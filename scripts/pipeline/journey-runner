@@ -46,10 +46,28 @@ product_inputs() {
   export VERIFIER=$set/bin/minidregg-credential-signature-verifier SHELL_BIN=$set/bin/mini
   export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher
   export CANDIDATE=$set/provenance.json
-  export M7_REFERENCE=${MINI_M7_REFERENCE:-}
+  export M7_REFERENCE=${MINI_M7_REFERENCE:-$(m7_reference_for "$set")}
   export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/bin/mini-hermes-test-provider}
   export LAUNCH_GATE=${MINI_LAUNCH_GATE_BIN:-$set/bin/launch-gate}
   export MINI_FN_LAUNCHER=${MINI_FN_LAUNCHER:-} MINI_FN_CORE=${MINI_FN_CORE:-}
+}
+
+# M7's reproduction reference (journey.d/m7.sh step 3): another READY set on this box, built by its own
+# publish-artifacts run in its own work directory, whose compiled inputs (journey.d/lib/m7-compiled.sh,
+# the definition m7.sh compares by) are byte-identical to SET's. The newest such set; none -> empty, and
+# the row names M7_REFERENCE missing. MINI_M7_REFERENCE overrides. m7.sh then re-checks everything
+# (identical compiled inputs, identical output SHA-256 set, both SHA256SUMS, runtime identity).
+m7_reference_for() {  # SET -> a provenance.json path or nothing
+  local set=$1 lib=$src/native/resource-client/journey.d/lib/m7-compiled.sh want d
+  [ -f "$lib" ] && [ -f "$set/logs/source-files.sha256" ] || return 0
+  ( . "$lib"
+    want=$(m7_compiled_inputs "$set" | sha256sum) || exit 0
+    for d in $(ls -1td "$ARTIFACT_ROOT"/*/READY 2>/dev/null); do
+      d=$(dirname "$d")
+      [[ $(basename "$d") =~ ^[0-9a-f]{40}$ ]] && [ "$(realpath "$d")" != "$(realpath "$set")" ] || continue
+      [ -f "$d/provenance.json" ] && [ -f "$d/logs/source-files.sha256" ] || continue
+      [ "$(m7_compiled_inputs "$d" | sha256sum)" = "$want" ] && { echo "$d/provenance.json"; exit 0; }
+    done; exit 0 )
 }
 
 owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row's driver

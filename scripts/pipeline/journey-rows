@@ -359,9 +359,19 @@ product_native() {
 # kernel.apparmor_restrict_unprivileged_userns=1 with no bwrap AppArmor profile, measured on hbox 2026-10-14)
 # makes every sandboxed worker exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed"
 # after a 15-min wait: a missing box input rendering as a product red. Probe it and name it (98).
+# product_userns [BWRAP...]: the bwraps the row's driver can select, in its order (default: bwrap on PATH).
+# The probe passes when one of them can create a user namespace; a driver that falls back to a profiled
+# copy (jpay6.sh: /usr/local/libexec/mini-grain-bwrap, root-owned, AppArmor `userns`) names it here, and a
+# driver that cannot (hermes, m6grain's spk-host: /usr/bin/bwrap) does not, so its row still says 98.
 product_userns() {
-  bwrap --die-with-parent --unshare-user --ro-bind / / true 2>"$OUT/userns-probe.err" && return 0
-  echo "missing input: unprivileged user namespaces for bwrap ($(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
+  local b
+  [ $# -gt 0 ] || set -- bwrap
+  : >"$OUT/userns-probe.err"
+  for b in "$@"; do
+    [ "$b" = bwrap ] || [ -x "$b" ] || continue
+    "$b" --die-with-parent --unshare-user --ro-bind / / true 2>>"$OUT/userns-probe.err" && return 0
+  done
+  echo "missing input: unprivileged user namespaces for bwrap ($*: $(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
   return 98
 }
 product_systemd() {
@@ -537,7 +547,10 @@ row_m7() {
   product_input M7_REFERENCE file || return $?
   product_journey m7 M7 J0 || return $?
   product_evidence "$OUT/steps/M7/m7-result.json" || return 1
-  jq -e '.type=="minidregg-m7-result-v1" and (.checks|length)==5' "$OUT/steps/M7/m7-result.json" >/dev/null
+  # the checks m7.sh runs, by name: a count admits a renamed or swapped check (it read 5 while m7.sh ran 6)
+  jq -e '.type=="minidregg-m7-result-v1" and (.checks|sort)==(["sha256sums","journey-runs-candidate-binaries",
+    "no-tmp-inputs","reproduces-all-outputs","tamper-init-and-serve-refuse","run.sh-init-start-sponsor-stop"]|sort)' \
+    "$OUT/steps/M7/m7-result.json" >/dev/null || { echo "invalid expected evidence: m7-result.json checks $(jq -c .checks "$OUT/steps/M7/m7-result.json")" >&2; return 1; }
 }
 row_growth() {
   product_journey growth G 'J0 J1 J2 J3 J4' || return $?
@@ -595,7 +608,7 @@ product_pay_step() {
     product_systemd || return $?
     product_tools sudo bwrap || return $?
     sudo -n true 2>/dev/null || { echo "no sudo: sudo -n probe failed" >&2; return 98; }
-    product_userns || return $?
+    product_userns /usr/bin/bwrap /usr/local/libexec/mini-grain-bwrap || return $?   # jpay6.sh's selection
     local name
     for name in GRAIN TEST_PROVIDER LAUNCH_GATE; do product_input "$name" executable || return $?; done
   fi
