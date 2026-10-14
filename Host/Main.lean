@@ -1021,6 +1021,21 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       for _ in [0:10] do
         if (NativeHost.validateLoadedFrom config opened durable).toOption.isSome then n := n + 1
       pure n
+  -- The light (served) validation a session's refresh runs, whole and against the held state.
+  match ← DurableServed.openHead config.transport ResourceBirthCodec.rootBytes with
+  | .error detail => IO.println s!"light open refused: {detail}"
+  | .ok opening =>
+      discard <| timed "validateServed x10" do
+        let mut n := 0
+        for _ in [0:10] do
+          if (NativeHostServed.validateServed config opening.served).toOption.isSome then n := n + 1
+        pure n
+      if let .ok held := NativeHostServed.validateServed config opening.served then
+        discard <| timed "validateServedFrom (held, same state) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (NativeHostServed.validateServedFrom config held opening.served).toOption.isSome then n := n + 1
+          pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
