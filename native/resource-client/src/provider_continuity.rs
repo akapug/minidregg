@@ -1148,7 +1148,9 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let host = directory.join("host.sh");
         // Any prepare, submit, or pin-plan-height invocation fails this test.
-        fs::write(&host, b"#!/bin/sh\ncase \"$2\" in lookup) cp \"$3\" \"$4\" ;; inspect) printf '{\"type\":\"confirmed\"}' >\"$5\" ;; *) exit 91 ;; esac\n").unwrap();
+        let _codec = crate::client_consent::codec_test_lock();
+        fs::write(&host, format!("#!/bin/sh\ncase \"$2\" in\n lookup) cp \"$3\" \"$4\" ;;\n{} *) exit 91 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(r#"printf '{"type":"confirmed"}' > "$out""#))).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let config = directory.join("config.json");
         fs::write(&config, b"{}").unwrap();

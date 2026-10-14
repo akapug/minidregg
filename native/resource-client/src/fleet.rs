@@ -1402,18 +1402,18 @@ mod exact_operation_tests {
     fn exact_operation_lost_reply_recovers_only_retained_call_without_resubmit() {
         let f = Fixture::new();
         let host = f.0.join("host");
-        // The fake transport refuses every operation except lookup/inspect and
-        // verifies the exact original call; no feed or text matching is possible.
-        let script = r##"#!/bin/sh
+        // The fake transport refuses every operation except lookup and the codec loop (inspect)
+        // and verifies the exact original call; no feed or text matching is possible.
+        let _codec = crate::client_consent::codec_test_lock();
+        let script = format!(r##"#!/bin/sh
 case "$2" in
  lookup)
   test "$(cat "$3")" = 'signed-call-for-g7' || exit 70
   printf 'lookup\n' >> "$1.calls"
-  printf '%s' '{"type":"confirmed","confirmation":"replayed","transactionId":"31","eventId":"32","acceptedCount":"1","worldRoot":"33"}' > "$4" ;;
- inspect) test "$3" = outcome || exit 71; cp "$4" "$5" ;;
- *) exit 72 ;;
+  printf '%s' '{{"type":"confirmed","confirmation":"replayed","transactionId":"31","eventId":"32","acceptedCount":"1","worldRoot":"33"}}' > "$4" ;;
+{} *) exit 72 ;;
 esac
-"##;
+"##, crate::client_consent::codec_loop_arm(r#"test "$kind" = outcome && cp "$body" "$out""#));
         crate::create_private(&host, script.as_bytes()).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let (path, record) = f.record("lost-reply", "workspace", json!({"text":"repeated text"}));

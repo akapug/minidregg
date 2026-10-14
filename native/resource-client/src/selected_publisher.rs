@@ -518,7 +518,10 @@ mod tests {
         let config = state.join("config.json");
         fs::write(&config, b"{}\n").unwrap();
         fs::write(state.join("ingress.bin"), b"exact-source-ingress").unwrap();
-        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-submit) printf truncated > \"$4\" ;;\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *source-submit.bin) exit 1 ;; esac\n    printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n  *) exit 9 ;;\nesac\n").unwrap();
+        // The truncated submit reply does not decode (the codec loop refuses it); a lookup reply does.
+        let _codec = crate::client_consent::codec_test_lock();
+        fs::write(&host, format!("#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-submit) printf truncated > \"$4\" ;;\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n{}  *) exit 9 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(r##"test "$(cat "$body")" = confirmed && printf '%s\n' '{"type":"confirmed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}' > "$out""##))).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let first = source_receipt(&host, &config, &state).unwrap();
         confirmed(&first).unwrap();
@@ -561,7 +564,10 @@ mod tests {
         )
         .unwrap();
         fs::write(state.join("source-lookup-000.bin"), b"absent").unwrap();
-        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *000.bin) printf '%s\\n' '{\"type\":\"absent\"}' > \"$5\" ;; *) printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;; esac ;;\n  *) exit 9 ;;\nesac\n").unwrap();
+        // The codec loop decodes what the bytes say: the old lookup reply is `absent`, the new one confirmed.
+        let _codec = crate::client_consent::codec_test_lock();
+        fs::write(&host, format!("#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n{}  *) exit 9 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(r#"if [ "$(cat "$body")" = absent ]; then printf '%s\n' '{"type":"absent"}' > "$out"; else printf '%s\n' '{"type":"confirmed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}' > "$out"; fi"#))).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let receipt = source_receipt(&host, &config, &state).unwrap();
         confirmed(&receipt).unwrap();
