@@ -43,7 +43,7 @@ open Minidregg.Kernel.DurableCommitProtocol (Intent Snapshot)
 open Minidregg.Kernel.DurableReceiver (IntentRecord Seed replay)
 open Minidregg.Kernel.DurableCheckpoint (State)
 open Minidregg.Kernel.DurableView (Keys AgreesOnKeys)
-open Minidregg.Compiler.DurableReceiverIO (Loaded)
+open Minidregg.Compiler.DurableReceiverIO (Loaded suffixSlots CheckpointRoots lookup_of_mem_nodup)
 open Minidregg.Compiler.DurableHistory (Head StoreIdentity)
 open Minidregg.Compiler.DurableHistoryReader (StateAt VerifiedFootprint TxAnswer ByTx Spent)
 open Minidregg.Compiler.DurableCheckpointCodec (systemLeaf)
@@ -559,15 +559,6 @@ theorem entries_step (ids : List CellId) (nodup : ids.Nodup) (before next : Data
 
 end Served
 
-/-- A suffix changes one system slot and the cells it actually writes. The
-system leaf is the final height/chain; intermediate system leaves are not
-needed when advancing directly to the verified head. -/
-def suffixSlots (height : Nat) (chain : Digest) (records : List IntentRecord) :
-    List (WorldRoot.Key × Digest) :=
-  (.system, systemLeaf height chain) ::
-    records.flatMap fun record => record.writes.map fun write =>
-      (.cell write.cellId.value, write.exactPost)
-
 /-- The canonical executor's suffix changes exactly `suffixSlots`. This is
 the refinement used by refresh, rather than a second replay implementation. -/
 theorem replay_entries_step (ids : List CellId) (nodup : ids.Nodup)
@@ -820,24 +811,6 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
             have fields := Head.verify_fields verified
             return .ok ⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
               start.checkpoint⟩
-
-/-- A checkpoint body's world-root tree, evaluated once by its open. -/
-private abbrev CheckpointRoots (rootBytes : List UInt8 → Digest) (body : DurableCheckpointCodec.Body) : Type :=
-  (cache : DurableReceiverIO.RootCache) × DurableReceiverIO.RootsExact cache
-    (DurableCheckpointCodec.stateEntries rootBytes body.height body.chain body.state)
-
-theorem lookup_of_mem_nodup : ∀ (cells : List (CellId × List UInt8)), (cells.map Prod.fst).Nodup →
-    ∀ cell ∈ cells, DurableReceiver.Seed.lookup cells cell.1 = some cell.2
-  | [], _, _, member => by simp at member
-  | head :: rest, nodup, cell, member => by
-      rw [List.map_cons, List.nodup_cons] at nodup
-      rcases List.mem_cons.mp member with same | later
-      · subst same
-        simp [DurableReceiver.Seed.lookup]
-      · have distinct : head.1 ≠ cell.1 := fun same =>
-          nodup.1 (same ▸ List.mem_map_of_mem (f := Prod.fst) later)
-        simp only [DurableReceiver.Seed.lookup, distinct, if_false]
-        exact lookup_of_mem_nodup rest nodup.2 cell later
 
 /-- A checkpoint state's served entries are its world-root entries (`stateEntries`). -/
 theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (height : Nat)
