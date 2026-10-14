@@ -38,7 +38,7 @@ python3 "$here/box.py" settings "$root.settings.json" "$bin" "$n" "$m" "$k" "$se
 run=(python3 "$here/workload.py" --bin "$bin" --root "$root" --births "$n" --updates "$m" --reads "$k" --seed "$seed")
 perf_ok=0
 if [ "${PERF_INSTRUCTIONS:-1}" = 1 ] && command -v perf >/dev/null && perf stat -e instructions:u -o /dev/null true 2>/dev/null; then
-  perf_ok=1; run=(perf stat -I 250 -x, -e instructions:u -o "$root.perf.csv" -- "${run[@]}")
+  perf_ok=1; run=(perf stat --no-scale -I 250 -x, -e instructions:u -o "$root.perf.csv" -- "${run[@]}")
 fi
 t0=$(date +%s.%N)
 "${run[@]}" >"$root.log" 2>&1
