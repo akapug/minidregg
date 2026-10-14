@@ -157,3 +157,26 @@ it executes; its `lib.sh`, `journey-red-lines` and `journey-rows` were planted b
 - `fleetsign` FAIL, reproduced 3 of 3: interleaved turns refused with "remote challenge differs from locally
   prepared intent" (cv 01a13985). Evidence is in `/tank/dregg-build/pipeline/evidence/fleetsign-race/`.
 - `growth` FAIL (write p99 10 s at 1000 records) and `perf` UNCONFIGURED (box not quiet). Neither is required.
+- `jserve` is a KNOWN FLAKY row on hbox (cv 01a139e1). It is timing-sensitive and not required. In main 7dea0626's
+  hbox run it FAILED 10/12 serve rows; the failing cases were (a) "a client sends 3 bytes then sleeps 30 s" and
+  (c) "50 connections that send nothing". It PASSED in the d37eee80 run an hour earlier. It is not declared absent:
+  a jserve that was PASS at main's baseline and fails in a candidate counts as a new red.
+
+## Baseline-relative landing rule (ROOT, 2026-10-14; the header of scripts/pipeline/required-rows)
+
+A candidate lands when all three hold:
+
+1. Its gate is red=0.
+2. Its standing run has **no line non-PASS (or missing) that was PASS in main's own most recent standing run on
+   this box**. landing.sh prints `new reds vs baseline: N`, and each one as `NEW RED`.
+3. Every required line is PASS or declared absent by name. The exception is a line that was already non-PASS at
+   main's baseline **and** is listed in required-rows as `known-red ROW CV-TASK note`; that line prints as
+   `PRE-RED` and blocks nothing until fixed. A pre-existing red with no `known-red` line still blocks, so its cv
+   task must be opened first.
+
+The verdict prints `required unmet: [...] (of which pre-existing at main: [...])`. Exit 0 iff new reds = 0 and
+nothing blocks.
+
+- Known-red today: fleetsign (cv 01a13985).
+- Plant for the rule: the d37eee80 results with m3 set to FAIL and rooms removed against the main baseline gave
+  `NEW RED rooms MISSING` and `NEW RED m3 FAIL`, and exited 1.
