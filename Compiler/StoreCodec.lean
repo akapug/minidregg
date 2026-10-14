@@ -431,6 +431,15 @@ def decodePayload (payload : List UInt8) : Option (Store L) := do
   let store ← (payloadStream W).toLawful.decode payload
   if (payloadStream W).encode store = payload then some store else none
 
+/-- Executable `decodePayload`: the re-encoding is compared by `bytesEqual`. -/
+def decodePayloadFast (payload : List UInt8) : Option (Store L) := do
+  let store ← (payloadStream W).toLawful.decode payload
+  if bytesEqual ((payloadStream W).encode store) payload then some store else none
+
+@[csimp] theorem decodePayload_eq_decodePayloadFast : @decodePayload = @decodePayloadFast := by
+  funext L W payload
+  simp only [decodePayload, decodePayloadFast, bytesEqual_eq_true_iff]
+
 theorem decodePayload_encode (store : Store L) :
     decodePayload W ((payloadStream W).encode store) = some store := by
   have lax := (payloadStream W).toLawful.decode_encode store

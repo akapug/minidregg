@@ -329,6 +329,20 @@ def decodeRecord (bytes : Bytes) : Option Record :=
     | none => none
   else none
 
+/-- Executable `decodeRecord`: the frame and the re-encoding are compared by
+`bytesEqual` (tail-recursive, unboxed) instead of the derived `List UInt8` equality. -/
+def decodeRecordFast (bytes : Bytes) : Option Record :=
+  if bytesEqual (bytes.take recordFrame.length) recordFrame then
+    match recordWire.toLawful.decode (bytes.drop recordFrame.length) with
+    | some wire =>
+        if bytesEqual (encodeRecord (Record.ofWire wire)) bytes then some (Record.ofWire wire) else none
+    | none => none
+  else none
+
+@[csimp] theorem decodeRecord_eq_decodeRecordFast : @decodeRecord = @decodeRecordFast := by
+  funext bytes
+  simp only [decodeRecord, decodeRecordFast, bytesEqual_eq_true_iff]
+
 theorem Source.ofWire_toWire (source : Source) (fits : source.Fits) :
     Source.ofWire (source.toWire fits) = source := by
   cases source with

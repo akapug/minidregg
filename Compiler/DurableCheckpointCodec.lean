@@ -76,6 +76,16 @@ def decode (framed : Framed α) (bytes : List UInt8) : Option α := do
   let (frame, value) ← (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes
   if frame = framed.frame ∧ framed.encode value = bytes then some value else none
 
+/-- Executable `decode`: the frame and the re-encoding are compared by `bytesEqual`
+(tail-recursive, unboxed) instead of the derived `List UInt8` equality. -/
+def decodeFast (framed : Framed α) (bytes : List UInt8) : Option α := do
+  let (frame, value) ← (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes
+  if bytesEqual frame framed.frame && bytesEqual (framed.encode value) bytes then some value else none
+
+@[csimp] theorem decode_eq_decodeFast : @decode = @decodeFast := by
+  funext α framed bytes
+  simp only [decode, decodeFast, Bool.and_eq_true, bytesEqual_eq_true_iff]
+
 theorem decode_encode (framed : Framed α) (value : α) :
     framed.decode (framed.encode value) = some value := by
   have roundtrip : (StreamCodec.product bytesStream framed.stream).toLawful.decode

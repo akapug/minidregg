@@ -34,6 +34,27 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
+/-! ## Exact byte comparison -/
+
+/-- Compare two byte lists in tail position, on unboxed octets. The derived
+`List UInt8` equality recurses once per octet (stack depth = length) and calls
+the element instance through a closure; every strict decoder compares a whole
+re-encoding against its input, so this is on every canonical decode. -/
+def bytesEqual : List UInt8 → List UInt8 → Bool
+  | [], [] => true
+  | left :: lefts, right :: rights =>
+      if left = right then bytesEqual lefts rights else false
+  | _, _ => false
+
+theorem bytesEqual_eq_true_iff (left right : List UInt8) :
+    bytesEqual left right = true ↔ left = right := by
+  induction left generalizing right with
+  | nil => cases right <;> simp [bytesEqual]
+  | cons left lefts ih =>
+      cases right with
+      | nil => simp [bytesEqual]
+      | cons right rights => simp [bytesEqual, ih]
+
 /-! ## Compact streaming-codec nucleus -/
 
 /-- A prefix codec consumes exactly one value and returns the unconsumed

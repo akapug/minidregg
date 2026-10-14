@@ -36,7 +36,7 @@ def decode (bytes : List UInt8) : Option Instance := do
     let ⟨descriptor, valid⟩ ← decodeDefinition definition
     let store ← StoreCodec.decode (wire descriptor) payload
     let value := Instance.mk descriptor valid store
-    if ResourceBirthCodec.bytesEqual (encode value) bytes then some value else none
+    if Tower256ConcreteBackend.bytesEqual (encode value) bytes then some value else none
 
 /-- Transport actions name a semantic field, not a positional namespace.
 The expected value is mandatory for replacement/deletion. -/

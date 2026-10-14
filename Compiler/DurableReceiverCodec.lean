@@ -128,6 +128,15 @@ def decode (bytes : List UInt8) : Option Image := do
   let image ← framedStream.toLawful.decode bytes
   if encode image = bytes then some image else none
 
+/-- Executable `decode`: the re-encoding is compared by `bytesEqual`. -/
+def decodeFast (bytes : List UInt8) : Option Image := do
+  let image ← framedStream.toLawful.decode bytes
+  if bytesEqual (encode image) bytes then some image else none
+
+@[csimp] theorem decode_eq_decodeFast : @decode = @decodeFast := by
+  funext bytes
+  simp only [decode, decodeFast, bytesEqual_eq_true_iff]
+
 @[simp] theorem decode_encode (image : Image) : decode (encode image) = some image := by
   have roundtrip := framedStream.toLawful.decode_encode image
   change framedStream.toLawful.decode (encode image) = some image at roundtrip
