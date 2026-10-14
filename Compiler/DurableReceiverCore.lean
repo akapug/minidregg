@@ -33,6 +33,7 @@ import Kernel.PresenceIndex
 import Kernel.TailBound
 import Kernel.LinkIndex
 import Kernel.SessionIndex
+import Kernel.DurableEngine
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
