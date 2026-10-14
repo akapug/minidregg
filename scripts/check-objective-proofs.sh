@@ -227,10 +227,11 @@ gate_proofs() {
     "      some (.boolean (left && right)) := rfl" \
     "      some (.boolean (left && right)) := by cases left <;> cases right <;> rfl" \
     "$ns_d" "$ns_d.conjunction_boolean_exact" || planted_e=0
-  # (f) a definition renamed verbatim with its uses: its own row is removed + added (key events,
-  # RED without decisions), and NO row that reaches it moves (content is name-free)
+  # (f) a definition renamed verbatim with its uses (liftRename: used only in bodies and simp lists, never
+  # in a statement): its own row is removed + added (key events, RED without decisions), and NO row that
+  # reaches it moves (content is name-free). A def a STATEMENT mentions is different: renaming it restates.
   scratch_module_re Theory/ObjectiveBendOpenRecursion.lean "$tmp/rename.lean" \
-    '\binstantiate\b' "instantiateRenamed" \
+    '\bliftRename\b' "liftRenameMoved" \
     "$ns_d" "$ns_d.lazy_fixed_function" || planted_f=0
   # all scanner runs in parallel
   local jobs="theory mathlib theory-plant mathlib-plant theory-noscan mathlib-noscan"
@@ -296,7 +297,7 @@ gate_proofs() {
     cat "$tmp/reproof.expect" 2>/dev/null; head -20 "$tmp/reproof.err" 2>/dev/null; failed=1
   fi
   if [ "$planted_f" = 1 ] && [ -s "$tmp/rename.out" ] && "${tool[@]}" expect "$tmp/rename.out" --against "$tmp/theory.out" \
-       --changed "$ns_d.instantiate=removed" --changed "$ns_d.instantiateRenamed=added" \
+       --changed "$ns_d.liftRename=removed" --changed "$ns_d.liftRenameMoved=added" \
        --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/rename.expect"; then
     echo "self-test (f) a definition renamed verbatim: PASS (its key removed+added RED, nothing reaching it moved; $(tail -1 "$tmp/rename.expect"))"
   else
