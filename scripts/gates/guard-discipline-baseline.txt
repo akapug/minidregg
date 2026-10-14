@@ -1,0 +1,18 @@
+# guard-discipline-baseline.txt — per-module `#guard` counts. A BURNDOWN LEDGER.
+# scripts/gates/check-guard-discipline.py reds when a module goes ABOVE its row, BELOW it
+# (a stale row — retire the number when you convert), or carries guards with no row.
+# So this file may only ever SHRINK. Refresh ONLY through
+#   python3 scripts/gates/check-guard-discipline.py --update-baseline --only <path> --reason '...'
+# which refuses to raise any row or the TOTAL. Never hand-edit: the header TOTAL and the last
+# provenance line are checked against the rows on every run.
+# TOTAL 70 guards across 7 modules (1617 .lean files scanned, 19825 theorems seen).
+# format: <count><TAB><path relative to the repository root>
+# BASELINE-PROVENANCE 0125b224 0→70 (+70) CREATED — first ledger: ported from Bread at next 0125b224 (70 #guard in 7 modules; the 4,392 figure counted #guard_msgs axiom pins)
+
+26	Assurance/NativeProviderHistoryAdmission.lean
+6	Compiler/CarryConfigurationChecks.lean
+6	Compiler/LegacyStoreCarryChecks.lean
+4	Compiler/NativeObservationCodec.lean
+4	Host/KeyRotationInspectionChecks.lean
+17	Kernel/WorldKindChecks.lean
+7	scripts/probe-fn-portable-line.lean

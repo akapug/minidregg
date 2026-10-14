@@ -64,6 +64,10 @@ run build-surfaces  python3 scripts/lean-build-surfaces.py check
 # (gen-sheetlaw), a stale status page (website).
 run build-closure   bash -c 'bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py'
 run exports         bash scripts/check-exports.sh
+# #guard runs the compiled evaluator, leaves no term and no axiom record (scripts/gates/check-guard-discipline.py
+# header). The per-module count may only FALL: a new #guard anywhere, or a converted module whose row was not
+# retired, is red by name. Pure python, ~2 s; self-test plants every arm first.
+run guard-discipline bash -c "python3 scripts/gates/check-guard-discipline.py --self-test && python3 scripts/gates/check-guard-discipline.py"
 run unit-tests      bash scripts/check-unit-tests.sh
 run policy-portal   bash scripts/check-canonical-policy-portal.sh
 run shell-paths     bash scripts/check-shell-paths.sh
