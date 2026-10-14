@@ -419,6 +419,36 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// One storeless codec loop answers every codec frame of the same image and
+    /// settings; changed settings bytes or a replaced image file start another.
+    #[test]
+    fn codec_loop_is_reused_only_for_the_same_image_and_settings() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = stub_dir("codec-reuse");
+        let inner = opcode_stub(&dir, b"");
+        let host = dir.join("host");
+        fs::write(&host, format!("#!/bin/sh\necho start >> '{}'\nexec '{}'\n",
+            dir.join("starts").display(), inner.display())).unwrap();
+        fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let starts = || fs::read_to_string(dir.join("starts")).unwrap_or_default().lines().count();
+        for operation in [7u8, 8, 9, 10, 11] {
+            assert_eq!(local_frame(&host, &settings, operation, b"payload").unwrap(), vec![operation]);
+        }
+        assert_eq!((starts(), opcodes(&dir)), (1, vec![7, 8, 9, 10, 11]));
+        fs::write(&settings, b"{ }").unwrap();
+        local_frame(&host, &settings, 7, b"payload").unwrap();
+        assert_eq!(starts(), 2);
+        let copy = dir.join("host-copy");
+        fs::copy(&host, &copy).unwrap();
+        fs::rename(&copy, &host).unwrap();
+        local_frame(&host, &settings, 7, b"payload").unwrap();
+        assert_eq!(starts(), 3);
+        *CODEC.lock().unwrap() = None;
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn retained_anchor_file_refuses_foreign_or_exposed_bytes() {
         use std::os::unix::fs::PermissionsExt;
@@ -556,6 +586,12 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
 /// answers frames 7-11 and never opens a Store, so a member's own machine needs
 /// none. This process never receives keys, and these operations never mutate
 /// source.
+///
+/// The loop answers frame after frame and keeps nothing between them, so one
+/// loop serves every codec frame of this process that names the same image
+/// file (path and inode identity, `anchor_binding`), settings path and settings
+/// bytes. Any other selection, a replaced image, a failed frame or changed
+/// settings ends the loop; the next frame starts a fresh one.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
@@ -563,16 +599,25 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .unwrap_or_else(||config.to_path_buf());
     if !settings.is_absolute(){return Err("local native settings must be absolute".into());}
     let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
-    let mut child=Command::new(&executable).arg(&settings).arg("codec")
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
-        .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
-    let input=child.stdin.take().ok_or("local codec stdin missing")?;
-    let output=child.stdout.take().ok_or("local codec stdout missing")?;
-    let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None};
-    let body=round_trip(&mut session,operation,payload)?;
-    if crate::fsio::read_bounded_or_empty(&settings, CAP)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
+    let binding=anchor_binding(&executable,&settings_bytes)?;
+    let mut slot=CODEC.lock().map_err(|_|"local codec session lock poisoned")?;
+    if slot.as_ref().is_some_and(|(path,bound,_)|path!=&settings||bound!=&binding){*slot=None;}
+    if slot.is_none(){
+        let mut child=Command::new(&executable).arg(&settings).arg("codec")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
+            .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
+        let input=child.stdin.take().ok_or("local codec stdin missing")?;
+        let output=child.stdout.take().ok_or("local codec stdout missing")?;
+        *slot=Some((settings.clone(),binding,Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None}));
+    }
+    let body=round_trip(&mut slot.as_mut().unwrap().2,operation,payload);
+    if body.is_err(){*slot=None;}
+    let body=body?;
+    if crate::fsio::read_bounded_or_empty(&settings, CAP)?!=settings_bytes{*slot=None;return Err("local native settings changed during codec operation".into());}
     Ok([vec![operation],body].concat())
 }
+/// The storeless codec loop this process reuses (`local_frame`): its settings path and binding.
+static CODEC: Mutex<Option<(PathBuf,[u8;32],Session)>> = Mutex::new(None);
 
 pub(crate) fn plan_operation(operation:u8)->bool {
     matches!(operation,32|36|44|48|50|52|58|66|68|70|74|78|80|82|86|92|96|103|108|113|117|123|126|140|160|170|183|201|206|210|215)
