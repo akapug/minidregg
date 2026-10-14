@@ -822,8 +822,15 @@ mod tests {
         frame_stub(&dir.join("consent"), &dir.join("consent-reply"));
         fs::write(dir.join("consent.json"), br#"{"stub":"consent settings"}"#).unwrap();
         fs::write(dir.join("host.json"), br#"{"domain":"7"}"#).unwrap();
+        // The worker is this test binary, not `mini`: it cannot be a resident consent
+        // provider (`connect_resident` would start `<test binary> consent-resident`, which
+        // the test harness refuses with exit 101). The resident is not under test here, so
+        // the provider runs in the worker process; anchors and HOME stay in the stub dir.
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "client_consent::tests::remote_plan_stub_worker", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("MINI_CONSENT_RESIDENT", "0")
+            .env("HOME", &dir)
+            .env("MINI_CONSENT_ANCHOR_DIR", dir.join("anchors"))
             .env("MINI_SSH", dir.join("ssh"))
             .env("MINI_CONSENT_HOST", dir.join("consent"))
             .env("MINI_CONSENT_CONFIG", dir.join("consent.json"))
