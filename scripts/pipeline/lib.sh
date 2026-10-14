@@ -7,7 +7,9 @@
 #                             <label> symlinks (green, next, main) to the newest READY tip
 #   $JOURNEY_ROOT             /srv/journeys/<tip>/: the journey runner's table per tip
 # Everything here is plain files on one box; boxes copy each other's results (rsync), never
-# rebuild the same tip.
+# rebuild the same tip. The /srv paths are only defaults: a box whose layout lives elsewhere (hbox:
+# /tank/dregg-build/pipeline, docs/PIPELINE-HBOX.md) sets PIPELINE_ROOT and its box.env (box-env
+# --layout) names every other root.
 PIPELINE_ROOT=${PIPELINE_ROOT:-/srv/pipeline}
 # The box's own topology (which slot files lanes may take, where artifacts are built and mirrored,
 # its Lean thread count) lives in ONE box-local file, written when the box is provisioned
@@ -92,7 +94,7 @@ pipeline_build_slot() {
 # (VERIFY-ONCE 3), so the hint may have moved: look where it goes.
 pipeline_find_tree() {
   local tip=$1 hint=${2:-} d
-  for d in "$hint" "$PIPELINE_WARM_BASE/src" /srv/next-base/src "$PIPELINE_WARM_BASE"/src.prev-*; do
+  for d in "$hint" "$PIPELINE_WARM_BASE/src" "${PIPELINE_NEXT_BASE:-/srv/next-base}/src" "$PIPELINE_WARM_BASE"/src.prev-*; do
     [ -n "$d" ] && [ -d "$d/.git" ] && [ -d "$d/.lake/build" ] || continue
     [ "$(git -C "$d" rev-parse HEAD 2>/dev/null)" = "$tip" ] || continue
     [ -z "$(git -C "$d" status --porcelain --untracked-files=no)" ] || continue

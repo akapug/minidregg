@@ -165,8 +165,8 @@ row_upgrade() {
 # The previous main reopen is 98 until a READY same-epoch main set is available.
 row_hostupgrade() (
   local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
-  local e=/srv/artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f
   local artifacts=${ARTIFACT_ROOT:-/srv/artifacts} previous=
+  local e=${HOSTUPGRADE_EF_SET:-$artifacts/e0a8ba21a39d92b470cc331fd16ea0408f608b1f}   # the pinned old-epoch set, under this box's ARTIFACT_ROOT
   local candidate pair n n1 expected rc status detail t overall=0 i=0
   [ -f "$d" ] || return 99
   echo prod-hostup >"$OUT/owner"

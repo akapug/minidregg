@@ -1,0 +1,55 @@
+# scripts/pipeline/required-rows -- the rows a landing requires (PROTOCOL 6): landed = on GitHub main AND
+# the standing journey run at that sha has every line below PASS, or UNCONFIGURED for an input the box
+# DECLARES absent ($PIPELINE_ROOT/absent-inputs.tsv). Source: MATURATION-MAP-20261009 section 3 (DEPLOYABLE-1).
+#
+# One results.tsv id per line (column 1 of $JOURNEY_ROOT/TIP/results.tsv). A row id covers the row AND
+# every sub-row ROW/*; a parent row that is UNCONFIGURED only because of a declared sub-row is accepted.
+# A required id with NO line in results.tsv is MISSING and fails the landing (a row cannot pass by vanishing).
+# landing.sh reads this file from the MAIN BASE's tree (the policy in force), never from the candidate's:
+# a lane cannot drop its own required rows. `pending NAME note` lines are required rows that do not exist
+# yet; landing.sh prints them on every landing and does not count them (they are DEPLOYABLE-1 work).
+activity
+seats
+call
+send
+domain
+objectrecord
+upgrade
+chargedfailure
+rooms
+bounty
+# journey J0-J8 + rotation/audit
+journey/J0
+journey/J1
+journey/J2
+journey/J3
+journey/J4
+journey/J5
+journey/J6
+journey/J7
+journey/J8
+journey/JROT
+journey/JROTL
+journey/JAUDIT
+journey
+welcomecontinuity
+sshe2e
+m3
+m4
+hermes
+m6grain
+m7
+m8
+fleetsign
+# jpay1-6 (there is no JPAY5 driver)
+jpay/JPAY1
+jpay/JPAY2
+jpay/JPAY3
+jpay/JPAY4
+jpay/JPAY6
+jpay
+exchange
+hostupgrade
+pending BIRTHS the bar (1000 records: write <= 5 s, cold reopen <= 60 s) measured on BIRTHS; growth measures updates (MATURATION-MAP 1, cv 01a11e1b-0adc)
+pending HERMES-LIVE real inference + BYOK; needs Ember's providers.json (MATURATION-MAP 2.6)
+pending jcertify certifier unit; 320 records PASS on dregg-infra edge/mini-certify (MATURATION-MAP 1)

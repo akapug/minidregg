@@ -147,7 +147,8 @@ git checkout -q -B main "$TIP"
 for r in origin github base shared; do git remote remove $r 2>/dev/null || true; done
 git remote add base "$BASE"
 git remote add github "$REPO_URL"
-[ -d /srv/git/minidregg.git ] && git remote add shared /srv/git/minidregg.git
+SHARED_GIT=${PIPELINE_SHARED_GIT:-/srv/git/minidregg.git}   # the box's shared bare repo (box.env; hbox: the bundles mirror)
+[ -d "$SHARED_GIT" ] && git remote add shared "$SHARED_GIT"
 git config user.name "ember arlynx"
 git config user.email "cmrx64@gmail.com"
 git config commit.gpgsign false

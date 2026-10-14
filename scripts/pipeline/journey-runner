@@ -2,6 +2,14 @@
 # scripts/pipeline/journey-runner -- continuous journeys on the journey box (PIPELINE item 4).
 #
 #   scripts/pipeline/journey-runner [--once] [--tip TIP] [--rows-file PATH (test override)] [--results-root PATH] [--row NAME --source-tree PATH (plant overrides)]
+#   scripts/pipeline/journey-runner --version      (this copy's path and sha256; PROTOCOL 7)
+#
+# SELF-CHECK (PROTOCOL 7; RETRO d: a stale installed copy decided verdicts for ~6-11 h on burst3): the
+# runner runs a tip only when it IS that tip's runner: journey-runner, lib.sh and journey-red-lines
+# next to this file must be byte-identical to the ones in the tree the rows come from (the tip's lean
+# env or source.tar; the --source-tree override when given). Otherwise it prints both sha256s and
+# REFUSES (exit 3, TIP/REFUSED, no DONE). The standing service never runs an installed copy: it runs
+# the set's own tree's runner (scripts/pipeline/install-journey-units, docs/PIPELINE-HBOX.md).
 #
 # Every PIPELINE_WATCH_S (60) seconds: for the READY artifact set each label points at (next first,
 # then green, then main; mirrored here by the gate box), not yet run, run every row of
@@ -22,8 +30,10 @@ PIPELINE_PROG=journey-runner
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 . "$here/lib.sh"
 once=0; only=""; rows_override=""; row_override=""; source_override=""
+runner_sha() { sha256sum "$1" | cut -c1-16; }
 while [ $# -gt 0 ]; do
-  case "$1" in --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; --rows-file) rows_override=$(realpath "$2"); shift 2 ;; --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;; --row) row_override=$2; shift 2 ;; --source-tree) source_override=$(realpath "$2"); shift 2 ;; *) pipeline_die "unknown $1" ;; esac
+  case "$1" in --version) printf 'journey-runner %s sha256:%s\n' "$here/journey-runner" "$(runner_sha "$here/journey-runner")"; exit 0 ;;
+    --once) once=1; shift ;; --tip) only=$2; once=1; shift 2 ;; --rows-file) rows_override=$(realpath "$2"); shift 2 ;; --results-root) JOURNEY_ROOT=$(realpath -m "$2"); shift 2 ;; --row) row_override=$2; shift 2 ;; --source-tree) source_override=$(realpath "$2"); shift 2 ;; *) pipeline_die "unknown $1" ;; esac
 done
 mkdir -p "$JOURNEY_ROOT"
 exec 7>"$JOURNEY_ROOT/.runner.lock"; flock -n 7 || pipeline_die "another journey-runner holds $JOURNEY_ROOT/.runner.lock"
@@ -131,6 +141,17 @@ run_tip() {
     [ "$leanenv" = 1 ] || rm -rf "$src"
     src=$source_override; leanenv=0
   fi
+  # SELF-CHECK: this runner must be the tree's own (header). A tree without a runner predates the
+  # pipeline and cannot be checked: refused too, never run by whatever copy happens to be here.
+  local f bad=""
+  for f in journey-runner lib.sh journey-red-lines; do
+    cmp -s "$here/$f" "$src/scripts/pipeline/$f" || bad="$bad $f(here:$(runner_sha "$here/$f") tree:$( [ -f "$src/scripts/pipeline/$f" ] && runner_sha "$src/scripts/pipeline/$f" || echo absent))"
+  done
+  if [ -n "$bad" ]; then
+    pipeline_log "REFUSED tip $tip: this runner ($here) is not the tree's own; differs:$bad. Run $src/scripts/pipeline/journey-runner (the set's tree), never an installed copy" | tee "$J/REFUSED" >&2
+    if [ "$leanenv" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
+    return 3
+  fi
   rowsfile=$src/scripts/pipeline/journey-rows; [ -f "$rowsfile" ] || rowsfile=$here/journey-rows
   if [ -n "$rows_override" ]; then
     [ -f "$rows_override" ] || pipeline_die "no rows override: $rows_override"
@@ -141,7 +162,7 @@ run_tip() {
     [[ " ${JOURNEY_ROWS[*]} " == *" $row_override "* ]] || pipeline_die "unknown row: $row_override"
     JOURNEY_ROWS=("$row_override")
   fi
-  pipeline_log "tip $tip (${labels% }) from $src (lean env: $leanenv); rows: ${JOURNEY_ROWS[*]}"
+  pipeline_log "tip $tip (${labels% }) from $src (lean env: $leanenv); runner $here/journey-runner sha256:$(runner_sha "$here/journey-runner") (self-check: the tree's own); rows: ${JOURNEY_ROWS[*]}"
   : >"$J/results.tsv"
   # Rows are independent (each its own scratch world, sockets, Store and scope): run them in
   # parallel, PIPELINE_JOURNEY_JOBS at a time (default all), and assemble the table in row order.
@@ -173,11 +194,12 @@ run_tip() {
 while :; do
   if [ -n "$only" ]; then
     tip=$(pipeline_full_sha "$only") || exit 1
-    run_tip "$tip"
+    run_tip "$tip" || exit $?
   else
     for l in next green main; do
       tip=$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null) || continue
       [ -f "$ARTIFACT_ROOT/$tip/READY" ] && [ ! -f "$JOURNEY_ROOT/$tip/DONE" ] || continue
+      [ ! -f "$JOURNEY_ROOT/$tip/REFUSED" ] || continue   # refused once by name: not retried every minute
       # the gate mirrors the lean env right after the set; give it PIPELINE_LEANENV_WAIT_S (1800)
       if [ ! -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ] &&
          [ $(( $(date +%s) - $(stat -c %Y "$ARTIFACT_ROOT/$tip/READY") )) -lt "${PIPELINE_LEANENV_WAIT_S:-1800}" ]; then

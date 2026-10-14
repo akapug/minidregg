@@ -5,7 +5,7 @@
 #   slot under swarm-build, then swap. Then a probe lane (mk-lane --verify) must replay 0 modules BEFORE the
 #   base is published: NOT-READY.txt stays through the swap AND the verify (`verifying ...`), and a failed
 #   verify leaves it in place with the reason (exit 8) instead of a FROZEN base nobody can replay from.
-# The base's mk-lane.sh is the TIP TREE's scripts/pipeline/mk-lane.sh (never a tools-dir copy: on 10-07 06:41Z a stale
+# The base's mk-lane.sh is a symlink to the TIP TREE's scripts/pipeline/mk-lane.sh (never a copy: on 10-07 06:41Z a stale
 # mk-tools copy without MK_LANE_PROBE was installed, the probe was refused and burst2-a's base sat NOT-READY for 5 min);
 # it must know MK_LANE_PROBE or the advance refuses before touching the base.
 # Refuses when NOT-READY is set (another advance, or a failed one) or src.prev-<old> already exists.
@@ -40,7 +40,9 @@ rm -rf build-logs target-gates   # gate outputs (untracked, this keeper's own)
 git remote set-url base "$W/src" 2>/dev/null || true
 mk=$GL/src/scripts/pipeline/mk-lane.sh
 [ -f "$mk" ] && grep -q 'MK_LANE_PROBE' "$mk" || { echo "advance: REFUSED, $mk is missing or predates MK_LANE_PROBE (the probe would be refused and the base left NOT-READY)"; exit 9; }
-install -m 755 "$mk" "$W/.mk-lane.sh.new" && mv -f "$W/.mk-lane.sh.new" "$W/mk-lane.sh"
+# a RELATIVE symlink into the base tree, never a copy: it names whatever tree is $W/src now, so the
+# probe below and every later lane run the base tree's own mk-lane (PROTOCOL 7; RETRO d: four stale copies)
+ln -sfn src/scripts/pipeline/mk-lane.sh "$W/.mk-lane.sh.new" && mv -Tf "$W/.mk-lane.sh.new" "$W/mk-lane.sh"
 echo "advancing $old -> $TIP by MERGE-KEEPER $(date -Is)" > "$W/NOT-READY.txt"
 mv "$W/src" "$W/src.prev-${old:0:8}"
 mv "$GL/src" "$W/src"
@@ -50,7 +52,7 @@ printf 'tip=%s\nfrozen_at=%s\nbuilt_in=%s\ngreen_log=%s\nprev=%s (kept at %s)\nr
 mv -f "$W/FROZEN.new" "$W/FROZEN"
 echo "verifying $TIP (advance by MERGE-KEEPER $(date -Is)); lanes wait for the replay probe" > "$W/NOT-READY.txt"
 probe=mk-verify-${TIP:0:8}
-rm -rf /srv/lanes/$probe 2>/dev/null || true   # a probe an earlier failed verify left behind is the relay's own
+rm -rf "$LANES/$probe" 2>/dev/null || true   # a probe an earlier failed verify left behind is the relay's own
 if MK_LANE_PROBE=1 "$W/mk-lane.sh" --verify "$probe"; then
   rm -f "$W/NOT-READY.txt"; rm -rf "$LANES/$probe"
 else
