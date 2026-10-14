@@ -120,6 +120,7 @@ results.tsv, it is required automatically (ROOT, 2026-10-14).
 | exchange | `^missing input: MINI_FN_LAUNCHER ` | no fn launcher/core outside /tank/fn |
 | hostupgrade | `^missing hostupgrade candidate input: .*/e0a8ba21…$` | the pinned old-epoch EF set existed only on burst3 |
 | hostupgrade/HOST-UPGRADE-PREVIOUS | `^no previous READY main set with the tip Store epoch$` | no same-epoch main set has been published on hbox yet |
+| hermes | `^missing input: unprivileged user namespaces for bwrap ` | hbox has `kernel.apparmor_restrict_unprivileged_userns=1` and no AppArmor profile that lets bwrap create a user namespace (`bwrap: setting up uid map: Permission denied`). **DECISION PENDING (Ember, box security):** until a bwrap profile exists, hbox landings do not prove hermes. JPAY6 accepts this message too (its probe comes before TEST_PROVIDER) |
 
 `sudo -n true` succeeds, `Linger=yes` is set for `hbox`, and sshd, bwrap and jq are present.
 
@@ -132,3 +133,27 @@ UNCONFIGURED undeclared, sshe2e removed): 3 not met, exit 1.
 Host closure, so the first `mk-lane --verify` probe compiled 533 umbrella modules. The probe tree was then swapped
 in as `warm-base/src`, and a second probe confirmed a warm replay with 0 modules compiled. To advance the base:
 `advance-base-burst.sh TIP [GATED_LANE_DIR]`, with PIPELINE_ROOT set.
+
+## The plant (2026-10-14): a stale installed runner is not used
+
+The old burst service read `$PIPELINE_ROOT/scripts/journey-runner`. Before the first landing, the 8be9bd910
+journey-runner was planted at `/tank/dregg-build/pipeline/scripts/`. That is the pre-`product_inputs` version
+that decided verdicts on burst3 (RETRO d). The planted copy appends to `logs/PLANT-STALE-RUNNER-EXECUTED` whenever
+it executes; its `lib.sh`, `journey-red-lines` and `journey-rows` were planted beside it.
+
+- The standing run of d37eee80 dispatched
+  `journeys/.trees/d37eee80…/scripts/pipeline/journey-runner sha256:bb8e1c6c…`. landing.sh printed
+  `SELF-CHECK PASS` (equal to `git show d37eee80:scripts/pipeline/journey-runner`), and the marker file was
+  **absent**.
+- Positive control: executing the planted copy directly writes the marker (`logs/PLANT-positive-control.txt`),
+  so its absence above is a real signal.
+- Self-check control: the new runner, copied to a scratch directory and pointed at d37eee80, printed
+  `REFUSED … differs: journey-runner(here:9e9b5b64 tree:bb8e1c6c) lib.sh(...)` and exited 3.
+
+## Findings on hbox at the first landing (d37eee80; gate red=0, 136 lines, PASS=125 FAIL=3 UNCONFIGURED=8)
+
+- `hermes` FAIL: the user-namespace restriction above. The driver waited 15 min and reported
+  "Hermes ACP stream closed". `product_userns` now names this as UNCONFIGURED.
+- `fleetsign` FAIL, reproduced 3 of 3: interleaved turns refused with "remote challenge differs from locally
+  prepared intent" (cv 01a13985). Evidence is in `/tank/dregg-build/pipeline/evidence/fleetsign-race/`.
+- `growth` FAIL (write p99 10 s at 1000 records) and `perf` UNCONFIGURED (box not quiet). Neither is required.
