@@ -596,6 +596,14 @@ def cmd_expect(a, pins, admitted):
     failures = []
     for key, (kind, v) in want.items():
         c = changes.get(key)
+        if c is None and kind == "removed" and key in pins and key not in fresh:
+            # partial: the scratch run covers one module, so a removal is read off directly
+            old_w, _ = witness("removed", pins[key], None)
+            ok = (key, old_w, "-", "removed") in admitted
+            print(f"expect: {key}: removed old={old_w} new=- {'admitted' if ok else 'RED'}")
+            if ok:
+                failures.append(f"{key}: the ratchet admitted it (expected RED)")
+            continue
         if c is None:
             failures.append(f"{key}: unchanged against its pin (expected {kind})")
             continue
