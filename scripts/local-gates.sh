@@ -28,7 +28,7 @@
 #   objective-proofs   ObjectiveProofs built; every declaration of every repository module in its
 #                  import closure ratcheted against scripts/gates/objective-manifest/<Module>.tsv
 #                  (statement, definition-closure hash, exact axiom set): a removed, restated,
-#                  redefined or re-axiomed row is red unless scripts/gates/objective-contract-changes.txt
+#                  redefined or re-axiomed row is red unless scripts/gates/objective-contract-decisions.txt
 #                  admits it (scripts/check-objective-proofs.sh proofs; self-tests its instrument each
 #                  run, incl. a planted `(_vacuous : False)` premise and a planted `Evaluates := True`)
 #   objective-c    the C backend differential against runBounded, State bytes included

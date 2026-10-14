@@ -121,7 +121,7 @@ closure a row in `scripts/gates/objective-manifest/<Module>.tsv`: its elaborated
 transitively; cut at constants outside the repository, axioms and opaques, hashed by type), and
 its exact axiom set. The gate is a RATCHET (`scripts/objective-manifest.py`): additions pass; a
 removed row, a restated statement, a redefined closure or a changed axiom set fails unless a
-reviewed line of `scripts/gates/objective-contract-changes.txt` admits exactly that change. The
+reviewed line of `scripts/gates/objective-contract-decisions.txt` admits exactly that change. The
 elaborated term, not the source text, is compared: a reformatting is not a change, a changed
 premise is, and so is `def Safe := True` under an unchanged `theorem t : Safe x`.
 

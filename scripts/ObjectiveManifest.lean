@@ -5,7 +5,7 @@ Writes the rows and the definition closure (format: Verify/ObjectiveManifest.lea
 declaration of a module whose name starts with `Theory.ObjectiveBend`.
 `scripts/check-objective-proofs.sh proofs` ratchets them against the per-module manifests under
 scripts/gates/objective-manifest/ (scripts/objective-manifest.py): a removed row or a changed
-statement, definition closure or axiom set is red unless scripts/gates/objective-contract-changes.txt
+statement, definition closure or axiom set is red unless scripts/gates/objective-contract-decisions.txt
 admits exactly that change. Every other repository module of the `ObjectiveProofs` closure is
 covered by scripts/ObjectiveManifestMathlib.lean.
 

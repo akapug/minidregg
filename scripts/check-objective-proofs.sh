@@ -7,16 +7,16 @@
 #             covers the Theory.ObjectiveBend* modules in an environment that refuses Mathlib;
 #             scripts/ObjectiveManifestMathlib.lean covers every other one (Kernel, Compiler, Pred,
 #             Selvage, the rest of Theory) with Mathlib in the environment. Every declaration gets a
-#             row: its statement, the SHA-256 Merkle hash of its statement's DEFINITION CLOSURE (the
-#             bodies of every repository definition, inductive and constructor it reaches,
-#             transitively), and its exact axiom set (scripts/objective-manifest.py has the hashing
-#             and the cut). The rows are RATCHETED against the per-module manifests
-#             scripts/gates/objective-manifest/<Module>.tsv: an added row passes; a removed row, a
-#             restated statement, a redefined closure (`def Safe := True` under an unchanged
-#             theorem) or a changed axiom set is RED unless scripts/gates/objective-contract-changes.txt
-#             admits exactly that change (name, old contract, new contract, kind, commit, reason).
+#             row: its statement, the name-free CONTENT hash of what it reaches (the bodies of every
+#             repository definition, inductive and constructor, transitively; a moved or renamed
+#             constant is the same content), and its exact axiom set (scripts/objective-manifest.py
+#             has the hashing and the cut). The rows are RATCHETED against the per-module manifests
+#             scripts/gates/objective-manifest/<Module>.tsv and constants.content: an added, removed
+#             or restated row, a changed constant body (`def Safe := True` under an unchanged theorem;
+#             one decision per changed constant, not per row) or a changed axiom set is RED unless a
+#             line of scripts/gates/objective-contract-decisions.txt admits exactly that event.
 #             Self-tested every run: the ratchet logic on synthetic changes of the real rows; per
-#             run (a) a planted theorem must appear as an admitted addition and every other row of
+#             run (a) a planted theorem must appear as an addition the gate refuses without a decision, and every other row of
 #             the planted run must equal the unplanted run's; (b) a copy whose scan is deleted must fail its instrument
 #             floor; and once each: (c) the measured defect -- `(_vacuous : False)` planted on
 #             Kernel.ObjectiveBendAdmissionSemantics.admitted_source_semantics -- must classify that
@@ -50,8 +50,11 @@
 # usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--pin|--draft]
 #   --pin    (proofs only) after a run whose every change is admitted, write the manifests: add the
 #            new rows, apply the admitted changes and removals, refresh re-rendered text. It cannot
-#            remove or change a row the ledger does not admit; commit the manifests it writes.
-#   --draft  (proofs only) print a ledger line (reason TODO, which the ledger refuses) for every
+#            write a row whose event no decision admits; commit the manifests it writes
+#            (the <Module>.tsv rows and constants.content).
+#   --rehash (proofs only) once, when objective-manifest.py's hash itself changes: re-pin closures and
+#            contracts; refuses any added/removed/restated/axioms event.
+#   --draft  (proofs only) print a decision line (reason TODO, which the gate refuses) for every
 #            unadmitted change, to review, give a commit and a reason, and append.
 #   --draft FROM..TO  the same lines with commit and reason attributed from the commits of FROM..TO
 #            that touched each change's cause module, written to build-logs/objective/draft-ledger.txt,
@@ -67,16 +70,18 @@ export PATH=$HOME/.elan/bin:$PATH
 lake=${LAKE:-lake}
 what=${1:-all}
 mode=check
+rehash=
 attribute=
 case "${2:-}" in
   --pin) mode=pin ;;
+  --rehash) mode=pin; rehash=--rehash ;;
   --draft) mode=draft; attribute=${3:-} ;;
   "") ;;
-  *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--draft]" >&2; exit 64 ;;
+  *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--rehash|--draft]" >&2; exit 64 ;;
 esac
 if [ "$mode" != check ] && [ "$what" != proofs ]; then echo "$0: ${2} is a proofs option" >&2; exit 64; fi
 manifests=scripts/gates/objective-manifest
-ledger=scripts/gates/objective-contract-changes.txt
+decisions=scripts/gates/objective-contract-decisions.txt
 manifest_tool=scripts/objective-manifest.py
 logs=$root/build-logs/objective
 mkdir -p "$logs"
@@ -160,6 +165,26 @@ run_meta Minidregg.ObjectiveManifest.main {{
 EOF
 }
 
+scratch_module_re() { # scratch_module_re <module file> <out> <regex> <replacement> <namespace> <mustFind>:
+  # like scratch_module, every match of <regex> replaced (asserted: at least two, and the copy differs)
+  python3 - "$@" <<'EOF'
+import re, sys
+path, out, pat, new, ns, must = sys.argv[1:]
+src = open(path).read()
+mutated, n = re.subn(pat, new, src)
+assert n >= 2 and mutated != src, f"self-test: the rename did not happen in {path} ({n} matches)"
+lines = mutated.split("\n")
+last = max(i for i, l in enumerate(lines) if l.startswith("import "))
+lines.insert(last + 1, "import Verify.ObjectiveManifest")
+open(out, "w").write("\n".join(lines) + f"""
+set_option maxHeartbeats 0 in
+run_meta Minidregg.ObjectiveManifest.main {{
+  label := "objective-manifest-plant", covers := fun _ => false, localPrefix := some `{ns},
+  refuseMathlib := false, scanFloor := 1, mustFind := [`{must}] }}
+""")
+EOF
+}
+
 public_rows() { # public rows of one module in a run's output (the floor of a scratch copy of it)
   awk -F'\t' -v m="$2" '$1 == "R" && $4 == m && $3 !~ /^private / { n++ } END { print n + 0 }' "$1"
 }
@@ -196,6 +221,17 @@ gate_proofs() {
     "def Evaluates (initial result : Term) : Prop := Steps initial result ∧ Value result" \
     "def Evaluates (initial result : Term) : Prop := True" \
     "$ns_d" "$ns_d.lazy_fixed_function" || planted_d=0
+  # (e) a proof edited, nothing else: a proof is never content, so NO event (no decision needed)
+  local planted_e=1 planted_f=1
+  scratch_module Theory/ObjectiveBendOpenRecursion.lean "$tmp/reproof.lean" \
+    "      some (.boolean (left && right)) := rfl" \
+    "      some (.boolean (left && right)) := by cases left <;> cases right <;> rfl" \
+    "$ns_d" "$ns_d.conjunction_boolean_exact" || planted_e=0
+  # (f) a definition renamed verbatim with its uses: its own row is removed + added (key events,
+  # RED without decisions), and NO row that reaches it moves (content is name-free)
+  scratch_module_re Theory/ObjectiveBendOpenRecursion.lean "$tmp/rename.lean" \
+    '\binstantiate\b' "instantiateRenamed" \
+    "$ns_d" "$ns_d.lazy_fixed_function" || planted_f=0
   # all scanner runs in parallel
   local jobs="theory mathlib theory-plant mathlib-plant theory-noscan mathlib-noscan"
   for run in $jobs; do
@@ -206,8 +242,10 @@ gate_proofs() {
   done
   [ "$planted_c" = 1 ] && manifest_run "$tmp/premise.lean" "$tmp/premise.out" "$tmp/premise.err" >"$tmp/premise.rc" &
   [ "$planted_d" = 1 ] && manifest_run "$tmp/redefine.lean" "$tmp/redefine.out" "$tmp/redefine.err" >"$tmp/redefine.rc" &
+  [ "$planted_e" = 1 ] && manifest_run "$tmp/reproof.lean" "$tmp/reproof.out" "$tmp/reproof.err" >"$tmp/reproof.rc" &
+  [ "$planted_f" = 1 ] && manifest_run "$tmp/rename.lean" "$tmp/rename.out" "$tmp/rename.err" >"$tmp/rename.rc" &
   wait
-  local tool=(python3 "$manifest_tool" --pins "$manifests" --ledger "$ledger")
+  local tool=(python3 "$manifest_tool" --pins "$manifests" --decisions "$decisions")
   for run in theory mathlib; do
     s=$(cat "$tmp/$run.rc")
     grep -av "warning\\|^Note:\\|^$" "$tmp/$run.err" || true
@@ -250,11 +288,27 @@ gate_proofs() {
     echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: FAIL"
     cat "$tmp/redefine.expect" 2>/dev/null; head -20 "$tmp/redefine.err" 2>/dev/null; failed=1
   fi
+  if [ "$planted_e" = 1 ] && [ -s "$tmp/reproof.out" ] && "${tool[@]}" expect "$tmp/reproof.out" --against "$tmp/theory.out" \
+       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/reproof.expect"; then
+    echo "self-test (e) a proof edited, nothing else: PASS (no event; $(tail -1 "$tmp/reproof.expect"))"
+  else
+    echo "self-test (e) a proof edited, nothing else: FAIL"
+    cat "$tmp/reproof.expect" 2>/dev/null; head -20 "$tmp/reproof.err" 2>/dev/null; failed=1
+  fi
+  if [ "$planted_f" = 1 ] && [ -s "$tmp/rename.out" ] && "${tool[@]}" expect "$tmp/rename.out" --against "$tmp/theory.out" \
+       --changed "$ns_d.instantiate=removed" --changed "$ns_d.instantiateRenamed=added" \
+       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/rename.expect"; then
+    echo "self-test (f) a definition renamed verbatim: PASS (its key removed+added RED, nothing reaching it moved; $(tail -1 "$tmp/rename.expect"))"
+  else
+    echo "self-test (f) a definition renamed verbatim: FAIL"
+    cat "$tmp/rename.expect" 2>/dev/null; head -20 "$tmp/rename.err" 2>/dev/null; failed=1
+  fi
   if [ "$mode" = pin ] && [ "$failed" != 0 ]; then
     echo "objective-manifest: pin REFUSED: a self-test failed; nothing written"; return 1
   fi
   local extra=()
   [ -n "$attribute" ] && extra=(--attribute "$attribute" --out "$logs/draft-ledger.txt" --review "$logs/draft-review.txt")
+  [ -n "$rehash" ] && extra+=("$rehash")
   if "${tool[@]}" "$mode" "${extra[@]}" "$tmp/theory.out" "$tmp/mathlib.out" | tee "$logs/manifest-$mode.log"; then :; else failed=1; fi
   [ "$failed" = 0 ]
 }

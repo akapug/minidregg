@@ -763,7 +763,7 @@ named modules. They build in the `ObjectiveProofs` library (`ObjectiveProofs.lea
 default target. The gate `scripts/check-objective-proofs.sh proofs` builds it and requires the
 every declaration's statement, definition closure (a SHA-256 Merkle hash of the body of every
 repository definition its statement reaches) and exact axiom set to match its row in the
-per-module contract manifests, or a reviewed line of `scripts/gates/objective-contract-changes.txt`
+per-module contract manifests, or a reviewed line of `scripts/gates/objective-contract-decisions.txt`
 to admit that exact change (additions pass); every pinned axiom set is within `propext`, `Classical.choice`, `Quot.sound`. Compiled code
 runs the machine through proven-equal `@[csimp]` replacements (`stepRaw_eq_fast`,
 `step_eq_fast`, `runBounded_eq_fast`, `forceWith_eq_fast`): the compiler's substitution is
