@@ -583,14 +583,6 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         path
     }
-    /// `CODEC` is one slot per process and `cargo test` runs tests on parallel threads: every test
-    /// that drives `local_frame` holds this lock, so no test replaces another's child mid-count.
-    static CODEC_TESTS: Mutex<()> = Mutex::new(());
-    fn codec_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        let guard = CODEC_TESTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        *CODEC.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
-        guard
-    }
     /// One storeless codec loop answers every codec frame of the same image and
     /// settings; changed settings bytes or a replaced image file start another.
     #[test]
@@ -782,6 +774,47 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
 /// The storeless codec child of this process (`local_frame`) and the `anchor_binding` it was
 /// started under.
 static CODEC: Mutex<Option<([u8;32],Session)>> = Mutex::new(None);
+
+/// Test stand-in for the local Host's storeless codec loop (`HOST SETTINGS codec`,
+/// `Host.Main.serveCodec`): a `codec)` arm for a fixture's `case "$2" in` script. Every pure verb
+/// reaches the Host this way (`process` -> `codec_process` -> `local_frame`); no client path runs a
+/// one-shot `HOST CONFIG inspect` any more. Frame 8 (inspect) runs `inspect` (a shell snippet
+/// reading the kind in `$kind` and the bytes in file `$body`, writing the decoded JSON to file
+/// `$out`) and answers `[8] ++ out`; a failing snippet, or any other frame, answers a 255 refusal
+/// whose bytes this loop decodes itself on `inspect outcome`, as the Host does.
+#[cfg(test)]
+pub(crate) fn codec_loop_arm(inspect: &str) -> String {
+    r#"  codec)
+    d="$1.codec.$$"; mkdir -p "$d"
+    while :; do
+      n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \n')
+      [ -n "$n" ] || exit 0
+      dd bs=1 count="$n" of="$d/frame" 2>/dev/null
+      op=$(od -An -tu1 -N1 "$d/frame" | tr -d ' \n')
+      k=$(od -An -tu2 -j1 -N2 "$d/frame" | tr -d ' \n')
+      kind=$(dd if="$d/frame" bs=1 skip=3 count="$k" 2>/dev/null)
+      body="$d/body"; out="$d/out"
+      tail -c +$((4+k)) "$d/frame" > "$body"; : > "$out"
+      if [ "$op" = 8 ] && [ "$kind" = outcome ] && [ "$(cat "$body")" = FIXTURE-REFUSAL ]; then
+        a=8; printf '%s' '{"type":"refused","reason":"fixture"}' > "$out"
+      elif [ "$op" = 8 ] && ( INSPECT ); then a=8
+      else a=255; printf FIXTURE-REFUSAL > "$out"; fi
+      m=$(( $(wc -c < "$out") + 1 ))
+      printf "$(printf '\\%03o\\%03o\\%03o\\%03o\\%03o' $((m%256)) $((m/256%256)) $((m/65536%256)) 0 "$a")"
+      cat "$out"
+    done ;;
+"#.replace("INSPECT", inspect)
+}
+/// `CODEC` is one slot per process and `cargo test` runs tests on parallel threads: every test that
+/// drives `local_frame` (directly or through a pure verb) holds this lock, so no test replaces
+/// another's child mid-count. Resets the slot on entry.
+#[cfg(test)]
+pub(crate) fn codec_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static CODEC_TESTS: Mutex<()> = Mutex::new(());
+    let guard = CODEC_TESTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    *CODEC.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    guard
+}
 
 pub(crate) fn plan_operation(operation:u8)->bool {
     matches!(operation,32|36|44|48|50|52|58|66|68|70|74|78|80|82|86|92|96|103|108|113|117|123|126|140|160|170|183|201|206|210|215)

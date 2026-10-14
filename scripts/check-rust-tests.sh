@@ -513,6 +513,19 @@ exact rc-private-rooms       resource-client --bin mini -- \
   workspace::roomkey::tests::rotation_leaves_out_members_without_a_grant_and_needs_a_keyed_room \
   workspace::roomkey::tests::a_hosted_invitee_into_a_private_room_needs_i_know \
   workspace::private::tests::legacy_private_content_never_seals_and_only_strikes_retaining_ciphertext
+# D16: every pure frame goes to ONE codec child per mini process (Host SETTINGS codec), keyed by
+# the Host image's file identity; recovery decodes retained outcomes through it, never through a
+# one-shot Host inspect (H 22166640 left four recovery fixtures on the one-shot shape, red unseen)
+exact rc-codec-child         resource-client --bin mini -- \
+  client_consent::tests::one_codec_child_serves_the_process_and_names_its_refusals \
+  client_consent::tests::codec_loop_is_reused_only_for_the_same_image_and_settings \
+  client_consent::tests::codec_child_is_kept_across_a_renamed_settings_directory \
+  client_consent::tests::codec_child_that_dies_decoding_its_refusal_is_replaced \
+  fleet::exact_operation_tests::exact_operation_lost_reply_recovers_only_retained_call_without_resubmit \
+  provider_continuity::tests::guarded_attempt_lookup_uses_original_call_without_rechecking_or_resigning \
+  selected_publisher::tests::truncated_submit_reply_recovers_by_lookup_without_resubmit \
+  selected_publisher::tests::an_old_absent_lookup_does_not_block_later_read_only_confirmation \
+  workspace::tests::retained_stale_observation_is_superseded_once_and_prior_generation_kept
 # D15: a queued request whose caller left, or that outwaited its residence bound,
 # is answered 254 and never reaches the Host (2a72f8ed)
 exact rc-transport-queue     resource-client --bin mini -- \

@@ -7880,6 +7880,8 @@ mod tests {
 
     #[test]
     fn retained_stale_observation_is_superseded_once_and_prior_generation_kept() {
+        // author_generations replans (the process-wide replan count): serialize with the replan tests.
+        let _guard = crate::replan::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let (root, base, reservation) = generation_fixture("stale");
         make_private_dir(&base).unwrap();
         make_private_dir(&base.join("g0001")).unwrap();
