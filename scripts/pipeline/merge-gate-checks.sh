@@ -84,6 +84,10 @@ run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$
 # detected. Elaborates TokenCensus over the research umbrella.
 run token-census    $LAKE_WRAP lake build TokenCensus
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
+# The waste model (docs/WASTE-MODEL.md): its plants (a lowered ceiling is red, an undecided raise is red), the
+# ratchet FROM..TO (a ceiling only falls; a raise or a moved necessary figure needs a decisions line), and the
+# judgment of $WASTE_MODEL_RUN (a workload.sh root, raw instructions) when the landing names one. Seconds; no build.
+run waste-model     python3 scripts/gates/check-waste-model gate "$FROM" "$TO"
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on
 # clean 259a2fb0); a batch is RED here only for a [RED] family outside that baseline, a failed

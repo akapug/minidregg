@@ -1,0 +1,47 @@
+# run	/tmp/srw-before
+# sourceCommit	93b89310956887e6e42610047c2aaebb9a1f0b55
+# inputKey	1b45a3a71609dc21064b6dec59e13048d31eaeac9175841769160c110c3747e1
+# births	32
+# updates	32
+# reads	16
+# records	110
+# storeBytes	1187840
+# underLoad	True
+# loadavg	37.27 32.86 26.61
+# quiet	False
+# busy	run-u21492.scope 1.17; run-u21488.scope 1.0
+# t0_fit_error_instr	0
+key	kind	value	count	source
+phase.birth	instr	43559851567	32	phase births / 32
+phase.invoke	instr	37727698090	32	phase updates / 32
+phase.certify	instr	21768608524	1	phase checkpoint / 1
+phase.cold-open	instr	23885618896	1	phase reopen / 1
+phase.genesis	instr	17747183091	1	phase genesis / 1
+op.birth.create	instr	17520363315	32	transcript-window attribution
+op.birth.resource	instr	26028866020	32	transcript-window attribution
+op.call	instr	42671808223	1	transcript-window attribution
+op.certify	instr	21606386073	1	transcript-window attribution
+op.cold-open	instr	23449745931	1	transcript-window attribution
+op.deliver	instr	25047026431	1	transcript-window attribution
+op.invoke	instr	37747797726	32	transcript-window attribution
+op.read.at	instr	40218022525	16	transcript-window attribution
+op.read.current	instr	555653370	16	transcript-window attribution
+op.read.probe	instr	41809452706	1	transcript-window attribution
+op.send	instr	45640850602	1	transcript-window attribution
+host.confirm_refresh	wall_p50_ms	58	110	serve.log host-trace
+host.op1_refresh	wall_p50_ms	2	36	serve.log host-trace
+host.op5_refresh	wall_p50_ms	3	37	serve.log host-trace
+host.op_1	wall_p50_ms	209	36	serve.log host-trace
+host.op_144	wall_p50_ms	12	40	serve.log host-trace
+host.op_170	wall_p50_ms	44	1	serve.log host-trace
+host.op_171	wall_p50_ms	1	1	serve.log host-trace
+host.op_172	wall_p50_ms	548	1	serve.log host-trace
+host.op_173	wall_p50_ms	19	1	serve.log host-trace
+host.op_2	wall_p50_ms	586	36	serve.log host-trace
+host.op_210	wall_p50_ms	38	107	serve.log host-trace
+host.op_211	wall_p50_ms	0	107	serve.log host-trace
+host.op_212	wall_p50_ms	142	73	serve.log host-trace
+host.op_214	wall_p50_ms	10	128	serve.log host-trace
+host.op_4	wall_p50_ms	10	73	serve.log host-trace
+host.op_5	wall_p50_ms	66	37	serve.log host-trace
+host.op_91	wall_p50_ms	82	36	serve.log host-trace
