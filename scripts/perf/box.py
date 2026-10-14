@@ -3,7 +3,9 @@
 
   box.py quiet OUT.json [WINDOW_S] [THRESHOLD_CORES]
       Sample every process on the box over WINDOW_S (default 3) and call one busy when it used at least
-      THRESHOLD_CORES (default 0.5) of a core, excluding this process's own ancestors. Busy processes are
+      THRESHOLD_CORES (default 0.5) of a core, excluding this process's own ancestors and, inside a journey
+      run, every row scope of the SAME run (journey-runner puts row R of run X in pj-R-X.scope: the
+      runner's own parallel rows are not someone else's load). Busy processes are
       grouped by their systemd unit (the cgroup leaf, e.g. a swarm-build scope) and named with their
       command. Writes OUT.json; exit 3 and prints "box not quiet: ..." when anything is busy.
 
@@ -64,8 +66,20 @@ def describe(pid):
     return unit, cmd.strip()[:120]
 
 
+def own_run_suffix():
+    """The run id X when this process is inside a journey row scope pj-ROW-X.scope, else None."""
+    try:
+        leaf = pathlib.Path('/proc/self/cgroup').read_text().splitlines()[0].rsplit('/', 1)[-1]
+    except (OSError, IndexError):
+        return None
+    if leaf.startswith('pj-') and leaf.endswith('.scope'):
+        return leaf[:-len('.scope')].rsplit('-', 1)[-1]
+    return None
+
+
 def quiet(out, window=3.0, threshold=0.5):
     mine = ancestors()
+    run = own_run_suffix()
     a = proc_cpu()
     t = time.monotonic()
     time.sleep(window)
@@ -79,6 +93,8 @@ def quiet(out, window=3.0, threshold=0.5):
         if cores < 0.05:
             continue
         unit, cmd = describe(pid)
+        if run and unit.startswith('pj-') and unit.endswith(f'-{run}.scope'):
+            continue  # a sibling row of this journey run
         u = units.setdefault(unit, {'unit': unit, 'cores': 0.0, 'top': []})
         u['cores'] += cores
         u['top'].append((round(cores, 2), pid, cmd))
@@ -89,7 +105,7 @@ def quiet(out, window=3.0, threshold=0.5):
         if u['cores'] >= threshold:
             busy.append(u)
     busy.sort(key=lambda u: -u['cores'])
-    doc = {'window_s': window, 'threshold_cores': threshold, 'busy': busy,
+    doc = {'window_s': window, 'threshold_cores': threshold, 'busy': busy, 'excludedRun': run,
            'loadavg': pathlib.Path('/proc/loadavg').read_text().split()[:3]}
     pathlib.Path(out).write_text(json.dumps(doc, indent=1) + '\n')
     if busy:

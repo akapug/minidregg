@@ -570,8 +570,11 @@ row_m7() {
 # to the first answered read. scripts/perf/workload.py --births-only; N=64 by default, 1000 when
 # PIPELINE_NIGHTLY=1. PASS iff every birth completed (N resource writes and N create turns, every turn judged
 # as expected), the p99 of each write op (births/resource, births/create) <= 5 s, and the reopen <= 60 s.
-# FAIL names the op and the bound it crossed. Wall time on a loaded box is the measurement, not an excuse:
-# the row never goes UNCONFIGURED for load; the detail carries the 1-min loadavg at start and end.
+# FAIL names the op and the bound it crossed. The BAR is judged only on a quiet box (Ember 10-14: never a
+# performance verdict on a box slammed by dev work): scripts/perf/box.py quiet before AND after the run,
+# excluding this journey run's own sibling rows. Busy at either end -> UNCONFIGURED (98) by name, "bar not
+# judged: loadavg N (quiet: no other unit >= Q cores)", and the detail still records p50/p99 and the counts.
+# The real bar run is the nightly on a dedicated burst box (scripts/pipeline/nightly-burst.sh).
 # Plant: JOURNEY_PLANT_BIRTHS=bar-1ms judges the same run against a 0.001 s write bar (must FAIL by name).
 row_births() {
   local d=$SRC/scripts/perf/workload.py bar_ms=5000 reopen_ms=60000 rc n la0 la1 f
@@ -583,9 +586,12 @@ row_births() {
   esac
   if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then n=${PERF_BIRTHS_N:-1000}; else n=${PERF_BIRTHS_N:-64}; fi
   la0=$(cut -d' ' -f1 /proc/loadavg)
+  local q0 q1 qt=${PIPELINE_QUIET_CORES:-0.5}
+  python3 "$SRC/scripts/perf/box.py" quiet "$OUT/quiet-start.json" 3 "$qt" >"$OUT/quiet-start.out"; q0=$?
   (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/b" --births "$n" --births-only) >"$OUT/births.out" 2>"$OUT/births.err"
   rc=$?
   la1=$(cut -d' ' -f1 /proc/loadavg)
+  python3 "$SRC/scripts/perf/box.py" quiet "$OUT/quiet-end.json" 3 "$qt" >"$OUT/quiet-end.out"; q1=$?
   for f in results.tsv table.txt summary.json results.json; do cp "$RUN/b/$f" "$OUT/" 2>/dev/null; done
   if [ ! -s "$OUT/summary.json" ] || [ ! -s "$OUT/results.tsv" ]; then
     echo "births FAIL: workload exited $rc with no summary (N=$n; load $la0->$la1): $(tail -1 "$OUT/births.err")" >&2; return 1
@@ -628,6 +634,13 @@ detail = (f'N={n} create p50 {ops.get(("births", "create"), {}).get("p50", "?")}
 print(('births FAIL: ' + '; '.join(fails) + ' | ' if fails else 'births PASS: ') + detail, file=sys.stderr)
 sys.exit(1 if fails else 0)
 PY
+  rc=$?
+  if [ "$q0" != 0 ] || [ "$q1" != 0 ] && [ -z "${JOURNEY_PLANT_BIRTHS:-}" ]; then
+    echo "births UNCONFIGURED: bar not judged: loadavg $la0->$la1 (quiet: no other unit >= $qt cores; $(tail -1 "$OUT/quiet-start.out" "$OUT/quiet-end.out" 2>/dev/null | grep -m1 'box not quiet' || echo busy)) | verdict it would have had: rc $rc; $(tail -1 "$OUT/births.err" 2>/dev/null | cut -c1-300)" >&2
+    sed -i 's/\tPASS\t/\tUNJUDGED\t/; s/\tFAIL\t/\tUNJUDGED\t/' "$OUT/subrows.tsv" 2>/dev/null
+    return 98
+  fi
+  return $rc
 }
 row_growth() {
   product_journey growth G 'J0 J1 J2 J3 J4' || return $?
@@ -656,9 +669,12 @@ row_perf() {
     budget-1s) budget=1 ;;
     *) echo "unknown JOURNEY_PLANT_PERF ${JOURNEY_PLANT_PERF} (known: budget-1s)" >&2; return 2 ;;
   esac
-  PERF_BUDGET_S=$budget bash "$d" "$BIN" "$RUN/p" "${PERF_ROW_N:-20}" "${PERF_ROW_M:-16}" "${PERF_ROW_K:-8}" \
+  local la0 la1; la0=$(cut -d' ' -f1 /proc/loadavg)
+  # always measured (instructions, p50/p99 in the detail); the wall bound is judged only when quiet
+  PERF_UNDER_LOAD=1 PERF_BUDGET_S=$budget bash "$d" "$BIN" "$RUN/p" "${PERF_ROW_N:-20}" "${PERF_ROW_M:-16}" "${PERF_ROW_K:-8}" \
     >"$OUT/perf.out" 2>"$OUT/perf.err"
   rc=$?
+  la1=$(cut -d' ' -f1 /proc/loadavg)
   [ "$rc" = 3 ] && { tail -1 "$OUT/perf.err" >&2; return 98; }
   local f
   for f in results.tsv table.txt summary.json settings.json quiet.json workload.log; do cp "$RUN/p/$f" "$OUT/" 2>/dev/null; done
@@ -669,6 +685,10 @@ row_perf() {
       printf '%s\t%s\t%s\t%s\n' "perf-$ph" "$st" "$wall" \
         "$(awk -F'\t' -v p="$ph" '$1 == p && $2 != "TOTAL" {printf "%s%s n=%s p50=%sms max=%sms", (s++?"; ":""), $2, $3, $4, $6}' "$OUT/results.tsv")"
     done >"$OUT/subrows.tsv"
+  fi
+  if [ -z "${JOURNEY_PLANT_PERF:-}" ] && jq -e '.underLoad == true' "$OUT/summary.json" >/dev/null 2>&1; then
+    echo "perf UNCONFIGURED: bar not judged: loadavg $la0->$la1 ($(grep -m1 'box not quiet' "$RUN/p/quiet.out" 2>/dev/null || echo 'box not quiet')) | verdict it would have had: rc $rc; $(tail -1 "$OUT/perf.err" | cut -c1-300)" >&2
+    return 98
   fi
   tail -1 "$OUT/perf.err" >&2
   return $rc
