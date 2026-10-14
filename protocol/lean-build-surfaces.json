@@ -4287,6 +4287,13 @@
       "ownerReportedStatus": "No matching owner source report"
     },
     {
+      "module": "Host.TurnLogFollower",
+      "path": "Host/TurnLogFollower.lean",
+      "sha256": "874e1bfbab90d5601a82245648b02abbf02a2bd39dcd0932c46d614263b33818",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
       "module": "Host.WorldFoldBench",
       "path": "Host/WorldFoldBench.lean",
       "sha256": "be4e7b656dfeac7c02a8bfb0f0a88efc5d98dcad95bb85d38e23dd1f7b2d740b",
@@ -4310,7 +4317,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "1af34444325f18da482402e0f84d8fbb57601acfb18690a323d260052fa7d4f4",
+      "sha256": "9801650e855a23c3cb6bc73418a37c7b1214447c9321a80f7aff1b3f610477c7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5732,6 +5739,13 @@
       "module": "Kernel.DeployedMaterializerWitness",
       "path": "Kernel/DeployedMaterializerWitness.lean",
       "sha256": "88208c668115dc09cf83f9e93fd788b5dbd6a0aa5ec398e013314860eb65a1fd",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.DeployedTurnCodec",
+      "path": "Kernel/DeployedTurnCodec.lean",
+      "sha256": "112e3f1141d7610177ac8e7dbfb722025c719320bb16359ab3ef433107458dea",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8077,6 +8091,13 @@
       "module": "Kernel.TurnLimit",
       "path": "Kernel/TurnLimit.lean",
       "sha256": "a62fa41477cc5fb019783657b6017d2f9ace139c1845a8bcaa4d3948b3c4ed8d",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.TurnLog",
+      "path": "Kernel/TurnLog.lean",
+      "sha256": "93d25f34f7913a9531b5d44bf20b51b246530352f6dc787e951dc1b5eee77492",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
