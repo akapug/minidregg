@@ -4601,6 +4601,28 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// The plant of the workspace Host pin: a Host file replaced under an unchanged pin is named by
+    /// the pin without being read (the serving Host's envelope check refuses it after the next
+    /// `serve` start), and `--verify-host` hashes it and refuses the mismatch here.
+    #[cfg(unix)]
+    #[test]
+    fn a_pinned_host_image_is_named_by_its_pin_and_verify_host_refuses_a_replacement() {
+        let dir = scratch("host-image-pin");
+        let host = dir.join("minidregg-host");
+        let sha = |bytes: &[u8]| hex(&sha2::Sha256::digest(bytes));
+        fs::write(&host, b"pinned image").unwrap();
+        pin_workspace_host(&host, &sha(b"pinned image")).unwrap();
+        fs::write(&host, b"replaced image").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"pinned image"));
+        VERIFY_HOST.store(true, Ordering::Relaxed);
+        let verified = host_image_sha256(&host);
+        VERIFY_HOST.store(false, Ordering::Relaxed);
+        let error = verified.unwrap_err();
+        assert!(error.contains("differs from the workspace's pinned hostSha256"), "{error}");
+        assert!(pin_workspace_host(&host, &sha(b"replaced image")).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn named_options_preserve_interleaved_fn_argument_order() {
         let mut args = Args {
