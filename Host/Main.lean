@@ -5965,7 +5965,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((211 : UInt8), ingress)
   | 212 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig opened payload
+      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
       return ((212 : UInt8), outcomeCodec.encode outcome)
   | 213 =>
       let opened ← sessionOpened pinnedConfig state
@@ -5997,7 +5997,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((216 : UInt8), ingress)
   | 217 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig opened payload
+      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
       return ((217 : UInt8), outcomeCodec.encode outcome)
   | 218 =>
       let opened ← sessionOpened pinnedConfig state
@@ -6770,8 +6770,8 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((85 : UInt8), outcomeCodec.encode outcome)
                         | 88 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.enrollmentSubmitLoaded
-                              pinnedConfig opened payload
+                            let outcome ← NativeHost.enrollmentSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
                             return ((88 : UInt8), outcomeCodec.encode outcome)
                         | 89 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -6780,8 +6780,8 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((89 : UInt8), outcomeCodec.encode outcome)
                         | 94 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.provisionSubmitLoaded
-                              pinnedConfig opened payload
+                            let outcome ← NativeHost.provisionSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
                             return ((94 : UInt8), outcomeCodec.encode outcome)
                         | 95 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -6904,7 +6904,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((104 : UInt8), ingress)
                         | 105 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.paySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.paySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A pay submission is blind: its refusal (including the
                             -- receiver's pre-signature notOwner/bookExhausted/...) is
                             -- the uniform `undisclosed` frame (MR's rule).
@@ -6996,7 +6996,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((141 : UInt8), ingress)
                         | 142 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.receivingSubmitLoaded pinnedConfig opened
+                            let outcome ← NativeHost.receivingSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
                               SubjectKeyRotation.family (NativeHostReplay.rotationEnv pinnedConfig)
                               "rotate-key" payload
                             return ((142 : UInt8), outcomeCodec.encode outcome)
@@ -7036,7 +7036,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((124 : UInt8), ingress)
                         | 125 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.wellSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.wellSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- Blind like every submission (MR): the submitter gets
                             -- the uniform refusal, the operator log the reason.
                             NativeHost.logOperatorRefusal outcome
@@ -7061,7 +7061,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((127 : UInt8), ingress)
                         | 128 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((128 : UInt8), outcomeCodec.encode outcome)
                         | 129 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7085,7 +7085,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((109 : UInt8), ingress)
                         | 110 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payObservationSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payObservationSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((110 : UInt8), outcomeCodec.encode outcome)
                         | 111 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7139,7 +7139,7 @@ def run (arguments : List String) : IO UInt32 := do
                             unless payload.length ≤ 4096 do
                               throw (IO.userError "claim ingress exceeds bound")
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payClaimSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payClaimSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((185 : UInt8), outcomeCodec.encode outcome)
                         | 186 =>
                             unless payload.length ≤ 4096 do
@@ -7164,7 +7164,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((118 : UInt8), ingress)
                         | 119 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payEnrolSubmitCurrentLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payEnrolSubmitCurrentLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((119 : UInt8), outcomeCodec.encode outcome)
                         | 120 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7188,7 +7188,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((161 : UInt8), ingress)
                         | 162 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.jobMoneySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.jobMoneySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A blind submission like op 115: a refusal is the uniform
                             -- `undisclosed` frame (MR's rule).
                             return ((162 : UInt8),
@@ -7215,7 +7215,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((114 : UInt8), ingress)
                         | 115 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payRefillSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payRefillSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A refill is a friend's blind submission, like op 105: its
                             -- refusal (notOwner, bookRefused, ...) is the uniform
                             -- `undisclosed` frame (MR's rule).
@@ -7242,7 +7242,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((171 : UInt8), ingress)
                         | 172 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((172 : UInt8), outcomeCodec.encode outcome)
                         | 173 =>
                             let opened ← sessionOpened pinnedConfig state
