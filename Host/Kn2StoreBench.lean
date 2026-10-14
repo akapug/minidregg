@@ -87,7 +87,7 @@ def pastReads (transport : Transport) (count : Nat) : IO Unit := do
     for _ in [0:3] do
       let t0 ← IO.monoMsNow
       kept ← match ← loaded.keptAt transport key height with
-        | .ok kept => pure kept
+        | .ok found => pure found
         | .error detail => throw (IO.userError s!"at {height}: {detail}")
       keptSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom kept height)
       keptMs := min keptMs (← ms t0)
