@@ -561,6 +561,12 @@ structure RootsExact (cache : RootCache) (es : List (Key × Digest)) where
 def RootsExact.ofEntries (es : List (Key × Digest)) : RootsExact (RootCache.ofEntries es) es :=
   ⟨fun _ => rfl, (RootCache.ofEntries es).injectiveCheck, RootCache.injectiveCheck_sound⟩
 
+/-- The cache of `es` with its exactness, the tree built once: `RootCache.ofEntries`
+paired with `RootsExact.ofEntries` builds the tree a second time inside the latter. -/
+def RootCache.build (es : List (Key × Digest)) : (cache : RootCache) × RootsExact cache es :=
+  let cache := RootCache.ofEntries es
+  ⟨cache, ⟨fun _ => rfl, cache.injectiveCheck, RootCache.injectiveCheck_sound⟩⟩
+
 theorem RootsExact.root_eq {cache : RootCache} {es : List (Key × Digest)}
     (exact : RootsExact cache es) (injective : exact.injective = true) :
     cache.root = deployedRoot es := by
@@ -581,8 +587,8 @@ def RootsExact.advance {cache : RootCache} {es es' : List (Key × Digest)}
           (exact.injectiveSound injective)
         ⟨next, ⟨fun k => by rw [sound.1, lastVal_append, exact.agree, step], true,
           fun _ => sound.2⟩⟩
-    | none => ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
-  else ⟨RootCache.ofEntries es', RootsExact.ofEntries es'⟩
+    | none => RootCache.build es'
+  else RootCache.build es'
 
 /-! ## The served entries, step by step -/
 
@@ -904,9 +910,9 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   | none => .error "durable image journal does not replay through the canonical executor"
   | some snapshot =>
       let chain := chainAfter logStart image.accepted
+      let built := RootCache.build (entriesOf image snapshot chain)
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
-        rfl, RootCache.ofEntries (entriesOf image snapshot chain),
-        RootsExact.ofEntries (entriesOf image snapshot chain),
+        rfl, built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
@@ -1058,12 +1064,12 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         match resumed : resume rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
+            let built := RootCache.build (entriesOf image snapshot headChain)
             let loaded : Loaded rootBytes :=
               ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
               (by show chains.getLast?.getD logStart = _; rw [chainsEq]
                   exact DurableLogTags.chainPrefixes_getLast? logStart records),
-              RootCache.ofEntries (entriesOf image snapshot headChain),
-              RootsExact.ofEntries (entriesOf image snapshot headChain),
+              built.1, built.2,
               PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
@@ -1260,9 +1266,9 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
   match resumed : resume rootBytes image baseHeight base with
   | none => .error "durable image journal does not replay through the canonical executor"
   | some snapshot =>
+      let built := RootCache.build (entriesOf image snapshot chain)
       .ok ⟨⟨image, baseHeight, base, snapshot, withinLog, resumed, logStart, chain, chainExact,
-        RootCache.ofEntries (entriesOf image snapshot chain),
-        RootsExact.ofEntries (entriesOf image snapshot chain),
+        built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,

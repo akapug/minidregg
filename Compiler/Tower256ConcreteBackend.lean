@@ -34,6 +34,27 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
+/-! ## Exact byte comparison -/
+
+/-- Compare two byte lists in tail position, on unboxed octets. The derived
+`List UInt8` equality recurses once per octet (stack depth = length) and calls
+the element instance through a closure; every strict decoder compares a whole
+re-encoding against its input, so this is on every canonical decode. -/
+def bytesEqual : List UInt8 → List UInt8 → Bool
+  | [], [] => true
+  | left :: lefts, right :: rights =>
+      if left = right then bytesEqual lefts rights else false
+  | _, _ => false
+
+theorem bytesEqual_eq_true_iff (left right : List UInt8) :
+    bytesEqual left right = true ↔ left = right := by
+  induction left generalizing right with
+  | nil => cases right <;> simp [bytesEqual]
+  | cons left lefts ih =>
+      cases right with
+      | nil => simp [bytesEqual]
+      | cons right rights => simp [bytesEqual, ih]
+
 /-! ## Compact streaming-codec nucleus -/
 
 /-- A prefix codec consumes exactly one value and returns the unconsumed
@@ -323,6 +344,51 @@ def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
     simp only [enough, dif_pos, taken, dropped]
     exact congrArg (fun v : Fin (256 ^ width) => some (v, suffix)) (Fin.ext (fixedValue_fixedOctets width value.val value.isLt))
 
+/-- Executable `fixedStream` decode: split off `width` octets and check that the PREFIX came
+out whole. The definition measures `octets.length`, the WHOLE remaining stream, once per
+fixed-width field, so a record of `m` digests and heights in `n` octets decoded in
+`O(m·n)`; this costs `O(width)` per field, independent of what follows. -/
+def fixedDecodePrefixTR (width : Nat) (octets : List UInt8) :
+    Option (Fin (256 ^ width) × List UInt8) :=
+  let split := octets.splitAt width
+  if whole : split.1.length = width then
+    some (⟨fixedValue split.1, by
+      have bound := fixedValue_lt split.1
+      rwa [whole] at bound⟩, split.2)
+  else none
+
+theorem fixedDecodePrefixTR_eq (width : Nat) (octets : List UInt8) :
+    fixedDecodePrefixTR width octets = (fixedStream width).decodePrefix octets := by
+  unfold fixedDecodePrefixTR fixedStream
+  simp only [List.splitAt_eq, List.length_take]
+  by_cases enough : width ≤ octets.length
+  · simp [enough]
+  · have short : min width octets.length ≠ width := by omega
+    simp [enough, short]
+
+/-- `fixedStream` with the bounded-take decoder; same encoder, same bytes. -/
+def fixedStreamTR (width : Nat) : StreamCodec (Fin (256 ^ width)) where
+  encode value := fixedOctets width value.val
+  decodePrefix := fixedDecodePrefixTR width
+  decodePrefix_encode := by
+    intro value suffix
+    rw [fixedDecodePrefixTR_eq]
+    exact (fixedStream width).decodePrefix_encode value suffix
+
+@[csimp] theorem fixedStream_eq_fixedStreamTR : @fixedStream = @fixedStreamTR := by
+  funext width
+  have decodes : (fixedStream width).decodePrefix = (fixedStreamTR width).decodePrefix := by
+    funext octets
+    exact (fixedDecodePrefixTR_eq width octets).symm
+  have encodes : (fixedStream width).encode = (fixedStreamTR width).encode := rfl
+  revert decodes encodes
+  generalize fixedStream width = left
+  generalize fixedStreamTR width = right
+  cases left; cases right
+  intro decodes encodes
+  cases decodes; cases encodes
+  rfl
+
 theorem fixedStream_encode_length (width : Nat) (value : Fin (256 ^ width)) :
     ((fixedStream width).encode value).length = width := fixedOctets_length _ _
 
@@ -396,6 +462,7 @@ theorem digest256_consumes_32 (octets : List UInt8) (digest : Digest256) (rest :
 #assert_axioms digest256_refuses_short
 #assert_axioms digest256_consumes_32
 #assert_axioms toDigest256_ofDigest256
+#assert_axioms fixedStream_eq_fixedStreamTR
 #assert_axioms ofDigest256_toDigest256
 /-- The byte specialization of `StreamCodec.encodeMany` has no per-byte
 framing. Keep this equality explicit so the faster implementation below stays

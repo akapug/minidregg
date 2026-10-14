@@ -166,11 +166,11 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
   match parsed : FnPortableSource.extract source with
   | .error detail => throw s!"authored fn source fails Mini's strict source parser: {detail}"
   | .ok extracted =>
-      if packageExact : ResourceBirthCodec.bytesEqual extracted.package packageBytes then
+      if packageExact : Tower256ConcreteBackend.bytesEqual extracted.package packageBytes then
         if messageExact : extracted.messageId = messageId then
           if groupExact : extracted.groups = context.group then
             have exactBytes : extracted.package = packageBytes :=
-              (ResourceBirthCodec.bytesEqual_eq_true_iff extracted.package packageBytes).mp packageExact
+              (Tower256ConcreteBackend.bytesEqual_eq_true_iff extracted.package packageBytes).mp packageExact
             return ⟨context, selection, packageBytes, verifiedReceipt,
               command.targets.map (·.target), messageId, source, extracted,
               parsed, exactBytes, messageExact, groupExact⟩

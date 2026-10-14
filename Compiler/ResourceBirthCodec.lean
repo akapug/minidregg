@@ -36,23 +36,6 @@ set_option autoImplicit false
 
 /-! ## Exact canonical transport -/
 
-/-- Compare two byte lists in tail position, avoiding the recursive list
-equality call chain on large native envelopes. -/
-def bytesEqual : List UInt8 → List UInt8 → Bool
-  | [], [] => true
-  | left :: lefts, right :: rights =>
-      if left = right then bytesEqual lefts rights else false
-  | _, _ => false
-
-theorem bytesEqual_eq_true_iff (left right : List UInt8) :
-    bytesEqual left right = true ↔ left = right := by
-  induction left generalizing right with
-  | nil => cases right <;> simp [bytesEqual]
-  | cons left lefts ih =>
-      cases right with
-      | nil => simp [bytesEqual]
-      | cons right rights => simp [bytesEqual, ih]
-
 def strictCodec {α : Type} (codec : LawfulCodec α) : LawfulCodec α where
   encode := codec.encode
   decode bytes := do

@@ -196,7 +196,7 @@ theorem tariff_v3_refused (rest : List UInt8) :
   change (do
       let value ← (framedRaw tariffFrame tariffStream).decode
         ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest)
-      if Minidregg.Compiler.ResourceBirthCodec.bytesEqual
+      if Minidregg.Compiler.Tower256ConcreteBackend.bytesEqual
           ((framedRaw tariffFrame tariffStream).encode value)
           ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) then some value else none) = none
   rw [refused]
