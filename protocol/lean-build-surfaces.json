@@ -4289,7 +4289,7 @@
     {
       "module": "Host.TurnLogFollower",
       "path": "Host/TurnLogFollower.lean",
-      "sha256": "874e1bfbab90d5601a82245648b02abbf02a2bd39dcd0932c46d614263b33818",
+      "sha256": "e7c84bcdd904f9a786dad2f1e33d2e99e9bf9c371a46042549c6cdd24954de76",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -4317,7 +4317,7 @@
     {
       "module": "Kernel",
       "path": "Kernel.lean",
-      "sha256": "9801650e855a23c3cb6bc73418a37c7b1214447c9321a80f7aff1b3f610477c7",
+      "sha256": "773e524ba2c6aaf8be73114fd62c04970fe41b2a2820c4af5e97e4c98129d8e7",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -5746,6 +5746,13 @@
       "module": "Kernel.DeployedTurnCodec",
       "path": "Kernel/DeployedTurnCodec.lean",
       "sha256": "112e3f1141d7610177ac8e7dbfb722025c719320bb16359ab3ef433107458dea",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.DeployedTurnCompact",
+      "path": "Kernel/DeployedTurnCompact.lean",
+      "sha256": "1f5dac6ab4c1ba6d64a60bf0a10cb003fa35323a6c382846b46a0c44836ae1c0",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8097,14 +8104,14 @@
     {
       "module": "Kernel.TurnLog",
       "path": "Kernel/TurnLog.lean",
-      "sha256": "93d25f34f7913a9531b5d44bf20b51b246530352f6dc787e951dc1b5eee77492",
+      "sha256": "8d89eb70a960dea2e31f736579383c7ca8a2f5840689aa5a5bc1ad935b22c62e",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
     {
       "module": "Kernel.TurnOfIntent",
       "path": "Kernel/TurnOfIntent.lean",
-      "sha256": "3944ed939716600de2a09bc2cb108afbfe5d627a25684e28ba028ad521e8270a",
+      "sha256": "e2fa6920fccfeaaed6c7a86fe25c9dd5bf7ed22fc1887b9fed9153141986000d",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },
@@ -8203,6 +8210,13 @@
       "module": "Kernel.WorldRootCache",
       "path": "Kernel/WorldRootCache.lean",
       "sha256": "23b4d5b9d90bb263d967155b6dc8b8c72ab892dc961345a7f610c4ab760349a8",
+      "surface": "default",
+      "ownerReportedStatus": "No matching owner source report"
+    },
+    {
+      "module": "Kernel.WorldSystemCodec",
+      "path": "Kernel/WorldSystemCodec.lean",
+      "sha256": "9bc8230c7477a8f10d7d43499c94074c727bcc0d6fd8d42734fbd3ed2a98c8f2",
       "surface": "default",
       "ownerReportedStatus": "No matching owner source report"
     },

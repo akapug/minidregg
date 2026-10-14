@@ -2,18 +2,20 @@
 # Kernel.TurnLog -- a log of Turns, folded by `World.admit` (FD-1, R4a)
 
 The deployed genesis World of a `Seed`, the Turn log's framing, and the
-follower: decode each entry (`DeployedTurnCodec.decodeTurn`), admit it
-(`World.admit` at `DeployedHistory.history`), stop by height on the first entry
-that does not decode or does not take.  `follow_ok_iff` says the follower IS
-`World.fold` over the decoded log.  No persisted byte changes: the Host still
-appends `IntentRecord`s; `Host/TurnLogFollower` derives this log from them.
+follower: decode each entry against its own world (`DeployedTurnCompact.decodeTurnAt`:
+digest guards, no old values), admit it (`World.admit` at `DeployedHistory.history`),
+stop by height on the first entry that does not decode or does not take.
+`followFrom_sound`: what a follower reaches is `World.fold` of the turns it
+returns; `followFrom_writeLog`: a follower of the writer's log reaches the
+writer's world with exactly the writer's turns.  No persisted byte changes yet:
+the Host still appends `IntentRecord`s; `Host/TurnLogFollower` derives this log.
 
 The root a follower reports (`turnLogRoot`) is the deployed root's shape: the
 system slot `systemLeaf height logRoot` with the World's own head (the chain
 over turn digests), and each listed cell's `rootBytes` of the bytes the World
 holds for it (`bytesOf`: the canonical encoding, or the retired image).
 -/
-import Kernel.DeployedTurnCodec
+import Kernel.DeployedTurnCompact
 import Compiler.DurableCheckpointCodec
 import Theory.AssertAxioms
 
@@ -26,6 +28,7 @@ open Minidregg.Kernel.World
 open Minidregg.Kernel.DeployedBridge
 open Minidregg.Kernel.DeployedHistory
 open Minidregg.Kernel.DeployedTurnCodec
+open Minidregg.Kernel.DeployedTurnCompact
 open Minidregg.Kernel.TurnOfIntent
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -89,73 +92,83 @@ inductive FollowStop
   | refused (height : Nat) (reason : Reject)
   deriving DecidableEq, Repr
 
-/-- Fold a list of entries' bytes from `w`, numbering from `height`. -/
-def followFrom (w : DWorld) (height : Nat) : List (List UInt8) → Except FollowStop DWorld
-  | [] => .ok w
+/-- Fold a list of persisted entries from `w`, numbering from `height`: each
+entry is decoded AGAINST the current world (`decodeTurnAt`: its digest guards are
+checked against the cells the world holds) and admitted. -/
+def followFrom (w : DWorld) (height : Nat) :
+    List (List UInt8) → Except FollowStop (DWorld × List (DTurn deployedR Digest))
+  | [] => .ok (w, [])
   | entry :: rest =>
-    match decodeTurn entry with
+    match decodeTurnAt w entry with
     | none => .error (.undecodable height)
     | some t =>
       match World.admit history w t with
       | .error reason => .error (.refused height reason)
-      | .ok w' => followFrom w' (height + 1) rest
+      | .ok w' => (followFrom w' (height + 1) rest).map fun r => (r.1, t :: r.2)
 
-/-- **The follower IS the fold**: it reaches `W` exactly when every entry
-decodes and `World.fold` of the decoded turns reaches `W`. -/
-theorem followFrom_ok_iff (w W : DWorld) (height : Nat) (entries : List (List UInt8)) :
-    followFrom w height entries = .ok W ↔
-      ∃ turns, entries.mapM decodeTurn = some turns ∧ World.fold history w turns = some W := by
-  induction entries generalizing w height with
-  | nil =>
-    constructor
-    · intro h
-      cases h
-      exact ⟨[], rfl, rfl⟩
-    · rintro ⟨turns, hm, hf⟩
-      have : turns = [] := by simpa using hm.symm
-      subst this
-      simp only [World.fold_nil, Option.some.injEq] at hf
-      subst hf
-      rfl
-  | cons entry rest ih =>
-    cases hd : decodeTurn entry with
-    | none =>
-      simp [followFrom, hd, List.mapM_cons]
-    | some t =>
-      have hmap : (entry :: rest).mapM decodeTurn = (rest.mapM decodeTurn).map (t :: ·) := by
-        simp only [List.mapM_cons, hd]
-        cases rest.mapM decodeTurn <;> rfl
-      rw [hmap]
-      cases ha : World.admit history w t with
-      | error r =>
-        have hs : World.step history w t = none := by
-          simp [World.step, ha, Except.toOption]
-        simp only [followFrom, hd, ha]
-        constructor
-        · intro h
-          cases h
-        · rintro ⟨turns, hm, hf⟩
-          cases hr : rest.mapM decodeTurn with
-          | none => simp [hr] at hm
-          | some ts =>
-            simp only [hr, Option.map_some, Option.some.injEq] at hm
-            subst hm
-            simp [World.fold_cons, hs] at hf
-      | ok w' =>
-        have hs : World.step history w t = some w' := by
-          simp [World.step, ha, Except.toOption]
-        simp only [followFrom, hd, ha]
-        rw [ih]
-        constructor
-        · rintro ⟨ts, hm, hf⟩
-          exact ⟨t :: ts, by simp [hm], by simp [World.fold_cons, hs, hf]⟩
-        · rintro ⟨turns, hm, hf⟩
-          cases hr : rest.mapM decodeTurn with
-          | none => simp [hr] at hm
-          | some ts =>
-            simp only [hr, Option.map_some, Option.some.injEq] at hm
-            subst hm
-            exact ⟨ts, rfl, by simpa [World.fold_cons, hs] using hf⟩
+/-- **Every world a follower reaches is the fold of the turns it returns.** -/
+theorem followFrom_sound : ∀ (w W : DWorld) (height : Nat) (entries : List (List UInt8))
+    (turns : List (DTurn deployedR Digest)),
+    followFrom w height entries = .ok (W, turns) →
+      turns.length = entries.length ∧ World.fold history w turns = some W
+  | w, W, _, [], turns, h => by
+      simp only [followFrom, Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨rfl, rfl⟩
+  | w, W, height, entry :: rest, turns, h => by
+      simp only [followFrom] at h
+      cases hd : decodeTurnAt w entry with
+      | none => simp [hd] at h
+      | some t =>
+        cases ha : World.admit history w t with
+        | error r => simp [hd, ha] at h
+        | ok w' =>
+          simp only [hd, ha] at h
+          cases hr : followFrom w' (height + 1) rest with
+          | error e => simp [hr, Except.map] at h
+          | ok r =>
+            simp only [hr, Except.map, Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            obtain ⟨hl, hf⟩ := followFrom_sound w' r.1 (height + 1) rest r.2 hr
+            have hs : World.step history w t = some w' := by
+              simp [World.step, ha, Except.toOption]
+            exact ⟨by simp [hl], by simp [World.fold_cons, hs, hf]⟩
+
+/-- The writer's log: each turn persisted against the world it is admitted at. -/
+def writeLog : DWorld → List (DTurn deployedR Digest) → Option (List (List UInt8))
+  | _, [] => some []
+  | w, t :: ts => (World.step history w t).bind fun w' =>
+      (writeLog w' ts).map (encodeTurnAt w t :: ·)
+
+/-- **A follower of the writer's log reaches the writer's world**: the persisted
+digest-guard entries decode, against the follower's own world, to exactly the
+admitted turns. -/
+theorem followFrom_writeLog : ∀ (w : DWorld) (height : Nat) (ts : List (DTurn deployedR Digest))
+    (entries : List (List UInt8)), writeLog w ts = some entries →
+      ∃ W, World.fold history w ts = some W ∧ followFrom w height entries = .ok (W, ts)
+  | w, _, [], entries, h => by
+      simp only [writeLog, Option.some.injEq] at h
+      subst h
+      exact ⟨w, rfl, rfl⟩
+  | w, height, t :: ts, entries, h => by
+      simp only [writeLog] at h
+      cases hs : World.step history w t with
+      | none => simp [hs] at h
+      | some w' =>
+        cases hr : writeLog w' ts with
+        | none => simp [hs, hr] at h
+        | some es =>
+          simp only [hs, hr, Option.bind_some, Option.map_some, Option.some.injEq] at h
+          subst h
+          obtain ⟨W, hf, hfol⟩ := followFrom_writeLog w' (height + 1) ts es hr
+          have ha : World.admit history w t = .ok w' := by
+            unfold World.step at hs
+            cases h2 : World.admit history w t with
+            | error r => simp [h2, Except.toOption] at hs
+            | ok v => simp [h2, Except.toOption] at hs; rw [hs]
+          refine ⟨W, by simp [World.fold_cons, hs, hf], ?_⟩
+          simp only [followFrom, decodeTurnAt_encodeTurnAt, ha, hfol]
+          rfl
 
 /-- A log entry's frame: its length, then its bytes. -/
 def frameEntries (entries : List (List UInt8)) : List UInt8 :=
@@ -189,7 +202,8 @@ def idsOf (seed : DurableReceiver.Seed) (turns : List (DTurn deployedR Digest)) 
   ((seed.cells.map fun c => c.1.value) ++ turns.flatMap fun t => t.creates.map Prod.fst).eraseDups
 
 #assert_axioms decodeTurn_encodeTurn
-#assert_axioms followFrom_ok_iff
+#assert_axioms followFrom_sound
+#assert_axioms followFrom_writeLog
 #assert_axioms unframe_frame
 
 end Minidregg.Kernel.TurnLog

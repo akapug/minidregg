@@ -3,7 +3,8 @@
 `turn-log-follower export CONFIG OUT` (the exporter, one process): open the Store
 named by a client settings file, build the deployed genesis World of its seed,
 and for every accepted record derive the Turn against the current World
-(`Turn.ofIntent`), admit it (`World.admit`), and write `encodeTurn t`.  It then
+(`Turn.ofIntent`), admit it (`World.admit`), and write it with digest guards
+(`DeployedTurnCompact.encodeTurnAt`, against the World it is admitted at).  It then
 checks the World against the Store it read: every cell's bytes, every spent
 nullifier, the height.  It writes `OUT/genesis.bin`, `OUT/turns.bin`, `OUT/root`.
 
@@ -65,6 +66,20 @@ def exportLog (config out : String) : IO UInt32 := do
   let mut entries : Array (List UInt8) := #[]
   let mut turns : Array (TurnOfIntent.DTurn deployedR Digest) := #[]
   let mut index := 0
+  let mut fullBytes := 0
+  let mut compactN := 0
+  let mut compactB := 0
+  let mut verbatimN := 0
+  let mut verbatimB := 0
+  let mut createB := 0
+  let mut eventB := 0
+  let mut fieldB : List Nat := List.replicate 12 0
+  let mut absentB := 0
+  let mut recWritesB := 0
+  let mut recGuardsN := 0
+  let mut recNullN := 0
+  let mut recNullB := 0
+  let mut recWritesN := 0
   for record in loaded.image.accepted do
     let some intent := record.bind? ResourceBirthCodec.rootBytes
       | throw (IO.userError s!"record {index} does not bind")
@@ -78,8 +93,24 @@ def exportLog (config out : String) : IO UInt32 := do
         IO.println s!"REFUSED {index} {reprStr r}"
         return (1 : UInt32)
       | .ok w' =>
+        entries := entries.push (DeployedTurnCompact.encodeTurnAt w t)
+        for leg in t.legs do
+          let b := DeployedTurnCompact.encodeLegAt (DeployedTurnCompact.heldOf w t.creates) leg
+          if b.head? == some 0 then
+            compactN := compactN + 1; compactB := compactB + b.length
+          else
+            verbatimN := verbatimN + 1; verbatimB := verbatimB + b.length
+        fieldB := (fieldB.zip (DeployedHistory.turnFields t)).map fun (n, f) => n + f.length
+        absentB := absentB + t.absent.length
+        eventB := eventB + (DurableReceiverCodec.eventStream.encode t.event).length
+        recWritesB := recWritesB + (record.writes.map fun x => x.canonicalPostBytes.length).sum
+        recGuardsN := recGuardsN + record.readGuards.length
+        recNullN := recNullN + record.nullifiers.length
+        recNullB := recNullB + (record.nullifiers.map fun n => n.canonicalBytes.length).sum
+        recWritesN := recWritesN + record.writes.length
+        createB := createB + (t.creates.map DeployedTurnCodec.createBytes |>.map List.length).sum
+        fullBytes := fullBytes + (DeployedHistory.encodeTurn t).length
         w := w'
-        entries := entries.push (DeployedHistory.encodeTurn t)
         turns := turns.push t
     index := index + 1
   -- The World against the Store it was derived from.
@@ -110,7 +141,9 @@ def exportLog (config out : String) : IO UInt32 := do
   IO.println s!"EXPORT turns {entries.size} cells {ids.length} turn-bytes {framed.length} record-bytes {recordBytes}"
   let (r, wr, a, i) := turns.foldl (fun (r, wr, a, i) t =>
     let (r', wr', a', i') := breakdown t; (r + r', wr + wr', a + a', i + i')) (0, 0, 0, 0)
-  IO.println s!"BYTES reads {r} writes {wr} alloc-free {a} images {i}"
+  IO.println s!"BYTES whole-value-turns {fullBytes} (reads {r} writes {wr} alloc-free {a} images {i}); digest-guard log {framed.length}"
+  IO.println s!"FIELDS {fieldB} absent-pins {absentB}"
+  IO.println s!"LEGS compact {compactN} ({compactB} B) verbatim {verbatimN} ({verbatimB} B) creates {createB} B events {eventB} B; records: post-image bytes {recWritesB} read-guards {recGuardsN} writes {recWritesN} nullifiers {recNullN} ({recNullB} B)"
   IO.println s!"ROOT {root.value}"
   return 0
 
@@ -129,8 +162,7 @@ def follow (out : String) (drop : Option Nat := none) : IO UInt32 := do
   match followFrom g 0 entries with
   | .error (.undecodable h) => IO.println s!"STOP undecodable {h}"; return 1
   | .error (.refused h r) => IO.println s!"STOP refused {h} {reprStr r}"; return 1
-  | .ok w =>
-    let turns := entries.filterMap DeployedTurnCodec.decodeTurn
+  | .ok (w, turns) =>
     let root := turnLogRoot w (idsOf seed turns)
     IO.println s!"FOLLOW turns {entries.length} height {(w.head.map Prod.fst).getD 0}"
     IO.println s!"ROOT {root.value}"

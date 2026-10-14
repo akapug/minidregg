@@ -44,9 +44,11 @@ for d in "$out"/*/; do
     printf 'PLANT tamper-last-entry NOT-CAUGHT %s\n' "$(head -1 "$p.follow")"; status=1
   fi
   # Plant 2: the follower is handed the log without entry 0 (every Store's first
-  # turn writes cells a later turn guards): it must STOP refused, never reach a root.
+  # turn writes cells a later turn guards): it must STOP at height 0 -- a digest
+  # guard that no longer matches its world reads as undecodable, a value guard
+  # as refused -- and never reach a root.
   "$exe" follow "$d" --plant-drop 0 >"$p.drop" 2>&1 || true
-  if grep -qE "^STOP refused " "$p.drop"; then
+  if grep -qE "^STOP (undecodable|refused) 0( |$)" "$p.drop"; then
     printf 'PLANT drop-entry-0 RED-AS-EXPECTED %s\n' "$(head -1 "$p.drop")"
   else
     printf 'PLANT drop-entry-0 NOT-CAUGHT %s\n' "$(head -1 "$p.drop")"; status=1
