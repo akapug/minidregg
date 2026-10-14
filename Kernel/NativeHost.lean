@@ -2426,12 +2426,12 @@ structure ActivityView where
 
 def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
     (quotes : List (Nat × Nat)) : Except String ActivityView := do
-  let authority ← need "authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  -- The opening holds its authority load (`Loaded.unique`: the one `loadDeployment` returns).
+  let authority := opened.authority
   let snapshot := opened.durable.snapshot
   let height := logicalHeight config opened.durable
-  let extractTicks := match ObjectiveKernelConfig.configOf config.deployment config.profile
-      (activityAmbient config opened) with
+  let kernel? := ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened)
+  let extractTicks := match kernel? with
     | .ok kernel => some kernel.maxExtractTicks
     | .error _ => none
   let cells := (cells ++ cells.flatMap fun cell =>
@@ -2454,7 +2454,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
     | none => []).dedup
   let quoted := quotes.map fun (record, await) =>
     (record, await,
-      match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
+      match kernel? with
       | .error reason => .error s!"{repr reason}"
       | .ok kernel =>
         match ObjectiveActivity.resumeQuote kernel snapshot height ⟨record⟩ ⟨await⟩ with
