@@ -10,13 +10,18 @@ def kindTag : Kind → Nat
   | .propose => 0 | .vote => 1 | .commit => 2 | .candidate => 3 | .ready => 4
 def kindOfTag : Nat → Kind
   | 0 => .propose | 1 => .vote | 2 => .commit | 3 => .candidate | _ => .ready
+/-- The five kind tags; any other natural is refused (it used to decode as
+`.ready`). -/
+def kindStream : StreamCodec Kind :=
+  StreamCodec.retract StreamCodec.nat kindTag kindOfTag (by intro kind; cases kind <;> rfl)
+
 def messageStream : StreamCodec Message :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat argumentStream)))
-    (fun m => (m.sender, m.view, kindTag m.kind, m.value))
-    (fun (s,v,k,a) => ⟨s,v,kindOfTag k,a⟩)
-    (by intro m; cases m with | mk s v k a => cases k <;> rfl)
+      (StreamCodec.product kindStream argumentStream)))
+    (fun m => (m.sender, m.view, m.kind, m.value))
+    (fun (s,v,k,a) => ⟨s,v,k,a⟩)
+    (by intro m; cases m; rfl)
 /-- Canonical decoding rejects tag aliases and trailing bytes. -/
 def decodeMessage (bytes : Bytes) : Option Message := do
   let m ← messageStream.toLawful.decode bytes
@@ -135,23 +140,50 @@ def viewStream : StreamCodec View :=
       v.sentReadyCore,v.sentReadyRelay,v.prepared,v.disabled,v.committed,v.received))
     (fun (a,b,c,d,e,f,g,h,i,j,k,l) => ⟨a,b,c,d,e,f,g,h,i,j,k,l⟩) (by intro v; cases v; rfl)
 
+abbrev AuditWire := Nat × Nat × Nat × Option Message × Block
+
+def auditWire : AuditEvent → AuditWire
+  | .send m => (0,0,0,some m,[])
+  | .prepare party view block => (1,party,view,none,block)
+  | .disable party view => (2,party,view,none,[])
+  | .commit party view block => (3,party,view,none,block)
+  | .idle => (4,0,0,none,[])
+
+def auditOfWire : AuditWire → AuditEvent
+  | (tag,party,view,m,block) => match tag with
+    | 0 => .send (m.getD default)
+    | 1 => .prepare party view block
+    | 2 => .disable party view
+    | 3 => .commit party view block
+    | _ => .idle
+
+/-- The wires `auditWire` produces: a known tag, and the fields that tag does
+not carry left at their one spelling (zero, `none`, empty). Every other wire is
+refused (an unknown tag used to decode as `.idle`, and unused fields were
+dropped). A shape check, not a re-encode. -/
+def auditWireOk : AuditWire → Bool
+  | (0, 0, 0, some _, []) => true
+  | (1, _, _, none, _) => true
+  | (2, _, _, none, []) => true
+  | (3, _, _, none, _) => true
+  | (4, 0, 0, none, []) => true
+  | _ => false
+
 def auditEventStream : StreamCodec AuditEvent :=
   StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option messageStream) blockStream))))
-    (fun
-      | .send m => (0,0,0,some m,[])
-      | .prepare party view block => (1,party,view,none,block)
-      | .disable party view => (2,party,view,none,[])
-      | .commit party view block => (3,party,view,none,block)
-      | .idle => (4,0,0,none,[]))
-    (fun (tag,party,view,m,block) => match tag with
-      | 0 => .send (m.getD default)
-      | 1 => .prepare party view block
-      | 2 => .disable party view
-      | 3 => .commit party view block
-      | _ => .idle)
+    (StreamCodec.refine
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option messageStream) blockStream))))
+      (fun wire => auditWireOk wire = true))
+    (fun event => ⟨auditWire event, by cases event <;> rfl⟩)
+    (fun wire => auditOfWire wire.val)
     (by intro e; cases e <;> rfl)
+    (by
+      rintro ⟨⟨tag, party, view, m, block⟩, ok⟩
+      apply Subtype.ext
+      rcases tag with _ | _ | _ | _ | _ | tag <;> rcases party with _ | party <;>
+        rcases view with _ | view <;> rcases m with _ | m <;> rcases block with _ | ⟨first, block⟩ <;>
+        first | rfl | cases ok)
 
 def stateStream : StreamCodec State :=
   StreamCodec.xmap

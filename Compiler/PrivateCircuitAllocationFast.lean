@@ -38,8 +38,8 @@ def encodePlan (plan : Plan) : List UInt8 :=
           (bytesStream.encode plan.bindingBytes ++ listBytes correlationStream plan.rows))))
 
 theorem encodePlan_exact (plan : Plan) : encodePlan plan = encode plan := by
-  simp [encodePlan, encode, framedPlanStream, planStream, StreamCodec.xmap,
-    StreamCodec.product, encodeNetwork_exact, listBytes_exact]
+  simp [encodePlan, encode, framedPlanStream, StreamCodec.framed_encode, planStream,
+    StreamCodec.xmap, StreamCodec.product, encodeNetwork_exact, listBytes_exact]
 
 theorem decode_encodePlan (plan : Plan) : decode (encodePlan plan) = some plan := by
   rw [encodePlan_exact]
@@ -97,6 +97,13 @@ def fastList {α : Type} (codec : StreamCodec α) : StreamCodec (List α) where
     intro values suffix
     rw [listBytes_exact, listDecode_exact]
     exact (StreamCodec.list codec).decodePrefix_encode values suffix
+  encode_decodePrefix := by
+    intro bytes values suffix decoded
+    change listDecode codec bytes = some (values, suffix) at decoded
+    rw [listDecode_exact] at decoded
+    change listBytes codec values ++ suffix = bytes
+    rw [listBytes_exact]
+    exact (StreamCodec.list codec).encode_decodePrefix _ _ _ decoded
 
 theorem stream_ext {α : Type} {left right : StreamCodec α}
     (encoding : left.encode = right.encode) (decoding : left.decodePrefix = right.decodePrefix) :
@@ -137,8 +144,7 @@ theorem fastPlanStream_exact : fastPlanStream = planStream := by
   simp [fastPlanStream, planStream, fastNetworkStream_exact, fastList_exact]
 
 def fastFramedPlanStream : StreamCodec Plan :=
-  StreamCodec.xmap (StreamCodec.product bytesStream fastPlanStream)
-    (fun plan => (frame,plan)) Prod.snd (by intro plan; rfl)
+  StreamCodec.framed (bytesStream.encode frame) fastPlanStream
 
 theorem fastFramedPlanStream_exact : fastFramedPlanStream = framedPlanStream := by
   simp [fastFramedPlanStream, framedPlanStream, fastPlanStream_exact]

@@ -38,8 +38,10 @@ set_option autoImplicit false
 
 /-- Compare two byte lists in tail position, on unboxed octets. The derived
 `List UInt8` equality recurses once per octet (stack depth = length) and calls
-the element instance through a closure; every strict decoder compares a whole
-re-encoding against its input, so this is on every canonical decode. -/
+the element instance through a closure. A `StreamCodec` decoder needs no byte
+comparison at all (it is canonical, `StreamCodec.toLawful_canonical`); this is
+for the remaining comparisons of whole byte strings (`strictCodec` over a
+hand-written decoder, an extracted package against its authored bytes). -/
 def bytesEqual : List UInt8 → List UInt8 → Bool
   | [], [] => true
   | left :: lefts, right :: rights =>
@@ -57,13 +59,96 @@ theorem bytesEqual_eq_true_iff (left right : List UInt8) :
 
 /-! ## Compact streaming-codec nucleus -/
 
+set_option hygiene false in
+/-- Discharges `StreamCodec.encode_decodePrefix` for a hand-written decoder
+that matches on a prefix of literal octets (tags, enums), each arm a chain of
+prefix decodes ending in `some`: split the decoder's cases, read every inner
+decode back as the encoding it consumed, and compare. A decoder with a
+defaulting arm, or one that drops what it decoded, is not canonical and this
+fails on it. (Unhygienic: it names the `StreamCodec.encode_decodePrefix`
+projection, which is declared below it.) -/
+macro "stream_canonical" : tactic => `(tactic| (
+  first
+  | (intro bytes value suffix decoded
+     revert decoded
+     split <;> intro decoded <;> first
+       | (cases decoded; done)
+       | (try simp only [Option.bind_eq_bind] at decoded
+          repeat' (
+           rw [Option.bind_eq_some_iff] at decoded
+           obtain ⟨⟨_, _⟩, ok, decoded⟩ := decoded
+           have okBytes := Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.encode_decodePrefix _ _ _ _ ok
+           subst okBytes
+           try dsimp only at decoded)
+          simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+          obtain ⟨sameValue, sameSuffix⟩ := decoded
+          first | subst sameValue | cases sameValue
+          subst sameSuffix
+          try dsimp only
+          first
+            | rfl
+            | (simp only [List.cons_append, List.append_assoc]; done)
+            | (simp only [List.cons_append, List.append_assoc]; rfl)
+            | simp [List.append_assoc]))
+  | (intro bytes value suffix decoded
+     rcases bytes with _ | ⟨tag, bytes⟩
+     · first | cases decoded | simp at decoded
+     · revert decoded
+       split <;> intro decoded <;> simp only [Option.some.injEq, Prod.mk.injEq, reduceCtorEq] at decoded <;>
+         (obtain ⟨sameValue, sameSuffix⟩ := decoded; subst sameValue; subst sameSuffix; simp_all))))
+
+/-- Discharges `xmap`'s `wireRoundtrip` for the usual view change: a record
+spelled as a nested tuple and rebuilt from it (by projections or by a match). -/
+macro "xmap_wire_roundtrip" : tactic => `(tactic| (
+  intro wire
+  first
+    | rfl
+    | (casesm* _ × _, _ ⊕ _, Option _ <;> rfl)
+    | (casesm* _ × _, _ ⊕ _, Option _ <;> simp_all)
+    | (cases wire <;> (try casesm* _ × _, _ ⊕ _, Option _) <;> rfl)))
+
 /-- A prefix codec consumes exactly one value and returns the unconsumed
-suffix.  The append law makes sequential and list composition mechanical. -/
+suffix.  The append law makes sequential and list composition mechanical.
+
+It is also CANONICAL (`encode_decodePrefix`): every input the decoder accepts
+is the encoding of the value it returns followed by the suffix it returns, so
+each value has exactly one spelling.  A strict decoder therefore needs no
+re-encode-and-compare: requiring the suffix to be empty is the whole check
+(`toLawful_canonical`). -/
 structure StreamCodec (alpha : Type) where
   encode : alpha -> List UInt8
   decodePrefix : List UInt8 -> Option (alpha × List UInt8)
   decodePrefix_encode : forall value suffix,
     decodePrefix (encode value ++ suffix) = some (value, suffix)
+  encode_decodePrefix : forall bytes value suffix,
+    decodePrefix bytes = some (value, suffix) -> encode value ++ suffix = bytes := by
+    stream_canonical
+
+/-- Discharges `StreamCodec.encode_decodePrefix` for a decoder that reads a
+`StreamCodec.nat` tag and dispatches on it: each known tag's arm is a chain of
+prefix decodes ending in `some`, and every other tag is refused (`| _ => none`).
+A decoder with a defaulting arm is not canonical and this tactic fails on it. -/
+macro "stream_canonical_tagged" : tactic => `(tactic| (
+  intro bytes value suffix decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Prod.exists] at decoded
+  obtain ⟨tag, afterTag, tagOk, decoded⟩ := decoded
+  have tagBytes := StreamCodec.encode_decodePrefix _ _ _ _ tagOk
+  subst tagBytes
+  split at decoded <;> first
+    | (cases decoded; done)
+    | (repeat' (
+          rw [Option.bind_eq_some_iff] at decoded
+          obtain ⟨⟨_, _⟩, ok, decoded⟩ := decoded
+          have okBytes := StreamCodec.encode_decodePrefix _ _ _ _ ok
+          subst okBytes
+          try dsimp only at decoded)
+       simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+       obtain ⟨sameValue, sameSuffix⟩ := decoded
+       subst sameValue
+       subst sameSuffix
+       try dsimp only
+       try simp only [List.append_assoc]
+       rfl)))
 
 namespace StreamCodec
 
@@ -82,9 +167,36 @@ def toLawful (codec : StreamCodec alpha) : LawfulCodec alpha where
     simp only [List.append_nil] at hdecode
     simp [hdecode]
 
+/-- The top-level decoder accepts exactly the encodings: no re-encode is needed
+to refuse a second spelling, because the stream codec has none. -/
+theorem toLawful_canonical (codec : StreamCodec alpha) (bytes : List UInt8) (value : alpha)
+    (decoded : codec.toLawful.decode bytes = some value) : codec.encode value = bytes := by
+  simp only [toLawful] at decoded
+  cases accepted : codec.decodePrefix bytes with
+  | none => simp [accepted] at decoded
+  | some pair =>
+      obtain ⟨decodedValue, rest⟩ := pair
+      simp only [accepted, bind, Option.bind] at decoded
+      split at decoded
+      · rename_i empty
+        subst empty
+        cases decoded
+        simpa using codec.encode_decodePrefix _ _ _ accepted
+      · cases decoded
+
+/-- `toLawful` decodes exactly the encodings. -/
+theorem toLawful_decode_iff (codec : StreamCodec alpha) (bytes : List UInt8) (value : alpha) :
+    codec.toLawful.decode bytes = some value ↔ codec.encode value = bytes := by
+  constructor
+  · exact codec.toLawful_canonical bytes value
+  · intro encoded
+    subst encoded
+    exact codec.toLawful.decode_encode value
+
 /-- Change only the value view of a stream codec. -/
 def xmap (codec : StreamCodec alpha) (toWire : beta -> alpha)
-    (fromWire : alpha -> beta) (roundtrip : forall value, fromWire (toWire value) = value) :
+    (fromWire : alpha -> beta) (roundtrip : forall value, fromWire (toWire value) = value)
+    (wireRoundtrip : forall wire, toWire (fromWire wire) = wire := by xmap_wire_roundtrip) :
     StreamCodec beta where
   encode value := codec.encode (toWire value)
   decodePrefix bytes := do
@@ -93,6 +205,16 @@ def xmap (codec : StreamCodec alpha) (toWire : beta -> alpha)
   decodePrefix_encode := by
     intro value suffix
     simp [codec.decodePrefix_encode, roundtrip]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases accepted : codec.decodePrefix bytes with
+    | none => simp [accepted] at decoded
+    | some pair =>
+        obtain ⟨wire, rest⟩ := pair
+        simp only [accepted, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [wireRoundtrip]
+        exact codec.encode_decodePrefix _ _ _ accepted
 
 /-- Sequential product; no delimiter is needed because both sides are prefix
 decodable. -/
@@ -107,6 +229,20 @@ def product (left : StreamCodec alpha) (right : StreamCodec beta) :
     intro value suffix
     simp [List.append_assoc, left.decodePrefix_encode,
       right.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases firstOk : left.decodePrefix bytes with
+    | none => simp [firstOk] at decoded
+    | some firstPair =>
+      obtain ⟨first, afterFirst⟩ := firstPair
+      cases secondOk : right.decodePrefix afterFirst with
+      | none => simp [firstOk, secondOk] at decoded
+      | some secondPair =>
+        obtain ⟨second, rest⟩ := secondPair
+        simp only [firstOk, secondOk, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [List.append_assoc, right.encode_decodePrefix _ _ _ secondOk,
+          left.encode_decodePrefix _ _ _ firstOk]
 
 /-- Prefix-free binary sum. -/
 def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
@@ -127,13 +263,37 @@ def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
     cases value with
     | inl value => simp [left.decodePrefix_encode]
     | inr value => simp [right.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    by_cases zero : tag = 0
+    · subst zero
+      cases ok : left.decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨v, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [left.encode_decodePrefix _ _ _ ok]
+    by_cases one : tag = 1
+    · subst one
+      cases ok : right.decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨v, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [right.encode_decodePrefix _ _ _ ok]
+    · simp [zero, one] at decoded
 
 /-- Booleans as a one-byte tag. -/
 def bool : StreamCodec Bool where
   encode value := [if value then 1 else 0]
   decodePrefix
-    | [] => none
-    | value :: suffix => some (value == 1, suffix)
+    | 0 :: suffix => some (false, suffix)
+    | 1 :: suffix => some (true, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;> rfl
@@ -157,6 +317,99 @@ def option (codec : StreamCodec alpha) : StreamCodec (Option alpha) where
     cases value with
     | none => rfl
     | some value => simp [codec.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    by_cases zero : tag = 0
+    · subst zero
+      simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨rfl, rfl⟩ := decoded
+      rfl
+    by_cases one : tag = 1
+    · subst one
+      cases ok : codec.decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨v, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [codec.encode_decodePrefix _ _ _ ok]
+    · simp [zero, one] at decoded
+
+/-- A fixed octet string (a frame, a magic, a version byte), CHECKED: an input
+that does not start with exactly these octets is refused.  A codec that wrote a
+constant and decoded it into a discarded value accepted every other constant
+too; this is the canonical way to spell one. -/
+def literal (expected : List UInt8) : StreamCodec Unit where
+  encode _ := expected
+  decodePrefix bytes :=
+    if bytes.take expected.length = expected then some ((), bytes.drop expected.length) else none
+  decodePrefix_encode := by
+    intro value suffix
+    simp [List.take_left', List.drop_left']
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    split at decoded
+    · rename_i prefixed
+      simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨-, rfl⟩ := decoded
+      conv => rhs; rw [← List.take_append_drop expected.length bytes]
+      rw [prefixed]
+    · cases decoded
+
+/-- `frame`, checked, then one value. -/
+def framed (frame : List UInt8) (codec : StreamCodec alpha) : StreamCodec alpha :=
+  xmap (product (literal frame) codec) (fun value => ((), value)) Prod.snd (by intro value; rfl)
+
+theorem framed_encode (frame : List UInt8) (codec : StreamCodec alpha) (value : alpha) :
+    (framed frame codec).encode value = frame ++ codec.encode value := rfl
+
+/-- The values `accept` holds of, CHECKED: a decoded value outside it is refused.
+A wire with more than one spelling per value (an unsorted list for a set, an
+unused tag, a padding field) is made canonical by refining it to the canonical
+spellings, never by re-encoding what was decoded. -/
+def refine (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred accept] :
+    StreamCodec {value // accept value} where
+  encode value := codec.encode value.val
+  decodePrefix bytes := do
+    let (value, suffix) ← codec.decodePrefix bytes
+    if accepted : accept value then some (⟨value, accepted⟩, suffix) else none
+  decodePrefix_encode := by
+    intro value suffix
+    simp [codec.decodePrefix_encode, value.property]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : codec.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases accepted : accept wire
+      · simp only [ok, bind, Option.bind, dif_pos accepted, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact codec.encode_decodePrefix _ _ _ ok
+      · simp [ok, accepted] at decoded
+
+theorem refine_encode (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred accept]
+    (value : {value // accept value}) : (refine codec accept).encode value = codec.encode value.val :=
+  rfl
+
+/-- A view whose wire map is only a RETRACTION (`fromWire` is total but not
+injective: a tag table with a default arm, a label space wider than the
+values). Only the wires that are the spelling of their own value are accepted;
+for a tag this is a range check on one small natural. -/
+def retract [DecidableEq alpha] (codec : StreamCodec alpha) (toWire : beta -> alpha)
+    (fromWire : alpha -> beta) (roundtrip : forall value, fromWire (toWire value) = value) :
+    StreamCodec beta :=
+  xmap (refine codec (fun wire => toWire (fromWire wire) = wire))
+    (fun value => ⟨toWire value, by rw [roundtrip]⟩) (fun wire => fromWire wire.val)
+    roundtrip (fun wire => Subtype.ext wire.property)
+
+theorem retract_encode [DecidableEq alpha] (codec : StreamCodec alpha) (toWire : beta -> alpha)
+    (fromWire : alpha -> beta) (roundtrip : forall value, fromWire (toWire value) = value)
+    (value : beta) : (retract codec toWire fromWire roundtrip).encode value = codec.encode (toWire value) :=
+  rfl
 
 def byte : StreamCodec UInt8 where
   encode value := [value]
@@ -183,51 +436,103 @@ definition. -/
 
 def encodeNat (value : Nat) : List UInt8 := natDigits value ++ [255]
 
+/-- Canonical: the most significant digit is never zero (`[0, 255]` is not a
+second spelling of `0`), so the accepted inputs are exactly the encodings
+(`encode_decodeNatPrefix`). -/
 def decodeNatPrefix : List UInt8 -> Option (Nat × List UInt8)
   | [] => none
   | byte :: bytes =>
       if byte = 255 then some (0, bytes)
       else do
         let (higher, suffix) ← decodeNatPrefix bytes
-        some (byte.toNat + 255 * higher, suffix)
+        if byte = 0 ∧ higher = 0 then none
+        else some (byte.toNat + 255 * higher, suffix)
 
-private theorem decodeNatPrefix_digits (digits : List Nat)
-    (ranged : ∀ digit ∈ digits, digit < 255) (suffix : List UInt8) :
-    decodeNatPrefix (digits.map UInt8.ofNat ++ 255 :: suffix) =
-      some (Nat.ofDigits 255 digits, suffix) := by
-  induction digits with
-  | nil => simp [decodeNatPrefix, Nat.ofDigits]
-  | cons digit digits ih =>
-      have hdigit : digit < 255 := ranged digit (by simp)
-      have hdigit256 : digit < 256 := lt_trans hdigit (by decide)
-      have htail : ∀ candidate ∈ digits, candidate < 255 := by
-        intro candidate member
-        exact ranged candidate (by simp [member])
-      have hne : UInt8.ofNat digit ≠ 255 := by
-        intro equal
-        have := congrArg UInt8.toNat equal
-        have h255 : UInt8.toNat (255 : UInt8) = 255 :=
-          UInt8.toNat_ofNat_of_lt (by decide)
-        simp only [UInt8.toNat_ofNat'] at this
-        rw [Nat.mod_eq_of_lt hdigit256, h255] at this
-        omega
-      simp only [List.map_cons, List.cons_append, decodeNatPrefix, hne, if_false]
-      rw [ih htail]
-      simp [Nat.ofDigits, UInt8.toNat_ofNat',
-        Nat.mod_eq_of_lt hdigit256]
+private theorem toNat_ofNat_small {n : Nat} (small : n < 256) : (UInt8.ofNat n).toNat = n := by
+  simp only [UInt8.toNat_ofNat']
+  omega
+
+private theorem byte_ne_255_lt {byte : UInt8} (ne : ¬ byte = 255) : byte.toNat < 255 := by
+  have lt := byte.toNat_lt
+  have ne' : byte.toNat ≠ 255 := by
+    intro equal
+    exact ne (UInt8.toNat_inj.mp (by simpa using equal))
+  omega
+
+/-- One digit, then the higher part: the digits of `low + 255 * high` when the
+number is not zero. -/
+private theorem encodeNat_digit (low high : Nat) (lowLt : low < 255) (nonzero : low ≠ 0 ∨ high ≠ 0) :
+    encodeNat (low + 255 * high) = UInt8.ofNat low :: encodeNat high := by
+  unfold encodeNat natDigits
+  rw [Nat.digits_add 255 (by decide) low high lowLt nonzero]
+  rfl
 
 theorem decodeNatPrefix_encode (value : Nat) (suffix : List UInt8) :
     decodeNatPrefix (encodeNat value ++ suffix) = some (value, suffix) := by
-  unfold encodeNat natDigits
-  rw [List.append_assoc]
-  simpa [Nat.ofDigits_digits] using
-    decodeNatPrefix_digits (Nat.digits 255 value)
-      (fun digit member => Nat.digits_lt_base (by decide) member) suffix
+  induction value using Nat.strong_induction_on with
+  | _ value ih =>
+      by_cases zero : value = 0
+      · subst zero
+        rfl
+      · have split := Nat.mod_add_div value 255
+        have lowLt : value % 255 < 255 := Nat.mod_lt _ (by decide)
+        have nonzero : value % 255 ≠ 0 ∨ value / 255 ≠ 0 := by omega
+        have higherLt : value / 255 < value := Nat.div_lt_self (by omega) (by decide)
+        have encoded := encodeNat_digit (value % 255) (value / 255) lowLt nonzero
+        rw [split] at encoded
+        rw [encoded, List.cons_append]
+        have low := toNat_ofNat_small (n := value % 255) (by omega)
+        have ne : ¬ UInt8.ofNat (value % 255) = 255 := by
+          intro equal
+          have := congrArg UInt8.toNat equal
+          rw [low] at this
+          simp at this
+          omega
+        have lead : ¬ (UInt8.ofNat (value % 255) = 0 ∧ value / 255 = 0) := by
+          rintro ⟨lowZero, high⟩
+          have := congrArg UInt8.toNat lowZero
+          rw [low] at this
+          simp at this
+          omega
+        simp only [decodeNatPrefix, ne, if_false, ih _ higherLt, bind, Option.bind, lead]
+        rw [low, split]
+
+/-- Canonicity of the natural codec: whatever `decodeNatPrefix` accepts is the
+encoding of the value it returns, followed by the suffix it returns. -/
+theorem encode_decodeNatPrefix (bytes : List UInt8) (value : Nat) (suffix : List UInt8)
+    (decoded : decodeNatPrefix bytes = some (value, suffix)) : encodeNat value ++ suffix = bytes := by
+  induction bytes generalizing value suffix with
+  | nil => cases decoded
+  | cons byte bytes ih =>
+      by_cases terminator : byte = 255
+      · simp only [decodeNatPrefix, terminator, if_true, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        subst terminator
+        rfl
+      · simp only [decodeNatPrefix, terminator, if_false, bind, Option.bind] at decoded
+        split at decoded
+        · cases decoded
+        · rename_i pair higherOk
+          obtain ⟨higher, rest⟩ := pair
+          by_cases lead : byte = 0 ∧ higher = 0
+          · simp [lead] at decoded
+          · simp only [lead, if_false, Option.some.injEq, Prod.mk.injEq] at decoded
+            obtain ⟨rfl, rfl⟩ := decoded
+            have lowLt := byte_ne_255_lt terminator
+            have nonzero : byte.toNat ≠ 0 ∨ higher ≠ 0 := by
+              by_cases h : higher = 0
+              · left
+                intro zero
+                exact lead ⟨UInt8.toNat_inj.mp (by simpa using zero), h⟩
+              · exact Or.inr h
+            rw [encodeNat_digit _ _ lowLt nonzero, List.cons_append, ih _ _ higherOk]
+            simp
 
 def nat : StreamCodec Nat where
   encode := encodeNat
   decodePrefix := decodeNatPrefix
   decodePrefix_encode := decodeNatPrefix_encode
+  encode_decodePrefix := encode_decodeNatPrefix
 
 def encodeMany (codec : StreamCodec alpha) : List alpha -> List UInt8
   | [] => []
@@ -251,6 +556,31 @@ theorem decodeMany_encodeMany (codec : StreamCodec alpha)
       simp [encodeMany, decodeMany, List.append_assoc,
         codec.decodePrefix_encode, ih]
 
+theorem encodeMany_decodeMany (codec : StreamCodec alpha) (count : Nat) (bytes : List UInt8)
+    (values : List alpha) (suffix : List UInt8)
+    (decoded : decodeMany codec count bytes = some (values, suffix)) :
+    values.length = count ∧ encodeMany codec values ++ suffix = bytes := by
+  induction count generalizing bytes values suffix with
+  | zero =>
+      simp only [decodeMany, Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨rfl, rfl⟩ := decoded
+      exact ⟨rfl, rfl⟩
+  | succ count ih =>
+      cases valueOk : codec.decodePrefix bytes with
+      | none => simp [decodeMany, valueOk] at decoded
+      | some pair =>
+        obtain ⟨value, afterValue⟩ := pair
+        cases restOk : decodeMany codec count afterValue with
+        | none => simp [decodeMany, valueOk, restOk] at decoded
+        | some rest =>
+          obtain ⟨tail, rest⟩ := rest
+          simp only [decodeMany, valueOk, restOk, bind, Option.bind, Option.some.injEq,
+            Prod.mk.injEq] at decoded
+          obtain ⟨rfl, rfl⟩ := decoded
+          obtain ⟨length, encoded⟩ := ih _ _ _ restOk
+          refine ⟨by simp [length], ?_⟩
+          rw [encodeMany, List.append_assoc, encoded, codec.encode_decodePrefix _ _ _ valueOk]
+
 def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
   encode values := nat.encode values.length ++ encodeMany codec values
   decodePrefix bytes := do
@@ -260,14 +590,16 @@ def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
     intro values suffix
     simp [List.append_assoc, nat.decodePrefix_encode,
       decodeMany_encodeMany]
-
-/-- Finite sets, through their canonical list.  `Finset.toList_toFinset` is what
-makes this lawful: decoding rebuilds the SET, so the codec is well defined even
-though the list it wrote is only one of the orderings that denote it. -/
-noncomputable def finset [DecidableEq alpha] (codec : StreamCodec alpha) :
-    StreamCodec (Finset alpha) :=
-  xmap (list codec) Finset.toList List.toFinset
-    (by intro value; exact Finset.toList_toFinset value)
+  encode_decodePrefix := by
+    intro bytes values suffix decoded
+    cases countOk : nat.decodePrefix bytes with
+    | none => simp [countOk] at decoded
+    | some pair =>
+      obtain ⟨count, afterCount⟩ := pair
+      simp only [countOk, bind, Option.bind] at decoded
+      obtain ⟨length, encoded⟩ := encodeMany_decodeMany codec _ _ _ _ decoded
+      rw [List.append_assoc, encoded, length]
+      exact nat.encode_decodePrefix _ _ _ countOk
 
 end StreamCodec
 
@@ -323,6 +655,24 @@ theorem fixedValue_fixedOctets (width value : Nat) (fits : value < 256 ^ width) 
   rw [same]
   exact Minidregg.Theory.Bignum.denoteNat_digitsLE (by decide) width value fits
 
+/-- `width` octets spell one value, and that value is spelled by exactly those
+octets: the fixed codec has one spelling per value. -/
+theorem fixedOctets_fixedValue (octets : List UInt8) :
+    fixedOctets octets.length (fixedValue octets) = octets := by
+  unfold fixedOctets fixedValue
+  have ranged : Minidregg.Theory.Bignum.Ranged 256 (octets.map UInt8.toNat) := by
+    intro digit member
+    rcases List.mem_map.mp member with ⟨byte, _, rfl⟩
+    exact byte.toNat_lt
+  have digits := Minidregg.Theory.Bignum.digitsLE_denoteNat (base := 256) (by decide)
+    (octets.map UInt8.toNat) ranged
+  rw [List.length_map] at digits
+  rw [digits, List.map_map]
+  conv => rhs; rw [← List.map_id octets]
+  apply List.map_congr_left
+  intro byte _
+  simp
+
 /-- Exactly `width` octets, strict: a shorter input is refused, and every input of
 at least `width` octets spells exactly one value. -/
 def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
@@ -343,6 +693,18 @@ def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
       List.drop_left' (fixedOctets_length _ _)
     simp only [enough, dif_pos, taken, dropped]
     exact congrArg (fun v : Fin (256 ^ width) => some (v, suffix)) (Fin.ext (fixedValue_fixedOctets width value.val value.isLt))
+  encode_decodePrefix := by
+    intro octets value suffix decoded
+    split at decoded
+    · rename_i enough
+      simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨rfl, rfl⟩ := decoded
+      have length : (octets.take width).length = width := by
+        simp [List.length_take, Nat.min_eq_left enough]
+      have spelled := fixedOctets_fixedValue (octets.take width)
+      rw [length] at spelled
+      simp only [spelled, List.take_append_drop]
+    · cases decoded
 
 /-- Executable `fixedStream` decode: split off `width` octets and check that the PREFIX came
 out whole. The definition measures `octets.length`, the WHOLE remaining stream, once per
@@ -374,6 +736,10 @@ def fixedStreamTR (width : Nat) : StreamCodec (Fin (256 ^ width)) where
     intro value suffix
     rw [fixedDecodePrefixTR_eq]
     exact (fixedStream width).decodePrefix_encode value suffix
+  encode_decodePrefix := by
+    intro octets value suffix decoded
+    rw [fixedDecodePrefixTR_eq] at decoded
+    exact (fixedStream width).encode_decodePrefix octets value suffix decoded
 
 @[csimp] theorem fixedStream_eq_fixedStreamTR : @fixedStream = @fixedStreamTR := by
   funext width
@@ -526,6 +892,11 @@ def bytesStream : StreamCodec (List UInt8) where
     intro values suffix
     have old := (StreamCodec.list StreamCodec.byte).decodePrefix_encode values suffix
     simpa [StreamCodec.list, encodeMany_byte, decodeMany_byte] using old
+  encode_decodePrefix := by
+    intro bytes values suffix decoded
+    have old := (StreamCodec.list StreamCodec.byte).encode_decodePrefix bytes values suffix
+      (by simpa [StreamCodec.list, decodeMany_byte] using decoded)
+    simpa [StreamCodec.list, encodeMany_byte] using old
 
 theorem bytesStream_encode_eq_list_byte (values : List UInt8) :
     bytesStream.encode values = (StreamCodec.list StreamCodec.byte).encode values := by

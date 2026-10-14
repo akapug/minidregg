@@ -123,6 +123,11 @@ def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro value suffix; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 section Wire
 
@@ -407,24 +412,35 @@ theorem entries_fromEntries_eq_iff (entryList : List (Entry L)) :
 
 /-! ## Payload codec and canonical decoding -/
 
+theorem addressLT_trans {left middle right : Entry L} (first : AddressLT W left middle)
+    (second : AddressLT W middle right) : AddressLT W left right := by
+  letI := addressOrder W
+  exact lt_trans (α := Address L) first second
+
+instance : Trans (AddressLT W) (AddressLT W) (AddressLT W) := ⟨addressLT_trans W⟩
+
+/-- The payload is the strictly address-ordered entry list; any other list
+(out of order, or repeating an address) is REFUSED by the stream decoder, a
+linear adjacent-pair check. It used to be read laxly (first occurrence wins)
+and refused only by the outer re-encode. -/
 def payloadStream : StreamCodec (Store L) :=
   letI := addressOrder W
-  StreamCodec.xmap (entryListStream W) (entries W)
+  StreamCodec.xmap
+    (StreamCodec.refine (entryListStream W) (List.IsChain (AddressLT W)))
+    (fun store => ⟨entries W store, List.isChain_iff_pairwise.mpr (entries_pairwise W store)⟩)
     (fun items => FiniteDependentMapCachedOrdering.fromEntriesCached (addressKey W)
-        (addressKey_injective W) (items.map Entry.toCoordinate))
+        (addressKey_injective W) (items.val.map Entry.toCoordinate))
     (by intro store; simpa [fromEntries] using fromEntries_entries W store)
+    (by
+      intro items
+      apply Subtype.ext
+      have same := entries_fromEntries_of_pairwise W items.val
+        (List.isChain_iff_pairwise.mp items.property)
+      simpa [fromEntries, FiniteDependentMapCachedOrdering.fromEntriesCached_eq] using same)
 
-/-- Reconstruction changes representation only: every payload result and byte is unchanged. -/
-theorem payloadStream_eq :
-    payloadStream W =
-      StreamCodec.xmap (entryListStream W) (entries W) fromEntries (fromEntries_entries W) := by
-  letI := addressOrder W
-  have same : (fun items : List (Entry L) =>
-      FiniteDependentMapCachedOrdering.fromEntriesCached (addressKey W)
-        (addressKey_injective W) (items.map Entry.toCoordinate)) = fromEntries := by
-    funext items
-    exact FiniteDependentMapCachedOrdering.fromEntriesCached_eq _ _ _
-  simp only [payloadStream, same]
+theorem payloadStream_encode (store : Store L) :
+    (payloadStream W).encode store = (entryListStream W).encode (entries W store) :=
+  rfl
 
 /-- Canonical payload decoding: lax decode, then exact re-encoding. -/
 def decodePayload (payload : List UInt8) : Option (Store L) := do
@@ -464,30 +480,27 @@ theorem decodePayload_eq_some_iff (payload : List UInt8) (store : Store L) :
     rw [← exact]
     exact decodePayload_encode W store
 
-/-- The lax reading of a raw entry list is the store it denotes. -/
-theorem lax_entryList (entryList : List (Entry L)) :
-    (payloadStream W).toLawful.decode ((entryListStream W).encode entryList) =
-      some (fromEntries entryList) := by
-  have parsed := (entryListStream W).decodePrefix_encode entryList []
-  simp only [List.append_nil] at parsed
-  simp [StreamCodec.toLawful, payloadStream, StreamCodec.xmap, parsed, fromEntries]
-
 /-- Exact acceptance law for every raw entry list: accepted iff it is the
 canonical list of the store it denotes. -/
 theorem decodePayload_list_eq_none_iff (entryList : List (Entry L)) :
     decodePayload W ((entryListStream W).encode entryList) = none ↔
       entries W (fromEntries entryList) ≠ entryList := by
-  have reencode : (payloadStream W).encode (fromEntries entryList) =
-      (entryListStream W).encode (entries W (fromEntries entryList)) := rfl
-  simp only [decodePayload, lax_entryList, Option.bind_eq_bind, Option.bind_some, reencode]
   constructor
   · intro refused same
-    rw [same] at refused
-    simp at refused
+    have accepted := (decodePayload_eq_some_iff W _ (fromEntries entryList)).mpr
+      (by rw [payloadStream_encode, same])
+    rw [refused] at accepted
+    cases accepted
   · intro different
-    rw [if_neg]
-    intro same
-    exact different (streamEncode_injective (entryListStream W) same)
+    cases accepted : decodePayload W ((entryListStream W).encode entryList) with
+    | none => rfl
+    | some store =>
+      exfalso
+      have encoded := (decodePayload_eq_some_iff W _ store).mp accepted
+      rw [payloadStream_encode] at encoded
+      have same := streamEncode_injective (entryListStream W) encoded
+      apply different
+      rw [← same, fromEntries_entries]
 
 /-- **Canonicity, structurally.**  A raw entry list is accepted exactly when
 its addresses are strictly increasing in byte order. -/
@@ -1131,15 +1144,16 @@ theorem duplicate_address_rejected :
   decide +kernel
 
 /-- Refuted misuse: a non-minimal natural (`3` written as digits `3, 0`) is
-read by the lax decoder but refused by re-encoding. -/
+refused. -/
 theorem noncanonical_value_bytes_rejected :
     decode wire (frame wire ++ [1, 255, 0, 3, 255, 3, 0, 255]) = none := by
   rw [decode_frame_append]
   decide +kernel
 
-theorem noncanonical_value_bytes_lax :
-    (payloadStream wire).toLawful.decode [1, 255, 0, 3, 255, 3, 0, 255] =
-      some (fromEntries [fieldEntry 3 3]) := by
+/-- The stream decoder itself refuses that spelling: the natural codec has
+one spelling per value, so no re-encode is needed to see it. -/
+theorem noncanonical_value_bytes_stream_refused :
+    (payloadStream wire).toLawful.decode [1, 255, 0, 3, 255, 3, 0, 255] = none := by
   decide +kernel
 
 end Worked

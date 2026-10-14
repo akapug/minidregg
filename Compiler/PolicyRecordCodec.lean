@@ -32,12 +32,16 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
+/-- A Unicode scalar as its code point. `Char.ofNat` sends every non-scalar
+(a surrogate, or a number past `0x10FFFF`) to `'\x00'`, so only the code points
+of actual scalars are accepted (`retract`). -/
 def charStream : StreamCodec Char :=
-  StreamCodec.xmap StreamCodec.nat Char.toNat Char.ofNat Char.ofNat_toNat
+  StreamCodec.retract StreamCodec.nat Char.toNat Char.ofNat Char.ofNat_toNat
 
 def stringStream : StreamCodec String :=
   StreamCodec.xmap (StreamCodec.list charStream) String.toList String.ofList
     (by intro value; exact String.ofList_toList)
+    (by intro wire; exact String.toList_ofList)
 
 /-- A finite first-order token vocabulary. `nil` and `cons` retain the exact
 list constructor structure without recursive numeric pairing or unary codes. -/
@@ -141,10 +145,74 @@ theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
   cases token <;>
     simp [encodeToken, decodeToken, StreamCodec.decodePrefix_encode]
 
+set_option hygiene false in
+/-- One payload arm of `decodeToken`: the payload decode read back as its
+encoding. -/
+local macro "token_arm " c:term : tactic => `(tactic| (
+  cases ok : ($c).decodePrefix bytes with
+  | none => simp [decodeToken, ok] at decoded
+  | some pair =>
+    obtain ⟨v, rest⟩ := pair
+    have enc := ($c).encode_decodePrefix _ _ _ ok
+    (try casesm* _ × _)
+    simp only [decodeToken, ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨rfl, rfl⟩ := decoded
+    subst enc
+    rfl))
+
+set_option hygiene false in
+/-- One payload-free arm of `decodeToken`. -/
+local macro "token_bare" : tactic => `(tactic| (
+  simp only [decodeToken, Option.some.injEq, Prod.mk.injEq] at decoded
+  obtain ⟨rfl, rfl⟩ := decoded
+  rfl))
+
+theorem encodeToken_decodeToken (bytes : List UInt8) (value : Token) (suffix : List UInt8)
+    (decoded : decodeToken bytes = some (value, suffix)) : encodeToken value ++ suffix = bytes := by
+  rcases bytes with _ | ⟨tag, bytes⟩
+  · cases decoded
+  by_cases t0 : tag = 0
+  · subst t0; token_arm slotIntStream
+  by_cases t1 : tag = 1
+  · subst t1; token_arm slotIntStream
+  by_cases t2 : tag = 2
+  · subst t2; token_arm slotListStream
+  by_cases t3 : tag = 3
+  · subst t3; token_arm stringStream
+  by_cases t4 : tag = 4
+  · subst t4; token_arm stringStream
+  by_cases t5 : tag = 5
+  · subst t5; token_arm stringStream
+  by_cases t6 : tag = 6
+  · subst t6; token_bare
+  by_cases t7 : tag = 7
+  · subst t7; token_bare
+  by_cases t8 : tag = 8
+  · subst t8; token_bare
+  by_cases t9 : tag = 9
+  · subst t9; token_bare
+  by_cases t10 : tag = 10
+  · subst t10; token_bare
+  by_cases t11 : tag = 11
+  · subst t11; token_arm slotPairStream
+  by_cases t12 : tag = 12
+  · subst t12; token_arm slotPairStream
+  by_cases t13 : tag = 13
+  · subst t13; token_arm slotPairIntStream
+  by_cases t14 : tag = 14
+  · subst t14; token_arm StreamCodec.nat
+  by_cases t16 : tag = 16
+  · subst t16; token_arm slotsPairStream
+  by_cases t17 : tag = 17
+  · subst t17; token_arm slotListsStream
+  simp [decodeToken, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t16,
+    t17] at decoded
+
 def tokenStream : StreamCodec Token where
   encode := encodeToken
   decodePrefix := decodeToken
   decodePrefix_encode := decodeToken_encode
+  encode_decodePrefix := encodeToken_decodeToken
 
 abbrev Stack := List (Sum Pred PredList)
 
@@ -249,6 +317,50 @@ def decodePred (tokens : List Token) : Option Pred := do
 @[simp] theorem decodePred_encode (predicate : Pred) :
     decodePred (encodePred predicate) = some predicate := by
   simp [decodePred, encodePred, runTokens_tokensInto, runTokens]
+
+/-- A stack as the postfix tokens that build it from empty, deepest entry
+first, ahead of `rest`. -/
+def stackInto : Stack → List Token → List Token
+  | [], rest => rest
+  | .inl predicate :: stack, rest => stackInto stack (tokensInto predicate rest)
+  | .inr predicates :: stack, rest => stackInto stack (listTokensInto predicates rest)
+
+/-- Every accepted step appends exactly its token to the stack's spelling. -/
+theorem step_stackInto {token : Token} {stack next : Stack}
+    (stepped : step token stack = some next) (rest : List Token) :
+    stackInto stack (token :: rest) = stackInto next rest := by
+  unfold step at stepped
+  split at stepped <;> first | (cases stepped; rfl) | cases stepped
+
+theorem runTokens_stackInto (tokens : List Token) {stack next : Stack}
+    (ran : runTokens tokens stack = some next) (rest : List Token) :
+    stackInto stack (tokens ++ rest) = stackInto next rest := by
+  induction tokens generalizing stack with
+  | nil =>
+      simp only [runTokens, Option.some.injEq] at ran
+      subst ran
+      rfl
+  | cons token tokens ih =>
+      cases stepped : step token stack with
+      | none => simp [runTokens, stepped] at ran
+      | some middle =>
+          simp only [runTokens, stepped, bind, Option.bind] at ran
+          rw [List.cons_append, step_stackInto stepped, ih ran]
+
+/-- Postfix decoding is canonical: a token list that decodes to a predicate is
+that predicate's encoding (no second spelling of a tree). -/
+theorem encodePred_decodePred {tokens : List Token} {predicate : Pred}
+    (decoded : decodePred tokens = some predicate) : encodePred predicate = tokens := by
+  unfold decodePred at decoded
+  cases ran : runTokens tokens [] with
+  | none => simp [ran] at decoded
+  | some stack =>
+      have built := runTokens_stackInto tokens ran []
+      simp only [ran, bind, Option.bind] at decoded
+      split at decoded
+      · cases decoded
+        simpa [stackInto, encodePred] using built.symm
+      · cases decoded
 
 /-! Component metadata is first-order source, using the existing Pred token
 stream and stream-codec combinators. Lists retain authored order in source;

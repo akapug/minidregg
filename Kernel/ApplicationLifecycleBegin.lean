@@ -32,7 +32,7 @@ def Kind.ofCode : Nat → Kind
   | 0 => .install | 1 => .start | 2 => .stop | _ => .upgrade
 
 def kindStream : StreamCodec Kind :=
-  StreamCodec.xmap StreamCodec.nat Kind.code Kind.ofCode
+  StreamCodec.retract StreamCodec.nat Kind.code Kind.ofCode
     (by intro kind; cases kind <;> rfl)
 
 def Kind.operation : Kind → ApplicationGrain.Operation

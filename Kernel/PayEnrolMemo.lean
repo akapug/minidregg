@@ -482,6 +482,27 @@ theorem JournalReason.ofCode_code (reason : JournalReason) :
   | memoMalformed refusal => cases refusal <;> decide
   | _ => decide
 
+theorem Refusal.code_ofCode {code : Nat} {refusal : Refusal} (known : Refusal.ofCode code = some refusal) :
+    refusal.code = code := by
+  unfold Refusal.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
+/-- `JournalReason.ofCode` is a partial inverse of `JournalReason.code`. -/
+theorem JournalReason.code_ofCode {code : Nat} {reason : JournalReason}
+    (known : JournalReason.ofCode code = some reason) : reason.code = code := by
+  unfold JournalReason.ofCode at known
+  split at known
+  any_goals (cases known; rfl)
+  split at known
+  · cases refusalOk : Refusal.ofCode (code - 100) with
+    | none => simp [refusalOk] at known
+    | some refusal =>
+      simp only [refusalOk, Option.map_some, Option.some.injEq] at known
+      subst known
+      simp only [JournalReason.code, Refusal.code_ofCode refusalOk]
+      omega
+  · cases known
+
 def journalReasonStream : StreamCodec JournalReason where
   encode reason := StreamCodec.nat.encode reason.code
   decodePrefix bytes := do
@@ -491,6 +512,20 @@ def journalReasonStream : StreamCodec JournalReason where
   decodePrefix_encode := by
     intro reason suffix
     simp [StreamCodec.nat.decodePrefix_encode, JournalReason.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : JournalReason.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [JournalReason.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 /-! ## The self-enrolled subject -/
 

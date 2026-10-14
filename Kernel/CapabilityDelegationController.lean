@@ -84,6 +84,22 @@ def packedCommandStream : StreamCodec PackedCommand where
     cases command with
     | mk kind command =>
       simp [List.append_assoc, StreamCodec.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases kindOk : ResourceBirthCodec.resourceKindStream.decodePrefix bytes with
+    | none => simp [kindOk] at decoded
+    | some pair =>
+      obtain ⟨kind, remainder⟩ := pair
+      cases commandOk : (commandStream kind).decodePrefix remainder with
+      | none => simp [kindOk, commandOk] at decoded
+      | some pair =>
+        obtain ⟨command, rest⟩ := pair
+        simp only [kindOk, commandOk, bind, Option.bind, pure, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show ResourceBirthCodec.resourceKindStream.encode kind ++ (commandStream kind).encode command ++ rest = bytes
+        rw [List.append_assoc, (commandStream kind).encode_decodePrefix _ _ _ commandOk,
+          ResourceBirthCodec.resourceKindStream.encode_decodePrefix _ _ _ kindOk]
 
 def commandFrameName : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList
 

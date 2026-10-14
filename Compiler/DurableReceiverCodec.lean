@@ -117,10 +117,11 @@ def imageStream : StreamCodec Image :=
 refuses (the frame is compared exactly). -/
 def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
 
-/-- A fixed frame is recovered only if the final canonical check succeeds. -/
+/-- The frame is CHECKED: its octets (the length-prefixed `wireFrame`, as
+before) must match exactly, so a version-1 or foreign frame is refused by the
+stream decoder itself. -/
 def framedStream : StreamCodec Image :=
-  StreamCodec.xmap (StreamCodec.product bytesStream imageStream)
-    (fun image => (wireFrame, image)) Prod.snd (by intro image; rfl)
+  StreamCodec.framed (bytesStream.encode wireFrame) imageStream
 
 def encode (image : Image) : List UInt8 := framedStream.encode image
 

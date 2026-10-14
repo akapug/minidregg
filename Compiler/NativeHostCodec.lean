@@ -242,6 +242,9 @@ def rosterInstallStream : StreamCodec RosterInstallWire :=
 def draftStream : StreamCodec Draft :=
   StreamCodec.xmap (StreamCodec.sum ordinaryDraftStream rosterInstallStream)
     Draft.toWire Draft.ofWire (by intro value; cases value <;> rfl)
+    (by
+      intro wire
+      rcases wire with (⟨_, _⟩ | _ | ⟨_, _, _⟩ | _ | _ | _) | ⟨_, _, _, _⟩ <;> rfl)
 
 def draftCodec : LawfulCodec Draft := framed draftFrame draftStream
 
@@ -299,8 +302,10 @@ def receiptStream : StreamCodec Receipt :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro value; cases value; rfl)
 
+/-- `.inr true` names no confirmation and is refused (it used to decode as
+`.replayed`, a second spelling of it). -/
 def confirmationStream : StreamCodec DurableReceiverIO.Confirmation :=
-  StreamCodec.xmap (StreamCodec.sum StreamCodec.bool StreamCodec.bool)
+  StreamCodec.retract (StreamCodec.sum StreamCodec.bool StreamCodec.bool)
     (fun value => match value with
       | .installed => .inl false
       | .recoveredAfterUncertainResponse => .inl true
@@ -360,6 +365,9 @@ def outcomeStream : StreamCodec Outcome :=
               (StreamCodec.product bytesStream (StreamCodec.option LawLeaf.stream))))
           (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream)))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
+    (by
+      intro wire
+      rcases wire with ⟨_, _⟩ | ⟨_, _, _⟩ | ⟨_, _, _, _⟩ | (_ | _) | _ | _ <;> rfl)
 
 def outcomeCodec : LawfulCodec Outcome :=
   framed outcomeFrame outcomeStream

@@ -75,7 +75,7 @@ def canonicalStatement (argsDigest effectsDigest preRoot : Digest)
   proofSuiteId := proofSuiteId
 
 def scalarStream : StreamCodec Scalar :=
-  StreamCodec.xmap StreamCodec.nat ZMod.val (fun n => (n : Scalar)) (by
+  StreamCodec.retract StreamCodec.nat ZMod.val (fun n => (n : Scalar)) (by
     intro value
     exact ZMod.natCast_zmod_val value)
 

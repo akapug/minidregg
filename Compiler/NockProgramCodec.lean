@@ -164,12 +164,12 @@ structure Program where
 /-! ## Codecs `DREGG/ABI/v5`, `DREGG/PROGRAM/v1` -/
 
 def slotTypeStream : StreamCodec SlotType :=
-  StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
+  StreamCodec.retract StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
     (fun n => if n = 1 then .int else if n = 2 then .noun else .nat)
     (by intro value; cases value <;> rfl)
 
 def contextStream : StreamCodec ContextMode :=
-  StreamCodec.xmap StreamCodec.nat (fun | .live => 0 | .pinned => 1)
+  StreamCodec.retract StreamCodec.nat (fun | .live => 0 | .pinned => 1)
     (fun n => if n = 1 then .pinned else .live) (by intro value; cases value <;> rfl)
 
 def sampleSlotStream : StreamCodec SampleSlot :=

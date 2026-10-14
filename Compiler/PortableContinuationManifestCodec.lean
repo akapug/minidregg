@@ -43,9 +43,10 @@ def manifestStream : StreamCodec Manifest :=
 
 def frame : Bytes := "DREGG.PORTABLE.CUSTODY/v1".toUTF8.toList
 
+/-- The frame is CHECKED (same octets: the length-prefixed `frame`); any other
+frame is refused by the stream decoder. -/
 def framedManifest : StreamCodec Manifest :=
-  StreamCodec.xmap (StreamCodec.product bytesStream manifestStream)
-    (fun manifest => (frame, manifest)) Prod.snd (by intro manifest; rfl)
+  StreamCodec.framed (bytesStream.encode frame) manifestStream
 
 def encode (manifest : Manifest) : Bytes := framedManifest.encode manifest
 

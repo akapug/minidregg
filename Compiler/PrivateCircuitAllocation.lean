@@ -81,8 +81,11 @@ theorem valid_assignments_complete {plan : Plan} (valid : plan.valid = true) :
   simp only [assignments, List.length_zip, schedule_length,
     ← valid_rows_count valid, Nat.min_self]
 
+/-- An op is a tag and two operands. Only the triples that spell an op are
+accepted: an unknown tag (it used to decode as `.constant false`) and a constant
+with non-zero operand fields (they used to be dropped) are refused. -/
 def opStream : StreamCodec Op :=
-  StreamCodec.xmap
+  StreamCodec.retract
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat StreamCodec.nat))
     (fun op => match op with
@@ -120,9 +123,10 @@ def planStream : StreamCodec Plan :=
 
 def frame : List UInt8 := "DREGG.PRIVATE.CIRCUIT.ALLOCATION".toUTF8.toList ++ [1]
 
+/-- The frame is CHECKED (same octets: the length-prefixed `frame`); any other
+frame is refused by the stream decoder. -/
 def framedPlanStream : StreamCodec Plan :=
-  StreamCodec.xmap (StreamCodec.product bytesStream planStream)
-    (fun plan => (frame, plan)) Prod.snd (by intro plan; rfl)
+  StreamCodec.framed (bytesStream.encode frame) planStream
 
 def encode (plan : Plan) : List UInt8 := framedPlanStream.encode plan
 

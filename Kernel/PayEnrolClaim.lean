@@ -48,6 +48,13 @@ theorem PendingReason.ofCode_code (reason : PendingReason) :
     PendingReason.ofCode reason.code = some reason := by
   cases reason <;> rfl
 
+/-- `PendingReason.ofCode` is a partial inverse of `PendingReason.code`: every code it accepts is
+the code of the value it returns. -/
+theorem PendingReason.code_ofCode {code : Nat} {value : PendingReason} (known : PendingReason.ofCode code = some value) :
+    value.code = code := by
+  unfold PendingReason.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def pendingReasonStream : StreamCodec PendingReason where
   encode reason := StreamCodec.nat.encode reason.code
   decodePrefix bytes := do
@@ -57,6 +64,20 @@ def pendingReasonStream : StreamCodec PendingReason where
   decodePrefix_encode := by
     intro reason suffix
     simp [StreamCodec.nat.decodePrefix_encode, PendingReason.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : PendingReason.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [PendingReason.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 /-- Exact deposit provenance, independent of the observer's ingress type. -/
 structure Observation where
@@ -117,6 +138,13 @@ def Mode.ofCode : Nat → Option Mode
 theorem Mode.ofCode_code (mode : Mode) : Mode.ofCode mode.code = some mode := by
   cases mode <;> rfl
 
+/-- `Mode.ofCode` is a partial inverse of `Mode.code`: every code it accepts is
+the code of the value it returns. -/
+theorem Mode.code_ofCode {code : Nat} {value : Mode} (known : Mode.ofCode code = some value) :
+    value.code = code := by
+  unfold Mode.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def modeStream : StreamCodec Mode where
   encode mode := StreamCodec.nat.encode mode.code
   decodePrefix bytes := do
@@ -126,6 +154,20 @@ def modeStream : StreamCodec Mode where
   decodePrefix_encode := by
     intro mode suffix
     simp [StreamCodec.nat.decodePrefix_encode, Mode.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : Mode.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [Mode.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 /-- Complete signed acceptance identity. claimId binds the original amount,
 recipient and signature through immutable storage, not a new transfer. The

@@ -136,6 +136,12 @@ def idDomainOfTag : UInt8 → Option IdDomain
 theorem idDomainOfTag_tag (domain : IdDomain) : idDomainOfTag domain.tag = some domain := by
   cases domain <;> rfl
 
+/-- The tag table has no aliases: a tag that names a domain is that domain's tag. -/
+theorem idDomainOfTag_some {tag : UInt8} {domain : IdDomain}
+    (found : idDomainOfTag tag = some domain) : domain.tag = tag := by
+  unfold idDomainOfTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 def idDomainStream : StreamCodec IdDomain where
   encode domain := [domain.tag]
   decodePrefix
@@ -144,6 +150,19 @@ def idDomainStream : StreamCodec IdDomain where
   decodePrefix_encode := by
     intro domain suffix
     simp [idDomainOfTag_tag]
+  encode_decodePrefix := by
+    intro bytes domain suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    · change (idDomainOfTag tag).map (fun domain => (domain, bytes)) = some (domain, suffix)
+        at decoded
+      cases found : idDomainOfTag tag with
+      | none => simp [found] at decoded
+      | some decodedDomain =>
+        simp only [found, Option.map_some, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [idDomainOfTag_some found]
+        rfl
 
 def fieldTypeStream : StreamCodec FieldType where
   encode
@@ -322,6 +341,12 @@ def namespaceOfTag : UInt8 → Option Hyperdocument.Namespace
   | 10 => some .blinding
   | _ => none
 
+/-- The namespace tag table has no aliases. -/
+theorem namespaceOfTag_some {tag : UInt8} {space : Hyperdocument.Namespace}
+    (found : namespaceOfTag tag = some space) : namespaceTag space = tag := by
+  unfold namespaceOfTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 def namespaceStream : StreamCodec Hyperdocument.Namespace where
   encode space := [namespaceTag space]
   decodePrefix
@@ -330,6 +355,19 @@ def namespaceStream : StreamCodec Hyperdocument.Namespace where
   decodePrefix_encode := by
     intro space suffix
     cases space <;> rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    · change (namespaceOfTag tag).map (fun space => (space, bytes)) = some (space, suffix)
+        at decoded
+      cases found : namespaceOfTag tag with
+      | none => simp [found] at decoded
+      | some decodedSpace =>
+        simp only [found, Option.map_some, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [namespaceOfTag_some found]
+        rfl
 
 def contentKeyStream : (space : Hyperdocument.Namespace) → StreamCodec (Hyperdocument.Key space)
   | .documents => identifierStream .v1 .document
@@ -489,18 +527,32 @@ def eventPreimageStream : StreamCodec EventPreimage :=
     (by intro event; rfl)
 
 /-- A stored event is its complete causal preimage plus the typed author needed
-to reconstruct `VersionEventRecord`. -/
+to reconstruct `VersionEventRecord`.  The preimage's two provenance digests are
+derived from that author, so a wire whose `authorId`/`principalId` are not the
+author's is refused: they used to be decoded and discarded. -/
 def versionEventRecordStream : StreamCodec VersionEventRecord :=
   StreamCodec.xmap
-    (StreamCodec.product eventPreimageStream principalRefStream)
-    (fun event => (event.toCausalPreimage, event.author))
-    (fun wire => VersionEventRecord.ofCausalPreimage wire.2 wire.1)
+    (StreamCodec.refine (StreamCodec.product eventPreimageStream principalRefStream)
+      (fun wire => wire.1.authorId = wire.2.authorId ∧ wire.1.principalId = wire.2.principalId))
+    (fun event => ⟨(event.toCausalPreimage, event.author), rfl, rfl⟩)
+    (fun wire => VersionEventRecord.ofCausalPreimage wire.val.2 wire.val.1)
     VersionEventRecord.ofCausalPreimage_toCausalPreimage
+    (by
+      rintro ⟨⟨event, author⟩, authorExact, principalExact⟩
+      exact Subtype.ext (Prod.ext
+        (VersionEventRecord.toCausalPreimage_ofCausalPreimage author event
+          authorExact principalExact) rfl))
 
 def eventNamespaceStream : StreamCodec Sparse.layout.Namespace where
   encode _ := []
   decodePrefix bytes := some (.events, bytes)
   decodePrefix_encode := by intro space suffix; cases space; rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    cases space
+    simp only [Option.some.injEq, Prod.mk.injEq, true_and] at decoded
+    subst decoded
+    rfl
 
 def eventWire : Wire Sparse.layout where
   name := "minidregg/hyperdocument-events/v1"
@@ -579,6 +631,18 @@ def finStream (capacity : Nat) : StreamCodec (Fin capacity) where
   decodePrefix_encode := by
     intro slot suffix
     simp [StreamCodec.nat.decodePrefix_encode, slot.isLt]
+  encode_decodePrefix := by
+    intro bytes slot suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases bound : wire < capacity
+      · simp only [ok, bind, Option.bind, dif_pos bound, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+      · simp [ok, bound] at decoded
 
 def checkpointStream : StreamCodec CausalCheckpoint :=
   StreamCodec.xmap

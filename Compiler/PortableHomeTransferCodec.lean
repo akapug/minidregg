@@ -73,7 +73,7 @@ private def tagPhase : Nat → Phase
   | 9 => .activationPending
   | _ => .recoveryRequired
 def phaseStream : StreamCodec Phase :=
-  StreamCodec.xmap StreamCodec.nat phaseTag tagPhase (by intro phase; cases phase <;> rfl)
+  StreamCodec.retract StreamCodec.nat phaseTag tagPhase (by intro phase; cases phase <;> rfl)
 
 def stateStream : StreamCodec State :=
   StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product principalStream (StreamCodec.product principalStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product phaseStream (StreamCodec.product (StreamCodec.option planStream) (StreamCodec.product (StreamCodec.option cutReferenceStream) (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list liabilityStream) (StreamCodec.product (StreamCodec.list artifactStream) (StreamCodec.product DurableReceiverCodec.chargeStream (StreamCodec.product (StreamCodec.list StreamCodec.nat) bytesStream))))))))))))))))))

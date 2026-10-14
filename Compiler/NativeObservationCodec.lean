@@ -157,6 +157,9 @@ def queryViewStream : StreamCodec QueryView :=
       | .inl (.inr (.inr (.inr (start, count)))) => .tail start count
       | .inr () => .resourceScope)
     (by intro view; cases view <;> rfl)
+    (by
+      rintro ((((wire | wire) | wire) | (height | height | ⟨start, count⟩)) | ⟨⟩) <;>
+        (try cases wire) <;> rfl)
 
 /-- Existing resource/capability observation bytes stay usable for retained
 birth preparation and historical exact recovery. -/

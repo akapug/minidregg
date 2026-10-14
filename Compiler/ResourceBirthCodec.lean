@@ -84,6 +84,20 @@ def packedCellStream (registry : TypeRegistry Digest) :
   decodePrefix_encode := by
     intro cell suffix
     simp [bytesStream.decodePrefix_encode, PackedCell.decode_bytes]
+  encode_decodePrefix := by
+    intro bytes cell suffix decoded
+    cases ok : bytesStream.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨payload, rest⟩ := pair
+      cases unpacked : PackedCell.decode registry payload with
+      | none => simp [ok, unpacked] at decoded
+      | some decodedCell =>
+        simp only [ok, unpacked, bind, Option.bind, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PackedCell.bytes_of_decode registry unpacked]
+        exact bytesStream.encode_decodePrefix _ _ _ ok
 
 def resourceKindStream : StreamCodec ResourceKind where
   encode

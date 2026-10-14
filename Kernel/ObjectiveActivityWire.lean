@@ -47,6 +47,11 @@ def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro value suffix; cases value; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 def subjectStream : StreamCodec SubjectId :=
   StreamCodec.xmap StreamCodec.nat (fun subject => subject.value) (fun value => ⟨value⟩)

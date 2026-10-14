@@ -40,8 +40,10 @@ def RoleBasis.ofWire : Nat × Option Nat → Option RoleBasis
   | (2, some roleId) => some (.role roleId)
   | _ => Option.none
 
+/-- Only the three wires `RoleBasis.toWire` produces are accepted; every other
+`(tag, option)` pair used to decode as `.none`. -/
 def roleBasisStream : StreamCodec RoleBasis :=
-  StreamCodec.xmap
+  StreamCodec.retract
     (StreamCodec.product StreamCodec.nat (StreamCodec.option StreamCodec.nat))
     RoleBasis.toWire
     (fun wire => (RoleBasis.ofWire wire).getD .none)

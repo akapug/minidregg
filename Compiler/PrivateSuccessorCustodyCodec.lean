@@ -34,7 +34,7 @@ def purposeOf : Nat → CorrelationPurpose
   | 1 => .agreementCoin | 2 => .holderOutputPad | 3 => .audienceReleasePad | _ => .triple
 
 def purposeStream : StreamCodec CorrelationPurpose :=
-  StreamCodec.xmap StreamCodec.nat purposeCode purposeOf (by intro purpose; cases purpose <;> rfl)
+  StreamCodec.retract StreamCodec.nat purposeCode purposeOf (by intro purpose; cases purpose <;> rfl)
 
 def correlationStream : StreamCodec CorrelationId :=
   StreamCodec.xmap (StreamCodec.product digestStream StreamCodec.nat)
@@ -42,7 +42,7 @@ def correlationStream : StreamCodec CorrelationId :=
     (by intro id; cases id; rfl)
 
 def consumptionStream : StreamCodec Consumption :=
-  StreamCodec.xmap StreamCodec.nat
+  StreamCodec.retract StreamCodec.nat
     (fun status => match status with | .reserved => 0 | .consumed => 1)
     (fun code => if code = 1 then .consumed else .reserved)
     (by intro status; cases status <;> rfl)
@@ -65,9 +65,10 @@ def journalStream : StreamCodec Journal :=
 /-- Source-owned version/domain framing, not an unbound digest. -/
 def journalFrame : List UInt8 := "DREGG.PRIVATE.CORRELATIONS".toUTF8.toList ++ [1]
 
+/-- The frame is CHECKED (same octets as before: the length-prefixed
+`journalFrame`); a foreign or other-version frame is refused. -/
 def framedJournalStream : StreamCodec Journal :=
-  StreamCodec.xmap (StreamCodec.product bytesStream journalStream)
-    (fun journal => (journalFrame, journal)) Prod.snd (by intro journal; rfl)
+  StreamCodec.framed (bytesStream.encode journalFrame) journalStream
 
 def encodeJournal (journal : Journal) : List UInt8 := framedJournalStream.encode journal
 

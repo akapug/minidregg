@@ -230,6 +230,35 @@ def markSpecStream : StreamCodec MarkSpec where
     cases value <;>
       simp [MarkSpec.kind, markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
         (identifierStream .v1 .link).decodePrefix_encode, linkTargetStream.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases tagOk : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [tagOk] at decoded
+    | some pair =>
+      obtain ⟨tag, afterTag⟩ := pair
+      have tagBytes := StreamCodec.nat.encode_decodePrefix _ _ _ tagOk
+      subst tagBytes
+      simp only [tagOk, bind, Option.bind] at decoded
+      split at decoded
+      all_goals first
+        | (cases decoded; done)
+        | (simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+           obtain ⟨rfl, rfl⟩ := decoded
+           rfl)
+        | (cases linkOk : (identifierStream .v1 .link).decodePrefix afterTag with
+           | none => simp [linkOk] at decoded
+           | some pair =>
+             obtain ⟨linkId, afterLink⟩ := pair
+             cases targetOk : linkTargetStream.decodePrefix afterLink with
+             | none => simp [linkOk, targetOk] at decoded
+             | some pair =>
+               obtain ⟨target, rest⟩ := pair
+               simp only [linkOk, targetOk, bind, Option.bind, Option.some.injEq,
+                 Prod.mk.injEq] at decoded
+               obtain ⟨rfl, rfl⟩ := decoded
+               simp only [MarkSpec.kind, markKindTag, List.append_assoc,
+                 linkTargetStream.encode_decodePrefix _ _ _ targetOk,
+                 (identifierStream .v1 .link).encode_decodePrefix _ _ _ linkOk])
 
 /-- A mark of `target` as its author read it at `revision`. -/
 structure MarkRequest where
@@ -386,6 +415,10 @@ def Action.ofWire : ActionWire → Action
 
 def actionStream : StreamCodec Action :=
   StreamCodec.xmap actionWireStream Action.toWire Action.ofWire Action.ofWire_toWire
+    (by
+      intro wire
+      rcases wire with (⟨_, _⟩ | ⟨_, _, _⟩ | _ | ⟨_, _, _, _⟩ | ⟨_, _⟩ | ⟨_, _, _, _⟩ | ⟨_, _, _⟩ | _ | _ |
+          _ | ⟨_, _⟩ | _ | ⟨_, _, _⟩) | ⟨_, _, _⟩ | ⟨_, _, _⟩ <;> rfl)
 
 structure Command where
   actions : List Action

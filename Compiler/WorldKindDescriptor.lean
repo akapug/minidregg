@@ -160,6 +160,18 @@ def finStream (size : Nat) : StreamCodec (Fin size) where
   decodePrefix_encode := by
     intro index suffix
     simp [StreamCodec.nat.decodePrefix_encode, index.isLt]
+  encode_decodePrefix := by
+    intro bytes index suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases bound : wire < size
+      · simp only [ok, bind, Option.bind, dif_pos bound, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+      · simp [ok, bound] at decoded
 
 /-- StoreCodec's frame commits to the complete descriptor identity, including
 field meanings. Its namespace order is not an implicit grant interpretation.

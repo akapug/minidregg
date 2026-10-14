@@ -40,6 +40,19 @@ def recordStream : StreamCodec PolicyRecord where
   decodePrefix_encode := by
     intro record suffix
     simp [bytesStream.decodePrefix_encode, PolicyRecordCodec.decode_encode]
+  encode_decodePrefix := by
+    intro bytes record suffix decoded
+    cases framed : bytesStream.decodePrefix bytes with
+    | none => simp [framed] at decoded
+    | some pair =>
+      obtain ⟨source, rest⟩ := pair
+      cases inner : PolicyRecordCodec.decode source with
+      | none => simp [framed, inner] at decoded
+      | some decodedRecord =>
+        simp only [framed, inner, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PolicyRecordCodec.decode_canonical inner]
+        exact bytesStream.encode_decodePrefix _ _ _ framed
 
 /-- One ROM address holding the source record.  The record is installed when
 the cell is born (`stateOfOption`, through the lifecycle allocator); no guarded

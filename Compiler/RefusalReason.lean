@@ -574,6 +574,20 @@ def predStream : StreamCodec Pred where
   decodePrefix_encode := by
     intro clause suffix
     simp [StreamCodec.decodePrefix_encode, PolicyRecordCodec.decodePred_encode]
+  encode_decodePrefix := by
+    intro bytes clause suffix decoded
+    cases listed : (StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix bytes with
+    | none => simp [listed] at decoded
+    | some pair =>
+      obtain ⟨tokens, rest⟩ := pair
+      cases inner : PolicyRecordCodec.decodePred tokens with
+      | none => simp [listed, inner] at decoded
+      | some decodedClause =>
+        simp only [listed, inner, bind, Option.bind, pure, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PolicyRecordCodec.encodePred_decodePred inner]
+        exact StreamCodec.encode_decodePrefix _ _ _ _ listed
 
 def stream : StreamCodec LawLeaf :=
   StreamCodec.xmap
