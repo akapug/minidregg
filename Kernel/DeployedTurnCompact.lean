@@ -19,9 +19,10 @@ changes)`.  Any other leg is persisted verbatim (`encodeLeg`).
 * `decodeTurnAt_encodeTurnAt` -- on the world it was written against, the
   compact entry decodes to exactly the turn: the follower admits what the
   writer admitted, byte for byte (`encodeTurn` of it, hence its journal digest).
-* `decodeTurnAt_collision` -- if the entry decodes against a DIFFERENT held
-  store of the same kind, the two stores' canonical cell bytes collide under
-  `rootBytes` (cSHAKE256): the digest guard is only as weak as that hash.
+* `decodeLegAt_other` -- if a persisted leg decodes against DIFFERENT held
+  cells to a different leg, the operation exhibits two different canonical cell
+  byte strings with one `rootBytes` (a cSHAKE256 collision on concrete inputs):
+  the digest guard is exactly as strong as that hash.
 -/
 import Kernel.DeployedTurnCodec
 import Theory.AssertAxioms
@@ -226,6 +227,64 @@ theorem decodeLegAt_encodeLegAt (held : CellId → Option (Cell deployedR)) (leg
     · rw [if_neg hc]
       exact verbatim
 
+/-- **A digest guard is a guard, up to one exhibited collision.**  If a
+persisted leg, decoded against DIFFERENT held cells, yields a leg other than
+the one written, then the operation itself exhibits two DIFFERENT canonical
+cell byte strings of the leg's kind with the same `rootBytes`: a collision of
+the deployed per-cell root (cSHAKE256), on two concrete inputs, not a
+disjunct over an infinite type. -/
+theorem decodeLegAt_other (held held' : CellId → Option (Cell deployedR)) (leg leg' : Leg deployedR)
+    (decoded : decodeLegAt held' (encodeLegAt held leg) = some leg') (other : leg' ≠ leg) :
+    ∃ s s' : Store (deployedR.layout leg.kind),
+      encodeCell (some ⟨leg.kind, s⟩) ≠ encodeCell (some ⟨leg.kind, s'⟩) ∧
+      ResourceBirthCodec.rootBytes (encodeCell (some ⟨leg.kind, s⟩)) =
+        ResourceBirthCodec.rootBytes (encodeCell (some ⟨leg.kind, s'⟩)) := by
+  have verbatim : decodeLegAt held' ([1] ++ encodeLeg leg) = some leg := by
+    simp only [List.singleton_append, decodeLegAt]
+    exact (legStream_encode leg) ▸ full_encode legStream leg
+  unfold encodeLegAt at decoded
+  cases hs : heldStore held leg with
+  | none =>
+    rw [hs] at decoded
+    exact absurd (Option.some.inj (verbatim.symm.trans decoded)).symm other
+  | some s =>
+    rw [hs] at decoded
+    dsimp only at decoded
+    by_cases hc : compactable held leg = true
+    · rw [if_pos hc] at decoded
+      obtain ⟨cell, k, patch⟩ := leg
+      have hpatch : patch = bridge.codec.legPatch k s (Patch.run s patch) := by
+        unfold compactable at hc
+        rw [hs] at hc
+        exact encodeOps_injective k (by simpa using hc)
+      simp only [List.singleton_append, List.append_assoc, decodeLegAt,
+        StreamCodec.decodePrefix_encode, List.cons_append, List.nil_append] at decoded
+      simp only [bind, Option.bind, CanonicalCellRegistry.kindAtTag_tag,
+        StreamCodec.decodePrefix_encode, full_encode, mapM_decodeChange] at decoded
+      cases hcell : held' cell with
+      | none => simp [hcell] at decoded
+      | some c =>
+        cases hst : c.storeAt k with
+        | none => simp [hcell, hst] at decoded
+        | some s' =>
+          simp only [hcell, hst] at decoded
+          by_cases hd : cellDigest k s' = cellDigest k s
+          · simp only [hd, ↓reduceIte, Option.some.injEq] at decoded
+            by_cases es : s' = s
+            · subst es
+              rw [applyChanges_changesOf (bridge.codec.cover_nodup k s' _)
+                (fun a h => bridge.codec.mem_cover a h)] at decoded
+              exact absurd (by rw [← decoded, ← hpatch]) other
+            · refine ⟨s, s', fun same => es ?_, hd.symm⟩
+              have h1 := bridge_decode_total_on_registry (some ⟨k, s⟩)
+              have h2 := bridge_decode_total_on_registry (some ⟨k, s'⟩)
+              rw [same, h2] at h1
+              have := Option.some.inj (Option.some.inj h1)
+              exact eq_of_heq (Cell.mk.inj this).2
+          · simp [hd] at decoded
+    · rw [if_neg hc] at decoded
+      exact absurd (Option.some.inj (verbatim.symm.trans decoded)).symm other
+
 /-! ## The persisted turn -/
 
 /-- Held cells after a list of creates over a world. -/
@@ -300,5 +359,6 @@ theorem decodeTurnAt_encodeTurnAt (w : World deployedR TransactionId Digest)
 #assert_axioms applyChanges_changesOf
 #assert_axioms decodeLegAt_encodeLegAt
 #assert_axioms decodeTurnAt_encodeTurnAt
+#assert_axioms decodeLegAt_other
 
 end Minidregg.Kernel.DeployedTurnCompact
