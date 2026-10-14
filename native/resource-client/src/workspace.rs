@@ -363,8 +363,11 @@ pub(crate) fn load_retained(root: &Path) -> Result<RetainedWorkspace> {
         crate::pin_ssh_identity(Path::new(identity))?;
     }
     if let Some(pins) = value.get("localConsent") { crate::client_consent::pin_record(pins)?; }
-    if workspace_host(&value)?.as_os_str().is_empty() {
+    let host = workspace_host(&value)?;
+    if host.as_os_str().is_empty() {
         crate::pin_remote_host(member(&value, "hostSha256")?)?;
+    } else if let Some(sha) = value.get("hostSha256").and_then(Value::as_str) {
+        crate::pin_workspace_host(&host, sha)?;
     }
     match (value.get("socket").and_then(Value::as_str), SOCKET.get()) {
         (Some(socket), Some(selected)) if Path::new(socket) != selected => {
@@ -549,7 +552,9 @@ fn init_impl(
             if !host.is_file() {
                 return Err("workspace Host must exist as a file".into());
             }
-            (Some(host), None)
+            // The one full hash of the image: the pin every later process of this workspace names.
+            let sha = crate::host_image_sha256(&host)?;
+            (Some(host), Some(sha))
         }
         None => {
             if !socket.as_deref().is_some_and(|s| crate::transport::is_remote(Path::new(s))) {

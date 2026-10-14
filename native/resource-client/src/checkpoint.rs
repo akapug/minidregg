@@ -43,8 +43,12 @@ fn workspace(directory: &Path) -> Result<Workspace> {
     if field(&value, "type")? != "minidregg-participant-workspace-v1" {
         return Err("unknown participant workspace version".into());
     }
+    let host = PathBuf::from(field(&value, "host")?);
+    if let Some(sha) = value.get("hostSha256").and_then(Value::as_str) {
+        crate::pin_workspace_host(&host, sha)?;
+    }
     Ok(Workspace {
-        host: PathBuf::from(field(&value, "host")?),
+        host,
         socket: PathBuf::from(field(&value, "socket")?),
         config: PathBuf::from(field(&value, "config")?),
         key: PathBuf::from(field(&value, "key")?),

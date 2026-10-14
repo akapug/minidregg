@@ -181,6 +181,16 @@ static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
+/// The local Host image a workspace (or an attempt it wrote) pinned at `workspace init`, and the
+/// digest it pinned: `host_image_sha256` of that exact path answers the pin instead of re-hashing
+/// ~170 MB in every `mini` process. What checks the bytes: `serve` hashes the sealed snapshot it
+/// executes (`transport::HostProcess::checked_image`) and the serving Host refuses an envelope that
+/// names another digest (`transport::request_from_envelope`, "host image pin mismatch"). So a Host
+/// file replaced under an unchanged pin is refused at the next `serve` start, on its first request.
+/// `--verify-host` (or MINI_VERIFY_HOST=1) hashes the file anyway and refuses a mismatch here.
+#[cfg(unix)]
+static WORKSPACE_HOST_PIN: OnceLock<(PathBuf, String)> = OnceLock::new();
+static VERIFY_HOST: AtomicBool = AtomicBool::new(false);
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
 /// The exit status a verb chose besides success (1): 3 = the Host refused, 4 = the Host did
 /// not decide (M4's shell contract). The highest one set wins.
@@ -488,6 +498,12 @@ fn host_image_sha256(host: &Path) -> Result<String> {
             _ => Err("no Host image: only a remote client (--remote) may omit --host".into()),
         };
     }
+    let pinned = WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha);
+    if let Some(sha) = pinned {
+        if !verify_host() {
+            return Ok(sha.clone());
+        }
+    }
     let mut file = File::open(host).map_err(|error| {
         format!(
             "cannot open selected Host image {}: {error}",
@@ -537,9 +553,42 @@ fn host_image_sha256(host: &Path) -> Result<String> {
         ));
     }
     let sha = hex(&digest.finalize());
+    if pinned.is_some_and(|pin| pin != &sha) {
+        return Err(format!(
+            "selected Host image {} differs from the workspace's pinned hostSha256",
+            host.display()
+        ));
+    }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
     Ok(sha)
+}
+
+/// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
+fn verify_host() -> bool {
+    VERIFY_HOST.load(Ordering::Relaxed) || env::var_os("MINI_VERIFY_HOST").as_deref() == Some(OsStr::new("1"))
+}
+
+/// Pins, for this process, the digest a local workspace (or attempt) recorded for its Host image
+/// path at `workspace init`. A second, different pin within one process is refused.
+#[cfg(unix)]
+pub(crate) fn pin_workspace_host(host: &Path, sha: &str) -> Result<()> {
+    if sha.len() != 64 || !mini_sdk::hex::is_lower(sha) {
+        return Err("workspace hostSha256 must be 64 lowercase hex digits".into());
+    }
+    let pin = (host.to_path_buf(), sha.to_owned());
+    match WORKSPACE_HOST_PIN.get() {
+        Some(existing) if existing != &pin => Err("pinned workspace Host image differs within one process".into()),
+        Some(_) => Ok(()),
+        None => WORKSPACE_HOST_PIN.set(pin).map_err(|_| "cannot pin the workspace Host image".into()),
+    }
+}
+
+/// The pin a local attempt manifest records beside its Host path: the workspace's, when one is
+/// loaded for that path (so the manifest and the workspace name the same digest), else none.
+#[cfg(unix)]
+fn workspace_host_pin(host: &Path) -> Option<String> {
+    WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha.clone())
 }
 
 #[cfg(unix)]
@@ -592,7 +641,9 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini [--remote DEST] COMMAND [options] [--replan-max N]
+  mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-max N]
+    --verify-host (or MINI_VERIFY_HOST=1): hash the local Host image even when the workspace pinned
+    its hostSha256 at init, and refuse a mismatch before any request.
     --replan-max N: when a tick, certify or another write lands between an observation and
     its use, the Host answers stale-root; mini observes again up to N times (default 5;
     MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
@@ -708,7 +759,9 @@ usage:
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini objective-invoke --host LOCAL-HOST --config CONFIG.json --request REQUEST.json --intent-nonce N --key KEY --dir NEW-ATTEMPT [--prepare-only true]   (lost reply: mini retry --attempt DIR --mode lookup)
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] [--provider-continuity DESCRIPTOR.json] --key KEY --dir ATTEMPT
-  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
+  mini query (--workspace WORKSPACE | --host HOST --config CONFIG.json --key KEY) --intent INTENT.json [--intent-kind KIND] --view resource|policy|capability|at [--presentation fn-inbox-resource] --dir ATTEMPT
+    --workspace takes the Host, config, key and socket from the workspace: the challenge and the query
+    are answered by its serving session (ops 4/5), not by two cold Host opens of the Store.
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
@@ -806,6 +859,10 @@ impl Args {
         let mut raw = env::args_os().skip(1);
         let mut values = Vec::new();
         let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        if command == OsStr::new("--verify-host") {
+            VERIFY_HOST.store(true, Ordering::Relaxed);
+            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
@@ -1174,9 +1231,7 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     let pure = arguments.first().and_then(|word| word.to_str()).is_some_and(|verb|
         matches!(verb, "author" | "inspect" | "signatures" | "observe-assemble" | "assemble"));
     if pure {
-        if let Some(output) = client_consent::codec_process(host, config, arguments)? { return Ok(output); }
-        let local = client_consent::pure_host(host)?;
-        return local_process(&local, config, arguments);
+        return client_consent::codec_process(host, config, arguments);
     }
     if let Some(socket) = SOCKET.get() {
         return socket_process(host, socket, config, arguments);
@@ -1201,14 +1256,8 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
-        // Exit 2 is the Host's definite refusal of a pure codec verb (it reads no Store,
-        // so nothing could have been accepted): stdout is the encoded outcome, stderr
-        // the Host's own decoding of it. Any other failing exit leaves the status uncertain.
-        if output.status.code() == Some(2) {
-            if let Some(refusal) = one_shot_refusal(arguments, &output) {
-                return Err(refusal);
-            }
-        }
+        // Pure codec verbs never reach here (`process` sends them to the codec child), so no
+        // failing exit is a decision: the status stays uncertain.
         return Err(format!(
             "{} exited {}; request status uncertain: {}",
             host.display(),
@@ -1217,23 +1266,6 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         ));
     }
     Ok(output)
-}
-
-/// The refusal a one-shot pure codec verb ended in (`Host.RequestRefusal.oneShotFrame`):
-/// the same decision and the same message the session path records for a 255 frame. `None`
-/// when the Host's stderr is not an outcome of type `refused`; the caller then reports the
-/// exit as it would any other.
-fn one_shot_refusal(arguments: &[&OsStr], output: &Output) -> Option<String> {
-    let command = arguments.first()?.to_str()?;
-    let decoded: Value = serde_json::from_slice(&output.stderr).ok()?;
-    let line = refusal_line(&decoded)?;
-    note_host_decision(HostDecision::RefusedFrame {
-        command: command.to_owned(),
-        byte: 255,
-        encoded: output.stdout.clone(),
-        decoded: Some(decoded),
-    });
-    Some(refused_frame_message(command, &output.stdout, Some(line)))
 }
 
 fn refused_frame_message(command: &str, encoded: &[u8], line: Option<String>) -> String {
@@ -1712,7 +1744,11 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     if host.as_os_str().is_empty() {
         manifest["hostSha256"] = json!(host_image_sha256(host)?);
     } else {
-        manifest["host"] = json!(utf8_path(&absolute(host)?)?);
+        let host = absolute(host)?;
+        if let Some(sha) = workspace_host_pin(&host) {
+            manifest["hostSha256"] = json!(sha);
+        }
+        manifest["host"] = json!(utf8_path(&host)?);
     }
     if let Some(pins) = client_consent::configured_record()? {
         manifest["localConsent"] = pins;
@@ -2371,7 +2407,13 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
     }
     if let Some(pins) = value.get("localConsent") { client_consent::pin_record(pins)?; }
     let host = match value.get("host") {
-        Some(Value::String(host)) => PathBuf::from(host),
+        Some(Value::String(host)) => {
+            let host = PathBuf::from(host);
+            if let Some(sha) = value.get("hostSha256").and_then(Value::as_str) {
+                pin_workspace_host(&host, sha)?;
+            }
+            host
+        }
         Some(Value::Null) => {
             let sha = value
                 .get("hostSha256")
@@ -4276,13 +4318,27 @@ fn run(mut args: Args) -> Result<()> {
             )
         }
         "query" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
+            // A workspace names its serving socket: the signed read goes to that session (ops 4/5);
+            // without one, each of challenge and query opens the Store in a cold Host.
+            let (host, config, key) = match args.optional("workspace") {
+                Some(root) => {
+                    let workspace = workspace::load(&path(root))?;
+                    (
+                        workspace::workspace_host(&workspace)?,
+                        workspace::member_path(&workspace, "config")?,
+                        workspace::member_path(&workspace, "key")?,
+                    )
+                }
+                None => (
+                    path(args.required("host")?),
+                    path(args.required("config")?),
+                    path(args.required("key")?),
+                ),
+            };
             let intent = path(args.required("intent")?);
             let intent_kind = args
                 .optional("intent-kind")
                 .unwrap_or_else(|| OsString::from("intent"));
-            let key = path(args.required("key")?);
             let view = args.required("view")?;
             let presentation = args.optional("presentation");
             let directory = path(args.required("dir")?);
@@ -4524,64 +4580,6 @@ mod tests {
         path
     }
 
-    /// A stand-in Host image that exits `code` with the given stdout bytes and stderr text.
-    #[cfg(unix)]
-    fn fake_host(name: &str, code: i32, stdout: &str, stderr: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = scratch(name);
-        let path = dir.join("host");
-        fs::write(&path, format!("#!/bin/sh\nprintf '%s' '{stdout}'\nprintf '%s' '{stderr}' >&2\nexit {code}\n")).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
-
-    /// `local_process` on a freshly written script: another test thread's fork may still hold
-    /// the write descriptor until it execs, which makes the exec fail ETXTBSY. Retry only that.
-    #[cfg(unix)]
-    fn run_fake(host: &Path, args: &[&OsStr]) -> Result<Output> {
-        for _ in 0..50 {
-            match local_process(host, Path::new("config"), args) {
-                Err(error) if error.contains("Text file busy") => {
-                    std::thread::sleep(std::time::Duration::from_millis(20))
-                }
-                other => return other,
-            }
-        }
-        local_process(host, Path::new("config"), args)
-    }
-
-    /// A one-shot pure verb the Host refuses (exit 2) surfaces under the Host's name, as the
-    /// session path does for a 255 frame, never as "request status uncertain".
-    #[cfg(unix)]
-    #[test]
-    fn one_shot_pure_refusal_is_named_not_uncertain() {
-        let host = fake_host(
-            "one-shot-refused",
-            2,
-            "ff00",
-            r#"{"type":"refused","reason":"malformed","phase":"6f702037","detail":"243a206d697373696e67206669656c64206e6f6e6365"}"#,
-        );
-        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
-        let error = run_fake(&host, &args).unwrap_err();
-        assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
-        assert!(!error.contains("uncertain"), "{error}");
-        assert!(matches!(take_host_decision(), Some(HostDecision::RefusedFrame { byte: 255, .. })));
-    }
-
-    /// Any other failing exit of the same verb is not a decision: the status stays uncertain.
-    #[cfg(unix)]
-    #[test]
-    fn one_shot_other_exit_stays_uncertain() {
-        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
-        let crashed = fake_host("one-shot-crashed", 1, "", "minidregg-host: boom");
-        let error = run_fake(&crashed, &args).unwrap_err();
-        assert!(error.contains("request status uncertain: minidregg-host: boom"), "{error}");
-        // Exit 2 whose stderr is not a refused outcome is not taken for one.
-        let odd = fake_host("one-shot-odd", 2, "", "not json");
-        let error = run_fake(&odd, &args).unwrap_err();
-        assert!(error.contains("request status uncertain"), "{error}");
-    }
-
     #[cfg(unix)]
     #[test]
     fn host_image_digest_is_cached_per_file_identity() {
@@ -4600,6 +4598,28 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(&host, b"third  image").unwrap();
         assert_eq!(host_image_sha256(&host).unwrap(), sha(b"third  image"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The plant of the workspace Host pin: a Host file replaced under an unchanged pin is named by
+    /// the pin without being read (the serving Host's envelope check refuses it after the next
+    /// `serve` start), and `--verify-host` hashes it and refuses the mismatch here.
+    #[cfg(unix)]
+    #[test]
+    fn a_pinned_host_image_is_named_by_its_pin_and_verify_host_refuses_a_replacement() {
+        let dir = scratch("host-image-pin");
+        let host = dir.join("minidregg-host");
+        let sha = |bytes: &[u8]| hex(&sha2::Sha256::digest(bytes));
+        fs::write(&host, b"pinned image").unwrap();
+        pin_workspace_host(&host, &sha(b"pinned image")).unwrap();
+        fs::write(&host, b"replaced image").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"pinned image"));
+        VERIFY_HOST.store(true, Ordering::Relaxed);
+        let verified = host_image_sha256(&host);
+        VERIFY_HOST.store(false, Ordering::Relaxed);
+        let error = verified.unwrap_err();
+        assert!(error.contains("differs from the workspace's pinned hostSha256"), "{error}");
+        assert!(pin_workspace_host(&host, &sha(b"replaced image")).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
