@@ -51,9 +51,9 @@ ref=${M7_REFERENCE:-$(jq -r '.m7Reference // ""' "$JOURNEY_RUN/manifest.json")}
 [ -n "$ref" ] && [ -f "$ref" ] || fail "no reference build (set M7_REFERENCE or .m7Reference to another build's provenance JSON)"
 R=$(CDPATH='' cd -- "$(dirname -- "$ref")" && pwd -P)
 [ "$R" != "$C" ] || fail "reference is the candidate itself"
-compiled='^[0-9a-f]{64}  \./(.*\.lean|Cargo\.(toml|lock)|\.cargo/.*|lakefile\.toml|lake-manifest\.json|lean-toolchain|rust-toolchain\.toml|native/.*|protocol/.*|scripts/build-native-host\.sh|deploy/candidate/(build|lane-build|lib)\.sh)$'
-grep -E "$compiled" "$C/logs/source-files.sha256" >"$D/compiled-inputs.candidate"
-grep -E "$compiled" "$R/logs/source-files.sha256" >"$D/compiled-inputs.reference"
+. "$(dirname -- "$0")/lib/m7-compiled.sh"
+m7_compiled_inputs "$C" >"$D/compiled-inputs.candidate"
+m7_compiled_inputs "$R" >"$D/compiled-inputs.reference"
 [ -s "$D/compiled-inputs.candidate" ] || fail "no compiled inputs listed for the candidate"
 cmp -s "$D/compiled-inputs.candidate" "$D/compiled-inputs.reference" \
   || fail "reference was built from different compiled inputs ($(diff "$D/compiled-inputs.candidate" "$D/compiled-inputs.reference" | grep -c '^[<>]') lines differ)"
