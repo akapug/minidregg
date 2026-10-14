@@ -356,19 +356,28 @@ product_native() {
   for name in HOST MINI STORE VERIFIER; do product_input "$name" executable || return $?; done
 }
 # bwrap present is not bwrap usable: a kernel that restricts unprivileged user namespaces (Ubuntu 24.04+:
-# kernel.apparmor_restrict_unprivileged_userns=1 with no bwrap AppArmor profile, measured on hbox 2026-10-14)
-# makes every sandboxed worker exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed"
-# after a 15-min wait: a missing box input rendering as a product red. Probe it and name it (98).
-# product_userns [BWRAP...]: the bwraps the row's driver can select, in its order (default: bwrap on PATH).
-# The probe passes when one of them can create a user namespace; a driver that falls back to a profiled
-# copy (jpay6.sh: /usr/local/libexec/mini-grain-bwrap, root-owned, AppArmor `userns`) names it here, and a
-# driver that cannot (hermes, m6grain's spk-host: /usr/bin/bwrap) does not, so its row still says 98.
+# kernel.apparmor_restrict_unprivileged_userns=1, measured on hbox 2026-10-14) makes every sandboxed worker
+# exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed" after a 15-min wait: a
+# missing box input rendering as a product red. The set's own deploy/grain-host/resolve-bwrap is the one
+# resolver its drivers use (hermes-journey.sh, jpay6.sh, grain-journey.sh for m6grain's spk-host profile):
+# the AppArmor-profiled /usr/local/libexec/mini-grain-bwrap when present and usable, else /usr/bin/bwrap;
+# MINI_BWRAP selects one. The probe runs it and exports its answer, so the row and its driver resolve the
+# same binary; nothing usable is 98, named. A set without the resolver pins its bwrap in its drivers:
+# product_userns [LEGACY_BWRAP...] probes those (default /usr/bin/bwrap; jpay6.sh before the resolver also
+# fell back to the profiled copy), and only for such a set.
 product_userns() {
+  local resolver=$SRC/deploy/grain-host/resolve-bwrap
+  if [ -f "$resolver" ]; then
+    MINI_BWRAP=$(sh "$resolver" 2>"$OUT/userns-probe.err") && { export MINI_BWRAP; echo "$MINI_BWRAP" >"$OUT/bwrap"; return 0; }
+    unset MINI_BWRAP
+    tail -1 "$OUT/userns-probe.err" >&2
+    return 98
+  fi
   local b
-  [ $# -gt 0 ] || set -- bwrap
+  [ $# -gt 0 ] || set -- /usr/bin/bwrap
   : >"$OUT/userns-probe.err"
   for b in "$@"; do
-    [ "$b" = bwrap ] || [ -x "$b" ] || continue
+    [ -x "$b" ] || continue
     "$b" --die-with-parent --unshare-user --ro-bind / / true 2>>"$OUT/userns-probe.err" && return 0
   done
   echo "missing input: unprivileged user namespaces for bwrap ($*: $(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
@@ -435,7 +444,7 @@ row_hermes() {
   product_native || return $?
   product_input GRAIN executable || return $?
   product_systemd || return $?
-  product_tools rustc bwrap || return $?
+  product_tools rustc || return $?
   product_userns || return $?
   product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
   product_keep "$RUN/h/evidence"
@@ -462,7 +471,7 @@ row_m6grain() {
   local CONSENT_BIN=$BIN/minidregg-client-consent
   for w in SPK_HOST_BIN SPK_BROKER_BIN SPK_VOLUME_HELPER_BIN CONSENT_BIN; do product_input "$w" executable || return $?; done
   product_systemd || return $?
-  product_tools jq curl loginctl sudo install od findmnt bwrap || return $?
+  product_tools jq curl loginctl sudo install od findmnt || return $?
   [ "$(id -u)" = 1001 ] || { echo "missing input: operator uid 1001 (two-world-journey.sh runs as uid 1001; this runner is uid $(id -u))" >&2; return 98; }
   [ "$(loginctl show-user 1001 -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for uid 1001" >&2; return 98; }
   sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
@@ -606,9 +615,9 @@ product_pay_step() {
   if [ "$id" = 1 ] || [ "$id" = 4 ]; then product_input PAY_WATCHER_BIN executable || return $?; fi
   if [ "$id" = 6 ]; then
     product_systemd || return $?
-    product_tools sudo bwrap || return $?
+    product_tools sudo || return $?
     sudo -n true 2>/dev/null || { echo "no sudo: sudo -n probe failed" >&2; return 98; }
-    product_userns /usr/bin/bwrap /usr/local/libexec/mini-grain-bwrap || return $?   # jpay6.sh's selection
+    product_userns /usr/bin/bwrap /usr/local/libexec/mini-grain-bwrap || return $?
     local name
     for name in GRAIN TEST_PROVIDER LAUNCH_GATE; do product_input "$name" executable || return $?; done
   fi
