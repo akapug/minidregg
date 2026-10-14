@@ -146,6 +146,11 @@ root = "Compiler.ObjectiveBendCDiffGen"
 name = "cshake-bench"
 root = "Host.CshakeBench"
 
+# Compiled Objective record decode (Kernel.ObjectiveActivity.decodeRecord). Not part of the umbrella gate.
+[[lean_exe]]
+name = "codec-bench"
+root = "Host.CodecBench"
+
 # Narrow explicit old-capsule carry verifier; no full Host receiving surface.
 [[lean_exe]]
 name = "minidregg-carry-verifier"
