@@ -1,0 +1,439 @@
+#!/usr/bin/env python3
+"""check-waste-model -- the waste ratio of each operation, ratcheted (docs/WASTE-MODEL.md).
+
+  check-waste-model measure RUN [OUT.tsv]
+      Reduce one workload run (scripts/perf/workload.sh NEW_ROOT, perf stat --no-scale) to its measure
+      table: per operation, the raw instructions:u it took (Host + clients + their children) and, from the
+      serving Host's trace (MINIDREGG_HOST_TRACE=1), the server wall per op. Prints it; writes OUT.tsv.
+  check-waste-model judge (RUN | MEASURE.tsv) [--table T]
+      Divide each measured operation by its NECESSARY work (docs/waste-model.tsv) and compare the ratio
+      with the row's pinned ceiling. RED (exit 1) when any load-safe ratio exceeds its ceiling.
+  check-waste-model ratchet FROM [TO]
+      The table may only fall: a ceiling raised, a necessary-work figure changed, or a row removed between
+      FROM and TO (TO default: the working tree) is RED unless scripts/gates/waste-model-decisions.txt
+      gained, in the same range, a line naming that row's key and its new value.
+  check-waste-model self-test
+      Plants: (1) the committed fixture judged against the table is GREEN; (2) one ceiling lowered below
+      the fixture's ratio is RED naming that row; (3) one ceiling raised without a decisions line is RED in
+      the ratchet; (4) the same raise WITH a decisions line passes. Exit 0 iff all four behave.
+  check-waste-model gate FROM TO
+      The merge-gate row: self-test + ratchet FROM TO + judge $WASTE_MODEL_RUN when it names a run (else one
+      UNCONFIGURED line naming why). Exit = number red.
+
+Load safety. Raw instruction counts (perf stat --no-scale) move 1-2% with box load (PERF-FIX-3: the
+scaled hybrid sum moved ~15%, raw did not), so instruction ratios are judged on any box. Wall (the Host
+trace, p50 ms) follows load: wall rows are judged only for a run whose quiet.json was quiet
+(scripts/perf/box.py quiet); on a loaded run each wall row prints UNCONFIGURED naming the busy units.
+A run counted with perf's scaling (before --no-scale) is refused: its instruction column is not raw.
+"""
+import bisect, json, os, pathlib, re, statistics, subprocess, sys, tempfile
+
+HERE = pathlib.Path(__file__).resolve().parent
+REPO = HERE.parent.parent
+TABLE = REPO / 'docs/waste-model.tsv'
+DECISIONS = HERE / 'waste-model-decisions.txt'
+FIXTURE = HERE / 'waste-model-fixture.tsv'
+TABLE_REL = 'docs/waste-model.tsv'
+DECISIONS_REL = 'scripts/gates/waste-model-decisions.txt'
+# workload.sh versions that count raw (perf stat --no-scale) but predate the perfCounting marker
+RAW_WORKLOAD_SH = {'14ae407433e042d0b7c2ddc30827def273836ac95b843a8112cb846fabeefbcc'}
+
+# transcript step name (after the NNN- prefix) -> operation class; first match wins
+STEP_CLASSES = [
+    (r'resource-b\d+$', 'birth.resource'),
+    (r'create-b\d+$', 'birth.create'),
+    (r'u\d+-b\d+-front-end-plan-\d+$', 'invoke'),
+    (r'u\d+-b\d+$', 'invoke'),
+    (r'view-r\d+-b\d+$', 'read.current'),
+    (r'resource-b\d+-now-\d+$', 'read.probe'),
+    (r'at-b\d+-\d+-\d+$', 'read.at'),
+    (r'phase-certify$', 'certify'),
+    (r'call-granted(-front-end-plan-\d+)?$', 'call'),
+    (r'send-post(-front-end-plan-\d+)?$', 'send'),
+    (r'send-deliver$', 'deliver'),
+    (r'reopen-probe(-\d+)?$', 'cold-open'),
+]
+# the step that counts one operation of a class (plans are part of their invoke/call/send)
+UNIT_STEP = {'invoke': r'u\d+-b\d+$', 'call': r'call-granted$', 'send': r'send-post$'}
+
+
+def fail(msg):
+    print(f'check-waste-model: {msg}', file=sys.stderr)
+    sys.exit(2)
+
+
+# ---------------------------------------------------------------- measure
+
+def perf_intervals(path):
+    """[(t_rel_end, count)] summed over the hybrid core types, raw counts."""
+    acc = {}
+    for line in pathlib.Path(path).read_text().splitlines():
+        f = line.split(',')
+        if line.startswith('#') or len(f) < 4 or 'instructions' not in line:
+            continue
+        try:
+            t, c = round(float(f[0]), 6), int(f[1])
+        except ValueError:
+            continue
+        acc[t] = acc.get(t, 0) + c
+    return sorted(acc.items())
+
+
+def phase_sums(iv, t0, phases):
+    """box.py's own attribution rule (an interval belongs to the phase it ends in)."""
+    per = {p: 0 for p, _, _ in phases}
+    for t, c in iv:
+        at = t0 + t
+        for p, s, e in phases:
+            if s < at <= e + 0.25:
+                per[p] += c
+                break
+    return per
+
+
+def recover_t0(iv, phases, recorded):
+    """perf's start time was not saved before perf.t0 existed: the t0 at which box.py's attribution
+    reproduces the recorded per-phase counts exactly (searched in 1 ms steps within 2 s before genesis)."""
+    start = phases[0][1]
+    best = None
+    for ms in range(0, 2000):
+        t0 = start - ms / 1000.0
+        per = phase_sums(iv, t0, phases)
+        err = sum(abs(per[p] - recorded.get(p, 0)) for p in per)
+        if best is None or err < best[0]:
+            best = (err, t0)
+        if err == 0:
+            return t0, 0
+    return best[1], best[0]
+
+
+def overlap_sum(iv, t0, a, b):
+    """instructions in the absolute window (a, b], each interval spread uniformly over its span."""
+    total, prev = 0.0, 0.0
+    for t, c in iv:
+        s, e = t0 + prev, t0 + t
+        lo, hi = max(s, a), min(e, b)
+        if hi > lo and e > s:
+            total += c * (hi - lo) / (e - s)
+        prev = t
+    return total
+
+
+def run_meta(run):
+    summ = json.loads((run / 'summary.json').read_text())
+    sett = json.loads((run / 'settings.json').read_text()) if (run / 'settings.json').exists() else {}
+    counting = summ.get('perfCounting')
+    wsh = ((sett.get('inputs') or {}).get('scripts') or {}).get('scripts/perf/workload.sh')
+    if counting != 'raw' and wsh not in RAW_WORKLOAD_SH:
+        fail(f'{run}: instructions were not counted raw (summary.perfCounting={counting!r}, workload.sh '
+             f'{(wsh or "?")[:12]}...): a scaled hybrid count moves ~15% with load; rerun with workload.sh --no-scale')
+    quiet = json.loads((run / 'quiet.json').read_text()) if (run / 'quiet.json').exists() else None
+    return summ, sett, quiet
+
+
+def measure(run):
+    run = pathlib.Path(run)
+    summ, sett, quiet = run_meta(run)
+    phases = [(l.split('\t')[0], float(l.split('\t')[1]), float(l.split('\t')[2]))
+              for l in (run / 'phases.tsv').read_text().splitlines() if l.strip()]
+    recorded = {k: int(v) for k, v in (summ.get('instructionsU') or {}).items()}
+    if not recorded:
+        fail(f'{run}: summary.json has no instructionsU (perf stat did not run)')
+    iv = perf_intervals(run / 'perf.csv')
+    if (run / 'perf.t0').exists():
+        t0, err = float((run / 'perf.t0').read_text().split()[0]), 0
+    else:
+        t0, err = recover_t0(iv, phases, recorded)
+    rows = []   # (key, kind, value, unit_count, source)
+    counts = {}
+    for l in (run / 'results.tsv').read_text().splitlines()[1:]:
+        f = l.split('\t')
+        if len(f) > 2 and f[1] != 'TOTAL' and f[2]:
+            counts[(f[0], f[1])] = int(f[2])
+    # phase-level rows: the robust ones (boundary error is one 250 ms interval per phase)
+    phase_ops = {'births': ('birth', counts.get(('births', 'create'), 0)),
+                 'updates': ('invoke', counts.get(('updates', 'invoke'), 0)),
+                 'checkpoint': ('certify', counts.get(('checkpoint', 'certify'), 0)),
+                 'reopen': ('cold-open', 1),
+                 'genesis': ('genesis', 1)}
+    for ph, (key, n) in phase_ops.items():
+        if ph in recorded and n:
+            rows.append((f'phase.{key}', 'instr', recorded[ph] / n, n, f'phase {ph} / {n}'))
+    # per-step attribution: each transcript step owns the window since the previous step ended
+    tr = run / 'transcript'
+    steps = []
+    for rc in sorted(tr.glob('*.rc')):
+        name = rc.name[:-3]
+        steps.append((rc.stat().st_mtime, re.sub(r'^\d+-', '', name)))
+    steps.sort()
+    per, units = {}, {}
+    ph_start = {p: s for p, s, _ in phases}
+    starts = sorted(ph_start.values())
+    prev_end = None
+    for end, name in steps:
+        cls = next((c for rx, c in STEP_CLASSES if re.match(rx, name)), None)
+        # a step's window never reaches back across a phase start
+        i = bisect.bisect_right(starts, end) - 1
+        floor = starts[i] if i >= 0 else end
+        a = floor if prev_end is None or prev_end < floor else prev_end
+        prev_end = end
+        if cls is None:
+            continue
+        per[cls] = per.get(cls, 0.0) + overlap_sum(iv, t0, a, end)
+        unit_rx = UNIT_STEP.get(cls)
+        if unit_rx is None or re.match(unit_rx, name):
+            units[cls] = units.get(cls, 0) + 1
+    for cls in sorted(per):
+        if units.get(cls):
+            rows.append((f'op.{cls}', 'instr', per[cls] / units[cls], units[cls], 'transcript-window attribution'))
+    # server wall per op (Host trace)
+    log = run / 'w/public/serve.log'
+    if log.exists():
+        d = {}
+        for line in log.read_text(errors='replace').splitlines():
+            m = re.match(r'host-trace (.+?) (\d+) ms$', line.strip())
+            if m:
+                d.setdefault(m.group(1).replace(' ', '_'), []).append(int(m.group(2)))
+        for k, v in sorted(d.items()):
+            rows.append((f'host.{k}', 'wall_p50_ms', statistics.median(v), len(v), 'serve.log host-trace'))
+    meta = {'run': str(run), 'sourceCommit': sett.get('sourceCommit'), 'inputKey': summ.get('inputKey'),
+            'births': summ.get('births'), 'updates': summ.get('updates'), 'reads': summ.get('reads'),
+            'records': summ.get('records'), 'storeBytes': summ.get('storeBytes'),
+            'underLoad': bool(summ.get('underLoad')), 'loadavg': ' '.join(summ.get('loadavg') or []),
+            'quiet': None if quiet is None else not quiet.get('busy'),
+            'busy': '' if quiet is None else '; '.join(f"{u['unit']} {u['cores']}" for u in quiet.get('busy', [])[:3]),
+            't0_fit_error_instr': err}
+    return meta, rows
+
+
+def write_measure(meta, rows, out):
+    lines = [f'# {k}\t{v}' for k, v in meta.items()]
+    lines.append('key\tkind\tvalue\tcount\tsource')
+    lines += [f'{k}\t{kind}\t{v:.0f}\t{n}\t{src}' for k, kind, v, n, src in rows]
+    pathlib.Path(out).write_text('\n'.join(lines) + '\n')
+
+
+def read_measure(path):
+    meta, rows = {}, []
+    for l in pathlib.Path(path).read_text().splitlines():
+        if l.startswith('# '):
+            k, _, v = l[2:].partition('\t')
+            meta[k] = v
+        elif l and not l.startswith('key\t'):
+            k, kind, v, n, src = l.split('\t')
+            rows.append((k, kind, float(v), int(n), src))
+    for b in ('underLoad', 'quiet'):
+        meta[b] = {'True': True, 'False': False}.get(meta.get(b), None)
+    return meta, rows
+
+
+def load(arg):
+    p = pathlib.Path(arg)
+    if p.is_dir():
+        return measure(p)
+    return read_measure(p)
+
+
+# ---------------------------------------------------------------- table / judge
+
+def parse_table(text):
+    rows = {}
+    for l in text.splitlines():
+        if not l.strip() or l.startswith('#') or l.startswith('key\t'):
+            continue
+        f = l.split('\t')
+        if len(f) < 6:
+            fail(f'table row has {len(f)} fields, wants 6+: {l!r}')
+        key, kind, necessary, ceiling, safe, note = f[0], f[1], float(f[2]), float(f[3]), f[4], '\t'.join(f[5:])
+        rows[key] = {'kind': kind, 'necessary': necessary, 'ceiling': ceiling, 'safe': safe, 'note': note}
+    return rows
+
+
+def judge(meta, rows, table, out=print):
+    got = {k: (v, n) for k, kind, v, n, _ in rows}
+    red = 0
+    out(f"waste-model: run {meta.get('run')} source {str(meta.get('sourceCommit'))[:12]} "
+        f"(records {meta.get('records')}, loadavg {meta.get('loadavg')}, quiet={meta.get('quiet')})")
+    out(f"{'row':<26}{'done':>14}{'necessary':>14}{'ratio':>10}{'ceiling':>10}  verdict")
+    for key, t in table.items():
+        if key not in got:
+            out(f'{key:<26}{"-":>14}{t["necessary"]:>14.3g}{"-":>10}{t["ceiling"]:>10.1f}  RED: not measured by this run')
+            red += 1
+            continue
+        v, n = got[key]
+        ratio = v / t['necessary']
+        if t['safe'] != 'load-safe' and meta.get('quiet') is not True:
+            why = meta.get('busy') or f"underLoad={meta.get('underLoad')}, loadavg {meta.get('loadavg')}"
+            out(f'{key:<26}{v:>14.4g}{t["necessary"]:>14.3g}{ratio:>10.1f}{t["ceiling"]:>10.1f}  '
+                f'UNCONFIGURED: {t["kind"]} is load-sensitive and this run was not quiet ({why})')
+            continue
+        if ratio > t['ceiling']:
+            out(f'{key:<26}{v:>14.4g}{t["necessary"]:>14.3g}{ratio:>10.1f}{t["ceiling"]:>10.1f}  RED: ratio above its ceiling')
+            red += 1
+        else:
+            hint = f' (ceiling may fall to {ratio * 1.05:.1f})' if ratio * 1.25 < t['ceiling'] else ''
+            out(f'{key:<26}{v:>14.4g}{t["necessary"]:>14.3g}{ratio:>10.1f}{t["ceiling"]:>10.1f}  ok{hint}')
+    out(f'waste-model: {"RED" if red else "GREEN"} ({red} row(s) red of {len(table)})')
+    return red
+
+
+# ---------------------------------------------------------------- ratchet
+
+def git_show(rev, rel):
+    r = subprocess.run(['git', '-C', str(REPO), 'show', f'{rev}:{rel}'], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def decisions_added(old_text, new_text):
+    old = set((old_text or '').splitlines())
+    return [l for l in (new_text or '').splitlines() if l.strip() and not l.startswith('#') and l not in old]
+
+
+def ratchet_texts(old_table, new_table, old_dec, new_dec, out=print):
+    if old_table is None:
+        out('waste-model ratchet: no table at FROM (first landing): nothing to ratchet against')
+        return 0
+    old, new = parse_table(old_table), parse_table(new_table)
+    added = decisions_added(old_dec, new_dec)
+    red = 0
+
+    def named(key, value):
+        for l in added:
+            f = l.split('\t')
+            if len(f) >= 3 and f[1] == key and (value is None or abs(float(f[2]) - value) < 1e-9):
+                return l
+        return None
+
+    for key, o in old.items():
+        n = new.get(key)
+        if n is None:
+            ok = named(key, None)
+            out(f'ratchet {key}: row removed -- {"decided: " + ok if ok else "RED (no decisions line names it)"}')
+            red += 0 if ok else 1
+            continue
+        if n['ceiling'] > o['ceiling']:
+            ok = named(key, n['ceiling'])
+            out(f'ratchet {key}: ceiling {o["ceiling"]} -> {n["ceiling"]} RAISED -- '
+                f'{"decided: " + ok if ok else "RED (a ceiling only falls without a decisions line)"}')
+            red += 0 if ok else 1
+        elif n['ceiling'] < o['ceiling']:
+            out(f'ratchet {key}: ceiling {o["ceiling"]} -> {n["ceiling"]} (lowered)')
+        if n['necessary'] != o['necessary']:
+            ok = named(key, n['necessary'])
+            out(f'ratchet {key}: necessary {o["necessary"]:.4g} -> {n["necessary"]:.4g} CHANGED -- '
+                f'{"decided: " + ok if ok else "RED (the denominator moves every ratio; name why)"}')
+            red += 0 if ok else 1
+        if n['safe'] != o['safe']:
+            ok = named(key, None)
+            out(f'ratchet {key}: safety {o["safe"]} -> {n["safe"]} -- {"decided: " + ok if ok else "RED"}')
+            red += 0 if ok else 1
+    out(f'waste-model ratchet: {"RED" if red else "GREEN"} ({red} violation(s), {len(added)} decisions line(s) added)')
+    return red
+
+
+def ratchet(frm, to=None):
+    old_t, old_d = git_show(frm, TABLE_REL), git_show(frm, DECISIONS_REL)
+    if to:
+        new_t, new_d = git_show(to, TABLE_REL), git_show(to, DECISIONS_REL)
+    else:
+        new_t = TABLE.read_text()
+        new_d = DECISIONS.read_text() if DECISIONS.exists() else ''
+    if new_t is None:
+        print('waste-model ratchet: RED (the table is gone at TO)')
+        return 1
+    return ratchet_texts(old_t, new_t, old_d, new_d)
+
+
+# ---------------------------------------------------------------- self-test
+
+def self_test():
+    table_text = TABLE.read_text()
+    table = parse_table(table_text)
+    meta, rows = read_measure(FIXTURE)
+    sink = []
+    bad = 0
+    r1 = judge(meta, rows, table, sink.append)
+    print(f'self-test 1 (fixture vs table): {"PASS" if r1 == 0 else "FAIL"} (red rows {r1})')
+    bad += r1 != 0
+    got = {k: v for k, kind, v, n, _ in rows}
+    key = next(k for k, t in table.items() if t['safe'] == 'load-safe' and k in got)
+    ratio = got[key] / table[key]['necessary']
+    planted = dict(table)
+    planted[key] = dict(table[key], ceiling=round(ratio * 0.9, 1))
+    sink = []
+    r2 = judge(meta, rows, planted, sink.append)
+    hit = any(l.startswith(key) and 'RED' in l for l in sink)
+    print(f'self-test 2 (ceiling of {key} lowered {table[key]["ceiling"]} -> {planted[key]["ceiling"]}, '
+          f'below ratio {ratio:.1f}): {"PASS" if r2 == 1 and hit else "FAIL"} (red rows {r2})')
+    bad += not (r2 == 1 and hit)
+    raised_line = None
+    out_lines = []
+    for l in table_text.splitlines():
+        f = l.split('\t')
+        if f[0] == key:
+            f[3] = str(table[key]['ceiling'] * 2)
+            raised_line = '\t'.join(f)
+            out_lines.append(raised_line)
+        else:
+            out_lines.append(l)
+    raised = '\n'.join(out_lines) + '\n'
+    dec = DECISIONS.read_text() if DECISIONS.exists() else ''
+    sink = []
+    r3 = ratchet_texts(table_text, raised, dec, dec, sink.append)
+    print(f'self-test 3 (ceiling of {key} raised, no decisions line): {"PASS" if r3 == 1 else "FAIL"}')
+    bad += r3 != 1
+    sink = []
+    r4 = ratchet_texts(table_text, raised, dec,
+                       dec + f'2026-10-14\t{key}\t{table[key]["ceiling"] * 2}\tself-test plant\n', sink.append)
+    print(f'self-test 4 (same raise with a decisions line): {"PASS" if r4 == 0 else "FAIL"}')
+    bad += r4 != 0
+    return bad
+
+
+def gate(frm, to):
+    red = 0
+    st = self_test()
+    print(f'waste-model self-test: {"PASS" if st == 0 else "RED"}')
+    red += st != 0
+    red += ratchet(frm, to) != 0
+    run = os.environ.get('WASTE_MODEL_RUN')
+    if run:
+        meta, rows = load(run)
+        red += judge(meta, rows, parse_table(TABLE.read_text())) != 0
+    else:
+        print('waste-model judge: UNCONFIGURED (no run: WASTE_MODEL_RUN names a workload.sh root or a measure '
+              'table; the landing pipeline runs no instruction-counted workload yet)')
+    print(f'waste-model gate: {"RED" if red else "PASS"} ({red})')
+    return red
+
+
+def main(argv):
+    if len(argv) < 2:
+        raise SystemExit(__doc__)
+    verb = argv[1]
+    if verb == 'measure':
+        meta, rows = measure(pathlib.Path(argv[2]))
+        for k, v in meta.items():
+            print(f'# {k}\t{v}')
+        for k, kind, v, n, src in rows:
+            print(f'{k:<26}{kind:<13}{v:>16.0f}{n:>6}  {src}')
+        if len(argv) > 3:
+            write_measure(meta, rows, argv[3])
+        return 0
+    if verb == 'judge':
+        tpath = TABLE
+        if '--table' in argv:
+            tpath = pathlib.Path(argv[argv.index('--table') + 1])
+        meta, rows = load(argv[2])
+        return 1 if judge(meta, rows, parse_table(tpath.read_text())) else 0
+    if verb == 'ratchet':
+        return 1 if ratchet(argv[2], argv[3] if len(argv) > 3 else None) else 0
+    if verb == 'self-test':
+        return 1 if self_test() else 0
+    if verb == 'gate':
+        return gate(argv[2], argv[3])
+    raise SystemExit(__doc__)
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
