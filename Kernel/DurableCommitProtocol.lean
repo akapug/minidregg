@@ -118,6 +118,9 @@ structure Snapshot
   roots : CellId -> TypedAuthorization.Digest
   consumed : Nullifier -> Bool
   available : Charge
+  /-- Newest first, like the journal: one cons per install, a persistent
+  append (a `List` snoc copied the whole history, Θ(h) per record). The
+  chronological history is `history.reverse` (`install_history_chronological`). -/
   history : List Event
   journal : List (TxId × Intent TxId CellId Nullifier Event)
 
@@ -156,7 +159,7 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
   consumed := fun nullifier =>
     if nullifier ∈ intent.nullifiers then true else before.consumed nullifier
   available := fun lane => before.available lane - intent.exactCharge lane
-  history := before.history ++ [intent.event]
+  history := intent.event :: before.history
   journal := (intent.transactionId, intent) :: before.journal
 
 @[simp] theorem lookupRecorded_install
@@ -195,8 +198,17 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
     [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event) :
-    (install before intent).history = before.history ++ [intent.event] :=
+    (install before intent).history = intent.event :: before.history :=
   rfl
+
+/-- The chronological history gains exactly the installed event at its end
+(the statement `install_history` made before history went newest first). -/
+theorem install_history_chronological
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event) :
+    (install before intent).history.reverse = before.history.reverse ++ [intent.event] := by
+  simp [install]
 
 @[simp] theorem install_journal
     [DecidableEq CellId] [DecidableEq Nullifier]

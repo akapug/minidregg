@@ -371,7 +371,7 @@ theorem history_length_eq_height (loaded : Loaded rootBytes) :
   split at resumed
   next =>
     rw [replay_history_length _ _ _ resumed]
-    simp only [State.snapshot, List.length_map, Loaded.height]
+    simp only [State.snapshot, List.length_reverse, List.length_map, Loaded.height]
     rw [← List.length_append, List.take_append_drop]
   next => simp at resumed
 

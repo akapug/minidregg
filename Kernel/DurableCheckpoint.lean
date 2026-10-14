@@ -96,8 +96,8 @@ theorem tableLookup_rootTable (rootBytes : List UInt8 → Digest)
       · simp only [rootTable, List.map_cons, tableLookup, Seed.lookup, same, ↓reduceIte]
         exact ih
 
-/-- The snapshot at the checkpoint. Journal (newest first) and history
-(chronological) come from the retained prefix exactly as `install` builds them. -/
+/-- The snapshot at the checkpoint. Journal and history (both newest first)
+come from the retained prefix exactly as `install` builds them. -/
 def State.snapshot (rootBytes : List UInt8 → Digest) (state : State)
     (prefixRecords : List IntentRecord) : DataSnapshot rootBytes :=
   let table := rootTable rootBytes state.cells
@@ -110,7 +110,7 @@ def State.snapshot (rootBytes : List UInt8 → Digest) (state : State)
           | none => absentRoot
         consumed := fun nullifier => decide (nullifier ∈ spent)
         available := state.available
-        history := prefixRecords.map fun record => (IntentRecord.erase record).event
+        history := (prefixRecords.map fun record => (IntentRecord.erase record).event).reverse
         journal := (prefixRecords.map fun record =>
           (record.transactionId, IntentRecord.erase record)).reverse }
     canonicalBytes := fun cellId => (Seed.lookup state.cells cellId).getD state.absentBytes

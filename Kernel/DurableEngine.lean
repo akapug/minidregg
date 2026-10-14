@@ -11,12 +11,12 @@ the spec reads, it costs Θ(h) per record replayed at height h:
 * the journal lookup that guards every replayed record walks the whole
   journal (`Snapshot.lookupRecorded`);
 * the consumed check walks every spent nullifier of the prefix (`∈ spent`);
-* the history append copies the whole history (`history ++ [event]`);
+* (until history went newest first, the history append copied the whole history);
 * admissibility enumerates the image's ids with an `eraseDups` (Θ(h·cells)).
 
 `Engine` holds the same snapshot as data: the cells as a `CellTable`, the
 spent nullifiers as a hash set, the journal with a hash-set index of its
-transaction ids, the history newest-first (one cons per record). `view` is the
+transaction ids. `view` is the
 snapshot it represents, field for field; `replay_view` says the engine's replay
 IS the protocol replay (`DurableReceiver.replay`) under `view`, and
 `resume_eq_resumeFast` (`@[csimp]`) makes every compiled `resume` run it. No
@@ -75,7 +75,7 @@ structure Engine where
   recorded : Std.HashSet TransactionId
   recordedExact : ∀ transactionId,
     recorded.contains transactionId = (journal.map Prod.fst).contains transactionId
-  /-- Newest first: one cons per record; `view` reverses it once. -/
+  /-- Newest first, as `Snapshot.install` conses it. -/
   historyRev : List ReplayEnvelope
 
 namespace Engine
@@ -92,7 +92,7 @@ def bytes (engine : Engine) (cellId : CellId) : List UInt8 :=
     { roots := fun cellId => rootBytes (engine.bytes cellId)
       consumed := fun nullifier => engine.spent.contains nullifier
       available := engine.available
-      history := engine.historyRev.reverse
+      history := engine.historyRev
       journal := engine.journal }
   canonicalBytes := engine.bytes
   coherent := fun _ => rfl
@@ -190,7 +190,7 @@ theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
          show (intent.nullifiers.foldl _ engine.spent).contains nullifier = _
          rw [contains_foldl]
          by_cases member : nullifier ∈ intent.nullifiers <;> simp [member, view])
-      | simp [view, install, List.reverse_cons]
+      | rfl
   · exact bytesEq
 
 /-- The engine at a checkpoint: the state's cells as a table, the prefix's
