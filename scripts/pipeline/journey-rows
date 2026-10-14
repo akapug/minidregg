@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve perf)
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -537,6 +537,40 @@ row_jserve() {
   [ -f "$SRC/native/resource-client/journey.d/jserve.sh" ] || return 99
   product_journey jserve JSERVE 'J0 J1 J2 J3 J4' || return $?
   product_evidence "$OUT/steps/JSERVE/jserve/serve-rows.tsv" || return 1
+}
+
+# The fixed performance workload (scripts/perf/workload.sh, docs/PERF-WORKLOAD.md) at its smallest
+# parameters on a fresh native Store: genesis, births, updates, current and past-state reads, a
+# checkpoint certify past height 64, a granted call and an inbox send, a cold reopen. PASS only when
+# every phase completed AND the whole run took < 180 s. One sub-row per phase (its wall); the table is
+# OUT/table.txt and the per-operation figures OUT/results.tsv. It measures wall time, so it requires a
+# quiet box: a busy one is UNCONFIGURED (98) with the busy job named (scripts/perf/box.py quiet), never
+# a red or green verdict taken under someone else's load. Plant: JOURNEY_PLANT_PERF=budget-1s
+# judges the same run against a 1 s bound, so the row must go red naming the bound.
+row_perf() {
+  local d=$SRC/scripts/perf/workload.sh budget=180 rc
+  [ -f "$d" ] || return 99
+  case "${JOURNEY_PLANT_PERF:-}" in
+    '') ;;
+    budget-1s) budget=1 ;;
+    *) echo "unknown JOURNEY_PLANT_PERF ${JOURNEY_PLANT_PERF} (known: budget-1s)" >&2; return 2 ;;
+  esac
+  PERF_BUDGET_S=$budget bash "$d" "$BIN" "$RUN/p" "${PERF_ROW_N:-20}" "${PERF_ROW_M:-16}" "${PERF_ROW_K:-8}" \
+    >"$OUT/perf.out" 2>"$OUT/perf.err"
+  rc=$?
+  [ "$rc" = 3 ] && { tail -1 "$OUT/perf.err" >&2; return 98; }
+  local f
+  for f in results.tsv table.txt summary.json settings.json quiet.json workload.log; do cp "$RUN/p/$f" "$OUT/" 2>/dev/null; done
+  # one sub-row per phase: PASS when the phase completed, its wall from the table
+  if [ -f "$OUT/summary.json" ] && [ -f "$OUT/results.tsv" ]; then
+    awk -F'\t' '$2 == "TOTAL" {print $1 "\t" $7}' "$OUT/results.tsv" | while IFS=$'\t' read -r ph wall; do
+      if jq -e --arg p "$ph" '.phasesCompleted | index($p)' "$OUT/summary.json" >/dev/null; then st=PASS; else st=FAIL; fi
+      printf '%s\t%s\t%s\t%s\n' "perf-$ph" "$st" "$wall" \
+        "$(awk -F'\t' -v p="$ph" '$1 == p && $2 != "TOTAL" {printf "%s%s n=%s p50=%sms max=%sms", (s++?"; ":""), $2, $3, $4, $6}' "$OUT/results.tsv")"
+    done >"$OUT/subrows.tsv"
+  fi
+  tail -1 "$OUT/perf.err" >&2
+  return $rc
 }
 
 product_pay_step() {
