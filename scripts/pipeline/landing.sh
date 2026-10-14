@@ -47,6 +47,10 @@ judge() {
   local J=$JOURNEY_ROOT/$tip req decl
   req=$W/src/scripts/pipeline/required-rows; [ -f "$req" ] || req=$here/required-rows
   decl=$PIPELINE_ROOT/absent-inputs.tsv; [ -f "$decl" ] || decl=/dev/null
+  # BASELINE: main's own most recent standing run on THIS box ($ARTIFACT_ROOT/main -> its journeys DONE)
+  local base_t base_res=/dev/null
+  base_t=$(readlink "$ARTIFACT_ROOT/main" 2>/dev/null || true)
+  if [ -n "$base_t" ] && [ -f "$JOURNEY_ROOT/$base_t/DONE" ]; then base_res=$JOURNEY_ROOT/$base_t/results.tsv; fi
   [ -f "$J/DONE" ] || { pipeline_log "no finished standing run at $J"; return 12; }
   # Which tree the standing run executed, and whether that runner is TIP's own: a greppable line, never an
   # absence. The dispatch record is the service's (install-journey-units); the reference sha is TIP's blob
@@ -73,16 +77,29 @@ judge() {
   awk -F'\t' '$2!="PASS"' "$J/results.tsv" | cut -c1-240
   echo "== rows: $(wc -l <"$J/results.tsv") lines; $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
   echo "== required rows: $req (sha256:$(self_sha "$req")); declarations: $decl"
-  python3 - "$req" "$J/results.tsv" "$decl" <<'PY'
+  echo "== baseline: main ${base_t:-none} on $(hostname): $base_res"
+  [ "$base_res" != /dev/null ] || echo "NO BASELINE: no finished standing run of main on this box; every required non-PASS counts as new"
+  python3 - "$req" "$J/results.tsv" "$decl" "$base_res" <<'PY'
 import re, sys
-req_f, res_f, decl_f = sys.argv[1:]
-req, pending = [], []
+req_f, res_f, decl_f, base_f = sys.argv[1:]
+req, pending, known = [], [], {}
 for l in open(req_f):
     l = l.strip()
     if not l or l.startswith('#'): continue
     if l.startswith('pending '): pending.append(l[8:]); continue
+    if l.startswith('known-red '):
+        p = l.split(None, 3); known[p[1]] = (p[2], p[3] if len(p) > 3 else ''); continue
     req.append(l)
 rows = [l.rstrip('\n').split('\t') for l in open(res_f) if l.strip()]
+base = {}
+for l in open(base_f):
+    if l.strip():
+        p = l.rstrip('\n').split('\t'); base[p[0]] = p[1]
+cand = {r[0]: r[1] for r in rows}
+# (b) NEW REDS: every line PASS at main's baseline that is not PASS (or is gone) in the candidate's run
+new = [(k, cand.get(k, 'MISSING')) for k, st in base.items() if st == 'PASS' and cand.get(k) != 'PASS']
+print(f"new reds vs baseline: {len(new)}")
+for k, st in new: print(f"NEW RED   {k} {st} (PASS at main's baseline)")
 decl = []
 for l in open(decl_f):
     if not l.strip() or l.startswith('#'): continue
@@ -93,6 +110,7 @@ def declared(r):
         if row == r[0] and len(r) > 4 and rx.search(r[4]): return why
     return None
 bad = 0
+unmet = []
 seen = set()   # a sub-row is covered by its own id AND its parent's: judge and print it once
 for rid in req:
     mine = [r for r in rows if r[0] == rid or r[0].startswith(rid + '/')]
@@ -111,7 +129,7 @@ for rid in req:
                 print(f"ok        {r[0]} UNCONFIGURED via declared sub-rows"); continue
         if why:
             print(f"declared  {r[0]} UNCONFIGURED: {why}"); continue
-        print(f"NOT MET   {r[0]} {st}: {(r[4] if len(r) > 4 else '')[:200]}"); bad += 1
+        unmet.append((r[0], st, (r[4] if len(r) > 4 else '')[:200]))
 for p in pending:
     pid = p.split()[0]
     if any(r[0] == pid or r[0].startswith(pid + '/') for r in rows):
@@ -124,8 +142,23 @@ for p in pending:
         print(f"required  {pid} (was pending; the row exists now)")
     else:
         print(f"pending   {p}")
-print(f"REQUIRED: {len(req)} ids, {bad} not met" + ("" if bad else " -> the standing run meets the required rows"))
-sys.exit(1 if bad else 0)
+# (c) a required line unmet in the candidate that was ALSO non-PASS at main's baseline is pre-existing: it
+# blocks nothing only when required-rows lists it as `known-red ROW CV-ID note` (the fix has an owner).
+pre, blocking = [], []
+for rid, st, det in unmet:
+    top = rid.split('/')[0]
+    was = base.get(rid)
+    if was is not None and was != 'PASS' and (rid in known or top in known):
+        cv = known.get(rid, known.get(top))[0]
+        pre.append(f"{rid} (cv {cv})"); print(f"PRE-RED   {rid} {st} (non-PASS at main's baseline too: {was}; cv {cv}): {det}")
+    else:
+        why = "" if was is None or was == 'PASS' else f" (non-PASS at main's baseline too: {was}, but no known-red cv task in required-rows: open one)"
+        blocking.append(rid); print(f"NOT MET   {rid} {st}{why}: {det}")
+bad += len(blocking)
+print(f"required unmet: {[u[0] for u in unmet]} (of which pre-existing at main: {pre})")
+ok = not new and not bad
+print(f"REQUIRED: {len(req)} ids; new reds vs baseline: {len(new)}; blocking: {bad}" + (" -> LANDABLE by the baseline-relative rule" if ok else " -> NOT landable"))
+sys.exit(0 if ok else 1)
 PY
 }
 if [ "$check_only" = 1 ]; then judge; exit $?; fi
