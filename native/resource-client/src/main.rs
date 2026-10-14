@@ -759,7 +759,9 @@ usage:
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini objective-invoke --host LOCAL-HOST --config CONFIG.json --request REQUEST.json --intent-nonce N --key KEY --dir NEW-ATTEMPT [--prepare-only true]   (lost reply: mini retry --attempt DIR --mode lookup)
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] [--provider-continuity DESCRIPTOR.json] --key KEY --dir ATTEMPT
-  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
+  mini query (--workspace WORKSPACE | --host HOST --config CONFIG.json --key KEY) --intent INTENT.json [--intent-kind KIND] --view resource|policy|capability|at [--presentation fn-inbox-resource] --dir ATTEMPT
+    --workspace takes the Host, config, key and socket from the workspace: the challenge and the query
+    are answered by its serving session (ops 4/5), not by two cold Host opens of the Store.
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
@@ -4316,13 +4318,27 @@ fn run(mut args: Args) -> Result<()> {
             )
         }
         "query" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
+            // A workspace names its serving socket: the signed read goes to that session (ops 4/5);
+            // without one, each of challenge and query opens the Store in a cold Host.
+            let (host, config, key) = match args.optional("workspace") {
+                Some(root) => {
+                    let workspace = workspace::load(&path(root))?;
+                    (
+                        workspace::workspace_host(&workspace)?,
+                        workspace::member_path(&workspace, "config")?,
+                        workspace::member_path(&workspace, "key")?,
+                    )
+                }
+                None => (
+                    path(args.required("host")?),
+                    path(args.required("config")?),
+                    path(args.required("key")?),
+                ),
+            };
             let intent = path(args.required("intent")?);
             let intent_kind = args
                 .optional("intent-kind")
                 .unwrap_or_else(|| OsString::from("intent"));
-            let key = path(args.required("key")?);
             let view = args.required("view")?;
             let presentation = args.optional("presentation");
             let directory = path(args.required("dir")?);

@@ -159,8 +159,9 @@ def total(name, label, phase=None, op=None):
 
 
 def query(name, view, height=None, phase=None, op=None):
-    """A signed query of NAME's resource (`mini query`, answered by a cold open of the Store): VIEW `resource`
-    (current) or `at` HEIGHT (absolute, K-HISTORY-READ). Returns the query directory (challenge.json)."""
+    """A signed query of NAME's resource (`mini query --workspace`, answered by the serving session: ops 4/5):
+    VIEW `resource` (current) or `at` HEIGHT (absolute, K-HISTORY-READ). Returns the query directory
+    (challenge.json)."""
     wsd = json.loads((w.sponsor / 'workspace.json').read_text())
     target = str(w.objects[name]['object'])
     req = w.root / 'queries'
@@ -173,8 +174,7 @@ def query(name, view, height=None, phase=None, op=None):
     tag = f'{view}-{name}-{height if height is not None else "now"}-{time.time_ns()}'
     f = req / f'{tag}.json'
     f.write_text(json.dumps(intent))
-    args = (tag, w.mini, 'query', '--host', wsd['host'], '--config', wsd['config'], '--intent', f, '--key',
-            wsd['key'], '--view', view, '--dir', req / tag)
+    args = (tag, w.mini, 'query', '--workspace', w.sponsor, '--intent', f, '--view', view, '--dir', req / tag)
     r = timed(phase, op, w.sh, *args, ok=(0, 1, 2, 3)) if phase else w.sh(*args, ok=(0, 1, 2, 3))
     query.last = r
     return req / tag
