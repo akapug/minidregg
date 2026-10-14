@@ -714,42 +714,44 @@ theorem openSealedWith_fst {α : Body → Type} (key : MacKey) (rootBytes : List
 
 #assert_axioms openSealedWith_fst
 
-/-- `openSealed` that also returns the world root it checked, so a caller that
-compares the checkpoint against a log root does not evaluate the root again. -/
-def openSealedRooted (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List UInt8) :
-    Except OpenError (Body × Digest) := do
-  let some sealed := checkpointFrame.decode bytes | throw .malformed
-  unless sealed.body.keyId = key.id do throw .foreignKey
-  unless sealed.root = worldRoot rootBytes sealed.body do throw .rootMismatch
-  unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
-  pure (sealed.body, sealed.root)
-
-/-- The rooted open is `openSealed` paired with the body's world root. -/
-theorem openSealedRooted_eq (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List UInt8) :
-    openSealedRooted key rootBytes bytes =
-      (fun body => (body, worldRoot rootBytes body)) <$> openSealed key rootBytes bytes := by
-  unfold openSealedRooted openSealed
+/-- **The cached open is the open, paired**: `openSealed` with the derived value
+of the body beside it. -/
+theorem openSealedWith_eq {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    openSealedWith key rootBytes bytes derive rootOf exact =
+      (fun body => (⟨body, derive body⟩ : (body : Body) × α body)) <$> openSealed key rootBytes bytes := by
+  unfold openSealedWith openSealed
   cases checkpointFrame.decode bytes with
   | none => rfl
   | some sealed =>
+      simp only [exact]
       by_cases keyOk : sealed.body.keyId = key.id
       · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
-        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body)
-          · simp [keyOk, rootOk, macOk] <;> rfl
-          · simp [keyOk, rootOk, macOk]
-        · simp [keyOk, rootOk] <;> rfl
-      · simp [keyOk] <;> rfl
+        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+            simp [keyOk, rootOk, macOk]
+        · simp [keyOk, rootOk]
+          rfl
+      · simp [keyOk]
+        rfl
 
-theorem openSealedRooted_ok {key : MacKey} {rootBytes : List UInt8 → Digest} {bytes : List UInt8}
-    {body : Body} {root : Digest} (opened : openSealedRooted key rootBytes bytes = .ok (body, root)) :
-    openSealed key rootBytes bytes = .ok body ∧ root = worldRoot rootBytes body := by
-  rw [openSealedRooted_eq] at opened
+/-- What an accepted cached open hands back: the body `openSealed` accepts, and
+a derived value whose root is that body's world root. -/
+theorem openSealedWith_ok {α : Body → Type} {key : MacKey} {rootBytes : List UInt8 → Digest}
+    {bytes : List UInt8} {derive : (body : Body) → α body} {rootOf : (body : Body) → α body → Digest}
+    {exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body} {body : Body} {derived : α body}
+    (opened : openSealedWith key rootBytes bytes derive rootOf exact = .ok ⟨body, derived⟩) :
+    openSealed key rootBytes bytes = .ok body ∧ rootOf body derived = worldRoot rootBytes body := by
+  rw [openSealedWith_eq] at opened
   cases plain : openSealed key rootBytes bytes with
   | error reason => rw [plain] at opened; cases opened
   | ok found =>
       rw [plain] at opened
       cases opened
-      exact ⟨rfl, rfl⟩
+      exact ⟨rfl, exact _⟩
+
+#assert_axioms openSealedWith_eq
+#assert_axioms openSealedWith_ok
 
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)

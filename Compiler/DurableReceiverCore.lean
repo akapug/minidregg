@@ -1497,16 +1497,20 @@ def Loaded.keptAt {rootBytes : List UInt8 → Digest} (transport : Transport) (k
   | .error message => return .error s!"past state unavailable: the kept checkpoint read failed: {message}"
   | .ok none => return .ok none
   | .ok (some checkpoint) =>
-      match opened : openSealedRooted key rootBytes checkpoint.bytes with
+      -- the same cached open as the full open's checkpoint (loadChained): the tree evaluated once
+      match opened : openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
+          (fun _ => RootCache.build _) (fun _ built => built.1.root)
+          (fun _ => RootCache.ofEntries_root _) with
       | .error reason =>
           return .error s!"past state refused: the kept checkpoint at {checkpoint.height} does not open ({repr reason})"
-      | .ok (body, root) =>
+      | .ok ⟨body, built⟩ =>
+          let root := built.1.root
           if body.height ≠ checkpoint.height ∨ body.height > height then
             return .error s!"past state refused: the kept checkpoint at {checkpoint.height} names height {body.height}"
           if positive : 0 < body.height then
             if within : body.height ≤ loaded.image.accepted.length then
               if logged : loaded.rootLog[body.height - 1]? = some (some root) then
-                have plain := openSealedRooted_ok opened
+                have plain := openSealedWith_ok opened
                 return .ok (some ⟨key, body.height, body.state, positive, within,
                   ⟨checkpoint.bytes, body, plain.1, rfl, rfl, by rw [← plain.2]; exact logged⟩⟩)
               else
