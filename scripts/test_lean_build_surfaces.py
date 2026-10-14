@@ -47,20 +47,25 @@ class BuildSurfaces(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing qualification"):
                 surfaces.build(root)
 
-    def test_check_refuses_changed_source_and_new_unclassified_module(self):
+    def test_check_refuses_untracked_or_stale_emitted_targets_and_ignores_edits(self):
         with tempfile.TemporaryDirectory() as t:
             root = Path(t); self.fixture(root)
-            data = surfaces.build(root)
-            (root / "protocol/lean-build-surfaces.json").write_text(json.dumps(data))
             script = str(Path(__file__).with_name("lean-build-surfaces.py"))
-            subprocess.run(["python3", script, "check", "--root", str(root)], check=True)
-            (root / "Compiler/New.lean").write_text("def newSource : Nat := 0\n")
-            run = subprocess.run(["python3", script, "check", "--root", str(root)], capture_output=True, text=True)
-            self.assertNotEqual(run.returncode, 0); self.assertIn("unclassified", run.stderr)
-            (root / "Compiler/New.lean").unlink()
+            check = lambda: subprocess.run(["python3", script, "check", "--root", str(root)], capture_output=True, text=True)
+            subprocess.run(["python3", script, "generate", "--root", str(root)], check=True, capture_output=True)
+            # the emitted targets exist but git does not track them: red by name
+            run = check()
+            self.assertNotEqual(run.returncode, 0); self.assertIn("not tracked", run.stdout)
+            subprocess.run(["git", "add", *surfaces.EMITTED], cwd=root, check=True)
+            self.assertEqual(check().returncode, 0)
+            # an ordinary source edit is no event (the old pin called it "source drift")
             (root / "Minidregg.lean").write_text("-- changed\n")
-            run = subprocess.run(["python3", script, "check", "--root", str(root)], capture_output=True, text=True)
-            self.assertNotEqual(run.returncode, 0); self.assertIn("source drift", run.stderr)
+            self.assertEqual(check().returncode, 0)
+            # a new unrooted module makes the emitted ResearchWip stale: red until regenerated
+            (root / "Compiler/New.lean").write_text("def newSource : Nat := 0\n")
+            run = check()
+            self.assertNotEqual(run.returncode, 0); self.assertIn("ResearchWip.lean is stale", run.stdout)
+            self.assertFalse((root / "protocol/lean-build-surfaces.json").exists())
 
 if __name__ == "__main__":
     unittest.main()

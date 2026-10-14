@@ -96,6 +96,7 @@ import Host.PortableContinuationInspection
 import Host.RoomKeyReleaseAuthor
 import Host.SourceAgreementBirth
 import Kernel.AgreementEvidenceRegime
+import Kernel.CellTable
 import Kernel.GenericSimplexReconfig
 import Kernel.JointProtectedGateProofs
 import Kernel.JointReservationFunding
