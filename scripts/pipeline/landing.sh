@@ -132,6 +132,17 @@ for rid in req:
         unmet.append((r[0], st, (r[4] if len(r) > 4 else '')[:200]))
 for p in pending:
     pid = p.split()[0]
+    green_gate = len(p.split()) > 1 and p.split()[1] == 'when-green-at-main'
+    mine_base = {k: st for k, st in base.items() if k == pid or k.startswith(pid + '/')}
+    if green_gate and not (mine_base and all(st == 'PASS' for st in mine_base.values())):
+        # required only once main's baseline has it PASS; (b) above still judges it line by line
+        mine = [r for r in rows if r[0] == pid or r[0].startswith(pid + '/')]
+        now = ', '.join(f"{r[0]} {r[1]}" for r in mine) or 'no line'
+        was = ', '.join(f"{k} {st}" for k, st in mine_base.items()) or 'no line'
+        print(f"pending   {pid} (when green at main; main's baseline: {was}; candidate: {now})")
+        for r in mine:
+            if r[1] != 'PASS': print(f"  not yet  {r[0]} {r[1]}: {(r[4] if len(r) > 4 else '')[:200]}")
+        continue
     if any(r[0] == pid or r[0].startswith(pid + '/') for r in rows):
         # a pending row that now exists is required (required-rows header)
         for r in [r for r in rows if r[0] == pid or r[0].startswith(pid + '/')]:

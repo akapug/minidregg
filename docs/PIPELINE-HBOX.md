@@ -106,9 +106,56 @@ from the results.tsv it has read.
 ### required-rows
 
 The ids come from MATURATION-MAP-20261009 §3. A row id covers its sub-rows. A parent that is UNCONFIGURED only
-because of declared sub-rows is accepted. Three rows on the map do not exist yet: BIRTHS (the bar; `growth`
-measures updates), HERMES-LIVE and jcertify. They are `pending` lines: printed on every landing, not counted. The first time a row of that name appears in
-results.tsv, it is required automatically (ROOT, 2026-10-14).
+because of declared sub-rows is accepted. Two rows on the map do not exist yet: HERMES-LIVE and jcertify. They are
+`pending` lines: printed on every landing, not counted. The first time a row of that name appears in results.tsv, it
+is required automatically (ROOT, 2026-10-14).
+
+`births` (THE BAR) exists and runs on every landing, but its line is `pending births when-green-at-main …`: it
+becomes required only once main's own baseline run has it PASS. Until then landing.sh prints
+`pending   births (when green at main; main's baseline: …; candidate: …)` and does not count it. Rule (b) below
+still applies to it, so once main is PASS a candidate that turns it red is a NEW RED.
+
+## The bar per landing: `births`; the soak: the nightly
+
+THE BAR (cv 01a0f9c0-521b) is on CREATES: write p99 <= 5 s, cold reopen <= 60 s. The standing run judges it with
+`births` (journey-rows `row_births`): `scripts/perf/workload.py --births-only` on a fresh native Store: genesis,
+setup, `PERF_BIRTHS_N` births (default **64**), then the Host stopped by its PID file and restarted on the same
+Store, timed to the first answered read. PASS iff all N resource writes and N `create` turns completed, each
+op's p99 <= 5 s, and the reopen <= 60 s; FAIL names the op and the bound. The detail carries create p50/p99/max,
+resource p99, reopen, cells and records at the end, the Store size, and the 1-min loadavg at start and end: a loaded
+box is recorded, never a reason to skip (the row has no UNCONFIGURED-for-load path, unlike `perf`). Sub-rows
+`births/create`, `births/resource`, `births/reopen`. Plant: `JOURNEY_PLANT_BIRTHS=bar-1ms`
+judges the same run against a 0.001 s write bar and must FAIL naming `births/create p99 … > 1 ms bar`.
+
+`growth` (1000 records through journey.sh; 2,436–5,401 s; it measures UPDATES on existing cells and flipped PASS/FAIL
+on the same bar with box load, FOLLIES-20261014 F1) is **not** in a landing's standing run: journey-rows appends it
+to `JOURNEY_ROWS` only when `PIPELINE_NIGHTLY=1`.
+
+### Nightly
+
+The nightly is the 1000-create run plus the full growth soak, against the `main` set, into its own results root
+(never `$JOURNEY_ROOT`: run_tip moves an existing `TIP/` aside, which would hide the standing run from landing.sh).
+With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides) and `growth` is in the row set:
+
+```
+cd /tank/dregg-build/pipeline && T=$(readlink artifacts/main) && tree=journeys/.trees/$T && \
+  PIPELINE_ROOT=$PWD PIPELINE_NIGHTLY=1 PIPELINE_ROW_TIMEOUT_S=7200 setsid nohup bash $tree/scripts/pipeline/journey-runner \
+    --tip $T --row births --results-root $PWD/nightly > logs/nightly-births-$T.log 2>&1 < /dev/null & echo $! > logs/nightly-births.pid
+# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished
+```
+
+Results: `nightly/<tip>/{results.tsv,table.txt,rows/}`. The nightly blocks nothing; it is the measurement a Store
+change that claims a speedup is judged by.
+
+### One row by hand (a lane verifying its own row)
+
+`--source-tree` runs the lane's rows against an existing READY set; the self-check then compares the runner with
+the lane tree's own:
+
+```
+cd /tank/dregg-build/pipeline && PIPELINE_ROOT=$PWD bash LANE/src/scripts/pipeline/journey-runner \
+  --tip $(readlink artifacts/next) --row births --source-tree LANE/src --results-root LANE/journeys
+```
 
 ### absent-inputs.tsv (hbox, measured 2026-10-14)
 
@@ -157,6 +204,7 @@ it executes; its `lib.sh`, `journey-red-lines` and `journey-rows` were planted b
 - `fleetsign` FAIL, reproduced 3 of 3: interleaved turns refused with "remote challenge differs from locally
   prepared intent" (cv 01a13985). Evidence is in `/tank/dregg-build/pipeline/evidence/fleetsign-race/`.
 - `growth` FAIL (write p99 10 s at 1000 records) and `perf` UNCONFIGURED (box not quiet). Neither is required.
+  `growth` has since moved to the nightly; `births` judges the bar per landing (above).
 - `jserve` is a KNOWN FLAKY row on hbox (cv 01a139e1). It is timing-sensitive and not required. In main 7dea0626's
   hbox run it FAILED 10/12 serve rows; the failing cases were (a) "a client sends 3 bytes then sleeps 30 s" and
   (c) "50 connections that send nothing". It PASSED in the d37eee80 run an hour earlier. It is not declared absent:

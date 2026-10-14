@@ -12,7 +12,10 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve perf)
+JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure births jserve perf)
+# growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
+# it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
+if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then JOURNEY_ROWS+=(growth); fi
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -538,6 +541,71 @@ row_m7() {
   product_journey m7 M7 J0 || return $?
   product_evidence "$OUT/steps/M7/m7-result.json" || return 1
   jq -e '.type=="minidregg-m7-result-v1" and (.checks|length)==5' "$OUT/steps/M7/m7-result.json" >/dev/null
+}
+# THE BAR (cv 01a0f9c0-521b) on BIRTHS: a fresh native Store (genesis, the two package publications, four
+# fixed objects), then PERF_BIRTHS_N Objective objects born (each a native resource, `mini workspace --action
+# create`, and its `create` turn), then the Host stopped by its PID file and restarted on the same Store, timed
+# to the first answered read. scripts/perf/workload.py --births-only; N=64 by default, 1000 when
+# PIPELINE_NIGHTLY=1. PASS iff every birth completed (N resource writes and N create turns, every turn judged
+# as expected), the p99 of each write op (births/resource, births/create) <= 5 s, and the reopen <= 60 s.
+# FAIL names the op and the bound it crossed. Wall time on a loaded box is the measurement, not an excuse:
+# the row never goes UNCONFIGURED for load; the detail carries the 1-min loadavg at start and end.
+# Plant: JOURNEY_PLANT_BIRTHS=bar-1ms judges the same run against a 0.001 s write bar (must FAIL by name).
+row_births() {
+  local d=$SRC/scripts/perf/workload.py bar_ms=5000 reopen_ms=60000 rc n la0 la1 f
+  [ -f "$d" ] && grep -q -- '--births-only' "$d" || return 99
+  case "${JOURNEY_PLANT_BIRTHS:-}" in
+    '') ;;
+    bar-1ms) bar_ms=1 ;;
+    *) echo "unknown JOURNEY_PLANT_BIRTHS ${JOURNEY_PLANT_BIRTHS} (known: bar-1ms)" >&2; return 2 ;;
+  esac
+  if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then n=${PERF_BIRTHS_N:-1000}; else n=${PERF_BIRTHS_N:-64}; fi
+  la0=$(cut -d' ' -f1 /proc/loadavg)
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/b" --births "$n" --births-only) >"$OUT/births.out" 2>"$OUT/births.err"
+  rc=$?
+  la1=$(cut -d' ' -f1 /proc/loadavg)
+  for f in results.tsv table.txt summary.json results.json; do cp "$RUN/b/$f" "$OUT/" 2>/dev/null; done
+  if [ ! -s "$OUT/summary.json" ] || [ ! -s "$OUT/results.tsv" ]; then
+    echo "births FAIL: workload exited $rc with no summary (N=$n; load $la0->$la1): $(tail -1 "$OUT/births.err")" >&2; return 1
+  fi
+  python3 - "$OUT/results.tsv" "$OUT/summary.json" "$n" "$bar_ms" "$reopen_ms" "$la0" "$la1" "$rc" "$OUT/subrows.tsv" <<'PY'
+import json, sys
+res_f, sum_f, n, bar, reopen_bar, la0, la1, rc, sub_f = sys.argv[1:]
+n, bar, reopen_bar = int(n), int(bar), int(reopen_bar)
+ops, wall = {}, {}
+for l in open(res_f).read().splitlines()[1:]:
+    p = l.split('\t')
+    if len(p) != 7: continue
+    if p[1] == 'TOTAL': wall[p[0]] = p[6]
+    else: ops[(p[0], p[1])] = {'n': int(p[2]), 'p50': int(p[3]), 'p99': int(p[4]), 'max': int(p[5])}
+s = json.load(open(sum_f))
+def fmt(k):
+    o = ops.get(k)
+    return f'{k[0]}/{k[1]} n={o["n"]} p50 {o["p50"]} p99 {o["p99"]} max {o["max"]} ms' if o else f'{k[0]}/{k[1]} none'
+fails = []
+if rc != '0': fails.append(f'workload exit {rc}')
+if s.get('phasesFailed'): fails.append('phases failed: ' + ','.join(s['phasesFailed']))
+if not s.get('allTurnsOk'): fails.append('a turn judged red')
+subs = []
+for k, key, b in ((('births', 'create'), 'p99', bar), (('births', 'resource'), 'p99', bar),
+                  (('reopen', 'to-first-read'), 'max', reopen_bar)):
+    o, why = ops.get(k), None
+    if o is None: why = f'{k[0]}/{k[1]} not measured'
+    elif k[0] == 'births' and o['n'] != n: why = f'{k[0]}/{k[1]} completed {o["n"]} of {n}'
+    elif o[key] > b: why = f'{k[0]}/{k[1]} {key} {o[key]} ms > {b} ms bar'
+    if why: fails.append(why)
+    subs.append(f'{k[1] if k[0] == "births" else "reopen"}\t{"FAIL" if why else "PASS"}\t{wall.get(k[0], "")}\t{fmt(k)}; bar {key} <= {b} ms\n')
+open(sub_f, 'w').write(''.join(subs))
+cert = ops.get(('checkpoint', 'certify'))
+r = ops.get(('reopen', 'to-first-read'))
+detail = (f'N={n} create p50 {ops.get(("births", "create"), {}).get("p50", "?")} p99 {ops.get(("births", "create"), {}).get("p99", "?")} '
+          f'max {ops.get(("births", "create"), {}).get("max", "?")} ms; resource p99 {ops.get(("births", "resource"), {}).get("p99", "?")} ms; '
+          f'reopen {r["max"] if r else "?"} ms; cells {s.get("objectCount")} records {s.get("records")} store {s.get("storeBytes")} B'
+          f'{"; cadence certifies " + str(cert["n"]) if cert else ""}; wall {s.get("totalSeconds")} s; load {la0}->{la1}; '
+          f'bar write p99 <= {bar} ms, reopen <= {reopen_bar} ms')
+print(('births FAIL: ' + '; '.join(fails) + ' | ' if fails else 'births PASS: ') + detail, file=sys.stderr)
+sys.exit(1 if fails else 0)
+PY
 }
 row_growth() {
   product_journey growth G 'J0 J1 J2 J3 J4' || return $?
