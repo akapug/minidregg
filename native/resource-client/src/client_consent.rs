@@ -60,6 +60,12 @@ fn pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn round_trip(session: &mut Session, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+    let (answer,body)=exchange(session,operation,payload)?;
+    if answer!=operation {return Err(format!("local consent refused before signing: {}",String::from_utf8_lossy(&body)));}
+    Ok(body)
+}
+/// One frame out, one frame in: the reply's operation byte and its body, unjudged.
+fn exchange(session: &mut Session, operation: u8, payload: &[u8]) -> Result<(u8, Vec<u8>)> {
     let size:u32=(payload.len()+1).try_into().map_err(|_|"consent frame exceeds bound")?;
     if size as usize>CAP {return Err("consent frame exceeds bound".into());}
     session.input.write_all(&size.to_le_bytes()).and_then(|_|session.input.write_all(&[operation]))
@@ -70,8 +76,8 @@ fn round_trip(session: &mut Session, operation: u8, payload: &[u8]) -> Result<Ve
     let size=u32::from_le_bytes(width) as usize;
     if size==0||size>CAP {return Err("local consent response frame refused".into());}
     let mut frame=vec![0;size];session.output.read_exact(&mut frame).map_err(|e|e.to_string())?;
-    if frame[0]!=operation {return Err(format!("local consent refused before signing: {}",String::from_utf8_lossy(&frame[1..])));}
-    Ok(frame[1..].to_vec())
+    let body=frame.split_off(1);
+    Ok((frame[0],body))
 }
 fn invoke(host: &Path, config: &Path, operation:u8, payload:&[u8]) -> Result<Vec<u8>> {
     let executable=PINS.get().map(|pins|pins.consent.clone()).or_else(||std::env::var_os("MINI_CONSENT_HOST").map(PathBuf::from))
@@ -298,10 +304,9 @@ pub(crate) fn configured_record()->Result<Option<Value>> {
     pin_record(&value)?;Ok(Some(value))
 }
 
-/// With local consent selected, retained authoring, inspection and assembly go
-/// through the local Host's storeless codec loop (`local_frame`).
-pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Option<Output>> {
-    if PINS.get().is_none() && std::env::var_os("MINI_CONSENT_HOST").is_none(){return Ok(None);}
+/// Authoring, inspection and assembly (the pure codec verbs) go through this process's one local
+/// storeless codec child (`local_frame`), never a Host process per verb.
+pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Output> {
     let verb=args.first().and_then(|s|s.to_str()).ok_or("missing local codec command")?;
     let read=|index:usize|->Result<Vec<u8>>{crate::fsio::read_bounded_or_empty(Path::new(args.get(index).ok_or("missing local codec input")?), CAP)};
     let kind=|label:&OsStr,bytes:Vec<u8>|->Result<Vec<u8>>{
@@ -318,7 +323,7 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Opti
     let frame=codec_frame(host,config,op,&payload)?;
     let bytes=frame[1..].to_vec();write_new(Path::new(destination),&bytes)?;
     #[cfg(unix)] {use std::os::unix::process::ExitStatusExt;
-        Ok(Some(Output{status:std::process::ExitStatus::from_raw(0),stdout:bytes,stderr:Vec::new()}))}
+        Ok(Output{status:std::process::ExitStatus::from_raw(0),stdout:bytes,stderr:Vec::new()})}
     #[cfg(not(unix))] {Err("local native consent codecs currently require Unix".into())}
 }
 
@@ -523,6 +528,42 @@ mod tests {
             Err(error) => println!("REMOTE-PLAN-REFUSED {error}"),
         }
     }
+    /// A stand-in `codec` loop: counts its starts, answers frame i with `reply-i` (else `reply`).
+    fn codec_stub(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("codec-host");
+        fs::write(&path, format!("#!/bin/sh\necho start >> '{d}/starts'\ni=0\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  i=$((i+1))\n  if [ -f '{d}/reply-'$i ]; then cat '{d}/reply-'$i; else cat '{d}/reply'; fi\ndone\n", d = dir.display())).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+    /// One codec child serves every pure frame of a process, a refusal included: the refusal is
+    /// named by the child's own `inspect outcome` decode, and the same child answers the next frame.
+    #[test]
+    fn one_codec_child_serves_the_process_and_names_its_refusals() {
+        let dir = stub_dir("codec");
+        fs::write(dir.join("settings.json"), b"{}").unwrap();
+        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        let host = codec_stub(&dir);
+        let settings = dir.join("settings.json");
+        for _ in 0..3 {
+            assert_eq!(local_frame(&host, &settings, 7, b"intent").unwrap(), b"\x07ok");
+        }
+        assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1);
+        let other = stub_dir("codec-refusal");
+        fs::write(other.join("settings.json"), b"{}").unwrap();
+        fs::write(other.join("reply-1"), framed(&[255, 0xff, 0x00])).unwrap();
+        fs::write(other.join("reply-2"), framed(&[b"\x08".as_slice(), br#"{"type":"refused","reason":"malformed","phase":"6f702037","detail":"243a206d697373696e67206669656c64206e6f6e6365"}"#.as_slice()].concat())).unwrap();
+        fs::write(other.join("reply"), framed(b"\x07again")).unwrap();
+        let refusing = codec_stub(&other);
+        let settings = other.join("settings.json");
+        let error = local_frame(&refusing, &settings, 7, b"intent").unwrap_err();
+        assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
+        assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::RefusedFrame { byte: 255, .. })));
+        assert_eq!(local_frame(&refusing, &settings, 7, b"intent").unwrap(), b"\x07again");
+        assert_eq!(fs::read_to_string(other.join("starts")).unwrap().lines().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&other);
+    }
     #[test]
     fn remote_signing_plan_with_one_changed_byte_is_refused_before_signing() {
         // Control: the served plan equals the local reconstruction and passes.
@@ -556,6 +597,11 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
 /// answers frames 7-11 and never opens a Store, so a member's own machine needs
 /// none. This process never receives keys, and these operations never mutate
 /// source.
+///
+/// The loop answers every frame, a refusal included (as a 255 frame), and keeps serving, so ONE child
+/// serves this whole `mini` process (`CODEC`). It holds no state between frames, so a child whose
+/// image path or settings bytes differ from this call's is replaced, and a child that failed a frame
+/// is dropped and the next call starts a fresh one.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
@@ -563,16 +609,39 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         .unwrap_or_else(||config.to_path_buf());
     if !settings.is_absolute(){return Err("local native settings must be absolute".into());}
     let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
-    let mut child=Command::new(&executable).arg(&settings).arg("codec")
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
-        .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
-    let input=child.stdin.take().ok_or("local codec stdin missing")?;
-    let output=child.stdout.take().ok_or("local codec stdout missing")?;
-    let mut session=Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None};
-    let body=round_trip(&mut session,operation,payload)?;
+    let mut slot=CODEC.lock().map_err(|_|"local codec lock poisoned")?;
+    if slot.as_ref().is_some_and(|session|session.executable!=executable||session.settings_bytes!=settings_bytes) {
+        *slot=None;
+    }
+    if slot.is_none() {
+        let mut child=Command::new(&executable).arg(&settings).arg("codec")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
+            .spawn().map_err(|e|format!("cannot start local native codec: {e}"))?;
+        let input=child.stdin.take().ok_or("local codec stdin missing")?;
+        let output=child.stdout.take().ok_or("local codec stdout missing")?;
+        *slot=Some(Session{child,input,output,executable,settings_bytes:settings_bytes.clone(),anchor:None});
+    }
+    let session=slot.as_mut().unwrap();
+    let (answer,body)=match exchange(session,operation,payload) {
+        Ok(reply)=>reply,
+        Err(error)=>{*slot=None;return Err(format!("local native codec: {error}"));}
+    };
     if crate::fsio::read_bounded_or_empty(&settings, CAP)?!=settings_bytes{return Err("local native settings changed during codec operation".into());}
-    Ok([vec![operation],body].concat())
+    if answer==operation {return Ok([vec![operation],body].concat());}
+    if answer!=255 {*slot=None;return Err(format!("local native codec answered frame {answer} to frame {operation}"));}
+    // A refusal: the same child decodes its own frame (`inspect outcome`), as the session path does;
+    // the client never decodes it itself.
+    let mut request=(b"outcome".len() as u16).to_le_bytes().to_vec();
+    request.extend_from_slice(b"outcome");request.extend_from_slice(&body);
+    let decoded=exchange(session,8,&request).ok().filter(|(answer,_)|*answer==8)
+        .and_then(|(_,json)|serde_json::from_slice::<Value>(&json).ok());
+    let line=decoded.as_ref().and_then(crate::refusal_line);
+    let command=match operation {7=>"author",8=>"inspect",9=>"signatures",10=>"observe-assemble",_=>"assemble"};
+    crate::note_host_decision(crate::HostDecision::RefusedFrame{command:command.to_owned(),byte:255,encoded:body.clone(),decoded});
+    Err(crate::refused_frame_message(command,&body,line))
 }
+/// The storeless codec child of this process (`local_frame`).
+static CODEC: Mutex<Option<Session>> = Mutex::new(None);
 
 pub(crate) fn plan_operation(operation:u8)->bool {
     matches!(operation,32|36|44|48|50|52|58|66|68|70|74|78|80|82|86|92|96|103|108|113|117|123|126|140|160|170|183|201|206|210|215)
