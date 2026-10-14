@@ -2353,18 +2353,15 @@ def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes 
     Except String ObjectiveActivityReceiver.SigningPlan := do
   let command ← need "noncanonical activity command"
     (ObjectiveActivityReceiver.commandCodec.decode commandBytes)
-  let header ← ObjectiveActivityReceiver.signingHeader config.deployment config.profile
-    (activityAmbient config opened) opened.durable command
+  let ambient := activityAmbient config opened
+  -- one decision, five projections (`ObjectiveActivityReceiver.planDecision_*`)
+  let decision := ObjectiveActivityReceiver.planDecision config.deployment config.profile ambient
+    opened.durable command
+  let header ← ObjectiveActivityReceiver.signingHeaderFor config.deployment config.profile ambient
+    opened.durable command decision.outcome
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     CredentialSignedEnvelopeController.headerCodec.encode header,
-    ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    ObjectiveActivityReceiver.planOutcome config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
-      opened.durable command).toUTF8.toList,
-    ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
-      opened.durable command⟩
+    decision.report, decision.outcome, decision.verdict.toUTF8.toList, decision.frontEnd⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
