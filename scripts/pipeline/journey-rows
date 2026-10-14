@@ -547,7 +547,10 @@ row_m7() {
   product_input M7_REFERENCE file || return $?
   product_journey m7 M7 J0 || return $?
   product_evidence "$OUT/steps/M7/m7-result.json" || return 1
-  jq -e '.type=="minidregg-m7-result-v1" and (.checks|length)==5' "$OUT/steps/M7/m7-result.json" >/dev/null
+  # the checks m7.sh runs, by name: a count admits a renamed or swapped check (it read 5 while m7.sh ran 6)
+  jq -e '.type=="minidregg-m7-result-v1" and (.checks|sort)==(["sha256sums","journey-runs-candidate-binaries",
+    "no-tmp-inputs","reproduces-all-outputs","tamper-init-and-serve-refuse","run.sh-init-start-sponsor-stop"]|sort)' \
+    "$OUT/steps/M7/m7-result.json" >/dev/null || { echo "invalid expected evidence: m7-result.json checks $(jq -c .checks "$OUT/steps/M7/m7-result.json")" >&2; return 1; }
 }
 row_growth() {
   product_journey growth G 'J0 J1 J2 J3 J4' || return $?
