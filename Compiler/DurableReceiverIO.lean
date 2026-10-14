@@ -186,6 +186,10 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   -- The tag keeps this record's receipt root, the root the extended image
   -- serves, the accumulator frontier after it and the index root after it.
   let extended := loaded.extend ready
+  -- The World judges the append: an intent whose turn it does not admit is
+  -- refused here, before any byte is written (FD-1 4a).
+  if let .lost reason := extended.track then
+    return .error s!"not admitted by the World: {reason}"
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
@@ -337,6 +341,9 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
           match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
               loaded.withinLog loaded.resumed intent with
           | .inl ready =>
+              match (loaded.extend ready).track with
+              | .lost reason => .error s!"durable log is not a turn log: {reason}"
+              | .held _ _ =>
               match (loaded.extend ready).replay rest with
               | .error message => .error message
               | .ok ⟨next, imaged, started⟩ =>
