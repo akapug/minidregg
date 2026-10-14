@@ -325,69 +325,76 @@ class World:
     def submit(self, label, workspace, body, prepare=False):
         """One signed command, unjudged: the Host's outcome value. An `invoke` without an operation id gets
         one minted HERE, written into the caller's body, so no driver can forget it and a driver that
-        resubmits the same body (a retry of the same operation) reuses it."""
+        resubmits the same body (a retry of the same operation) reuses it. An invoke not yet quoted is
+        quoted and submitted by ONE `mini` process (`--quote-front-end`, `front_end_quote`)."""
         if body.get('kind') == 'invoke' and 'opId' not in body:
             body['opId'] = op_id()
+        quote = None
         if body.get('kind') == 'invoke' and body['opId'] not in self.front_end_quoted:
-            self.quote_front_end(label, workspace, body)
+            quote = self.front_end_quote(body)
         out = self.attempts / label
         command = self.root / f'{label}.turn.json'
         command.write_text(json.dumps(body))
         args = ['activity', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
+        if quote is not None:
+            args += ['--quote-front-end', json.dumps(quote)]
         if prepare:
             args += ['--prepare-only', 'true']
-        return self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+        value = self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+        if quote is not None:
+            self.adopt_quote(label, body, out, value)
+        return value
 
-    def quote_front_end(self, label, workspace, body):
+    def front_end_quote(self, body):
         """An invocation declares the front-end work its replays draw (GPT-6 row E: one meter over every frame's
         method load and every send's deliverable check, `Invocation.frontEnd_within`), and a postage that pays
-        each send's delivery root load (`Deliverable.postagePays`). The client does not guess either: it PLANS the
-        invoke with a budget it can afford in the envelope and the postage (doubled while the plan runs out of it,
-        up to the policy's ceiling `MAXIMUM`), and reads the plan's `frontEnd`: the bytes the turn's
+        each send's delivery root load (`Deliverable.postagePays`). The client does not guess either: `mini`
+        PLANS the invoke with a budget it can afford in the envelope and the postage (doubled while the plan runs
+        out of it, up to the policy's ceiling `MAXIMUM`), and reads the plan's `frontEnd`: the bytes the turn's
         replays drew, decided or refused (a refused plan reports the meter at its failure point, so the same
         refusal is reached again), and the largest root load any send's delivery replays. It declares exactly the
         first in the envelope and, in the postage, the second times `postageLoads` (default 1): the loads the
         sender intends its message's delivery to perform (its root frame, plus each onward send's check or nested
-        call), which no plan at the sender can see. Once per operation, so a retry resubmits the same body. A body
-        whose envelope is written by hand (a row that under-declares on purpose) sets `frontEndAsWritten`."""
+        call), which no plan at the sender can see (native/resource-client/src/activity.rs `quote_front_end`).
+        Once per operation, so a retry resubmits the same body. A body whose envelope is written by hand (a row
+        that under-declares on purpose) sets `frontEndAsWritten`. Returns the quote `mini` takes, or None.
+        The probe's budget starts at four replays of the largest published package, so the probe is affordable
+        to the payer and its plan decides the same turn the submission will."""
         self.front_end_quoted.add(body['opId'])
         loads = int(body.pop('postageLoads', 1))
         if body.pop('frontEndAsWritten', False):
-            return
-        # The probe's budget starts at four replays of the largest published package and doubles while the plan
-        # runs out of it (`frontEndExhausted` / `postageFrontEnd`), up to the policy's ceiling: so the probe is
-        # affordable to the payer and its plan decides the same turn the submission will.
-        budget = (4 * int(FRONT['replayBytes']), 4 * int(FRONT['coreBytes']))
-        attempt = 0
-        while True:
-            probe = json.loads(json.dumps(body))
-            for key in ('envelope', 'postage'):
-                if key in probe:
-                    probe[key]['replayBytes'] = str(budget[0])
-                    probe[key]['coreBytes'] = str(budget[1])
-            command = self.root / f'{label}.front-end-plan-{attempt}.json'
-            command.write_text(json.dumps(probe))
-            r = self.last_json(self.sh(f'{label}-front-end-plan-{attempt}', self.mini, 'activity', '--action', 'submit',
-                                       '--workspace', workspace, '--command', command,
-                                       '--out', self.attempts / f'{label}-front-end-plan-{attempt}',
-                                       '--prepare-only', 'true', ok=(0, 1, 2))) or {}
-            planned = r.get('frontEnd')
-            if not planned:
-                raise RuntimeError(f'{label}: the plan reported no front end: {r}')
-            short = any(n in str(r.get('verdict') or '') for n in ('frontEndExhausted', 'postageFrontEnd'))
-            ceiling = (int(MAXIMUM['replayBytes']), int(MAXIMUM['coreBytes']))
-            if not short or budget == ceiling:
-                break
-            budget = (min(2 * budget[0], ceiling[0]), min(2 * budget[1], ceiling[1]))
-            attempt += 1
-        body['envelope']['replayBytes'] = str(planned['replayBytes'])
-        body['envelope']['coreBytes'] = str(planned['coreBytes'])
-        if 'postage' in body:
-            body['postage']['replayBytes'] = str(loads * int(planned['postageReplayBytes']))
-            body['postage']['coreBytes'] = str(loads * int(planned['postageCoreBytes']))
+            return None
+        return {'replayBytes': str(4 * int(FRONT['replayBytes'])), 'coreBytes': str(4 * int(FRONT['coreBytes'])),
+                'ceilingReplayBytes': str(MAXIMUM['replayBytes']), 'ceilingCoreBytes': str(MAXIMUM['coreBytes']),
+                'postageLoads': str(loads)}
+
+    def adopt_quote(self, label, body, out, value):
+        """The declaration `mini` quoted (OUT/declared.json, OUT/front-end.json, written before it signs anything)
+        becomes the caller's body, so a retry of the same operation resubmits exactly it."""
+        declared, planned = out / 'declared.json', out / 'front-end.json'
+        if not (declared.exists() and planned.exists()):
+            raise RuntimeError(f'{label}: the plan reported no front end: {value}')
+        declared, planned = json.loads(declared.read_text()), json.loads(planned.read_text())
+        for key in ('envelope', 'postage'):
+            if key in body:
+                body[key] = declared[key]
         self.quoted[label] = (price(body['envelope']), price(body['postage']) if 'postage' in body else 0)
         self.planned[label] = planned
         self.quote_bodies[label] = body
+
+    def quote_front_end(self, label, workspace, body):
+        """Quote an invoke without submitting it (`mini activity --action quote`): `front_end_quote`'s
+        declaration written into BODY and recorded under LABEL."""
+        quote = self.front_end_quote(body)
+        if quote is None:
+            return
+        out = self.attempts / f'{label}-front-end-quote'
+        command = self.root / f'{label}.front-end-quote.json'
+        command.write_text(json.dumps(body))
+        value = self.last_json(self.sh(f'{label}-front-end-quote', self.mini, 'activity', '--action', 'quote',
+                                       '--workspace', workspace, '--command', command, '--out', out,
+                                       '--quote', json.dumps(quote), ok=(0, 1, 2))) or {}
+        self.adopt_quote(label, body, out, value)
 
     def payer_of(self, workspace):
         """The submitter's own (account, spend capability): the sponsor's, or the enrolled second subject's."""

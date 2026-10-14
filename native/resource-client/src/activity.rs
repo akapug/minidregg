@@ -105,14 +105,17 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     crate::create_private(path, bytes)
 }
 
-fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value> {
-    fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))?;
+fn authority_root(ws: &Ws) -> Result<String> {
     let current = view(ws, &json!({}))?;
-    let authority = current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?;
+    Ok(current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?.to_owned())
+}
+
+/// The signed command for `turn` against `authority`.
+fn command_for(ws: &Ws, turn: &Value, authority: &str) -> Result<Value> {
     // An invoke's nonce is its operation id, `turn.opId`: the caller names the operation in the turn it
     // writes before the first submit, and a retry resubmits the same turn. Minting one here, per attempt,
     // would make every retry a second invocation.
-    let command = if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
+    Ok(if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
         if turn.get("opId").and_then(Value::as_str).is_none() {
             return Err("activity: an invoke turn names its operation: turn.opId (a decimal string, minted once \
                         per operation and reused on every retry)".into());
@@ -120,13 +123,115 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
         json!({"subject": ws.subject, "expectedAuthorityRoot": authority, "turn": turn})
     } else {
         json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn})
-    };
+    })
+}
+
+/// Author and plan `command` (frame 210) and inspect the plan; retains command.json, command.bin and
+/// plan.bin under `out`.
+fn plan_command(ws: &Ws, command: &Value, out: &Path) -> Result<(Vec<u8>, Value)> {
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
-    let command_bytes = author(ws, "objective-activity", &command)?;
+    let command_bytes = author(ws, "objective-activity", command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;
     let plan = invoke(ws, 210, &command_bytes)?;
     write_new(&out.join("plan.bin"), &plan)?;
     let inspected = inspect(ws, "objective-activity-plan", &plan)?;
+    Ok((plan, inspected))
+}
+
+/// How an invoke learns the front-end work it declares (GPT-6 row E): plan it with an affordable
+/// budget in its envelope and postage, doubling while the plan runs out of it, up to the ceiling; then
+/// declare the plan's `frontEnd` in the envelope and `postageLoads` times its postage figures in the
+/// postage. The caller (activity_world.py `front_end_quote`) chooses the start, ceiling and loads.
+struct FrontEndQuote {
+    start: (u128, u128),
+    ceiling: (u128, u128),
+    loads: u128,
+}
+
+fn decimal_member(value: &Value, key: &str) -> Result<u128> {
+    match value.get(key) {
+        Some(Value::String(text)) => text.parse().map_err(|_| format!("activity: {key} is not a decimal")),
+        Some(Value::Number(number)) => number.as_u64().map(u128::from).ok_or(format!("activity: {key} is not a natural")),
+        _ => Err(format!("activity: {key} missing")),
+    }
+}
+
+impl FrontEndQuote {
+    fn parse(text: &str) -> Result<Self> {
+        let value: Value = serde_json::from_str(text).map_err(|error| format!("activity: invalid front-end quote: {error}"))?;
+        Ok(Self {
+            start: (decimal_member(&value, "replayBytes")?, decimal_member(&value, "coreBytes")?),
+            ceiling: (decimal_member(&value, "ceilingReplayBytes")?, decimal_member(&value, "ceilingCoreBytes")?),
+            loads: decimal_member(&value, "postageLoads")?,
+        })
+    }
+}
+
+/// Plans `turn` under the quote's budgets until the plan no longer runs out of front end (or the budget
+/// is the ceiling), then writes the declaration into `turn`. Each plan is retained under
+/// `out/front-end-plan-N`; the declared turn and the planned front end are retained as
+/// `out/declared.json` and `out/front-end.json` before anything else is attempted, so a caller sees
+/// them even when the submission that follows fails. Returns (planned frontEnd, plans made).
+fn quote_front_end(ws: &Ws, turn: &mut Value, authority: &str, quote: &FrontEndQuote, out: &Path) -> Result<(Value, usize)> {
+    let mut budget = quote.start;
+    let mut attempt = 0;
+    let planned = loop {
+        let mut probe = turn.clone();
+        for key in ["envelope", "postage"] {
+            if let Some(slot) = probe.get_mut(key).and_then(Value::as_object_mut) {
+                slot.insert("replayBytes".into(), json!(budget.0.to_string()));
+                slot.insert("coreBytes".into(), json!(budget.1.to_string()));
+            }
+        }
+        let directory = out.join(format!("front-end-plan-{attempt}"));
+        fs::create_dir(&directory).map_err(|error| format!("activity: cannot create {}: {error}", directory.display()))?;
+        let (_, inspected) = plan_command(ws, &command_for(ws, &probe, authority)?, &directory)?;
+        let planned = inspected.get("frontEnd").filter(|value| value.is_object()).cloned()
+            .ok_or_else(|| format!("activity: the plan reported no front end: {inspected}"))?;
+        let verdict = inspected.get("verdict").map(Value::to_string).unwrap_or_default();
+        let short = verdict.contains("frontEndExhausted") || verdict.contains("postageFrontEnd");
+        if !short || budget == quote.ceiling {
+            break planned;
+        }
+        budget = ((2 * budget.0).min(quote.ceiling.0), (2 * budget.1).min(quote.ceiling.1));
+        attempt += 1;
+    };
+    let envelope = turn.get_mut("envelope").and_then(Value::as_object_mut).ok_or("activity: an invoke carries an envelope")?;
+    envelope.insert("replayBytes".into(), json!(decimal_member(&planned, "replayBytes")?.to_string()));
+    envelope.insert("coreBytes".into(), json!(decimal_member(&planned, "coreBytes")?.to_string()));
+    if let Some(postage) = turn.get_mut("postage").and_then(Value::as_object_mut) {
+        postage.insert("replayBytes".into(), json!((quote.loads * decimal_member(&planned, "postageReplayBytes")?).to_string()));
+        postage.insert("coreBytes".into(), json!((quote.loads * decimal_member(&planned, "postageCoreBytes")?).to_string()));
+    }
+    write_new(&out.join("declared.json"), turn.to_string().as_bytes())?;
+    write_new(&out.join("front-end.json"), planned.to_string().as_bytes())?;
+    Ok((planned, attempt + 1))
+}
+
+fn create_out(out: &Path) -> Result<()> {
+    fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))
+}
+
+/// Quote only: the declaration an invoke would carry (`quote_front_end`), nothing signed or submitted.
+fn quote(ws: &Ws, turn: &Value, out: &Path, front_end: &FrontEndQuote) -> Result<Value> {
+    create_out(out)?;
+    let authority = authority_root(ws)?;
+    let mut turn = turn.clone();
+    let (planned, plans) = quote_front_end(ws, &mut turn, &authority, front_end, out)?;
+    Ok(json!({"type": "quoted", "declared": turn, "planned": planned, "plans": plans}))
+}
+
+/// With `front_end`, the invoke is first quoted (`quote_front_end`) in this same process and the
+/// declared turn is what is signed and submitted.
+fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>) -> Result<Value> {
+    create_out(out)?;
+    let authority = authority_root(ws)?;
+    let mut turn = turn.clone();
+    let quoted = match front_end {
+        Some(front_end) => Some(quote_front_end(ws, &mut turn, &authority, front_end, out)?),
+        None => None,
+    };
+    let (plan, inspected) = plan_command(ws, &command_for(ws, &turn, &authority)?, out)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("activity: plan lacks a header")?;
     let header = crate::decode_hex(canonical).map_err(|error| format!("activity: {error}"))?;
@@ -142,17 +247,24 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool) -> Result<Value
     // The front-end work the decided turn's replays drew (`{replayBytes, coreBytes}`): what an
     // invocation declares (plan over a generous envelope, declare this, plan again; GPT-6 row E).
     let front_end = inspected.get("frontEnd").cloned().unwrap_or(Value::Null);
-    if prepare_only {
-        return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
-            "report": report, "verdict": verdict, "frontEnd": front_end}));
+    let mut outcome = if prepare_only {
+        json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
+            "report": report, "verdict": verdict, "frontEnd": front_end})
+    } else {
+        let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
+        write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
+        outcome["transaction"] = transaction;
+        outcome["report"] = report;
+        outcome["verdict"] = verdict;
+        outcome["frontEnd"] = front_end;
+        outcome["ingress"] = json!(out.join("ingress.bin"));
+        outcome
+    };
+    if let Some((planned, plans)) = quoted {
+        outcome["declared"] = turn;
+        outcome["planned"] = planned;
+        outcome["plans"] = json!(plans);
     }
-    let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
-    write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
-    outcome["transaction"] = transaction;
-    outcome["report"] = report;
-    outcome["verdict"] = verdict;
-    outcome["frontEnd"] = front_end;
-    outcome["ingress"] = json!(out.join("ingress.bin"));
     Ok(outcome)
 }
 
@@ -164,7 +276,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action")?.into_string().map_err(|_| "activity action must be UTF-8")?;
     let ws = ws(path(args.required("workspace")?))?;
     let value = match action.as_str() {
-        "submit" => {
+        "submit" | "quote" => {
             let command = path(args.required("command")?);
             let out = path(args.required("out")?);
             let prepare_only = match args.optional("prepare-only").as_deref().map(|v| v.to_str()) {
@@ -172,10 +284,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(Some("true")) => true,
                 _ => return Err("--prepare-only must be true or false".into()),
             };
+            let front_end = args.optional(if action == "quote" { "quote" } else { "quote-front-end" })
+                .map(|text| FrontEndQuote::parse(text.to_str().ok_or("activity: the front-end quote must be UTF-8")?))
+                .transpose()?;
             args.finish()?;
             let turn: Value = serde_json::from_slice(&fs::read(&command).map_err(|e| e.to_string())?)
                 .map_err(|error| format!("activity: invalid command JSON: {error}"))?;
-            submit(&ws, &turn, &out, prepare_only)?
+            if action == "quote" {
+                quote(&ws, &turn, &out, front_end.as_ref().ok_or("activity quote requires --quote")?)?
+            } else {
+                submit(&ws, &turn, &out, prepare_only, front_end.as_ref())?
+            }
         }
         "resubmit" => {
             let ingress = read_ingress(&path(args.required("ingress")?))?;
@@ -196,7 +315,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             view(&ws, &request)?
         }
-        _ => return Err("activity action must be submit, resubmit, lookup or view".into()),
+        _ => return Err("activity action must be submit, quote, resubmit, lookup or view".into()),
     };
     let _ = &ws.root;
     println!("{}", serde_json::to_string(&value).map_err(|e| e.to_string())?);
