@@ -355,6 +355,15 @@ product_native() {
   product_tools jq python3 sha256sum timeout || return $?
   for name in HOST MINI STORE VERIFIER; do product_input "$name" executable || return $?; done
 }
+# bwrap present is not bwrap usable: a kernel that restricts unprivileged user namespaces (Ubuntu 24.04+:
+# kernel.apparmor_restrict_unprivileged_userns=1 with no bwrap AppArmor profile, measured on hbox 2026-10-14)
+# makes every sandboxed worker exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed"
+# after a 15-min wait: a missing box input rendering as a product red. Probe it and name it (98).
+product_userns() {
+  bwrap --die-with-parent --unshare-user --ro-bind / / true 2>"$OUT/userns-probe.err" && return 0
+  echo "missing input: unprivileged user namespaces for bwrap ($(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
+  return 98
+}
 product_systemd() {
   product_tools systemctl systemd-run || return $?
   systemctl --user show-environment >/dev/null 2>&1 || { echo "no systemd user session" >&2; return 98; }
@@ -417,6 +426,7 @@ row_hermes() {
   product_input GRAIN executable || return $?
   product_systemd || return $?
   product_tools rustc bwrap || return $?
+  product_userns || return $?
   product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
   product_keep "$RUN/h/evidence"
   [ "$rc" = 0 ] || return "$rc"
@@ -446,6 +456,7 @@ row_m6grain() {
   [ "$(id -u)" = 1001 ] || { echo "missing input: operator uid 1001 (two-world-journey.sh runs as uid 1001; this runner is uid $(id -u))" >&2; return 98; }
   [ "$(loginctl show-user 1001 -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for uid 1001" >&2; return 98; }
   sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
+  product_userns || return $?
   for w in /usr/bin/newuidmap /usr/bin/newgidmap; do [ -x "$w" ] || { echo "missing input: $w (uidmap)" >&2; return 98; }; done
   awk -F: '$1=="ember" && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for ember" >&2; return 98; }
   # The pinned signed sntfy package: MINI_TEST_SPK, else the repo's pinned fetcher (sha256 and size checked).
@@ -584,6 +595,7 @@ product_pay_step() {
     product_systemd || return $?
     product_tools sudo bwrap || return $?
     sudo -n true 2>/dev/null || { echo "no sudo: sudo -n probe failed" >&2; return 98; }
+    product_userns || return $?
     local name
     for name in GRAIN TEST_PROVIDER LAUNCH_GATE; do product_input "$name" executable || return $?; done
   fi
