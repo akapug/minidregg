@@ -181,6 +181,16 @@ static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
+/// The local Host image a workspace (or an attempt it wrote) pinned at `workspace init`, and the
+/// digest it pinned: `host_image_sha256` of that exact path answers the pin instead of re-hashing
+/// ~170 MB in every `mini` process. What checks the bytes: `serve` hashes the sealed snapshot it
+/// executes (`transport::HostProcess::checked_image`) and the serving Host refuses an envelope that
+/// names another digest (`transport::request_from_envelope`, "host image pin mismatch"). So a Host
+/// file replaced under an unchanged pin is refused at the next `serve` start, on its first request.
+/// `--verify-host` (or MINI_VERIFY_HOST=1) hashes the file anyway and refuses a mismatch here.
+#[cfg(unix)]
+static WORKSPACE_HOST_PIN: OnceLock<(PathBuf, String)> = OnceLock::new();
+static VERIFY_HOST: AtomicBool = AtomicBool::new(false);
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
 /// The exit status a verb chose besides success (1): 3 = the Host refused, 4 = the Host did
 /// not decide (M4's shell contract). The highest one set wins.
@@ -488,6 +498,12 @@ fn host_image_sha256(host: &Path) -> Result<String> {
             _ => Err("no Host image: only a remote client (--remote) may omit --host".into()),
         };
     }
+    let pinned = WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha);
+    if let Some(sha) = pinned {
+        if !verify_host() {
+            return Ok(sha.clone());
+        }
+    }
     let mut file = File::open(host).map_err(|error| {
         format!(
             "cannot open selected Host image {}: {error}",
@@ -537,9 +553,42 @@ fn host_image_sha256(host: &Path) -> Result<String> {
         ));
     }
     let sha = hex(&digest.finalize());
+    if pinned.is_some_and(|pin| pin != &sha) {
+        return Err(format!(
+            "selected Host image {} differs from the workspace's pinned hostSha256",
+            host.display()
+        ));
+    }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
     Ok(sha)
+}
+
+/// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
+fn verify_host() -> bool {
+    VERIFY_HOST.load(Ordering::Relaxed) || env::var_os("MINI_VERIFY_HOST").as_deref() == Some(OsStr::new("1"))
+}
+
+/// Pins, for this process, the digest a local workspace (or attempt) recorded for its Host image
+/// path at `workspace init`. A second, different pin within one process is refused.
+#[cfg(unix)]
+pub(crate) fn pin_workspace_host(host: &Path, sha: &str) -> Result<()> {
+    if sha.len() != 64 || !mini_sdk::hex::is_lower(sha) {
+        return Err("workspace hostSha256 must be 64 lowercase hex digits".into());
+    }
+    let pin = (host.to_path_buf(), sha.to_owned());
+    match WORKSPACE_HOST_PIN.get() {
+        Some(existing) if existing != &pin => Err("pinned workspace Host image differs within one process".into()),
+        Some(_) => Ok(()),
+        None => WORKSPACE_HOST_PIN.set(pin).map_err(|_| "cannot pin the workspace Host image".into()),
+    }
+}
+
+/// The pin a local attempt manifest records beside its Host path: the workspace's, when one is
+/// loaded for that path (so the manifest and the workspace name the same digest), else none.
+#[cfg(unix)]
+fn workspace_host_pin(host: &Path) -> Option<String> {
+    WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha.clone())
 }
 
 #[cfg(unix)]
@@ -592,7 +641,9 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini [--remote DEST] COMMAND [options] [--replan-max N]
+  mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-max N]
+    --verify-host (or MINI_VERIFY_HOST=1): hash the local Host image even when the workspace pinned
+    its hostSha256 at init, and refuse a mismatch before any request.
     --replan-max N: when a tick, certify or another write lands between an observation and
     its use, the Host answers stale-root; mini observes again up to N times (default 5;
     MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
@@ -806,6 +857,10 @@ impl Args {
         let mut raw = env::args_os().skip(1);
         let mut values = Vec::new();
         let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        if command == OsStr::new("--verify-host") {
+            VERIFY_HOST.store(true, Ordering::Relaxed);
+            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
@@ -1712,7 +1767,11 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     if host.as_os_str().is_empty() {
         manifest["hostSha256"] = json!(host_image_sha256(host)?);
     } else {
-        manifest["host"] = json!(utf8_path(&absolute(host)?)?);
+        let host = absolute(host)?;
+        if let Some(sha) = workspace_host_pin(&host) {
+            manifest["hostSha256"] = json!(sha);
+        }
+        manifest["host"] = json!(utf8_path(&host)?);
     }
     if let Some(pins) = client_consent::configured_record()? {
         manifest["localConsent"] = pins;
@@ -2371,7 +2430,13 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
     }
     if let Some(pins) = value.get("localConsent") { client_consent::pin_record(pins)?; }
     let host = match value.get("host") {
-        Some(Value::String(host)) => PathBuf::from(host),
+        Some(Value::String(host)) => {
+            let host = PathBuf::from(host);
+            if let Some(sha) = value.get("hostSha256").and_then(Value::as_str) {
+                pin_workspace_host(&host, sha)?;
+            }
+            host
+        }
         Some(Value::Null) => {
             let sha = value
                 .get("hostSha256")

@@ -280,9 +280,13 @@ class World:
         self.sponsor = self.W / 'sponsor'
         self.second = root / 'second'
         self.second.mkdir(mode=0o700)
-        (self.second / 'workspace.json').write_text(json.dumps({
-            'type': 'minidregg-participant-workspace-v1', 'host': str(self.host), 'socket': str(self.sock),
-            'config': str(self.config), 'key': str(root / 'second.key'), 'subject': self.SECOND}))
+        second = {'type': 'minidregg-participant-workspace-v1', 'host': str(self.host), 'socket': str(self.sock),
+                  'config': str(self.config), 'key': str(root / 'second.key'), 'subject': self.SECOND}
+        # The second subject names the Host image digest the sponsor's `workspace init` pinned (one hash per run).
+        host_sha = json.loads((self.sponsor / 'workspace.json').read_text()).get('hostSha256')
+        if host_sha:
+            second['hostSha256'] = host_sha
+        (self.second / 'workspace.json').write_text(json.dumps(second))
         params = json.loads((self.W / 'genesis-params.json').read_text())
         self.SPONSOR = str(params['sponsor']['subject'])
         self.SPONSOR_ACCOUNT = str(params['sponsor']['accountId'])

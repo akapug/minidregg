@@ -44,8 +44,12 @@ fn ws(root: PathBuf) -> Result<Ws> {
     }
     let pin: Value =
         serde_json::from_slice(&bytes).map_err(|error| format!("activity: invalid workspace.json: {error}"))?;
+    let host = PathBuf::from(field(&pin, "host")?);
+    if let Some(sha) = pin.get("hostSha256").and_then(Value::as_str) {
+        crate::pin_workspace_host(&host, sha)?;
+    }
     Ok(Ws {
-        host: PathBuf::from(field(&pin, "host")?),
+        host,
         socket: PathBuf::from(field(&pin, "socket")?),
         config: PathBuf::from(field(&pin, "config")?),
         key: PathBuf::from(field(&pin, "key")?),
