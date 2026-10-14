@@ -8,7 +8,8 @@
 # dispatch below, inline in the unit: pick the first label (next, green, main) whose READY set has no
 # DONE/REFUSED run, check the set's SHA256SUMS (source.tar is listed), extract source.tar ONCE into
 # $JOURNEY_ROOT/.trees/TIP (read-only), print that tree's journey-runner path + sha256, and exec it with
-# --tip TIP. So each tip's rows, runner, lib.sh and journey-red-lines are that tip's own; a runner with the
+# --tip TIP, after writing $JOURNEY_ROOT/.trees/TIP.dispatch (tree, runner path + sha256, source.tar sha256)
+# for landing.sh's RUN-TREE / SELF-CHECK lines. So each tip's rows, runner, lib.sh and journey-red-lines are that tip's own; a runner with the
 # self-check (journey-runner header) also refuses by name if it is ever started from anywhere else.
 # The unit records this generator's sha256; re-run it after changing it (it is configuration, not a tool).
 set -euo pipefail
@@ -34,6 +35,7 @@ for l in next green main; do
   fi;
   r=$tree/scripts/pipeline/journey-runner;
   [ -f "$r" ] || { echo "dispatch: $t has no scripts/pipeline/journey-runner in its tree; not run"; exit 1; };
+  printf "tip=%s\nlabel=%s\ntree=%s\nrunner=%s\nrunner_sha256=%s\nsource_tar_sha256=%s\ndispatched=%s\n" "$t" "$l" "$tree" "$r" "$(sha256sum "$r" | cut -d" " -f1)" "$(sha256sum "$ARTIFACT_ROOT/$t/source.tar" | cut -d" " -f1)" "$(date -u +%FT%TZ)" > "$JOURNEY_ROOT/.trees/$t.dispatch";
   echo "dispatch: tip $t ($l) runs $r sha256:$(sha256sum "$r" | cut -c1-16) -- the set tree, never an installed copy";
   exec bash "$r" --tip "$t";
 done; echo "dispatch: no unrun READY set under $ARTIFACT_ROOT (next green main)"'

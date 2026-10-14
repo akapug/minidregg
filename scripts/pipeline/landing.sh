@@ -48,6 +48,26 @@ judge() {
   req=$W/src/scripts/pipeline/required-rows; [ -f "$req" ] || req=$here/required-rows
   decl=$PIPELINE_ROOT/absent-inputs.tsv; [ -f "$decl" ] || decl=/dev/null
   [ -f "$J/DONE" ] || { pipeline_log "no finished standing run at $J"; return 12; }
+  # Which tree the standing run executed, and whether that runner is TIP's own: a greppable line, never an
+  # absence. The dispatch record is the service's (install-journey-units); the reference sha is TIP's blob
+  # in the shared repo, independent of the set.
+  local D=$JOURNEY_ROOT/.trees/$tip.dispatch ran want git_dir
+  if [ -f "$D" ]; then
+    ran=$(sed -n 's/^runner_sha256=//p' "$D")
+    echo "RUN-TREE tip=$tip tree=$(sed -n 's/^tree=//p' "$D") runner=$(sed -n 's/^runner=//p' "$D") runner_sha256=$ran source_tar_sha256=$(sed -n 's/^source_tar_sha256=//p' "$D") dispatched=$(sed -n 's/^dispatched=//p' "$D")"
+    git_dir=${PIPELINE_SHARED_GIT:-$W/src/.git}
+    want=$(git --git-dir="$git_dir" show "$tip:scripts/pipeline/journey-runner" 2>/dev/null | sha256sum | cut -d' ' -f1)
+    if [ -n "$ran" ] && [ "$ran" = "$want" ] && cmp -s "$(sed -n 's/^runner=//p' "$D")" <(git --git-dir="$git_dir" show "$tip:scripts/pipeline/journey-runner"); then
+      echo "SELF-CHECK PASS: the standing run executed $tip's own journey-runner (sha256 $ran = git $tip:scripts/pipeline/journey-runner)"
+    else
+      echo "SELF-CHECK FAIL: executed runner sha256 ${ran:-?} != $tip's journey-runner ${want:-?}"; return 12
+    fi
+  else
+    echo "SELF-CHECK FAIL: no dispatch record $D (the run was not started by pipeline-journeys.service)"; return 12
+  fi
+  if [ -s "$PIPELINE_ROOT/logs/PLANT-STALE-RUNNER-EXECUTED" ]; then
+    echo "STALE-COPY EXECUTED: $(tail -1 "$PIPELINE_ROOT/logs/PLANT-STALE-RUNNER-EXECUTED")"
+  fi
   echo "== standing run $J ($(sed -n 2p "$J/table.txt" 2>/dev/null))"
   echo "== awk -F'\\t' '\$2!=\"PASS\"' $J/results.tsv"
   awk -F'\t' '$2!="PASS"' "$J/results.tsv" | cut -c1-240
@@ -93,7 +113,17 @@ for rid in req:
             print(f"declared  {r[0]} UNCONFIGURED: {why}"); continue
         print(f"NOT MET   {r[0]} {st}: {(r[4] if len(r) > 4 else '')[:200]}"); bad += 1
 for p in pending:
-    print(f"pending   {p}")
+    pid = p.split()[0]
+    if any(r[0] == pid or r[0].startswith(pid + '/') for r in rows):
+        # a pending row that now exists is required (required-rows header)
+        for r in [r for r in rows if r[0] == pid or r[0].startswith(pid + '/')]:
+            if r[1] == 'PASS': continue
+            why = declared(r) if r[1] == 'UNCONFIGURED' else None
+            if why: print(f"declared  {r[0]} UNCONFIGURED: {why}"); continue
+            print(f"NOT MET   {r[0]} {r[1]} (pending row now exists, so required): {(r[4] if len(r) > 4 else '')[:200]}"); bad += 1
+        print(f"required  {pid} (was pending; the row exists now)")
+    else:
+        print(f"pending   {p}")
 print(f"REQUIRED: {len(req)} ids, {bad} not met" + ("" if bad else " -> the standing run meets the required rows"))
 sys.exit(1 if bad else 0)
 PY

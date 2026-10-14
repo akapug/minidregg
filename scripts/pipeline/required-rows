@@ -8,6 +8,8 @@
 # landing.sh reads this file from the MAIN BASE's tree (the policy in force), never from the candidate's:
 # a lane cannot drop its own required rows. `pending NAME note` lines are required rows that do not exist
 # yet; landing.sh prints them on every landing and does not count them (they are DEPLOYABLE-1 work).
+# A pending row FLIPS TO REQUIRED AUTOMATICALLY the first time results.tsv has a line with its id (NAME or
+# NAME/*): from then on it must PASS like any other line here (decision: ROOT, 2026-10-14).
 activity
 seats
 call
