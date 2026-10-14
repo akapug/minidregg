@@ -33,7 +33,7 @@ for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN"; do
   [ -x "$item" ] || { echo "not executable: $item" >&2; exit 2; }
 done
 [ "$(uname -s)" = Linux ] || { echo 'Linux user systemd is required' >&2; exit 2; }
-for tool in jq python3 rustc systemctl systemd-run sha256sum bwrap; do
+for tool in jq python3 rustc systemctl systemd-run sha256sum; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 2; }
 done
 [ ! -e "$RUN" ] || { echo 'run directory exists' >&2; exit 2; }
@@ -42,6 +42,8 @@ state=$(systemctl --user show -p LoadState --value "$UNIT.service" 2>/dev/null |
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
+# The physical bwrap the worker launcher runs (MINI_BWRAP selects; see resolve-bwrap).
+BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap") || exit 2
 mkdir -m 700 "$RUN"
 RUN=$(CDPATH='' cd -- "$RUN" && pwd)
 EV=$RUN/evidence
@@ -73,6 +75,7 @@ trap cleanup EXIT
 
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$0" \
   "$HERE/fixture/hermes-deterministic-acp" "$REPO/deploy/grain-host/bwrap" \
+  "$REPO/deploy/grain-host/resolve-bwrap" "$REPO/deploy/grain-host/materialize-bwrap.py" "$BWRAP" \
   "$REPO/deploy/grain-host/launch-gate.rs" \
   "$REPO/native/resource-client/newparticipant-acceptance.sh" >"$EV/inputs.sha256"
 confirmed() {
@@ -176,7 +179,9 @@ mkdir -m 700 "$H" "$H/state" "$H/worker-work" "$H/worker-runtime" "$H/launcher"
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
   --key "$RUN/keys/hermes.key" --subject 9 --namespace-root "$ROOT/namespace" \
   --no-prerotation --dir "$H/state/resource-workspace" >/dev/null
-cp "$REPO/deploy/grain-host/bwrap" "$H/launcher/bwrap"
+python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$BWRAP" \
+  --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$H/launcher/bwrap" >"$EV/launcher.json"
+mark "worker launcher materialized for $BWRAP"
 rustc -O --edition 2021 -o "$H/launcher/launch-gate" "$REPO/deploy/grain-host/launch-gate.rs" 2>"$EV/launch-gate-build.log"
 cp "$GRAIN" "$H/worker-runtime/grain-runtime"
 cp "$HERE/fixture/hermes-deterministic-acp" "$H/worker-runtime/hermes-acp"

@@ -17,6 +17,12 @@ fn real_acp_room_catalogue_is_exact_before_any_prompt() {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
     fs::create_dir(&root).unwrap();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    // The physical bwrap a deployed grain worker runs (MINI_BWRAP selects; deploy/grain-host/resolve-bwrap).
+    let resolved = Command::new("sh")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../deploy/grain-host/resolve-bwrap"))
+        .output().unwrap();
+    assert!(resolved.status.success(), "{}", String::from_utf8_lossy(&resolved.stderr));
+    let bwrap = String::from_utf8(resolved.stdout).unwrap().trim().to_owned();
     let socket = root.join("broker.sock");
     let broker = start_broker(&socket, Duration::from_secs(90), ToolCatalog {
         room_tools: true, ..ToolCatalog::default()
@@ -34,7 +40,7 @@ fn real_acp_room_catalogue_is_exact_before_any_prompt() {
         fs::write(workspace.join(".hermes/config.yaml"), PROFILE).unwrap();
         fs::copy(&script, workspace.join("probe-catalogue.py")).unwrap();
         let mut command = Command::new("/usr/bin/timeout");
-        command.args(["--signal=KILL", "100s", "/usr/bin/bwrap",
+        command.args(["--signal=KILL", "100s"]).arg(&bwrap).args([
             "--die-with-parent", "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
             "--unshare-cgroup", "--unshare-net", "--clearenv", "--ro-bind", "/usr", "/usr",
             "--symlink", "usr/bin", "/bin", "--symlink", "usr/lib", "/lib",

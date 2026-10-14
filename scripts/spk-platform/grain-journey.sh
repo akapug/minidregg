@@ -34,7 +34,6 @@ GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
-BWRAP=${BWRAP:-/usr/bin/bwrap}
 STORE=$RUN/store
 WR=$STORE/base/workroom
 CONFIG=$WR/deployment/pinned-config.json
@@ -568,7 +567,7 @@ floor() (
           grep -q '^Seccomp:[[:space:]]*2$' "$status" ||
           { echo "resident no_new_privs/seccomp floor absent" >&2; exit 1; }
         ;;
-      bwrap) ;;
+      bwrap|mini-grain-bwra) ;; # the kernel truncates task names to 15 bytes
       *) grep -q '^Seccomp:[[:space:]]*2$' "$status" &&
            grep -q '^NoNewPrivs:[[:space:]]*1$' "$status" &&
            grep -q '^CapEff:[[:space:]]*0000000000000000$' "$status" &&
@@ -601,6 +600,8 @@ write_profile() {
   PROFILE=$STATE/grain-host.json
   [ ! -e "$PROFILE" ] || fail "profile already exists without this fixture result; preserve it"
   semantics=$(jq -er .semantics "$WR/operator-profile.json")
+  # The physical bwrap spk-host's sandbox runs (MINI_BWRAP selects; see resolve-bwrap), pinned into the profile.
+  BWRAP=$(sh "$HERE/../../deploy/grain-host/resolve-bwrap") || fail "no usable bwrap for the grain sandbox"
   jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" --arg broker "$broker" \
     --arg hostSha "$(sha "$HOST")" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" --arg socket "$OSOCK" \

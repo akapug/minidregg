@@ -1,0 +1,40 @@
+#!/bin/sh
+# The physical bwrap a Mini grain sandbox runs, resolved once and printed on stdout.
+#
+# The candidates are the two paths materialize-bwrap.py and spk-host's spawn gate accept:
+#   /usr/local/libexec/mini-grain-bwrap  root-owned copy of the distro ELF under its own AppArmor profile
+#                                        (`userns`), what a box that sets
+#                                        kernel.apparmor_restrict_unprivileged_userns=1 ships for grains
+#                                        (docs/evidence/2026-09-27-hermes-upstream-hbox/)
+#   /usr/bin/bwrap                       the distro binary
+# MINI_BWRAP, when set, selects one of them; nothing else is accepted. Unset, the profiled binary wins when
+# present and usable, else /usr/bin/bwrap. Usable means it can create a user namespace: present is not usable
+# on a restricting kernel, where every sandboxed worker would exit 1 at once.
+# Exit 0 with the path; exit 1 with a "missing input:" line on stderr.
+set -u
+PROFILED=/usr/local/libexec/mini-grain-bwrap
+DISTRO=/usr/bin/bwrap
+usable() {
+  [ -f "$1" ] && [ -x "$1" ] || { last="$1: not an executable file"; return 1; }
+  last=$("$1" --die-with-parent --unshare-user --ro-bind / / true 2>&1 >/dev/null) && return 0
+  last="$1: ${last:-exit nonzero}"
+  return 1
+}
+restrict=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo '?')
+if [ -n "${MINI_BWRAP:-}" ]; then
+  case "$MINI_BWRAP" in
+    "$PROFILED"|"$DISTRO") ;;
+    *) echo "MINI_BWRAP must be $PROFILED or $DISTRO, not $MINI_BWRAP" >&2; exit 1 ;;
+  esac
+  usable "$MINI_BWRAP" && { printf '%s\n' "$MINI_BWRAP"; exit 0; }
+  echo "missing input: unprivileged user namespaces for bwrap (MINI_BWRAP $last; kernel.apparmor_restrict_unprivileged_userns=$restrict)" >&2
+  exit 1
+fi
+tried=
+if [ -e "$PROFILED" ]; then
+  usable "$PROFILED" && { printf '%s\n' "$PROFILED"; exit 0; }
+  tried="$last; "
+fi
+usable "$DISTRO" && { printf '%s\n' "$DISTRO"; exit 0; }
+echo "missing input: unprivileged user namespaces for bwrap (${tried}$last; kernel.apparmor_restrict_unprivileged_userns=$restrict)" >&2
+exit 1
