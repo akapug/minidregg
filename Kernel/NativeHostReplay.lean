@@ -2949,13 +2949,13 @@ def Derived.judge {config : Config} {opened : Opened config} (derived : Derived 
         (ObjectiveAdmissible.Proposal.seat accepted)
       pure (judged.retarget exact.symm)
 
-/-- Advance through the same canonical durable executor using the derived
+/-- Advance through the same canonical durable executor (`Loaded.prepare`, which
+IS `DurableCheckpoint.prepare`: `Loaded.prepare_eq`) using the derived
 intent, never the untrusted stored post. This reuses its checked next snapshot
 and append proof instead of replaying the whole physical prefix again. -/
 def advance {config : Config} (opened : Opened config) (derived : Derived config opened) : Except String Durable :=
   let durable := opened.durable
-  match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
-      durable.withinLog durable.resumed derived.intent with
+  match durable.prepare derived.intent with
   | .inl ready =>
       match derived.judge with
       | .ok _ => .ok (durable.extend ready)
@@ -3631,7 +3631,7 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     have advanced : advance old.opened readback.derived = .ok target := by
       unfold advance
       simp only
-      rw [readback.prepared]
+      rw [DurableReceiverIO.Loaded.prepare_eq, readback.prepared]
       simp only [readback.judged]
       rfl
     exact ⟨readback.derived, matched, target, advanced, readback.validated, rfl⟩
@@ -4019,8 +4019,7 @@ installer. Only the typed `SuffixDerived` cases call this private helper. -/
 private def advanceCarriedIntent {config : Config} (opened : Opened config)
     (intent : DataIntent rootBytes) : Except String Durable :=
   let durable := opened.durable
-  match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
-      durable.withinLog durable.resumed intent with
+  match durable.prepare intent with
   | .inl ready =>
       match durable.judge config.transport (.ordinary intent) with
       | .ok _ => .ok (durable.extend ready)
