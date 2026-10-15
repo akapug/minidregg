@@ -254,6 +254,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
       authority.snapshot.cell ambient command) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
+      (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
 theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} (prepared : Prepared deployment profile ambient durable command) :
@@ -262,7 +263,6 @@ theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
       (show Option Epoch from
         prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true :=
   ⟨prepared.factory.rootExact, prepared.factory.present, prepared.holderEnrolled⟩
-      (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

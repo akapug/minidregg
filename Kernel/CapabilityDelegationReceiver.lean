@@ -142,7 +142,7 @@ theorem AcceptedDelegation.sound [DecidableEq F] {ingress : DecodedIngress}
     accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
     accepted.accepted.authorization.evidence.capabilityValue =
       some (accepted.prepared.parent.head,
-        storedCapabilityDigest ground.authority accepted.prepared.parent) ∧
+        CredentialAuthorityPolicyRegistry.storedCapabilityDigest ground.authority accepted.prepared.parent) ∧
     PhysicalShape accepted.prepared :=
   ⟨accepted.accepted.envelopeExact, accepted.accepted.parentNamed, accepted.physical⟩
 

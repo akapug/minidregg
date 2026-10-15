@@ -79,10 +79,29 @@ run axiom-census    $LAKE_WRAP lake build AxiomCensus
 # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
 # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
 run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
-# Every private constructor is listed in TokenCensus/Table.lean and minted only in its home
-# module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
-# detected. Elaborates TokenCensus over the research umbrella.
+# Every private constructor is listed in TokenCensus/Table.lean with a reviewed row (an L1 witness
+# or a defect naming its cv task) and minted only in its home module (a `private mk` stops names,
+# not `by constructor`). Elaborates TokenCensus over the research umbrella.
 run token-census    $LAKE_WRAP lake build TokenCensus
+# Defects only shrink: a commit may delete a `defect` row (its type now carries its guarantee),
+# never add one. A new token is reviewed to L1 or loses `private`. The ratchet starts at the
+# commit that introduced the grammar (TokenCensus/Core.lean absent at FROM).
+defects() { git show "$1:TokenCensus/Table.lean" | awk -F'|' '$3 ~ /^ *defect / {gsub(/ /,"",$1); print $1}' | sort -u; }
+if git cat-file -e "$FROM:TokenCensus/Core.lean" 2>/dev/null; then
+  added_defects=$(comm -13 <(defects "$FROM") <(defects "$TO") | tr '\n' ' ')
+  if [ -n "$added_defects" ]; then
+    echo "token-census-defects RED (defect rows added; review the type to L1 instead): $added_defects" | tee -a "$S"; red=$((red+1))
+  else echo "token-census-defects PASS ($(defects "$TO" | wc -l) defects, none added)" | tee -a "$S"; fi
+else echo "token-census-defects SKIP (the defect ratchet starts in this range)" | tee -a "$S"; fi
+# The instrument's self-test (a planted forgery per private constructor, a planted call per
+# restriction, and the plant script's statement plants) tests the detector, not the tree: it runs
+# when the instrument changes.
+if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
+  run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
+  for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous; do
+    run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
+  done
+fi
 run objective-proofs bash scripts/check-objective-proofs.sh proofs
 # The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
 # baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on

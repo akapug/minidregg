@@ -337,7 +337,7 @@ inductive StoreOrigin where
   deriving DecidableEq, Repr
 
 structure StoreIdentity where
-  mk ::
+  private mk ::
   origin : StoreOrigin
   key : MacKey
   logStart : Digest
