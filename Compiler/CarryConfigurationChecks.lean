@@ -1,4 +1,5 @@
 import Compiler.CarryConfiguration
+import Theory.AssertCompiled
 
 namespace Minidregg.Compiler.CarryConfigurationChecks
 open Lean
@@ -19,16 +20,29 @@ private def accepts (next : Json) : Bool :=
   | .ok () => true
   | .error _ => false
 
+/-! `checkLegacy` walks `Lean.Json` objects (an RB-map), so these instances are compiled
+evaluations: `native_decide` + `#assert_compiled`. -/
+
 -- Relocation is permitted while all authority-affecting settings remain fixed.
-#guard accepts target
+theorem relocation_accepted : accepts target = true := by native_decide
 -- A new default must not expand the old birth window.
-#guard !accepts source
-#guard !accepts (target.setObjVal! "birthSlack" (toJson (64 : Nat)))
+theorem missing_birth_slack_refused : accepts source = false := by native_decide
+theorem wider_birth_slack_refused :
+    accepts (target.setObjVal! "birthSlack" (toJson (64 : Nat))) = false := by native_decide
 -- Disabled evaluators and unknown extension settings remain in the gate.
-#guard !accepts (target.setObjVal! "disabledEvaluators" (toJson ([] : List String)))
-#guard !accepts (target.setObjVal! "extension" (.str "changed"))
+theorem enabled_evaluators_refused :
+    accepts (target.setObjVal! "disabledEvaluators" (toJson ([] : List String))) = false := by
+  native_decide
+theorem changed_extension_refused :
+    accepts (target.setObjVal! "extension" (.str "changed")) = false := by native_decide
 -- Adjacent values far above IEEE754 integer precision remain distinguishable.
-#guard !accepts (target.setObjVal! "expectedSeed"
-  (toJson (123456789012345678901234567890123456788 : Nat)))
+theorem adjacent_seed_refused : accepts (target.setObjVal! "expectedSeed"
+    (toJson (123456789012345678901234567890123456788 : Nat))) = false := by native_decide
+#assert_compiled relocation_accepted
+#assert_compiled missing_birth_slack_refused
+#assert_compiled wider_birth_slack_refused
+#assert_compiled enabled_evaluators_refused
+#assert_compiled changed_extension_refused
+#assert_compiled adjacent_seed_refused
 
 end Minidregg.Compiler.CarryConfigurationChecks
