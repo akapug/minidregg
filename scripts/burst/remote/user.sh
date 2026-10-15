@@ -91,6 +91,8 @@ unit pipeline-sccache.service; unit pipeline-slots.service
 # a no-root host is someone's machine: every pipeline unit runs at Nice=15 (a drop-in; the unit files stay the repo's)
 if [ "$noroot" = 1 ]; then for u in pipeline-sccache pipeline-slots pipeline-artifacts pipeline-journeys; do [ -f "$U/$u.service" ] || continue
   mkdir -p "$U/$u.service.d"; printf '[Service]\nNice=15\nIOSchedulingClass=idle\n' > "$U/$u.service.d/50-no-root-nice.conf"; done; fi
+# ... and its disk is not ours either: the sccache cache stays at BURST_SCCACHE_GB (default 30) instead of the unit's 120G
+[ "$noroot" = 1 ] && printf '[Service]\nEnvironment=SCCACHE_CACHE_SIZE=%sG\n' "${BURST_SCCACHE_GB:-30}" > "$U/pipeline-sccache.service.d/60-no-root-cache.conf"
 systemctl --user daemon-reload
 # a TRANSIENT pipeline-sccache (install-sccache's own, pre-burst-up) must go before the persistent one can start
 systemctl --user show pipeline-sccache.service -p FragmentPath 2>/dev/null | grep -q "/run/user" && systemctl --user stop pipeline-sccache.service 2>/dev/null || true
