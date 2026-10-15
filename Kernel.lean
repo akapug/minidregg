@@ -125,6 +125,7 @@ import Kernel.DeployedTurnCodec  -- FD-1 R4a: decodeTurn, the inverse of encodeT
 import Kernel.DeployedTurnCompact  -- FD-1 R4b/FD-2: the persisted Turn: digest guards, new values only (decodeTurnAt_encodeTurnAt)
 import Kernel.WorldSystemCodec  -- checkpoint = World v1: the system cell sub-codec, all six namespaces
 import Kernel.TurnLog  -- FD-1 R4a: deployed genesis World of a Seed; the Turn-log follower IS World.fold
+import Kernel.TurnGen  -- HP-6 SIM: seeded generator of intents (honest and invalid) and presented turns over a small deployed World
 import Kernel.ObjectiveAdmissible -- Exact receiver intent certificates consumed by the durable writer
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles

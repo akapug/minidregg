@@ -68,6 +68,10 @@ ledger_imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/Hypothesis
 builders() {
   if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $newt; fi
   run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
+  # HP-6 SIM (HP-DESIGN section 4): seeded Host-path vs follower simulation with crash-restart, and its
+  # plant (the follower skipping a failed guard) red at its recorded seed and step. Needs the world-sim
+  # exe (exe-roots, just above, builds it). The nightly knob is in the script header.
+  run world-sim       bash scripts/gates/check-world-sim .lake/build/bin/world-sim
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates

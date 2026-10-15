@@ -73,3 +73,20 @@ seconds. A tree that fails J5, J7 or J8 needs kernel changes to match the settle
 semantics; one that fails the growth thresholds needs storage and recovery work;
 one that cannot reach J0 in its time box has a build problem, and the time it
 consumed is the measurement.
+
+## The simulation gate (HP-6 SIM)
+
+`scripts/gates/check-world-sim` is a merge-gate row (`world-sim` in
+`scripts/pipeline/merge-gate-checks.sh`). It runs `world-sim` (`Host/WorldSim.lean`), a
+seeded, deterministic, one-process simulation. The Host side is today's admission path:
+the receiver (`DurableDataIntent.execute`), then `Turn.ofIntent`, then `World.admit`, with
+the record and the Turn entry persisted. The follower side folds only the entries
+(`TurnLog.followFrom`). Both are fed intents and presented turns from `Kernel/TurnGen.lean`,
+valid and invalid. On every step the sim asserts that the roots are equal, that the follower
+re-admits each admitted entry, that it refuses each refused turn by the same name, and that the
+receiver's cell bytes, meter, spent set and height equal the World's (`Represents` on the
+touched cells). Every K steps the Host crashes at a seeded point and reopens from its persisted
+bytes, and the reopened Host must equal the one that ran without interruption. A plant (the
+follower skips a failed leg-0 guard) must go red at its recorded seed and step. Default: seeds
+1–3 × 300 steps, K = 50. Nightly: `WORLD_SIM_SEEDS=64 WORLD_SIM_STEPS=10000 WORLD_SIM_K=500`.
+`WORLD_SIM_STORES=stores.json` adds the retained Stores' own records as a corpus.
