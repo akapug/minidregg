@@ -1029,6 +1029,10 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
         .unwrap_or_else(|| "account".into());
     args.finish()?;
     canonical_decimal(&fund, "--fund")?;
+    // Loaded first: it pins the process to the sponsor's socket (or refuses a selected one
+    // that differs), so a planned, retained or resumed enrollment and the funding all go to
+    // the one Host the new workspace will name.
+    let sponsor_workspace = workspace::load(&sponsor_root)?;
     let enrollment = enrollment_dir.join("enrollment.json");
     if !enrollment.exists() {
         let owned = |values: &[(&str, &OsStr)]| Args {
@@ -1064,7 +1068,6 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     }
     let admitted = read_json(&enrollment)?;
     let subject = field(&admitted, "subject")?.to_owned();
-    let sponsor_workspace = workspace::load(&sponsor_root)?;
     if !agent_root.join("workspace.json").exists() {
         workspace::init(
             &agent_root,
@@ -1081,6 +1084,9 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
             Some(&workspace::member_path(&sponsor_workspace, "namespaceRoot")?),
         )?;
     }
+    // Loaded before funding: a workspace an interrupted join left pinned to another socket
+    // is refused before value moves to an account it cannot reach.
+    let agent_workspace = workspace::load(&agent_root)?;
     let handoff = workspace::create_funded_account(
         &sponsor_root,
         &sponsor_workspace,
@@ -1092,7 +1098,6 @@ pub(crate) fn join(mut args: Args) -> Result<()> {
     if field(&handoff, "owner")? != subject {
         return Err("account handoff names another owner".into());
     }
-    let agent_workspace = workspace::load(&agent_root)?;
     if !agent_root.join("refs").join(format!("{account_name}.json")).exists() {
         let provenance = sponsor_root
             .join("sources")
