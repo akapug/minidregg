@@ -25,6 +25,6 @@ printf 'tip=%s\nfrozen_at=%s\nbuilt_on=%s:%s/mini\n%s\nrule=read-only base; lane
 [ "$(git -C "$SRV/mini" rev-parse HEAD)" = "$TIP" ] && [ "$(git -C "$W/src" rev-parse HEAD)" = "$TIP" ] || { echo "tip moved during the copy"; exit 1; }
 echo "verifying $TIP (make-warm-base $(date -Is))" > "$W/NOT-READY.txt"
 p=mk-verify-${TIP:0:8}
-rm -rf /srv/lanes/$p 2>/dev/null || true   # a probe an earlier failed verify left behind is the relay's own
-if MK_LANE_PROBE=1 "$W/mk-lane.sh" --verify "$p"; then rm -f "$W/NOT-READY.txt"; rm -rf "$SRV/lanes/$p"; echo "warm base frozen at $TIP (verified replay)"; du -sh "$W/src" "$W/src/.lake"
-else echo "verify FAILED after make-warm-base $TIP $(date -Is): see $SRV/lanes/$p/logs/verify-replay.log" > "$W/NOT-READY.txt"; echo "make-warm-base: VERIFY FAILED; base stays NOT-READY"; exit 8; fi
+rm -rf "${PIPELINE_LANES:-$SRV/lanes}/$p" 2>/dev/null || true   # a probe an earlier failed verify left behind
+if MK_LANE_PROBE=1 "$W/mk-lane.sh" --verify "$p"; then rm -f "$W/NOT-READY.txt"; rm -rf "${PIPELINE_LANES:-$SRV/lanes}/$p"; echo "warm base frozen at $TIP (verified replay)"; du -sh "$W/src" "$W/src/.lake"
+else echo "verify FAILED after make-warm-base $TIP $(date -Is): see ${PIPELINE_LANES:-$SRV/lanes}/$p/logs/verify-replay.log" > "$W/NOT-READY.txt"; echo "make-warm-base: VERIFY FAILED; base stays NOT-READY"; exit 8; fi

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# scripts/pipeline/with-lean-slot <cmd...> : run a Lean build holding one of N box-wide slots, FIFO.
+# One source for the wrapper hbox runs by hand (/tank/dregg-build/pipeline/slots/with-lean-slot, 10-14 23:04): a waiter
+# takes a slot only when it is the OLDEST live ticket in $D/waiters (ticket = its own PID file; dead PIDs are pruned),
+# so a 3-hour waiter is never passed by a 5-minute one. The lock fd is held by this wrapper only (the build and its
+# children never inherit it). Deadline 4 h (exit 75). Stop a waiting build by ITS ticket's PID, never by pattern.
+#   WITH_LEAN_SLOT_DIR      slot dir (default $PIPELINE_ROOT/slots)   WITH_LEAN_SLOT_N        slots (default 2)
+#   WITH_LEAN_SLOT_THREADS  THREADS for the build when unset (default 4)   WITH_LEAN_SLOT_PIDFILE  this waiter's ticket
+#   WITH_LEAN_SLOT_NICE     nice level of the build (default 0; a host that is not ours sets 15)
+# burst4 (32 threads/187 GB): N=6 x 4; persvati (laptop, <= half its 24 cores): N=3 x 4, nice 15 -- set in box.env.
+PIPELINE_ROOT=${PIPELINE_ROOT:-/srv/pipeline}; [ -f "$PIPELINE_ROOT/box.env" ] && . "$PIPELINE_ROOT/box.env"
+D=${WITH_LEAN_SLOT_DIR:-$PIPELINE_ROOT/slots}; W=$D/waiters; mkdir -p "$W"; N=${WITH_LEAN_SLOT_N:-2}
+wf=${WITH_LEAN_SLOT_PIDFILE:-$W/$$.pid}; echo $$ > "$wf"; touch -d "@$(date +%s)" "$wf"; trap 'rm -f "$wf"' EXIT
+deadline=$(( $(date +%s) + 14400 ))
+oldest_live() { for f in $(ls -tr "$W"/*.pid 2>/dev/null); do p=$(cat "$f" 2>/dev/null); if kill -0 "$p" 2>/dev/null; then echo "$p"; return; else rm -f "$f"; fi; done; }
+while :; do
+  if [ "$(oldest_live)" = "$$" ]; then
+    for s in $(seq 1 "$N"); do
+      exec {fd}>"$D/lean-$s.lock"
+      if flock -n "$fd"; then
+        rm -f "$wf"; export THREADS=${THREADS:-${WITH_LEAN_SLOT_THREADS:-4}}
+        ( exec {fd}>&-; exec nice -n "${WITH_LEAN_SLOT_NICE:-0}" "$@" ); exit $?
+      fi
+      exec {fd}>&-
+    done
+  fi
+  [ "$(date +%s)" -lt "$deadline" ] || { echo "with-lean-slot: no slot in 4 h" >&2; exit 75; }
+  sleep 15
+done
