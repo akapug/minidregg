@@ -81,6 +81,7 @@ Environment:
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
   MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
   MINIDREGG_LEAN_SEATS=N           how many host-wide compiler seats this box carries (default: 2)
+  MINIDREGG_LEAN_SEAT_WAIT=S       seconds to wait for a free seat before refusing (default 7200; 0 = refuse at once)
 EOF
 }
 
@@ -379,21 +380,50 @@ on_signal() {
   release_seat
   exit "$code"
 }
-for seat_number in $(seq 1 "$lean_seats"); do
-  candidate="$seat_root/lean-seat-$seat_number"
-  # Acquire with one syscall, independent of utility-level race handling.
-  if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
-    seat_dir=$(cd "$candidate" && pwd -P)
-    printf 'pid=%s\nstarted_utc=%s\nroot=%s\n' \
-      "$BASHPID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
-      > "$seat_dir/owner.txt"
-    break
+try_seat() {
+  local seat_number candidate
+  for seat_number in $(seq 1 "$lean_seats"); do
+    candidate="$seat_root/lean-seat-$seat_number"
+    # Acquire with one syscall, independent of utility-level race handling.
+    if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
+      seat_dir=$(cd "$candidate" && pwd -P)
+      printf 'pid=%s\nstarted_utc=%s\nroot=%s\n' \
+        "$BASHPID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$root" \
+        > "$seat_dir/owner.txt"
+      return 0
+    fi
+  done
+  return 1
+}
+seat_owners() {
+  local d
+  for d in "$seat_root"/lean-seat-*; do
+    [[ -d "$d" ]] || continue
+    printf '  %s: %s\n' "${d##*/}" "$(tr '\n' ' ' < "$d/owner.txt" 2>/dev/null)"
+  done
+}
+# A full set of seats is contention, not failure: wait for one, so a landing's publish does not fail
+# because a lane holds the compiler. MINIDREGG_LEAN_SEAT_WAIT=0 restores the immediate refusal.
+seat_wait=${MINIDREGG_LEAN_SEAT_WAIT:-7200}
+case "$seat_wait" in ''|*[!0-9]*) printf 'MINIDREGG_LEAN_SEAT_WAIT must be a number of seconds\n' >&2; exit 64 ;; esac
+seat_t0=$SECONDS
+seat_said=-1
+until try_seat; do
+  waited=$(( SECONDS - seat_t0 ))
+  if (( waited >= seat_wait )); then
+    printf 'build-native-host: all %s Lean compiler seats are occupied under %s after %s s; owners:\n' \
+      "$lean_seats" "$seat_root" "$waited" >&2
+    seat_owners >&2
+    exit 75
   fi
+  if (( seat_said < 0 || waited - seat_said >= 600 )); then
+    printf 'build-native-host: all %s Lean compiler seats are occupied; waiting (%s/%s s); owners:\n' \
+      "$lean_seats" "$waited" "$seat_wait" >&2
+    seat_owners >&2
+    seat_said=$waited
+  fi
+  sleep 30
 done
-if [[ -z "$seat_dir" ]]; then
-  printf 'build-native-host: all %s Lean compiler seats are occupied under %s\n' "$lean_seats" "$seat_root" >&2
-  exit 75
-fi
 trap on_exit EXIT
 trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
