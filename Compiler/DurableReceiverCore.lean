@@ -33,6 +33,8 @@ import Kernel.PresenceIndex
 import Kernel.TailBound
 import Kernel.LinkIndex
 import Kernel.SessionIndex
+import Kernel.DeployedRepresentsCheck
+import Kernel.TurnLog
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -848,6 +850,90 @@ private abbrev OpenBase (rootBytes : List UInt8 → Digest) : Type :=
   (height : Nat) × (state : State) × List (Nat × Digest) × Digest ×
     Option ((chain : Digest) × (cache : RootCache) ×' RootsExact cache
       (DurableCheckpointCodec.stateEntries rootBytes height chain state))
+/-! ## The World a loaded image holds (FD-1 4a)
+
+A `Loaded` carries the deployed World its snapshot represents, or the reason its
+log is not a turn log.  An append advances it by `World.admit` of the derived turn
+(`WorldTrack.advance`, representation by `admit_of_accepted`); an open folds the
+log's turns from the seed's genesis World and DECIDES the representation
+(`representsCheck_sound`); the append path refuses an intent whose turn the World
+does not admit (`prepareAppend`), so no `lost` image reaches the Store. -/
+
+/-- The World a snapshot at a height represents, or why there is none. -/
+inductive WorldTrack {rootBytes : List UInt8 → Digest} (snapshot : DataSnapshot rootBytes)
+    (height : Nat) : Type where
+  | held (world : HostRefinesWorld.DWorld)
+      (represents : HostRefinesWorld.SnapRepresents DeployedBridge.bridge snapshot height world)
+  | lost (reason : String)
+
+/-- The held World, if any. -/
+def WorldTrack.world? {rootBytes : List UInt8 → Digest} {snapshot : DataSnapshot rootBytes}
+    {height : Nat} : WorldTrack snapshot height → Option HostRefinesWorld.DWorld
+  | .held w _ => some w
+  | .lost _ => none
+
+/-- **One accepted execution, one admitted turn.**  From a held World, derive the
+intent's turn against it and admit it; the result represents the executed
+snapshot one height up. -/
+def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : DataSnapshot rootBytes}
+    {height height' : Nat} {intent : DataIntent rootBytes}
+    (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
+    (up : height' = height + 1) : WorldTrack snapshot height → WorldTrack next height'
+  | .lost reason => .lost reason
+  | .held w rep =>
+      match derived : TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
+      | .error refusal => .lost s!"height {height'}: the intent is not a turn: {repr refusal}"
+      | .ok t =>
+          match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
+          | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
+          | .ok w' => .held w' (by
+              obtain ⟨w'', h, r⟩ := HostRefinesWorld.admit_of_accepted DeployedBridge.bridge
+                DeployedHistory.history rep derived executed
+              rw [admitted] at h
+              cases h
+              rw [up]
+              exact r)
+
+/-- Fold a log's records as turns from a World: bind, derive, admit; refuse by height. -/
+def foldRecords (rootBytes : List UInt8 → Digest) :
+    HostRefinesWorld.DWorld → Nat → List IntentRecord → Except String HostRefinesWorld.DWorld
+  | w, _, [] => .ok w
+  | w, height, record :: rest =>
+      match record.bind? rootBytes with
+      | none => .error s!"height {height + 1}: the record does not bind its roots"
+      | some intent =>
+          match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
+          | .error refusal => .error s!"height {height + 1}: the record is not a turn: {repr refusal}"
+          | .ok t =>
+              match Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
+              | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
+              | .ok w' => foldRecords rootBytes w' (height + 1) rest
+
+/-- **The World of a resumed image**: the seed's genesis World, the log folded
+as turns, and the representation decided against the resumed snapshot. -/
+def trackOf (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {state : State}
+    {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot) :
+    WorldTrack snapshot image.accepted.length :=
+  match TurnLog.genesisOfSeed image.seed with
+  | .error refusal => .lost s!"the seed has no genesis World: {repr refusal}"
+  | .ok genesis =>
+      match foldRecords rootBytes genesis 0 image.accepted with
+      | .error message => .lost message
+      | .ok w =>
+          if ok : HostRefinesWorld.representsCheck image snapshot w = true then
+            .held w (HostRefinesWorld.representsCheck_sound resumed ok)
+          else .lost "the folded World does not represent the resumed snapshot"
+
+/-- Re-decide a held World against a re-materialized snapshot of the same image. -/
+def WorldTrack.recheck {rootBytes : List UInt8 → Digest} {snapshot snapshot' : DataSnapshot rootBytes}
+    (image : Image) {height : Nat} {state : State}
+    (resumed : resume rootBytes image height state = some snapshot') :
+    WorldTrack snapshot image.accepted.length → WorldTrack snapshot' image.accepted.length
+  | .lost reason => .lost reason
+  | .held w _ =>
+      if ok : HostRefinesWorld.representsCheck image snapshot' w = true then
+        .held w (HostRefinesWorld.representsCheck_sound resumed ok)
+      else .lost "the re-materialized snapshot does not represent the held World"
 
 /-! ## The loaded, resumed image -/
 
@@ -898,6 +984,8 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   appended to) the Store: its MAC was verified, so what it carries (the spent
   root after the head) is authenticated. `none` for in-memory images. -/
   headTag : Option (List UInt8)
+  /-- The World the snapshot represents (FD-1 4a). -/
+  track : WorldTrack snapshot image.accepted.length
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -970,6 +1058,9 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   | some snapshot =>
       let chain := chainAfter logStart image.accepted
       let built := RootCache.build (entriesOf image snapshot chain)
+      match trackOf rootBytes image resumed with
+      | .lost reason => .error s!"durable image is not a turn log: {reason}"
+      | track@(.held _ _) =>
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
         rfl, built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
@@ -977,7 +1068,7 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
         Array.replicate image.accepted.length none, Array.size_replicate,
-        if image.accepted.isEmpty then some [] else none, none⟩
+        if image.accepted.isEmpty then some [] else none, none, track⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -985,8 +1076,10 @@ theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} 
   unfold loadImage at built
   split at built
   · simp at built
-  · cases built
-    rfl
+  · split at built
+    · simp at built
+    · cases built
+      rfl
 
 /-- The loaded genesis image of a seed. -/
 def loadSeed (rootBytes : List UInt8 → Digest) (logStart : Digest) (seed : Seed) :
@@ -1148,7 +1241,9 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
               SessionIndex.TxIndex.ofRecords image.accepted,
               SessionIndex.TxIndex.ofRecords_exact image.accepted,
               rootLog, Decidable.of_not_not sized, some frontier,
-              stored.entries.getLast?.map (·.tag)⟩
+              stored.entries.getLast?.map (·.tag), trackOf rootBytes image resumed⟩
+            if let .lost reason := loaded.track then
+              return .error s!"durable log is not a turn log: {reason}"
             -- The head's stored root is the root this open just served: a
             -- rewritten head root refuses here, not at a later receipt.
             match rootLog.back? with
@@ -1235,7 +1330,8 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     by simp [Image.append, loaded.rootLogSize],
     loaded.frontier.map fun frontier => DurableHistory.Frontier.push frontier
       (leafDigest (loaded.image.accepted.length + 1) (recordFrame.encode record) chain served),
-    none⟩
+    none,
+    loaded.track.advance ready.executed (by simp [Image.append])⟩
 
 /-- **The root log keeps the served root**: after an append, the newest stored
 receipt root is the root the extended image serves. -/
@@ -1273,7 +1369,8 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
         by rw [same]; exact loaded.rootsExact,
         loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
         loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
-        loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag⟩
+        loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag,
+        loaded.track.recheck loaded.image resumed⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -1344,7 +1441,7 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        rootLog, rootLogSize, none, none⟩, rfl, rfl⟩
+        rootLog, rootLogSize, none, none, trackOf rootBytes image resumed⟩, rfl, rfl⟩
 
 /-- **The loaded image cut at log height `height`**, from an open that kept its
 chain prefixes (`loadChained`): the chain after `height` records is read off
