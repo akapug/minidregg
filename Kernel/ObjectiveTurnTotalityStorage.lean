@@ -956,4 +956,21 @@ theorem intent_equality :
 end BurnWitness
 
 
+/-! ## Poles of `PostShape`
+
+The retired lifecycle image is the shape of a burn; no image is the shape of an
+absent delta. -/
+
+theorem postShape_retired_burn :
+    PostShape (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry .retired)
+      (.burn .objectiveActivity) :=
+  .burn _
+
+theorem postShape_absent_refused :
+    ¬ PostShape (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry .retired)
+      .absent := by
+  intro h; cases h
+
+#assert_axioms postShape_retired_burn postShape_absent_refused
+
 end Minidregg.Kernel.ObjectiveTurnTotalityStorage

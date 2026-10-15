@@ -26,6 +26,7 @@ import Compiler.Tower256ConcreteBackend
 import Compiler.CredentialSigningKeyCodec
 import Kernel.CanonicalPolicyRegistry
 import Theory.CredentialAuthorityFamily
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.CredentialSignedEnvelopeController
 
@@ -411,5 +412,22 @@ theorem SignatureCompletion.issued_of_verified {Error : Type}
   completion.custody.authentic_implies_issued prepared.key prepared.frame
     prepared.envelope.signature
       (completion.native.sound _ _ _ verified)
+
+/-! ## Poles of `SignatureCompletion`
+
+A verifier that never accepts completes against any custody; one that accepts
+everything is refused when nothing authenticates. -/
+
+theorem signatureCompletion_rejectAll :
+    SignatureCompletion (Error := Unit) (fun _ _ _ => .ok false) (fun _ _ _ => False)
+      (fun _ _ _ _ => False) :=
+  ⟨⟨fun _ _ _ h => nomatch h⟩, ⟨fun _ _ _ h => h.elim⟩⟩
+
+theorem signatureCompletion_acceptAll_refused :
+    ¬ SignatureCompletion (Error := Unit) (fun _ _ _ => .ok true) (fun _ _ _ => False)
+      (fun _ _ _ _ => True) :=
+  fun c => c.native.sound [] [] [] rfl
+
+#assert_axioms signatureCompletion_rejectAll signatureCompletion_acceptAll_refused
 
 end Minidregg.Kernel.CredentialSignedEnvelopeController

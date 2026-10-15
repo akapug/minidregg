@@ -119,7 +119,7 @@ ledger() {
   while [ ! -s "$ACR" ]; do { [ -n "${BP:-}" ] && kill -0 "$BP" 2>/dev/null; } || break; sleep 10; done
   if [ "$(cat "$ACR" 2>/dev/null)" != ok ]; then echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; return; fi
   local nst=""; [ "$(selftests hyp-ledger)" = 0 ] && nst=--no-self-test
-  timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh $nst > "$log" 2>&1; rc=$?
+  HYP_LEDGER_BASE="$FROM" timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh $nst > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
   new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
   if [ $rc = 0 ]; then st=PASS

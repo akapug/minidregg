@@ -20,6 +20,7 @@ I/O transitions to `DeviceStep`.  In particular, this file proves neither
 liveness nor survival of an unmodelled fault domain.
 -/
 import Kernel.DurableWalHandler
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.FramedWalRefinement
 
@@ -541,5 +542,21 @@ end ClosedInstance
 /-- info: 'Minidregg.Kernel.FramedWalRefinement.ClosedInstance.stale_cannot_sync' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.stale_cannot_sync
+
+namespace ClosedInstance
+
+open Minidregg.Kernel.DurableWalHandler.ClosedInstance
+
+/-- The closed codec with its payload decoder muted: every frame fails closed. -/
+def mutedCodec : FrameCodec (Intent Nat Nat Nat Nat) :=
+  { codec with decodePayload := fun _ => none }
+
+/-- Refuting pole of `RoundTrips` (`intent_roundTrips` is the satisfying one). -/
+theorem mutedCodec_not_roundTrips : ¬ mutedCodec.RoundTrips intent := by
+  intro h; cases h
+
+#assert_axioms mutedCodec_not_roundTrips
+
+end ClosedInstance
 
 end Minidregg.Kernel.FramedWalRefinement

@@ -26,6 +26,7 @@ states the proof-relevant simulation a database, filesystem, or replicated
 service must discharge; it does not manufacture physical durability.
 -/
 import Kernel.DurableCommitProtocol
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.DurableDataIntent
 
@@ -710,6 +711,31 @@ the same transaction id with colliding post bytes is a conflict, not a replay. -
 @[simp] theorem byte_tamper_rejected_after_install :
     execute .complete (DataSnapshot.install before intent) tamperedIntent =
       .rejected (.durable .transactionConflict) := by rfl
+
+/-! ### Poles of `ImplementationRefinement`
+
+The model itself, stepping by exact execution, refines; a physical state that
+stops representing anything after a step does not. -/
+
+theorem implementationRefinement_exact :
+    ImplementationRefinement lengthRoot (DataSnapshot lengthRoot)
+      (fun before intent after =>
+        PLift (after = (execute .complete before intent).storeAfter before))
+      Eq := by
+  constructor
+  intro _ _ _ _ rep step
+  subst rep
+  exact ⟨.complete, step.down⟩
+
+theorem implementationRefinement_stuck_refused :
+    ¬ ImplementationRefinement lengthRoot Bool (fun _ _ _ => PUnit) (fun b _ => b = false) := by
+  intro r
+  obtain ⟨_, h⟩ := r.simulates (physicalBefore := false) (physicalAfter := true)
+    (modelBefore := before) (intent := intent) rfl PUnit.unit
+  exact Bool.noConfusion h
+
+#assert_axioms implementationRefinement_exact implementationRefinement_stuck_refused
+
 
 end Witness
 

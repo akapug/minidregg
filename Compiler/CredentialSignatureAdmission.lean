@@ -627,4 +627,22 @@ theorem checked_signer_live (snapshot : Snapshot) (receipt : CheckedSignature sn
 /-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_separates_policyRevision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms requestBytes_separates_policyRevision
 
+/-! ## Poles of `NativeIORefinement`
+
+Execution that returns exactly what `verify` computes refines it; an execution
+reporting `ok true` where `verify` says `ok false` does not. -/
+
+theorem nativeIORefinement_exact :
+    NativeIORefinement ⟨⟨"verifier"⟩⟩ (fun _ k f s r => (Except.ok false) = r)
+      (fun _ _ _ => .ok false) :=
+  ⟨fun _ _ _ _ h => h⟩
+
+theorem nativeIORefinement_misreported_refused :
+    ¬ NativeIORefinement ⟨⟨"verifier"⟩⟩ (fun _ _ _ _ r => r = .ok true)
+      (fun _ _ _ => .ok false) := by
+  intro r
+  exact Bool.noConfusion (Except.ok.inj (r.exactResult [] [] [] (.ok true) rfl))
+
+#assert_axioms nativeIORefinement_exact nativeIORefinement_misreported_refused
+
 end Minidregg.Compiler.CredentialSignatureAdmission
