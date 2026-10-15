@@ -27,6 +27,7 @@ PIPELINE_MIRRORS=${PIPELINE_MIRRORS:-}
 PIPELINE_SLOTS=${PIPELINE_SLOTS:-/srv/build-slot-1 /srv/build-slot-2}
 # The box's warm base (a built, read-only clone at the newest gated tip): the publisher's fallback tree.
 PIPELINE_WARM_BASE=${PIPELINE_WARM_BASE:-/srv/warm-base}
+PIPELINE_LANES=${PIPELINE_LANES:-/srv/lanes}
 
 pipeline_die() { printf '%s: %s\n' "${PIPELINE_PROG:-$(basename -- "$0")}" "$*" >&2; exit 1; }
 pipeline_log() { printf '%s %s: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PIPELINE_PROG:-$(basename -- "$0")}" "$*"; }
