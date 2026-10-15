@@ -188,15 +188,12 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted deployment profile ambient ground ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let legacy := accepted.base.intent
-  let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
   { legacy with
     exactCharge := fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
-      | .storageBytes => ordinary.exactCharge .storageBytes +
-          ingress.canonicalBytes.length +
-          (ApplicationLifecycleBegin.stableNullifier deployment.domain
-            profile.semantics ingress.base.source).canonicalBytes.length
+      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes legacy.readGuards
+          (event ingress)
       | other => legacy.exactCharge other
     event := event ingress }
 

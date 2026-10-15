@@ -1,4 +1,5 @@
-/- The deployed D2 storage unit is the encoding of newly written values.
+/- The deployed D2 storage unit is the encoding of newly written values, plus
+the canonical bytes of the event the turn retains.
 Transport frames, keys, old values, reads and frees are not value writes.
 The complete turn encoding separately binds every guard and effect. -/
 import Kernel.DeployedBridge
@@ -77,9 +78,14 @@ theorem encodeTurn_absent {a b : DTurn deployedR Digest}
     (same : encodeTurn a = encodeTurn b) : a.absent = b.absent :=
   (Prod.mk.inj (StoreCodec.streamEncode_injective _ same)).1
 
-/-- The pinned deployed history: cSHAKE turn digest/log chain and written-value bytes. -/
+/-- The bytes a turn's event retains: the event's canonical bytes, archived
+with the turn (the admitted ingress they carry), charged like a written value. -/
+def eventBytes (event : StableEvent) : Nat := event.canonicalBytes.length
+
+/-- The pinned deployed history: cSHAKE turn digest/log chain, written-value
+bytes and retained-event bytes. -/
 def history : History deployedR TransactionId StableEvent Digest :=
-  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes
+  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes eventBytes
 
 /-- A whole-blob allocation charges exactly its newly encoded payload. -/
 theorem objective_allocate_bytes (c : CellId) (payload : ObjectiveActivityCell.Payload) :

@@ -652,7 +652,9 @@ def charge (accepted : AcceptedAssignment deployment profile ambient durable ing
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared) (readGuards accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0

@@ -43,10 +43,10 @@ structure SnapRepresents (B : Bridge R D) (snap : DataSnapshot rootBytes) (heigh
   journal : ∀ x, (w.journal x).isSome = (Snapshot.lookupRecorded x snap.model.journal).isSome
   /-- The clock: the head height is the deployed height. -/
   head : ∃ r, w.head = some (height, r)
-  /-- Every meter lane but storage is the deployed allowance. -/
-  meter : ∀ l, l ≠ .storageBytes → w.meter l = snap.model.available l
-  /-- Storage: the model charges the patch, the present Host the image (G-CHARGE). -/
-  storage : snap.model.available .storageBytes ≤ w.meter .storageBytes
+  /-- Every meter lane, storage included, is the deployed allowance: the Host
+  debits the derived turn's charge (G-CHARGE, the append path refuses any
+  other). -/
+  meter : ∀ l, w.meter l = snap.model.available l
   /-- A cell is retired exactly when its deployed bytes are the retirement. -/
   retired : ∀ c, (w.retired c).isSome = B.codec.retires (snap.canonicalBytes ⟨c⟩)
   /-- No parent rows: the present Host keeps parentage in the authority
@@ -161,12 +161,14 @@ theorem lookupPostBytes_none_unwritten {c : CellId} :
 
 /-- **`ofIntent_run`.**  `World.step H w (ofIntent w i)` is the deployed
 post-state: from a represented snapshot, an intent the executor would install
-(fresh id, passing preflight) and its derived turn, `World.step` accepts the
+(fresh id, passing preflight) and its derived turn whose charge is the intent's
+(`charged`: the Host debits what the World debits), `World.step` accepts the
 turn and its world represents `DataSnapshot.install` one height up. -/
 theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D)
     {snap : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
     (rep : SnapRepresents B snap height w) {intent : DataIntent rootBytes} {t : DTurn R D}
     (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
     (fresh : Snapshot.lookupRecorded intent.transactionId snap.model.journal = none)
     (ready : intent.preflight snap = .ok ()) :
     ∃ w', World.step H w t = some w' ∧
@@ -188,16 +190,17 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
         rw [unconsumed _ m] at hc
         cases hc
   have fundedL : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l := by
-    intro l e
-    rw [rep.meter l e]
+    intro l _
+    rw [rep.meter l]
     exact funded l
-  have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes :=
-    le_trans (funded _) rep.storage
+  have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes := by
+    rw [rep.meter]
+    exact funded _
   obtain ⟨w', hs, hcells, hsys⟩ := ofIntent_step B H derived hh jfresh nodup unspent fundedL fundedS
   have derived' : ofCells B H (fun c => w.cells c) (fun c => (w.retired c).isSome) intent = .ok t := derived
-  obtain ⟨htx, hret, hrows, hnull, hchg, hchgS⟩ := ofCells_fields derived
+  obtain ⟨htx, hret, hrows, hnull, -, -⟩ := ofCells_fields derived
   have d := ofCells_ok derived
-  refine ⟨w', hs, ⟨fun c => ?_, fun dd => ?_, fun x => ?_, ⟨H.chain r (H.turnDigest t), ?_⟩, fun l e => ?_, ?_,
+  refine ⟨w', hs, ⟨fun c => ?_, fun dd => ?_, fun x => ?_, ⟨H.chain r (H.turnDigest t), ?_⟩, fun l => ?_,
     fun c => ?_, fun c => ?_⟩⟩
   · -- cells
     rw [DataSnapshot.install_canonicalBytes, hcells c]
@@ -255,22 +258,13 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
   · -- meter
     rw [meter_system, hsys, sysPost_allowance]
     show _ = snap.model.available l - intent.exactCharge l
-    rw [← hchg l e, ← rep.meter l e]
+    rw [← charged, ← rep.meter l]
     split
     · rfl
     · rename_i z
       simp only [not_not] at z
       rw [z, Nat.sub_zero]
       rfl
-  · -- storage
-    rw [meter_system, hsys, sysPost_allowance]
-    show snap.model.available .storageBytes - intent.exactCharge .storageBytes ≤ _
-    have hm := rep.storage
-    split
-    · show _ ≤ w.meter .storageBytes - t.charge .storageBytes
-      omega
-    · show _ ≤ w.meter .storageBytes
-      omega
   · -- retired
     show (w'.system ⟨SysSpace.retired, c⟩).isSome =
       B.codec.retires ((DataSnapshot.install snap intent).canonicalBytes ⟨c⟩)
@@ -379,10 +373,11 @@ theorem admit_of_accepted (B : Bridge R D) (H : History R TransactionId StableEv
     {snap next : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
     (rep : SnapRepresents B snap height w) {intent : DataIntent rootBytes} {t : DTurn R D}
     (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
     (executed : execute .complete snap intent = .accepted next) :
     ∃ w', World.admit H w t = .ok w' ∧ SnapRepresents B next (height + 1) w' := by
   rcases execute_cases .complete snap intent with ⟨-, fresh, ready, after⟩ | ⟨installs, -⟩
-  · obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived fresh ready
+  · obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived charged fresh ready
     have hn : next = DataSnapshot.install snap intent := by
       rw [executed] at after; exact after
     refine ⟨w', ?_, hn ▸ hrep⟩

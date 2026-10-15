@@ -30,7 +30,8 @@ append-only contents still enter a cell only through a guarded leg, and ROM
 contents enter only at birth: after it, no valid patch moves a ROM address
 (`step_rom_preserved`, `rom_cell_immutable_after_birth`).  The empty create is
 the image `0`.  The image's bytes are charged (`History.imageBytes`, part of
-`patchBytes`).
+`patchBytes`), and so are the bytes the turn's event retains
+(`History.eventBytes`).
 
 The system half of every accepted turn is the `sysPatch`: a `read retired c none`
 guard per create, one `allocate journal txId (height, H turn)`, one
@@ -418,6 +419,11 @@ structure History (R : Registry) (TxId Ev D : Type) where
   birth, and is charged like a leg's writes.  Stage F counts the canonical
   encoding of the image's entries; no default, for the same reason. -/
   imageBytes : Cell R → Nat
+  /-- The bytes the turn's event retains: the event is archived with the turn
+  (the deployed event carries the admitted ingress), so its bytes are charged
+  like a leg's writes.  Stage F counts the event's canonical encoding; no
+  default, for the same reason. -/
+  eventBytes : Ev → Nat
 
 /-- Refusal reasons.  Every refusal leaves the world unchanged (`admit` returns
 no world on any error branch). -/
@@ -494,9 +500,10 @@ def sysPatch (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge
     debits (chargedLanes t.charge) t.charge avail
 
 /-- The patch bytes of a turn: the bytes its legs write, plus the bytes its
-births' images write (T3b). -/
+births' images write (T3b), plus the bytes its event retains. -/
 def patchBytes (t : Turn R TxId Ev D) : Nat :=
-  (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum
+  (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum +
+    H.eventBytes t.event
 
 /-- The T1 checks, each a named refusal of something the store guards would
 also refuse (or, for the charge rule and the window, something no store guard
@@ -2232,6 +2239,7 @@ def toyH : History toyR Nat Unit Nat where
   -- The B2 toy charges no storage; `Kernel.TurnCensus` exercises the meter.
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
+  eventBytes := fun _ => 0
 
 def g : ToyWorld := genesis toyH 0
 
@@ -2491,6 +2499,7 @@ def romH : History romR Nat Unit Nat where
   logRoot0 := 0
   legBytes := fun _ => 0
   imageBytes := fun b => if b.store = 0 then 0 else 16
+  eventBytes := fun _ => 0
 
 /-- Genesis, with 64 storage bytes funded. -/
 def g : World romR Nat Nat :=

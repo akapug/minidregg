@@ -90,13 +90,15 @@ theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
   rw [hpost]
   simp
 
-/-- The turn carrying one accepted leg at cell `c`, charged its storage bytes. -/
+/-- The turn carrying one accepted leg at cell `c`, charged its storage bytes:
+the leg's and the retained event's. -/
 def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
     (H : History R TxId Ev D) (c : CellId) (x : TxId) (ev : Ev)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome) : Turn R TxId Ev D :=
   { txId := x, creates := [], legs := [Leg.ofAccepted c accepted], retires := [], event := ev,
-    charge := fun lane => if lane = .storageBytes then H.legBytes (Leg.ofAccepted c accepted) else 0 }
+    charge := fun lane =>
+      if lane = .storageBytes then H.legBytes (Leg.ofAccepted c accepted) + H.eventBytes ev else 0 }
 
 /-- Satisfiable pole at the seam: a one-leg turn carrying an accepted effect,
 charged its storage bytes, at a fresh id, a present head and a meter that
@@ -108,7 +110,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     (holds : w.cells c = some ⟨k, pre.logical⟩)
     {height : Nat} {logRoot : D} (hh : w.head = some (height, logRoot))
     (fresh : w.journal x = none)
-    (funded : H.legBytes (Leg.ofAccepted c accepted) ≤ w.meter .storageBytes) :
+    (funded : H.legBytes (Leg.ofAccepted c accepted) + H.eventBytes ev ≤ w.meter .storageBytes) :
     ∃ w', World.step H w (singleTurn H c x ev accepted) = some w' ∧
       w'.cells c = some ⟨k, accepted.validated.apply.logical⟩ := by
   let t : Turn R TxId Ev D := singleTurn H c x ev accepted

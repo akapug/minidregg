@@ -81,9 +81,10 @@ theorem composite_roots_bound
   accepted.birth.prepared.write_roots_bound write member
 
 /-- Charge: the resource birth's own (its descriptor carries the whole initialized
-ticket cell, so turn and storage bytes count it), the extra signed app authority
-check, the complete outer ingress and the app read guard.  The accepted birth fee
-remains the only Book debit. -/
+ticket cell, so turn bytes count it), the extra signed app authority check, the
+complete outer ingress and the app read guard; storage is the World's storage of
+this intent (its writes and its retained event).  The accepted birth fee remains
+the only Book debit. -/
 def charge (accepted : Accepted profile config pins durable height ingress) : Charge
   | .incidences => ResourceBirthReceiver.charge accepted.birth .incidences + 1
   | .turnBytes => ResourceBirthReceiver.charge accepted.birth .turnBytes +
@@ -92,8 +93,8 @@ def charge (accepted : Accepted profile config pins durable height ingress) : Ch
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
-  | .storageBytes => ResourceBirthReceiver.charge accepted.birth .storageBytes +
-      (ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted)
+      (readGuards accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0

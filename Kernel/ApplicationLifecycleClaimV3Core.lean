@@ -152,12 +152,10 @@ def Conditional.intent {config : Config} {store : StoreIdentity} {head : Head st
   match ingress.createAttempt with
   | none => ordinary
   | some marker =>
+      -- One more nullifier of the same writes, guards and event: the World's
+      -- storage of the turn is the ordinary intent's (no marker term).
       { ordinary with
-        nullifiers := ordinary.nullifiers ++ [marker]
-        exactCharge := fun dimension => match dimension with
-          | .storageBytes => ordinary.exactCharge .storageBytes +
-              marker.canonicalBytes.length
-          | other => ordinary.exactCharge other }
+        nullifiers := ordinary.nullifiers ++ [marker] }
 
 theorem Conditional.intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : Ingress} (conditional : Conditional config head ground ingress) :

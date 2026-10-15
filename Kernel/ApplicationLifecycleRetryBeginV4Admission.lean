@@ -74,14 +74,12 @@ def Accepted.intent {config : Config} {store : StoreIdentity} {head : Head store
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
     (accepted : Accepted config head ground ingress) : DataIntent rootBytes :=
   let legacy := accepted.base.intent
-  let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
   { legacy with
     exactCharge := fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
-      | .storageBytes => ordinary.exactCharge .storageBytes + ingress.canonicalBytes.length +
-          (ApplicationLifecycleBegin.stableNullifier config.deployment.domain
-            config.profile.semantics ingress.begin.base.source).canonicalBytes.length
+      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes legacy.readGuards
+          (event ingress)
       | other => legacy.exactCharge other
     event := event ingress }
 

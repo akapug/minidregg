@@ -54,10 +54,11 @@ Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
   T4 must prove the window translation for every receiver that pins a height:
   `ofAdmission_window : derived = .ok t → (t.notBefore ≤ h ∧ ∀ u ∈ t.validUntil, h ≤ u) ↔
     receiverHeightCheck admitted (config.genesisHeight + h)`.
-* `meter` -- exact on 9 lanes.  `storage` -- `≤` (G-CHARGE).  T5 must prove
-  `intent.exactCharge .storageBytes = storageOf H t.creates t.legs` for every
-  admitted intent and its derived `t` (the legs' bytes plus the born images'),
-  after which the field is an equality.
+* `meter` -- exact on every lane, storage included (G-CHARGE closed): the
+  append path refuses an intent whose exact charge is not its derived turn's
+  (`WorldTrack.advance`), so `intent.exactCharge .storageBytes =
+  storageOf H t.creates t.legs t.event` (the legs' bytes, the born images',
+  the retained event's) on every accepted turn.
 * `retired` -- exact: a cell is retired in the world exactly when its deployed
   bytes are the retirement (`Codec.retires`: the registry's retired lifecycle
   image). A turn that writes the retired image over a present cell is the
@@ -283,13 +284,14 @@ end CellCases
 /-! ## 2. Policy-source births are turns (T3b) -/
 
 /-- The birth turn of a policy-source cell: one create carrying the record's
-ROM image, charged the image's bytes, and nothing else. -/
+ROM image, charged the image's bytes and its event's, and nothing else. -/
 def sourceBirth {D' : Type} (H : History deployedR TransactionId StableEvent D')
     (x : TransactionId) (c : CellId)
     (record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) (ev : StableEvent) :
     DTurn deployedR D' :=
   { txId := x, creates := [(c, sourceCell record, none)], legs := [], retires := [], event := ev,
-    charge := fun l => if l = .storageBytes then H.imageBytes (sourceCell record) else 0 }
+    charge := fun l =>
+      if l = .storageBytes then H.imageBytes (sourceCell record) + H.eventBytes ev else 0 }
 
 /-- **`policy_source_birth_is_turn`.**  Every accepted install, and every
 birth whose descriptor carries initial policies, writes a fresh `policySource`
@@ -304,7 +306,7 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
     {x : TransactionId} (fresh : w.journal x = none) {c : CellId} (absent : w.cells c = none)
     (unretired : w.retired c = none)
     (record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) (ev : StableEvent)
-    (funded : H.imageBytes (sourceCell record) ≤ w.meter .storageBytes) :
+    (funded : H.imageBytes (sourceCell record) + H.eventBytes ev ≤ w.meter .storageBytes) :
     ∃ w', World.step H w (sourceBirth H x c record ev) = some w' ∧
       w'.cells c = some (sourceCell record) := by
   have shaped : Shaped (sourceBirth H x c record ev) := by
@@ -417,6 +419,9 @@ structure HostStep (B : Bridge R D) (H : History R TransactionId StableEvent D)
   intent : DataIntent rootBytes
   derived : Turn.ofLoaded B H p intent = .ok t
   schedule : Schedule
+  /-- The append path's charge gate: an installed turn's charge is the
+  intent's (`WorldTrack.advance` refuses any other). -/
+  charged : Installs (execute schedule p.snapshot intent) = true → t.charge = intent.exactCharge
   snapshot : p'.snapshot = (execute schedule p.snapshot intent).storeAfter p.snapshot
   height : p'.height =
     if Installs (execute schedule p.snapshot intent) then p.height + 1 else p.height
@@ -431,7 +436,7 @@ theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId Stab
   · right
     have derived : Turn.ofIntent B H wb st.intent = .ok t :=
       (ofLoaded_eq B H rep st.intent).symm.trans st.derived
-    obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived fresh ready
+    obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived (st.charged hi) fresh ready
     refine ⟨w', hs, ?_⟩
     unfold Represents
     rw [st.snapshot, after, st.height, hi]
@@ -457,11 +462,13 @@ theorem host_trace_represents_fold (B : Bridge R D) (H : History R TransactionId
 def extendStep (B : Bridge R D) (H : History R TransactionId StableEvent D) (p : Loaded rootBytes)
     {intent : DataIntent rootBytes}
     (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent)
-    {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t) :
+    {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t)
+    (charged : t.charge = intent.exactCharge) :
     HostStep B H p t (p.extend ready) where
   intent := intent
   derived := derived
   schedule := .complete
+  charged := fun _ => charged
   snapshot := by rw [ready.executed]; rfl
   height := by
     rw [ready.executed]
@@ -475,6 +482,7 @@ def refusedStep (B : Bridge R D) (H : History R TransactionId StableEvent D) (p 
   intent := intent
   derived := derived
   schedule := .complete
+  charged := fun installs => by rw [refused] at installs; cases installs
   snapshot := by
     rcases execute_cases .complete p.snapshot intent with ⟨hi, -⟩ | ⟨-, after⟩
     · rw [hi] at refused; cases refused
@@ -490,6 +498,7 @@ def failedAppendStep (B : Bridge R D) (H : History R TransactionId StableEvent D
   intent := intent
   derived := derived
   schedule := .crash .beforeAtomicInstall
+  charged := fun installs => absurd installs (by unfold execute; split <;> (try split) <;> simp [Installs])
   snapshot := by
     rcases execute_cases (.crash .beforeAtomicInstall) p.snapshot intent with
       ⟨hi, -⟩ | ⟨-, after⟩
@@ -592,13 +601,12 @@ theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R 
   | some p' =>
       obtain ⟨hbytes, hj, hc, ha, hh⟩ := rebase_agrees hr
       show SnapRepresents B p'.snapshot p'.height w
-      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, ?_, fun c => ?_, rep.parent⟩
+      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l => ?_, fun c => ?_, rep.parent⟩
       · rw [hbytes]; exact rep.cells c
       · simp only [hc]; exact rep.spent d
       · rw [hj]; exact rep.journal x
       · rw [hh]; exact rep.head
-      · rw [ha]; exact rep.meter l e
-      · rw [ha]; exact rep.storage
+      · rw [ha]; exact rep.meter l
       · rw [hbytes]; exact rep.retired c
 
 /-- **The pole: a rebase that drops a cell breaks representation.**  The
@@ -627,12 +635,13 @@ theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId Stabl
     {p : Loaded rootBytes} {w : World R TransactionId D} (rep : Represents B p w)
     {intent : DataIntent rootBytes}
     (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent)
-    {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t) (stored : Bool) :
+    {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t)
+    (charged : t.charge = intent.exactCharge) (stored : Bool) :
     ∃ w', World.step H w t = some w' ∧
       Represents B (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) w' := by
   have derived' : Turn.ofIntent B H w intent = .ok t := (ofLoaded_eq B H rep intent).symm.trans derived
   rcases execute_cases .complete p.snapshot intent with ⟨-, fresh, prepared, after⟩ | ⟨hi, -⟩
-  · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep derived' fresh prepared
+  · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep derived' charged fresh prepared
     have hnext : ready.next = DataSnapshot.install p.snapshot intent := by
       rw [ready.executed] at after
       exact after
@@ -782,6 +791,7 @@ def toyH : History toyR TransactionId StableEvent Nat where
   logRoot0 := 0
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
+  eventBytes := fun _ => 0
 
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
@@ -846,7 +856,7 @@ theorem genesis_sys_none (a : Address (sysLayout TransactionId Nat)) (ne : a.1 �
 
 /-- **`Represents` is satisfiable**: the seed snapshot represents `w0`. -/
 theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
-  refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ⟨0, rfl⟩, fun l _ => ?_, ?_, fun c => ?_,
+  refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ⟨0, rfl⟩, fun l => ?_, fun c => ?_,
     fun c => ?_⟩
   · by_cases e : c = 0
     · subst e; rfl
@@ -866,7 +876,6 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
     show Option.getD (α := Nat) (genesisSystem toyH ⟨SysSpace.allowance, l⟩) 0 = _
     rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
     rfl
-  · exact Nat.zero_le _
   · show (genesisSystem toyH ⟨SysSpace.retired, c⟩).isSome = false
     rw [genesis_sys_none _ (fun e => SysSpace.noConfusion e)]
     rfl
@@ -889,7 +898,12 @@ theorem toy_refined :
         rw [h] at ok
         cases ok
     | ok t =>
-        obtain ⟨w', hs, hr⟩ := ofIntent_run toyB toyH toy_represents h fresh ready
+        have charged : t.charge = (writeIntent 1 6).exactCharge := by
+          have := (ofCells_ok h).eq
+          subst this
+          funext l
+          simp [turnOf, chargeOf, storageOf, toyH, writeIntent]
+        obtain ⟨w', hs, hr⟩ := ofIntent_run toyB toyH toy_represents h charged fresh ready
         exact ⟨t, w', rfl, hs, hr⟩
   · rw [installs] at hi; cases hi
 

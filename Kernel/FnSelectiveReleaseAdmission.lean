@@ -238,14 +238,12 @@ def admit (config : NativeHost.Config) (opened : NativeHost.Opened config)
 with the exact content and authority writes in the same durable CAS. The
 ordinary marker remains the prepared authority edit; the second marker is
 durable-journal state, not an invented authority-page post. -/
-def charge (ingress : FnSelectiveReleaseIngress.Ingress)
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : FnSelectiveReleaseIngress.Ingress)
     (writes : List DataWrite) (guards : List ReadGuard) : Charge
   | .incidences => 2
   | .turnBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .memoryTouches => writes.length + guards.length
-  | .storageBytes =>
-      (writes.map fun write => write.canonicalPostBytes.length).sum +
-        (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge snap writes guards (FnSelectiveReleaseIngress.event ingress)
   | .witnessBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .proofWork => 2
   | .sideEffectCount => 1
@@ -271,7 +269,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
           (DeclaredResourceController.operationMarker config.deployment.domain
             config.profile.semantics (FnSelectiveReleaseIngress.command ingress)),
         FnSelectiveReleaseIngress.releaseNullifier ingress.packet.release]
-    exactCharge := charge ingress writes guards
+    exactCharge := charge opened.durable.snapshot ingress writes guards
     event := FnSelectiveReleaseIngress.event ingress
     subject := some (FnSelectiveReleaseIngress.command ingress).subject
     postRootsBound := DeclaredResourceController.writes_roots_bound operation

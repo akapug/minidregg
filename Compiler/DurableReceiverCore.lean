@@ -34,6 +34,7 @@ import Kernel.TailBound
 import Kernel.LinkIndex
 import Kernel.SessionIndex
 import Kernel.DeployedRepresentsCheck
+import Kernel.DeployedCharge
 import Kernel.TurnLog
 
 namespace Minidregg.Compiler.DurableReceiverIO
@@ -1001,8 +1002,9 @@ def WorldTrack.world? {rootBytes : List UInt8 → Digest} {snapshot : DataSnapsh
   | .lost _ => none
 
 /-- **One accepted execution, one admitted turn.**  From a held World, derive the
-intent's turn against it and admit it; the result represents the executed
-snapshot one height up. -/
+intent's turn against it, refuse it unless its charge is the intent's on every
+lane (the Host debits what the World debits), and admit it; the result
+represents the executed snapshot one height up. -/
 def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : DataSnapshot rootBytes}
     {height height' : Nat} {intent : DataIntent rootBytes}
     (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
@@ -1012,17 +1014,85 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
       match derived : TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
       | .error refusal => .lost s!"height {height'}: the intent is not a turn: {repr refusal}"
       | .ok t =>
+          match charged : DeployedCharge.mismatch t.charge intent.exactCharge with
+          | some lane => .lost s!"height {height'}: the intent's charge is not its turn's: {repr lane}"
+          | none =>
           match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
           | .ok w' => .held w' (by
               obtain ⟨w'', h, r⟩ := HostRefinesWorld.admit_of_accepted DeployedBridge.bridge
-                DeployedHistory.history rep derived executed
+                DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
               rw [admitted] at h
               cases h
               rw [up]
               exact r)
 
-/-- Fold a log's records as turns from a World: bind, derive, admit; refuse by height. -/
+/-- **The append path refuses an intent charged other than its turn.**  From a
+held World, an intent whose derived turn's charge differs from its exact charge
+on any lane leaves the World lost: `prepareAppend` refuses it before a byte is
+written. -/
+theorem WorldTrack.advance_refuses_mismatch {rootBytes : List UInt8 → Digest}
+    {snapshot next : DataSnapshot rootBytes} {height height' : Nat} {intent : DataIntent rootBytes}
+    (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
+    (up : height' = height + 1) {w : HostRefinesWorld.DWorld}
+    (rep : HostRefinesWorld.SnapRepresents DeployedBridge.bridge snapshot height w)
+    {t : TurnOfIntent.DTurn DeployedBridge.deployedR Digest}
+    (derived : TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent = .ok t)
+    (differs : t.charge ≠ intent.exactCharge) :
+    ∃ reason, WorldTrack.advance executed up (.held w rep) = .lost reason := by
+  cases hm : DeployedCharge.mismatch t.charge intent.exactCharge with
+  | none => exact absurd (DeployedCharge.mismatch_none hm) differs
+  | some lane =>
+    unfold WorldTrack.advance
+    split
+    · rename_i h; cases h
+    · rename_i h; cases h
+      split
+      · rename_i r h; rw [derived] at h; cases h
+      · rename_i t' h
+        rw [derived] at h
+        cases h
+        split
+        · exact ⟨_, rfl⟩
+        · rename_i h
+          rw [hm] at h
+          cases h
+
+/-- **The plant: a receiver that archives its event but charges none of it is
+refused.**  An intent whose storage lane is only its turn's legs and born images
+-- omitting the bytes its event retains -- while its event retains some, is not
+appended: the World charges the event (`DeployedHistory.eventBytes`), so the
+charges differ and the append path loses the World. -/
+theorem WorldTrack.advance_refuses_unretained {rootBytes : List UInt8 → Digest}
+    {snapshot next : DataSnapshot rootBytes} {height height' : Nat} {intent : DataIntent rootBytes}
+    (executed : DurableDataIntent.execute .complete snapshot intent = .accepted next)
+    (up : height' = height + 1) {w : HostRefinesWorld.DWorld}
+    (rep : HostRefinesWorld.SnapRepresents DeployedBridge.bridge snapshot height w)
+    {t : TurnOfIntent.DTurn DeployedBridge.deployedR Digest}
+    (derived : TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent = .ok t)
+    (retains : intent.event.canonicalBytes ≠ [])
+    (omits : intent.exactCharge .storageBytes =
+      (t.legs.map DeployedHistory.legBytes).sum +
+        (t.creates.map fun c => DeployedHistory.imageBytes c.2.1).sum) :
+    ∃ reason, WorldTrack.advance executed up (.held w rep) = .lost reason := by
+  refine WorldTrack.advance_refuses_mismatch executed up rep derived fun same => ?_
+  have lane := congrFun same .storageBytes
+  have d := (TurnOfIntent.ofCells_ok derived).eq
+  have event : t.event = intent.event := by rw [d]; rfl
+  have charged : t.charge .storageBytes =
+      TurnOfIntent.storageOf DeployedHistory.history t.creates t.legs t.event := by
+    rw [d]; simp [TurnOfIntent.turnOf, TurnOfIntent.chargeOf]
+  rw [charged, omits, event] at lane
+  have positive : 0 < intent.event.canonicalBytes.length := List.length_pos_iff.mpr retains
+  simp only [TurnOfIntent.storageOf, DeployedHistory.history, WorldRoot.cshakeHistory,
+    DeployedHistory.eventBytes] at lane
+  omega
+
+#assert_axioms WorldTrack.advance_refuses_mismatch
+#assert_axioms WorldTrack.advance_refuses_unretained
+
+/-- Fold a log's records as turns from a World: bind, derive, compare the
+charge, admit; refuse by height. -/
 def foldRecords (rootBytes : List UInt8 → Digest) :
     HostRefinesWorld.DWorld → Nat → List IntentRecord → Except String HostRefinesWorld.DWorld
   | w, _, [] => .ok w
@@ -1033,6 +1103,10 @@ def foldRecords (rootBytes : List UInt8 → Digest) :
           match TurnOfIntent.Turn.ofIntent DeployedBridge.bridge DeployedHistory.history w intent with
           | .error refusal => .error s!"height {height + 1}: the record is not a turn: {repr refusal}"
           | .ok t =>
+              match DeployedCharge.mismatch t.charge intent.exactCharge with
+              | some lane =>
+                  .error s!"height {height + 1}: the record's charge is not its turn's: {repr lane}"
+              | none =>
               match Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
               | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
               | .ok w' => foldRecords rootBytes w' (height + 1) rest

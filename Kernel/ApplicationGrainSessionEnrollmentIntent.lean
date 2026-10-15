@@ -82,7 +82,9 @@ def charge {config : Config} {opened : Opened config}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 3
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 3
-    | .storageBytes => ordinary.exactCharge .storageBytes + ingress.canonicalBytes.length
+    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes
+        (ordinary.readGuards ++ readGuards checked)
+        (ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress)
     | other => ordinary.exactCharge other
 
 def intent {config : Config} {opened : Opened config}

@@ -5,6 +5,7 @@ stand-ins for the hash-derived object/state/package/domain coordinates. -/
 import Kernel.DeployedHistory
 import Kernel.ObjectiveActivityWire
 import Kernel.ObjectiveDomain
+import Kernel.DeployedCharge
 
 namespace Minidregg.Kernel.ObjectiveTurnTotality
 
@@ -30,16 +31,18 @@ def payloadCell (role : ObjectiveActivityCell.Role) : Cell deployedR :=
 def preWorld : World deployedR DurableDataIntent.TransactionId Digest :=
   ⟨(0 : Cells deployedR).update 3 (some (payloadCell .package)), 0⟩
 
-/-- The receiver's exact storage model: sum of full post image lengths. -/
+/-- The receiver's exact storage model: the World's storage of the posts, the
+guards and the retained event, against the witness cells (`preWorld`'s). -/
 def sealing : Seal where
   guards := []
   nullifiers := []
   event := ⟨1, ⟨0⟩, ⟨0⟩, []⟩
   subject := none
-  charge posts guards := fun lane => match lane with
+  charge posts guards event := fun lane => match lane with
     | .incidences => 1
     | .memoryTouches => posts.length + guards.length
-    | .storageBytes => (posts.map fun p => p.bytes.length).sum
+    | .storageBytes => DeployedCharge.storageAt (fun c => preWorld.cells c)
+        (posts.map (Post.write ResourceBirthCodec.rootBytes)) guards event
     | _ => 0
 
 def post (id : Nat) (role : ObjectiveActivityCell.Role) : Post :=

@@ -693,23 +693,24 @@ def chainDigest (acc turn : Digest) : Digest :=
 turn digest is cSHAKE over the turn's canonical bytes; the chain links it to
 the previous log root. -/
 def cshakeHistory {R : Registry} {TxId Ev : Type} (encode : Turn R TxId Ev Digest → List UInt8)
-    (logRoot0 : Digest) (legBytes : Leg R → Nat) (imageBytes : Cell R → Nat) :
-    History R TxId Ev Digest where
+    (logRoot0 : Digest) (legBytes : Leg R → Nat) (imageBytes : Cell R → Nat)
+    (eventBytes : Ev → Nat) : History R TxId Ev Digest where
   turnDigest t := turnDigestOfBytes (encode t)
   chain := chainDigest
   logRoot0 := logRoot0
   legBytes := legBytes
   imageBytes := imageBytes
+  eventBytes := eventBytes
 
 /-- `classify_conflict`'s `separates` premise at the deployed history: two turns
 with different canonical bytes, where the hash binds that one pair. -/
 theorem cshakeHistory_separates {R : Registry} {TxId Ev : Type}
     (encode : Turn R TxId Ev Digest → List UInt8) (logRoot0 : Digest) (legBytes : Leg R → Nat)
-    (imageBytes : Cell R → Nat) {t t' : Turn R TxId Ev Digest}
+    (imageBytes : Cell R → Nat) (eventBytes : Ev → Nat) {t t' : Turn R TxId Ev Digest}
     (hne : encode t ≠ encode t')
     (binds : turnDigestOfBytes (encode t) = turnDigestOfBytes (encode t') → encode t = encode t') :
-    (cshakeHistory encode logRoot0 legBytes imageBytes).turnDigest t ≠
-      (cshakeHistory encode logRoot0 legBytes imageBytes).turnDigest t' :=
+    (cshakeHistory encode logRoot0 legBytes imageBytes eventBytes).turnDigest t ≠
+      (cshakeHistory encode logRoot0 legBytes imageBytes eventBytes).turnDigest t' :=
   fun h => hne (binds h)
 
 end History

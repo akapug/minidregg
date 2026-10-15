@@ -61,11 +61,12 @@ theorem ofAdmission_run (B : Bridge R D) (H : History R TransactionId StableEven
     {snap : DataSnapshot Minidregg.Compiler.ResourceBirthCodec.rootBytes} {height : Nat}
     {w : World R TransactionId D} (rep : SnapRepresents B snap height w) {t : DTurn R D}
     (derived : Turn.ofAdmission B H w admitted = .ok t)
+    (charged : t.charge = intent.exactCharge)
     (installs : Installs (execute .complete snap intent) = true) :
     ∃ w', World.step H w t = some w' ∧
       SnapRepresents B (DataSnapshot.install snap intent) (height + 1) w' := by
   rcases execute_cases .complete snap intent with ⟨-, fresh, ready, -⟩ | ⟨hi, -⟩
-  · exact ofIntent_run B H rep derived fresh ready
+  · exact ofIntent_run B H rep derived charged fresh ready
   · rw [installs] at hi; cases hi
 
 end Admission

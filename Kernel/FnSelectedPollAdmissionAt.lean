@@ -75,11 +75,14 @@ def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
     else return .error "selected fn poll testimony refused"
   else return .error "selected fn poll testimony refused"
 
-def charge (ingress : Ingress) : ResourceCost.Charge
+/-- The turn's charge: it writes nothing, so its storage lane is the World's
+storage of its guards and its retained event (`DeployedCharge.storageCharge`). -/
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List ReadGuard)
+    (ingress : Ingress) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => (ingressCodec.encode ingress).length
   | .memoryTouches => 1
-  | .storageBytes => (ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge snap [] guards (event ingress)
   | .witnessBytes => (ingressCodec.encode ingress).length
   | .proofWork => 1
   | .sideEffectCount => 1
@@ -91,12 +94,13 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
     (registration : FnConsumerNamespaceHistory.Original) (ingress : Ingress)
     (accepted : Accepted config opened cursor original registration ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
+  let guards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
+    opened.authority.readGuards
   { transactionId := transactionId ingress.spec
     writes := []
-    readGuards := FnConsumerFrontierGateway.readGuards accepted.gateway.prepared ++
-      opened.authority.readGuards
+    readGuards := guards
     nullifiers := [frontierNullifier ingress.spec]
-    exactCharge := charge ingress
+    exactCharge := charge opened.durable.snapshot guards ingress
     event := event ingress
     subject := some ingress.spec.gatewaySubject
     postRootsBound := by intro write present; cases present

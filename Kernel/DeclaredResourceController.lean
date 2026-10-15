@@ -1703,6 +1703,13 @@ def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment pr
   readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
+/-- The invocation's retained event: the signed bytes. -/
+def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
+  codecVersion := 3
+  domain := domain
+  eventId := effectsDigest domain semantics command
+  canonicalBytes := signedBytes domain semantics signed
+
 /- Current signature, observation and law checks only. This token cannot create
 an effect intent and carries no accepted source execution. -/
 /-- A closed, current route admission. Registration alone cannot create an
@@ -1858,7 +1865,7 @@ structure AcceptedInvocation [DecidableEq F]
   audience : AudienceChecks prepared
   route : InvocationRouteAdmission prepared signed
   execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
-    (signedBytes ground.authority.domain profile.semantics signed)
+    (invocationEvent ground.authority.domain profile.semantics command signed)
     (writes prepared) (completeAdmissionGuards prepared signed audience route))
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
   tuple : PreparedTuple (plan prepared)
@@ -2029,7 +2036,7 @@ private def finishAdmission [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command) (signed : SignedCommand)
     (authority : AuthorityInvocation prepared signed) (route : InvocationRouteAdmission prepared signed)
     (execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
-      (signedBytes ground.authority.domain profile.semantics signed)
+      (invocationEvent ground.authority.domain profile.semantics command signed)
       (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
     Except Reject (AcceptedInvocation prepared signed) := do
   if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
@@ -2078,7 +2085,7 @@ def admitObjective [DecidableEq F] {m : Type → Type} [Monad m] (native : Crede
               let route : InvocationRouteAdmission prepared signed :=
                 .objective family selected kind registered guards readonly roots
               match ObjectiveBendNativeAdmission.admit selection
-                  (signedBytes ground.authority.domain profile.semantics signed)
+                  (invocationEvent ground.authority.domain profile.semantics command signed)
                   (writes prepared) (completeAdmissionGuards prepared signed authority.audience route) with
               | .error reason => return .error reason
               | .ok completed => return finishAdmission prepared signed authority route (some completed)
@@ -2279,14 +2286,16 @@ theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
 
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
-def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
-  codecVersion := 3
-  domain := domain
-  eventId := effectsDigest domain semantics command
-  canonicalBytes := signedBytes domain semantics signed
-
 def transactionId (domain semantics : Digest) (command : Command) : Digest :=
   ⟨operationMarker domain semantics command⟩
+
+/-- The storage lane of an invocation writing `ws` under `guards`: the World's
+(`DeployedCharge.storageCharge` against the ground's image, the retained event
+the signed bytes). -/
+def storageFrom (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard)
+    (_prepared : PreparedInvocation deployment profile ambient ground command) : Nat :=
+  DeployedCharge.storageCharge ground.view ws guards
+    (invocationEvent ground.authority.domain profile.semantics command signed)
 
 def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
@@ -2294,17 +2303,22 @@ def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile amb
   | .incidences => command.targets.length + 1
   | .turnBytes => (signedBytes ground.authority.domain profile.semantics signed).length
   | .memoryTouches => ws.length + guards.length
-  | .storageBytes => (ws.map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => storageFrom signed ws guards prepared
   | .proofWork => (prepared.run.map fun checked => checked.verdict.steps).getD 0
   | .feeDebit => (prepared.compute.map RunComputeBudgetDomain.Prepared.credits).getD 0
   | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-/-- Fixed public capacity is the actual admitted application charge. Exact
-private branch usage was checked against this envelope before Accepted existed. -/
+/-- Fixed public capacity is the actual admitted application charge on every
+lane but storage. Exact private branch usage was checked against this envelope
+before Accepted existed (`ObjectiveBendNativeAdmission.Admitted.fits`); the
+storage lane is the World's actual number, which that check bounds by the
+capacity's. -/
 def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge :=
   match command.objectiveClaim with
-  | .ok (some claim) => ObjectiveBendNativeAdmission.charge claim.capacity
+  | .ok (some claim) => fun lane =>
+      if lane = .storageBytes then storageFrom signed ws guards prepared
+      else ObjectiveBendNativeAdmission.charge claim.capacity lane
   | _ => legacySourceChargeFrom prepared signed ws guards
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -2334,22 +2348,31 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     postRootsBound := writes_roots_bound prepared
     guardsReadOnly := accepted.readGuards_readonly shape }
 
-/-- **Charging rule: a record is charged the bytes it writes.**  The storage
-charge of an accepted invocation is exactly the canonical bytes of the cells
-its record writes: each non-read target plus its fresh stream append entry.
-Authority and observe-only targets are guards, neither stored nor charged. -/
+/-- **Charging rule: a record is charged what the World retains.**  The
+storage charge of an accepted invocation, ordinary or Objective, is exactly the
+World's storage of its intent against the ground's image: the new values its
+record writes (each non-read target plus its fresh stream append entry), the
+born images, and the retained event.  Authority and observe-only targets are
+guards, neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared)
-    (ordinary : command.objectiveClaim = .ok none) :
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
-        ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
+        DeployedCharge.storageCharge ground.view (accepted.dataIntent shape).writes
+          (accepted.dataIntent shape).readGuards (accepted.dataIntent shape).event ∧
       (accepted.dataIntent shape).writes =
         (List.finRange command.targets.length).filterMap (fun i =>
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
   by
     constructor
-    · simp [AcceptedInvocation.dataIntent, sourceChargeFrom, ordinary, legacySourceChargeFrom]
+    · show sourceChargeFrom prepared signed _ _ .storageBytes = _
+      unfold sourceChargeFrom
+      cases command.objectiveClaim with
+      | error _ => rfl
+      | ok claim =>
+        cases claim with
+        | none => rfl
+        | some _ => exact if_pos rfl
     · rfl
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]

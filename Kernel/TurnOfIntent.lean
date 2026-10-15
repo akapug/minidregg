@@ -687,17 +687,18 @@ def guardIds (ws : List DataWrite) (gs : List ReadGuard) : List CellId :=
 def guardLeg (C : Codec R) (cells : CellId → Option (Cell R)) (c : CellId) : Option (Leg R) :=
   (cells c).map fun cell => ⟨c, cell.kind, C.legPatch cell.kind cell.store cell.store⟩
 
-/-- The storage bytes of creates and legs: the legs' bytes plus the born
-images' (`World.patchBytes`). -/
+/-- The storage bytes of creates, legs and the event: the legs' bytes, the
+born images' and the retained event's (`World.patchBytes`). -/
 def storageOf (H : History R TransactionId StableEvent D)
-    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) : Nat :=
-  (legs.map H.legBytes).sum + (creates.map fun c => H.imageBytes c.2.1).sum
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (event : StableEvent) :
+    Nat :=
+  (legs.map H.legBytes).sum + (creates.map fun c => H.imageBytes c.2.1).sum + H.eventBytes event
 
 /-- The turn's charge: the intent's, with the storage lane the patch bytes. -/
 def chargeOf (H : History R TransactionId StableEvent D)
-    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (exact : Charge) :
-    Charge :=
-  fun l => if l = .storageBytes then storageOf H creates legs else exact l
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (event : StableEvent)
+    (exact : Charge) : Charge :=
+  fun l => if l = .storageBytes then storageOf H creates legs event else exact l
 
 /-- The creates of an intent. -/
 def createsOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
@@ -729,7 +730,7 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     event := intent.event
     nullifiers := intent.nullifiers.map B.key
     charge := chargeOf H (createsOf B.codec cells intent) (legsOf B.codec cells intent)
-      intent.exactCharge
+      intent.event intent.exactCharge
     subject := intent.subject
     absent := absentOf cells intent }
 
@@ -751,7 +752,7 @@ def ofCells (B : Bridge R D) (H : History R TransactionId StableEvent D)
           else if ¬ t.retires.Nodup then .error .duplicateWrite
           else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLeg
           else if t.legs.isEmpty ∧ t.creates.isEmpty then .error .noEffect
-          else if storageOf H t.creates t.legs > intent.exactCharge .storageBytes then
+          else if storageOf H t.creates t.legs t.event > intent.exactCharge .storageBytes then
             .error .storageAboveCharge
           else .ok t
 
@@ -773,7 +774,7 @@ structure Derived (B : Bridge R D) (H : History R TransactionId StableEvent D)
   retires_nodup : t.retires.Nodup
   legs_nodup : (t.legs.map Leg.cell).Nodup
   nonempty : ¬ (t.legs.isEmpty = true ∧ t.creates.isEmpty = true)
-  storage : storageOf H t.creates t.legs ≤ intent.exactCharge .storageBytes
+  storage : storageOf H t.creates t.legs t.event ≤ intent.exactCharge .storageBytes
 
 omit [DecidableEq D] in
 theorem ofCells_ok {B : Bridge R D} {H : History R TransactionId StableEvent D}
@@ -1273,7 +1274,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   have hretires : t.retires = retiresOf B.codec cells intent := by rw [teq]; rfl
   have htx : t.txId = intent.transactionId := by rw [teq]; rfl
   have hnull : t.nullifiers = intent.nullifiers.map B.key := by rw [teq]; rfl
-  have hcharge : t.charge = chargeOf H t.creates t.legs intent.exactCharge := by
+  have hcharge : t.charge = chargeOf H t.creates t.legs t.event intent.exactCharge := by
     rw [teq]; rfl
   have hnb : t.notBefore = 0 := by rw [teq]; rfl
   have hvu : t.validUntil = none := by rw [teq]; rfl

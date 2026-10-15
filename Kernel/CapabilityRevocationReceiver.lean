@@ -157,7 +157,9 @@ def charge (accepted : AcceptedRevocation deployment profile ambient ground ingr
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge ground.view
+      (writes accepted.prepared) (readGuards accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelopeBytes.length
   | .proofWork => 3
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0

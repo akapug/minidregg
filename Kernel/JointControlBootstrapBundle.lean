@@ -38,9 +38,11 @@ def decodeSource (bytes : List UInt8) : Option Source := do
   let source ← sourceStream.toLawful.decode (bytes.drop frame.length)
   if sourceBytes source != bytes then none else some source
 
-/-- Additional operation accounting preserves all ten birth lanes. Source
-bytes and two extra current-law validations receive explicit deterministic
-charges. This quote is a source operation rule, not a CPU refinement proof. -/
+/-- Additional operation accounting preserves the birth's lanes but storage.
+Source bytes and two extra current-law validations receive explicit
+deterministic charges; the storage lane is the World's storage of the bundle's
+own turn (`birthIntent`). This quote is a source operation rule, not a CPU
+refinement proof. -/
 def overhead (source : Source) : Charge
   | .turnBytes => (sourceBytes source).length
   | .proofWork => 2
@@ -54,10 +56,14 @@ def birthIntent {config : Config} {opened : Opened config}
       opened.pins opened.durable (logicalHeight config opened.durable)) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ordinary := ResourceBirthReceiver.intent accepted
+  let event : StableEvent := ⟨61,config.deployment.domain,
+    (Sp800185Cshake256.hash frame (sourceBytes source)).digest,sourceBytes source⟩
   { ordinary with
-    exactCharge := ordinary.exactCharge + overhead source
-    event := ⟨61,config.deployment.domain,
-      (Sp800185Cshake256.hash frame (sourceBytes source)).digest,sourceBytes source⟩ }
+    exactCharge := fun lane =>
+      if lane = .storageBytes then
+        DeployedCharge.storageCharge opened.durable.snapshot ordinary.writes ordinary.readGuards event
+      else ordinary.exactCharge lane + overhead source lane
+    event := event }
 
 /-- Bootstrap is a creator-owned source resource: the ordinary current creator
 signature is also the configured current owner permission. General separately
