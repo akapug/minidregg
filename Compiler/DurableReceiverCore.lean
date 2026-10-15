@@ -1523,6 +1523,61 @@ def Loaded.keptAt {rootBytes : List UInt8 → Digest} (transport : Transport) (k
 #assert_axioms Loaded.atPrefixFrom_kept
 #assert_axioms Loaded.atPrefixFrom_from_checkpoint
 
+/-! ## A cut that keeps nothing the Store sealed (CONSENT-OWN)
+
+`prefixAt` keeps the open's checkpoint as the cut's base when it sits at or
+below the cut, and the verified tags' roots as its stored roots: both are the
+Store key holder's (the operator's). A consent provider's opening may base on
+neither: a client base is a state the client computed. `prefixOwn` is the cut
+whose base is the seed and whose root log keeps no root, so its snapshot is the
+genesis fold of the cut (`atPrefix_own`) and every receipt root below its head
+is evaluated, never read. -/
+
+/-- **The image cut at `height`, folded from genesis**: the chain after
+`height` records read off the open's verified prefixes, the seed as the base,
+no stored roots. -/
+def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
+    (chains : List Digest) (chainsExact : chains = chainPrefixes loaded.logStart loaded.image.accepted) :
+    Except String {cut : Loaded rootBytes //
+      cut.image = ⟨loaded.image.seed, loaded.image.accepted.take height⟩ ∧
+        cut.logStart = loaded.logStart ∧ cut.baseHeight = 0 ∧
+        cut.base = State.ofSeed loaded.image.seed ∧
+        cut.rootLog = Array.replicate cut.image.accepted.length none} :=
+  if within : height ≤ loaded.image.accepted.length then
+    match found : chains[height]? with
+    | none => .error "durable chain prefix unavailable at the requested height"
+    | some chain =>
+        have chainExact : chain = chainAfter loaded.logStart (loaded.image.accepted.take height) := by
+          rw [chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ within] at found
+          exact (Option.some.inj found).symm
+        let image : Image := ⟨loaded.image.seed, loaded.image.accepted.take height⟩
+        match resumed : resume rootBytes image 0 (State.ofSeed loaded.image.seed) with
+        | none => .error "durable image journal does not replay from genesis through the canonical executor"
+        | some snapshot =>
+            let built := RootCache.build (entriesOf image snapshot chain)
+            .ok ⟨⟨image, 0, State.ofSeed loaded.image.seed, snapshot, Nat.zero_le _, resumed,
+              loaded.logStart, chain, chainExact, built.1, built.2,
+              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
+              SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
+              SessionIndex.TxIndex.ofRecords image.accepted,
+              SessionIndex.TxIndex.ofRecords_exact image.accepted,
+              Array.replicate image.accepted.length none, Array.size_replicate, none, none⟩,
+              rfl, rfl, rfl, rfl, rfl⟩
+  else .error "durable log is shorter than the requested height"
+
+/-- **A genesis-based image's past read is the genesis fold of the prefix**, at
+every height: `resume_sound`'s premises hold by construction (the base IS the
+seed), so nothing is assumed about who sealed what. -/
+theorem Loaded.atPrefix_own {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (zero : loaded.baseHeight = 0) (seeded : loaded.base = State.ofSeed loaded.image.seed)
+    (height : Nat) :
+    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefix
+  rw [if_pos (by rw [zero]; exact Nat.zero_le _), zero, seeded]
+  exact resume_genesis rootBytes (loaded.prefixImage height)
+
+#assert_axioms Loaded.atPrefix_own
+
 /-- The checkpoint state's world-root entries are the served entries. -/
 theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)
     (snapshot : DataSnapshot rootBytes) (chain : Digest) :

@@ -127,6 +127,9 @@ structure Base (rootBytes : List UInt8 → Digest) (seed : Seed) {store : StoreI
   authentic : (height = 0 ∧ state = State.ofSeed seed ∧ chain = store.logStart) ∨
     ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed store.key rootBytes bytes = .ok body ∧
         body.height = height ∧ body.chain = chain ∧ body.state = state) ∧
+      ∃ base : Record head height, base.verified.chain = chain) ∨
+    ((∃ own : OwnBase rootBytes, own.seed = seed ∧ own.logStart = store.logStart ∧
+        own.height = height ∧ own.chain = chain ∧ own.state = state) ∧
       ∃ base : Record head height, base.verified.chain = chain)
 
 /-- The latest retained checkpoint at or below `height` (MAC verified under the
@@ -148,15 +151,16 @@ def baseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : S
           | .ok baseRecord =>
               if onLog : baseRecord.verified.chain = body.chain then
                 return .ok ⟨body.height, body.chain, body.state,
-                  Or.inr ⟨⟨checkpoint.bytes, body, opened, rfl, rfl, rfl⟩, baseRecord, onLog⟩⟩
+                  Or.inr (Or.inl ⟨⟨checkpoint.bytes, body, opened, rfl, rfl, rfl⟩, baseRecord, onLog⟩)⟩
               else return .error (.notIncluded body.height)
 
 /-- The authentic state after `height` records. -/
-def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
-    {store : StoreIdentity} (head : Head store) (height : Nat) :
+def stateAtFrom (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
+    {store : StoreIdentity} (head : Head store)
+    (choose : Nat → IO (Except Refusal (Base rootBytes seed head))) (height : Nat) :
     IO (Except Refusal (StateAt rootBytes seed head height)) := do
   if height > head.height then return .error (.beyondHead height head.height)
-  match ← baseOf transport rootBytes seed head height with
+  match ← choose height with
   | .error refusal => return .error refusal
   | .ok base =>
       let reads ← if base.height + 1 > height then pure [] else
@@ -176,6 +180,58 @@ def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : 
           else return .error (.notIncluded (base.height + 1))
         else return .error (.unavailable height "the Store returned another record count")
       else return .error (.unavailable height "the Store returned records out of order")
+
+/-- The authentic state after `height` records, from the Store's latest
+retained checkpoint at or below it (`baseOf`). -/
+def stateAt (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
+    {store : StoreIdentity} (head : Head store) (height : Nat) :
+    IO (Except Refusal (StateAt rootBytes seed head height)) :=
+  stateAtFrom transport rootBytes seed head (baseOf transport rootBytes seed head) height
+
+/-- The base an OWN-ONLY past state resumes from (CONSENT-OWN): the highest of
+the holder's own bases at or below `height` (positive, for this seed and genesis
+log, sitting on the verified log: the record at its height carries its chain),
+else the seed. A Store checkpoint is never read. -/
+def ownBaseOf (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
+    {store : StoreIdentity} (head : Head store) (own : List (OwnBase rootBytes)) (height : Nat) :
+    IO (Except Refusal (Base rootBytes seed head)) := do
+  let genesis : Base rootBytes seed head := ⟨0, store.logStart, State.ofSeed seed, Or.inl ⟨rfl, rfl, rfl⟩⟩
+  let usable := own.filter fun base => 0 < base.height && base.height ≤ height &&
+    base.logStart == store.logStart
+  let best : Option (OwnBase rootBytes) := usable.foldl (init := none) fun found base =>
+    match found with
+    | some kept => if kept.height < base.height then some base else some kept
+    | none => some base
+  let some base := best | return .ok genesis
+  if seedSame : DurableReceiverCodec.seedStream.encode base.seed =
+      DurableReceiverCodec.seedStream.encode seed then
+    have seedExact : base.seed = seed :=
+      (ResourceBirthCodec.lawful_encode_injective DurableReceiverCodec.seedStream.toLawful) seedSame
+    if started : base.logStart = store.logStart then
+      match ← atHeight transport head base.height with
+      | .error refusal => return .error refusal
+      | .ok baseRecord =>
+          if onLog : baseRecord.verified.chain = base.chain then
+            return .ok ⟨base.height, base.chain, base.state,
+              Or.inr (Or.inr ⟨⟨base, seedExact, started, rfl, rfl, rfl⟩, baseRecord, onLog⟩)⟩
+          else return .error (.notIncluded base.height)
+    else return .ok genesis
+  else return .ok genesis
+
+/-- The state after `height` records from the holder's own bases or the seed,
+never from a Store checkpoint (`ownBaseOf`). -/
+def stateAtOwn (transport : Transport) (rootBytes : List UInt8 → Digest) (seed : Seed)
+    {store : StoreIdentity} (head : Head store) (own : List (OwnBase rootBytes)) (height : Nat) :
+    IO (Except Refusal (StateAt rootBytes seed head height)) :=
+  stateAtFrom transport rootBytes seed head (ownBaseOf transport rootBytes seed head own) height
+
+/-- **This Reader's past states are its holder's own**: every `stateAt` resumes
+from one of `own` or the seed (`stateAtOwn`); records, transaction and spent
+answers are the Store's, verified under the head as before. -/
+def _root_.Minidregg.Compiler.DurableHistoryReader.Reader.ownOnly {rootBytes : List UInt8 → Digest} {store : StoreIdentity} (transport : Transport)
+    (reader : Reader rootBytes store) (own : List (OwnBase rootBytes)) : Reader rootBytes store :=
+  { reader with stateAt :=
+      Minidregg.Compiler.DurableHistoryStore.stateAtOwn transport rootBytes reader.seed reader.head own }
 
 /-- The Reader of an opened Store at its head. The open mints the Store's
 identity (its key, its genesis log start) and the head: `Head.verify` of the
