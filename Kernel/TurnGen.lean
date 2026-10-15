@@ -234,7 +234,7 @@ def assemble (w : DWorld) (tx : Nat) (writes : List DataWrite) (guards : List Re
     (nulls : List StableNullifier) (fee : Nat) : Option (DataIntent RB) := do
   let pre ← (IntentRecord.mk ⟨tx⟩ writes guards nulls 0 (event tx) none).bind? RB
   let t := turnOf bridge history (fun c => w.cells c) pre
-  let storage := storageOf history t.creates t.legs
+  let storage := storageOf history t.creates t.legs t.event
   return { pre with exactCharge := fun l =>
     if l = .storageBytes then storage else if l = .feeDebit then fee else 0 }
 
@@ -444,7 +444,7 @@ def mutated (sz : Sizes) (v : View) : GenM (Option (String × DTurn deployedR Di
   let absentId := cellBase + 999999
   let n ← below 12
   let named : Option (String × DTurn deployedR Digest) :=
-    if n = 0 then some ("empty", { t with legs := [], creates := [], retires := [] })
+    if n = 0 then some ("empty", { t with legs := [], creates := [], retires := [], pins := [] })
     else if n = 1 then some ("dup-leg", { t with legs := t.legs ++ t.legs.take 1 })
     else if n = 2 then
       (match others.head? with
@@ -471,7 +471,7 @@ def mutated (sz : Sizes) (v : View) : GenM (Option (String × DTurn deployedR Di
     else if n = 9 then
       (match accepted.head? with
       | some old => some ("replay", { t with txId := old.transactionId })
-      | none => some ("empty", { t with legs := [], creates := [], retires := [] }))
+      | none => some ("empty", { t with legs := [], creates := [], retires := [], pins := [] }))
     else if n = 10 then some ("image-not-rom", { t with creates :=
       (absentId, contentCell (Store.set 0 (fieldAddr 0) (some (fieldRec 1))), none) :: t.creates })
     else

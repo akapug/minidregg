@@ -108,8 +108,6 @@ def charge {config : Config} {opened : Opened config}
     | .memoryTouches => base .memoryTouches + 1
     | .storageBytes => DeployedCharge.storageCharge opened.ground.view
         (ApplicationDispatchPending.candidateIntent checked.base.checked).writes
-        ((ApplicationDispatchPending.candidateIntent checked.base.checked).readGuards ++
-          [purseGuard checked.payer])
         (ApplicationDispatchAgentIngress.event ingress)
     | other => base other
 

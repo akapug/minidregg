@@ -227,6 +227,22 @@ theorem decodeCell_retired :
   rw [LifecycleImage.decode_encode]
   exact ⟨rfl, rfl⟩
 
+/-- **The deployed per-cell digest** of a slot, the absent slot included:
+the root of its canonical bytes.  It is the one function the deployed history's
+`cellDigest` (what a pin is compared with) and the compact log's digest guard
+(`DeployedTurnCompact`) both use. -/
+def cellRoot (slot : Option (Cell deployedR)) : Theory.TypedAuthorization.Digest :=
+  ResourceBirthCodec.rootBytes (encodeCell slot)
+
+/-- **Pin coherence at the deployed codec**: a slot's bytes that decode and do
+not retire have the root of the slot they decode to. -/
+theorem cellRoot_of_decode {bytes : List UInt8} {slot : Option (Cell deployedR)}
+    (h : decodeCell bytes = some slot) (live : retiresCell bytes = false) :
+    cellRoot slot = ResourceBirthCodec.rootBytes bytes := by
+  rcases decodeCell_canonical h with canonical | ⟨-, retired⟩
+  · unfold cellRoot; rw [canonical]
+  · rw [live] at retired; cases retired
+
 /-! ## The bridge -/
 
 /-- The deployed cell codec: the decoder and the canonical address order of
@@ -238,7 +254,12 @@ def codec : Codec deployedR :=
 /-- **The deployed `Bridge`**: the real cell codec and the injective nullifier
 key. -/
 def bridge : Bridge deployedR Theory.TypedAuthorization.Digest :=
-  ⟨codec, digestKey, digestKey_injective⟩
+  ⟨codec, digestKey, digestKey_injective, id⟩
+
+/-- The deployed pin reading is the identity: an asserted root IS the pin. -/
+@[simp] theorem bridge_pin : bridge.pin = id := rfl
+
+theorem bridge_pin_injective : Function.Injective bridge.pin := fun _ _ h => h
 
 /-- **`Represents`' cells field over the deployed bridge** is exactly: every
 deployed cell's bytes are the canonical encoding of the world's cell, or the
@@ -312,6 +333,8 @@ theorem decodeCell_policySource (record : CanonicalPolicyAdmission.PolicyRecord)
 #assert_axioms packOf_unpack
 #assert_axioms bridge_decode_total_on_registry
 #assert_axioms decodeCell_canonical
+#assert_axioms cellRoot_of_decode
+#assert_axioms bridge_pin_injective
 #assert_axioms decodeCell_retired
 #assert_axioms retiresCell_decode
 #assert_axioms deployed_cells_iff

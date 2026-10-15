@@ -158,7 +158,7 @@ def charge (accepted : AcceptedDelegation deployment profile ambient ground ingr
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => DeployedCharge.storageCharge ground.view
-      (writes accepted.prepared) (readGuards accepted.prepared)
+      (writes accepted.prepared)
       (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelopeBytes.length
   | .proofWork => 3

@@ -266,7 +266,7 @@ theorem Output.exact {deployment : Deployment}
 /-- Complete native counters; proofWork remains a signed work envelope charged
 by prepareCompute, while source and forcing ticks have their own exact cap.  The
 turn bytes are the retained event's, and the storage lane is the World's
-(`DeployedCharge.storageCharge` of the final writes, guards and event against
+(`DeployedCharge.storageCharge` of the final writes and event against
 the admission image `snap`): the signed capacity is a ceiling on it, and the
 debit charges the actual number (`DeclaredResourceController.sourceChargeFrom`). -/
 def usage {deployment : Deployment}
@@ -282,7 +282,7 @@ def usage {deployment : Deployment}
       ((output.plan.effects.map (fun e => BendWorldPlan.effectStream.encode e)).flatten.length +
        (output.plan.returns.map BendWorldPlan.encodeReturn).flatten.length)
   | .proofWork => c.proofWork
-  | .storageBytes => DeployedCharge.storageCharge snap writes guards event
+  | .storageBytes => DeployedCharge.storageCharge snap writes event
   | .networkBytes => 0
   | .sideEffectCount => output.plan.effects.length
   | .feeDebit => c.feeDebit

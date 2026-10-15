@@ -983,7 +983,7 @@ private abbrev OpenBase (rootBytes : List UInt8 → Digest) : Type :=
 
 A `Loaded` carries the deployed World its snapshot represents, or the reason its
 log is not a turn log.  An append advances it by `World.admit` of the derived turn
-(`WorldTrack.advance`, representation by `admit_of_accepted`); an open folds the
+(`WorldTrack.advance`, representation by `represents_of_admitted`); an open folds the
 log's turns from the seed's genesis World and DECIDES the representation
 (`representsCheck_sound`); the append path refuses an intent whose turn the World
 does not admit (`prepareAppend`), so no `lost` image reaches the Store. -/
@@ -1020,12 +1020,10 @@ def WorldTrack.advance {rootBytes : List UInt8 → Digest} {snapshot next : Data
           match admitted : Minidregg.Kernel.World.World.admit DeployedHistory.history w t with
           | .error reason => .lost s!"height {height'}: the World refuses the turn: {repr reason}"
           | .ok w' => .held w' (by
-              obtain ⟨w'', h, r⟩ := HostRefinesWorld.admit_of_accepted DeployedBridge.bridge
-                DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
-              rw [admitted] at h
-              cases h
               rw [up]
-              exact r)
+              exact HostRefinesWorld.represents_of_admitted DeployedBridge.bridge
+                DeployedHistory.history rep derived (DeployedCharge.mismatch_none charged) executed
+                admitted)
 
 /-- **The append path refuses an intent charged other than its turn.**  From a
 held World, an intent whose derived turn's charge differs from its exact charge

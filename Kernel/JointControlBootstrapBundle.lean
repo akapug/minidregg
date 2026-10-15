@@ -61,7 +61,7 @@ def birthIntent {config : Config} {opened : Opened config}
   { ordinary with
     exactCharge := fun lane =>
       if lane = .storageBytes then
-        DeployedCharge.storageCharge opened.durable.snapshot ordinary.writes ordinary.readGuards event
+        DeployedCharge.storageCharge opened.durable.snapshot ordinary.writes event
       else ordinary.exactCharge lane + overhead source lane
     event := event }
 

@@ -538,8 +538,7 @@ def charge (accepted : AcceptedInstall profile deployment ground federation heig
   | .memoryTouches => accepted.prepared.writes.length + accepted.readGuards.length
   | .witnessBytes => accepted.ingress.ingress.envelopeBytes.length
   | .proofWork => 3
-  | .storageBytes => DeployedCharge.storageCharge ground.view accepted.prepared.writes
-      accepted.readGuards (event deployment.domain accepted.ingress)
+  | .storageBytes => DeployedCharge.storageCharge ground.view accepted.prepared.writes (event deployment.domain accepted.ingress)
   | .sideEffectCount => 1
   | .feeDebit | .networkBytes | .leaseByteBlocks => 0
 

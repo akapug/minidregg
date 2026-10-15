@@ -83,8 +83,8 @@ structure Follower where
 /-- A planted divergence. -/
 inductive Plant
   | none
-  /-- The follower skips the guard of the first leg (its leading reads) when
-  that leg's guard is the one that failed. -/
+  /-- The follower skips the guard that failed: the pins on the failing cell
+  and the leading reads of that cell's leg. -/
   | followerSkipsGuard
   /-- The Host's reopen loses the last persisted Turn entry (a torn append). -/
   | reopenDropsLast
@@ -107,12 +107,14 @@ def addIds (ids : List CellId) (t : DTurn deployedR Digest) : List CellId :=
 /-- The follower's admission (planted or not). -/
 def followerAdmit (plant : Plant) (w : DWorld) (t : DTurn deployedR Digest) :
     Except Reject DWorld :=
-  match plant, World.admit history w t, t.legs with
-  | .followerSkipsGuard, .error (.guardFailed c i), leg :: rest =>
-      if leg.cell = c then
-        World.admit history w { t with legs := { leg with patch := leg.patch.filter fun op => !World.Op.isRead op } :: rest }
-      else .error (.guardFailed c i)
-  | _, r, _ => r
+  match plant, World.admit history w t with
+  | .followerSkipsGuard, .error (.guardFailed c _) =>
+      World.admit history w { t with
+        pins := t.pins.filter fun p => p.1 != c
+        legs := t.legs.map fun leg =>
+          if leg.cell = c then { leg with patch := leg.patch.filter fun op => !World.Op.isRead op }
+          else leg }
+  | _, r => r
 
 /-- Follow one entry: `followFrom` on it, or the planted follower. -/
 def followOne (plant : Plant) (f : Follower) (entry : List UInt8) :

@@ -77,7 +77,7 @@ def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => base .proofWork + 2
     | .memoryTouches => base .memoryTouches + 2
-    | .storageBytes => DeployedCharge.storageCharge ground.view ws guards (ApplicationLifecycleCompletionIngress.event ingress)
+    | .storageBytes => DeployedCharge.storageCharge ground.view ws (ApplicationLifecycleCompletionIngress.event ingress)
     | other => base other
 
 def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}

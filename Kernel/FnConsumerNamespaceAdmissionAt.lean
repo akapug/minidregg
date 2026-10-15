@@ -77,7 +77,7 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List Rea
   | .incidences => 1
   | .turnBytes => (ingressCodec.encode ingress).length
   | .memoryTouches => 1
-  | .storageBytes => DeployedCharge.storageCharge snap [] guards (event ingress)
+  | .storageBytes => DeployedCharge.storageCharge snap [] (event ingress)
   | .witnessBytes => (ingressCodec.encode ingress).length
   | .proofWork => 1
   | .sideEffectCount => 1

@@ -299,24 +299,12 @@ theorem deltas_storage (cells : CellId → Option (Cell deployedR)) (ws : List D
       cases hc : d.create? w.cellId.value <;> cases hl : d.leg? bridge.codec w.cellId.value <;>
         simp_all [storageOf, history, WorldRoot.cshakeHistory, deltas, writeStorage, deltaStorage] <;> omega
 
-/-- Guard legs have no newly written values even outside the three post kinds. -/
-theorem guard_storage_zero (cells : CellId → Option (Cell deployedR)) (ids : List CellId) :
-    ((ids.filterMap (guardLeg bridge.codec cells)).map legBytes).sum = 0 := by
-  induction ids with
-  | nil => rfl
-  | cons c cs ih =>
-    cases h : cells c with
-    | none => simpa [guardLeg, h] using ih
-    | some cell =>
-      simpa [guardLeg, h, legBytes, Codec.legPatch, self_diff_bytes] using ih
-
 theorem intent_storage (cells : CellId → Option (Cell deployedR)) (intent : DataIntent rootBytes) :
     storageOf history (createsOf bridge.codec cells intent) (legsOf bridge.codec cells intent)
         intent.event =
       (intent.writes.map (writeStorage cells)).sum + eventBytes intent.event := by
   have h := deltas_storage cells intent.writes intent.event
-  simpa [createsOf, legsOf, storageOf, history, WorldRoot.cshakeHistory,
-    List.map_append, List.sum_append, guard_storage_zero] using h
+  simpa [createsOf, legsOf, storageOf, history, WorldRoot.cshakeHistory] using h
 
 /-- The full post images exceed the World's value bytes by the classified
 framing: what the receiver charged before the FD-1 switch, and no longer does. -/

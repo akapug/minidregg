@@ -243,7 +243,7 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : FnSelec
   | .incidences => 2
   | .turnBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .memoryTouches => writes.length + guards.length
-  | .storageBytes => DeployedCharge.storageCharge snap writes guards (FnSelectiveReleaseIngress.event ingress)
+  | .storageBytes => DeployedCharge.storageCharge snap writes (FnSelectiveReleaseIngress.event ingress)
   | .witnessBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .proofWork => 2
   | .sideEffectCount => 1

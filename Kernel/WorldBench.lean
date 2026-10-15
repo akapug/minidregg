@@ -58,6 +58,8 @@ def benchH : History benchR Nat Unit UInt64 where
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
   eventBytes := fun _ => 0
+  -- Bench turns carry no pins.
+  cellDigest := fun _ => 0
 
 def benchGenesis : BenchWorld := genesis benchH 0
 

@@ -128,7 +128,8 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     · simp [t, singleTurn, e]
   have hk : turnCheck H w t height = none := by
     rw [turnCheck_eq_none_iff]
-    refine ⟨by simp [t, singleTurn], ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩,
+    refine ⟨by simp [t, singleTurn], by simp [t, singleTurn],
+      ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩,
       by simp [t, singleTurn], by simp [t, singleTurn, patchBytes], covered⟩
   have hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) := by
     refine sysPatch_valid_plain H rfl rfl fresh hh ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩ ?_

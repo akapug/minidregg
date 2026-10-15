@@ -254,7 +254,7 @@ def charge (accepted : AcceptedAdoption deployment semantics durable ingress) :
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => DeployedCharge.storageCharge durable.snapshot
-      (writes accepted.prepared) (readGuards accepted.prepared)
+      (writes accepted.prepared)
       (event deployment.domain semantics ingress)
   | .witnessBytes => ingress.ingress.currentSignature.length + ingress.ingress.nextPossessionSignature.length
   | .proofWork => 2

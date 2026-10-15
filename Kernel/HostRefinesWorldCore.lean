@@ -319,7 +319,8 @@ theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
     · simp [sourceBirth, e]
   have hk : turnCheck H w (sourceBirth H x c record ev) height = none := by
     rw [turnCheck_eq_none_iff]
-    refine ⟨by simp [sourceBirth], ⟨by simp [sourceBirth], by simp [sourceBirth]⟩,
+    refine ⟨by simp [sourceBirth], by simp [sourceBirth],
+      ⟨by simp [sourceBirth], by simp [sourceBirth]⟩,
       by simp [sourceBirth], by simp [sourceBirth, patchBytes], funded'⟩
   have hv : Patch.ValidFrom w.system
       (sysPatch H (sourceBirth H x c record ev) height logRoot w.meter) := by
@@ -428,7 +429,8 @@ structure HostStep (B : Bridge R D) (H : History R TransactionId StableEvent D)
 
 /-- **`deployed_refines_step`.**  Today's executor (execute, then append) is an
 `ImplementationRefinement` of `World.step` under `Represents`. -/
-theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId StableEvent D) :
+theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (coherent : PinCoherent B H rootBytes) :
     ImplementationRefinement H (Loaded rootBytes) (HostStep B H) (Represents B) := by
   refine ⟨fun {pb pa wb t} rep st => ?_⟩
   rcases execute_cases st.schedule pb.snapshot st.intent with
@@ -436,7 +438,7 @@ theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId Stab
   · right
     have derived : Turn.ofIntent B H wb st.intent = .ok t :=
       (ofLoaded_eq B H rep st.intent).symm.trans st.derived
-    obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived (st.charged hi) fresh ready
+    obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep coherent derived (st.charged hi) fresh ready
     refine ⟨w', hs, ?_⟩
     unfold Represents
     rw [st.snapshot, after, st.height, hi]
@@ -450,10 +452,10 @@ theorem deployed_refines_step (B : Bridge R D) (H : History R TransactionId Stab
 deployed Host went through, its state represents the fold, from the world it
 started at, of a sublist of the turns it was given. -/
 theorem host_trace_represents_fold (B : Bridge R D) (H : History R TransactionId StableEvent D)
-    {p0 p : Loaded rootBytes} {g : World R TransactionId D} {log : List (DTurn R D)}
+    (coherent : PinCoherent B H rootBytes) {p0 p : Loaded rootBytes} {g : World R TransactionId D} {log : List (DTurn R D)}
     (start : Represents B p0 g) (trace : Trace (HostStep B H) p0 log p) :
     ∃ sub W, sub.Sublist log ∧ fold H g sub = some W ∧ Represents B p W :=
-  trace_represents_fold H (deployed_refines_step B H) start trace
+  trace_represents_fold H (deployed_refines_step B H coherent) start trace
 
 /-! ### The real code paths are `HostStep`s -/
 
@@ -632,6 +634,7 @@ representing `w`, the deployed successor `afterCheckpoint (p.extend ready)
 stored` -- what `receiveLoadedDetailedWithFresh` returns on a confirmed
 read-back -- represents the world `World.step` produces on the derived turn. -/
 theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (coherent : PinCoherent B H rootBytes)
     {p : Loaded rootBytes} {w : World R TransactionId D} (rep : Represents B p w)
     {intent : DataIntent rootBytes}
     (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent)
@@ -641,7 +644,7 @@ theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId Stabl
       Represents B (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) w' := by
   have derived' : Turn.ofIntent B H w intent = .ok t := (ofLoaded_eq B H rep intent).symm.trans derived
   rcases execute_cases .complete p.snapshot intent with ⟨-, fresh, prepared, after⟩ | ⟨hi, -⟩
-  · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep derived' charged fresh prepared
+  · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep coherent derived' charged fresh prepared
     have hnext : ready.next = DataSnapshot.install p.snapshot intent := by
       rw [ready.executed] at after
       exact after
@@ -783,7 +786,7 @@ def toyCodec : Codec toyR where
       · exact List.mem_cons_of_mem _ List.mem_cons_self
   support_nodup _ _ := List.Nodup.filter _ toy_addrs_nodup
 
-def toyB : Bridge toyR Nat := ⟨toyCodec, nullifierCode, nullifierCode_injective⟩
+def toyB : Bridge toyR Nat := ⟨toyCodec, nullifierCode, nullifierCode_injective, fun d => d.value⟩
 
 def toyH : History toyR TransactionId StableEvent Nat where
   turnDigest := fun _ => 0
@@ -792,6 +795,7 @@ def toyH : History toyR TransactionId StableEvent Nat where
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
   eventBytes := fun _ => 0
+  cellDigest := fun _ => 0
 
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
@@ -881,6 +885,9 @@ theorem toy_represents : SnapRepresents toyB toySnap 0 w0 := by
     rfl
   · exact genesis_sys_none _ (fun e => SysSpace.noConfusion e)
 
+/-- The toy root is constant, and so is the toy slot digest: pins agree. -/
+theorem toy_pinCoherent : PinCoherent toyB toyH toyRoot := fun _ _ _ _ => rfl
+
 /-- **The refinement is not vacuous**: on the represented seed, the deployed
 executor installs the heap write, its derived turn steps, and the stepped
 world represents the installed snapshot one height up. -/
@@ -903,7 +910,8 @@ theorem toy_refined :
           subst this
           funext l
           simp [turnOf, chargeOf, storageOf, toyH, writeIntent]
-        obtain ⟨w', hs, hr⟩ := ofIntent_run toyB toyH toy_represents h charged fresh ready
+        obtain ⟨w', hs, hr⟩ := ofIntent_run toyB toyH toy_represents toy_pinCoherent h charged fresh
+          ready
         exact ⟨t, w', rfl, hs, hr⟩
   · rw [installs] at hi; cases hi
 

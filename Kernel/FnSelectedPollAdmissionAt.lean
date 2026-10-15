@@ -76,13 +76,14 @@ def admitAt (config : NativeHost.Config) (opened : NativeHost.Opened config)
   else return .error "selected fn poll testimony refused"
 
 /-- The turn's charge: it writes nothing, so its storage lane is the World's
-storage of its guards and its retained event (`DeployedCharge.storageCharge`). -/
+storage of its retained event (`DeployedCharge.storageCharge`; a guard is a pin and writes
+nothing). -/
 def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List ReadGuard)
     (ingress : Ingress) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => (ingressCodec.encode ingress).length
   | .memoryTouches => 1
-  | .storageBytes => DeployedCharge.storageCharge snap [] guards (event ingress)
+  | .storageBytes => DeployedCharge.storageCharge snap [] (event ingress)
   | .witnessBytes => (ingressCodec.encode ingress).length
   | .proofWork => 1
   | .sideEffectCount => 1

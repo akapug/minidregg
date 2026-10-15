@@ -93,8 +93,7 @@ def charge (accepted : Accepted profile config pins durable height ingress) : Ch
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
-  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted)
-      (readGuards accepted) (event config.deployment.domain ingress)
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0

@@ -55,6 +55,7 @@ def Turn.ofAdmission (B : Bridge R D) (H : History R TransactionId StableEvent D
 installs, from a represented snapshot, steps the world to a representation of
 the installed snapshot. -/
 theorem ofAdmission_run (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (coherent : PinCoherent B H Minidregg.Compiler.ResourceBirthCodec.rootBytes)
     {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes}
     (admitted : NativeHostReplay.NativeAdmission config opened intent)
@@ -66,7 +67,7 @@ theorem ofAdmission_run (B : Bridge R D) (H : History R TransactionId StableEven
     ∃ w', World.step H w t = some w' ∧
       SnapRepresents B (DataSnapshot.install snap intent) (height + 1) w' := by
   rcases execute_cases .complete snap intent with ⟨-, fresh, ready, -⟩ | ⟨hi, -⟩
-  · exact ofIntent_run B H rep derived charged fresh ready
+  · exact ofIntent_run B H rep coherent derived charged fresh ready
   · rw [installs] at hi; cases hi
 
 end Admission

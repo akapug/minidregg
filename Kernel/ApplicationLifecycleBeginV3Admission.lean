@@ -192,7 +192,7 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     exactCharge := fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
-      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes legacy.readGuards
+      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes
           (event ingress)
       | other => legacy.exactCharge other
     event := event ingress }

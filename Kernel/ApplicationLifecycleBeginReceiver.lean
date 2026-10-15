@@ -248,8 +248,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
         | .witnessBytes => ingress.canonicalBytes.length
         | .proofWork => ordinary.exactCharge .proofWork + 1
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 1
-        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
-            (ordinary.readGuards ++ [packageGuard source packageBefore]) (event ingress)
+        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (event ingress)
         | other => ordinary.exactCharge other
       event := event ingress
       subject := ordinary.subject

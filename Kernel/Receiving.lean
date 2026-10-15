@@ -257,8 +257,7 @@ def charge (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.
   | .incidences => 1
   | .turnBytes => (F.bytes ingress).length
   | .memoryTouches => (F.writes prepared).length + (readGuards laws prepared).length
-  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (F.writes prepared)
-      (readGuards laws prepared) (F.event env ingress)
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (F.writes prepared) (F.event env ingress)
   | .witnessBytes => F.witnessBytes ingress
   | .proofWork =>
       (match F.claims env durable ingress with

@@ -31,8 +31,8 @@ def payloadCell (role : ObjectiveActivityCell.Role) : Cell deployedR :=
 def preWorld : World deployedR DurableDataIntent.TransactionId Digest :=
   ⟨(0 : Cells deployedR).update 3 (some (payloadCell .package)), 0⟩
 
-/-- The receiver's exact storage model: the World's storage of the posts, the
-guards and the retained event, against the witness cells (`preWorld`'s). -/
+/-- The receiver's exact storage model: the World's storage of the posts and the
+retained event, against the witness cells (`preWorld`'s). -/
 def sealing : Seal where
   guards := []
   nullifiers := []
@@ -42,7 +42,7 @@ def sealing : Seal where
     | .incidences => 1
     | .memoryTouches => posts.length + guards.length
     | .storageBytes => DeployedCharge.storageAt (fun c => preWorld.cells c)
-        (posts.map (Post.write ResourceBirthCodec.rootBytes)) guards event
+        (posts.map (Post.write ResourceBirthCodec.rootBytes)) event
     | _ => 0
 
 def post (id : Nat) (role : ObjectiveActivityCell.Role) : Post :=
@@ -66,10 +66,12 @@ theorem seedless_create_is_turn :
     (Turn.ofIntent bridge DeployedHistory.history preWorld seedlessCreateIntent).isOk = true := by
   decide +kernel
 
-/-- The absent state guard survives the derivation as an absence pin. -/
+/-- The absent state guard survives the derivation as a pin on state cell 2
+(after the write's pre on object 1 and the package guard on 3); its digest is
+the guard's asserted root (`pinsOf`), never read from the world. -/
 theorem seedless_create_pins_state :
     (Turn.ofIntent bridge DeployedHistory.history preWorld seedlessCreateIntent).toOption.map
-      (·.absent) = some [2] := by
+      (fun t => t.pins.map Prod.fst) = some [1, 3, 2] := by
   decide +kernel
 
 /-- Stateless members contribute no joint state slots, as the OB domain permits. -/
@@ -82,7 +84,7 @@ theorem stateless_domain_member_is_turn :
 
 theorem stateless_domain_member_pins_state :
     (Turn.ofIntent bridge DeployedHistory.history preWorld statelessDomainIntent).toOption.map
-      (·.absent) = some [2] := by
+      (fun t => t.pins.map Prod.fst) = some [4, 1, 2] := by
   decide +kernel
 
 /-- Permanent retirement is not fresh absence. -/
@@ -146,6 +148,15 @@ theorem fresh_retirement_steps_permanently :
         (by intro n hn; simp [freshRetirementIntent, intentOf, sealing] at hn)
         (by intro lane ne; cases lane <;> decide +kernel)
         (by decide +kernel)
+        (by
+          intro wr hw
+          simp only [freshRetirementIntent, intentOf, List.map_cons, List.map_nil,
+            List.mem_singleton] at hw
+          subst hw
+          rw [DeployedHistory.history_cellDigest, bridge_pin, id]
+          unfold cellRoot
+          congr 1)
+        (by intro g hg; simp [freshRetirementIntent, intentOf, ObjectiveActivityWire.readOnly, sealing] at hg)
       have names : (Turn.ofIntent bridge DeployedHistory.history burnWorld freshRetirementIntent).toOption.map
           (·.retires) = some [1] := by decide +kernel
       rw [hd] at names

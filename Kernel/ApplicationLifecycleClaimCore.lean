@@ -97,8 +97,6 @@ def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deplo
         | .proofWork => ordinary.exactCharge .proofWork + 2
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 2
         | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
-            (ordinary.readGuards ++
-              [packageGuard ingress.source current.packageRead.selected.observed.before])
             wireEvent
         | other => ordinary.exactCharge other
       event := wireEvent

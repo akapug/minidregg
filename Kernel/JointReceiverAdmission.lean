@@ -173,7 +173,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                     let event : StableEvent := ⟨60,deployment.domain,
                       JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration,bytes⟩
                     let charge := reserveCharge bytes control effect guards
-                      (DeployedCharge.storageCharge ground.view control.writes guards event)
+                      (DeployedCharge.storageCharge ground.view control.writes event)
                     let intent : DataIntent ResourceBirthCodec.rootBytes :=
                       { control with
                         readGuards := guards

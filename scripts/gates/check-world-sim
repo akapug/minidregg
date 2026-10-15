@@ -12,7 +12,9 @@
 #
 # The plants, each red at the seed and step recorded when it was first observed (10-15,
 # burst4, lane/hp-6-sim); a plant that stops firing, or fires elsewhere, is red too:
-#   follower-skips-guard  the follower skips leg 0's guard when that guard is the one that failed
+#   follower-skips-guard  the follower skips the guard that failed (that cell's pins and leg reads);
+#                         re-recorded 10-15 (TURN-LOG guards-from-intent): seed 1 step 29 -> step 41,
+#                         since the failing guard is now the intent's pin, checked before any leg
 #   reopen-drops-last     the Host's reopen loses its last persisted Turn entry (a torn append)
 set -uo pipefail
 exe=${1:-.lake/build/bin/world-sim}
@@ -31,7 +33,7 @@ plant() {  # NAME SEED STEP FACT-GLOB
     echo "PLANT $1 NOT-CAUGHT-AS-RECORDED (want seed=$2 step=$3)"; status=1
   fi
 }
-plant follower-skips-guard 1 29 '*follower admitted*'
+plant follower-skips-guard 1 41 '*follower admitted*'
 plant reopen-drops-last 1 49 'crash-restart: resumed != uninterrupted*'
 if [[ -n ${WORLD_SIM_STORES:-} ]]; then
   "$exe" corpus "$WORLD_SIM_STORES" "$k" || status=1

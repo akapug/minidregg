@@ -51,7 +51,9 @@ def encodeLeg (leg : Leg deployedR) : List UInt8 :=
   StreamCodec.nat.encode leg.cell ++ [CanonicalCellRegistry.Kind.tag leg.kind] ++
     (StreamCodec.list bytesStream).encode (leg.patch.map (encodeOp leg.kind))
 
-/-- All fields other than absence pins, each in a length-delimited slot. -/
+/-- All fields other than absence pins, each in a length-delimited slot; the
+last is the digest pins (`Turn.pins`, each a cell and its asserted digest), so
+the journal digest binds what the turn asserts about the pre-state. -/
 def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
   [digestStream.encode t.txId,
    (StreamCodec.list bytesStream).encode (t.creates.map fun c =>
@@ -66,7 +68,8 @@ def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
    StreamCodec.nat.encode t.keyEpoch,
    (StreamCodec.option digestStream).encode t.capability,
    StreamCodec.nat.encode t.notBefore,
-   (StreamCodec.option StreamCodec.nat).encode t.validUntil]
+   (StreamCodec.option StreamCodec.nat).encode t.validUntil,
+   (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins]
 
 /-- Greenfield v2 turn shape: absence pins are in the digest preimage. -/
 def encodeTurn (t : DTurn deployedR Digest) : List UInt8 :=
@@ -83,9 +86,21 @@ with the turn (the admitted ingress they carry), charged like a written value. -
 def eventBytes (event : StableEvent) : Nat := event.canonicalBytes.length
 
 /-- The pinned deployed history: cSHAKE turn digest/log chain, written-value
-bytes and retained-event bytes. -/
+bytes, retained-event bytes, and the per-cell root a pin is compared with
+(`DeployedBridge.cellRoot`). -/
 def history : History deployedR TransactionId StableEvent Digest :=
-  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes eventBytes
+  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes eventBytes cellRoot
+
+/-- A pin is compared with the deployed per-cell root. -/
+@[simp] theorem history_cellDigest : history.cellDigest = cellRoot := rfl
+
+/-- **Pin coherence of the deployed bridge and history** at the deployed
+per-cell root: bytes that decode to a slot and do not retire are that slot's
+canonical encoding (`decodeCell_canonical`), so their root is the slot's
+`cellRoot`, which is what a pin is compared with.  No deployed use of
+`ofIntent_run`/`admit_of_accepted` carries coherence as a hypothesis. -/
+theorem deployed_pinCoherent : PinCoherent bridge history ResourceBirthCodec.rootBytes :=
+  fun _ _ h live => cellRoot_of_decode h live
 
 /-- A whole-blob allocation charges exactly its newly encoded payload. -/
 theorem objective_allocate_bytes (c : CellId) (payload : ObjectiveActivityCell.Payload) :
@@ -165,6 +180,7 @@ theorem objective_free_below_retired (c : CellId) (old : ObjectiveActivityCell.P
 #assert_axioms objective_write_below_post objective_free_below_retired
 
 #assert_axioms encodeTurn_absent
+#assert_axioms deployed_pinCoherent
 #assert_axioms objective_allocate_bytes objective_write_bytes objective_free_bytes read_bytes
 #assert_axioms objective_post_bytes objective_allocate_below_post
 

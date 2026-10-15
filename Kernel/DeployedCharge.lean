@@ -9,8 +9,9 @@ ingress), never the whole post image.  The per-kind framing the post image
 carried is gone, and so is every receiver-local ingress, nullifier or marker
 term: the event term is the one charge for what the log retains.
 
-* `storageCharge snap writes guards event`: that number, read against the cells
-  the snapshot holds -- what every receiver's `.storageBytes` lane is.
+* `storageCharge snap writes event`: that number, read against the cells the
+  snapshot holds -- what every receiver's `.storageBytes` lane is.  Read guards
+  are not in it: a guard is a pin (`Turn.pins`), which writes nothing.
 * `charge_eq`: for a represented snapshot, a derived turn's charge IS the
   intent's exact charge, on every lane, when the intent's storage lane is
   `storageCharge` (`charged`).  The append path refuses any other
@@ -38,21 +39,20 @@ set_option autoImplicit false
 
 variable {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest}
 
-/-- The storage lane of the turn a write list, its guards and its event are,
-against held cells: `storageOf` of its derived creates and legs and its event. -/
+/-- The storage lane of the turn a write list and its event are, against held
+cells: `storageOf` of its derived creates and legs and its event. -/
 def storageAt (cells : CellId → Option (Cell deployedR)) (writes : List DataWrite)
-    (guards : List ReadGuard) (event : StableEvent) : Nat :=
+    (event : StableEvent) : Nat :=
   storageOf history ((deltas bridge.codec cells writes).filterMap fun d => d.2.create? d.1)
-    ((guardIds writes guards).filterMap (guardLeg bridge.codec cells) ++
-      (deltas bridge.codec cells writes).filterMap fun d => d.2.leg? bridge.codec d.1) event
+    ((deltas bridge.codec cells writes).filterMap fun d => d.2.leg? bridge.codec d.1) event
 
 /-- The storage lane against the cells a snapshot holds. -/
-def storageCharge (snap : DataSnapshot rootBytes) (writes : List DataWrite) (guards : List ReadGuard)
+def storageCharge (snap : DataSnapshot rootBytes) (writes : List DataWrite)
     (event : StableEvent) : Nat :=
-  storageAt (cellsOf bridge snap) writes guards event
+  storageAt (cellsOf bridge snap) writes event
 
 theorem storageCharge_eq (snap : DataSnapshot rootBytes) (intent : DataIntent rootBytes) :
-    storageCharge snap intent.writes intent.readGuards intent.event =
+    storageCharge snap intent.writes intent.event =
       storageOf history (createsOf bridge.codec (cellsOf bridge snap) intent)
         (legsOf bridge.codec (cellsOf bridge snap) intent) intent.event := rfl
 
@@ -63,7 +63,7 @@ theorem charge_eq {snap : DataSnapshot rootBytes} {height : Nat}
     {t : DTurn deployedR Theory.TypedAuthorization.Digest}
     (derived : Turn.ofIntent bridge history w intent = .ok t)
     (charged : intent.exactCharge .storageBytes =
-      storageCharge snap intent.writes intent.readGuards intent.event) :
+      storageCharge snap intent.writes intent.event) :
     t.charge = intent.exactCharge := by
   have d := (ofCells_ok derived).eq
   have cells : (fun c => w.cells c) = cellsOf bridge snap := funext fun c => cellsOf_eq rep c

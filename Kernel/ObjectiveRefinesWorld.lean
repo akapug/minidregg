@@ -39,6 +39,7 @@ theorem payloads_of_represents {snap : DataSnapshot ResourceBirthCodec.rootBytes
 intent whose turn is charged what it charges (`charged`, the append path's
 gate). -/
 theorem intent_refines_step (H : History deployedR TransactionId StableEvent Digest)
+    (coherent : PinCoherent bridge H ResourceBirthCodec.rootBytes)
     {p : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {w : World deployedR TransactionId Digest} (rep : DeployedRepresents p w)
     (intent : DataIntent ResourceBirthCodec.rootBytes) {t : DTurn deployedR Digest}
@@ -51,7 +52,7 @@ theorem intent_refines_step (H : History deployedR TransactionId StableEvent Dig
     (Installs o = false → SnapRepresents bridge (o.storeAfter p.snapshot) p.height w) := by
   dsimp only
   rcases execute_cases schedule p.snapshot intent with ⟨hi, fresh, ready, after⟩ | ⟨hi, after⟩
-  · obtain ⟨w', step, post⟩ := ofIntent_run bridge H rep
+  · obtain ⟨w', step, post⟩ := ofIntent_run bridge H rep coherent
       ((ofLoaded_eq bridge H rep intent).symm.trans derived) charged fresh ready
     rw [after]
     exact ⟨fun _ => ⟨w', step, post, payloads_of_represents post⟩, by simp [hi]⟩
@@ -70,7 +71,6 @@ theorem finalIntent_storage {ob : ObjectiveActivity.Config}
     (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).exactCharge .storageBytes =
       DeployedCharge.storageCharge snap
         (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).writes
-        (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).readGuards
         (ActivitySeatEnd.AdmittedTurn.finalIntent sealing posts extra turn).event := by
   cases sealing
   subst sealed
@@ -83,8 +83,7 @@ theorem activity_storage {config : NativeHost.Config} {opened : NativeHost.Opene
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
         config.tariff.asset, config.tariff.collector⟩ opened.durable ingress) :
     verdict.intent.exactCharge .storageBytes =
-      DeployedCharge.storageCharge opened.durable.snapshot verdict.intent.writes
-        verdict.intent.readGuards verdict.intent.event := by
+      DeployedCharge.storageCharge opened.durable.snapshot verdict.intent.writes verdict.intent.event := by
   cases verdict with
   | accepted accepted => exact finalIntent_storage _ _ _ _ _ accepted.prepared.decided rfl
   | failed failed =>
@@ -105,7 +104,7 @@ theorem seat_storage {config : NativeHost.Config} {opened : NativeHost.Opened co
         config.tariff.asset, config.tariff.collector⟩ opened.durable ingress) :
     (SeatReceiver.intent verdict).exactCharge .storageBytes =
       DeployedCharge.storageCharge opened.durable.snapshot (SeatReceiver.intent verdict).writes
-        (SeatReceiver.intent verdict).readGuards (SeatReceiver.intent verdict).event := rfl
+        (SeatReceiver.intent verdict).event := rfl
 
 /-- A receiver intent charged the World's storage of itself has its derived
 turn's charge on every lane. -/
@@ -114,7 +113,7 @@ theorem charged_of_storage {p : DurableReceiverIO.Loaded ResourceBirthCodec.root
     {intent : DataIntent ResourceBirthCodec.rootBytes} {t : DTurn deployedR Digest}
     (derived : Turn.ofLoaded bridge DeployedHistory.history p intent = .ok t)
     (storage : intent.exactCharge .storageBytes =
-      DeployedCharge.storageCharge p.snapshot intent.writes intent.readGuards intent.event) :
+      DeployedCharge.storageCharge p.snapshot intent.writes intent.event) :
     t.charge = intent.exactCharge :=
   DeployedCharge.charge_eq rep ((ofLoaded_eq bridge _ rep intent).symm.trans derived) storage
 
@@ -135,7 +134,7 @@ theorem objective_refines_step {config : NativeHost.Config} {opened : NativeHost
       payloads (o.storeAfter opened.durable.snapshot).canonicalBytes = payloadsOf w') ∧
     (Installs o = false → SnapRepresents bridge (o.storeAfter opened.durable.snapshot)
       opened.durable.height w) :=
-  intent_refines_step DeployedHistory.history rep verdict.intent derived
+  intent_refines_step DeployedHistory.history DeployedHistory.deployed_pinCoherent rep verdict.intent derived
     (charged_of_storage rep derived (activity_storage verdict)) schedule
 
 /-- The same exact-intent simulation for the seat receiver's admitted object. -/
@@ -154,7 +153,7 @@ theorem seat_refines_step {config : NativeHost.Config} {opened : NativeHost.Open
       payloads (o.storeAfter opened.durable.snapshot).canonicalBytes = payloadsOf w') ∧
     (Installs o = false → SnapRepresents bridge (o.storeAfter opened.durable.snapshot)
       opened.durable.height w) :=
-  intent_refines_step DeployedHistory.history rep (SeatReceiver.intent verdict) derived
+  intent_refines_step DeployedHistory.history DeployedHistory.deployed_pinCoherent rep (SeatReceiver.intent verdict) derived
     (charged_of_storage rep derived (seat_storage verdict)) schedule
 
 #assert_axioms payloads_of_represents intent_refines_step objective_refines_step seat_refines_step
@@ -236,7 +235,7 @@ theorem ReceiverIntent.storage {config : NativeHost.Config} {opened : NativeHost
     {ob : ObjectiveActivity.Config} {intent : DataIntent ResourceBirthCodec.rootBytes}
     (receiver : ReceiverIntent config opened ob intent) :
     intent.exactCharge .storageBytes =
-      DeployedCharge.storageCharge opened.durable.snapshot intent.writes intent.readGuards intent.event := by
+      DeployedCharge.storageCharge opened.durable.snapshot intent.writes intent.event := by
   cases receiver with
   | activity verdict => exact activity_storage verdict
   | seat verdict _ => exact seat_storage verdict
@@ -290,7 +289,7 @@ theorem receiver_reached_view {config : NativeHost.Config} {opened : NativeHost.
     let after := (execute schedule opened.durable.snapshot intent).storeAfter opened.durable.snapshot
     ObjectiveCheckpointInvariant.Reachable ob genesis after ∧
       payloads after.canonicalBytes = payloadsOf w' := by
-  obtain ⟨next, step, _, view⟩ := (intent_refines_step DeployedHistory.history rep intent derived
+  obtain ⟨next, step, _, view⟩ := (intent_refines_step DeployedHistory.history DeployedHistory.deployed_pinCoherent rep intent derived
     (receiver.charged rep derived) schedule).1 installs
   have same : next = w' := Option.some.inj (step.symm.trans stepped)
   subst next
@@ -485,7 +484,7 @@ theorem admissible_post_view {ob : ObjectiveActivity.Config}
     ObjectiveCheckpointInvariant.Step ob cert.loaded.snapshot after ∧
       payloads cert.loaded.snapshot.canonicalBytes = payloadsOf w ∧
       payloads after.canonicalBytes = payloadsOf w' := by
-  obtain ⟨next, step, _, view⟩ := (intent_refines_step DeployedHistory.history
+  obtain ⟨next, step, _, view⟩ := (intent_refines_step DeployedHistory.history DeployedHistory.deployed_pinCoherent
     cert.represents cert.commit.intent cert.commit.derived cert.commit.charged .complete).1
       cert.commit.installs
   have same : next = w' := Option.some.inj (step.symm.trans stepped)

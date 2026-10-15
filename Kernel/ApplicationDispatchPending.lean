@@ -85,8 +85,7 @@ def charge (checked : CheckedCurrentForSourceBytes deployment profile ambient gr
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 4
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 4
-    | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
-        (ordinary.readGuards ++ readGuards checked) (ApplicationDispatchAdmissionIngress.event ingress)
+    | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (ApplicationDispatchAdmissionIngress.event ingress)
     | other => ordinary.exactCharge other
 
 /-- A special pending event, not the ordinary DRC mutation receipt. This is a

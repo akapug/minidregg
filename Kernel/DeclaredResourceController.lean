@@ -2294,7 +2294,7 @@ def transactionId (domain semantics : Digest) (command : Command) : Digest :=
 the signed bytes). -/
 def storageFrom (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard)
     (_prepared : PreparedInvocation deployment profile ambient ground command) : Nat :=
-  DeployedCharge.storageCharge ground.view ws guards
+  DeployedCharge.storageCharge ground.view ws
     (invocationEvent ground.authority.domain profile.semantics command signed)
 
 def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -2358,8 +2358,7 @@ theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
-        DeployedCharge.storageCharge ground.view (accepted.dataIntent shape).writes
-          (accepted.dataIntent shape).readGuards (accepted.dataIntent shape).event ∧
+        DeployedCharge.storageCharge ground.view (accepted.dataIntent shape).writes (accepted.dataIntent shape).event ∧
       (accepted.dataIntent shape).writes =
         (List.finRange command.targets.length).filterMap (fun i =>
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=

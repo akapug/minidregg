@@ -622,7 +622,7 @@ def charge (accepted : AcceptedCertify deployment profile ambient durable ingres
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => DeployedCharge.storageCharge durable.snapshot
-      (writes accepted.prepared) (readGuards accepted.prepared)
+      (writes accepted.prepared)
       (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length
   | .proofWork => 2

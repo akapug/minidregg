@@ -366,8 +366,8 @@ nothing is written as before):
   journaled in (`valid_until` is a block height, 09-29).  The wall clock is
   the K-CLOCK cell, pinned like any other read: by a read leg.
 
-The footprint includes the absence pins and the read ops of the legs
-(`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
+The footprint includes the absence pins, the digest pins and the read ops of
+the legs (`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
 structure Turn (R : Registry) (TxId Ev D : Type) where
   txId : TxId
   creates : List (CellId × Cell R × Option CellId)
@@ -383,6 +383,13 @@ structure Turn (R : Registry) (TxId Ev D : Type) where
   validUntil : Option Nat := none
   /-- Cells pinned absent and never retired, checked before creates. -/
   absent : List CellId := []
+  /-- The pre-state the turn asserts: each a cell and the digest
+  (`History.cellDigest`) its pre-slot must have, the cell unretired.  Checked
+  first of the turn's checks (`pinCheck`), so a turn whose asserted pre-state
+  has moved is refused as `guardFailed` before anything else is looked at.
+  A derived turn's pins are its intent's `expectedPre`/`expectedRoot` claims
+  (`TurnOfIntent.turnOf`), in intent order, duplicates kept. -/
+  pins : List (CellId × D) := []
 
 /-- The `(cell, room)` rows a turn's creates record. -/
 def Turn.parentRows {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) :
@@ -403,7 +410,7 @@ def Leg.guards {R : Registry} (leg : Leg R) : Patch (R.layout leg.kind) :=
 
 /-- The cells the turn's footprint pins. -/
 def Turn.footprint {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) : List CellId :=
-  t.absent ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
+  t.absent ++ t.pins.map Prod.fst ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
 
 /-- The hash surface history needs: a turn digest and the log chain.  Stage F
 instantiates both with cSHAKE over the turn's canonical bytes (C1). -/
@@ -424,6 +431,10 @@ structure History (R : Registry) (TxId Ev D : Type) where
   like a leg's writes.  Stage F counts the event's canonical encoding; no
   default, for the same reason. -/
   eventBytes : Ev → Nat
+  /-- The digest of a slot, the absent slot included: what a turn's pin
+  (`Turn.pins`) is compared with.  Stage F is the per-cell root of the slot's
+  canonical bytes; no default, so no history pins nothing by omission. -/
+  cellDigest : Option (Cell R) → D
 
 /-- Refusal reasons.  Every refusal leaves the world unchanged (`admit` returns
 no world on any error branch). -/
@@ -439,6 +450,8 @@ inductive Reject
   | cellPresent (cell : CellId)
   | missingCell (cell : CellId)
   | kindMismatch (cell : CellId)
+  /-- A guard did not hold: for a leg, `index` is the position of its first
+  disabled op; for a pin (`pinCheck`), its position in `Turn.pins`. -/
   | guardFailed (cell : CellId) (index : Nat)
   | retireNonEmpty (cell : CellId)
   | missingParent (cell : CellId) (room : CellId)
@@ -505,18 +518,38 @@ def patchBytes (t : Turn R TxId Ev D) : Nat :=
   (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum +
     H.eventBytes t.event
 
+/-- Whether a pin fails at a world: its cell is retired, or its slot's digest
+is not the asserted one. -/
+def pinFails (w : World R TxId D) (p : CellId × D) : Bool :=
+  (w.retired p.1).isSome || decide (H.cellDigest (w.cells p.1) ≠ p.2)
+
+/-- The first failing pin of a list whose head sits at index `i`. -/
+def pinCheckFrom (w : World R TxId D) : Nat → List (CellId × D) → Option Reject
+  | _, [] => none
+  | i, p :: ps => if pinFails H w p then some (.guardFailed p.1 i) else pinCheckFrom w (i + 1) ps
+
+/-- **The staleness refusal.**  The first pin (in `t.pins` order, at index
+`i`) whose cell is retired or whose slot's digest is not the asserted one
+refuses the turn as `guardFailed c i`. -/
+def pinCheck (w : World R TxId D) (t : Turn R TxId Ev D) : Option Reject :=
+  pinCheckFrom H w 0 t.pins
+
 /-- The T1 checks, each a named refusal of something the store guards would
-also refuse (or, for the charge rule and the window, something no store guard
-sees): distinct nullifiers, the height window, unspent nullifiers, the charge
-rule (storage lane = patch bytes), the charge within the meter. -/
+also refuse (or, for the pins, the charge rule and the window, something no
+store guard sees): the pins first (`pinCheck`, the one staleness refusal),
+distinct nullifiers, the height window, unspent nullifiers, the charge rule
+(storage lane = patch bytes), the charge within the meter. -/
 def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Option Reject :=
-  if ¬ t.nullifiers.Nodup then some .duplicateNullifier
-  else if ¬ (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) then
-    some .outsideWindow
-  else if ∃ n ∈ t.nullifiers, (w.spent n).isSome then some .nullifierSpent
-  else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
-  else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
-  else none
+  match pinCheck H w t with
+  | some r => some r
+  | none =>
+    if ¬ t.nullifiers.Nodup then some .duplicateNullifier
+    else if ¬ (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) then
+      some .outsideWindow
+    else if ∃ n ∈ t.nullifiers, (w.spent n).isSome then some .nullifierSpent
+    else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
+    else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
+    else none
 
 /-- A create's room, if it names one, is a present cell. -/
 def roomPresent (cells : Cells R) : Option CellId → Bool
@@ -604,15 +637,15 @@ theorem absentCheck_eq_none_iff (w : World R TxId D) (t : Turn R TxId Ev D) :
   intro _
   cases w.cells c <;> cases w.retired c <;> simp
 
-/-- A turn is well-shaped: it does something, and names each cell at most once
-per role. -/
+/-- A turn is well-shaped: it does or pins something, and names each cell at
+most once per role. -/
 def Shaped (t : Turn R TxId Ev D) : Prop :=
-  ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty) ∧
+  ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty) ∧
     (t.legs.map Leg.cell).Nodup ∧ (t.creates.map Prod.fst).Nodup ∧ t.retires.Nodup ∧ AbsentShaped t
 
 /-- **The one transition.**  Fail-closed: every error branch returns no world. -/
 def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (World R TxId D) :=
-  if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty then .error .emptyTurn
+  if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty then .error .emptyTurn
   else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLegCell
   else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateCreate
   else if ¬ t.retires.Nodup then .error .duplicateRetire
@@ -783,7 +816,7 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev D}
       applyCells w.cells t = .ok w'.cells ∧
       w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) := by
   unfold World.admit at h
-  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
+  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty
   · rw [if_pos hE] at h; cases h
   rw [if_neg hE] at h
   by_cases hL : (t.legs.map Leg.cell).Nodup
@@ -836,7 +869,7 @@ theorem admit_ok_turnCheck {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.admit H w t = .ok w') :
     ∃ height logRoot, w.head = some (height, logRoot) ∧ turnCheck H w t height = none := by
   unfold World.admit at h
-  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
+  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty
   · rw [if_pos hE] at h; cases h
   rw [if_neg hE] at h
   by_cases hL : (t.legs.map Leg.cell).Nodup
@@ -1999,15 +2032,71 @@ section TurnLaws
 variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
 variable (H : History R TxId Ev D)
 
-/-- `turnCheck` passes exactly when every T1 condition holds. -/
+/-- A pin holds exactly when its cell is unretired and its slot has the
+asserted digest. -/
+theorem pinFails_eq_false_iff {w : World R TxId D} {p : CellId × D} :
+    pinFails H w p = false ↔ w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  unfold pinFails
+  cases w.retired p.1 <;> simp
+
+theorem pinCheckFrom_eq_none_iff {w : World R TxId D} :
+    ∀ {i : Nat} {ps : List (CellId × D)},
+      pinCheckFrom H w i ps = none ↔ ∀ p ∈ ps, pinFails H w p = false
+  | _, [] => by simp [pinCheckFrom]
+  | i, p :: ps => by
+      unfold pinCheckFrom
+      cases hp : pinFails H w p
+      · simp only [Bool.false_eq_true, if_false, List.mem_cons, forall_eq_or_imp, hp, true_and]
+        exact pinCheckFrom_eq_none_iff
+      · simp only [if_true, reduceCtorEq, false_iff]
+        intro h
+        have := h p List.mem_cons_self
+        rw [hp] at this
+        cases this
+
+theorem pinCheckFrom_some {w : World R TxId D} :
+    ∀ {i : Nat} {ps : List (CellId × D)} {r : Reject},
+      pinCheckFrom H w i ps = some r → ∃ c j, r = .guardFailed c j
+  | _, [], _, h => by simp [pinCheckFrom] at h
+  | i, p :: ps, r, h => by
+      unfold pinCheckFrom at h
+      split at h
+      · exact ⟨p.1, i, (Option.some.inj h).symm⟩
+      · exact pinCheckFrom_some h
+
+/-- `pinCheck` passes exactly when every pin holds. -/
+theorem pinCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} :
+    pinCheck H w t = none ↔
+      ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  unfold pinCheck
+  rw [pinCheckFrom_eq_none_iff]
+  exact forall₂_congr fun _ _ => pinFails_eq_false_iff H
+
+/-- `pinCheck` refuses only as `guardFailed`. -/
+theorem pinCheck_some {w : World R TxId D} {t : Turn R TxId Ev D} {r : Reject}
+    (h : pinCheck H w t = some r) : ∃ c i, r = .guardFailed c i :=
+  pinCheckFrom_some H h
+
+/-- `turnCheck` passes exactly when every pin and every T1 condition holds. -/
 theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} :
     turnCheck H w t height = none ↔
+      (∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2) ∧
       t.nullifiers.Nodup ∧
       (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) ∧
       (∀ n ∈ t.nullifiers, w.spent n = none) ∧
       t.charge .storageBytes = patchBytes H t ∧
       t.charge ≤ w.meter := by
   unfold turnCheck
+  cases hp : pinCheck H w t with
+  | some r =>
+      have : ¬ ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 :=
+        fun h => by rw [(pinCheck_eq_none_iff H).2 h] at hp; cases hp
+      simp only [reduceCtorEq, false_iff]
+      exact fun h => this h.1
+  | none =>
+  have hp' := (pinCheck_eq_none_iff H).1 hp
+  rw [and_iff_right hp']
+  simp only
   constructor
   · intro h
     split_ifs at h with h1 h2 h3 h4 h5 <;> try cases h
@@ -2021,6 +2110,33 @@ theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {heigh
       (Charge.fundedCheck_eq_true_iff _ _).2 h5
     simp only [h1, h2, h3', h4, h5', not_true_eq_false, not_false_eq_true, and_self, if_false,
       ne_eq, reduceCtorEq]
+
+/-- **A stale pin is refused as `guardFailed`.**  A well-shaped turn at a
+world with a head, its transaction id unjournaled, one of whose pins fails
+(the cell retired, or its slot's digest not the asserted one) is refused by
+`admit` as `guardFailed c i`: the pins are the first check after replay. -/
+theorem admit_pin_refused {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} {logRoot : D}
+    (shaped : Shaped t) (hh : w.head = some (height, logRoot)) (hj : w.journal t.txId = none)
+    (stale : ∃ p ∈ t.pins, w.retired p.1 ≠ none ∨ H.cellDigest (w.cells p.1) ≠ p.2) :
+    ∃ c i, World.admit H w t = .error (.guardFailed c i) := by
+  obtain ⟨hE, hL, hC, hR, hA⟩ := shaped
+  cases hp : pinCheck H w t with
+  | none =>
+      obtain ⟨p, m, bad⟩ := stale
+      have := (pinCheck_eq_none_iff H).1 hp p m
+      rcases bad with bad | bad
+      · exact absurd this.1 bad
+      · exact absurd this.2 bad
+  | some r =>
+      obtain ⟨c, i, rfl⟩ := pinCheck_some H hp
+      refine ⟨c, i, ?_⟩
+      have hk : turnCheck H w t height = some (.guardFailed c i) := by
+        unfold turnCheck; rw [hp]
+      unfold World.admit
+      rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR),
+        if_neg (not_not.mpr hA)]
+      simp only [hh]
+      rw [if_neg (by simp [hj]), hk]
 
 /-- The meter, read off the system cell. -/
 theorem meter_system {w : World R TxId D} (l : Lane) :
@@ -2062,7 +2178,7 @@ theorem spent_refused {w : World R TxId D} {t : Turn R TxId Ev D} {n : D}
   | none => rfl
   | some w' =>
       obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 hs)
-      have := ((turnCheck_eq_none_iff H).1 hk).2.2.1 n m
+      have := ((turnCheck_eq_none_iff H).1 hk).2.2.2.1 n m
       rw [spent] at this
       cases this
 
@@ -2076,7 +2192,7 @@ theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
   obtain ⟨_, height', logRoot', hh', _, _, _, hsys⟩ := admit_ok H ha
   rw [hh] at hh'
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hh')
-  refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2, fun l => ?_⟩
+  refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2.2, fun l => ?_⟩
   rw [meter_system, meter_system (w := w), hsys, sysPost_allowance]
   by_cases hl : t.charge l ≠ 0
   · rw [if_pos hl]; rfl
@@ -2089,7 +2205,7 @@ theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
 theorem charge_is_patch_bytes {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') : t.charge .storageBytes = patchBytes H t := by
   obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
-  exact ((turnCheck_eq_none_iff H).1 hk).2.2.2.1
+  exact ((turnCheck_eq_none_iff H).1 hk).2.2.2.2.1
 
 /-- **The clock pin.**  An accepted turn was journaled at a height inside its
 window. -/
@@ -2098,7 +2214,7 @@ theorem step_window {w w' : World R TxId D} {t : Turn R TxId Ev D}
     ∃ height logRoot, w.head = some (height, logRoot) ∧ t.notBefore ≤ height ∧
       ∀ u ∈ t.validUntil, height ≤ u := by
   obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
-  obtain ⟨lo, hi⟩ := ((turnCheck_eq_none_iff H).1 hk).2.1
+  obtain ⟨lo, hi⟩ := ((turnCheck_eq_none_iff H).1 hk).2.2.1
   refine ⟨height, logRoot, hh, lo, fun u m => ?_⟩
   rw [Option.mem_def] at m
   rw [m] at hi
@@ -2140,14 +2256,14 @@ theorem footprint_pinned {w : World R TxId D} {t : Turn R TxId Ev D} (leg : Leg 
       rw [← split, Patch.validFrom_append] at hv
       exact absurd (validFrom_reads (fun o mo => List.all_eq_true.mp List.all_takeWhile o mo) hv.1 op pinned) moved
 
-/-- A turn that writes, creates and retires nothing is refused whether or not
-it spends: a spend must be pinned by at least one guard leg (the deployed
-`unguardedEventOnly` rule, which `emptyTurn` already is). -/
+/-- A turn that writes, creates, retires and pins nothing is refused whether
+or not it spends: a spend must be pinned by at least one leg or pin (the
+deployed `unguardedEventOnly` rule, which `emptyTurn` already is). -/
 theorem spend_needs_guard (w : World R TxId D) (t : Turn R TxId Ev D)
-    (hl : t.legs = []) (hc : t.creates = []) (hr : t.retires = []) :
+    (hl : t.legs = []) (hc : t.creates = []) (hr : t.retires = []) (hp : t.pins = []) :
     rejectOf (World.admit H w t) = some .emptyTurn := by
   unfold World.admit
-  simp [hl, hc, hr, rejectOf]
+  simp [hl, hc, hr, hp, rejectOf]
 
 end TurnLaws
 
@@ -2240,6 +2356,7 @@ def toyH : History toyR Nat Unit Nat where
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
   eventBytes := fun _ => 0
+  cellDigest := fun o => o.elim 0 fun c => c.kind.toNat + 1
 
 def g : ToyWorld := genesis toyH 0
 
@@ -2349,6 +2466,24 @@ theorem reject_kindMismatch :
 theorem reject_guardFailed :
     rejectOf (World.admit toyH w1 (turn 5 [] [leg 0 [rd 0 (some 5), wr 0 4 6]])) =
       some (.guardFailed 0 1) := by
+  decide +kernel
+/-- A stale pin: cells 0 and 1 hold kind `false` (toy digest 1), cell 7 is
+absent (digest 0); the third pin asserts digest 7 of cell 0 and is refused at
+its index, before the (valid) leg is looked at. -/
+theorem reject_stalePin :
+    rejectOf (World.admit toyH w1
+      { turn 5 [] [leg 0 [wr 0 5 6]] with pins := [(1, 1), (7, 0), (0, 7)] }) =
+      some (.guardFailed 0 2) := by
+  decide +kernel
+/-- The same turn with every pin true is admitted. -/
+theorem admit_truePins :
+    rejectOf (World.admit toyH w1
+      { turn 5 [] [leg 0 [wr 0 5 6]] with pins := [(1, 1), (7, 0), (0, 1)] }) = none := by
+  decide +kernel
+/-- A pin alone is an effect: a turn that only pins (and spends nothing) is
+not empty. -/
+theorem admit_pinOnly :
+    rejectOf (World.admit toyH w1 { turn 5 [] [] with pins := [(0, 1)] }) = none := by
   decide +kernel
 theorem reject_retireNonEmpty :
     rejectOf (World.admit toyH w1 (turn 5 [] [] [0])) = some (.retireNonEmpty 0) := by
@@ -2500,6 +2635,7 @@ def romH : History romR Nat Unit Nat where
   legBytes := fun _ => 0
   imageBytes := fun b => if b.store = 0 then 0 else 16
   eventBytes := fun _ => 0
+  cellDigest := fun o => if o.isSome then 1 else 0
 
 /-- Genesis, with 64 storage bytes funded. -/
 def g : World romR Nat Nat :=
@@ -2792,6 +2928,13 @@ end RomExample
 #assert_axioms absent_present_refused
 #assert_axioms admit_ok_turnCheck
 #assert_axioms turnCheck_eq_none_iff
+#assert_axioms pinFails_eq_false_iff
+#assert_axioms pinCheck_eq_none_iff
+#assert_axioms pinCheck_some
+#assert_axioms admit_pin_refused
+#assert_axioms Example.reject_stalePin
+#assert_axioms Example.admit_truePins
+#assert_axioms Example.admit_pinOnly
 #assert_axioms meter_system
 #assert_axioms spent_monotone
 #assert_axioms fold_spent_monotone

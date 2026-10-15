@@ -146,6 +146,8 @@ def censusH : History R Nat Unit Nat where
   imageBytes := fun b => if b.store = 0 then 0 else 16
   -- A census event is `()`: it retains no bytes.
   eventBytes := fun _ => 0
+  -- Census turns carry no pins; a slot's digest is whether it is present.
+  cellDigest := fun o => if o.isSome then 1 else 0
 
 /-! ## The census world -/
 

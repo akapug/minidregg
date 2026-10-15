@@ -398,8 +398,7 @@ def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : Decoded
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => posts.length + guards.length
-  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes))
-      guards retained
+  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes)) retained
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0

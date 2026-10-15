@@ -374,7 +374,7 @@ def charge (accepted : AcceptedClaim deployment profile ambient durable ingress)
   | .turnBytes => (ingressBytes ingress).length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
   | .storageBytes => DeployedCharge.storageCharge durable.snapshot
-      (writes accepted.prepared) (readGuards accepted.prepared)
+      (writes accepted.prepared)
       (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.possessionSignature.length
   | .proofWork => 1

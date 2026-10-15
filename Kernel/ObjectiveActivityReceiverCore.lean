@@ -920,15 +920,14 @@ def nullifier (domain semantics : Digest) (command : Command) : StableNullifier 
   CredentialAuthorityReplay.nullifier domain (marker domain semantics command)
 
 /-- The exact charge of a turn's footprint against the image `snap` it is
-admitted on: its storage lane is the World's storage of the posts, the guards
-and the retained event (`DeployedCharge.storageCharge`). -/
+admitted on: its storage lane is the World's storage of the posts and the
+retained event (`DeployedCharge.storageCharge`). -/
 def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : DecodedIngress) (posts : List Post)
     (guards : List ReadGuard) (retained : StableEvent) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => posts.length + guards.length
-  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes))
-      guards retained
+  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes)) retained
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0

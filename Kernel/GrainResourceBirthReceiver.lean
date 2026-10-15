@@ -60,7 +60,7 @@ def charge {F : Type} [Field F] [DecidableEq F]
   | .proofWork => (GrainResourceBirthAdmission.branches tariff source).length + 2 +
       source.birth.resourceBatch.operations.length
   | .storageBytes => DeployedCharge.storageCharge durable.snapshot
-      (GrainResourceBirthTransaction.writes birth grain) accepted.readGuards
+      (GrainResourceBirthTransaction.writes birth grain)
       (event deployment.domain ingress)
   | .sideEffectCount => 1
   | .feeDebit => source.birth.fee.amount
