@@ -79,6 +79,11 @@ case "${2:-}" in
   "") ;;
   *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--rehash|--draft]" >&2; exit 64 ;;
 esac
+# OBJECTIVE_SELF_TESTS=0 skips the instrument's self-tests (plants (a)-(f) and the ratchet selftest) in check and
+# draft mode: the merge gate sets it when FROM..TO touched none of the instrument's files
+# (scripts/pipeline/instruments.tsv). --pin always runs them: a pin is refused unless they pass.
+self_test=1
+[ "${OBJECTIVE_SELF_TESTS:-1}" = 0 ] && [ "$mode" != pin ] && self_test=0
 if [ "$mode" != check ] && [ "$what" != proofs ]; then echo "$0: ${2} is a proofs option" >&2; exit 64; fi
 manifests=scripts/gates/objective-manifest
 decisions=scripts/gates/objective-contract-decisions.txt
@@ -198,6 +203,8 @@ gate_proofs() {
   "$lake" build $targets
   local failed=0 run script s
   local ns_c=Minidregg.Kernel.ObjectiveBendAdmissionSemantics ns_d=Minidregg.Theory.ObjectiveBendOpenRecursion
+  local planted_c=0 planted_d=0 planted_e=0 planted_f=0
+  if [ "$self_test" = 1 ]; then
   for run in theory mathlib; do
     script=scripts/ObjectiveManifest.lean
     [ "$run" = mathlib ] && script=scripts/ObjectiveManifestMathlib.lean
@@ -206,7 +213,7 @@ gate_proofs() {
   done
   # (c) the measured defect: an unused `(_vacuous : False)` premise on admitted_source_semantics
   # (W20-GATE-MUTATION left the old gate green under exactly this)
-  local planted_c=1 planted_d=1
+  planted_c=1 planted_d=1
   scratch_module Kernel/ObjectiveBendAdmissionSemantics.lean "$tmp/premise.lean" \
     "    (admitted : Admitted prepared ingress writes guards) :
     runBounded" \
@@ -222,7 +229,7 @@ gate_proofs() {
     "def Evaluates (initial result : Term) : Prop := True" \
     "$ns_d" "$ns_d.lazy_fixed_function" || planted_d=0
   # (e) a proof edited, nothing else: a proof is never content, so NO event (no decision needed)
-  local planted_e=1 planted_f=1
+  planted_e=1 planted_f=1
   scratch_module Theory/ObjectiveBendOpenRecursion.lean "$tmp/reproof.lean" \
     "      some (.boolean (left && right)) := rfl" \
     "      some (.boolean (left && right)) := by cases left <;> cases right <;> rfl" \
@@ -233,8 +240,10 @@ gate_proofs() {
   scratch_module_re Theory/ObjectiveBendOpenRecursion.lean "$tmp/rename.lean" \
     '\bliftRename\b' "liftRenameMoved" \
     "$ns_d" "$ns_d.lazy_fixed_function" || planted_f=0
+  fi
   # all scanner runs in parallel
-  local jobs="theory mathlib theory-plant mathlib-plant theory-noscan mathlib-noscan"
+  local jobs="theory mathlib"
+  [ "$self_test" = 1 ] && jobs="$jobs theory-plant mathlib-plant theory-noscan mathlib-noscan"
   for run in $jobs; do
     script=$tmp/$run.lean
     [ "$run" = theory ] && script=scripts/ObjectiveManifest.lean
@@ -253,6 +262,9 @@ gate_proofs() {
     if [ "$s" != 0 ] || [ ! -s "$tmp/$run.out" ]; then echo "objective-manifest ($run): FAILED (exit $s)"; failed=1; fi
   done
   [ "$failed" = 0 ] || return 1
+  if [ "$self_test" = 0 ]; then
+    echo "objective: self-tests skipped (OBJECTIVE_SELF_TESTS=0): plants (a)-(f) and the ratchet selftest not run"
+  else
   if "${tool[@]}" selftest "$tmp/theory.out" "$tmp/mathlib.out"; then :; else failed=1; fi
   for run in theory mathlib; do
     s=$(cat "$tmp/$run-plant.rc")
@@ -303,6 +315,7 @@ gate_proofs() {
   else
     echo "self-test (f) a definition renamed verbatim: FAIL"
     cat "$tmp/rename.expect" 2>/dev/null; head -20 "$tmp/rename.err" 2>/dev/null; failed=1
+  fi
   fi
   if [ "$mode" = pin ] && [ "$failed" != 0 ]; then
     echo "objective-manifest: pin REFUSED: a self-test failed; nothing written"; return 1

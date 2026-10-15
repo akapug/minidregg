@@ -50,6 +50,22 @@ run() { local n=$1; shift; local s=$(date +%s); timeout -k 30 "$TMO" "$@" > "$L/
   if [ $rc = 124 ] || [ $rc = 137 ]; then st="TIMEOUT(${TMO}s)"; echo "merge-gate: $n killed after ${TMO}s" >> "$L/gate-$TAG-$n.log"
   elif [ $rc != 0 ]; then st=RED; fi
   echo "$n $st rc=$rc $(( $(date +%s) - s ))s :: $(tail -n 1 "$L/gate-$TAG-$n.log" | cut -c1-200)" | tee -a "$S"; }
+# Self-tests run only when the instrument could have changed (scripts/pipeline/instruments.tsv): selftests NAME
+# prints 1 when FROM..TO touched one of NAME's files or the gate itself, else 0, recording
+# "NAME: instrument unchanged since <sha>: self-tests skipped" in the mode file and the summary.
+selftests() {
+  local n=$1 paths last
+  paths=$(awk -F'\t' -v n="$n" '$1==n{print $2}' "$H/instruments.tsv")
+  [ -n "$paths" ] || { echo 1; return; }
+  # shellcheck disable=SC2086
+  if [ -n "$(git diff --name-only "$FROM" "$TO" -- $paths scripts/pipeline/merge-gate-checks.sh scripts/pipeline/instruments.tsv)" ]; then
+    echo 1
+  else
+    last=$(git log -1 --format=%h "$TO" -- $paths)
+    echo "$n: instrument unchanged since $last: self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
+    echo 0
+  fi
+}
 ACR=$L/gate-$TAG.acr   # written by the builders once AxiomCensusResearch is built: "ok" or "red"
 rm -f "$ACR"
 # lean targets the range DECLARES (new [[lean_lib]]/[[lean_exe]] names in lakefile.toml) are built too:
@@ -84,7 +100,7 @@ builders() {
   # module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
   # detected. Elaborates TokenCensus over the research umbrella.
   run token-census    $LAKE_WRAP lake build TokenCensus
-  run objective-proofs $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
+  run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
   # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
   # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
   # After the AxiomCensusResearch build: scripts/NativeTranscripts.lean imports it; before it, a
@@ -102,7 +118,8 @@ ledger() {
   # the builders job writes $ACR; if it ended without writing it, that is a red, not a wait
   while [ ! -s "$ACR" ]; do { [ -n "${BP:-}" ] && kill -0 "$BP" 2>/dev/null; } || break; sleep 10; done
   if [ "$(cat "$ACR" 2>/dev/null)" != ok ]; then echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; return; fi
-  timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
+  local nst=""; [ "$(selftests hyp-ledger)" = 0 ] && nst=--no-self-test
+  timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh $nst > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
   new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
   if [ $rc = 0 ]; then st=PASS
@@ -125,7 +142,8 @@ readers() {
   # Only the finish/checkInert routes hand out the object kernel facet (Config.kernelTransport): an
   # environment census (scripts/KernelTransportCensus.lean) after self-test plants; a new caller or a
   # stale row is red. Needs Kernel.NativeHost + Kernel.NativeHostReplay built (the umbrella does); ~30 s.
-  run kernel-transport $SB bash scripts/check-kernel-transport.sh
+  local kst=""; [ "$(selftests kernel-transport)" = 0 ] && kst=--no-self-test
+  run kernel-transport $SB bash scripts/check-kernel-transport.sh $kst
   run import-boundary bash scripts/check-import-boundary.sh
   run proof-hygiene   bash scripts/check-proof-hygiene.sh
   run build-surfaces  python3 scripts/lean-build-surfaces.py check
