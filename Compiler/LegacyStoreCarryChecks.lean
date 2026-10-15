@@ -2,6 +2,7 @@
 PayCellUpgrade proofs cover typed rows; these checks also exercise the frozen
 source frame and the final target decoder path. -/
 import Compiler.LegacyStoreCarry
+import Theory.AssertCompiled
 
 namespace Minidregg.Compiler.LegacyStoreCarryChecks
 open Minidregg.Kernel
@@ -34,15 +35,26 @@ private def enrolledCarry : Bool :=
         (PayCell.claimAt store [1, 2, 3]).isNone &&
         (PayCell.claimConsumptionAt store [1, 2, 3]).isNone
 
-#guard enrolledCarry
+/-! `decodePay` checks the frozen layout descriptor (and the frame carries its digest), so these
+instances are compiled evaluations: `native_decide` + `#assert_compiled`. -/
+
+theorem enrolled_carry : enrolledCarry = true := by native_decide
 -- A newer outer frame does not silently widen the source language.
-#guard refuses (StoreCodec.encode PayCellLegacyV4.wire PayCellLegacyV4.enrolledFixture)
+theorem current_frame_old_payload_refused :
+    refuses (StoreCodec.encode PayCellLegacyV4.wire PayCellLegacyV4.enrolledFixture) = true := by
+  native_decide
 -- Neither current target bytes nor a current payload in an old frame is old v4.
-#guard refuses (StoreCodec.encode PayCell.wire
-  (PayCellUpgrade.lift PayCellLegacyV4.enrolledFixture))
-#guard refuses (encodeV2 PayCell.wire
-  (PayCellUpgrade.lift PayCellLegacyV4.enrolledFixture))
-#guard refuses (sourceBytes ++ [0])
-#guard refuses (sourceBytes.dropLast)
+theorem current_target_bytes_refused : refuses (StoreCodec.encode PayCell.wire
+    (PayCellUpgrade.lift PayCellLegacyV4.enrolledFixture)) = true := by native_decide
+theorem current_payload_old_frame_refused : refuses (encodeV2 PayCell.wire
+    (PayCellUpgrade.lift PayCellLegacyV4.enrolledFixture)) = true := by native_decide
+theorem trailing_byte_refused : refuses (sourceBytes ++ [0]) = true := by native_decide
+theorem truncated_source_refused : refuses sourceBytes.dropLast = true := by native_decide
+#assert_compiled enrolled_carry
+#assert_compiled current_frame_old_payload_refused
+#assert_compiled current_target_bytes_refused
+#assert_compiled current_payload_old_frame_refused
+#assert_compiled trailing_byte_refused
+#assert_compiled truncated_source_refused
 
 end Minidregg.Compiler.LegacyStoreCarryChecks

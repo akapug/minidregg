@@ -363,7 +363,8 @@ def refresh_baseline(path: Path, counts: dict[str, int], n_files: int,
 
 
 def evaluate(counts: dict[str, int], n_files: int, baseline: dict[str, int],
-             enforce_floors: bool, label: str, top: int, quiet: bool = False) -> int:
+             enforce_floors: bool, label: str, top: int, quiet: bool = False,
+             ledger_present: bool = True) -> int:
     def say(*a):
         if not quiet:
             print(*a)
@@ -381,8 +382,9 @@ def evaluate(counts: dict[str, int], n_files: int, baseline: dict[str, int],
             findings.append(f"VACUOUS SCAN: the stripped text shows {N_THEOREMS[0]} `theorem` "
                             f"tokens, floor {MIN_THEOREMS_FOUND} — the reader is blind, and a "
                             "blind reader looks exactly like a finished burndown")
-        if not baseline:
-            findings.append("NO BASELINE: the ledger is missing or empty")
+        if not ledger_present:
+            findings.append("NO BASELINE: the ledger file is missing (an EMPTY ledger written by "
+                            "the gated refresh is the finished burndown, and is green)")
 
     grew, stale, unlisted = [], [], []
     for p, k in sorted(counts.items()):
@@ -572,7 +574,20 @@ def run_self_test() -> int:
         N_THEOREMS[0] = 0
         check("a BLINDED scan trips the floors (zero guards is not a pass when the reader saw nothing)",
               evaluate({}, 0, {"A.lean": 1}, True, "blind", 0, quiet=True) == 1, "")
-        check("a missing ledger trips the floors", evaluate({}, 0, {}, True, "blind", 0, quiet=True) == 1, "")
+        N_THEOREMS[0] = MIN_THEOREMS_FOUND
+        check("a missing ledger is red", evaluate({}, MIN_FILES_SCANNED, {}, True, "no ledger", 0,
+                                                 quiet=True, ledger_present=False) == 1, "")
+        # the finished burndown: every row retired, the ledger empty but gate-written, is GREEN
+        rc = refresh_baseline(bl, *scan(mt), "regenerate", True, quiet=True)
+        for rel in list(read_baseline(bl)):
+            (mt / rel).write_text("theorem converted : True := trivial\n", encoding="utf-8")
+        rc = refresh_baseline(bl, *scan(mt), "retire the last rows", False, quiet=True,
+                              only=sorted(read_baseline(bl)))
+        N_THEOREMS[0] = MIN_THEOREMS_FOUND
+        check("CONTROL: an EMPTY gate-written ledger over a guard-free tree is GREEN",
+              rc == 0 and read_baseline(bl) == {} and not audit_baseline_integrity(bl)
+              and evaluate({}, MIN_FILES_SCANNED, {}, True, "done", 0, quiet=True) == 0,
+              f"rc={rc} rows={read_baseline(bl)} integrity={audit_baseline_integrity(bl)}")
         print("\nguard-discipline self-test: " + ("PASS" if ok else "FAIL"))
         return 0 if ok else 1
     finally:
@@ -616,7 +631,8 @@ def main() -> int:
             return refresh_baseline(args.baseline, counts, n_files, args.reason,
                                     args.allow_increase, only=args.only, create=args.create)
         rc = evaluate(counts, n_files, read_baseline(args.baseline),
-                      enforce_floors=True, label=label, top=args.top)
+                      enforce_floors=True, label=label, top=args.top,
+                      ledger_present=args.baseline.exists())
         integrity = audit_baseline_integrity(args.baseline)
         if integrity:
             print("\n⚑ RED — the BASELINE ITSELF does not add up (a refresh was bypassed):")
