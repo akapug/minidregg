@@ -45,8 +45,14 @@ absent from that packet schema.
 
 The worker intentionally does not inherit the operator namespace-denial filter:
 the pinned bubblewrap executable must create the app sandbox. It is the same
-physical binary that created the resident namespace: the resident refuses a
-`resident.json` whose `bwrap`/`bwrapSha256` differ from the broker-rendered pair.
+bwrap build that created the resident namespace: the resident refuses a
+`resident.json` whose `bwrapSha256` differs from the broker-rendered one. Its
+path may differ (a per-app-identity copy, `sandbox-launcher-stage.py`); the spawn
+gate refuses one the app identity cannot execute after the drop, deciding by the
+mode bits or, when the file has one, its POSIX access ACL, and names which of its
+conditions failed. On a host shipping the profiled copy `root:hbox 0750`,
+`install-user-world` grants the operator and the world's app identities named
+`r-x` ACL entries and revokes the ones it added at removal.
 Its host identity is already the separate app UID, with no host capability or
 supplementary group that can map another host UID or reach operator custody.
 This is a distinct physical boundary from the operator parser. The sandbox’s own
@@ -71,7 +77,7 @@ joins afterwards, so the credential floor stays in the bootstrap's code.
 | No unit-level ambient capabilities | `AmbientCapabilities=` in the rendered unit |
 | The operator parser cannot create or enter namespaces | the parser seccomp filter (unshare, setns, namespace clone flags, clone3) |
 | One launch over the private channel; no identity selector in packets | the bootstrap channel wire (`deny_unknown_fields`, bounded frames, tags 1/2/3) |
-| The app sandbox runs the same physical bwrap | `ResidentBound::validate` (resident config `bwrap`/`bwrapSha256` must equal the broker-rendered pair) and the spawn gate's path/inode/SHA pin |
+| The app sandbox runs the same bwrap build | `ResidentBound::validate` (resident config `bwrapSha256` must equal the broker-rendered one) and the spawn gate's name/inode/SHA pin and its mode/ACL execute decision for the app identity |
 
 ## Source admission still selects the work
 
