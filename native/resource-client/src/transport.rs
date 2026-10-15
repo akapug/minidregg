@@ -14,12 +14,14 @@ use std::time::{Duration, Instant};
 use crate::serve_queue::{self, fair_queue, TrySendError};
 use mini_sdk::lock::{Create, Lease, LockError, Wait};
 
-// Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
-pub(crate) const HOST_MAX_FRAME: usize = 12_102_760;
+// Kernel.Bounds.frameBytesMax (generated, crate::bounds); the host's length includes op byte.
+pub(crate) const HOST_MAX_FRAME: usize = crate::bounds::FRAME_BYTES_MAX;
 pub(crate) const MAX_CONFIG: usize = 65_536;
 // Op153 wraps every formerly valid raw call without reducing its capacity.
 pub(crate) const MAX_CARRIED_CALL: usize = HOST_MAX_FRAME - 1;
-pub(crate) const CARRIED_LOOKUP_MAX_FRAME: usize = HOST_MAX_FRAME + 4 + 1024;
+// Kernel.Bounds.lookupFrameBytesMax: the raw call, its length header, a bounded identity header.
+pub(crate) const CARRIED_LOOKUP_MAX_FRAME: usize = crate::bounds::LOOKUP_FRAME_BYTES_MAX;
+const _: () = assert!(CARRIED_LOOKUP_MAX_FRAME == HOST_MAX_FRAME + 4 + 1024);
 const MAX_FRAME: usize = CARRIED_LOOKUP_MAX_FRAME + 5 + MAX_CONFIG + 32;
 
 fn request_within_bound(request: &[u8]) -> bool {

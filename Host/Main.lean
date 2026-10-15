@@ -165,6 +165,7 @@ import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
 import Host.DryRun
 import Host.RequestRefusal
+import Kernel.Bounds
 import Host.LawSatWire
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
@@ -2312,7 +2313,49 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       return (79, ingress)
   | _ => throw (IO.userError "unsupported lifetime dispatch authoring operation")
 
-def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
+def maxFrame : Nat := Kernel.Bounds.frameBytesMax
+
+/-- The fn consumer route's derived frame (two consumer reports + 256 KiB) is the
+frame bound: `Kernel.Bounds` is the home, this derivation is pinned to it. -/
+theorem fnFrame_eq_bound : FnEvidenceCodec.maxHostFrameBytes = Kernel.Bounds.frameBytesMax :=
+  FnEvidenceCodec.selected_poll_envelope_exact.2.2.2.2
+
+theorem lookupFrame_eq_bound :
+    RetainedSegmentInspection.maxLookupFrame = Kernel.Bounds.lookupFrameBytesMax := rfl
+
+theorem fnPackage_eq_bound : FnEvidenceCodec.maxPackageBytes = Kernel.Bounds.packageBytesMax := rfl
+
+/-- The bound a frame is held to before its payload is read (HP-1): carried
+exact-call recovery (operation 153) to `lookupFrameBytesMax`, every other
+operation to `frameBytesMax`. -/
+def frameBound (operation : UInt8) : Kernel.Bounds.Name :=
+  if operation == 153 then .lookupFrameBytes else .frameBytes
+
+/-- **No false refusal at the frame reader**: a frame within `frameBytesMax` passes
+both checks `serveSession` runs, whatever its operation. -/
+theorem frameBound_accepts (operation : UInt8) {length : Nat}
+    (within : length ≤ Kernel.Bounds.frameBytesMax) :
+    Kernel.Bounds.check .lookupFrameBytes length = .ok () ∧
+      Kernel.Bounds.check (frameBound operation) length = .ok () := by
+  have outer : length ≤ Kernel.Bounds.lookupFrameBytesMax :=
+    Nat.le_trans within Kernel.Bounds.frameBytes_le_lookupFrameBytes
+  refine ⟨Kernel.Bounds.check_accepts outer, ?_⟩
+  unfold frameBound
+  split
+  · exact Kernel.Bounds.check_accepts outer
+  · exact Kernel.Bounds.check_accepts within
+
+/-- A frame past `frameBytesMax` of any operation but 153 is refused by that name. -/
+theorem frameBound_refuses {operation : UInt8} (other : operation ≠ 153) {length : Nat}
+    (past : Kernel.Bounds.frameBytesMax < length) :
+    Kernel.Bounds.check (frameBound operation) length =
+      .error (.overBound .frameBytes length Kernel.Bounds.frameBytesMax) := by
+  have : frameBound operation = .frameBytes := by simp [frameBound, other]
+  rw [this]
+  exact Kernel.Bounds.check_refuses past
+
+#assert_axioms fnFrame_eq_bound lookupFrame_eq_bound fnPackage_eq_bound
+#assert_axioms frameBound_accepts frameBound_refuses
 
 /-- Inspection repeats the exact frame and full request as hex. A hostd
 consumer must cap this JSON separately from the smaller binary input. -/
@@ -2667,20 +2710,22 @@ partial def serveSession (config : NativeHost.Config)
   if length == 0 then
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native host frame"))
-  else if length > RetainedSegmentInspection.maxLookupFrame then
+  else match Kernel.Bounds.check .lookupFrameBytes length with
+  | .error refusal =>
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed "native host frame exceeds frame bound"))
-  else
+      (RequestRefusal.malformed refusal.render))
+  | .ok () =>
     let opcode ← readExactly input 1
     let operation := opcode[0]!
     -- Only carried exact-call recovery needs the bounded identity-header
     -- overhead. Refuse other oversized operations before allocating payload.
-    if length > maxFrame && operation != 153 then
+    match Kernel.Bounds.check (frameBound operation) length with
+    | .error refusal =>
       discardExactly input (length - 1)
       writeSessionFrame output 255 (RequestRefusal.frame operation
-        (RequestRefusal.malformed "native host frame exceeds operation bound"))
-    else
+        (RequestRefusal.malformed refusal.render))
+    | .ok () =>
       let payload ← readExactly input (length - 1)
       serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
   serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
@@ -2699,10 +2744,10 @@ partial def serveCodec (config : NativeHost.Config)
   if length == 0 then
     writeSessionFrame output 255 (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native codec frame"))
-  else if length > maxFrame then
+  else if let .error refusal := Kernel.Bounds.check .frameBytes length then
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed "native codec frame exceeds frame bound"))
+      (RequestRefusal.malformed refusal.render))
   else
     let body ← readExactly input length
     let operation := body[0]!

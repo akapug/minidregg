@@ -47,6 +47,7 @@
 # updated 2026-10-07: b22 kn2-trie-a  [counts: Minidregg 0 1, Theory 78 178, Kernel 394 545, Pred 7 11, Effects 0 3, Compiler 154 323, Selvage 12 153, Assurance 0 155, Host 87 121, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 13, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-08: kern R2 Core extraction: checked durable writer imports receiver evidence and World derivation from moved Core modules; associated OB invariant proof dependencies now enter Host.Main. Diagnostic totality runner moved to Host; no production route added.  [counts: Minidregg 0 1, Theory 106 179, Kernel 405 554, Pred 7 11, Effects 0 3, Compiler 156 325, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-09: derived StoreEpoch: Compiler.PersistedCodecTags (registry of persisted codec identities) and its attribute module PersistedCodecTagRegistry enter the Host closure; DurableCheckpointCodec hashes their content into schema-refs  [counts: Minidregg 0 1, Theory 106 179, Kernel 405 554, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-14: HP-1 BOUNDS: Kernel.Bounds (the static limits; imports only Theory.AssertAxioms) enters through Host.Main, Compiler.DurableReceiverIO  [counts: Minidregg 0 1, Theory 106 179, Kernel 406 555, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 123, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -438,6 +439,7 @@ Kernel.AuditTiming
 Kernel.Base64
 Kernel.BirthCandidateAdmission
 Kernel.BirthExportAdmission
+Kernel.Bounds
 Kernel.CanonicalPolicyRegistry
 Kernel.CanonicalResourceEffect
 Kernel.CapabilityDelegationController
