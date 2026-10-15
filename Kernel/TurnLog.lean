@@ -89,19 +89,23 @@ def genesisOfSeed (seed : DurableReceiver.Seed) : Except GenesisRefusal DWorld :
 /-- Why a follower stopped, and at which height (0-based entry index). -/
 inductive FollowStop
   | undecodable (height : Nat)
+  /-- The entry at `height`, or its turn, is past a static bound (`decodeEntry`). -/
+  | overBound (height : Nat) (name : Bounds.Name) (value limit : Nat)
   | refused (height : Nat) (reason : Reject)
   deriving DecidableEq, Repr
 
 /-- Fold a list of persisted entries from `w`, numbering from `height`: each
-entry is decoded AGAINST the current world (`decodeTurnAt`: its digest guards are
-checked against the cells the world holds) and admitted. -/
+entry is decoded AGAINST the current world (`decodeEntry`: refused by name past a
+static bound, then `decodeTurnAt`, whose digest guards are checked against the
+cells the world holds) and admitted. -/
 def followFrom (w : DWorld) (height : Nat) :
     List (List UInt8) → Except FollowStop (DWorld × List (DTurn deployedR Digest))
   | [] => .ok (w, [])
   | entry :: rest =>
-    match decodeTurnAt w entry with
-    | none => .error (.undecodable height)
-    | some t =>
+    match decodeEntry w entry with
+    | .error .undecodable => .error (.undecodable height)
+    | .error (.overBound name value limit) => .error (.overBound height name value limit)
+    | .ok t =>
       match World.admit history w t with
       | .error reason => .error (.refused height reason)
       | .ok w' => (followFrom w' (height + 1) rest).map fun r => (r.1, t :: r.2)
@@ -117,9 +121,9 @@ theorem followFrom_sound : ∀ (w W : DWorld) (height : Nat) (entries : List (Li
       exact ⟨rfl, rfl⟩
   | w, W, height, entry :: rest, turns, h => by
       simp only [followFrom] at h
-      cases hd : decodeTurnAt w entry with
-      | none => simp [hd] at h
-      | some t =>
+      cases hd : decodeEntry w entry with
+      | error e => cases e <;> simp [hd] at h
+      | ok t =>
         cases ha : World.admit history w t with
         | error r => simp [hd, ha] at h
         | ok w' =>
@@ -134,11 +138,14 @@ theorem followFrom_sound : ∀ (w W : DWorld) (height : Nat) (entries : List (Li
               simp [World.step, ha, Except.toOption]
             exact ⟨by simp [hl], by simp [World.fold_cons, hs, hf]⟩
 
-/-- The writer's log: each turn persisted against the world it is admitted at. -/
+/-- The writer's log: each turn persisted against the world it is admitted at. A
+turn whose entry is past a static bound is not written (`entryWithinBounds`). -/
 def writeLog : DWorld → List (DTurn deployedR Digest) → Option (List (List UInt8))
   | _, [] => some []
-  | w, t :: ts => (World.step history w t).bind fun w' =>
-      (writeLog w' ts).map (encodeTurnAt w t :: ·)
+  | w, t :: ts =>
+    if entryWithinBounds w t then
+      (World.step history w t).bind fun w' => (writeLog w' ts).map (encodeTurnAt w t :: ·)
+    else none
 
 /-- **A follower of the writer's log reaches the writer's world**: the persisted
 digest-guard entries decode, against the follower's own world, to exactly the
@@ -152,6 +159,10 @@ theorem followFrom_writeLog : ∀ (w : DWorld) (height : Nat) (ts : List (DTurn 
       exact ⟨w, rfl, rfl⟩
   | w, height, t :: ts, entries, h => by
       simp only [writeLog] at h
+      by_cases hb : entryWithinBounds w t = true
+      swap
+      · simp [hb] at h
+      rw [if_pos hb] at h
       cases hs : World.step history w t with
       | none => simp [hs] at h
       | some w' =>
@@ -167,7 +178,7 @@ theorem followFrom_writeLog : ∀ (w : DWorld) (height : Nat) (ts : List (DTurn 
             | error r => simp [h2, Except.toOption] at hs
             | ok v => simp [h2, Except.toOption] at hs; rw [hs]
           refine ⟨W, by simp [World.fold_cons, hs, hf], ?_⟩
-          simp only [followFrom, decodeTurnAt_encodeTurnAt, ha, hfol]
+          simp only [followFrom, decodeEntry_encodeTurnAt w t hb, ha, hfol]
           rfl
 
 /-- A log entry's frame: its length, then its bytes. -/

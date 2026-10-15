@@ -11,7 +11,9 @@ nullifier, the height.  It writes `OUT/genesis.bin`, `OUT/turns.bin`, `OUT/root`
 `turn-log-follower follow OUT [--plant-drop K]` (the follower, a second process): reads only
 `genesis.bin` and `turns.bin` (no post image, no Store), folds the decoded turns
 (`TurnLog.followFrom`, which IS `World.fold`), and prints `ROOT <digest>`; a
-tampered entry stops it as `STOP undecodable|refused <height>`. -/
+tampered entry stops it as `STOP undecodable|refused <height>`, and an entry past a
+static bound as `STOP over-bound <height> <name> <value> <limit>` (HP-1;
+`--plant-pad K` pads entry K to one byte past `turnBytesMax`). -/
 import Host.ClientConsentCore
 import Kernel.TurnLog
 
@@ -147,7 +149,7 @@ def exportLog (config out : String) : IO UInt32 := do
   IO.println s!"ROOT {root.value}"
   return 0
 
-def follow (out : String) (drop : Option Nat := none) : IO UInt32 := do
+def follow (out : String) (drop : Option Nat := none) (pad : Option Nat := none) : IO UInt32 := do
   let some seed := DeployedTurnCodec.full seedStream (← readBytes (System.FilePath.mk out / "genesis.bin"))
     | IO.println "STOP genesis-undecodable"; return 1
   let some entries := unframeEntries (← readBytes (System.FilePath.mk out / "turns.bin"))
@@ -156,11 +158,17 @@ def follow (out : String) (drop : Option Nat := none) : IO UInt32 := do
   let entries := match drop with
     | some k => entries.eraseIdx k
     | none => entries
+  -- Plant: entry K padded to exactly one byte past the entry bound.
+  let entries := match pad with
+    | some k => entries.modify k fun e => e ++ List.replicate (Bounds.turnBytesMax + 1 - e.length) 0
+    | none => entries
   match genesisOfSeed seed with
   | .error e => IO.println s!"STOP genesis {reprStr e}"; return (1 : UInt32)
   | .ok g =>
   match followFrom g 0 entries with
   | .error (.undecodable h) => IO.println s!"STOP undecodable {h}"; return 1
+  | .error (.overBound h name value limit) =>
+    IO.println s!"STOP over-bound {h} {name.ident} {value} {limit}"; return 1
   | .error (.refused h r) => IO.println s!"STOP refused {h} {reprStr r}"; return 1
   | .ok (w, turns) =>
     let root := turnLogRoot w (idsOf seed turns)
@@ -177,6 +185,8 @@ def main (arguments : List String) : IO UInt32 := do
     | ["follow", out] => Minidregg.Host.TurnLogFollower.follow out
     | ["follow", out, "--plant-drop", k] =>
       Minidregg.Host.TurnLogFollower.follow out k.toNat?
+    | ["follow", out, "--plant-pad", k] =>
+      Minidregg.Host.TurnLogFollower.follow out none k.toNat?
     | _ =>
       IO.eprintln "usage: turn-log-follower export CONFIG OUT | follow OUT"
       return (2 : UInt32)
