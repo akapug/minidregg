@@ -96,7 +96,7 @@ ledger() {
   local imports; imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/HypothesisLedger.lean | tr '\n' ' ')
   timeout -k 30 "$TMO" $LAKE_WRAP lake build AxiomCensusResearch $imports > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1 \
     || { echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; red=$((red+1)); return; }
-  timeout -k 30 "$TMO" bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
+  HYP_LEDGER_BASE="$FROM" timeout -k 30 "$TMO" bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
   new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
   if [ $rc = 0 ]; then st=PASS

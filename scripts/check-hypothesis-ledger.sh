@@ -12,6 +12,8 @@
 #   * a TRIVIAL hypothesis structure (bound by a theorem, inhabited for every
 #     parameter with degenerate fields) not in scripts/trivial-structure-allow.txt,
 #   * a stale allowlist entry in either list (the ratchet only tightens),
+#   * a family ADDED to scripts/hypothesis-ledger-allow.txt since HYP_LEDGER_BASE
+#     (default HEAD; the merge gate passes FROM): the allowlist only shrinks,
 #   * a broken instrument: a planted family classified wrongly, a pinned real
 #     row that moved, or fewer consumed families than the pinned floor.
 # STALE rows (a family proved outright, still bound as a premise) are printed,
@@ -71,6 +73,28 @@ done < "$tmp/dependencies.log"
 self_test=1
 [ "${1:-}" = "--no-self-test" ] && self_test=0
 failed=0
+
+# The allowlist is a RATCHET: it may shrink, never grow.  Every family on it at
+# HYP_LEDGER_BASE (the merge gate passes FROM; standalone, HEAD, so an uncommitted
+# addition is caught) may stay or leave; a family listed now and not then is RED
+# by name.  A new hypothesis earns its place with a named satisfying and refuting
+# instance, or it is deleted -- it is never pardoned.
+base=${HYP_LEDGER_BASE:-HEAD}
+allow_families() { awk '!/^#/ && NF { print $1 }' | sort -u; }
+if ! base_allow=$(git show "$base:scripts/hypothesis-ledger-allow.txt" 2>/dev/null); then
+  echo "hypothesis-ledger: RED: allowlist base $base has no scripts/hypothesis-ledger-allow.txt; the ratchet has nothing to compare" >&2
+  exit 1
+fi
+grown=$(comm -13 <(printf '%s\n' "$base_allow" | allow_families) <(allow_families < "$HYP_LEDGER_ALLOW"))
+ratchet_red=0
+if [ -n "$grown" ]; then
+  for family in $grown; do
+    echo "hypothesis-ledger: RED: allowlist GREW: $family is listed but was not at $base (the allowlist only shrinks; name a satisfying and a refuting instance)"
+  done
+  ratchet_red=1
+else
+  echo "allowlist ratchet: PASS ($(allow_families < "$HYP_LEDGER_ALLOW" | wc -l) entries now; $(printf '%s\n' "$base_allow" | allow_families | wc -l) at $base)"
+fi
 
 if [ "$self_test" = 1 ]; then
   # (a) plant a refuted family with a consumer
@@ -208,7 +232,7 @@ if [ "$failed" != 0 ]; then
   echo "hypothesis-ledger: instrument self-test FAILED" >&2
   exit 1
 fi
-if [ "$status" != 0 ]; then
+if [ "$status" != 0 ] || [ "$ratchet_red" != 0 ]; then
   echo "hypothesis-ledger: FAILED (see above)" >&2
   exit 1
 fi
