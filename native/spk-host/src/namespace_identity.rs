@@ -1,11 +1,16 @@
-//! Enter a mapped user namespace before parsing resident bytes. The mapper
-//! remains outside it; both resident and worker later drop all capability sets.
+//! Join a mapped user namespace before parsing resident bytes. bubblewrap
+//! creates it (the one sandboxing binary a host provides; on a host that confines
+//! unprivileged namespace creation, its AppArmor-profiled copy is the permitted
+//! creator); this process writes the two broker-selected identities into it from
+//! outside and then joins it, staying the unit MainPID. Both resident and worker
+//! later drop all capability sets.
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::collections::BTreeMap;
 static ROOTS: OnceLock<BTreeMap<PathBuf, (File, Metadata)>>=OnceLock::new();
@@ -39,55 +44,132 @@ pub(crate) fn prepare_root_handles(config: &Path, root: &Path, store: &str, grai
     for path in witness.ancestors() { remember(path,&mut roots)?; }
     ROOTS.set(roots).map_err(|_|refused("namespace root provenance initialized twice"))
 }
-fn map(program: &str,pid: u32,operator: u32,app: u32) -> io::Result<()> {
-    eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
-    let status=Command::new(program).args([pid.to_string(),operator.to_string(),operator.to_string(),"1".into(),app.to_string(),app.to_string(),"1".into()]).env_clear().status()?;
-    if !status.success() { return Err(refused("namespace identity mapping refused")); }
+/// The physical bubblewrap binaries a host may provide (deploy/grain-host/resolve-bwrap):
+/// the AppArmor-profiled copy a host restricting unprivileged user namespaces ships, and
+/// the distro binary. The namespace and the app sandbox are made by the same binary.
+pub(crate) const PHYSICAL_BWRAPS: [&str; 2] = ["/usr/local/libexec/mini-grain-bwrap", "/usr/bin/bwrap"];
+/// A deployed physical bwrap: one of PHYSICAL_BWRAPS, a root-owned non-writable
+/// executable regular file whose bytes have the pinned SHA-256.
+pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
+    use sha2::{Digest, Sha256};
+    if !PHYSICAL_BWRAPS.iter().any(|b| Path::new(b) == path) {
+        return Err(refused("namespace bwrap is not a deployed physical bwrap"));
+    }
+    let m = fs::symlink_metadata(path)?;
+    if !m.file_type().is_file() || m.uid() != 0 || m.mode() & 0o022 != 0 || m.mode() & 0o111 == 0 {
+        return Err(refused("namespace bwrap must be a root-owned non-writable executable"));
+    }
+    let mut f = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(path)?;
+    let held = f.metadata()?;
+    if (held.dev(), held.ino()) != (m.dev(), m.ino()) {
+        return Err(refused("namespace bwrap changed while pinned"));
+    }
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes)?;
+    if sha256.len() != 64 || format!("{:x}", Sha256::digest(&bytes)) != sha256 {
+        return Err(refused("namespace bwrap SHA-256 differs from its pin"));
+    }
     Ok(())
 }
-pub(crate) fn enter(operator_uid:u32,operator_gid:u32,app_uid:u32,app_gid:u32)->io::Result<()> {
-    if unsafe{libc::geteuid()}==0 || unsafe{libc::geteuid()}!=operator_uid || unsafe{libc::getegid()}!=operator_gid {
+fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
+    eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
+    let status = Command::new(program)
+        .args([pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()])
+        .env_clear()
+        .status()?;
+    if !status.success() {
+        return Err(refused("namespace identity mapping refused"));
+    }
+    Ok(())
+}
+fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [0; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+fn exact_map(text: &str, op: u32, app: u32) -> bool {
+    let rows: Vec<Vec<u32>> = text.lines().map(|r| r.split_whitespace().filter_map(|n| n.parse().ok()).collect()).collect();
+    rows.len() == 2 && rows.contains(&vec![op, op, 1]) && rows.contains(&vec![app, app, 1])
+}
+/// `bwrap --unshare-user --userns-block-fd 4 --info-fd 3` creates the namespace and,
+/// given the block fd, writes no uid/gid map itself: it reports its namespaced child and
+/// waits. newuidmap/newgidmap then map exactly {operator, app} into it (the operator's
+/// /etc/subuid grant covers the app identity), this process holds the namespace by fd,
+/// releases bwrap (whose child runs /usr/bin/true and exits), and joins by setns. The
+/// joining process is single-threaded and keeps every capability of the namespace,
+/// none of the host, until the bootstrap drops them.
+pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32, app_uid: u32, app_gid: u32) -> io::Result<()> {
+    if unsafe { libc::geteuid() } == 0 || unsafe { libc::geteuid() } != operator_uid || unsafe { libc::getegid() } != operator_gid {
         return Err(refused("resident requires its unprivileged operator uid"));
     }
-    let (mut a,mut b)=UnixStream::pair()?;
-    a.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    b.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    let parent=std::process::id();
-    let mapper=unsafe{libc::fork()};
-    if mapper<0 { return Err(io::Error::last_os_error()); }
-    if mapper==0 {
-        drop(a);
-        let result=(||->io::Result<()> {
-            let mut ready=[0];b.read_exact(&mut ready)?;
-            if ready!=[1] { return Err(refused("namespace mapper handshake refused")); }
-            map("/usr/bin/newuidmap",parent,operator_uid,app_uid)?;
-            map("/usr/bin/newgidmap",parent,operator_gid,app_gid)?;
-            b.write_all(&[1])
-        })();
-        if let Err(e)=&result { eprintln!("{e}"); }
-        unsafe{libc::_exit(if result.is_ok(){0}else{1})}
+    pinned_bwrap(bwrap, bwrap_sha256)?;
+    let (info_r, info_w) = pipe()?;
+    let (block_r, block_w) = pipe()?;
+    let (iw, br) = (info_w.as_raw_fd(), block_r.as_raw_fd());
+    let mut command = Command::new(bwrap);
+    command
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .args(["--unshare-user", "--die-with-parent", "--info-fd", "3", "--userns-block-fd", "4", "--ro-bind", "/", "/", "--", "/usr/bin/true"]);
+    unsafe {
+        command.pre_exec(move || {
+            // Move both ends above 9 first so neither dup2 can land on the other.
+            let i = libc::fcntl(iw, libc::F_DUPFD_CLOEXEC, 10);
+            let b = libc::fcntl(br, libc::F_DUPFD_CLOEXEC, 10);
+            if i < 0 || b < 0 || libc::dup2(i, 3) != 3 || libc::dup2(b, 4) != 4 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
-    drop(b);
-    let result=(||->io::Result<()> {
-        if unsafe{libc::unshare(libc::CLONE_NEWUSER)}!=0 { return Err(io::Error::other(format!("namespace unshare(CLONE_NEWUSER) refused: {}",io::Error::last_os_error()))); }
+    let mut holder = command.spawn()?;
+    drop(info_w);
+    drop(block_r);
+    let result = (|| -> io::Result<()> {
+        let mut info = Vec::new();
+        File::from(info_r).take(4096).read_to_end(&mut info)?;
+        let info: serde_json::Value = serde_json::from_slice(&info).map_err(|_| refused("namespace bwrap info refused"))?;
+        let pid = info
+            .get("child-pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|p| u32::try_from(p).ok())
+            .filter(|p| *p > 1)
+            .ok_or_else(|| refused("namespace bwrap child absent"))?;
+        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+        if !status.lines().any(|l| l.split_whitespace().collect::<Vec<_>>() == ["PPid:", &holder.id().to_string()]) {
+            return Err(refused("namespace holder is not the bwrap child"));
+        }
+        let ns = File::open(format!("/proc/{pid}/ns/user"))?;
+        if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
+            return Err(refused("namespace bwrap did not create a user namespace"));
+        }
+        map("/usr/bin/newuidmap", pid, operator_uid, app_uid)?;
+        map("/usr/bin/newgidmap", pid, operator_gid, app_gid)?;
+        File::from(block_w).write_all(&[1])?;
+        if !holder.wait()?.success() {
+            return Err(refused("namespace bwrap failed"));
+        }
+        if unsafe { libc::setns(ns.as_raw_fd(), libc::CLONE_NEWUSER) } != 0 {
+            return Err(io::Error::other(format!("namespace setns(CLONE_NEWUSER) refused: {}", io::Error::last_os_error())));
+        }
         // newgidmap's privileged write preserves setgroups=allow; Linux refuses
         // setgroups until a gid_map exists. Clear groups immediately afterwards.
-        if unsafe{libc::prctl(libc::PR_SET_DUMPABLE,1,0,0,0)}!=0 { return Err(io::Error::last_os_error()); }
-        a.write_all(&[1])?;let mut ready=[0];a.read_exact(&mut ready)?;
-        if ready!=[1] { return Err(refused("namespace mapping did not complete")); }
-        if unsafe{libc::setgroups(0,std::ptr::null())}!=0 { return Err(io::Error::other(format!("namespace empty groups refused after gid mapping: {}",io::Error::last_os_error()))); }
-        let uid=fs::read_to_string("/proc/self/uid_map")?;
-        let gid=fs::read_to_string("/proc/self/gid_map")?;
-        let exact=|text: &str, op: u32, app: u32| {
-            let rows:Vec<Vec<u32>>=text.lines().map(|r|r.split_whitespace().filter_map(|n|n.parse().ok()).collect()).collect();
-            rows.len()==2 && rows.contains(&vec![op,op,1]) && rows.contains(&vec![app,app,1])
-        };
-        if !exact(&uid,operator_uid,app_uid) || !exact(&gid,operator_gid,app_gid) { return Err(refused("namespace identity maps differ from broker selection")); }
+        if unsafe { libc::setgroups(0, std::ptr::null()) } != 0 {
+            return Err(io::Error::other(format!("namespace empty groups refused after gid mapping: {}", io::Error::last_os_error())));
+        }
+        let uid = fs::read_to_string("/proc/self/uid_map")?;
+        let gid = fs::read_to_string("/proc/self/gid_map")?;
+        if !exact_map(&uid, operator_uid, app_uid) || !exact_map(&gid, operator_gid, app_gid) {
+            return Err(refused("namespace identity maps differ from broker selection"));
+        }
         Ok(())
     })();
-    drop(a);let mut status=0;
-    let waited=unsafe{libc::waitpid(mapper,&mut status,0)};
-    result?;
-    if waited!=mapper || status!=0 { return Err(refused("namespace mapper failed")); }
-    Ok(())
+    if result.is_err() {
+        let _ = holder.kill();
+        let _ = holder.wait();
+    }
+    result
 }
