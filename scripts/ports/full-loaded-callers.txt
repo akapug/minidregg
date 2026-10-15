@@ -24,6 +24,8 @@ Host/Kn2StoreBench.lean
 Host/Main.lean
 Host/ObjectiveTurnTotalityRunner.lean
 Host/SourceAgreementReader.lean
+# EXPORTER (turn-log R4a f916e16f / R4b f8bc8bdf): exportLog folds EVERY record of the Store into the Turn log; reading the whole log is its job, not a full-path use of the receiver
+Host/TurnLogFollower.lean
 Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean
 Kernel/CarriedSegment.lean
@@ -63,6 +65,8 @@ scripts/kn2/neutral-birth.lean
 scripts/kn2/neutral-birth-install.lean
 # PROBE (KN2-NEUTRAL-BIRTHS cluster 5): the reserve-method birth probe; boots its Store through the full open
 scripts/kn2/neutral-birth-reserve.lean
+# PROBE (state-at d951d57a): the executed past-checkpoint plant boots a native Store through the full open, flips a kept checkpoint's MAC and requires `at h` to refuse by name
+scripts/kn2/past-checkpoint-tamper.lean
 scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
