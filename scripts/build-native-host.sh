@@ -80,6 +80,7 @@ Environment:
   MINIDREGG_NATIVE_LAKE_CC=PATH    optional bounded compiler wrapper for Lake C jobs
   MINIDREGG_CYCLE_DIR=DIR          evidence parent (default below /tmp)
   MINIDREGG_LEAN_SEAT_ROOT=DIR     host-wide compiler seats (default /tmp/minidregg-lean-seats)
+  MINIDREGG_LEAN_SEATS=N           how many host-wide compiler seats this box carries (default: 2)
 EOF
 }
 
@@ -337,6 +338,8 @@ cycle_dir=${MINIDREGG_CYCLE_DIR:-/tmp/minidregg-cycle-20260919}
 # Compiler capacity belongs to the host, not to one candidate's evidence.
 # Every candidate and scoped build on this host must use this same root.
 seat_root=${MINIDREGG_LEAN_SEAT_ROOT:-/tmp/minidregg-lean-seats}
+lean_seats=${MINIDREGG_LEAN_SEATS:-2}
+case "$lean_seats" in [1-9]|[1-9][0-9]) ;; *) printf 'MINIDREGG_LEAN_SEATS must be a positive integer\n' >&2; exit 64 ;; esac
 mkdir -p "$seat_root" "$cycle_dir/build"
 seat_root=$(cd "$seat_root" && pwd -P)
 if [[ -z "$output_dir" ]]; then
@@ -376,7 +379,7 @@ on_signal() {
   release_seat
   exit "$code"
 }
-for seat_number in 1 2; do
+for seat_number in $(seq 1 "$lean_seats"); do
   candidate="$seat_root/lean-seat-$seat_number"
   # Acquire with one syscall, independent of utility-level race handling.
   if python3 -c 'import os, sys; os.mkdir(sys.argv[1])' "$candidate" 2>/dev/null; then
@@ -388,7 +391,7 @@ for seat_number in 1 2; do
   fi
 done
 if [[ -z "$seat_dir" ]]; then
-  printf 'build-native-host: both Lean compiler seats are occupied under %s\n' "$seat_root" >&2
+  printf 'build-native-host: all %s Lean compiler seats are occupied under %s\n' "$lean_seats" "$seat_root" >&2
   exit 75
 fi
 trap on_exit EXIT
