@@ -157,6 +157,7 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
            "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
            "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
+           "clockTickers": [], "tailBound":"1000000",
            "factoryPredicate": {"type": "all", "predicates": []},
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(OPERATOR),
@@ -469,18 +470,20 @@ os.chmod(RUNTIME, 0o755)
 for source, name in ((GRAIN, "grain-runtime"), (STANDIN, "hermes-acp")):
     data = open(source, "rb").read()
     open(os.path.join(RUNTIME, name), "wb").write(data); os.chmod(os.path.join(RUNTIME, name), 0o755)
-launcher = open(os.path.join(REPO, "deploy/grain-host/bwrap")).read()
-probe = subprocess.run(["/usr/bin/bwrap", "--unshare-user", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin",
-                        "/bin", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64", "/usr/bin/true"],
-                       capture_output=True)
-BWRAP = "/usr/bin/bwrap"
-if probe.returncode != 0 and os.access("/usr/local/libexec/mini-grain-bwrap", os.X_OK):
-    # hbox restricts unprivileged user namespaces; its operator installed an
-    # AppArmor-profiled root-owned copy of the distro bwrap for exactly this.
-    BWRAP = "/usr/local/libexec/mini-grain-bwrap"
-    launcher = launcher.replace("/usr/bin/bwrap ", BWRAP + " ")
+# The physical bwrap (MINI_BWRAP selects; see resolve-bwrap) and the launcher materialized for it.
+resolved = subprocess.run(["sh", os.path.join(REPO, "deploy/grain-host/resolve-bwrap")], capture_output=True, text=True)
+if resolved.returncode != 0:
+    fail("bwrap: " + resolved.stderr.strip())
+BWRAP = resolved.stdout.strip()
 LAUNCHER = path("launcher/bwrap")
-open(LAUNCHER, "w").write(launcher); os.chmod(LAUNCHER, 0o700)
+materialized = subprocess.run([sys.executable, os.path.join(REPO, "deploy/grain-host/materialize-bwrap.py"),
+                               "--physical-bwrap", BWRAP, "--physical-sha256",
+                               hashlib.sha256(open(BWRAP, "rb").read()).hexdigest(), "--output", LAUNCHER],
+                              capture_output=True, text=True)
+if materialized.returncode != 0:
+    fail("materialize-bwrap: " + materialized.stderr.strip())
+open(path("launcher.json"), "w").write(materialized.stdout)
+os.chmod(LAUNCHER, 0o700)
 open(path("launcher/launch-gate"), "wb").write(open(LAUNCH_GATE, "rb").read())
 os.chmod(path("launcher/launch-gate"), 0o700)
 # HERMES-KEYS/-TARIFF: the provider request's route is a row of the operator's

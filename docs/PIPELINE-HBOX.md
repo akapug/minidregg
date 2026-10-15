@@ -114,13 +114,24 @@ results.tsv, it is required automatically (ROOT, 2026-10-14).
 
 | row | detail regex | why absent |
 |---|---|---|
-| m6grain | `^missing input: operator uid 1001 ` | the pipeline runs as uid 1000 (`hbox`). There is no uid-1001 operator account or subuid range |
-| m7 | `^missing input: M7_REFERENCE ` | no M7 reference exists on any box yet |
-| jpay/JPAY6 | `^missing input: TEST_PROVIDER=` | the set ships no mini-hermes-test-provider |
-| exchange | `^missing input: MINI_FN_LAUNCHER ` | no fn launcher/core outside /tank/fn |
 | hostupgrade | `^missing hostupgrade candidate input: .*/e0a8ba21…$` | the pinned old-epoch EF set existed only on burst3 |
 | hostupgrade/HOST-UPGRADE-PREVIOUS | `^no previous READY main set with the tip Store epoch$` | no same-epoch main set has been published on hbox yet |
 | hermes | `^missing input: unprivileged user namespaces for bwrap ` | hbox has `kernel.apparmor_restrict_unprivileged_userns=1` and no AppArmor profile that lets bwrap create a user namespace (`bwrap: setting up uid map: Permission denied`). **DECISION PENDING (Ember, box security):** until a bwrap profile exists, hbox landings do not prove hermes. JPAY6 accepts this message too (its probe comes before TEST_PROVIDER) |
+
+Supplied 2026-10-14 (M6GRAIN-HBOX), no longer declared: **m6grain** runs two-world-journey.sh AS the operator
+(`MINI_OPERATOR_UID`/`MINI_OPERATOR_NAME` in box.env: `mini-operator` uid 1001, linger, subuid 165536:65536) through
+`/etc/sudoers.d/mini-operator` (hbox may run only that script as the operator; the operator may run only `install-user-world`
+as root), with `u:mini-operator:r-x` on `/usr/local/libexec/mini-grain-bwrap` (r-x: an exec-only binary is non-dumpable and
+bwrap cannot write its uid_map), `uidmap` installed and `MINI_TEST_SPK` in `inputs/spk/`. Box changes and their undo:
+`$PIPELINE_ROOT/box-changes.md`. It now RUNS and FAILS (cv 01a13d9c-8a9d): spk-host's resident bootstrap unshares its own
+user namespace, AppArmor moves it to `unprivileged_userns`, which denies CAP_SETGID, so `setgroups(0)` is EPERM.
+
+Supplied 2026-10-14 (INPUTS-HBOX), no longer declared: **m7** takes its reference from the newest other READY
+set with identical compiled inputs (journey-runner `m7_reference_for`); **exchange** gets `MINI_FN_LAUNCHER`/`MINI_FN_CORE`
+from box.env = a verified copy of fn's 6679dae0e image at `$PIPELINE_ROOT/inputs/fnbin/6679dae0e/` (outside /tank/fn,
+which the row forbids); **JPAY6** gets `MINI_TEST_PROVIDER_BIN`/`MINI_LAUNCH_GATE_BIN` from box.env
+(`$PIPELINE_ROOT/inputs/fixtures/7ffd6524/`, built from the tree; same sources at next) and its userns probe tries
+`/usr/local/libexec/mini-grain-bwrap`, the AppArmor-profiled copy jpay6.sh itself falls back to.
 
 `sudo -n true` succeeds, `Linger=yes` is set for `hbox`, and sshd, bwrap and jq are present.
 
