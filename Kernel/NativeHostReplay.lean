@@ -4136,6 +4136,65 @@ theorem AdmittedSuffix.image {config : Config} {before after : Opened config}
         simp only [DurableReceiver.Image.append, List.append_assoc, List.singleton_append]
       · rw [tailStart, wraps, started]
 
+theorem advance_base {config : Config} {opened : Opened config} {derived : Derived config opened}
+    {next : Durable} (advanced : advance opened derived = .ok next) :
+    next.baseHeight = opened.durable.baseHeight ∧ next.base = opened.durable.base := by
+  revert advanced
+  unfold advance
+  simp only
+  split
+  · split
+    · intro done
+      cases done
+      exact ⟨rfl, rfl⟩
+    · intro failed
+      cases failed
+  all_goals intro failed; cases failed
+
+private theorem advanceCarriedIntent_base {config : Config} {opened : Opened config}
+    {intent : DataIntent rootBytes} {next : Durable}
+    (advanced : advanceCarriedIntent opened intent = .ok next) :
+    next.baseHeight = opened.durable.baseHeight ∧ next.base = opened.durable.base := by
+  revert advanced
+  unfold advanceCarriedIntent
+  simp only
+  split
+  · split
+    · intro done
+      cases done
+      exact ⟨rfl, rfl⟩
+    · intro failed
+      cases failed
+  all_goals intro failed; cases failed
+
+theorem advanceSuffix_base {config : Config} {opened : Opened config}
+    {derived : SuffixDerived config opened} {next : Durable}
+    (advanced : advanceSuffix opened derived = .ok next) :
+    next.baseHeight = opened.durable.baseHeight ∧ next.base = opened.durable.base := by
+  cases derived with
+  | ordinary ordinary => exact advance_base advanced
+  | carriedEnrollment _ admitted => exact advanceCarriedIntent_base advanced
+  | carriedDispatch _ admitted => exact advanceCarriedIntent_base advanced
+
+/-- **The suffix walk keeps its anchor's base**: every step extends the held
+image (`Loaded.extend`), never rebases it, so the final image resumes from the
+same base as the anchor's. A genesis-based anchor stays genesis-based. -/
+theorem AdmittedSuffix.base {config : Config} {before after : Opened config}
+    {records : List DurableReceiver.IntentRecord} {receipts : List NativeHostCodec.Receipt}
+    (trace : AdmittedSuffix config before records after receipts) :
+    after.durable.baseHeight = before.durable.baseHeight ∧
+      after.durable.base = before.durable.base := by
+  induction trace with
+  | nil opened => exact ⟨rfl, rfl⟩
+  | cons step tail ih =>
+      obtain ⟨derived, _, next, advanced, validated, _⟩ := step
+      obtain ⟨tailHeight, tailBase⟩ := ih
+      have wraps := validateLoaded_durable validated
+      obtain ⟨height, base⟩ := advanceSuffix_base advanced
+      exact ⟨by rw [tailHeight, wraps, height], by rw [tailBase, wraps, base]⟩
+
+#assert_axioms AdmittedSuffix.base
+
 theorem appendedSuffixWalk_image {config : Config} {start final : Opened config}
     {source target : Durable} {suffix : List DurableReceiver.IntentRecord}
     {receipts : List NativeHostCodec.Receipt}

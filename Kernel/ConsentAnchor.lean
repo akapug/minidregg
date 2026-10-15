@@ -14,8 +14,10 @@ the world root there. A later provider (`resume`):
   accepted history was rolled back), or whose chain after the anchor's height
   is not the anchor's chain (the prefix this client admitted was rewritten or
   forked) — `checkStore_ok`, `checkStore_refuses_rewritten`;
-* cuts the Store at the anchor (`Loaded.prefixAt`), validates that image, and
-  refuses unless it reproduces the anchor exactly, world root included;
+* cuts the Store at the anchor folded from the seed (`Loaded.prefixOwn`: the
+  Store's checkpoint is the operator's seal and is never a client base),
+  validates that image, and refuses unless it reproduces the anchor exactly,
+  world root included;
 * natively admits every record after the anchor (`verifySuffixFrom`).
 
 Trust premise, stated once: the anchor bytes are the client's custody, written
@@ -201,6 +203,10 @@ structure Anchored (config : Config) (target : Durable) where
   anchor : Anchor
   start : Opened config
   startExact : Anchor.ofOpened start = anchor
+  /-- The opening is folded from the seed (`Loaded.prefixOwn`): no Store
+  checkpoint is its base. -/
+  startGenesis : start.durable.baseHeight = 0 ∧
+    start.durable.base = DurableCheckpoint.State.ofSeed start.durable.image.seed
   suffix : NativeHostReplay.SuffixVerified config start target
 
 /-- **The target's prefix is the one the anchor commits to**: its chain after
@@ -216,6 +222,42 @@ theorem Anchored.prefix_committed {config : Config} {target : Durable}
   rw [anchored.suffix.logStartExact, anchored.suffix.prefixExact, anchored.start.durable.chainExact]
 
 #assert_axioms Anchored.prefix_committed
+
+/-- **The own base of a genesis-based image** (CONSENT-OWN): its head state,
+which is the genesis fold of its records (`resume_genesis` on the image's own
+`resumed`), so a past read from it needs no premise about who sealed it. -/
+def ownOfGenesis (durable : Durable)
+    (genesis : durable.baseHeight = 0 ∧
+      durable.base = DurableCheckpoint.State.ofSeed durable.image.seed) :
+    DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes :=
+  ⟨durable.image.seed, durable.logStart, durable.image.accepted.length, durable.chain,
+    DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot,
+    ⟨durable.image.accepted, rfl, durable.chainExact.symm, durable.snapshot, by
+      have folded := durable.resumed
+      rw [genesis.1, genesis.2, DurableCheckpoint.resume_genesis] at folded
+      exact folded, rfl⟩⟩
+
+/-- **The held image of an anchored admission is genesis-based**: the suffix
+walk keeps its anchor's base (`AdmittedSuffix.base`), and the anchor's is the
+seed. -/
+theorem Anchored.opened_genesis {config : Config} {target : Durable}
+    (anchored : Anchored config target) :
+    anchored.suffix.opened.durable.baseHeight = 0 ∧
+      anchored.suffix.opened.durable.base =
+        DurableCheckpoint.State.ofSeed anchored.suffix.opened.durable.image.seed := by
+  obtain ⟨height, base⟩ := anchored.suffix.admitted.base
+  have imaged := anchored.suffix.exactImage
+  refine ⟨height.trans anchored.startGenesis.1, ?_⟩
+  rw [base, anchored.startGenesis.2, imaged, anchored.suffix.seedExact]
+
+#assert_axioms Anchored.opened_genesis
+
+/-- The own bases an anchored admission holds: its opening at the anchor and
+its head. -/
+def Anchored.own {config : Config} {target : Durable} (anchored : Anchored config target) :
+    List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) :=
+  [ownOfGenesis anchored.suffix.opened.durable anchored.opened_genesis,
+    ownOfGenesis anchored.start.durable anchored.startGenesis]
 
 /-- Why a resume did not produce an anchored target. A contradiction is a
 refusal: the Store disagrees with what this client admitted, and no fallback
@@ -243,9 +285,11 @@ def resume (config : Config) {store : DurableHistory.StoreIdentity}
     IO (Except ResumeError (Anchored config target)) := do
   if let .error detail := checkStore anchor target chains then
     return .error (.contradicted detail)
-  match target.prefixAt anchor.height chains chainsExact with
+  -- The opening is folded from the seed: the Store's checkpoint (the operator's
+  -- seal) is never a client base, and no operator tag root is kept.
+  match target.prefixOwn anchor.height chains chainsExact with
   | .error detail => return .error (.contradicted s!"retained consent anchor prefix: {detail}")
-  | .ok ⟨cut, imaged, started⟩ =>
+  | .ok ⟨cut, imaged, started, zero, seeded, _⟩ =>
     match validated : validateLoaded config cut with
     | .error detail =>
         return .error (.contradicted s!"the Store's image at the retained consent anchor is invalid: {detail}")
@@ -263,10 +307,16 @@ def resume (config : Config) {store : DurableHistory.StoreIdentity}
           rw [wraps, imaged]
           exact take_length_take _ _
         have logStartExact : target.logStart = start.durable.logStart := by rw [wraps, started]
-        match ← NativeHostReplay.verifySuffixFrom config start reader target none seedExact anchorWithin
+        have startGenesis : start.durable.baseHeight = 0 ∧
+            start.durable.base = DurableCheckpoint.State.ofSeed start.durable.image.seed := by
+          refine ⟨by rw [wraps]; exact zero, ?_⟩
+          rw [wraps, seeded, imaged]
+        -- Past states the suffix admission reads resume from this opening or the seed.
+        let own := reader.ownOnly config.transport [ownOfGenesis start.durable startGenesis]
+        match ← NativeHostReplay.verifySuffixFrom config start own target none seedExact anchorWithin
             prefixExact logStartExact with
         | .error failure => return .error (.suffix failure)
-        | .ok suffix => return .ok ⟨anchor, start, exact, suffix⟩
+        | .ok suffix => return .ok ⟨anchor, start, exact, startGenesis, suffix⟩
       else
         return .error (.contradicted
           "the Store's image at the retained consent anchor does not reproduce the anchor's world root")
@@ -288,6 +338,13 @@ theorem Basis.image_exact {config : Config} {target : Durable} :
     (basis : Basis config target) → basis.opened.durable.image = target.image
   | .full verified => verified.exactImage
   | .anchored held => held.suffix.exactImage
+
+/-- The own bases this basis holds (`Anchored.own`); a full re-admission
+contributes none, so its past reads fold from the seed. -/
+def Basis.own {config : Config} {target : Durable} :
+    Basis config target → List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes)
+  | .full _ => []
+  | .anchored held => held.own
 
 /-- The anchor this basis leaves for the next provider. -/
 def Basis.anchor {config : Config} {target : Durable} (basis : Basis config target) : Anchor :=
@@ -324,7 +381,7 @@ def Basis.extendAppended (config : Config) {store : DurableHistory.StoreIdentity
         exact List.take_left' rfl
       return (← NativeHostReplay.extendSuffixAppended config reader held.suffix target seedExact
         within prefixExact logStartExact).map fun suffix =>
-          .anchored ⟨held.anchor, held.start, held.startExact, suffix⟩
+          .anchored ⟨held.anchor, held.start, held.startExact, held.startGenesis, suffix⟩
 
 /-! ## The Store epoch names the deployed constants
 
