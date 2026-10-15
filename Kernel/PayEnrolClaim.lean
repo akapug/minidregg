@@ -78,6 +78,21 @@ def pendingReasonStream : StreamCodec PendingReason where
         show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
         rw [PendingReason.code_ofCode known]
         exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match PendingReason.ofCode code with
+        | some reason => some (reason, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : PendingReason.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-- Exact deposit provenance, independent of the observer's ingress type. -/
 structure Observation where
@@ -168,6 +183,21 @@ def modeStream : StreamCodec Mode where
         show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
         rw [Mode.code_ofCode known]
         exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match Mode.ofCode code with
+        | some mode => some (mode, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : Mode.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-- Complete signed acceptance identity. claimId binds the original amount,
 recipient and signature through immutable storage, not a new transfer. The

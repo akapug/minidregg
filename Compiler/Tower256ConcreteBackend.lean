@@ -107,6 +107,15 @@ macro "xmap_wire_roundtrip" : tactic => `(tactic| (
     | (casesm* _ × _, _ ⊕ _, Option _ <;> simp_all)
     | (cases wire <;> (try casesm* _ × _, _ ⊕ _, Option _) <;> rfl)))
 
+/-- The cursor reading of a list decoder: decode the octets of `bytes` from
+`start` on, and answer where the unread suffix begins. Every
+`StreamCodec.decodeAt` agrees with this (`StreamCodec.decodeAt_spec`); it is the
+default for a hand-written decoder and the specification a native loop is
+proved against. -/
+def cursorOfPrefix {alpha : Type} (decode : List UInt8 -> Option (alpha × List UInt8))
+    (bytes : ByteArray) (start : Nat) : Option (alpha × Nat) :=
+  (decode (bytes.data.toList.drop start)).map fun result => (result.1, bytes.size - result.2.length)
+
 /-- A prefix codec consumes exactly one value and returns the unconsumed
 suffix.  The append law makes sequential and list composition mechanical.
 
@@ -123,6 +132,22 @@ structure StreamCodec (alpha : Type) where
   encode_decodePrefix : forall bytes value suffix,
     decodePrefix bytes = some (value, suffix) -> encode value ++ suffix = bytes := by
     stream_canonical
+  /-- The same decoder over a packed buffer: from octet `start`, the value and
+  the position after it. The primitives and combinators read octets by index
+  and slice payloads straight out of the buffer; a hand-written decoder gets
+  the list decoder run on the suffix (`cursorOfPrefix`). -/
+  decodeAt : ByteArray -> Nat -> Option (alpha × Nat) := cursorOfPrefix decodePrefix
+  /-- The cursor decodes exactly what the list decoder decodes, from any
+  position inside the buffer. -/
+  decodeAt_spec : forall bytes start, start ≤ bytes.size ->
+    decodeAt bytes start = cursorOfPrefix decodePrefix bytes start := by
+    intro _ _ _; rfl
+  /-- `decodeAt` is a native loop all the way down (no `cursorOfPrefix`
+  fallback anywhere inside). Only then does a top-level decode run on the
+  cursor (`toLawfulCursor`); a fallback re-materializes the suffix as a list at
+  every call, which inside a repetition would be quadratic. A dispatch bit, not
+  a law: `decodeAt_spec` holds either way. -/
+  cursorNative : Bool := false
 
 /-- Discharges `StreamCodec.encode_decodePrefix` for a decoder that reads a
 `StreamCodec.nat` tag and dispatches on it: each known tag's arm is a chain of
@@ -193,6 +218,149 @@ theorem toLawful_decode_iff (codec : StreamCodec alpha) (bytes : List UInt8) (va
     subst encoded
     exact codec.toLawful.decode_encode value
 
+/-! ### The cursor -/
+
+theorem octets_length (bytes : ByteArray) : bytes.data.toList.length = bytes.size := by
+  rw [Array.length_toList, ByteArray.size_data]
+
+theorem octets_drop (bytes : ByteArray) {start : Nat} (inside : start < bytes.size) :
+    bytes.data.toList.drop start = bytes[start] :: bytes.data.toList.drop (start + 1) := by
+  rw [List.drop_eq_getElem_cons (by rwa [octets_length])]
+  rfl
+
+theorem octets_drop_end (bytes : ByteArray) {start : Nat} (outside : bytes.size ≤ start) :
+    bytes.data.toList.drop start = [] :=
+  List.drop_eq_nil_of_le (by rwa [octets_length])
+
+theorem size_sub_drop (bytes : ByteArray) {start : Nat} (inside : start ≤ bytes.size) :
+    bytes.size - (bytes.data.toList.drop start).length = start := by
+  rw [List.length_drop, octets_length]
+  omega
+
+/-- What is left after a prefix of a suffix of `l` is a suffix of `l`, at its own length. -/
+theorem drop_sub_length {l front rest : List UInt8} {start : Nat}
+    (split : front ++ rest = l.drop start) : l.drop (l.length - rest.length) = rest := by
+  have whole : l = (l.take start ++ front) ++ rest := by
+    rw [List.append_assoc, split, List.take_append_drop]
+  have length : l.length - rest.length = (l.take start ++ front).length := by
+    have lengths := congrArg List.length whole
+    simp only [List.length_append] at lengths ⊢
+    omega
+  rw [length]
+  calc l.drop (l.take start ++ front).length
+      = ((l.take start ++ front) ++ rest).drop (l.take start ++ front).length := by rw [← whole]
+    _ = rest := List.drop_left
+
+/-- After a list decode at `start`, the cursor position `size - |rest|` is where `rest` begins. -/
+theorem rest_at (codec : StreamCodec alpha) {bytes : ByteArray} {start : Nat} {value : alpha}
+    {rest : List UInt8} (decoded : codec.decodePrefix (bytes.data.toList.drop start) = some (value, rest)) :
+    bytes.data.toList.drop (bytes.size - rest.length) = rest := by
+  have dropped := drop_sub_length (codec.encode_decodePrefix _ _ _ decoded)
+  rwa [octets_length] at dropped
+
+/-- A top-level decode on the cursor: from octet 0, accepted only when the
+cursor stops exactly at the end. -/
+def decodeCursor (codec : StreamCodec alpha) (bytes : ByteArray) : Option alpha :=
+  match codec.decodeAt bytes 0 with
+  | some (value, next) => if next = bytes.size then some value else none
+  | none => none
+
+theorem decodeCursor_eq (codec : StreamCodec alpha) (bytes : ByteArray) :
+    codec.decodeCursor bytes = codec.toLawful.decode bytes.data.toList := by
+  unfold decodeCursor
+  rw [codec.decodeAt_spec bytes 0 (Nat.zero_le _)]
+  simp only [cursorOfPrefix, List.drop_zero, toLawful]
+  cases decoded : codec.decodePrefix bytes.data.toList with
+  | none => rfl
+  | some pair =>
+      obtain ⟨value, rest⟩ := pair
+      have whole := codec.encode_decodePrefix _ _ _ decoded
+      have fits : rest.length ≤ bytes.size := by
+        rw [← octets_length, ← whole, List.length_append]
+        omega
+      by_cases empty : rest = []
+      · subst empty
+        simp
+      · have nonzero : rest.length ≠ 0 := by simpa using empty
+        have moved : bytes.size - rest.length ≠ bytes.size := by omega
+        simp [empty, moved]
+
+theorem _root_.ByteArray.toList_loop_eq (bytes : ByteArray) (index : Nat) (acc : List UInt8) :
+    ByteArray.toList.loop bytes index acc = acc.reverse ++ bytes.data.toList.drop index := by
+  rw [ByteArray.toList.loop]
+  split
+  · rename_i inside
+    rw [ByteArray.toList_loop_eq bytes (index + 1), octets_drop bytes inside]
+    have same : bytes.get! index = bytes[index] := by
+      cases bytes with
+      | mk data =>
+        simp only [ByteArray.get!, ByteArray.getElem_eq_getElem_data]
+        exact getElem!_pos data index inside
+    simp [same]
+  · rename_i outside
+    rw [octets_drop_end bytes (by omega)]
+    simp
+termination_by bytes.size - index
+
+theorem _root_.ByteArray.toList_eq_data_toList (bytes : ByteArray) :
+    bytes.toList = bytes.data.toList := by
+  simp [ByteArray.toList, ByteArray.toList_loop_eq]
+
+/-- The packed-buffer entry point: the cursor when `codec` is native all the way
+down, the list decoder otherwise. Equal to the list decode (`decodeBytes_eq`). -/
+def decodeBytes (codec : StreamCodec alpha) (bytes : ByteArray) : Option alpha :=
+  if codec.cursorNative then codec.decodeCursor bytes
+  else do
+    let (value, suffix) ← codec.decodePrefix bytes.data.toList
+    if suffix = [] then some value else none
+
+theorem decodeBytes_eq (codec : StreamCodec alpha) (bytes : ByteArray) :
+    codec.decodeBytes bytes = codec.toLawful.decode bytes.toList := by
+  rw [ByteArray.toList_eq_data_toList]
+  unfold decodeBytes
+  split
+  · exact codec.decodeCursor_eq bytes
+  · rfl
+
+/-- `toLawful` as compiled: a native codec converts the list to a buffer once and
+decodes on the cursor; any other runs the list decoder. Same function
+(`toLawful_eq_toLawfulCursor`), so no statement about `toLawful` changes. -/
+def toLawfulCursor (codec : StreamCodec alpha) : LawfulCodec alpha where
+  encode := codec.encode
+  decode bytes :=
+    if codec.cursorNative then codec.decodeCursor bytes.toByteArray
+    else do
+      let (value, suffix) ← codec.decodePrefix bytes
+      if suffix = [] then some value else none
+  decode_encode := by
+    intro value
+    split
+    · rw [codec.decodeCursor_eq, List.toList_data_toByteArray]
+      exact codec.toLawful.decode_encode value
+    · exact codec.toLawful.decode_encode value
+
+@[csimp] theorem toLawful_eq_toLawfulCursor : @toLawful = @toLawfulCursor := by
+  funext alpha codec
+  unfold toLawful toLawfulCursor
+  congr 1
+  funext bytes
+  split
+  · rw [codec.decodeCursor_eq, List.toList_data_toByteArray]
+    rfl
+  · rfl
+
+/-- Two codecs with the same functions are the same codec. -/
+theorem ext_fields {left right : StreamCodec alpha} (encodes : left.encode = right.encode)
+    (decodes : left.decodePrefix = right.decodePrefix) (cursors : left.decodeAt = right.decodeAt)
+    (natives : left.cursorNative = right.cursorNative) : left = right := by
+  cases left
+  cases right
+  cases encodes
+  cases decodes
+  cases cursors
+  cases natives
+  rfl
+
 /-- Change only the value view of a stream codec. -/
 def xmap (codec : StreamCodec alpha) (toWire : beta -> alpha)
     (fromWire : alpha -> beta) (roundtrip : forall value, fromWire (toWire value) = value)
@@ -215,6 +383,16 @@ def xmap (codec : StreamCodec alpha) (toWire : beta -> alpha)
         obtain ⟨rfl, rfl⟩ := decoded
         rw [wireRoundtrip]
         exact codec.encode_decodePrefix _ _ _ accepted
+  decodeAt bytes start :=
+    match codec.decodeAt bytes start with
+    | some (wire, next) => some (fromWire wire, next)
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [codec.decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix]
+    cases codec.decodePrefix (bytes.data.toList.drop start) <;> rfl
+  cursorNative := codec.cursorNative
 
 /-- Sequential product; no delimiter is needed because both sides are prefix
 decodable. -/
@@ -243,6 +421,27 @@ def product (left : StreamCodec alpha) (right : StreamCodec beta) :
         obtain ⟨rfl, rfl⟩ := decoded
         rw [List.append_assoc, right.encode_decodePrefix _ _ _ secondOk,
           left.encode_decodePrefix _ _ _ firstOk]
+  decodeAt bytes start :=
+    match left.decodeAt bytes start with
+    | some (first, afterFirst) =>
+        match right.decodeAt bytes afterFirst with
+        | some (second, after) => some ((first, second), after)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [left.decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix]
+    cases firstOk : left.decodePrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some firstPair =>
+        obtain ⟨first, afterFirst⟩ := firstPair
+        have dropped := left.rest_at firstOk
+        simp only [Option.map_some]
+        rw [right.decodeAt_spec bytes _ (Nat.sub_le _ _)]
+        simp only [cursorOfPrefix, dropped]
+        cases secondOk : right.decodePrefix afterFirst <;> simp [secondOk]
+  cursorNative := left.cursorNative && right.cursorNative
 
 /-- Prefix-free binary sum. -/
 def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
@@ -286,6 +485,38 @@ def sum (left : StreamCodec alpha) (right : StreamCodec beta) :
         obtain ⟨rfl, rfl⟩ := decoded
         simp [right.encode_decodePrefix _ _ _ ok]
     · simp [zero, one] at decoded
+  decodeAt bytes start :=
+    if inside : start < bytes.size then
+      if bytes[start] = 0 then
+        match left.decodeAt bytes (start + 1) with
+        | some (value, next) => some (.inl value, next)
+        | none => none
+      else if bytes[start] = 1 then
+        match right.decodeAt bytes (start + 1) with
+        | some (value, next) => some (.inr value, next)
+        | none => none
+      else none
+    else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, octets_drop bytes inside]
+      generalize bytes[start] = tag
+      by_cases zero : tag = 0
+      · subst zero
+        rw [if_pos rfl, left.decodeAt_spec bytes _ inside]
+        simp only [cursorOfPrefix]
+        cases left.decodePrefix (bytes.data.toList.drop (start + 1)) <;> rfl
+      by_cases one : tag = 1
+      · subst one
+        rw [if_neg (by decide), if_pos rfl, right.decodeAt_spec bytes _ inside]
+        simp only [cursorOfPrefix]
+        cases right.decodePrefix (bytes.data.toList.drop (start + 1)) <;> rfl
+      · simp [zero, one]
+    · rw [dif_neg inside, octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := left.cursorNative && right.cursorNative
 
 /-- Booleans as a one-byte tag. -/
 def bool : StreamCodec Bool where
@@ -297,6 +528,28 @@ def bool : StreamCodec Bool where
   decodePrefix_encode := by
     intro value suffix
     cases value <;> rfl
+  decodeAt bytes start :=
+    if inside : start < bytes.size then
+      if bytes[start] = 0 then some (false, start + 1)
+      else if bytes[start] = 1 then some (true, start + 1)
+      else none
+    else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, octets_drop bytes inside]
+      generalize bytes[start] = tag
+      by_cases zero : tag = 0
+      · subst zero
+        simp; omega
+      by_cases one : tag = 1
+      · subst one
+        simp; omega
+      · simp [zero, one]
+    · rw [dif_neg inside, octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := true
 
 /-- Optional values, tagged.  `none` costs one byte and `some` costs one byte
 plus the payload, so the absent case never has to be encoded as a sentinel
@@ -336,6 +589,52 @@ def option (codec : StreamCodec alpha) : StreamCodec (Option alpha) where
         obtain ⟨rfl, rfl⟩ := decoded
         simp [codec.encode_decodePrefix _ _ _ ok]
     · simp [zero, one] at decoded
+  decodeAt bytes start :=
+    if inside : start < bytes.size then
+      if bytes[start] = 0 then some (none, start + 1)
+      else if bytes[start] = 1 then
+        match codec.decodeAt bytes (start + 1) with
+        | some (value, next) => some (some value, next)
+        | none => none
+      else none
+    else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, octets_drop bytes inside]
+      generalize bytes[start] = tag
+      by_cases zero : tag = 0
+      · subst zero
+        simp; omega
+      by_cases one : tag = 1
+      · subst one
+        rw [if_neg (by decide), if_pos rfl, codec.decodeAt_spec bytes _ inside]
+        simp only [cursorOfPrefix]
+        cases codec.decodePrefix (bytes.data.toList.drop (start + 1)) <;> rfl
+      · simp [zero, one]
+    · rw [dif_neg inside, octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := codec.cursorNative
+
+/-- Whether `expected` sits in `bytes` at `start`, octet by octet. -/
+def matchesAt (bytes : ByteArray) : Nat -> List UInt8 -> Bool
+  | _, [] => true
+  | start, octet :: rest =>
+      if inside : start < bytes.size then bytes[start] == octet && matchesAt bytes (start + 1) rest
+      else false
+
+theorem matchesAt_iff (bytes : ByteArray) (start : Nat) (expected : List UInt8) :
+    matchesAt bytes start expected = true ↔
+      (bytes.data.toList.drop start).take expected.length = expected := by
+  induction expected generalizing start with
+  | nil => simp [matchesAt]
+  | cons octet rest ih =>
+      by_cases inside : start < bytes.size
+      · rw [matchesAt, dif_pos inside, octets_drop bytes inside, List.length_cons,
+          List.take_succ_cons, Bool.and_eq_true, beq_iff_eq, ih, List.cons.injEq]
+      · rw [matchesAt, dif_neg inside, octets_drop_end bytes (by omega)]
+        simp
 
 /-- A fixed octet string (a frame, a magic, a version byte), CHECKED: an input
 that does not start with exactly these octets is refused.  A codec that wrote a
@@ -357,6 +656,24 @@ def literal (expected : List UInt8) : StreamCodec Unit where
       conv => rhs; rw [← List.take_append_drop expected.length bytes]
       rw [prefixed]
     · cases decoded
+  decodeAt bytes start :=
+    if matchesAt bytes start expected then some ((), start + expected.length) else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases found : matchesAt bytes start expected = true
+    · have taken := (matchesAt_iff bytes start expected).mp found
+      have long : expected.length ≤ (bytes.data.toList.drop start).length := by
+        have lengths := congrArg List.length taken
+        rw [List.length_take] at lengths
+        omega
+      rw [if_pos found, if_pos taken]
+      simp only [Option.map_some, List.length_drop, octets_length] at long ⊢
+      congr 2
+      omega
+    · rw [if_neg found, if_neg (fun taken => found ((matchesAt_iff bytes start expected).mpr taken))]
+      rfl
+  cursorNative := true
 
 /-- `frame`, checked, then one value. -/
 def framed (frame : List UInt8) (codec : StreamCodec alpha) : StreamCodec alpha :=
@@ -390,6 +707,20 @@ def refine (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred a
         obtain ⟨rfl, rfl⟩ := decoded
         exact codec.encode_decodePrefix _ _ _ ok
       · simp [ok, accepted] at decoded
+  decodeAt bytes start :=
+    match codec.decodeAt bytes start with
+    | some (value, next) => if accepted : accept value then some (⟨value, accepted⟩, next) else none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [codec.decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix]
+    cases codec.decodePrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair =>
+        obtain ⟨value, rest⟩ := pair
+        by_cases accepted : accept value <;> simp [accepted]
+  cursorNative := codec.cursorNative
 
 theorem refine_encode (codec : StreamCodec alpha) (accept : alpha -> Prop) [DecidablePred accept]
     (value : {value // accept value}) : (refine codec accept).encode value = codec.encode value.val :=
@@ -417,6 +748,16 @@ def byte : StreamCodec UInt8 where
     | [] => none
     | value :: suffix => some (value, suffix)
   decodePrefix_encode := by intro value suffix; rfl
+  decodeAt bytes start := if inside : start < bytes.size then some (bytes[start], start + 1) else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, octets_drop bytes inside]
+      simp; omega
+    · rw [dif_neg inside, octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := true
 
 /-! ### Compact naturals and finite sequences
 
@@ -528,11 +869,48 @@ theorem encode_decodeNatPrefix (bytes : List UInt8) (value : Nat) (suffix : List
             rw [encodeNat_digit _ _ lowLt nonzero, List.cons_append, ih _ _ higherOk]
             simp
 
+/-- `decodeNatPrefix` on the cursor: the same digits, read by index. -/
+def decodeNatAt (bytes : ByteArray) (start : Nat) : Option (Nat × Nat) :=
+  if inside : start < bytes.size then
+    let byte := bytes[start]
+    if byte = 255 then some (0, start + 1)
+    else
+      match decodeNatAt bytes (start + 1) with
+      | some (higher, next) =>
+          if byte = 0 ∧ higher = 0 then none else some (byte.toNat + 255 * higher, next)
+      | none => none
+  else none
+termination_by bytes.size - start
+
+theorem decodeNatAt_spec (bytes : ByteArray) (start : Nat) (fits : start ≤ bytes.size) :
+    decodeNatAt bytes start = cursorOfPrefix decodeNatPrefix bytes start := by
+  rw [decodeNatAt]
+  simp only [cursorOfPrefix]
+  by_cases inside : start < bytes.size
+  · rw [dif_pos inside, octets_drop bytes inside]
+    simp only [decodeNatPrefix]
+    by_cases terminator : bytes[start] = 255
+    · simp [terminator]; omega
+    · simp only [terminator, if_false]
+      rw [decodeNatAt_spec bytes (start + 1) inside]
+      simp only [cursorOfPrefix]
+      cases decodeNatPrefix (bytes.data.toList.drop (start + 1)) with
+      | none => rfl
+      | some pair =>
+          obtain ⟨higher, rest⟩ := pair
+          by_cases lead : bytes[start] = 0 ∧ higher = 0 <;> simp [lead]
+  · rw [dif_neg inside, octets_drop_end bytes (by omega)]
+    rfl
+termination_by bytes.size - start
+
 def nat : StreamCodec Nat where
   encode := encodeNat
   decodePrefix := decodeNatPrefix
   decodePrefix_encode := decodeNatPrefix_encode
   encode_decodePrefix := encode_decodeNatPrefix
+  decodeAt := decodeNatAt
+  decodeAt_spec := decodeNatAt_spec
+  cursorNative := true
 
 def encodeMany (codec : StreamCodec alpha) : List alpha -> List UInt8
   | [] => []
@@ -581,6 +959,33 @@ theorem encodeMany_decodeMany (codec : StreamCodec alpha) (count : Nat) (bytes :
           refine ⟨by simp [length], ?_⟩
           rw [encodeMany, List.append_assoc, encoded, codec.encode_decodePrefix _ _ _ valueOk]
 
+/-- `decodeMany` on the cursor, tail-recursive (the values gather reversed). -/
+def decodeManyAt (codec : StreamCodec alpha) (bytes : ByteArray) :
+    Nat -> Nat -> List alpha -> Option (List alpha × Nat)
+  | 0, start, acc => some (acc.reverse, start)
+  | count + 1, start, acc =>
+      match codec.decodeAt bytes start with
+      | some (value, next) => decodeManyAt codec bytes count next (value :: acc)
+      | none => none
+
+theorem decodeManyAt_spec (codec : StreamCodec alpha) (bytes : ByteArray) (count start : Nat)
+    (acc : List alpha) (fits : start ≤ bytes.size) :
+    decodeManyAt codec bytes count start acc =
+      (decodeMany codec count (bytes.data.toList.drop start)).map
+        fun result => (acc.reverse ++ result.1, bytes.size - result.2.length) := by
+  induction count generalizing start acc with
+  | zero => simp [decodeManyAt, decodeMany]; omega
+  | succ count ih =>
+      rw [decodeManyAt, codec.decodeAt_spec bytes start fits]
+      simp only [cursorOfPrefix, decodeMany]
+      cases valueOk : codec.decodePrefix (bytes.data.toList.drop start) with
+      | none => rfl
+      | some pair =>
+          obtain ⟨value, rest⟩ := pair
+          simp only [Option.map_some]
+          rw [ih _ _ (Nat.sub_le _ _), codec.rest_at valueOk]
+          cases restOk : decodeMany codec count rest <;> simp [restOk]
+
 def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
   encode values := nat.encode values.length ++ encodeMany codec values
   decodePrefix bytes := do
@@ -600,6 +1005,22 @@ def list (codec : StreamCodec alpha) : StreamCodec (List alpha) where
       obtain ⟨length, encoded⟩ := encodeMany_decodeMany codec _ _ _ _ decoded
       rw [List.append_assoc, encoded, length]
       exact nat.encode_decodePrefix _ _ _ countOk
+  decodeAt bytes start :=
+    match decodeNatAt bytes start with
+    | some (count, afterCount) => decodeManyAt codec bytes count afterCount []
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, nat]
+    cases countOk : decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair =>
+        obtain ⟨count, afterCount⟩ := pair
+        simp only [Option.map_some]
+        rw [decodeManyAt_spec codec bytes _ _ [] (Nat.sub_le _ _), nat.rest_at countOk]
+        cases manyOk : decodeMany codec count afterCount <;> simp [manyOk]
+  cursorNative := codec.cursorNative
 
 end StreamCodec
 
@@ -673,6 +1094,70 @@ theorem fixedOctets_fixedValue (octets : List UInt8) :
   intro byte _
   simp
 
+theorem denoteNat_append (base : Nat) (front back : List Nat) :
+    Minidregg.Theory.Bignum.denoteNat base (front ++ back) =
+      Minidregg.Theory.Bignum.denoteNat base front +
+        base ^ front.length * Minidregg.Theory.Bignum.denoteNat base back := by
+  induction front with
+  | nil => simp [Minidregg.Theory.Bignum.denoteNat]
+  | cons digit front ih =>
+      simp only [List.cons_append, Minidregg.Theory.Bignum.denoteNat, ih, List.length_cons]
+      ring
+
+/-- The little-endian value of `width` octets at `start`, digit by digit. Used for
+at most seven octets, so every intermediate is below `2 ^ 56` (machine arithmetic). -/
+def smallValueAt (bytes : ByteArray) (start : Nat) :
+    (width : Nat) -> start + width ≤ bytes.size -> Nat
+  | 0, _ => 0
+  | width + 1, fits =>
+      (bytes[start]'(by omega)).toNat + 256 * smallValueAt bytes (start + 1) width (by omega)
+
+theorem smallValueAt_eq (bytes : ByteArray) (start width : Nat) (fits : start + width ≤ bytes.size) :
+    smallValueAt bytes start width fits = fixedValue ((bytes.data.toList.drop start).take width) := by
+  induction width generalizing start with
+  | zero => simp [smallValueAt, fixedValue]
+  | succ width ih =>
+      rw [smallValueAt, ih, StreamCodec.octets_drop bytes (by omega : start < bytes.size)]
+      simp [fixedValue]
+
+/-- The little-endian value of `width` octets at `start`, seven octets per step: each
+seven-octet chunk is assembled in machine arithmetic and only one big multiply-add per
+chunk touches the bignum (a 256-bit digest: four, not thirty-two). -/
+def fixedValueAt (bytes : ByteArray) (start width : Nat) (fits : start + width ≤ bytes.size) : Nat :=
+  if seven : 7 ≤ width then
+    smallValueAt bytes start 7 (by omega) +
+      72057594037927936 * fixedValueAt bytes (start + 7) (width - 7) (by omega)
+  else smallValueAt bytes start width fits
+termination_by width
+
+theorem fixedValueAt_eq (bytes : ByteArray) (start width : Nat) (fits : start + width ≤ bytes.size) :
+    fixedValueAt bytes start width fits = fixedValue ((bytes.data.toList.drop start).take width) := by
+  rw [fixedValueAt]
+  split
+  · rename_i seven
+    rw [fixedValueAt_eq bytes (start + 7) (width - 7), smallValueAt_eq]
+    obtain ⟨rest, rfl⟩ : ∃ rest, width = 7 + rest := ⟨width - 7, by omega⟩
+    have long : 7 ≤ (bytes.data.toList.drop start).length := by
+      rw [List.length_drop, StreamCodec.octets_length]
+      omega
+    have dropped : (bytes.data.toList.drop start).drop 7 = bytes.data.toList.drop (start + 7) := by
+      rw [List.drop_drop]
+    rw [List.take_add, dropped]
+    simp only [fixedValue, List.map_append, denoteNat_append, List.length_map, List.length_take,
+      Nat.min_eq_left long, Nat.add_sub_cancel_left]
+    norm_num
+  · exact smallValueAt_eq bytes start width fits
+termination_by width
+
+theorem fixedValueAt_lt (bytes : ByteArray) (start width : Nat) (fits : start + width ≤ bytes.size) :
+    fixedValueAt bytes start width fits < 256 ^ width := by
+  rw [fixedValueAt_eq]
+  have bound := fixedValue_lt ((bytes.data.toList.drop start).take width)
+  have long : width ≤ (bytes.data.toList.drop start).length := by
+    rw [List.length_drop, StreamCodec.octets_length]
+    omega
+  rwa [List.length_take, Nat.min_eq_left long] at bound
+
 /-- Exactly `width` octets, strict: a shorter input is refused, and every input of
 at least `width` octets spells exactly one value. -/
 def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
@@ -705,6 +1190,26 @@ def fixedStream (width : Nat) : StreamCodec (Fin (256 ^ width)) where
       rw [length] at spelled
       simp only [spelled, List.take_append_drop]
     · cases decoded
+  decodeAt bytes start :=
+    if fits : start + width ≤ bytes.size then
+      some (⟨fixedValueAt bytes start width fits, fixedValueAt_lt bytes start width fits⟩, start + width)
+    else none
+  decodeAt_spec := by
+    intro bytes start inside
+    simp only [cursorOfPrefix]
+    have length : (bytes.data.toList.drop start).length = bytes.size - start := by
+      rw [List.length_drop, StreamCodec.octets_length]
+    by_cases fits : start + width ≤ bytes.size
+    · have enough : width ≤ (bytes.data.toList.drop start).length := by omega
+      rw [dif_pos fits, dif_pos enough]
+      simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq]
+      refine ⟨Fin.ext (fixedValueAt_eq bytes start width fits), ?_⟩
+      rw [List.length_drop, length]
+      omega
+    · have short : ¬ width ≤ (bytes.data.toList.drop start).length := by omega
+      rw [dif_neg fits, dif_neg short]
+      rfl
+  cursorNative := true
 
 /-- Executable `fixedStream` decode: split off `width` octets and check that the PREFIX came
 out whole. The definition measures `octets.length`, the WHOLE remaining stream, once per
@@ -740,20 +1245,17 @@ def fixedStreamTR (width : Nat) : StreamCodec (Fin (256 ^ width)) where
     intro octets value suffix decoded
     rw [fixedDecodePrefixTR_eq] at decoded
     exact (fixedStream width).encode_decodePrefix octets value suffix decoded
+  decodeAt := (fixedStream width).decodeAt
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [(fixedStream width).decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix, fixedDecodePrefixTR_eq]
+  cursorNative := true
 
 @[csimp] theorem fixedStream_eq_fixedStreamTR : @fixedStream = @fixedStreamTR := by
   funext width
-  have decodes : (fixedStream width).decodePrefix = (fixedStreamTR width).decodePrefix := by
-    funext octets
-    exact (fixedDecodePrefixTR_eq width octets).symm
-  have encodes : (fixedStream width).encode = (fixedStreamTR width).encode := rfl
-  revert decodes encodes
-  generalize fixedStream width = left
-  generalize fixedStreamTR width = right
-  cases left; cases right
-  intro decodes encodes
-  cases decodes; cases encodes
-  rfl
+  exact StreamCodec.ext_fields rfl (funext fun octets => (fixedDecodePrefixTR_eq width octets).symm)
+    rfl rfl
 
 theorem fixedStream_encode_length (width : Nat) (value : Fin (256 ^ width)) :
     ((fixedStream width).encode value).length = width := fixedOctets_length _ _
@@ -830,6 +1332,13 @@ theorem digest256_consumes_32 (octets : List UInt8) (digest : Digest256) (rest :
 #assert_axioms toDigest256_ofDigest256
 #assert_axioms fixedStream_eq_fixedStreamTR
 #assert_axioms ofDigest256_toDigest256
+#assert_axioms StreamCodec.decodeCursor_eq
+#assert_axioms StreamCodec.decodeBytes_eq
+#assert_axioms StreamCodec.toLawful_eq_toLawfulCursor
+#assert_axioms StreamCodec.decodeNatAt_spec
+#assert_axioms StreamCodec.decodeManyAt_spec
+#assert_axioms StreamCodec.matchesAt_iff
+#assert_axioms fixedValueAt_eq
 /-- The byte specialization of `StreamCodec.encodeMany` has no per-byte
 framing. Keep this equality explicit so the faster implementation below stays
 on the existing wire format. -/
@@ -881,6 +1390,29 @@ theorem decodeMany_byte (count : Nat) (bytes : List UInt8) :
           simp [StreamCodec.byte, tail, decodeBytesPrefix, List.splitAt_eq]
           split_ifs <;> simp_all
 
+/-- `count` octets of `bytes` from `start`, consed from the end onto `acc`: one
+cell per octet and nothing else allocated. -/
+def sliceOnto (bytes : ByteArray) (start : Nat) :
+    (count : Nat) -> start + count ≤ bytes.size -> List UInt8 -> List UInt8
+  | 0, _, acc => acc
+  | count + 1, fits, acc =>
+      sliceOnto bytes start count (by omega) (bytes[start + count]'(by omega) :: acc)
+
+theorem sliceOnto_eq (bytes : ByteArray) (start count : Nat) (fits : start + count ≤ bytes.size)
+    (acc : List UInt8) :
+    sliceOnto bytes start count fits acc = (bytes.data.toList.drop start).take count ++ acc := by
+  induction count generalizing acc with
+  | zero => simp [sliceOnto]
+  | succ count ih =>
+      rw [sliceOnto, ih, List.take_add_one]
+      have inside : start + count < bytes.data.size := by
+        rw [ByteArray.size_data]
+        omega
+      have octet : (bytes.data.toList.drop start)[count]? = some bytes[start + count] := by
+        rw [List.getElem?_drop, Array.getElem?_toList, Array.getElem?_eq_getElem inside,
+          ByteArray.getElem_eq_getElem_data]
+      simp only [octet, Option.toList_some, List.append_assoc, List.singleton_append]; rfl
+
 /-- Same length-prefixed bytes as `StreamCodec.list StreamCodec.byte`, with
 one list split instead of one recursive codec call per payload byte. -/
 def bytesStream : StreamCodec (List UInt8) where
@@ -897,6 +1429,37 @@ def bytesStream : StreamCodec (List UInt8) where
     have old := (StreamCodec.list StreamCodec.byte).encode_decodePrefix bytes values suffix
       (by simpa [StreamCodec.list, decodeMany_byte] using decoded)
     simpa [StreamCodec.list, encodeMany_byte] using old
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (count, afterCount) =>
+        if fits : afterCount + count ≤ bytes.size then
+          some (sliceOnto bytes afterCount count fits [], afterCount + count)
+        else none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases countOk : StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair =>
+        obtain ⟨count, rest⟩ := pair
+        have dropped := StreamCodec.nat.rest_at countOk
+        have restLength : rest.length ≤ bytes.size := by
+          have lengths := congrArg List.length dropped
+          rw [List.length_drop, StreamCodec.octets_length] at lengths
+          omega
+        simp only [Option.map_some]
+        by_cases fits : bytes.size - rest.length + count ≤ bytes.size
+        · have enough : count ≤ rest.length := by omega
+          have split : decodeBytesPrefix count rest = some (rest.take count, rest.drop count) := by
+            simp [decodeBytesPrefix, enough, List.splitAt_eq]
+          rw [dif_pos fits, sliceOnto_eq, dropped, List.append_nil]
+          simp [split]; omega
+        · have short : ¬ count ≤ rest.length := by omega
+          rw [dif_neg fits]
+          simp [decodeBytesPrefix, short]
+  cursorNative := true
 
 theorem bytesStream_encode_eq_list_byte (values : List UInt8) :
     bytesStream.encode values = (StreamCodec.list StreamCodec.byte).encode values := by
@@ -906,6 +1469,8 @@ theorem bytesStream_decodePrefix_eq_list_byte (bytes : List UInt8) :
     bytesStream.decodePrefix bytes =
       (StreamCodec.list StreamCodec.byte).decodePrefix bytes := by
   simp [bytesStream, StreamCodec.list, decodeMany_byte]
+
+#assert_axioms sliceOnto_eq
 
 def merklePathStream : StreamCodec (List Digest) :=
   StreamCodec.list digestStream

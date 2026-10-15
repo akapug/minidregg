@@ -128,6 +128,61 @@ def unitStream : StreamCodec Unit where
     simp only [Option.some.injEq, Prod.mk.injEq] at decoded
     obtain ⟨-, rfl⟩ := decoded
     rfl
+  decodeAt _ start := some ((), start)
+  decodeAt_spec := by
+    intro bytes start inside
+    simp only [cursorOfPrefix, Option.map_some, Option.some.injEq, Prod.mk.injEq, true_and]
+    rw [StreamCodec.size_sub_drop bytes inside]
+  cursorNative := true
+
+/-- The cursor of a decoder that reads one tag octet and nothing after it (a
+namespace tag): the list decoder runs on that one octet. -/
+def tagCursor {α : Type} (decode : List UInt8 → Option (α × List UInt8)) (bytes : ByteArray)
+    (start : Nat) : Option (α × Nat) :=
+  if inside : start < bytes.size then
+    match decode [bytes[start]] with
+    | some (value, _) => some (value, start + 1)
+    | none => none
+  else none
+
+theorem tagCursor_spec {α : Type} (decode : List UInt8 → Option (α × List UInt8))
+    (empty : decode [] = none)
+    (oneOctet : ∀ tag rest, decode (tag :: rest) = (decode [tag]).map fun result => (result.1, rest))
+    (bytes : ByteArray) (start : Nat) (fits : start ≤ bytes.size) :
+    tagCursor decode bytes start = cursorOfPrefix decode bytes start := by
+  unfold tagCursor cursorOfPrefix
+  by_cases inside : start < bytes.size
+  · rw [dif_pos inside, StreamCodec.octets_drop bytes inside,
+      oneOctet bytes[start] (bytes.data.toList.drop (start + 1))]
+    cases decode [bytes[start]] with
+    | none => rfl
+    | some pair =>
+        simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq, true_and]
+        rw [List.length_drop, StreamCodec.octets_length]
+        omega
+  · rw [dif_neg inside, StreamCodec.octets_drop_end bytes (by omega), empty]
+    rfl
+
+/-- A one-octet tag codec, decoding natively on the cursor. -/
+def withTagCursor {α : Type} (codec : StreamCodec α) (empty : codec.decodePrefix [] = none)
+    (oneOctet : ∀ tag rest, codec.decodePrefix (tag :: rest) =
+      (codec.decodePrefix [tag]).map fun result => (result.1, rest)) : StreamCodec α :=
+  { codec with
+    decodeAt := tagCursor codec.decodePrefix
+    decodeAt_spec := tagCursor_spec codec.decodePrefix empty oneOctet
+    cursorNative := true }
+
+set_option hygiene false in
+/-- Discharges `withTagCursor`'s `oneOctet` for a decoder that matches one literal
+tag octet per arm (`| 3 :: suffix => some (.c, suffix)`) and refuses the rest:
+each arm's answer does not depend on what follows the tag. -/
+macro "one_octet_tag" : tactic => `(tactic| (
+  intro tag rest
+  dsimp only
+  split
+  all_goals first
+    | (rename_i same; injection same with tagSame restSame; subst tagSame; subst restSame; rfl)
+    | (split <;> rename_i same <;> simp at same <;> simp_all)))
 
 section Wire
 
@@ -137,6 +192,12 @@ def disciplineByte : Discipline → UInt8
   | .rom => 0
   | .ram => 1
   | .appendOnly => 2
+
+/-- Every codec of the wire decodes natively on the cursor, so its payload does
+(`payloadStream`). The namespaces are finite (`namespaces_complete`): a finite check. -/
+def Wire.cursorReady : Bool :=
+  W.namespaceStream.cursorNative &&
+    W.namespaces.all fun space => (W.keyStream space).cursorNative && (W.valueStream space).cursorNative
 
 /-! ## Addresses and their byte order -/
 
@@ -425,7 +486,7 @@ linear adjacent-pair check. It used to be read laxly (first occurrence wins)
 and refused only by the outer re-encode. -/
 def payloadStream : StreamCodec (Store L) :=
   letI := addressOrder W
-  StreamCodec.xmap
+  { StreamCodec.xmap
     (StreamCodec.refine (entryListStream W) (List.IsChain (AddressLT W)))
     (fun store => ⟨entries W store, List.isChain_iff_pairwise.mpr (entries_pairwise W store)⟩)
     (fun items => FiniteDependentMapCachedOrdering.fromEntriesCached (addressKey W)
@@ -437,6 +498,7 @@ def payloadStream : StreamCodec (Store L) :=
       have same := entries_fromEntries_of_pairwise W items.val
         (List.isChain_iff_pairwise.mp items.property)
       simpa [fromEntries, FiniteDependentMapCachedOrdering.fromEntriesCached_eq] using same)
+    with cursorNative := W.cursorReady }
 
 theorem payloadStream_encode (store : Store L) :
     (payloadStream W).encode store = (entryListStream W).encode (entries W store) :=

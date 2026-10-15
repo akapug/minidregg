@@ -131,7 +131,8 @@ def clockStream : StreamCodec Clock :=
     (fun (now, slot) => ⟨now, slot⟩)
     (by intro clock; cases clock; rfl)
 
-def namespaceStream : StreamCodec Namespace where
+/-- The namespace tag's list codec; `namespaceStream` is it on the cursor. -/
+def namespaceListStream : StreamCodec Namespace where
   encode
     | .clock => [0]
     | .maxStepSeconds => [1]
@@ -140,6 +141,9 @@ def namespaceStream : StreamCodec Namespace where
     | 1 :: suffix => some (.maxStepSeconds, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
+
+def namespaceStream : StreamCodec Namespace :=
+  withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
 
 def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .clock => unitStream

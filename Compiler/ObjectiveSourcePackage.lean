@@ -56,6 +56,12 @@ def codec : LawfulCodec Package := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
+/-- `decode` straight from a file's buffer, with no list in between (`decodeBytes_eq`). -/
+def decodeBytes (bytes : ByteArray) : Option Package := (StreamCodec.framed frame stream).decodeBytes bytes
+
+theorem decodeBytes_eq (bytes : ByteArray) : decodeBytes bytes = decode bytes.toList :=
+  (StreamCodec.framed frame stream).decodeBytes_eq bytes
+
 def identity (p : Package) : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-PACKAGE/v3".toUTF8.toList (encode p)).digest
 

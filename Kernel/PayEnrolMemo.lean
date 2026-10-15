@@ -439,6 +439,35 @@ def memoFieldStream : StreamCodec MemoField where
     cases value with
     | present bytes => simp [bytesStream.decodePrefix_encode]
     | _ => rfl
+  decodeAt bytes start :=
+    if inside : start < bytes.size then
+      match bytes[start] with
+      | 0 => some (.absent, start + 1)
+      | 1 =>
+          match bytesStream.decodeAt bytes (start + 1) with
+          | some (value, next) => some (.present value, next)
+          | none => none
+      | 2 => some (.unbound, start + 1)
+      | 3 => some (.invalid, start + 1)
+      | _ => none
+    else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, StreamCodec.octets_drop bytes inside]
+      generalize bytes[start] = tag
+      split
+      · simp; omega
+      · rw [bytesStream.decodeAt_spec bytes _ inside]
+        simp only [cursorOfPrefix]
+        cases bytesStream.decodePrefix (bytes.data.toList.drop (start + 1)) <;> rfl
+      · simp; omega
+      · simp; omega
+      · split <;> simp_all
+    · rw [dif_neg inside, StreamCodec.octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := true
 
 /-! ## Journal reasons (PAY §11.3) -/
 
@@ -526,6 +555,21 @@ def journalReasonStream : StreamCodec JournalReason where
         show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
         rw [JournalReason.code_ofCode known]
         exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match JournalReason.ofCode code with
+        | some reason => some (reason, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : JournalReason.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-! ## The self-enrolled subject -/
 

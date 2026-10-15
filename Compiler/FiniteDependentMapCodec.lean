@@ -121,6 +121,28 @@ def entryStream (keyStream : StreamCodec K)
         obtain ⟨rfl, rfl⟩ := decoded
         rw [List.append_assoc, (valueStream key).encode_decodePrefix _ _ _ valueOk,
           keyStream.encode_decodePrefix _ _ _ keyOk]
+  decodeAt bytes start :=
+    match keyStream.decodeAt bytes start with
+    | some (key, afterKey) =>
+        match (valueStream key).decodeAt bytes afterKey with
+        | some (value, after) => some (⟨key, value⟩, after)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [keyStream.decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix]
+    cases keyOk : keyStream.decodePrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some keyPair =>
+        obtain ⟨key, afterKey⟩ := keyPair
+        simp only [Option.map_some]
+        rw [(valueStream key).decodeAt_spec bytes _ (Nat.sub_le _ _)]
+        simp only [cursorOfPrefix, keyStream.rest_at keyOk]
+        cases valueOk : (valueStream key).decodePrefix afterKey <;> simp [valueOk]
+  -- `cursorNative` stays false: whether every `valueStream key` is native is not computable
+  -- for an arbitrary key type. A consumer that knows its keys sets the bit on the codec it
+  -- decodes with (`StoreCodec.payloadStream`, by `StoreCodec.Wire.cursorReady`).
 
 /-! ## Canonical finite sets and sparse maps
 

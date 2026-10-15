@@ -417,7 +417,8 @@ instance (store : PayStore) : Decidable (Law store) := by
 
 /-! ## Wire `DREGG/PAY/CELL/v6` -/
 
-def namespaceStream : StreamCodec Namespace where
+/-- The namespace tag's list codec; `namespaceStream` is it on the cursor. -/
+def namespaceListStream : StreamCodec Namespace where
   encode
     | .tariff => [0]
     | .book => [1]
@@ -448,6 +449,9 @@ def namespaceStream : StreamCodec Namespace where
     | 13 :: suffix => some (.computeActivation, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
+
+def namespaceStream : StreamCodec Namespace :=
+  withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
 
 def enrolRecordStream : StreamCodec EnrolRecord :=
   StreamCodec.xmap

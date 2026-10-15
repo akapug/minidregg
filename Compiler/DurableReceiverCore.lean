@@ -167,11 +167,13 @@ private def u64At (bytes : ByteArray) (position : Nat) : Option Nat :=
     some <| (List.range 8).foldl (fun value index => value * 256 + (bytes.get! (position + index)).toNat) 0
   else none
 
+/-- A length-prefixed blob, sliced straight out of the read buffer into a list
+(`Tower256ConcreteBackend.sliceOnto`: one cell per octet, no intermediate copy). -/
 private def blobAt (bytes : ByteArray) (position : Nat) : Option (List UInt8 × Nat) := do
   let length ← u64At bytes position
   let start := position + 8
-  if start + length ≤ bytes.size then
-    some ((bytes.extract start (start + length)).toList, start + length)
+  if fits : start + length ≤ bytes.size then
+    some (Minidregg.Compiler.Tower256ConcreteBackend.sliceOnto bytes start length fits [], start + length)
   else none
 
 private def entriesAt (bytes : ByteArray) : Nat → Nat → Nat → List Entry → Option (List Entry)
