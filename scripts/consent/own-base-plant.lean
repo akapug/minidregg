@@ -121,7 +121,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       require "the anchor comparison cannot see it: equal world roots at 36" (old.worldRoot == own.worldRoot)
       require "the own cut carries the honest budget" (budget own.snapshot == 964 && cell 3 own.snapshot == [36])
       let past (loaded : Loaded rootBytes) (height : Nat) : Nat :=
-        ((loaded.atPrefix height).map budget).getD 0
+        ((loaded.atPrefixFrom none height).map budget).getD 0
       IO.println s!"at 34: operator cut {past old 34}, own cut {past own 34}"
       require "operator past read at 34 shows the forgery" (past old 34 == 966 + 777)
       require "own past read at 34 does not" (past own 34 == 966)

@@ -1662,7 +1662,7 @@ below the cut, and the verified tags' roots as its stored roots: both are the
 Store key holder's (the operator's). A consent provider's opening may base on
 neither: a client base is a state the client computed. `prefixOwn` is the cut
 whose base is the seed and whose root log keeps no root, so its snapshot is the
-genesis fold of the cut (`atPrefix_own`) and every receipt root below its head
+genesis fold of the cut (`atPrefixFrom_own`) and every receipt root below its head
 is evaluated, never read. -/
 
 /-- **The image cut at `height`, folded from genesis**: the chain after
@@ -1700,15 +1700,15 @@ def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBy
 /-- **A genesis-based image's past read is the genesis fold of the prefix**, at
 every height: `resume_sound`'s premises hold by construction (the base IS the
 seed), so nothing is assumed about who sealed what. -/
-theorem Loaded.atPrefix_own {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+theorem Loaded.atPrefixFrom_own {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (zero : loaded.baseHeight = 0) (seeded : loaded.base = State.ofSeed loaded.image.seed)
-    (height : Nat) :
-    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
-  unfold atPrefix
+    (kept : Option (loaded.Kept)) (height : Nat) :
+    loaded.atPrefixFrom kept height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefixFrom
   rw [if_pos (by rw [zero]; exact Nat.zero_le _), zero, seeded]
   exact resume_genesis rootBytes (loaded.prefixImage height)
 
-#assert_axioms Loaded.atPrefix_own
+#assert_axioms Loaded.atPrefixFrom_own
 
 /-- The checkpoint state's world-root entries are the served entries. -/
 theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Image)
