@@ -64,9 +64,11 @@ def framesPerRequestMax : Nat := 16
 /-- A request's bytes: its frames at the frame bound (DERIVED). -/
 def requestBytesMax : Nat := framesPerRequestMax * frameBytesMax
 
-/-- A persisted Turn entry's bytes (compact encoding, `encodeTurnAt`). ASSUMED
-1 MiB: 8x the largest measured record (128,346 B). -/
-def turnBytesMax : Nat := 1048576
+/-- A persisted Turn entry's bytes (compact encoding, `encodeTurnAt`). DERIVED:
+the frame bound, so a turn that creates one cell at `cellBytesMax` is persisted
+(`cellBytes_le_turnBytes`) and every persisted turn fits in one frame
+(`turnBytes_le_frameBytes`). The largest measured record is 128,346 B. -/
+def turnBytesMax : Nat := frameBytesMax
 
 /-- Legs per turn. ASSUMED 256 (the workload's whole Store is 166 cells). -/
 def legsPerTurnMax : Nat := 256
@@ -75,8 +77,11 @@ def legsPerTurnMax : Nat := 256
 record path, written + guarded cells). ASSUMED 512. -/
 def cellsTouchedMax : Nat := 512
 
-/-- One cell's canonical post bytes. ASSUMED 1 MiB (cells measure ~4 KB). -/
-def cellBytesMax : Nat := 1048576
+/-- One cell's canonical post bytes: 8 MiB (ROOT ruling 10-15). The single home of
+the per-cell cap: the grain-backed birth's source carrier is held to it
+(`Kernel.GrainResourceBirthPolicyController.DecodedIngress.sourceSizeBound`), and a
+package is one cell (`packageBytesMax`). Cells measure ~4 KB. -/
+def cellBytesMax : Nat := 8388608
 
 /-- Nullifiers per turn. ASSUMED 64. -/
 def nullifiersPerTurnMax : Nat := 64
@@ -84,9 +89,9 @@ def nullifiersPerTurnMax : Nat := 64
 /-- Requests per batch at the resident loop (HP-3). ASSUMED 64. -/
 def batchTurnsMax : Nat := 64
 
-/-- A native fn package. Provenance: `Compiler.FnEvidenceCodec.maxPackageBytes`
-(pinned equal in `Host.Main`). -/
-def packageBytesMax : Nat := 1048576
+/-- A package's bytes: one cell (DERIVED). The fn route keeps its own tighter cap,
+`Compiler.FnEvidenceCodec.maxPackageBytes` (1 MiB), within it (`Host.Main.fnPackage_le_bound`). -/
+def packageBytesMax : Nat := cellBytesMax
 
 /-- A Store's state bytes this epoch (creates refused past it, HP-3). ASSUMED 64 MiB. -/
 def stateBytesMax : Nat := 67108864
@@ -178,6 +183,8 @@ end Name
 
 /-- A persisted turn fits in one frame. -/
 theorem turnBytes_le_frameBytes : turnBytesMax ≤ frameBytesMax := by decide
+/-- A turn carrying one whole cell fits in a persisted turn. -/
+theorem cellBytes_le_turnBytes : cellBytesMax ≤ turnBytesMax := by decide
 /-- Every leg is a touched cell. -/
 theorem legsPerTurn_le_cellsTouched : legsPerTurnMax ≤ cellsTouchedMax := by decide
 /-- A carried exact-call recovery frame is the only frame above the frame bound. -/

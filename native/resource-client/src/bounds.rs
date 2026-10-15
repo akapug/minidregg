@@ -12,18 +12,18 @@ pub(crate) const FRAMES_PER_REQUEST_MAX: usize = 16;
 /// Kernel.Bounds.requestBytesMax
 pub(crate) const REQUEST_BYTES_MAX: usize = 193644160;
 /// Kernel.Bounds.turnBytesMax
-pub(crate) const TURN_BYTES_MAX: usize = 1048576;
+pub(crate) const TURN_BYTES_MAX: usize = 12102760;
 /// Kernel.Bounds.legsPerTurnMax
 pub(crate) const LEGS_PER_TURN_MAX: usize = 256;
 /// Kernel.Bounds.cellsTouchedMax
 pub(crate) const CELLS_TOUCHED_MAX: usize = 512;
 /// Kernel.Bounds.cellBytesMax
-pub(crate) const CELL_BYTES_MAX: usize = 1048576;
+pub(crate) const CELL_BYTES_MAX: usize = 8388608;
 /// Kernel.Bounds.nullifiersPerTurnMax
 pub(crate) const NULLIFIERS_PER_TURN_MAX: usize = 64;
 /// Kernel.Bounds.batchTurnsMax
 pub(crate) const BATCH_TURNS_MAX: usize = 64;
 /// Kernel.Bounds.packageBytesMax
-pub(crate) const PACKAGE_BYTES_MAX: usize = 1048576;
+pub(crate) const PACKAGE_BYTES_MAX: usize = 8388608;
 /// Kernel.Bounds.stateBytesMax
 pub(crate) const STATE_BYTES_MAX: usize = 67108864;

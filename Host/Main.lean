@@ -2323,7 +2323,9 @@ theorem fnFrame_eq_bound : FnEvidenceCodec.maxHostFrameBytes = Kernel.Bounds.fra
 theorem lookupFrame_eq_bound :
     RetainedSegmentInspection.maxLookupFrame = Kernel.Bounds.lookupFrameBytesMax := rfl
 
-theorem fnPackage_eq_bound : FnEvidenceCodec.maxPackageBytes = Kernel.Bounds.packageBytesMax := rfl
+/-- The fn route's own package cap is within the package bound (one cell). -/
+theorem fnPackage_le_bound : FnEvidenceCodec.maxPackageBytes ≤ Kernel.Bounds.packageBytesMax := by
+  decide
 
 /-- The bound a frame is held to before its payload is read (HP-1): carried
 exact-call recovery (operation 153) to `lookupFrameBytesMax`, every other
@@ -2354,7 +2356,7 @@ theorem frameBound_refuses {operation : UInt8} (other : operation ≠ 153) {leng
   rw [this]
   exact Kernel.Bounds.check_refuses past
 
-#assert_axioms fnFrame_eq_bound lookupFrame_eq_bound fnPackage_eq_bound
+#assert_axioms fnFrame_eq_bound lookupFrame_eq_bound fnPackage_le_bound
 #assert_axioms frameBound_accepts frameBound_refuses
 
 /-- Inspection repeats the exact frame and full request as hex. A hostd

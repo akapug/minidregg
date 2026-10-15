@@ -37,7 +37,7 @@ def fromIssue {config : Config} {current : Durable} (issue : CarriedIssue config
   match rawExact : GrainResourceBirthPolicyController.ingressCodec.decode issue.ingress.grainIngress with
   | none => throw "carried grain issue outer signed carrier differs"
   | some raw =>
-    if raw.sourceBytes.length > GrainResourceBirthPolicyController.maxSourceBytes then
+    if raw.sourceBytes.length > Kernel.Bounds.cellBytesMax then
       throw "carried grain issue source exceeds original bound"
     if raw.sourceBytes.take GrainResourceBirthHostCodec.sourceFrame.length !=
         GrainResourceBirthHostCodec.sourceFrame then
