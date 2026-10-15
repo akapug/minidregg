@@ -261,8 +261,14 @@ print(json.dumps(value))
             script=(MODULE.parent/"grain-journey.sh").read_text()
             paths=script[script.index('state_paths() {'):script.index('\nstate_paths\n')]
             writer=script[script.index('write_profile() {'):script.index('\n\n# Phases:')]
+            # write_profile resolves the physical bwrap with $HERE/../../deploy/grain-host/resolve-bwrap (a63c33ff);
+            # this unit test stands in a resolver that names the fake launcher, so it never depends on the box's
+            # user namespaces (the resolver itself is the hermes/JPAY6/m6grain rows' business).
+            here=root/"repo"/"scripts"/"spk-platform";here.mkdir(parents=True)
+            resolver=root/"repo"/"deploy"/"grain-host"/"resolve-bwrap";resolver.parent.mkdir(parents=True)
+            resolver.write_text('#!/bin/sh\nprintf "%s\\n" "$BWRAP"\n')
             runner=root/"profile.sh"
-            runner.write_text('set -eu\numask 077\nSTATE= PROFILE=\nfail() { echo "$*" >&2; exit 1; }\nsha() { sha256sum "$1" | cut -d " " -f 1; }\n'+paths+'\n'+writer+'\nwrite_profile\nstate_paths\n')
+            runner.write_text('set -eu\numask 077\nSTATE= PROFILE=\nHERE='+str(here)+'\nfail() { echo "$*" >&2; exit 1; }\nsha() { sha256sum "$1" | cut -d " " -f 1; }\n'+paths+'\n'+writer+'\nwrite_profile\nstate_paths\n')
             env=dict(os.environ,PROFILE_RESULT=str(ev/"profile-result.json"),CONFIG=str(config),GRAINS_ROOT=str(grains),EV=str(ev),
                 SPK_HOST=str(native),HOST=str(native),WR=str(wr),OSOCK=str(root/"operator.sock"),STORE=str(root),BWRAP=str(native),NATIVE_STATE=str(state),BROKER_SOCKET=str(broker),NATIVE_BROKER=str(broker))
             subprocess.run(["/bin/sh",str(runner)],env=env,check=True,timeout=15,capture_output=True)

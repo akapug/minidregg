@@ -57,6 +57,7 @@ Minidregg.Compiler.DurableHistory.RawNode.mk | Compiler.DurableHistory | encapsu
 Minidregg.Compiler.DurableHistory.StoreIdentity.mk | Compiler.DurableHistory | evidence | L2 | the identity of an opened Store (origin deployment) or of a scratch Store holding a portable image (origin scratch); mints: StoreIdentity.ofOpen, StoreIdentity.ofScratch
 Minidregg.Compiler.DurableServed.Served.mk | Compiler.DurableServed | evidence | L2 | the served Store open (kn2-store-open ii); layer-1 review pending
 Minidregg.Compiler.DurableServed.Start.mk | Compiler.DurableServed | evidence | L2 | the served Store open's start state (kn2-store-open ii); layer-1 review pending
+Minidregg.Compiler.DurableServed.CachedRoots.mk | Compiler.DurableServed | evidence | L2 | the light open's cached world root with its exactness proof (perf-fix a16e2f1b; RootsExact is a Prop since store-root 13c865a1); layer-1 review pending
 Minidregg.Compiler.GenericSimplexIO.VerifiedCommit.mk | Compiler.GenericSimplexIO | evidence | L2 | 4 proof / 1 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.mk | Compiler.GrainResourceBirthAuthority | evidence | L2 | 3 proof / 2 data fields; layer-1 review pending
 Minidregg.Compiler.GrainResourceBirthController.PreparedSourceAuthority.mk | Compiler.GrainResourceBirthController | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
