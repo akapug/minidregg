@@ -45,9 +45,9 @@ if [ -n "$PROFILE" ]; then
     (.providerBudget | tonumber >= 67) and
     (.factoryPredicate | type == "object") and
     (.operator | type == "object" and
-      ((keys | sort) == ["continuityProviderResourceId","grainBirthTariff","providerMetering"])) and
-    (.operator.providerMetering.providerResourceId | tostring) == .providerTask and
-    (.operator.continuityProviderResourceId | tostring) == .providerTask and
+      ((keys | sort) == ["grainBirthTariff","providerServices"])) and
+    (.operator.providerServices | type == "array" and length == 1) and
+    (.operator.providerServices[0].providerResourceId | tostring) == .providerTask and
     (.operator.grainBirthTariff.base | type == "number" and . >= 0 and . == floor) and
     (.operator.grainBirthTariff.perBirth | type == "number" and . >= 0 and . == floor) and
     (.runtimeTemplate | type == "string" and startswith("/"))
@@ -199,15 +199,16 @@ fi
 # OPERATOR_PROVIDER_PINS (a JSON file, non-profiled provider bootstraps only)
 # adds the Host's provider pins before genesis, so the provider purse is born
 # under the per-route tariff it names (HERMES-TARIFF): exactly
-# {continuityProviderResourceId, providerMetering}, both naming the provider task.
+# {providerServices: [one entry naming the provider task]} (continuity and
+# metering share the one service list).
 if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
   [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] && [ -z "$PROFILE" ] || {
     echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1 and no profile' >&2; exit 2;
   }
   jq -e --arg p "$PROVIDER_TASK" 'type == "object" and
-    ((keys | sort) == ["continuityProviderResourceId","providerMetering"]) and
-    (.providerMetering.providerResourceId | tostring) == $p and
-    (.continuityProviderResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
+    (keys == ["providerServices"]) and
+    (.providerServices | type == "array" and length == 1) and
+    (.providerServices[0].providerResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
     { echo 'OPERATOR_PROVIDER_PINS is invalid' >&2; exit 2; }
   jq --slurpfile pins "$OPERATOR_PROVIDER_PINS" '. + $pins[0]' \
     "$EVIDENCE/operator.json" >"$EVIDENCE/operator-pinned.json"

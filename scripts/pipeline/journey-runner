@@ -101,6 +101,9 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
   # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
   local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
   product_inputs
+  # A row's consent anchors and resident providers live in its scratch world, never
+  # under the runner's real HOME (~/.mini/consent-anchors): client_consent.rs anchor_dir.
+  export MINI_CONSENT_ANCHOR_DIR=$R/consent-anchors
   if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
     echo "no systemd user session" >"$O/row.err"; rc=98
   else

@@ -19,6 +19,8 @@ import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnEvidenceCodec
 import Host.SourceAgreementJson
 import Host.ObjectiveInvocationSettings
+import Host.ProviderUsage
+import Kernel.ProviderRouteConsent
 import Host.RequestRefusal
 import Lean.Data.Json
 
@@ -102,7 +104,19 @@ structure Settings where
   disabledEvaluators : Option (List String) := none
   lifecycleManagement : Option LifecycleManagementSettings := none
   objectiveInvocation : Option ObjectiveInvocationSettings := none
+  /-- The deployment's provider services, as the serving Host and the local
+  semantic Host read them from this same file. Consent USES them: a draft that
+  installs a law at a service resource must install exactly the pinned route
+  law (`Kernel.ProviderRouteConsent.check`). -/
+  providerServices : Option (List ProviderUsage.ServiceSettings) := none
   deriving FromJson, ToJson
+
+/-- The pinned services' per-operation fee schedules, parsed with the Host's
+own checker (`ProviderUsage.checkedServices`). -/
+def Settings.providerRoutes (settings : Settings) :
+    Except String ProviderRouteConsent.Services := do
+  let some services := settings.providerServices | return []
+  return (← ProviderUsage.checkedServices services).map fun pin => (pin.1, pin.2.schedule)
 
 def Settings.disabledEvaluatorIds (settings : Settings) :
     List Minidregg.Theory.TypedAuthorization.Digest :=
@@ -170,7 +184,8 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     "collector", "asset", "genesisHeight", "expectedSeed", "storageBinary",
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
     "jointConsensus", "nockFSync", "disabledEvaluators", "fnGateway",
-    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation"]
+    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation",
+    "providerServices"]
   -- A deployment config written by `mini bootstrap` spells every absent Host
   -- option as null. Null is absence; any other value of a key this provider
   -- cannot honor refuses, since it would change the semantics it verifies.
@@ -188,6 +203,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     let bytes ← IO.ofExcept (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key))
     unless bytes.length == 32 && SourceAgreementJson.encodeHex bytes == key do
       throw (IO.userError "noncanonical completion custodian key")
+  discard <| IO.ofExcept settings.providerRoutes
   IO.ofExcept settings.checkDisabledEvaluators
   IO.ofExcept settings.checkJointConsensus
   pure settings
@@ -335,11 +351,13 @@ def selectedHeaders (config : NativeHost.Config) (session : Session config)
       throw (IO.userError "prepared role selects another custody signer")
   pure (headersBytes headers)
 
-def consent (config : NativeHost.Config) (session : Session config) (operation : UInt8)
+def consent (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
+    (session : Session config) (operation : UInt8)
     (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
     | throw (IO.userError "noncanonical retained local intent")
+  IO.ofExcept (ProviderRouteConsent.checkIntent services wanted)
   let (signer, rest) ← splitPair rest
   -- Bind the selected custody key at EACH source extension, including a key
   -- change between intent signing and observation/transaction signing.
@@ -390,12 +408,14 @@ def shownJson : NativeThinConsent.Shown → Json
   | .invocation displays => Json.arr (displays.map displayJson).toArray
   | .delegation display => Json.arr #[delegateJson display]
 
-def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
+def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
+    (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
     | throw (IO.userError "noncanonical retained local intent")
   unless NativeObservationCodec.intentCodec.encode wanted == intentBytes do
     throw (IO.userError "noncanonical retained local intent")
+  IO.ofExcept (ProviderRouteConsent.checkIntent services wanted)
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
@@ -534,7 +554,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let payload := body.toList.drop 1
   if operation ≥ 230 && operation ≤ 232 || operation == 226 then
     let answer ← try pure (operation, ← if operation == 226 then possession config payload
-        else thin config operation payload)
+        else thin (← IO.ofExcept settings.providerRoutes) config operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output own
@@ -584,7 +604,7 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
     let answer ← try pure (operation, ← if operation == 224 then
         specialized extraExpected settings config updated full payload
       else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
-      else consent config updated operation payload)
+      else consent (← IO.ofExcept settings.providerRoutes) config updated operation payload)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained (some updated) input output own

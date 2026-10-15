@@ -104,6 +104,9 @@ CAPS = {OPERATOR: (41, 51, 54), TOOL: (42, 52, 55), PROVIDER: (43, 56, 57),
 BALANCE = {OPERATOR: 100, TOOL: 100, PROVIDER: 100, FRIEND: FRIEND_BALANCE, STRANGER: 100}
 
 def path(name): return os.path.join(DIR, name)
+# Consent anchors and resident providers of every mini this journey starts (the
+# controller unit too, by --setenv) stay in its own directory, never ~/.mini.
+os.environ["MINI_CONSENT_ANCHOR_DIR"] = path("consent-anchors")
 LIVE = []          # child processes to stop on any exit
 UNITS = []         # transient systemd units to stop on any exit
 def cleanup():
@@ -142,14 +145,13 @@ operator = {"domain": 8501, "federation": 9, "factoryId": 10, "resourceBookId": 
             "tariffPerInitialPayloadByte": 0, "collector": 99, "asset": 0, "genesisHeight": 10,
             "expectedSeed": 0, "storageBinary": STORE, "storageRoot": path("store"),
             "signatureBinary": VERIFIER,
-            "continuityProviderResourceId": PURSE,
-            "providerMetering": {"providerResourceId": PURSE, "tariff": {
+            "providerServices": [{"providerResourceId": PURSE, "tariff": {
                 "version": "1", "model": MODEL, "routes": {
                     "user": {"perOp": str(USER_FEE)},
                     "pool": {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
                              "outputMicroPerMillion": str(RATE_OUT)},
                     "homelab": {"perOp": str(HOMELAB_FEE), "inputMicroPerMillion": "0",
-                                "outputMicroPerMillion": "0"}}}}}
+                                "outputMicroPerMillion": "0"}}}}]}
 json.dump(operator, open(path("operator.json"), "w"), indent=1)
 profile = json.loads(subprocess.run([HOST, path("operator.json"), "profile"], check=True,
                                     capture_output=True).stdout)
@@ -173,11 +175,11 @@ boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("oper
 if boot.returncode != 0:
     fail("bootstrap: " + (boot.stdout + boot.stderr).decode("utf-8", "replace")[-400:])
 CONFIG = path("deployment/pinned-config.json")
-# The provider pins are in force from the first event: the purse's birth reads
-# the Host's per-route tariff to install its route law.
+# The provider service pin is in force from the first event: the purse's birth
+# reads the Host's per-route tariff to install its route law, and the local
+# consent provider (same settings file) refuses a purse law without it.
 pinned = json.load(open(CONFIG))
-for key in ("continuityProviderResourceId", "providerMetering"):
-    pinned.setdefault(key, operator[key])
+pinned.setdefault("providerServices", operator["providerServices"])
 CONFIG = path("deployment/continuity-config.json")
 json.dump(pinned, open(CONFIG, "w"), indent=1)
 
@@ -541,9 +543,8 @@ mini_key("friend-grant", "--action", "grant", "--dir", FRIEND_WS, "--provider", 
          "--runner", str(PROVIDER), "--per-call", "64", "--per-day", "10", "--until", "1000000")
 pinned = json.load(open(CONFIG))
 added = []
-for key in ("continuityProviderResourceId", "providerMetering"):
-    if key not in pinned:
-        pinned[key] = operator[key]; added.append(key)
+if "providerServices" not in pinned:
+    pinned["providerServices"] = operator["providerServices"]; added.append("providerServices")
 CONFIG_B = CONFIG
 if added:
     # as docs/evidence/2026-09-26-provider-gateway-continuity/configure-case.sh
@@ -551,7 +552,8 @@ if added:
     json.dump(pinned, open(CONFIG_B, "w"), indent=1)
 prof = json.loads(subprocess.run([MINI, "profile", "--host", HOST, "--config", CONFIG_B],
                                  capture_output=True).stdout or b"{}")
-pin = prof.get("providerMetering") or {}
+services = prof.get("providerMeterings") or []
+pin = services[0] if len(services) == 1 else {}
 routes = pin.get("routes") or {}
 row(f"the Host profile pins the per-route provider tariff in credit for purse {PURSE}",
     f"providerResourceId {PURSE}, model {MODEL}, user fee {USER_FEE}; pool fee {POOL_FEE} + {RATE_IN}/{RATE_OUT} per million tokens; homelab fee {HOMELAB_FEE}",
@@ -561,6 +563,34 @@ row(f"the Host profile pins the per-route provider tariff in credit for purse {P
     and routes.get("pool") == {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
                                "outputMicroPerMillion": str(RATE_OUT)}
     and (routes.get("homelab") or {}).get("perOp") == str(HOMELAB_FEE))
+# PLANT (consent honours the pinned service, Kernel.ProviderRouteConsent): the
+# purse's birth intent authored under another tariff (user fee + 1) carries a
+# route law the pin does not; the local consent provider, reading the pinned
+# config, refuses it by name at intent consent (frame 230) before any key
+# signs, while the same intent authored under the pinned config is consented.
+CONSENT = os.path.join(os.path.dirname(HOST), "minidregg-client-consent")
+rogue = json.load(open(CONFIG_B))
+rogue["providerServices"][0]["tariff"]["routes"]["user"]["perOp"] = str(USER_FEE + 1)
+json.dump(rogue, open(path("rogue-tariff-config.json"), "w"), indent=1)
+def consent_230(author_config, label):
+    out = path(f"{label}-birth-intent.bin")
+    subprocess.run([HOST, author_config, "author", "birth-intent", path("birth-intent.json"), out],
+                   check=True, capture_output=True)
+    intent = open(out, "rb").read()
+    signer = keys[OPERATOR].verify_key.encode()
+    payload = struct.pack("<I", len(intent)) + intent + struct.pack("<I", len(signer)) + signer
+    frame = struct.pack("<I", len(payload) + 1) + bytes([230]) + payload
+    done = subprocess.run([CONSENT, CONFIG_B, "stdio"], input=frame, capture_output=True, timeout=600)
+    reply = done.stdout
+    if len(reply) < 5: return (None, (done.stderr or b"").decode("utf-8", "replace")[-200:])
+    return (reply[4], reply[5:].decode("utf-8", "replace") if reply[4] == 255 else f"{len(reply) - 5} intent bytes")
+ok_op, ok_body = consent_230(CONFIG_B, "pinned")
+bad_op, bad_body = consent_230(path("rogue-tariff-config.json"), "rogue")
+row(f"consent refuses a purse law off the pinned tariff (plant) and consents to the pinned one",
+    f"pinned: op 230; rogue: op 255 'provider service {PURSE}: ... does not carry the pinned per-route schedule'",
+    f"pinned: op {ok_op} ({ok_body}); rogue: op {bad_op} ({bad_body})",
+    ok_op == 230 and bad_op == 255
+    and f"provider service {PURSE}: the law this draft installs does not carry the pinned per-route schedule" in bad_body)
 runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOCKET,
            "controlSocket": os.path.join(STATE, "control.sock"), "custodyKey": path(f"keys/{OPERATOR}.key"),
            "stateDir": STATE, "cwd": DIR, "task": str(PARENT), "subject": "7", "capability": "71",
@@ -611,6 +641,7 @@ def unit_prop(name):
 controller = subprocess.run(["systemd-run", "--user", "--collect", f"--unit={UNIT}",
                              "--property=KillMode=control-group", "--property=Restart=on-failure",
                              "--property=RestartSec=2", "--property=RuntimeMaxSec=3600s",
+                             f"--setenv=MINI_CONSENT_ANCHOR_DIR={os.environ['MINI_CONSENT_ANCHOR_DIR']}",
                              f"--property=StandardOutput=append:{path('controller.stdout')}",
                              f"--property=StandardError=append:{path('controller.stderr')}",
                              GRAIN, "serve", path("runtime-config.json")], capture_output=True, text=True)
