@@ -325,6 +325,9 @@ structure Method (config : Config) (pin : Digest) (method : String) (view args :
   replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering
   accepted : ObjectiveBendFrontEnd.Accepted lowering
   fuelWithin : accepted.packet.fuel ≤ config.typeFuel
+  /-- The length of the lowering's typed-core rendering, rendered once with the held front. -/
+  generated : Nat
+  generatedExact : generated = lowering.packet.compress.toUTF8.toList.length
   applied : AnnotatedTerm
   checked : Checked applied []
   planType : Ty
@@ -376,14 +379,14 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
   match replayPackage config stored pin with
   | .error reason => .error (.kernel reason)
   | .ok definition =>
-  match lowered : ObjectiveBendPublication.lowerParsed definition.replayed.parsed definition.package.entryModule method with
+  -- the method's lowering and acceptance, held with the replay (`Fronts.front_eq`)
+  match definition.fronts.front method with
   | .error d => .error (.notCallable target method d.message)
-  | .ok lowering =>
+  | .ok front =>
+  let lowering := front.lowering
   have replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering :=
-    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans lowered
-  match ObjectiveBendFrontEnd.accept lowering with
-  | .error d => .error (.notCallable target method d.message)
-  | .ok accepted =>
+    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans front.lowered
+  let accepted := front.accepted
   if fuelWithin : accepted.packet.fuel ≤ config.typeFuel then
     match callable accepted.typed.type with
     | .arrow _ _ viewType (.arrow _ _ argsType _) =>
@@ -402,8 +405,8 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
         | .computation planType responseType resultType =>
           if callsOnly : labelsWithin applied.assumptions planType framePlans = true then
             if returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true then
-              .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
-                responseType, resultType, typeExact, callsOnly, returnsOnly⟩
+              .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, front.generatedCore, front.generatedExact,
+                applied, checked, planType, responseType, resultType, typeExact, callsOnly, returnsOnly⟩
             else .error (.notCallable target method "its response type is not within `returned | queued | acked`")
           else .error (.notCallable target method
             "its Plan type is not within `call | send | stop | cancel`: a method that awaits is not callable")
@@ -414,7 +417,12 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
 /-- The typed-core bytes a method's lowering generated (drawn after the lowering). -/
 def Method.generatedCore {config : Config} {pin : Digest} {method : String} {view args : Data}
     (m : Method config pin method view args) : Nat :=
-  m.lowering.packet.compress.toUTF8.toList.length
+  m.generated
+
+/-- It is the length of the lowering's rendering. -/
+theorem Method.generatedCore_eq {config : Config} {pin : Digest} {method : String} {view args : Data}
+    (m : Method config pin method view args) :
+    m.generatedCore = m.lowering.packet.compress.toUTF8.toList.length := m.generatedExact
 
 /-- Draw a pair's front-end quote (its source bytes, the stored core its replay must generate);
 a pair whose quote does not decode draws nothing and is refused by `replayPackage` before any
@@ -524,7 +532,8 @@ theorem replayPackage_unquoted_refused {config : Config} {bytes : Bytes} {stored
     ∃ reason, replayPackage config stored pin = .error reason := by
   unfold frontEndQuote at unquoted
   rw [decoded] at unquoted
-  unfold replayPackage
+  rw [replayPackage_eq]
+  unfold replayPackageAt
   cases ha : ObjectiveBendSourceArtifact.decode stored.artifact with
   | none => split_ifs <;> exact ⟨_, rfl⟩
   | some artifact =>

@@ -91,6 +91,7 @@ The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
 import Kernel.NativeHost
+import Kernel.NativeHostHeld
 import Host.ObjectiveActivityJson
 import Host.SeatJson
 import Compiler.GenericSimplexSourceAnchor
@@ -5965,7 +5966,8 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
   match operation with
   | 210 =>
       let opened ← sessionOpened pinnedConfig state
-      let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened payload)
+      let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened
+        (← NativeHostHeld.heldFor pinnedConfig opened) payload)
       let bytes := ObjectiveActivityReceiver.signingPlanCodec.encode plan
       unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "activity plan exceeds host frame bound")
@@ -5980,7 +5982,8 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((211 : UInt8), ingress)
   | 212 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
+      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
+        (← NativeHostHeld.heldFor pinnedConfig opened) payload
       return ((212 : UInt8), outcomeCodec.encode outcome)
   | 213 =>
       let opened ← sessionOpened pinnedConfig state
