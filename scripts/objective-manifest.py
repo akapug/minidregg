@@ -795,11 +795,36 @@ def cmd_attribute(a, pins, changes):
         return sorted(m for m in mods if m and commits(m))
 
     lines, review_rows, by_root = [], [], {}
+    cause_lines = set()
     for kind, k, old, new, f, run, ok in changes:
         if ok:
             continue
         own = (f.module if f is not None else pins[k].module)
         roots = via(run, f, pins) if kind == "redefined" else []
+        if kind == "redefined" and PIN_CONSTS and roots:
+            # The decision names the CAUSE, not each row that reaches it (one line admits every row whose
+            # closure changed only through admitted causes): one line per cause, attributed to the
+            # commits of RANGE that touched the cause's own module.
+            ccs = set()
+            for n in roots:
+                m = const_module(n) or own
+                cs_n = commits_for(n, m)
+                ccs.update(cs_n)
+                if n in cause_lines:
+                    continue
+                cause_lines.add(n)
+                if cs_n:
+                    c_commit = "+".join(c[:8] for c in cs_n)
+                    c_reason = (f"TODO why the meaning is unchanged, or MEANING CHANGES and what -- redefined (cause): {m} changed by "
+                                + "; ".join(f"{c[:8]} {subject[c][:90]}" for c in cs_n) + f" (attributed by module, {rng})")
+                else:
+                    c_commit, c_reason = "UNATTRIBUTED:none", "TODO"
+                lines.append("\t".join([n, PIN_CONSTS[n][1], run.closure[n].hex(), "redefined", c_commit, c_reason]))
+            key = ", ".join(roots[:3]) + (" ..." if len(roots) > 3 else "")
+            g = by_root.setdefault(key, [0, set()])
+            g[0] += 1
+            g[1].update(ccs)
+            continue
         causes = [(r, pins[r].module) for r in roots if r in pins] or [(k, own)]
         mods = sorted({m for _, m in causes})
         cs = sorted({c for r, m in causes for c in commits_for(r, m)}, key=lambda c: pos.get(c, -1))
@@ -844,7 +869,7 @@ def cmd_attribute(a, pins, changes):
                     fresh = next(f for ck, k, _, _, f, _, _ in changes if ck == kind and k == key)
                     fh.write(f"  old statement: {pins[key].text}\n")
                     fh.write(f"  new statement: {fresh.text}\n")
-        fh.write(f"## redefined: {sum(g[0] for g in by_root.values())} rows, {len(by_root)} root groups\n")
+        fh.write(f"## redefined: {sum(g[0] for g in by_root.values())} rows, {len(by_root)} root groups, {len(cause_lines)} cause lines\n")
         for key, (n, cs) in sorted(by_root.items(), key=lambda x: -x[1][0]):
             fh.write(f"{n}\t{key}\t{'+'.join(c[:8] for c in sorted(cs, key=lambda c: pos.get(c, -1))) or 'UNATTRIBUTED (reason TODO: place by hand)'}\n")
     un = sum(1 for x in lines if "\tUNATTRIBUTED" in x)

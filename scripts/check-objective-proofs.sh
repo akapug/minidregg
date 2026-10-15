@@ -86,7 +86,7 @@ manifest_tool=scripts/objective-manifest.py
 logs=$root/build-logs/objective
 mkdir -p "$logs"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/objective-proofs.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+if [ -n "${OBJECTIVE_KEEP_TMP:-}" ]; then echo "objective: manifest runs kept in $tmp (OBJECTIVE_KEEP_TMP)"; else trap 'rm -rf "$tmp"' EXIT; fi
 
 bun_bin() {
   local b=${BUN:-$(command -v bun || true)}
