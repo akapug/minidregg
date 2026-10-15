@@ -82,6 +82,11 @@ root = "Host.ObjectiveTurnTotalityRunner"
 name = "turn-log-follower"
 root = "Host.TurnLogFollower"
 
+# HP-6 SIM: the seeded deterministic simulation (Host path vs follower, crash-restart).
+[[lean_exe]]
+name = "world-sim"
+root = "Host.WorldSim"
+
 # Local custody consent, selected separately from the remote Host image.
 # The base entry refuses unsupported higher lifecycle families explicitly.
 [[lean_exe]]

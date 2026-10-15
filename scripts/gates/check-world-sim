@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# HP-6 SIM gate (HP-DESIGN §4): seeded deterministic simulation of the Host path
+# (receiver -> Turn.ofIntent -> World.admit, persisted records + Turn entries) against
+# the follower (TurnLog.followFrom over the entries), with a crash-restart every K steps.
+#
+#   scripts/gates/check-world-sim [EXE]
+#
+# Default (merge gate): seeds 1..3 x 300 steps, crash every 50.  Nightly knob:
+#   WORLD_SIM_FIRST=<fresh> WORLD_SIM_SEEDS=64 WORLD_SIM_STEPS=10000 WORLD_SIM_K=500
+# Corpus (optional): WORLD_SIM_STORES=<stores.json of {row, config}> drives each retained
+# Store's own records through both sides (scripts/kern/turn-log-follower.sh's inputs).
+#
+# The plant: the follower skips leg 0's guard when that guard is the one that failed.
+# It must go red on PLANT_SEED at exactly PLANT_STEP (recorded when the plant was first
+# observed); a plant that stops firing, or fires elsewhere, is red too.
+set -uo pipefail
+exe=${1:-.lake/build/bin/world-sim}
+[[ -x $exe ]] || { echo "check-world-sim: $exe is not executable" >&2; exit 2; }
+first=${WORLD_SIM_FIRST:-1} seeds=${WORLD_SIM_SEEDS:-3} steps=${WORLD_SIM_STEPS:-300} k=${WORLD_SIM_K:-50}
+PLANT_SEED=@PLANT_SEED@ PLANT_STEP=@PLANT_STEP@
+status=0
+start=$(date +%s)
+"$exe" seeds "$first" "$seeds" "$steps" "$k" || status=1
+plant=$("$exe" "$PLANT_SEED" "$steps" "$k" --plant follower-skips-guard) && prc=0 || prc=$?
+echo "$plant"
+if [[ $prc == 1 && $plant == "SIM seed=$PLANT_SEED FAIL step=$PLANT_STEP "*follower* ]]; then
+  echo "PLANT follower-skips-guard RED-AS-EXPECTED seed=$PLANT_SEED step=$PLANT_STEP"
+else
+  echo "PLANT follower-skips-guard NOT-CAUGHT-AS-RECORDED (want seed=$PLANT_SEED step=$PLANT_STEP)"; status=1
+fi
+if [[ -n ${WORLD_SIM_STORES:-} ]]; then
+  "$exe" corpus "$WORLD_SIM_STORES" "$k" || status=1
+fi
+echo "WORLD-SIM seeds=$first+$seeds steps=$steps k=$k wall=$(( $(date +%s) - start ))s status=$status"
+exit $status
