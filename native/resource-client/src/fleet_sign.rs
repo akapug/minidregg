@@ -225,23 +225,23 @@ fn profile(flags: &Flags) -> Result<Profile> {
 /// an enrollment is planned or resumed, or value moves; a `--node-url` that agrees is pinned
 /// for the process, and every later reader of those files rechecks against that pin.
 fn bind_socket(flags: &Flags, pins: &[(PathBuf, &str)]) -> Result<()> {
-    let mut selected = flags.socket.clone();
+    let mut selected = flags.socket.clone().map(|socket| (socket, "--node-url".to_owned()));
     for (file, member) in pins {
         if !file.exists() {
             continue;
         }
         let pin = PathBuf::from(field(&read_json(file)?, member)?);
         match &selected {
-            Some(socket) if *socket != pin => {
+            Some((socket, source)) if *socket != pin => {
                 return Err(format!(
-                    "{} is pinned to {}, not the selected socket {}",
+                    "{} is pinned to {}, but {source} names {}",
                     file.display(),
                     pin.display(),
                     socket.display()
                 ))
             }
             Some(_) => {}
-            None => selected = Some(pin),
+            None => selected = Some((pin, file.display().to_string())),
         }
     }
     if let Some(socket) = &flags.socket {
@@ -1016,21 +1016,6 @@ mod tests {
         parse(argv(&words)).unwrap()
     }
 
-    /// SOCKET is process-global: a case that pins it runs alone in a child test process.
-    fn in_child(test: &str, var: &str) {
-        let output = std::process::Command::new(env::current_exe().unwrap())
-            .args(["--exact", test, "--nocapture"])
-            .env(var, "1")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success() && stdout.contains("1 passed"),
-            "{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
     #[test]
     fn join_refuses_a_node_url_the_sponsor_is_not_pinned_to_before_any_key_or_enrollment() {
         let base = scratch("socket-mismatch");
@@ -1039,7 +1024,7 @@ mod tests {
         let home = base.join("home");
         let flags = join_flags(&home, &sponsor, Some("unix:/run/mini-other.sock"));
         let error = join(&flags).unwrap_err();
-        assert!(error.contains("not the selected socket /run/mini-other.sock"), "{error}");
+        assert!(error.contains("but --node-url names /run/mini-other.sock"), "{error}");
         let profile = profile(&flags).unwrap();
         assert!(!profile.dir.exists(), "no key, enrollment or workspace is made");
         assert_ne!(SOCKET.get(), Some(&PathBuf::from("/run/mini-other.sock")));
@@ -1088,7 +1073,7 @@ mod tests {
 
     #[test]
     fn join_with_the_sponsors_socket_pins_it_and_proceeds() {
-        in_child(
+        crate::in_child(
             "fleet_sign::tests::join_with_the_sponsors_socket_pins_it_and_proceeds_child",
             "MINI_FLEET_SIGN_SOCKET_CHILD",
         );

@@ -2055,25 +2055,12 @@ mod tests {
 
     #[test]
     fn enrollment_refuses_a_process_pinned_to_another_socket_than_its_sponsors() {
-        // SOCKET is process-global: the case pins it, so it runs alone in a child process.
         const CHILD: &str = "MINI_ENROLLMENT_SOCKET_CHILD";
         if std::env::var_os(CHILD).is_none() {
-            let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "participant_enrollment::tests::enrollment_refuses_a_process_pinned_to_another_socket_than_its_sponsors",
-                    "--nocapture",
-                ])
-                .env(CHILD, "1")
-                .output()
-                .unwrap();
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                output.status.success() && stdout.contains("1 passed"),
-                "{stdout}\n{}",
-                String::from_utf8_lossy(&output.stderr)
+            return crate::in_child(
+                "participant_enrollment::tests::enrollment_refuses_a_process_pinned_to_another_socket_than_its_sponsors",
+                CHILD,
             );
-            return;
         }
         let base = scratch("socket-pin");
         let sponsor = base.join("sponsor");
