@@ -73,7 +73,8 @@ fi
 mkdir -p "$PIPELINE_ROOT/scripts" "$PIPELINE_ROOT/candidate"
 rsync -a --delete "$STAGE/pipeline/" "$PIPELINE_ROOT/scripts/"
 rsync -a "$STAGE/candidate/lane-build.sh" "$STAGE/candidate/lib.sh" "$PIPELINE_ROOT/candidate/"
-git -C "$SRV/mini" rev-parse HEAD > "$PIPELINE_ROOT/scripts/.installed-from"; echo "installed-from: $(cat "$PIPELINE_ROOT/scripts/.installed-from") (staged by burst-up)"
+# provenance = the commit the scripts were STAGED from (burst-up's checkout), which need not be the tip at $SRV/mini
+{ cat "$STAGE/STAGED-FROM" 2>/dev/null || git -C "$SRV/mini" rev-parse HEAD; } > "$PIPELINE_ROOT/scripts/.installed-from"; echo "installed-from: $(cat "$PIPELINE_ROOT/scripts/.installed-from") (staged by burst-up)"
 P=$PIPELINE_ROOT/scripts
 # the FIFO Lean-slot wrapper at its well-known path (sized by WITH_LEAN_SLOT_N/_THREADS/_NICE in box.env, via --set);
 # a hand-installed copy already there is left alone
