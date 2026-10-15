@@ -30,6 +30,22 @@ def full {α : Type} (c : StreamCodec α) (bytes : List UInt8) : Option α := do
   let (value, rest) ← c.decodePrefix bytes
   if rest = [] then some value else none
 
+/-- `full` accepts exactly the encodings (the codec is canonical). -/
+theorem full_canonical {α : Type} (c : StreamCodec α) (bytes : List UInt8) (value : α)
+    (decoded : full c bytes = some value) : c.encode value = bytes := by
+  unfold full at decoded
+  cases accepted : c.decodePrefix bytes with
+  | none => simp [accepted] at decoded
+  | some pair =>
+      obtain ⟨v, rest⟩ := pair
+      simp only [accepted, bind, Option.bind] at decoded
+      split at decoded
+      · rename_i empty
+        subst empty
+        cases decoded
+        simpa using c.encode_decodePrefix _ _ _ accepted
+      · cases decoded
+
 @[simp] theorem full_encode {α : Type} (c : StreamCodec α) (value : α) :
     full c (c.encode value) = some value := by
   have h := c.decodePrefix_encode value []
@@ -68,6 +84,39 @@ def opStream (k : deployedR.Kind) : StreamCodec (Op (deployedR.layout k)) where
     intro op suffix
     cases op <;>
       simp [encodeOp, List.append_assoc, StreamCodec.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes op suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    revert decoded
+    split <;> intro decoded
+    all_goals try (simp at decoded; done)
+    all_goals simp only [bind, Option.bind_eq_some_iff, Option.some.injEq, Prod.mk.injEq] at decoded
+    · obtain ⟨⟨ns, b1⟩, h1, ⟨key, b2⟩, h2, ⟨v, b3⟩, h3, rfl, rfl⟩ := decoded
+      have e1 := StreamCodec.encode_decodePrefix _ _ _ _ h1
+      have e2 := StreamCodec.encode_decodePrefix _ _ _ _ h2
+      have e3 := StreamCodec.encode_decodePrefix _ _ _ _ h3
+      subst e3
+      simp_all [encodeOp, List.append_assoc]
+    · obtain ⟨⟨ns, b1⟩, h1, ⟨key, b2⟩, h2, ⟨old, b3⟩, h3, ⟨new, b4⟩, h4, rfl, rfl⟩ := decoded
+      have e1 := StreamCodec.encode_decodePrefix _ _ _ _ h1
+      have e2 := StreamCodec.encode_decodePrefix _ _ _ _ h2
+      have e3 := StreamCodec.encode_decodePrefix _ _ _ _ h3
+      have e4 := StreamCodec.encode_decodePrefix _ _ _ _ h4
+      subst e4; subst e3
+      simp_all [encodeOp, List.append_assoc]
+    · obtain ⟨⟨ns, b1⟩, h1, ⟨key, b2⟩, h2, ⟨v, b3⟩, h3, rfl, rfl⟩ := decoded
+      have e1 := StreamCodec.encode_decodePrefix _ _ _ _ h1
+      have e2 := StreamCodec.encode_decodePrefix _ _ _ _ h2
+      have e3 := StreamCodec.encode_decodePrefix _ _ _ _ h3
+      subst e3
+      simp_all [encodeOp, List.append_assoc]
+    · obtain ⟨⟨ns, b1⟩, h1, ⟨key, b2⟩, h2, ⟨old, b3⟩, h3, rfl, rfl⟩ := decoded
+      have e1 := StreamCodec.encode_decodePrefix _ _ _ _ h1
+      have e2 := StreamCodec.encode_decodePrefix _ _ _ _ h2
+      have e3 := StreamCodec.encode_decodePrefix _ _ _ _ h3
+      subst e3
+      simp_all [encodeOp, List.append_assoc]
 
 theorem opStream_encode (k : deployedR.Kind) (op : Op (deployedR.layout k)) :
     (opStream k).encode op = encodeOp k op := rfl
@@ -89,6 +138,22 @@ theorem decodeOps_encode (k : deployedR.Kind) (patch : Patch (deployedR.layout k
       simp only [decodeOps, List.map_cons, List.mapM_cons, h] at ih ⊢
       simp [ih]
 
+theorem decodeOps_canonical (k : deployedR.Kind) (ops : List (List UInt8))
+    (patch : Patch (deployedR.layout k)) (decoded : decodeOps k ops = some patch) :
+    patch.map (encodeOp k) = ops := by
+  induction ops generalizing patch with
+  | nil =>
+      simp [decodeOps] at decoded
+      subst decoded; rfl
+  | cons op rest ih =>
+      simp only [decodeOps, List.mapM_cons, bind, Option.bind_eq_some_iff] at decoded
+      obtain ⟨head, headOk, tail, tailOk, built⟩ := decoded
+      simp only [pure, Option.some.injEq] at built
+      subst built
+      have h1 := full_canonical (opStream k) _ _ headOk
+      rw [opStream_encode] at h1
+      simp [h1, ih tail tailOk]
+
 /-- The leg stream; its `encode` is `encodeLeg`. -/
 def legStream : StreamCodec (Leg deployedR) where
   encode := encodeLeg
@@ -107,6 +172,22 @@ def legStream : StreamCodec (Leg deployedR) where
     simp only [encodeLeg, List.append_assoc, StreamCodec.decodePrefix_encode,
       List.cons_append, List.nil_append]
     simp [StreamCodec.decodePrefix_encode, decodeOps_encode]
+  encode_decodePrefix := by
+    intro bytes leg suffix decoded
+    simp only [bind, Option.bind_eq_some_iff] at decoded
+    obtain ⟨⟨cell, b1⟩, cellOk, decoded⟩ := decoded
+    have back := StreamCodec.encode_decodePrefix _ _ _ _ cellOk
+    subst back
+    rcases b1 with _ | ⟨tag, b2⟩
+    · cases decoded
+    simp only [Option.bind_eq_some_iff] at decoded
+    obtain ⟨k, kOk, ⟨ops, b3⟩, opsOk, patch, patchOk, decoded⟩ := decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨rfl, rfl⟩ := decoded
+    have back := StreamCodec.encode_decodePrefix _ _ _ _ opsOk
+    subst back
+    simp [encodeLeg, List.append_assoc, CanonicalCellRegistry.tag_of_kindAtTag _ _ kOk,
+      decodeOps_canonical _ _ _ patchOk]
 
 theorem legStream_encode (leg : Leg deployedR) : legStream.encode leg = encodeLeg leg := rfl
 
