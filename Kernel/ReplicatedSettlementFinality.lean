@@ -29,6 +29,7 @@ without the stated premises.
 -/
 import Kernel.FramedWalRefinement
 import Kernel.DurableDataIntent
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.ReplicatedSettlementFinality
 
@@ -501,5 +502,31 @@ end ClosedInstance
 /-- info: 'Minidregg.Kernel.ReplicatedSettlementFinality.ClosedInstance.retry_on_backup_is_idempotent' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms ClosedInstance.retry_on_backup_is_idempotent
+
+namespace ClosedInstance
+
+open Minidregg.Kernel.DurableWalHandler.ClosedInstance
+
+/-- The closed candidate with a different event at the same slot. -/
+def rival : Candidate Nat Nat Nat Nat :=
+  { candidate with intent := { intent with event := intent.event + 1 } }
+
+/-- Every replica voted for both forks of slot 0. -/
+def forkedBook : VoteBook (Node := ReplicaNode) (TxId := Nat) (CellId := Nat)
+    (Nullifier := Nat) (Event := Nat) :=
+  fun _ => [candidate, rival]
+
+/-- Refuting pole of `PrefixDiscipline` (`discipline` is the satisfying one). -/
+theorem forkedBook_not_prefixDiscipline : ¬ PrefixDiscipline forkedBook := by
+  intro d
+  rcases d.compatible 0 candidate rival (by simp [forkedBook]) (by simp [forkedBook]) with h | h
+  all_goals
+    have e := congrArg (List.map Intent.event)
+      (h.eq_of_length (by simp [Candidate.log, rival, candidate]))
+    simp [Candidate.log, rival, candidate] at e
+
+#assert_axioms forkedBook_not_prefixDiscipline
+
+end ClosedInstance
 
 end Minidregg.Kernel.ReplicatedSettlementFinality

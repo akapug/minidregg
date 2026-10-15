@@ -1643,4 +1643,19 @@ def signingHeader {F : Type} [Field F] [DecidableEq F] (deployment : Deployment)
 #assert_axioms committed_admitted
 #assert_axioms committed_verified
 
+/-! ## Poles of `SshsigRefinement`
+
+A never-accepting `verify-sshsig` refines any authentication relation; an
+accept-all one is refused when nothing authenticates. -/
+
+theorem sshsigRefinement_rejectAll :
+    SshsigRefinement (fun _ _ _ _ => .ok false) id (fun _ _ _ => False) :=
+  ⟨fun _ _ _ _ h => nomatch h⟩
+
+theorem sshsigRefinement_acceptAll_refused :
+    ¬ SshsigRefinement (fun _ _ _ _ => .ok true) id (fun _ _ _ => False) :=
+  fun r => r.sound [] [] [] [] rfl
+
+#assert_axioms sshsigRefinement_rejectAll sshsigRefinement_acceptAll_refused
+
 end Minidregg.Kernel.PayEnrolReceiver

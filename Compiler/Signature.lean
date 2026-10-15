@@ -33,6 +33,7 @@ Imports Mathlib only (Compiler may import Mathlib + Theory + Compiler).
 -/
 import Mathlib.Data.PFunctor.Univariate.Basic
 import Mathlib.Data.Countable.Defs
+import Theory.AxiomPin
 
 namespace Minidregg.Compiler
 
@@ -491,5 +492,24 @@ obligation names, exercised end-to-end on one concrete instance. -/
 theorem conflated_pair_separated :
     opaqueRun ℕ (guardT fun _ => true) ≠ opaqueRun ℕ (guardT fun _ => false) :=
   opaqueRun_separates_guards fun h => Bool.noConfusion (congrFun h 0)
+
+/-! ## Poles of `IsFoldHom`
+
+Over the one-leaf signature, the fold of the constant-`0` algebra is a hom; the
+constant-`1` map is not. -/
+
+/-- One leaf shape, no recursive slots. -/
+def unitLeaf : Signature := ⟨Unit, fun _ => Empty⟩
+
+theorem isFoldHom_unitLeaf_fold :
+    IsFoldHom (S := unitLeaf) (fun _ _ => (0 : Nat)) (fold fun _ _ => 0) :=
+  fold_isFoldHom _
+
+theorem isFoldHom_unitLeaf_const_refused :
+    ¬ IsFoldHom (S := unitLeaf) (fun _ _ => (0 : Nat)) (fun _ => 1) := by
+  intro h
+  exact Nat.one_ne_zero (h () Empty.elim)
+
+#assert_axioms isFoldHom_unitLeaf_fold isFoldHom_unitLeaf_const_refused
 
 end Minidregg.Compiler

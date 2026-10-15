@@ -22,6 +22,7 @@ treated as evidence of physical atomicity.
 -/
 import Kernel.MultiCellHyperedge
 import Theory.ResourceCost
+import Theory.AxiomPin
 
 namespace Minidregg.Kernel.DurableCommitProtocol
 
@@ -922,6 +923,43 @@ theorem physical_step_no_partial_commit
   refine ⟨(execute schedule modelBefore intent).storeAfter modelBefore,
     simulated, ?_⟩
   exact execute_no_partial_commit schedule modelBefore intent
+
+/-! ## Poles of `ImplementationRefinement`
+
+The model itself, stepping by exact execution, refines; a physical state that
+stops representing anything after a step does not. -/
+
+namespace ImplementationRefinementPoles
+
+def snapshot : Snapshot Nat Nat Nat Nat :=
+  { roots := fun _ => ⟨0⟩, consumed := fun _ => false, available := fun _ => 0,
+    history := [], journal := [] }
+
+def intent : Intent Nat Nat Nat Nat :=
+  { transactionId := 0, rootWrites := [], nullifiers := [], exactCharge := fun _ => 0,
+    event := 0 }
+
+theorem exact :
+    ImplementationRefinement Nat Nat Nat Nat (Snapshot Nat Nat Nat Nat)
+      (fun before intent after =>
+        PLift (after = (execute .complete before intent).storeAfter before))
+      Eq := by
+  constructor
+  intro _ _ _ _ rep step
+  subst rep
+  exact ⟨.complete, step.down⟩
+
+theorem stuck_refused :
+    ¬ ImplementationRefinement Nat Nat Nat Nat Bool (fun _ _ _ => PUnit)
+      (fun b _ => b = false) := by
+  intro r
+  obtain ⟨_, h⟩ := r.simulates (physicalBefore := false) (physicalAfter := true)
+    (modelBefore := snapshot) (intent := intent) rfl PUnit.unit
+  exact Bool.noConfusion h
+
+#assert_axioms exact stuck_refused
+
+end ImplementationRefinementPoles
 
 end Minidregg.Kernel.DurableCommitProtocol
 

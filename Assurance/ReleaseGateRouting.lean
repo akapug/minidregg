@@ -66,6 +66,7 @@ sum of the operands the statement names, or the receipt is refused (up to the pr
 -/
 import Kernel.PrivateEscrowSettlement
 import Compiler.CommittedTerminalFiatShamir
+import Theory.AxiomPin
 
 namespace Minidregg.Assurance.ReleaseGateRouting
 
@@ -539,5 +540,33 @@ end Stage0
 #guard_msgs (whitespace := lax) in #print axioms stage0_deployed_gate_accepts_honest
 /-- info: 'Minidregg.Assurance.ReleaseGateRouting.stage0Receipt_is_bound_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stage0Receipt_is_bound_evidence
+
+/-! ## Poles of `BindingGate` and `PublicOnly`
+
+An accept-all gate binds the full relation and is refused for the empty one; a
+relation releasing a constant reads only the public half, one releasing the
+private state does not. -/
+
+theorem bindingGate_full :
+    BindingGate (fun (_ _ : Unit) (_ : Unit) => True) id id (fun _ => true) :=
+  fun _ _ => ⟨(), trivial⟩
+
+theorem bindingGate_acceptAll_refused :
+    ¬ BindingGate (fun (_ _ : Unit) (_ : Unit) => False) id id (fun _ => true) := by
+  intro h
+  obtain ⟨_, h⟩ := h () rfl
+  exact h
+
+theorem publicOnly_constant :
+    PublicOnly (fun (_ _ : Bool) (o : Bool) => o = true) (fun _ => ()) (fun _ => true) :=
+  fun _ _ _ h => h
+
+theorem publicOnly_private_refused :
+    ¬ PublicOnly (fun (s _ : Bool) (o : Bool) => o = s) (fun _ => ()) (fun _ => true) := by
+  intro h
+  exact absurd (h false false false rfl) (by decide)
+
+#assert_axioms bindingGate_full bindingGate_acceptAll_refused publicOnly_constant
+  publicOnly_private_refused
 
 end Minidregg.Assurance.ReleaseGateRouting

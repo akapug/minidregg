@@ -19,6 +19,8 @@ import Compiler.CredentialSignatureAdmission
 import Theory.CredentialLineageAdmission
 import Kernel.CanonicalPolicyRegistry
 import Compiler.RefusalReason
+import Theory.AssertCompiled
+import Theory.AxiomPin
 
 namespace Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 
@@ -1264,9 +1266,13 @@ def rotatedStore : Store.Store layout :=
 def rotatedCell : RegistryCell authorityMaterializer :=
   CellState.materialize authorityMaterializer rotatedStore
 
-/-- The root-collision premise for this one pair of authority stores. -/
-def RootPairBinding (left right : Store.Store layout) : Prop :=
-  authorityMaterializer.rootOf left = authorityMaterializer.rootOf right → left = right
+/-- The two selected authority stores have different roots under the deployed
+materializer: a computation on two closed stores, not a collision premise. -/
+theorem policy_rotated_rootOf_ne :
+    authorityMaterializer.rootOf policyStore ≠ authorityMaterializer.rootOf rotatedStore := by
+  native_decide
+
+#assert_compiled policy_rotated_rootOf_ne
 
 theorem selected_rotated_states_ne : policyStore ≠ rotatedStore := by
   intro equal
@@ -1278,10 +1284,30 @@ theorem selected_rotated_states_ne : policyStore ≠ rotatedStore := by
   rw [Store.Store.set_ne _ _ _ _ (by simp), Store.Store.set_eq] at revisions
   exact Nat.succ_ne_self demoRequest.policyRevision (Option.some.inj revisions).symm
 
-theorem rotated_root_ne (binding : RootPairBinding policyStore rotatedStore) :
-    rotatedCell.root ≠ authorityCell.root := by
-  intro rootsEqual
-  exact selected_rotated_states_ne (binding rootsEqual.symm)
+theorem rotated_root_ne : rotatedCell.root ≠ authorityCell.root := by
+  native_decide
+
+#assert_compiled rotated_root_ne
+
+/-! ### Poles of `CellState.PairBindingPremise`
+
+The deployed materializer binds the selected pair (its roots are computed to
+differ); a materializer whose root ignores its bytes does not. -/
+
+theorem selected_pair_binding :
+    CellState.PairBindingPremise authorityMaterializer policyStore rotatedStore :=
+  fun collision => policy_rotated_rootOf_ne collision.rootsEqual
+
+/-- `authorityMaterializer` with a constant root. -/
+def constantRootMaterializer : CellState.Materializer layout Digest :=
+  { authorityMaterializer with rootBytes := fun _ => authorityMaterializer.rootBytes [] }
+
+theorem constantRoot_pair_refused :
+    ¬ CellState.PairBindingPremise constantRootMaterializer policyStore rotatedStore :=
+  fun binding => binding ⟨selected_rotated_states_ne, rfl⟩
+
+#assert_compiled selected_pair_binding
+#assert_axioms constantRoot_pair_refused
 
 noncomputable def rotatedSnapshotBytes (cellId : CellId) : List UInt8 :=
   if cellId = registryCellId then rotatedCell.bytes
@@ -1297,22 +1323,22 @@ noncomputable def rotatedSnapshot : DataSnapshot authorityRootBytes where
   canonicalBytes := rotatedSnapshotBytes
   coherent := by intro cellId; rfl
 
-theorem rotatedSnapshot_moved (binding : RootPairBinding policyStore rotatedStore) :
+theorem rotatedSnapshot_moved :
     rotatedSnapshot.model.roots registryCellId ≠ authorityCell.root := by
   have bytesExact : rotatedSnapshotBytes registryCellId = rotatedCell.bytes := by
     simp [rotatedSnapshotBytes]
   change authorityRootBytes (rotatedSnapshotBytes registryCellId) ≠ authorityCell.root
   rw [bytesExact]
-  exact rotated_root_ne binding
+  exact rotated_root_ne
 
 /-- Stale policy-update tooth.  A policy revision/address rotation changes the
 pair-bound authority-cell root, so the old content+authorization intent is
 rejected at the read guard before its data write can be installed. -/
-theorem rotated_policy_rejects_old_intent (binding : RootPairBinding policyStore rotatedStore) :
+theorem rotated_policy_rejects_old_intent :
     guardedIntent.preflight rotatedSnapshot = .error .staleReadGuard :=
   policy_registry_rotation_rejects_old_intent authorityCell registryCellId
     sharedDigest baseIntent registryCell_readOnly rotatedSnapshot
-      (rotatedSnapshot_moved binding)
+      rotatedSnapshot_moved
 
 /-! ## Explicit physical ceiling -/
 
@@ -1338,6 +1364,4 @@ end Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 /-- info: 'Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.guardedIntent_ready' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.guardedIntent_ready
-/-- info: 'Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_policy_rejects_old_intent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in
-  #print axioms Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_policy_rejects_old_intent
+#assert_compiled Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_policy_rejects_old_intent
