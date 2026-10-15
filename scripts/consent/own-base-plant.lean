@@ -1,24 +1,26 @@
 /- CONSENT-OWN executed plant: no operator-sealed checkpoint is a client base.
 
-A Store key holder (the operator) can seal any state it likes. Every later write
-names its cell's pre-root (`expectedPre`), so a forged cell that a record later
-overwrites does not replay; and the anchor's world root covers the system slot
-and the cells the image seeds or writes. What neither sees is a cell id the image
-never touches: a checkpoint that carries one passes the open, the replay and the
-anchor root, and that cell's bytes are the operator's in every state resumed from
-it. This plant seals such a checkpoint at 32 under the Store's own key (cell 9 =
-[99], never seeded or written; the seed's default is []), then reads the same
-heights both ways in one pass:
+A Store key holder (the operator) can seal any state it likes. Most of it is
+caught: every later write names its cell's pre-root (`expectedPre`), so a forged
+cell that a record later writes does not replay; a checkpoint state may only hold
+cells the image seeds or writes, with the seed's absent default
+(`State.Admissible`), and the anchor's world root covers those cells. What
+neither sees is `State.available`, the metering budget: a checkpoint sealed with
+a raised budget passes the open, the replay, the head-root check and the anchor
+root, and every state resumed from it carries the operator's budget, so a later
+record the honest budget refuses (`insufficientBudget`) would be admitted. This
+plant re-seals checkpoint 32 under the Store's own key with every lane's budget
+raised by 777, then reads the same heights both ways in one pass (honest
+incidences budget after h records = 1000 - h):
 
-  OPERATOR (before CONSENT-OWN): `Loaded.prefixAt` (the opening's old cut) and
-  the Store Reader's `stateAt` — both resume from the sealed checkpoint at 32,
-  and cell 9 reads [99] at 34 and at 36, while the cut's world root equals the
-  honest one (the anchor comparison passes).
-  OWN (after): `Loaded.prefixOwn` (the opening's cut) and `Reader.ownOnly` with an
-  own base minted from that cut — cell 9 reads [] at 34, 36 and 38, and the own
-  base at 36 serves 38.
+  OPERATOR (before CONSENT-OWN): `Loaded.prefixAt` (the opening's old cut at 36)
+  and the Store Reader's `stateAt 34` resume from the sealed 32: budget + 777,
+  with the cut's world root EQUAL to the honest one (the anchor passes).
+  OWN (after): `Loaded.prefixOwn` (the opening's cut), `Reader.ownOnly []` at 34
+  and `Reader.ownOnly [own base at 36]` at 38 and at 34: the honest budget, base 0
+  or the own base 36.
 
-PASS requires the forged value to APPEAR on the operator path (the plant is live)
+PASS requires the forgery to APPEAR on every operator path (the plant is live)
 and to be ABSENT on every own path.
 
 Usage: lake env lean --run scripts/consent/own-base-plant.lean STORE-HELPER -/
@@ -60,6 +62,10 @@ def require (label : String) (condition : Bool) : IO Unit :=
 
 def cell (id : Nat) (snapshot : DataSnapshot rootBytes) : List UInt8 := snapshot.canonicalBytes ⟨id⟩
 
+/-- The incidences budget a state carries (`State.available`, which the world root does not cover). -/
+def budget (snapshot : DataSnapshot rootBytes) : Nat :=
+  snapshot.model.available Minidregg.Theory.ResourceCost.Lane.incidences
+
 /-- The own base of a genesis-based cut (`ConsentAnchor.ownOfGenesis`, here over
 the probe's root function). -/
 def ownOf (cut : Loaded rootBytes) (zero : cut.baseHeight = 0)
@@ -86,14 +92,14 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let key ← match ← transport.key with
     | .ok key => pure key
     | .error detail => throw (IO.userError detail)
-  -- The operator seals checkpoint 32 over a state carrying cell 9 = [99].
+  -- The operator re-seals checkpoint 32 over its state with every budget lane raised by 777.
   let some stored := (← transport.checkpointAt 32).toOption.join
     | throw (IO.userError "FAIL no checkpoint at 32")
   let body ← match DurableCheckpointCodec.openSealed key rootBytes stored.bytes with
     | .ok body => pure body
     | .error _ => throw (IO.userError "FAIL the honest checkpoint does not open")
   require "the honest checkpoint is at 32" (body.height == 32)
-  let forged := { body.state with cells := body.state.cells ++ [(⟨9⟩, [99])] }
+  let forged := { body.state with available := fun lane => body.state.available lane + 777 }
   match ← transport.putCheckpoint 32 (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealCheckpoint key rootBytes 32 body.chain body.frontier body.indexRoot forged)) with
   | .ok () => pure ()
@@ -109,34 +115,34 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   match target.prefixOwn 36 chains chainsExact with
   | .error detail => throw (IO.userError s!"FAIL own cut: {detail}")
   | .ok ⟨own, imaged, _, zero, seeded, _⟩ =>
-      IO.println s!"OPERATOR cut at 36: base {old.baseHeight}, cell 9 = {cell 9 old.snapshot}, cell 3 = {cell 3 old.snapshot}"
-      IO.println s!"OWN      cut at 36: base {own.baseHeight}, cell 9 = {cell 9 own.snapshot}, cell 3 = {cell 3 own.snapshot}"
-      require "the plant is live: the operator cut carries the forged cell" (cell 9 old.snapshot == [99])
+      IO.println s!"OPERATOR cut at 36: base {old.baseHeight}, budget = {budget old.snapshot}, cell 3 = {cell 3 old.snapshot}"
+      IO.println s!"OWN      cut at 36: base {own.baseHeight}, budget = {budget own.snapshot}, cell 3 = {cell 3 own.snapshot}"
+      require "the plant is live: the operator cut carries the forged budget" (budget old.snapshot == 964 + 777)
       require "the anchor comparison cannot see it: equal world roots at 36" (old.worldRoot == own.worldRoot)
-      require "the own cut carries the seed's default" (cell 9 own.snapshot == [] && cell 3 own.snapshot == [36])
-      let past (loaded : Loaded rootBytes) (height : Nat) : List UInt8 :=
-        ((loaded.atPrefix height).map (cell 9 ·)).getD [7, 7]
+      require "the own cut carries the honest budget" (budget own.snapshot == 964 && cell 3 own.snapshot == [36])
+      let past (loaded : Loaded rootBytes) (height : Nat) : Nat :=
+        ((loaded.atPrefix height).map budget).getD 0
       IO.println s!"at 34: operator cut {past old 34}, own cut {past own 34}"
-      require "operator past read at 34 shows the forgery" (past old 34 == [99])
-      require "own past read at 34 does not" (past own 34 == [])
+      require "operator past read at 34 shows the forgery" (past old 34 == 966 + 777)
+      require "own past read at 34 does not" (past own 34 == 966)
       let ⟨store, reader⟩ ← match ← DurableHistoryStore.readerOf transport rootBytes target with
         | .ok sealed => pure sealed
         | .error detail => throw (IO.userError s!"FAIL reader: {detail}")
-      let readAt (reader : Reader rootBytes store) (height : Nat) : IO (Nat × List UInt8) := do
+      let readAt (reader : Reader rootBytes store) (height : Nat) : IO (Nat × Nat) := do
         match ← reader.stateAt height with
-        | .ok state => pure (state.baseHeight, cell 9 state.snapshot)
+        | .ok state => pure (state.baseHeight, budget state.snapshot)
         | .error refusal => throw (IO.userError s!"FAIL stateAt {height}: {refusal.message}")
       let ownBase := ownOf own zero (by rw [seeded, imaged])
       let operator ← readAt reader 34
       let ownGenesis ← readAt (reader.ownOnly transport []) 34
       let ownAt38 ← readAt (reader.ownOnly transport [ownBase]) 38
       let ownAt34 ← readAt (reader.ownOnly transport [ownBase]) 34
-      IO.println s!"Reader.stateAt 34: operator base {operator.1} cell 9 = {operator.2}; own (none) base {ownGenesis.1} cell 9 = {ownGenesis.2}"
-      IO.println s!"Reader.ownOnly [own@36]: at 38 base {ownAt38.1} cell 9 = {ownAt38.2}; at 34 base {ownAt34.1} cell 9 = {ownAt34.2}"
-      require "operator Reader at 34 resumes from the sealed 32 and shows the forgery" (operator == (32, [99]))
-      require "own Reader at 34 folds from the seed" (ownGenesis == (0, []))
-      require "own Reader at 38 resumes from the own base at 36" (ownAt38 == (36, []))
-      require "own Reader at 34 (below the own base) folds from the seed" (ownAt34 == (0, []))
+      IO.println s!"Reader.stateAt 34: operator base {operator.1} budget = {operator.2}; own (none) base {ownGenesis.1} budget = {ownGenesis.2}"
+      IO.println s!"Reader.ownOnly [own@36]: at 38 base {ownAt38.1} budget = {ownAt38.2}; at 34 base {ownAt34.1} budget = {ownAt34.2}"
+      require "operator Reader at 34 resumes from the sealed 32 and shows the forgery" (operator == (32, 966 + 777))
+      require "own Reader at 34 folds from the seed" (ownGenesis == (0, 966))
+      require "own Reader at 38 resumes from the own base at 36" (ownAt38 == (36, 962))
+      require "own Reader at 34 (below the own base) folds from the seed" (ownAt34 == (0, 966))
       IO.println "PASS consent-own plant: the sealed forgery shows on every operator path and on no own path"
 
 end ConsentOwnPlant
