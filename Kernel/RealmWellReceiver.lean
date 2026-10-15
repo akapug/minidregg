@@ -379,7 +379,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.well, command.op, command.account, command.amount, marker domain semantics command⟩

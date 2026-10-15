@@ -209,7 +209,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.SEAT.EFFECT/v1".toUTF8.toList

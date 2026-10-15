@@ -450,6 +450,62 @@ def exportOfTuple : Option ComponentTuple → Option (Option Minidregg.Theory.La
     exportOfTuple (component.map componentTuple) = some component := by
   cases component <;> simp [exportOfTuple]
 
+/-- The tuple views are inverse on everything the decoders accept: a decoded
+tuple is the tuple of the record it decodes to. -/
+theorem refTuple_refOfTuple {tuple : RefTuple} {reference : Minidregg.Theory.LawComposition.PolicyRef}
+    (decoded : refOfTuple tuple = some reference) : refTuple reference = tuple := by
+  obtain ⟨policy, facet, selection⟩ := tuple
+  simp only [refOfTuple] at decoded
+  rcases facet with _ | _ | facet <;> rcases selection with _ | ⟨revision, digest⟩ <;>
+    simp at decoded <;> subst decoded <;> rfl
+
+theorem refsTuples_refsOfTuples {tuples : List RefTuple}
+    {references : List Minidregg.Theory.LawComposition.PolicyRef}
+    (decoded : refsOfTuples tuples = some references) : references.map refTuple = tuples := by
+  induction tuples generalizing references with
+  | nil => simp [refsOfTuples] at decoded; subst decoded; rfl
+  | cons first rest ih =>
+    simp only [refsOfTuples, bind, Option.bind] at decoded
+    cases one : refOfTuple first with
+    | none => simp [one] at decoded
+    | some head =>
+      cases many : refsOfTuples rest with
+      | none => simp [one, many] at decoded
+      | some tail =>
+        simp [one, many] at decoded
+        subst decoded
+        simp [refTuple_refOfTuple one, ih many]
+
+theorem componentTuple_componentOfTuple {tuple : ComponentTuple}
+    {component : Minidregg.Theory.LawComposition.Component}
+    (decoded : componentOfTuple tuple = some component) : componentTuple component = tuple := by
+  obtain ⟨selector, tokens, refs⟩ := tuple
+  simp only [componentOfTuple, bind, Option.bind] at decoded
+  cases pred : decodePred tokens with
+  | none => simp [pred] at decoded
+  | some predicate =>
+    cases parents : refsOfTuples refs with
+    | none => simp [pred, parents] at decoded
+    | some ps =>
+      simp [pred, parents] at decoded
+      subst decoded
+      simp [componentTuple, selectorTuple, selectorOfTuple, encodePred_decodePred pred,
+        refsTuples_refsOfTuples parents]
+
+theorem exportTuple_exportOfTuple {tuple : Option ComponentTuple}
+    {exported : Option Minidregg.Theory.LawComposition.Component}
+    (decoded : exportOfTuple tuple = some exported) : exported.map componentTuple = tuple := by
+  cases tuple with
+  | none => simp [exportOfTuple] at decoded; subst decoded; rfl
+  | some tuple =>
+    simp only [exportOfTuple, bind, Option.bind] at decoded
+    cases one : componentOfTuple tuple with
+    | none => simp [one] at decoded
+    | some component =>
+      simp [one] at decoded
+      subst decoded
+      simp [componentTuple_componentOfTuple one]
+
 abbrev RecordTuple := Nat × Nat × Digest × Digest × Option Digest × List Token ×
   SelectorTuple × List RefTuple × Option ComponentTuple ×
   Option Minidregg.Theory.ObjectAudience.State × Option Digest
@@ -497,6 +553,25 @@ def recordOfTuple (tuple : RecordTuple) : Option PolicyRecord := do
   cases record
   simp [recordOfTuple, recordTuple]
 
+theorem recordTuple_recordOfTuple {tuple : RecordTuple} {record : PolicyRecord}
+    (decoded : recordOfTuple tuple = some record) : recordTuple record = tuple := by
+  obtain ⟨policyId, version, domain, semantics, previous, tokens, selector, refs, exported,
+    audience, objectDescriptor⟩ := tuple
+  simp only [recordOfTuple, bind, Option.bind] at decoded
+  cases pred : decodePred tokens with
+  | none => simp [pred] at decoded
+  | some predicate =>
+    cases parents : refsOfTuples refs with
+    | none => simp [pred, parents] at decoded
+    | some ps =>
+      cases descendants : exportOfTuple exported with
+      | none => simp [pred, parents, descendants] at decoded
+      | some ds =>
+        simp [pred, parents, descendants] at decoded
+        subst decoded
+        simp [recordTuple, selectorTuple, selectorOfTuple, encodePred_decodePred pred,
+          refsTuples_refsOfTuples parents, exportTuple_exportOfTuple descendants]
+
 def sourceVersion : Nat := 6
 
 def framePrefix : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList
@@ -506,40 +581,36 @@ def wireFrame : List UInt8 := framePrefix ++ [6]
 def encode (record : PolicyRecord) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
 
-def decodeRaw (bytes : List UInt8) : Option PolicyRecord :=
+/-- The frame is checked, the tuple stream is canonical, and the tuple view is
+inverse on what it accepts (`recordTuple_recordOfTuple`), so the decoder admits
+one spelling per record (`decode_canonical`). -/
+def decode (bytes : List UInt8) : Option PolicyRecord :=
   if bytes.take wireFrame.length = wireFrame then do
     let tuple ← recordTupleStream.toLawful.decode (bytes.drop wireFrame.length)
     recordOfTuple tuple
   else none
 
-@[simp] theorem decodeRaw_encode (record : PolicyRecord) :
-    decodeRaw (encode record) = some record := by
+@[simp] theorem decode_encode (record : PolicyRecord) :
+    decode (encode record) = some record := by
   have payload := recordTupleStream.toLawful.decode_encode (recordTuple record)
   change recordTupleStream.toLawful.decode
     (recordTupleStream.encode (recordTuple record)) = some (recordTuple record) at payload
-  simp [decodeRaw, encode, payload]
-
-/-- Full consumption plus exact re-encoding admits one spelling per record. -/
-def decode (bytes : List UInt8) : Option PolicyRecord := do
-  let record ← decodeRaw bytes
-  if encode record = bytes then some record else none
-
-@[simp] theorem decode_encode (record : PolicyRecord) :
-    decode (encode record) = some record := by
-  simp [decode]
+  simp [decode, encode, payload]
 
 theorem decode_canonical {bytes : List UInt8} {record : PolicyRecord}
     (accepted : decode bytes = some record) : encode record = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical =>
-        cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+  split at accepted
+  · rename_i framed
+    cases payload : recordTupleStream.toLawful.decode (bytes.drop wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some tuple =>
+      simp only [payload, bind, Option.bind] at accepted
+      rw [encode, recordTuple_recordOfTuple accepted,
+        recordTupleStream.toLawful_canonical _ _ payload]
+      conv => rhs; rw [← List.take_append_drop wireFrame.length bytes]
+      rw [framed]
+  · cases accepted
 
 theorem decode_some_iff (bytes : List UInt8) (record : PolicyRecord) :
     decode bytes = some record ↔ bytes = encode record := by
@@ -559,14 +630,9 @@ theorem encode_injective : Function.Injective encode := by
   have decoded := congrArg decode equal
   simpa using decoded
 
-theorem rejects_noncanonical {bytes : List UInt8} {record : PolicyRecord}
-    (parsed : decodeRaw bytes = some record) (different : encode record ≠ bytes) :
-    decode bytes = none := by
-  simp [decode, parsed, different]
-
 theorem rejects_trailing (record : PolicyRecord) (suffix : List UInt8)
     (nonempty : suffix ≠ []) : decode (encode record ++ suffix) = none := by
-  simp [decode, decodeRaw, encode, List.append_assoc,
+  simp [decode, encode, List.append_assoc,
     StreamCodec.toLawful, StreamCodec.decodePrefix_encode, nonempty]
 
 theorem unknown_token_rejected (suffix : List UInt8) :
@@ -604,12 +670,8 @@ theorem v2_frame_refused (rest : List UInt8) :
     intro same
     have := List.append_cancel_left same
     simp at this
-  have raw : decodeRaw ((framePrefix ++ [2]) ++ rest) = none := by
-    unfold decodeRaw
-    rw [if_neg (by rw [taken]; exact differs)]
   unfold decode
-  rw [raw]
-  rfl
+  rw [if_neg (by rw [taken]; exact differs)]
 
 /-- Version 3 records (the vocabulary without the slot-to-slot atoms) refuse to decode:
 their frame byte is 3. -/
@@ -622,12 +684,8 @@ theorem v3_frame_refused (rest : List UInt8) :
     intro same
     have := List.append_cancel_left same
     simp at this
-  have raw : decodeRaw ((framePrefix ++ [3]) ++ rest) = none := by
-    unfold decodeRaw
-    rw [if_neg (by rw [taken]; exact differs)]
   unfold decode
-  rw [raw]
-  rfl
+  rw [if_neg (by rw [taken]; exact differs)]
 
 /-- Version 4 records (the single-predicate source without law components) refuse to decode:
 their frame byte is 4. -/
@@ -640,12 +698,8 @@ theorem v4_frame_refused (rest : List UInt8) :
     intro same
     have := List.append_cancel_left same
     simp at this
-  have raw : decodeRaw ((framePrefix ++ [4]) ++ rest) = none := by
-    unfold decodeRaw
-    rw [if_neg (by rw [taken]; exact differs)]
   unfold decode
-  rw [raw]
-  rfl
+  rw [if_neg (by rw [taken]; exact differs)]
 
 /-- Both independent v5 layouts (law composition and audience) are rejected
 before inspecting their payload. Neither is a fallback active source format. -/
@@ -658,12 +712,8 @@ theorem v5_frame_refused (rest : List UInt8) :
     intro same
     have := List.append_cancel_left same
     simp at this
-  have raw : decodeRaw ((framePrefix ++ [5]) ++ rest) = none := by
-    unfold decodeRaw
-    rw [if_neg (by rw [taken]; exact differs)]
   unfold decode
-  rw [raw]
-  rfl
+  rw [if_neg (by rw [taken]; exact differs)]
 
 
 /-- Conversely every version-6 encoding carries frame byte 6, so a version-3 decoder, whose first
@@ -855,43 +905,52 @@ def recordOfTuple (tuple : RecordTuple) : Option Record := do
   cases record
   simp [recordOfTuple, recordTuple]
 
+theorem recordTuple_recordOfTuple {tuple : RecordTuple} {record : Record}
+    (decoded : recordOfTuple tuple = some record) : recordTuple record = tuple := by
+  obtain ⟨policyId, version, domain, semantics, previous, tokens⟩ := tuple
+  simp only [recordOfTuple, bind, Option.bind] at decoded
+  cases pred : decodePred tokens with
+  | none => simp [pred] at decoded
+  | some predicate =>
+    simp [pred] at decoded
+    subst decoded
+    simp [recordTuple, encodePred_decodePred pred]
+
 def wireFrame : List UInt8 := framePrefix ++ [4]
 
 def encode (record : Record) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
 
-def decodeRaw (bytes : List UInt8) : Option Record :=
+/-- The frame is checked, the tuple stream is canonical, and the tuple view is
+inverse on what it accepts (`recordTuple_recordOfTuple`), so the decoder admits
+one spelling per record (`decode_canonical`). -/
+def decode (bytes : List UInt8) : Option Record :=
   if bytes.take wireFrame.length = wireFrame then do
     let tuple ← recordTupleStream.toLawful.decode (bytes.drop wireFrame.length)
     recordOfTuple tuple
   else none
 
-@[simp] theorem decodeRaw_encode (record : Record) :
-    decodeRaw (encode record) = some record := by
+@[simp] theorem decode_encode (record : Record) :
+    decode (encode record) = some record := by
   have payload := recordTupleStream.toLawful.decode_encode (recordTuple record)
   change recordTupleStream.toLawful.decode
     (recordTupleStream.encode (recordTuple record)) = some (recordTuple record) at payload
-  simp [decodeRaw, encode, payload]
-
-def decode (bytes : List UInt8) : Option Record := do
-  let record ← decodeRaw bytes
-  if encode record = bytes then some record else none
-
-@[simp] theorem decode_encode (record : Record) :
-    decode (encode record) = some record := by simp [decode]
+  simp [decode, encode, payload]
 
 theorem decode_canonical {bytes : List UInt8} {record : Record}
     (accepted : decode bytes = some record) : encode record = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical =>
-        cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+  split at accepted
+  · rename_i framed
+    cases payload : recordTupleStream.toLawful.decode (bytes.drop wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some tuple =>
+      simp only [payload, bind, Option.bind] at accepted
+      rw [encode, recordTuple_recordOfTuple accepted,
+        recordTupleStream.toLawful_canonical _ _ payload]
+      conv => rhs; rw [← List.take_append_drop wireFrame.length bytes]
+      rw [framed]
+  · cases accepted
 
 def codec : LawfulCodec Record where
   encode := encode

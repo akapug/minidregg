@@ -39,9 +39,8 @@ def controlStream : StreamCodec Control :=
         (StreamCodec.product (StreamCodec.list bytesStream) DurableReceiverCodec.chargeStream)))
     (fun c => (c.reservations,c.decisions,c.repairOutbox,c.maintenanceReserve))
     (fun (r,e,o,m) => ⟨r,e,o,m⟩) (by intro c; cases c; rfl)
-def decode (bytes : List UInt8) : Option Control := do
-  let c ← controlStream.toLawful.decode bytes
-  if controlStream.encode c == bytes then some c else none
+def decode (bytes : List UInt8) : Option Control :=
+  controlStream.toLawful.decode bytes
 /-- The control cell cannot itself become an application lock: otherwise
 the engine could reserve the very cell needed to finish/abort its decision. -/
 def Control.wellFormed (c : Control) (domain : Digest) (controlCell : CellId) : Bool :=

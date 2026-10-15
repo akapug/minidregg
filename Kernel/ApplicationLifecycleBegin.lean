@@ -140,17 +140,7 @@ def sourceStream : StreamCodec Source :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/LIFECYCLE-BEGIN/v2".toUTF8.toList
 
-private def rawSourceCodec : LawfulCodec Source where
-  encode source := frame ++ sourceStream.encode source
-  decode bytes := if bytes.take frame.length = frame then
-    sourceStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro source
-    have decoded := sourceStream.toLawful.decode_encode source
-    change sourceStream.toLawful.decode (sourceStream.encode source) = some source at decoded
-    simp [decoded]
-
-def sourceCodec : LawfulCodec Source := strictCodec rawSourceCodec
+def sourceCodec : LawfulCodec Source := (StreamCodec.framed frame sourceStream).toLawful
 
 def Source.canonicalBytes (source : Source) : List UInt8 :=
   sourceCodec.encode source
@@ -162,7 +152,7 @@ theorem source_decode_encode (source : Source) :
 theorem source_decoded_canonical {bytes : List UInt8} {source : Source}
     (decoded : sourceCodec.decode bytes = some source) :
     source.canonicalBytes = bytes :=
-  strictCodec_canonical rawSourceCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The operation key stays stable when a different proposed image or package
 is presented under the same app generation and caller operation ID. -/

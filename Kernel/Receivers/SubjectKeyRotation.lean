@@ -126,8 +126,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   | none => none
   | some command =>
       some ⟨ingress, command,
-        ResourceBirthCodec.strictCodec_canonical
-          (ParticipantKeyEnrollment.framedRaw commandFrame commandStream) commandExact⟩
+        ParticipantKeyEnrollment.framed_canonical commandExact⟩
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress

@@ -58,17 +58,7 @@ def specStream : StreamCodec Spec :=
 private def specFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-ISSUE-SPEC/v2".toUTF8.toList
 
-private def rawSpecCodec : LawfulCodec Spec where
-  encode spec := specFrame ++ specStream.encode spec
-  decode bytes := if bytes.take specFrame.length = specFrame then
-    specStream.toLawful.decode (bytes.drop specFrame.length) else none
-  decode_encode := by
-    intro spec
-    have decoded := specStream.toLawful.decode_encode spec
-    change specStream.toLawful.decode (specStream.encode spec) = some spec at decoded
-    simp [decoded]
-
-def specCodec : LawfulCodec Spec := ResourceBirthCodec.strictCodec rawSpecCodec
+def specCodec : LawfulCodec Spec := (StreamCodec.framed specFrame specStream).toLawful
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec := specCodec.decode_encode spec
@@ -100,17 +90,7 @@ private def ingressStream : StreamCodec Ingress :=
 private def ingressFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-ISSUE-INGRESS/v2".toUTF8.toList
 
-private def rawIngressCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec rawIngressCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 theorem ingress_decode_encode (ingress : Ingress) :
     ingressCodec.decode (ingressCodec.encode ingress) = some ingress :=

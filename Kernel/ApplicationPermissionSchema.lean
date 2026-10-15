@@ -77,18 +77,8 @@ def schemaStream : StreamCodec Schema :=
 private def schemaFrame : List UInt8 :=
   "DREGG/APPLICATION/PERMISSION-SCHEMA/v1".toUTF8.toList
 
-private def rawSchemaCodec : LawfulCodec Schema where
-  encode s := schemaFrame ++ schemaStream.encode s
-  decode bytes := if bytes.take schemaFrame.length = schemaFrame then
-    schemaStream.toLawful.decode (bytes.drop schemaFrame.length) else none
-  decode_encode := by
-    intro s
-    have decoded := schemaStream.toLawful.decode_encode s
-    change schemaStream.toLawful.decode (schemaStream.encode s) = some s at decoded
-    simp [decoded]
-
 def schemaCodec : LawfulCodec Schema :=
-  ResourceBirthCodec.strictCodec rawSchemaCodec
+  (StreamCodec.framed schemaFrame schemaStream).toLawful
 
 def Schema.root (s : Schema) : Digest :=
   (Sp800185Cshake256.hash
@@ -107,7 +97,7 @@ theorem schema_bytes_injective : Function.Injective schemaCodec.encode := by
 theorem decoded_canonical {bytes : List UInt8} {s : Schema}
     (decoded : schemaCodec.decode bytes = some s) :
     schemaCodec.encode s = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawSchemaCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 private def asciiLetter (c : UInt8) : Bool :=
   (65 ≤ c.toNat && c.toNat ≤ 90) || (97 ≤ c.toNat && c.toNat ≤ 122)

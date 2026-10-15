@@ -356,8 +356,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -1918,7 +1917,7 @@ def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   return ((payload.drop 4).take width, payload.drop (4 + width))
 
 def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+  let signaturesCodec := (StreamCodec.list bytesStream).toLawful
   let some signatures := signaturesCodec.decode bytes
     | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures
@@ -4210,9 +4209,8 @@ def fnFrontierLocalScope (config : NativeHost.Config)
     FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath, gateway)
 
 def fnFrontierPlanRequestCodec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN-REQUEST/v2".toUTF8.toList
-      (StreamCodec.option digestStream))
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN-REQUEST/v2".toUTF8.toList
+    (StreamCodec.option digestStream)
 
 /-- Op64 polls only the configured local consumer. The optional transaction ID
 selects an already accepted Mini event13; `none` selects a bounded empty page.
@@ -8063,7 +8061,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "observe-assemble", [challengePath, signaturesPath, output] =>
           let some challenge := NativeObservationCodec.challengeCodec.decode (← readBytes challengePath)
             | throw (RequestRefusal.malformed "noncanonical observation challenge")
-          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let signaturesCodec := (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
             | throw (RequestRefusal.malformed "noncanonical signature list")
           let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
@@ -8081,7 +8079,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "assemble", [planPath, signaturesPath, output] =>
           let some plan := signingPlanCodec.decode (← readBytes planPath)
             | throw (RequestRefusal.malformed "noncanonical signing plan")
-          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let signaturesCodec := (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
             | throw (RequestRefusal.malformed "noncanonical signature list")
           let call ← IO.ofExcept (NativeHost.assemble plan signatures)

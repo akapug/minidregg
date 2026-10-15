@@ -29,24 +29,6 @@ open Minidregg.Theory.Store
 open Minidregg.Compiler.IntStream (intStream)
 set_option autoImplicit false
 
-/-- Re-encoding is part of decoding: alternative integer encodings, duplicate
-map entries, zero entries, reordered supports, and trailing bytes are refused. -/
-def canonicalCodec {α : Type} (codec : LawfulCodec α) : LawfulCodec α where
-  encode := codec.encode
-  decode bytes := do
-    let value ← codec.decode bytes
-    if codec.encode value = bytes then some value else none
-  decode_encode := by intro value; simp [codec.decode_encode]
-
-theorem canonicalCodec_accepted_bytes {α : Type} (codec : LawfulCodec α)
-    {bytes : List UInt8} {value : α}
-    (accepted : (canonicalCodec codec).decode bytes = some value) :
-    codec.encode value = bytes := by
-  simp only [canonicalCodec, Option.bind_eq_bind, Option.bind_eq_some_iff] at accepted
-  obtain ⟨decoded, _, accepted⟩ := accepted
-  split_ifs at accepted with exactBytes
-  · cases Option.some.inj accepted; exact exactBytes
-
 variable {K V : Type} [DecidableEq K] [Zero V]
 
 /-- Product view of the shared dependent sparse-map reconstruction. -/
@@ -186,16 +168,31 @@ def wireVersion : Nat := 2
 
 def wireFrame : List UInt8 := [68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,2]
 
-def framedCodec {α : Type} (kind : UInt8) (codec : LawfulCodec α) : LawfulCodec α where
-  encode value := wireFrame ++ kind :: codec.encode value
-  decode
-    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 82 :: 69 :: 83 :: 79 :: 85 :: 82 :: 67 :: 69 :: 47 :: 2 :: found :: payload =>
-      if found = kind then codec.decode payload else none
-    | _ => none
-  decode_encode := by intro value; simp [wireFrame, codec.decode_encode]
+/-- The resource frame and the codec's kind byte, CHECKED, then one value.
+Every stream below is canonical, so the decoder accepts exactly the encodings
+(`framedCodec_decode_iff`): alternative integer encodings, duplicate map
+entries, zero entries, reordered supports and trailing bytes are refused by the
+streams themselves, with no re-encode. -/
+def framedCodec {α : Type} (kind : UInt8) (stream : StreamCodec α) : LawfulCodec α :=
+  (StreamCodec.framed (wireFrame ++ [kind]) stream).toLawful
+
+theorem framedCodec_encode {α : Type} (kind : UInt8) (stream : StreamCodec α) (value : α) :
+    (framedCodec kind stream).encode value = wireFrame ++ kind :: stream.encode value := by
+  simp [framedCodec, StreamCodec.toLawful, StreamCodec.framed_encode]
+
+theorem framedCodec_canonical {α : Type} (kind : UInt8) (stream : StreamCodec α)
+    {bytes : List UInt8} {value : α} (accepted : (framedCodec kind stream).decode bytes = some value) :
+    (framedCodec kind stream).encode value = bytes :=
+  StreamCodec.toLawful_canonical _ bytes value accepted
+
+theorem framedCodec_decode_iff {α : Type} (kind : UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) (value : α) :
+    (framedCodec kind stream).decode bytes = some value ↔
+      (framedCodec kind stream).encode value = bytes :=
+  StreamCodec.toLawful_decode_iff _ bytes value
 
 def stateCodec : LawfulCodec (Store CanonicalResourceKernel.layout) :=
-  canonicalCodec (framedCodec 0 stateStream.toLawful)
+  framedCodec 0 stateStream
 
 def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v2".toUTF8.toList
 
@@ -262,7 +259,7 @@ def operationStream : StreamCodec Operation where
         exact operationWireStream.encode_decodePrefix _ _ _ wireOk
 
 def operationCodec : LawfulCodec Operation :=
-  canonicalCodec (framedCodec 1 operationStream.toLawful)
+  framedCodec 1 operationStream
 
 abbrev PostingTuple := Nat × Nat × Nat × Nat
 
@@ -275,12 +272,12 @@ def postingStream : StreamCodec Posting :=
     (by intro posting; rfl)
 
 def postingCodec : LawfulCodec Posting :=
-  canonicalCodec (framedCodec 2 postingStream.toLawful)
+  framedCodec 2 postingStream
 
 /-- The effect preimage is itself a derived codec, so operation/posting
 separation and complete consumption follow the common product law. -/
 def effectSourceCodec : LawfulCodec (Operation × Posting) :=
-  canonicalCodec (framedCodec 4 (StreamCodec.product operationStream postingStream).toLawful)
+  framedCodec 4 (StreamCodec.product operationStream postingStream)
 
 /-- A batch on the wire: registrations, operations, then deregistrations. The
 deregistration list is part of every batch's bytes (an empty list is still
@@ -294,7 +291,7 @@ def batchStream : StreamCodec Batch :=
     (by intro batch; rfl)
 
 def batchCodec : LawfulCodec Batch :=
-  canonicalCodec (framedCodec 3 batchStream.toLawful)
+  framedCodec 3 batchStream
 
 theorem codec_encode_injective {α : Type} (codec : LawfulCodec α) :
     Function.Injective codec.encode := by
@@ -339,14 +336,6 @@ theorem same_size_distinct_operations :
 theorem operation_wire_is_compact :
     (operationCodec.encode (.transfer 1000000 2000000 3000000 4000000)).length < 64 := by decide
 
-theorem canonicalCodec_decode_iff {α : Type} (codec : LawfulCodec α) (bytes : List UInt8)
-    (value : α) : (canonicalCodec codec).decode bytes = some value ↔ codec.encode value = bytes := by
-  constructor
-  · exact canonicalCodec_accepted_bytes codec
-  · intro encoded
-    subst encoded
-    exact (canonicalCodec codec).decode_encode value
-
 theorem bookTupleStream_encode_injective : Function.Injective bookTupleStream.encode :=
   codec_encode_injective bookTupleStream.toLawful
 
@@ -365,7 +354,7 @@ theorem decode_tuple_eq_none_iff (wire : BookTuple) :
       change wireFrame ++ 0 :: 1 :: bookStream.encode (bookOfTuple wire) = _
       rw [bookStream_encode, canonical]
       simp
-    have accepted := (canonicalCodec_decode_iff (framedCodec 0 stateStream.toLawful) _ _).mpr encoded
+    have accepted := (framedCodec_decode_iff 0 stateStream _ _).mpr encoded
     change stateCodec.decode _ = some _ at accepted
     rw [refused] at accepted
     cases accepted
@@ -374,7 +363,7 @@ theorem decode_tuple_eq_none_iff (wire : BookTuple) :
     | none => rfl
     | some state =>
       exfalso
-      have encoded := (canonicalCodec_decode_iff (framedCodec 0 stateStream.toLawful) _ _).mp decoded
+      have encoded := (framedCodec_decode_iff 0 stateStream _ _).mp decoded
       change wireFrame ++ 0 :: (StreamCodec.option bookStream).encode (bookAt state) = _ at encoded
       cases present : bookAt state with
       | none =>

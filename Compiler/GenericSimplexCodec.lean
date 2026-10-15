@@ -22,10 +22,12 @@ def messageStream : StreamCodec Message :=
     (fun m => (m.sender, m.view, m.kind, m.value))
     (fun (s,v,k,a) => ⟨s,v,k,a⟩)
     (by intro m; cases m; rfl)
-/-- Canonical decoding rejects tag aliases and trailing bytes. -/
-def decodeMessage (bytes : Bytes) : Option Message := do
-  let m ← messageStream.toLawful.decode bytes
-  if messageStream.encode m == bytes then some m else none
+/-- `messageStream` is canonical: tag aliases and trailing bytes have no
+decoding (`decodeMessage_canonical`). -/
+def decodeMessage (bytes : Bytes) : Option Message := messageStream.toLawful.decode bytes
+theorem decodeMessage_canonical {bytes : Bytes} {m : Message}
+    (decoded : decodeMessage bytes = some m) : messageStream.encode m = bytes :=
+  messageStream.toLawful_canonical bytes m decoded
 structure Event where
   tag : Nat
   payload : Bytes
@@ -41,18 +43,53 @@ def encodeInput : Input → Event
   | .checked b => ⟨2,blockStream.encode b⟩
   | .offer b => ⟨3,b⟩
   | .poll => ⟨4,[]⟩
-def decodeInput (e : Event) : Option Input := do
-  let input ← match e.tag with
-    | 0 => return .delivery (← decodeMessage e.payload)
-    | 1 => return .tick (← StreamCodec.nat.toLawful.decode e.payload)
-    | 2 => return .checked (← blockStream.toLawful.decode e.payload)
-    | 3 => some (.offer e.payload)
-    | 4 => if e.payload.isEmpty then some .poll else none
-    | 5 => do
-        let (t,m) ← (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode e.payload
-        return .deliveryAt t m
-    | _ => none
-  if encodeInput input == e then some input else none
+/-- Each arm decodes its payload canonically and the tag selects the arm, so a
+decoded input is the input of exactly that event (`decodeInput_canonical`). -/
+def decodeInput (e : Event) : Option Input :=
+  match e.tag with
+  | 0 => return .delivery (← decodeMessage e.payload)
+  | 1 => return .tick (← StreamCodec.nat.toLawful.decode e.payload)
+  | 2 => return .checked (← blockStream.toLawful.decode e.payload)
+  | 3 => some (.offer e.payload)
+  | 4 => if e.payload.isEmpty then some .poll else none
+  | 5 => do
+      let (t,m) ← (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode e.payload
+      return .deliveryAt t m
+  | _ => none
+theorem decodeInput_canonical {e : Event} {input : Input}
+    (decoded : decodeInput e = some input) : encodeInput input = e := by
+  obtain ⟨tag, payload⟩ := e
+  rcases tag with _ | _ | _ | _ | _ | _ | tag <;>
+    simp only [decodeInput, bind, Option.bind] at decoded
+  · cases m : decodeMessage payload with
+    | none => simp [m] at decoded
+    | some message =>
+      simp [m, pure] at decoded; subst decoded
+      simp [encodeInput, decodeMessage_canonical m]
+  · cases t : StreamCodec.nat.toLawful.decode payload with
+    | none => simp [t] at decoded
+    | some tick =>
+      simp [t, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ t]
+  · cases b : blockStream.toLawful.decode payload with
+    | none => simp [b] at decoded
+    | some block =>
+      simp [b, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ b]
+  · simp at decoded; subst decoded; rfl
+  · by_cases empty : payload.isEmpty
+    · simp [empty] at decoded; subst decoded
+      simp [encodeInput, List.isEmpty_iff.mp empty]
+    · simp [empty] at decoded
+  · cases d : (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode payload with
+    | none => simp [d] at decoded
+    | some pair =>
+      obtain ⟨t, m⟩ := pair
+      simp [d, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ d]
+  · cases decoded
+#assert_axioms decodeMessage_canonical
+#assert_axioms decodeInput_canonical
 /-- Five fields since the timeout-backoff epoch. A four-field pre-epoch
 Context does not decode: such journals and contexts refuse to load. -/
 def configStream : StreamCodec Config :=

@@ -147,24 +147,25 @@ def tariffStream : StreamCodec Tariff :=
       ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash⟩)
     (by intro t; cases t; rfl)
 
-/-- A frame-prefixed codec that refuses every non-canonical byte string. -/
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  { encode := fun value => frame ++ stream.encode value
-    decode := fun bytes => if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  Minidregg.Compiler.ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     {bytes : List UInt8} {value : α} (accepted : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value accepted
+
+theorem framed_decode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) :
+    (framed frame stream).decode bytes =
+      if bytes.take frame.length = frame then stream.toLawful.decode (bytes.drop frame.length)
+      else none := by
+  by_cases prefixed : bytes.take frame.length = frame <;>
+    simp [framed, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap,
+      StreamCodec.product, StreamCodec.literal, prefixed]
+  cases stream.decodePrefix (bytes.drop frame.length) <;> simp
 
 def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v4".toUTF8.toList
 
@@ -188,19 +189,7 @@ theorem tariff_v3_refused (rest : List UInt8) :
       "DREGG/PAY/TARIFF/v3".toUTF8.toList := by
     rw [← sameLength]
     exact List.take_left
-  have refused : (framedRaw tariffFrame tariffStream).decode
-      ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) = none := by
-    change (if _ = tariffFrame then _ else none) = none
-    rw [prefixIsV3]
-    exact if_neg differs
-  change (do
-      let value ← (framedRaw tariffFrame tariffStream).decode
-        ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest)
-      if Minidregg.Compiler.Tower256ConcreteBackend.bytesEqual
-          ((framedRaw tariffFrame tariffStream).encode value)
-          ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) then some value else none) = none
-  rw [refused]
-  rfl
+  rw [tariffCodec, framed_decode, prefixIsV3, if_neg differs]
 
 /-! ## The genesis placeholder -/
 

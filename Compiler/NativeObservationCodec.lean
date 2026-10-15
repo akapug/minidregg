@@ -271,9 +271,7 @@ private theorem framed_refuses_prefix {A : Type} (frame old : List UInt8)
     have recoveredPrefix : old = frame.take old.length := by
       simpa [List.take_take, Nat.min_eq_left shorter] using prefixEquality
     exact different recoveredPrefix.symm
-  have raw : (NativeHostCodec.framedRaw frame stream).decode (old ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, mismatch]
-  simp [NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [NativeHostCodec.framed_decode, mismatch]
 
 /-- A v6 challenge refuses to decode. -/
 theorem v6_challenge_refused (payload : List UInt8) :
@@ -294,19 +292,13 @@ theorem v3_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredV3IntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredV3IntentFrame.length := by decide +kernel
   have different : retiredV3IntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredV3IntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 
 theorem v4_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredIntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredIntentFrame.length := by decide +kernel
   have different : retiredIntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredIntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v4_intent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v4_intent_refused
@@ -348,10 +340,7 @@ theorem v5_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredDocuverseIntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredDocuverseIntentFrame.length := by decide +kernel
   have different : retiredDocuverseIntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredDocuverseIntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v7_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v7_challenge_refused
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v7_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/

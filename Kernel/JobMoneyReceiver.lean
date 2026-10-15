@@ -237,7 +237,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 /-- The job's pre-root is the loaded one: the signed request carries it as
 `preStateRoot` and the declaration carries the loaded job, so a job that moved

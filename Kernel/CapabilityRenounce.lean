@@ -70,21 +70,11 @@ def commandStream : StreamCodec Command :=
 
 def commandFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE".toUTF8.toList ++ [1]
 
-def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    commandStream.toLawful.decode (bytes.drop commandFrame.length) else none
-  decode_encode := by
-    intro command
-    have decoded := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec Command := (StreamCodec.framed commandFrame commandStream).toLawful
 
 theorem command_decode_canonical {bytes : List UInt8} {command : Command}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- One operation per (signer, nonce): a substituted capability under the same
 nonce is a transaction-identity conflict, never a second admission. -/
@@ -150,17 +140,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
-def rawIngressCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
   private mk ::

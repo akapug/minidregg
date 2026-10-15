@@ -52,10 +52,10 @@ def ingressStream : StreamCodec Ingress :=
         grantObservationEnvelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def codec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
+def codec : LawfulCodec Ingress :=
+  NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-INGRESS/v1".toUTF8.toList
-    ingressStream)
+    ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
 

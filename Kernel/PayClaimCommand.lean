@@ -117,8 +117,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
       | some command =>
         if commandShape : command.valid then
           some ⟨ingress, command,
-            ResourceBirthCodec.strictCodec_canonical
-              (ParticipantKeyEnrollment.framedRaw commandFrame commandStream) exact,
+            ParticipantKeyEnrollment.framed_canonical exact,
             signatureShape, commandShape⟩
         else none
     else none

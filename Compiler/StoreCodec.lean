@@ -442,43 +442,19 @@ theorem payloadStream_encode (store : Store L) :
     (payloadStream W).encode store = (entryListStream W).encode (entries W store) :=
   rfl
 
-/-- Canonical payload decoding: lax decode, then exact re-encoding. -/
-def decodePayload (payload : List UInt8) : Option (Store L) := do
-  let store ← (payloadStream W).toLawful.decode payload
-  if (payloadStream W).encode store = payload then some store else none
-
-/-- Executable `decodePayload`: the re-encoding is compared by `bytesEqual`. -/
-def decodePayloadFast (payload : List UInt8) : Option (Store L) := do
-  let store ← (payloadStream W).toLawful.decode payload
-  if bytesEqual ((payloadStream W).encode store) payload then some store else none
-
-@[csimp] theorem decodePayload_eq_decodePayloadFast : @decodePayload = @decodePayloadFast := by
-  funext L W payload
-  simp only [decodePayload, decodePayloadFast, bytesEqual_eq_true_iff]
+/-- Canonical payload decoding: the payload stream's own decoder. The stream
+refuses every unordered list itself and is canonical, so an accepted payload is
+exactly an encoding (`decodePayload_eq_some_iff`) with no re-encode. -/
+def decodePayload (payload : List UInt8) : Option (Store L) :=
+  (payloadStream W).toLawful.decode payload
 
 theorem decodePayload_encode (store : Store L) :
-    decodePayload W ((payloadStream W).encode store) = some store := by
-  have lax := (payloadStream W).toLawful.decode_encode store
-  change (payloadStream W).toLawful.decode ((payloadStream W).encode store) = some store at lax
-  simp [decodePayload, lax]
+    decodePayload W ((payloadStream W).encode store) = some store :=
+  (payloadStream W).toLawful.decode_encode store
 
 theorem decodePayload_eq_some_iff (payload : List UInt8) (store : Store L) :
-    decodePayload W payload = some store ↔ (payloadStream W).encode store = payload := by
-  constructor
-  · intro accepted
-    unfold decodePayload at accepted
-    cases lax : (payloadStream W).toLawful.decode payload with
-    | none => simp [lax] at accepted
-    | some decoded =>
-        simp only [lax, Option.bind_eq_bind, Option.bind_some] at accepted
-        split at accepted
-        · rename_i exact
-          cases Option.some.inj accepted
-          exact exact
-        · cases accepted
-  · intro exact
-    rw [← exact]
-    exact decodePayload_encode W store
+    decodePayload W payload = some store ↔ (payloadStream W).encode store = payload :=
+  (payloadStream W).toLawful_decode_iff payload store
 
 /-- Exact acceptance law for every raw entry list: accepted iff it is the
 canonical list of the store it denotes. -/

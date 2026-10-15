@@ -111,19 +111,8 @@ def enrollmentStream : StreamCodec Enrollment :=
 private def enrollmentFrame : List UInt8 :=
   "DREGG/APPLICATION/SESSION-ENROLLMENT/v1".toUTF8.toList
 
-private def rawEnrollmentCodec : LawfulCodec Enrollment where
-  encode enrollment := enrollmentFrame ++ enrollmentStream.encode enrollment
-  decode bytes := if bytes.take enrollmentFrame.length = enrollmentFrame then
-    enrollmentStream.toLawful.decode (bytes.drop enrollmentFrame.length) else none
-  decode_encode := by
-    intro enrollment
-    have decoded := enrollmentStream.toLawful.decode_encode enrollment
-    change enrollmentStream.toLawful.decode (enrollmentStream.encode enrollment) =
-      some enrollment at decoded
-    simp [decoded]
-
 def enrollmentCodec : LawfulCodec Enrollment :=
-  ResourceBirthCodec.strictCodec rawEnrollmentCodec
+  (StreamCodec.framed enrollmentFrame enrollmentStream).toLawful
 
 theorem enrollment_decode_encode (enrollment : Enrollment) :
     enrollmentCodec.decode (enrollmentCodec.encode enrollment) = some enrollment :=

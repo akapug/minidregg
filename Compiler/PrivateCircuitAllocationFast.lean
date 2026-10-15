@@ -149,12 +149,10 @@ def fastFramedPlanStream : StreamCodec Plan :=
 theorem fastFramedPlanStream_exact : fastFramedPlanStream = framedPlanStream := by
   simp [fastFramedPlanStream, framedPlanStream, fastPlanStream_exact]
 
-def decodePlan (bytes : List UInt8) : Option Plan := do
-  let plan ← fastFramedPlanStream.toLawful.decode bytes
-  if encodePlan plan == bytes then some plan else none
+def decodePlan (bytes : List UInt8) : Option Plan := fastFramedPlanStream.toLawful.decode bytes
 
 theorem decodePlan_exact (bytes : List UInt8) : decodePlan bytes = decode bytes := by
-  simp [decodePlan, decode, fastFramedPlanStream_exact, encodePlan_exact]
+  simp [decodePlan, decode, fastFramedPlanStream_exact]
 
 theorem fast_roundtrip (plan : Plan) : decodePlan (encodePlan plan) = some plan := by
   rw [decodePlan_exact, decode_encodePlan]

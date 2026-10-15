@@ -58,9 +58,8 @@ def recoveryStream : StreamCodec RecoveryJob :=
     (by intro j; cases j; rfl)
 
 /-- Canonical decoding rejects unknown phase aliases and trailing bytes. -/
-def decodeRecovery (bytes : List UInt8) : Option RecoveryJob := do
-  let job ← recoveryStream.toLawful.decode bytes
-  if recoveryStream.encode job = bytes then some job else none
+def decodeRecovery (bytes : List UInt8) : Option RecoveryJob :=
+  recoveryStream.toLawful.decode bytes
 
 @[simp] theorem decodeRecovery_encode (job : RecoveryJob) :
     decodeRecovery (recoveryStream.encode job) = some job := by

@@ -125,34 +125,17 @@ def framedStream : StreamCodec Image :=
 
 def encode (image : Image) : List UInt8 := framedStream.encode image
 
-def decode (bytes : List UInt8) : Option Image := do
-  let image ← framedStream.toLawful.decode bytes
-  if encode image = bytes then some image else none
+/-- The framed stream's own decoder: it is canonical (`decode_canonical`), so
+it refuses every second spelling and trailing byte without re-encoding. -/
+def decode (bytes : List UInt8) : Option Image :=
+  framedStream.toLawful.decode bytes
 
-/-- Executable `decode`: the re-encoding is compared by `bytesEqual`. -/
-def decodeFast (bytes : List UInt8) : Option Image := do
-  let image ← framedStream.toLawful.decode bytes
-  if bytesEqual (encode image) bytes then some image else none
-
-@[csimp] theorem decode_eq_decodeFast : @decode = @decodeFast := by
-  funext bytes
-  simp only [decode, decodeFast, bytesEqual_eq_true_iff]
-
-@[simp] theorem decode_encode (image : Image) : decode (encode image) = some image := by
-  have roundtrip := framedStream.toLawful.decode_encode image
-  change framedStream.toLawful.decode (encode image) = some image at roundtrip
-  simp [decode, roundtrip]
+@[simp] theorem decode_encode (image : Image) : decode (encode image) = some image :=
+  framedStream.toLawful.decode_encode image
 
 theorem decode_canonical {bytes : List UInt8} {image : Image}
-    (accepted : decode bytes = some image) : encode image = bytes := by
-  unfold decode at accepted
-  cases raw : framedStream.toLawful.decode bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical => cases Option.some.inj accepted; exact canonical
-      next => contradiction
+    (accepted : decode bytes = some image) : encode image = bytes :=
+  framedStream.toLawful_canonical bytes image accepted
 
 def codec : LawfulCodec Image where
   encode := encode

@@ -320,28 +320,16 @@ fitting record round-trips (`record_roundTrip`). -/
 def encodeRecord (record : Record) : Bytes :=
   if fits : record.Fits then recordFrame ++ recordWire.encode (record.toWire fits) else []
 
-/-- Strict: the frame, a wire that decodes, and the record re-encoding to exactly the
-input bytes (no second spelling of a number or a string). -/
+/-- Strict: the frame, then a wire that decodes. The wire stream is canonical and
+every wire is a fitting record's wire (`Record.toWire_ofWire`), so an accepted
+string is exactly the record's encoding (`decodeRecord_some`): no second
+spelling of a number or a string, with no re-encode. -/
 def decodeRecord (bytes : Bytes) : Option Record :=
   if bytes.take recordFrame.length = recordFrame then
     match recordWire.toLawful.decode (bytes.drop recordFrame.length) with
-    | some wire => if encodeRecord (Record.ofWire wire) = bytes then some (Record.ofWire wire) else none
+    | some wire => some (Record.ofWire wire)
     | none => none
   else none
-
-/-- Executable `decodeRecord`: the frame and the re-encoding are compared by
-`bytesEqual` (tail-recursive, unboxed) instead of the derived `List UInt8` equality. -/
-def decodeRecordFast (bytes : Bytes) : Option Record :=
-  if bytesEqual (bytes.take recordFrame.length) recordFrame then
-    match recordWire.toLawful.decode (bytes.drop recordFrame.length) with
-    | some wire =>
-        if bytesEqual (encodeRecord (Record.ofWire wire)) bytes then some (Record.ofWire wire) else none
-    | none => none
-  else none
-
-@[csimp] theorem decodeRecord_eq_decodeRecordFast : @decodeRecord = @decodeRecordFast := by
-  funext bytes
-  simp only [decodeRecord, decodeRecordFast, bytesEqual_eq_true_iff]
 
 theorem Source.ofWire_toWire (source : Source) (fits : source.Fits) :
     Source.ofWire (source.toWire fits) = source := by
@@ -389,6 +377,12 @@ theorem Phase.ofWire_fits (wire : PhaseWire) : (Phase.ofWire wire).Fits := by
 theorem Record.ofWire_fits (wire : RecordWire) : (Record.ofWire wire).Fits :=
   ⟨⟨ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _, ofDigest256_lt _⟩, Phase.ofWire_fits _⟩
 
+/-- Every wire is the wire of the (fitting) record it denotes. -/
+theorem Record.toWire_ofWire (wire : RecordWire) :
+    (Record.ofWire wire).toWire (Record.ofWire_fits wire) = wire := by
+  obtain ⟨_, _, _, _, _, _, _, _, _, phase⟩ := wire
+  rcases phase with ⟨_, (⟨_, _⟩ | _), _, _⟩ | (_ | _) <;> rfl
+
 /-- **A fitting record round-trips.** -/
 theorem record_roundTrip (record : Record) (fits : record.Fits) :
     decodeRecord (encodeRecord record) = some record := by
@@ -403,20 +397,24 @@ theorem record_roundTrip (record : Record) (fits : record.Fits) :
   have back := Record.ofWire_toWire record fits
   unfold decodeRecord
   rw [taken, if_pos rfl, dropped, wire]
-  simp only [back, if_true]
+  simp only [back]
 
 /-- A decoded record is exactly the one whose encoding it was read from, and fits. -/
 theorem decodeRecord_some {bytes : Bytes} {record : Record} (decoded : decodeRecord bytes = some record) :
     encodeRecord record = bytes ∧ record.Fits := by
   unfold decodeRecord at decoded
   split at decoded
-  · split at decoded
-    · rename_i wire _
-      split at decoded
-      · rename_i same
-        cases decoded
-        exact ⟨same, Record.ofWire_fits wire⟩
-      · cases decoded
+  · rename_i framed
+    split at decoded
+    · rename_i wire accepted
+      cases decoded
+      refine ⟨?_, Record.ofWire_fits wire⟩
+      have payload := recordWire.toLawful_canonical _ _ accepted
+      calc encodeRecord (Record.ofWire wire)
+          = bytes.take recordFrame.length ++ bytes.drop recordFrame.length := by
+            unfold encodeRecord
+            rw [dif_pos (Record.ofWire_fits wire), Record.toWire_ofWire, framed, payload]
+        _ = bytes := List.take_append_drop _ _
     · cases decoded
   · cases decoded
 

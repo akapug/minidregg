@@ -53,7 +53,7 @@ def declarationStream (kind : ResourceKind) : StreamCodec (DelegateDeclaration k
     (by intro declaration; cases declaration; rfl)
 
 def declarationCodec (kind : ResourceKind) : LawfulCodec (DelegateDeclaration kind) :=
-  ResourceBirthCodec.strictCodec (declarationStream kind).toLawful
+  (declarationStream kind).toLawful
 
 structure Command (kind : ResourceKind) where
   subject : SubjectId
@@ -108,21 +108,11 @@ def commandFrameName : List UInt8 := "DREGG/CAPABILITY/DELEGATE".toUTF8.toList
 name (`retiredCommand`). -/
 def commandFrame : List UInt8 := commandFrameName ++ [2]
 
-def rawCommandCodec : LawfulCodec PackedCommand where
-  encode command := commandFrame ++ packedCommandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    packedCommandStream.toLawful.decode (bytes.drop commandFrame.length) else none
-  decode_encode := by
-    intro command
-    have decoded := packedCommandStream.toLawful.decode_encode command
-    change packedCommandStream.toLawful.decode (packedCommandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec PackedCommand := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec PackedCommand := (StreamCodec.framed commandFrame packedCommandStream).toLawful
 
 theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The version-1 frame: its declaration carried `expectedPreRoot`, the whole
 authority-cell root. -/
@@ -146,8 +136,8 @@ theorem retired_v1_refused (rest : List UInt8) :
     | none => rfl
     | some command =>
         have exact := command_decode_canonical decoded
-        have framed := congrArg (List.take commandFrame.length) exact
-        simp [commandCodec, ResourceBirthCodec.strictCodec, rawCommandCodec] at framed
+        have framed := congrArg (List.take commandFrame.length)
+          (show commandFrame ++ packedCommandStream.encode command = _ from exact)
         simp [commandFrame, retiredFrameV1, commandFrameName, List.take_append] at framed
   · simp [undecodable]
 

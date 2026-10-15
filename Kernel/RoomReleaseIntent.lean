@@ -28,7 +28,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (r,s,e) => ⟨r,s,e⟩) (by intro s; cases s; rfl)
 def frame : List UInt8 := "DREGG.PRIVATE.ROOM.RELEASE.SOURCE".toUTF8.toList ++ [1]
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec (NativeHostCodec.framed frame ingressStream)
+  NativeHostCodec.framed frame ingressStream
 
 def decisionSchema : Digest :=
   (Sp800185Cshake256.hash "DREGG.PRIVATE-CELL.SCHEMA/v1".toUTF8.toList

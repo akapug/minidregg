@@ -52,16 +52,7 @@ def stream : StreamCodec Package :=
     (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2⟩)
     (by intro p; cases p; rfl)
 def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-PACKAGE".toUTF8.toList ++ [3]
-def rawCodec : LawfulCodec Package where
-  encode p := frame ++ stream.encode p
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro p
-    have exact := stream.toLawful.decode_encode p
-    change stream.toLawful.decode (stream.encode p) = some p at exact
-    simp [exact]
-def codec : LawfulCodec Package := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Package := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
@@ -91,7 +82,7 @@ theorem encode_injective {a b : Package} (same : encode a = encode b) : a = b :=
   simpa only [roundtrip,Option.some.injEq] using decoded
 theorem decoded_canonical {bytes : List UInt8} {p : Package}
     (accepted : decode bytes = some p) : encode p = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 #assert_axioms roundtrip
 #assert_axioms encode_injective
 #assert_axioms decoded_canonical

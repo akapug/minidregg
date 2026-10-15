@@ -62,27 +62,50 @@ theorem fromWire_toWire (source : Source) : fromWire (toWire source) = some sour
       simp [fromWire, toWire, Kernel.AgentGrain.State.values,
         decoded]
 
-def rawCodec : LawfulCodec Source where
-  encode source := sourceFrame ++ sourceWireStream.encode (toWire source)
-  decode bytes := if bytes.take sourceFrame.length = sourceFrame then do
-    let wire ← sourceWireStream.toLawful.decode (bytes.drop sourceFrame.length)
-    fromWire wire
-    else none
-  decode_encode := by
-    intro source
-    simp
-    have decoded : sourceWireStream.toLawful.decode
-        (sourceWireStream.encode (toWire source)) = some (toWire source) :=
-      sourceWireStream.toLawful.decode_encode _
-    rw [decoded]
-    exact fromWire_toWire source
+/-- `fromWire` keeps no choice of its own: what it accepts is a `toWire` image
+(the birth descriptor is read by a canonical codec). -/
+theorem toWire_fromWire {wire : SourceWire} {source : Source}
+    (decoded : fromWire wire = some source) : toWire source = wire := by
+  unfold fromWire at decoded
+  split at decoded
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+    obtain ⟨birth, birthOk, same⟩ := decoded
+    cases Option.some.inj same
+    simp [toWire, Kernel.AgentGrain.State.values,
+      ResourceBirthCodec.descriptor_decode_canonical _ birthOk]
+  · cases decoded
 
-def sourceCodec : LawfulCodec Source := ResourceBirthCodec.strictCodec rawCodec
+/-- The source stream: the wire stream refined by `fromWire`, canonical because
+`fromWire` only accepts `toWire` images (`toWire_fromWire`). -/
+def sourceStream : StreamCodec Source where
+  encode source := sourceWireStream.encode (toWire source)
+  decodePrefix bytes := do
+    let (wire, suffix) ← sourceWireStream.decodePrefix bytes
+    let source ← fromWire wire
+    some (source, suffix)
+  decodePrefix_encode := by
+    intro source suffix
+    simp [sourceWireStream.decodePrefix_encode, fromWire_toWire]
+  encode_decodePrefix := by
+    intro bytes source suffix decoded
+    cases wireOk : sourceWireStream.decodePrefix bytes with
+    | none => simp [wireOk] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      cases sourceOk : fromWire wire with
+      | none => simp [wireOk, sourceOk] at decoded
+      | some decodedSource =>
+        simp only [wireOk, sourceOk, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [toWire_fromWire sourceOk]
+        exact sourceWireStream.encode_decodePrefix _ _ _ wireOk
+
+def sourceCodec : LawfulCodec Source := (StreamCodec.framed sourceFrame sourceStream).toLawful
 
 theorem sourceCodec_canonical {bytes : List UInt8} {source : Source}
     (decoded : sourceCodec.decode bytes = some source) :
     sourceCodec.encode source = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The signing plan retains the finalized canonical source and exactly the
 derived command bytes used for its headers. Detached assembly has no access
@@ -102,22 +125,12 @@ def finalizedStream : StreamCodec Finalized :=
 def finalizedFrame : List UInt8 :=
   "DREGG/GRAIN-RESOURCE-BIRTH/FINALIZED-DRAFT/v1".toUTF8.toList
 
-def finalizedRawCodec : LawfulCodec Finalized where
-  encode value := finalizedFrame ++ finalizedStream.encode value
-  decode bytes := if bytes.take finalizedFrame.length = finalizedFrame then
-    finalizedStream.toLawful.decode (bytes.drop finalizedFrame.length) else none
-  decode_encode := by
-    intro value
-    have decoded := finalizedStream.toLawful.decode_encode value
-    change finalizedStream.toLawful.decode (finalizedStream.encode value) = some value at decoded
-    simp [decoded]
-
 def finalizedCodec : LawfulCodec Finalized :=
-  ResourceBirthCodec.strictCodec finalizedRawCodec
+  (StreamCodec.framed finalizedFrame finalizedStream).toLawful
 
 theorem finalizedCodec_canonical {bytes : List UInt8} {value : Finalized}
     (decoded : finalizedCodec.decode bytes = some value) :
     finalizedCodec.encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical finalizedRawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 end Minidregg.Compiler.GrainResourceBirthHostCodec

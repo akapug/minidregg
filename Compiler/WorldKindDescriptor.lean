@@ -106,8 +106,7 @@ def descriptorStream : StreamCodec Descriptor :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro descriptor; cases descriptor; rfl)
 
-def descriptorCodec : LawfulCodec Descriptor :=
-  ResourceBirthCodec.strictCodec descriptorStream.toLawful
+def descriptorCodec : LawfulCodec Descriptor := descriptorStream.toLawful
 
 def Descriptor.Valid (descriptor : Descriptor) : Prop :=
   (descriptor.fields.map Field.id).Nodup ∧

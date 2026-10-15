@@ -27,11 +27,24 @@ def frameV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) : List UInt8 :=
 def encodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) : List UInt8 :=
   frameV2 wire ++ (payloadStream wire).encode store
 
-/-- Fully consumed canonical source bytes, including the frozen outer frame. -/
-def decodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (bytes : List UInt8) : Option (Store L) := do
-  if bytes.take (frameV2 wire).length != frameV2 wire then none else do
-    let store ← decodePayload wire (bytes.drop (frameV2 wire).length)
-    if encodeV2 wire store = bytes then some store else none
+/-- Fully consumed canonical source bytes, including the frozen outer frame.
+The frame is compared exactly and the payload decoder is canonical, so an
+accepted string is exactly an encoding (`decodeV2_canonical`). -/
+def decodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (bytes : List UInt8) : Option (Store L) :=
+  if bytes.take (frameV2 wire).length != frameV2 wire then none else
+    decodePayload wire (bytes.drop (frameV2 wire).length)
+
+theorem decodeV2_canonical {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) {bytes : List UInt8}
+    {store : Store L} (accepted : decodeV2 wire bytes = some store) : encodeV2 wire store = bytes := by
+  unfold decodeV2 at accepted
+  split at accepted
+  · cases accepted
+  · rename_i framed
+    have payload := (decodePayload_eq_some_iff wire _ store).mp accepted
+    have framed : bytes.take (frameV2 wire).length = frameV2 wire := by simpa using framed
+    calc encodeV2 wire store = bytes.take (frameV2 wire).length ++ bytes.drop (frameV2 wire).length := by
+          rw [encodeV2, payload, framed]
+      _ = bytes := List.take_append_drop _ _
 
 private def ns (tag : List UInt8) (discipline : UInt8) (key value : String) : NamespaceDescriptor :=
   (tag, discipline, key.toUTF8.toList, value.toUTF8.toList)

@@ -397,7 +397,8 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .seat => Kernel.SeatCell.materializer
 
 /-- Every materializer codec accepts only encodings: the `StoreCodec` frames by
-`StoreCodec.decode_reencodes`, the resource book by `canonicalCodec`, and the
+`StoreCodec.decode_reencodes`, the resource book by its framed stream
+(`framedCodec_canonical`), and the
 policy-source, Nock-program and protected cells by their own `decode_canonical`. -/
 theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
     (logical : Store (layout kind))
@@ -406,10 +407,8 @@ theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
   cases kind
   all_goals first
     | exact StoreCodec.decode_reencodes _ accepted
-    | (have exact := CanonicalResourcePageMaterializer.canonicalCodec_accepted_bytes
-          (CanonicalResourcePageMaterializer.framedCodec 0
-            CanonicalResourcePageMaterializer.stateStream.toLawful) accepted
-       exact exact)
+    | exact CanonicalResourcePageMaterializer.framedCodec_canonical 0
+        CanonicalResourcePageMaterializer.stateStream accepted
     | exact PolicySourceCell.decode_canonical accepted
     | exact NockProgramCodec.decode_canonical accepted
     | exact Kernel.ProtectedCell.decode_canonical _ accepted
@@ -504,17 +503,17 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_lifecycle_root :
     registry.rootBytes = ResourceBirthCodec.rootBytes := rfl
 
-/-- Strict dependent decoding preserves the exact selected native codec/root.
-It also rejects aliases accepted by older primitive prefix decoders. -/
-def cellCodec : LawfulCodec (PackedCell registry) :=
-  ResourceBirthCodec.strictCodec (PackedCell.codec registry)
+/-- Dependent decoding preserves the exact selected native codec/root. The
+envelope is canonical (`PackedCell.bytes_of_decode`: the tag cannot alias and
+every materializer codec accepts only encodings), so nothing is re-encoded. -/
+def cellCodec : LawfulCodec (PackedCell registry) := PackedCell.codec registry
 
 @[simp] theorem cell_roundtrip (cell : PackedCell registry) :
     cellCodec.decode (cellCodec.encode cell) = some cell := cellCodec.decode_encode cell
 
 theorem decoded_cell_canonical {bytes : List UInt8} {cell : PackedCell registry}
     (accepted : cellCodec.decode bytes = some cell) : PackedCell.bytes registry cell = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (PackedCell.codec registry) accepted
+  PackedCell.bytes_of_decode registry accepted
 
 /-! ## Source-owned role and identity laws -/
 

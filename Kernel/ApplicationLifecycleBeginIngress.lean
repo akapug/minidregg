@@ -42,17 +42,7 @@ def ingressStream : StreamCodec Ingress :=
 def frame : List UInt8 :=
   "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v1".toUTF8.toList
 
-private def rawCodec : LawfulCodec Ingress where
-  encode ingress := frame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take frame.length = frame then
-    ingressStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Ingress := strictCodec rawCodec
+def codec : LawfulCodec Ingress := (StreamCodec.framed frame ingressStream).toLawful
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
 
@@ -61,7 +51,7 @@ theorem decode_encode (ingress : Ingress) :
 
 theorem decoded_canonical {bytes : List UInt8} {ingress : Ingress}
     (decoded : codec.decode bytes = some ingress) :
-    ingress.canonicalBytes = bytes := strictCodec_canonical rawCodec decoded
+    ingress.canonicalBytes = bytes := StreamCodec.toLawful_canonical _ _ _ decoded
 
 def event (ingress : Ingress) : StableEvent where
   codecVersion := 12

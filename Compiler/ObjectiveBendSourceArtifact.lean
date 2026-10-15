@@ -42,16 +42,7 @@ def stream : StreamCodec Artifact :=
 
 /-- Version 2: the artifact carries the package's enforced laws; a version-1 artifact refuses. -/
 def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-ARTIFACT".toUTF8.toList ++ [2]
-def rawCodec : LawfulCodec Artifact where
-  encode a := frame ++ stream.encode a
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro a
-    have exact := stream.toLawful.decode_encode a
-    change stream.toLawful.decode (stream.encode a) = some a at exact
-    simp [exact]
-def codec : LawfulCodec Artifact := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Artifact := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
@@ -115,7 +106,7 @@ theorem encode_injective {a b : Artifact} (same : encode a = encode b) : a = b :
 
 theorem decoded_canonical {bytes : List UInt8} {a : Artifact}
     (accepted : decode bytes = some a) : encode a = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 theorem selected_core_exact {a : Artifact} {maxBytes : Nat} (checked : Checked a maxBytes) :
     decodePacket checked.packetJson = .ok checked.packet := checked.packetExact

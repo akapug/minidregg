@@ -102,21 +102,11 @@ def packedCommandStream : StreamCodec PackedCommand where
 
 def commandFrame : List UInt8 := "DREGG/CAPABILITY/REVOKE".toUTF8.toList ++ [1]
 
-def rawCommandCodec : LawfulCodec PackedCommand where
-  encode command := commandFrame ++ packedCommandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    packedCommandStream.toLawful.decode (bytes.drop commandFrame.length) else none
-  decode_encode := by
-    intro command
-    have decoded := packedCommandStream.toLawful.decode_encode command
-    change packedCommandStream.toLawful.decode (packedCommandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec PackedCommand := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec PackedCommand := (StreamCodec.framed commandFrame packedCommandStream).toLawful
 
 theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- Same caller/resource/nonce is one operation even if its victim, authority,
 root or signature changes. The retained exact ingress rejects such substitution. -/
@@ -141,7 +131,7 @@ def declarationStream : StreamCodec RevokeDeclaration :=
     (by intro declaration; cases declaration; rfl)
 
 def declarationCodec : LawfulCodec RevokeDeclaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def commandBytes {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode

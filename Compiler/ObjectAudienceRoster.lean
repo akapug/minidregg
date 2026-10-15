@@ -20,25 +20,14 @@ def rosterStream : StreamCodec Roster :=
     (fun r => (r.object,r.epoch,r.transition,r.entries))
     (fun (o,e,t,es) => ⟨o,e,t,es⟩) (by intro r; cases r; rfl)
 def encode (r : Roster) : List UInt8 := rosterStream.encode r
-def decode (bytes : List UInt8) : Option Roster := do
-  let r ← rosterStream.toLawful.decode bytes
-  if encode r = bytes then some r else none
-@[simp] theorem decode_encode (r : Roster) : decode (encode r) = some r := by
-  have roundtrip := rosterStream.toLawful.decode_encode r
-  change rosterStream.toLawful.decode (rosterStream.encode r) = some r at roundtrip
-  simp [decode, encode, roundtrip]
+/-- `rosterStream` is canonical, so its top-level decoder already accepts
+exactly the encodings (`decode_canonical`). -/
+def decode (bytes : List UInt8) : Option Roster := rosterStream.toLawful.decode bytes
+@[simp] theorem decode_encode (r : Roster) : decode (encode r) = some r :=
+  rosterStream.toLawful.decode_encode r
 theorem decode_canonical {bytes : List UInt8} {r : Roster}
-    (accepted : decode bytes = some r) : encode r = bytes := by
-  unfold decode at accepted
-  cases raw : rosterStream.toLawful.decode bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical =>
-        cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+    (accepted : decode bytes = some r) : encode r = bytes :=
+  rosterStream.toLawful_canonical bytes r accepted
 def codec : LawfulCodec Roster where
   encode := encode
   decode := decode
