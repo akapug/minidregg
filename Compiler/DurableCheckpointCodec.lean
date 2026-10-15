@@ -34,6 +34,7 @@ the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
 import Compiler.PersistedCodecTags
+import Compiler.PersistedCodecShapes
 import Compiler.CanonicalCellRegistry
 import Compiler.DurableReceiverCodec
 import Compiler.Sp800185Cshake256
@@ -156,15 +157,19 @@ def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
     pure (tag, schema.schemaId.value, schema.version, descriptor)
 
 /-- Canonical, length-prefixed corpus: the automatically collected source tag
-entries plus the actual exhaustive cell schema/layout descriptors. -/
+entries, their structural fingerprints (`Compiler.PersistedCodecShapes`, checked
+by the census), and the actual exhaustive cell schema/layout descriptors: a codec
+whose structure moves moves the epoch. -/
 def persistedCodecCorpus : List UInt8 :=
   let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
+  let shapes := PersistedCodecShapes.pins.map fun (identity, fingerprint) =>
+    (identity ++ ":" ++ fingerprint).toUTF8.toList
   (StreamCodec.product
-    (StreamCodec.list bytesStream)
+    (StreamCodec.product (StreamCodec.list bytesStream) (StreamCodec.list bytesStream))
     (StreamCodec.list (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat bytesStream))))).encode
-    (entries, persistedCellDescriptors)
+    ((entries, shapes), persistedCellDescriptors)
 
 /-- Derived from the content of every registered persisted tag and cell
 descriptor. This is a flag day: every old schema-refs/v5 Store requires
