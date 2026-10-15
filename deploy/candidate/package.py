@@ -71,6 +71,11 @@ ROLES = {
     "discord": "mini-discord",
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
+    # Test fixtures the standing journey runs against THIS set (journey-runner product_inputs defaults to
+    # $set/bin/<name>): the deterministic OpenAI-compatible provider and the grain launch gate. In the set so
+    # they are built from the tip they test and pinned in SHA256SUMS (cv 01a13c42-dc75), never a box path.
+    "testProvider": "mini-hermes-test-provider",
+    "launchGate": "launch-gate",
 }
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
@@ -81,7 +86,8 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
               ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
               ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
-              ("keys", "mini-keys"))
+              ("keys", "mini-keys"),
+              ("testProvider", "hermes-test-provider"), ("launchGate", "launch-gate"))
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
 # locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.
 # keys is required: split tenancy (step B) is the box's shape, and install.sh under split has no
