@@ -29,7 +29,7 @@ Asserted, every step (a red names the step and the fact):
   uninterrupted Host (whole system cell bytes and every cell); the in-flight
   intent is retried and must be admitted (lost) or replayed (kept).
 
-`world-sim SEED STEPS [K] [--plant follower-skips-guard] [--names]` prints one line:
+`world-sim SEED STEPS [K] [--plant follower-skips-guard|reopen-drops-last] [--names]` prints one line:
 `SIM seed=… PASS …counts…` or `SIM seed=… FAIL step=… <fact>`.
 `world-sim seeds FROM COUNT STEPS K` runs a range.
 `world-sim corpus STORES.json K` drives each retained Store's own records (with
@@ -86,6 +86,8 @@ inductive Plant
   /-- The follower skips the guard of the first leg (its leading reads) when
   that leg's guard is the one that failed. -/
   | followerSkipsGuard
+  /-- The Host's reopen loses the last persisted Turn entry (a torn append). -/
+  | reopenDropsLast
   deriving DecidableEq
 
 def headOf (w : DWorld) : Nat × Digest := w.head.getD (0, history.logRoot0)
@@ -241,18 +243,19 @@ def genHere {α : Type} (m : GenM α) : SimM α := do
   return a
 
 /-- Reopen a Host from its persisted bytes only. -/
-def reopen (h : Host) : Except String Host := do
+def reopen (plant : Plant) (h : Host) : Except String Host := do
   let records ← h.records.toList.mapM fun b =>
     (DurableCheckpointCodec.recordFrame.decode b).elim (.error "a persisted record does not decode") .ok
   let snap ← (Image.restore RB ⟨h.seed, records⟩).elim (.error "Image.restore refused the records") .ok
   let g ← (genesisOfSeed h.seed).mapError fun e => s!"genesis {reprStr e}"
-  let (w, turns) ← (followFrom g 0 h.log.toList).mapError fun e => s!"reopen fold {reprStr e}"
+  let log := if plant = .reopenDropsLast then h.log.pop else h.log
+  let (w, turns) ← (followFrom g 0 log.toList).mapError fun e => s!"reopen fold {reprStr e}"
   return { h with snap, world := w, ids := idsOf h.seed turns }
 
 /-- Crash and reopen; the reopened Host must equal `expect`. -/
 def crashRestart (expect : Host) : SimM Unit := do
   count fun c => { c with crashes := c.crashes + 1 }
-  match reopen expect with
+  match reopen (← get).plant expect with
   | .error e => fail s!"crash-restart: {e}"
   | .ok h' =>
     if let some e := sameHost h' expect then fail s!"crash-restart: resumed != uninterrupted: {e}"
@@ -486,7 +489,9 @@ end Minidregg.Host.WorldSim
 open Minidregg.Host.WorldSim in
 def main (arguments : List String) : IO UInt32 := do
   let plantOf (rest : List String) : Plant :=
-    if rest.contains "--plant" ∧ rest.contains "follower-skips-guard" then .followerSkipsGuard else .none
+    if rest.contains "--plant" ∧ rest.contains "follower-skips-guard" then .followerSkipsGuard
+    else if rest.contains "--plant" ∧ rest.contains "reopen-drops-last" then .reopenDropsLast
+    else .none
   try
     match arguments with
     | ["seeds", a, n, steps, k] =>
@@ -505,7 +510,7 @@ def main (arguments : List String) : IO UInt32 := do
       let k := (rest.head?.bind String.toNat?).getD 50
       return if ← runSeed seed steps k (plantOf rest) (rest.contains "--names") then 0 else 1
     | _ =>
-      IO.eprintln "usage: world-sim SEED STEPS [K] [--plant follower-skips-guard] | seeds FROM COUNT STEPS K | corpus STORES.json K"
+      IO.eprintln "usage: world-sim SEED STEPS [K] [--plant follower-skips-guard|reopen-drops-last] [--names] | seeds FROM COUNT STEPS K | corpus STORES.json K"
       return 2
   catch e =>
     IO.eprintln s!"world-sim: {e}"

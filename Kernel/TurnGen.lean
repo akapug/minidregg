@@ -479,7 +479,11 @@ def mutated (sz : Sizes) (v : View) : GenM (Option (String × DTurn deployedR Di
       | some c => some ("kind-mismatch", { t with legs := t.legs ++ [⟨c, .eventHistory, []⟩] })
       | none => some ("dup-create", { t with
           creates := [(absentId, contentCell 0, none), (absentId, contentCell 0, none)] }))
-  return named
+  -- Every mutation but `charge` keeps the charge rule (storage = the patch bytes), so the
+  -- named refusal is the one the mutation aims at and not `chargeMismatch`.
+  return named.map fun (c, t') =>
+    if c = "charge" then (c, t') else
+      (c, { t' with charge := fun l => if l = .storageBytes then patchBytes history t' else t'.charge l })
 
 /-! ## One step -/
 

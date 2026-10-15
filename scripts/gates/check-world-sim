@@ -10,24 +10,29 @@
 # Corpus (optional): WORLD_SIM_STORES=<stores.json of {row, config}> drives each retained
 # Store's own records through both sides (scripts/kern/turn-log-follower.sh's inputs).
 #
-# The plant: the follower skips leg 0's guard when that guard is the one that failed.
-# It must go red on PLANT_SEED at exactly PLANT_STEP (recorded when the plant was first
-# observed); a plant that stops firing, or fires elsewhere, is red too.
+# The plants, each red at the seed and step recorded when it was first observed (10-15,
+# burst4, lane/hp-6-sim); a plant that stops firing, or fires elsewhere, is red too:
+#   follower-skips-guard  the follower skips leg 0's guard when that guard is the one that failed
+#   reopen-drops-last     the Host's reopen loses its last persisted Turn entry (a torn append)
 set -uo pipefail
 exe=${1:-.lake/build/bin/world-sim}
 [[ -x $exe ]] || { echo "check-world-sim: $exe is not executable" >&2; exit 2; }
 first=${WORLD_SIM_FIRST:-1} seeds=${WORLD_SIM_SEEDS:-3} steps=${WORLD_SIM_STEPS:-300} k=${WORLD_SIM_K:-50}
-PLANT_SEED=@PLANT_SEED@ PLANT_STEP=@PLANT_STEP@
 status=0
 start=$(date +%s)
 "$exe" seeds "$first" "$seeds" "$steps" "$k" || status=1
-plant=$("$exe" "$PLANT_SEED" "$steps" "$k" --plant follower-skips-guard) && prc=0 || prc=$?
-echo "$plant"
-if [[ $prc == 1 && $plant == "SIM seed=$PLANT_SEED FAIL step=$PLANT_STEP "*follower* ]]; then
-  echo "PLANT follower-skips-guard RED-AS-EXPECTED seed=$PLANT_SEED step=$PLANT_STEP"
-else
-  echo "PLANT follower-skips-guard NOT-CAUGHT-AS-RECORDED (want seed=$PLANT_SEED step=$PLANT_STEP)"; status=1
-fi
+plant() {  # NAME SEED STEP FACT-GLOB
+  local out rc=0
+  out=$("$exe" "$2" "$steps" "$k" --plant "$1") || rc=$?
+  echo "$out"
+  if [[ $rc == 1 && $out == "SIM seed=$2 FAIL step=$3 "$4 ]]; then
+    echo "PLANT $1 RED-AS-EXPECTED seed=$2 step=$3"
+  else
+    echo "PLANT $1 NOT-CAUGHT-AS-RECORDED (want seed=$2 step=$3)"; status=1
+  fi
+}
+plant follower-skips-guard 1 29 '*follower admitted*'
+plant reopen-drops-last 1 49 'crash-restart: resumed != uninterrupted*'
 if [[ -n ${WORLD_SIM_STORES:-} ]]; then
   "$exe" corpus "$WORLD_SIM_STORES" "$k" || status=1
 fi

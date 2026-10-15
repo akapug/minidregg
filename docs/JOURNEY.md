@@ -86,7 +86,8 @@ valid and invalid. On every step the sim asserts that the roots are equal, that 
 re-admits each admitted entry, that it refuses each refused turn by the same name, and that the
 receiver's cell bytes, meter, spent set and height equal the World's (`Represents` on the
 touched cells). Every K steps the Host crashes at a seeded point and reopens from its persisted
-bytes, and the reopened Host must equal the one that ran without interruption. A plant (the
-follower skips a failed leg-0 guard) must go red at its recorded seed and step. Default: seeds
+bytes, and the reopened Host must equal the one that ran without interruption. Two plants
+must each go red at their recorded seed and step: the follower skipping a failed leg-0 guard
+(seed 1, step 29) and a reopen that loses the last Turn entry (seed 1, step 49). Default: seeds
 1–3 × 300 steps, K = 50. Nightly: `WORLD_SIM_SEEDS=64 WORLD_SIM_STEPS=10000 WORLD_SIM_K=500`.
 `WORLD_SIM_STORES=stores.json` adds the retained Stores' own records as a corpus.
