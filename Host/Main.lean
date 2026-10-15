@@ -2714,7 +2714,7 @@ partial def serveSession (config : NativeHost.Config)
   | .error refusal =>
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed refusal.render))
+      (RequestRefusal.overBound refusal))
   | .ok () =>
     let opcode ← readExactly input 1
     let operation := opcode[0]!
@@ -2724,7 +2724,7 @@ partial def serveSession (config : NativeHost.Config)
     | .error refusal =>
       discardExactly input (length - 1)
       writeSessionFrame output 255 (RequestRefusal.frame operation
-        (RequestRefusal.malformed refusal.render))
+        (RequestRefusal.overBound refusal))
     | .ok () =>
       let payload ← readExactly input (length - 1)
       serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
@@ -2747,7 +2747,7 @@ partial def serveCodec (config : NativeHost.Config)
   else if let .error refusal := Kernel.Bounds.check .frameBytes length then
     discardExactly input length
     writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed refusal.render))
+      (RequestRefusal.overBound refusal))
   else
     let body ← readExactly input length
     let operation := body[0]!

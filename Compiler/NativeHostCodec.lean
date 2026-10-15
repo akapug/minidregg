@@ -412,6 +412,20 @@ theorem v4_outcome_refused (payload : List UInt8) :
     simp [framedRaw, lengthExact, different]
   simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
+def retiredOutcomeFrameV5 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v5".toUTF8.toList
+
+/-- A version-5 outcome (its refusal reason without `overBound`, tag 15)
+refuses to decode: a v5 peer would read tag 15 as unknown, a v6 reader never
+reinterprets a v5 frame. -/
+theorem v5_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV5 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV5.length := by decide +kernel
+  have different : retiredOutcomeFrameV5 ≠ outcomeFrame := by decide +kernel
+  have raw : (framedRaw outcomeFrame outcomeStream).decode
+      (retiredOutcomeFrameV5 ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
 /-- A version-4 signing plan (its draft without `renounce`) refuses to decode. -/
 theorem v4_signingPlan_refused (payload : List UInt8) :
     signingPlanCodec.decode (retiredSigningPlanFrame ++ payload) = none := by

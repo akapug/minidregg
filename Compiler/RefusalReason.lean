@@ -93,6 +93,12 @@ inductive RefusalReason where
   reached only after the requester's read authority is established; a blind
   submission still tells it as `undisclosed`. -/
   | audienceTransition
+  /-- A value the request carries or derives is past a static limit
+  (`Kernel.Bounds`): a frame past its bound, or an intent past a leg, touched
+  cell, cell byte or nullifier bound. The detail names the bound, the value and
+  the limit (`Kernel.Bounds.Refusal.render`). Like every admission branch it is
+  told as `undisclosed` on a blind submission. -/
+  | overBound
   deriving DecidableEq, Repr, Inhabited
 
 namespace RefusalReason
@@ -114,6 +120,7 @@ def name : RefusalReason → String
   | .undisclosed => "undisclosed"
   | .tailBound => "tail-bound"
   | .audienceTransition => "audience-transition"
+  | .overBound => "over-bound"
 
 /-- Fixed friend-facing text. It depends on the reason only. -/
 def describe : RefusalReason → String
@@ -132,11 +139,12 @@ def describe : RefusalReason → String
   | .undisclosed => "request refused; a blind submission discloses no reason"
   | .tailBound => "the node is past its tail bound; no write is admitted until the next checkpoint"
   | .audienceTransition => "a holder of the object's current audience epoch no longer stands; the owner rotates the epoch before new protected bytes"
+  | .overBound => "a value in the request is past a static bound; the detail names the bound, the value and the limit"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
     .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed,
-    .lawInputRange, .tailBound, .audienceTransition]
+    .lawInputRange, .tailBound, .audienceTransition, .overBound]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -164,6 +172,7 @@ def stream : StreamCodec RefusalReason where
     | .lawInputRange => [12]
     | .tailBound => [13]
     | .audienceTransition => [14]
+    | .overBound => [15]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -180,11 +189,12 @@ def stream : StreamCodec RefusalReason where
     | 12 :: suffix => some (.lawInputRange, suffix)
     | 13 :: suffix => some (.tailBound, suffix)
     | 14 :: suffix => some (.audienceTransition, suffix)
+    | 15 :: suffix => some (.overBound, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (15 :: suffix) = none := rfl
+    stream.decodePrefix (16 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the

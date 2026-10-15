@@ -448,7 +448,7 @@ mod tests {
     fn replan_never_retries_another_refusal() {
         let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
         for reason in ["law-denied", "undisclosed", "bad-signature", "no-grant", "conflict",
-            "operation-rejected", "tail-bound"]
+            "operation-rejected", "tail-bound", "over-bound"]
         {
             let (result, calls, retired) = run(5, vec![Some(refused(reason))]);
             assert_eq!(result, Err("host refused".into()), "{reason}");

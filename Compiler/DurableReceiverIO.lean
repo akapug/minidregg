@@ -1,7 +1,6 @@
 /- Durable judgment and append over the shared loaded-image core. -/
 import Compiler.DurableReceiverCore
 import Kernel.ObjectiveAdmissible
-import Kernel.Bounds
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -165,53 +164,10 @@ structure PreparedAppend {rootBytes : List UInt8 → Digest} (loaded : Loaded ro
   extendedImage : extended.image = loaded.image.append intent
   indexAfter : Digest
 
-/-- The static bounds an intent is held to before it is appended (`Kernel.Bounds`,
-HP-1). On today's record path a written cell is a leg, a written or guarded cell
-is a touched cell, and each post image is one cell's bytes. -/
-def intentBounds {rootBytes : List UInt8 → Digest} (intent : DataIntent rootBytes) :
-    List (Bounds.Name × Nat) :=
-  [(.legsPerTurn, intent.writes.length),
-    (.cellsTouched, intent.writes.length + intent.readGuards.length),
-    (.nullifiersPerTurn, intent.nullifiers.length)] ++
-    intent.writes.map fun write => (.cellBytes, write.canonicalPostBytes.length)
-
-/-- **No false refusal at the append**: an intent within every bound passes the
-check `prepareAppend` runs first. -/
-theorem intentBounds_accepts {rootBytes : List UInt8 → Digest} (intent : DataIntent rootBytes)
-    (legs : intent.writes.length ≤ Bounds.legsPerTurnMax)
-    (touched : intent.writes.length + intent.readGuards.length ≤ Bounds.cellsTouchedMax)
-    (nullifiers : intent.nullifiers.length ≤ Bounds.nullifiersPerTurnMax)
-    (cells : ∀ write ∈ intent.writes, write.canonicalPostBytes.length ≤ Bounds.cellBytesMax) :
-    Bounds.checkAll (intentBounds intent) = .ok () := by
-  apply Bounds.withinBounds_accepts
-  intro p hp
-  simp only [intentBounds, List.cons_append, List.nil_append, List.mem_cons, List.mem_map] at hp
-  rcases hp with rfl | rfl | rfl | ⟨write, mem, rfl⟩
-  · exact legs
-  · exact touched
-  · exact nullifiers
-  · exact cells write mem
-
-/-- An accepted intent is within every bound (the check is not vacuous). -/
-theorem intentBounds_ok {rootBytes : List UInt8 → Digest} {intent : DataIntent rootBytes}
-    (h : Bounds.checkAll (intentBounds intent) = .ok ()) :
-    intent.writes.length ≤ Bounds.legsPerTurnMax ∧
-      intent.writes.length + intent.readGuards.length ≤ Bounds.cellsTouchedMax ∧
-      intent.nullifiers.length ≤ Bounds.nullifiersPerTurnMax ∧
-      ∀ write ∈ intent.writes, write.canonicalPostBytes.length ≤ Bounds.cellBytesMax := by
-  have w := Bounds.checkAll_ok _ h
-  refine ⟨w (.legsPerTurn, _) (by simp [intentBounds]), w (.cellsTouched, _) (by simp [intentBounds]),
-    w (.nullifiersPerTurn, _) (by simp [intentBounds]), fun write mem => w (.cellBytes, _) ?_⟩
-  simp only [intentBounds, List.cons_append, List.nil_append, List.mem_cons, List.mem_map]
-  exact Or.inr (Or.inr (Or.inr ⟨write, mem, rfl⟩))
-
 def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
     (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
     (key : MacKey) : IO (Except String (PreparedAppend loaded intent)) := do
-  -- HP-1: refused by the bound's name before the Store is read.
-  if let .error refusal := Bounds.checkAll (intentBounds intent) then
-    return .error refusal.render
   let height := loaded.image.accepted.length + 1
   let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
   let chain := loaded.chainAfterIntent intent
@@ -237,18 +193,6 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
   return .ok ⟨entry, rfl, nodes, extended, rfl, indexAfter⟩
 
-/-- An intent past a bound is refused by that bound's name, and the Store is
-neither read nor written. -/
-theorem prepareAppend_overBound (transport : Transport) {rootBytes : List UInt8 → Digest}
-    (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
-    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
-    (key : MacKey) {refusal : Bounds.Refusal}
-    (past : Bounds.checkAll (intentBounds intent) = .error refusal) :
-    prepareAppend transport loaded ready key = pure (.error refusal.render) := by
-  unfold prepareAppend
-  rw [past]
-
-#assert_axioms intentBounds_accepts intentBounds_ok prepareAppend_overBound
 
 /-- What the receiving loop does after the append's observation: confirm by
 exact readback (seal a due checkpoint), or report contention. -/

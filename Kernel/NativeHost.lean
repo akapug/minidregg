@@ -111,12 +111,23 @@ def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
 
 /-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
 with the head, the certified height and `L`): it is a fact about the public
-chain head, not about the request.  Every other durable reason is the
+chain head, not about the request.  A static bound is named (`overBound`, with
+`over-bound NAME VALUE > LIMIT`).  Every other durable reason is the
 receiver's `operationRejected`. -/
 def durableRefusal : DurableDataIntent.RejectReason → Outcome
   | .tailBound head certified bound =>
       refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}"
+  | .overBound name value limit =>
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render
   | reason => refused .operationRejected "durable" s!"{repr reason}"
+
+/-- A static bound's refusal names `overBound` and renders the bound, the value
+and the limit. -/
+theorem durableRefusal_overBound (name : Kernel.Bounds.Name) (value limit : Nat) :
+    durableRefusal (.overBound name value limit) =
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render := rfl
+
+#assert_axioms durableRefusal_overBound
 
 /-- The tail bound's refusal names `tailBound` and the three heights. -/
 theorem durableRefusal_tailBound (head certified bound : Nat) :
@@ -146,6 +157,7 @@ private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .transactionConflict => .conflict
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
+  | .durable (.overBound ..) => .overBound
   | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)

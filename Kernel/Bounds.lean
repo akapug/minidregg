@@ -12,10 +12,13 @@ The choke points that refuse by these names:
 
 * `Host.Main.serveSession` / `serveCodec`: a frame past `frameBytesMax` (or, for
   carried exact-call recovery, `lookupFrameBytesMax`) is refused before its payload
-  is read;
-* `Compiler.DurableReceiverIO.prepareAppend` (today's single append path): an
-  intent past `legsPerTurnMax`, `cellsTouchedMax`, `cellBytesMax` or
-  `nullifiersPerTurnMax` is refused before the Store is read;
+  is read, answered `refused over-bound` (`Host.RequestRefusal.answer_overBound`);
+* `Kernel.DurableCheckpoint.prepare` (the durable admission every append and every
+  replay goes through): an intent past `legsPerTurnMax`, `cellsTouchedMax`,
+  `cellBytesMax` or `nullifiersPerTurnMax` is rejected
+  `DurableDataIntent.RejectReason.overBound` before the snapshot is consulted
+  (`DataIntent.checkBounds`, `prepare_overBound`), answered `refused over-bound`
+  (`NativeHost.durableRefusal_overBound`);
 * `Kernel.DeployedTurnCompact.decodeEntry` (the follower's log-entry decoder): an
   entry past `turnBytesMax` is refused before a byte of it is decoded, and a turn
   past `legsPerTurnMax`, `nullifiersPerTurnMax` or `cellsTouchedMax` is refused

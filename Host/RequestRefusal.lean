@@ -9,6 +9,9 @@ its own answer is answered here, and the loop keeps serving:
   is the decoder's position or field name — a fact about bytes the client sent,
   so it is within the pre-signature disclosure rule (a challenge publishes
   nothing the client does not already hold about its own frame);
+* a frame past a static bound (`Kernel.Bounds`) is thrown as `overBound r` and
+  answered `refused overBound` (phase `op N`) with `over-bound NAME VALUE > LIMIT`
+  — a fact about the frame's length header, which the client sent;
 * any other exception is answered `refused operationRejected` (phase `op N`)
   with its text, as the fn session dispatcher already answers its own failures.
 
@@ -20,6 +23,7 @@ already been written (a second frame would desynchronise the pipe).
 `mini serve` restarts the Host in both cases.
 -/
 import Compiler.NativeHostCodec
+import Kernel.Bounds
 import Theory.AssertAxioms
 
 namespace Minidregg.Host.RequestRefusal
@@ -34,6 +38,14 @@ def tag : String := "minidregg-host request"
 /-- Thrown by a decoder when a request's client bytes fail its grammar. -/
 def malformed (detail : String) : IO.Error :=
   .invalidArgument (some tag) 0 detail
+
+/-- The `IO.Error` filename slot that marks a request past a static bound; only
+`overBound` constructs it. -/
+def boundTag : String := "minidregg-host bound"
+
+/-- Thrown when a request is past a static bound (`Kernel.Bounds.check`). -/
+def overBound (refusal : Kernel.Bounds.Refusal) : IO.Error :=
+  .invalidArgument (some boundTag) 0 refusal.render
 
 /-- Lift a decoder's verdict on client bytes into the session monad. -/
 def clientBytes {ε α : Type} [ToString ε] (decoded : Except ε α) : IO α :=
@@ -54,6 +66,7 @@ def answer (operation : UInt8) (error : IO.Error) : Outcome :=
   match error with
   | .invalidArgument (some marker) _ detail =>
       if marker = tag then .refused .malformed (phase operation) (clip detail)
+      else if marker = boundTag then .refused .overBound (phase operation) (clip detail)
       else .refused .operationRejected (phase operation) (clip (toString error))
   | other => .refused .operationRejected (phase operation) (clip (toString other))
 
@@ -68,6 +81,13 @@ theorem answer_malformed (operation : UInt8) (detail : String) :
       .refused .malformed (phase operation) (clip detail) := by
   simp [answer, malformed]
 
+/-- A request past a static bound is answered `refused overBound`, phase `op N`,
+with the bound's name, the value and the limit. -/
+theorem answer_overBound (operation : UInt8) (refusal : Kernel.Bounds.Refusal) :
+    answer operation (overBound refusal) =
+      .refused .overBound (phase operation) (clip refusal.render) := by
+  simp [answer, overBound, tag, boundTag]
+
 /-- Every exception is answered by a refusal for that operation: never a
 confirmation, never contention, unavailable or uncertain. -/
 theorem answer_refused (operation : UInt8) (error : IO.Error) :
@@ -76,7 +96,9 @@ theorem answer_refused (operation : UInt8) (error : IO.Error) :
   split
   · split
     · exact ⟨_, _, rfl⟩
-    · exact ⟨_, _, rfl⟩
+    · split
+      · exact ⟨_, _, rfl⟩
+      · exact ⟨_, _, rfl⟩
   · exact ⟨_, _, rfl⟩
 
 /-- The written frame decodes, under the current outcome version, to exactly
@@ -128,6 +150,7 @@ theorem oneShotFrame_decodes (operation : UInt8) (error : IO.Error) :
   outcomeCodec.decode_encode _
 
 #assert_axioms answer_malformed
+#assert_axioms answer_overBound
 #assert_axioms answer_refused
 #assert_axioms frame_decodes
 #assert_axioms oneShotAnswer_userError
