@@ -100,10 +100,21 @@ builders() {
   else
     echo red > "$ACR"
   fi
-  # Every private constructor is listed in TokenCensus/Table.lean and minted only in its home
-  # module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
-  # detected. Elaborates TokenCensus over the research umbrella.
+  # Every private constructor is listed in TokenCensus/Table.lean with a reviewed row (an L1 witness
+  # or a defect naming its cv task) and minted only in its home module (a `private mk` stops names,
+  # not `by constructor`). Elaborates TokenCensus over the research umbrella.
   run token-census    $LAKE_WRAP lake build TokenCensus
+  # The instrument's self-test (a planted forgery per private constructor, a planted call per
+  # restriction, and the plant script's statement plants) tests the detector, not the tree: it runs
+  # when the instrument changes. Lake builds, so in the builders job (one .lake writer).
+  if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
+    run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
+    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous; do
+      run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
+    done
+  else
+    echo "token-census: instrument unchanged since $(git log -1 --format=%h "$TO" -- TokenCensus.lean TokenCensus/Core.lean TokenCensus/SelfTest.lean scripts/kn2/plant-token-census-v2.sh): self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
+  fi
   run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
   # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
   # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
@@ -133,6 +144,18 @@ ledger() {
 }
 
 readers() {
+  # Defects only shrink: a commit may delete a `defect` row (its type now carries its guarantee),
+  # never add one. A new token is reviewed to L1 or loses `private`. The ratchet starts at the
+  # commit that introduced the grammar (TokenCensus/Core.lean absent at FROM). git only; its RED
+  # line is counted from the summary like every other.
+  defects() { git show "$1:TokenCensus/Table.lean" | awk -F'|' '$3 ~ /^ *defect / {gsub(/ /,"",$1); print $1}' | sort -u; }
+  if git cat-file -e "$FROM:TokenCensus/Core.lean" 2>/dev/null; then
+    local added_defects
+    added_defects=$(comm -13 <(defects "$FROM") <(defects "$TO") | tr '\n' ' ')
+    if [ -n "$added_defects" ]; then
+      echo "token-census-defects RED (defect rows added; review the type to L1 instead): $added_defects" | tee -a "$S"
+    else echo "token-census-defects PASS ($(defects "$TO" | wc -l) defects, none added)" | tee -a "$S"; fi
+  else echo "token-census-defects SKIP (the defect ratchet starts in this range)" | tee -a "$S"; fi
   run host-closure    bash scripts/check-host-closure.sh
   # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
   run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh

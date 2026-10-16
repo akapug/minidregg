@@ -38,7 +38,7 @@ def ingressCodec : LawfulCodec SignedIngress :=
   (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   raw : SignedIngress
   /-- The source carrier is bounded by one cell's bytes (`Kernel.Bounds.cellBytesMax`)
   before nested descriptor decoding. -/
