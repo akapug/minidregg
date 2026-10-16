@@ -1240,7 +1240,8 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
         (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
-    DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
+    DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height,
+    DurableReceiverIO.afterCheckpoint_image]
 
 def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do

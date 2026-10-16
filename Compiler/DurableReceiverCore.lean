@@ -1208,6 +1208,12 @@ theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loade
   dsimp only
   split <;> rfl
 
+theorem Loaded.rebaseD_logStart {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.rebaseD.logStart = loaded.logStart := by
+  unfold rebaseD rebase
+  dsimp only
+  split <;> rfl
+
 /-- **The index is the replay's index**: the cached index is the fold of the
 whole log, and equally the fold of the checkpoint's prefix advanced by the
 replayed suffix, which is the shape a resumed open computes. -/
@@ -1441,6 +1447,13 @@ theorem afterCheckpoint_image {rootBytes : List UInt8 → Digest} (loaded : Load
   unfold afterCheckpoint
   split
   · exact Loaded.rebaseD_image _
+  · rfl
+
+theorem afterCheckpoint_logStart {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (stored : Bool) : (afterCheckpoint loaded stored).logStart = loaded.logStart := by
+  unfold afterCheckpoint
+  split
+  · exact Loaded.rebaseD_logStart _
   · rfl
 
 /-- **The checkpoint differential** (operator diagnostic): rebuild the stored

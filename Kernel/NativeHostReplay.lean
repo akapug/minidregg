@@ -2951,14 +2951,24 @@ def Derived.judge {config : Config} {opened : Opened config} (derived : Derived 
 
 /-- Advance through the same canonical durable executor using the derived
 intent, never the untrusted stored post. This reuses its checked next snapshot
-and append proof instead of replaying the whole physical prefix again. -/
+and append proof instead of replaying the whole physical prefix again.
+
+Every accepted record adds one install layer to the next snapshot; a held
+session (the consent holder, an anchored suffix) would walk that growing chain
+on every lookup. The writer's own discipline applies here too: at each
+checkpoint height the verified base advances to the head (`afterCheckpoint`
+materializes the snapshot as a cold open of a checkpoint at the head would;
+`entriesOf_rebase` proves it serves the same entries). -/
 def advance {config : Config} (opened : Opened config) (derived : Derived config opened) : Except String Durable :=
   let durable := opened.durable
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed derived.intent with
   | .inl ready =>
       match derived.judge with
-      | .ok _ => .ok (durable.extend ready)
+      | .ok _ =>
+          let next := durable.extend ready
+          .ok (DurableReceiverIO.afterCheckpoint next
+            (DurableReceiverIO.checkpointDue config.transport next))
       | .error reason => .error reason
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted history entry"
@@ -3052,7 +3062,8 @@ theorem advance_image {config : Config} {opened : Opened config} {derived : Deri
   · split
     · intro done
       cases done
-      exact ⟨rfl, rfl⟩
+      exact ⟨DurableReceiverIO.afterCheckpoint_image _ _,
+        DurableReceiverIO.afterCheckpoint_logStart _ _⟩
     · intro failed
       cases failed
   all_goals intro failed; cases failed
@@ -3563,13 +3574,18 @@ theorem Verified.accepted_history {config : Config} {target : Durable}
   verified.admitted
 
 /-- The sole candidate produced from a previously verified image and the
-receiver's checked `Ready`; it contains no caller-supplied post snapshot. -/
+receiver's checked `Ready`; it contains no caller-supplied post snapshot.
+At each checkpoint height the verified base advances to the head, as in
+`advance`: a held session's snapshot lookups then walk at most one checkpoint
+interval of install layers, not every record admitted since it opened. -/
 def exactCandidate {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (derived : Derived config old.opened)
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
       old.opened.durable.snapshot derived.intent) : Durable :=
-  old.opened.durable.extend ready
+  let next := old.opened.durable.extend ready
+  DurableReceiverIO.afterCheckpoint next
+    (DurableReceiverIO.checkpointDue config.transport next)
 
 /-- A receiver-created exact readback: the store holds, at the next height,
 exactly the entry this admitted intent produced (record bytes and tag), read
@@ -3639,13 +3655,15 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable readback.validated)
   have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
     simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append,
-      old.countExact, ← old.image_exact]
+      DurableReceiverIO.afterCheckpoint_image, old.countExact, ← old.image_exact]
   have admitted : AdmittedReplay config old.origin target.image.accepted
       readback.after (old.receipts ++ [receipt]) := by
-    change AdmittedReplay config old.origin
-      (old.opened.durable.image.accepted ++ [record]) readback.after
-      (old.receipts ++ [receipt])
-    rw [old.image_exact]
+    have head : target.image.accepted =
+        old.opened.durable.image.accepted ++
+          [DurableReceiver.IntentRecord.ofIntent readback.derived.intent] := by
+      simp [target, exactCandidate, DurableReceiverIO.Loaded.extend,
+        DurableReceiver.Image.append, DurableReceiverIO.afterCheckpoint_image]
+    rw [head, old.image_exact]
     exact old.admitted.append (.cons step (.nil readback.after))
   let issues := issuesAfter config old.opened old.issues record receipt readback.derived matched
   let reserves := reservesAfter config old.opened old.reserves record receipt
@@ -4015,7 +4033,8 @@ def SuffixDerived.intent {config : Config} {opened : Opened config} :
   | .carriedDispatch _ admitted => admitted.intent
 
 /-- Both carried families use the same durable preparation, tail judgement and
-installer. Only the typed `SuffixDerived` cases call this private helper. -/
+installer. Only the typed `SuffixDerived` cases call this private helper. The
+verified base advances at each checkpoint height, as in `advance`. -/
 private def advanceCarriedIntent {config : Config} (opened : Opened config)
     (intent : DataIntent rootBytes) : Except String Durable :=
   let durable := opened.durable
@@ -4023,7 +4042,10 @@ private def advanceCarriedIntent {config : Config} (opened : Opened config)
       durable.withinLog durable.resumed intent with
   | .inl ready =>
       match durable.judge config.transport (.ordinary intent) with
-      | .ok _ => .ok (durable.extend ready)
+      | .ok _ =>
+          let next := durable.extend ready
+          .ok (DurableReceiverIO.afterCheckpoint next
+            (DurableReceiverIO.checkpointDue config.transport next))
       | .error reason => .error s!"carried durable intent refused: {repr reason}"
   | .inr (.rejected reason) => .error s!"carried durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted suffix entry"
@@ -4101,7 +4123,8 @@ private theorem advanceCarriedIntent_image {config : Config} {opened : Opened co
   · split
     · intro done
       cases done
-      exact ⟨rfl, rfl⟩
+      exact ⟨DurableReceiverIO.afterCheckpoint_image _ _,
+        DurableReceiverIO.afterCheckpoint_logStart _ _⟩
     · intro failed
       cases failed
   all_goals intro failed; cases failed
