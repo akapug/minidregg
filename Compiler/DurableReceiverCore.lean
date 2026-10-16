@@ -1658,7 +1658,8 @@ def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBy
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
               SessionIndex.TxIndex.ofRecords_exact image.accepted,
-              Array.replicate image.accepted.length none, Array.size_replicate, none, none⟩,
+              Array.replicate image.accepted.length none, Array.size_replicate, none, none,
+              trackOf rootBytes image resumed⟩,
               rfl, rfl, rfl, rfl, rfl⟩
   else .error "durable log is shorter than the requested height"
 
