@@ -197,6 +197,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
   return .ok ⟨entry, rfl, nodes, extended, rfl, indexAfter⟩
 
+
 /-- What the receiving loop does after the append's observation: confirm by
 exact readback (seal a due checkpoint), or report contention. -/
 def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes)

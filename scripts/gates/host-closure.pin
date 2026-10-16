@@ -49,6 +49,7 @@
 # updated 2026-10-09: derived StoreEpoch: Compiler.PersistedCodecTags (registry of persisted codec identities) and its attribute module PersistedCodecTagRegistry enter the Host closure; DurableCheckpointCodec hashes their content into schema-refs  [counts: Minidregg 0 1, Theory 106 179, Kernel 405 554, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 122, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-15: store-root 1f5920fe/f537449d: the world root IS the compressed trie (AuthTrie.root over Theory.AuthTrieCache), so the Host computes it from that module  [counts: Minidregg 0 1, Theory 107 180, Kernel 405 559, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 124, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-15: turn-log 4a 88e790b9: the open folds the turn log and decides the snapshot represents the World it holds (TurnLog, DeployedTurnCodec/Compact, SnapRepresents, DeployedRepresentsCheck)  [counts: Minidregg 0 1, Theory 107 180, Kernel 410 561, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 124, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
+# updated 2026-10-14: HP-1 BOUNDS: Kernel.Bounds (the static limits; imports only Theory.AssertAxioms) enters through Host.Main, Compiler.DurableReceiverIO  [counts: Minidregg 0 1, Theory 106 179, Kernel 406 555, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 123, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -440,6 +441,7 @@ Kernel.AuditTiming
 Kernel.Base64
 Kernel.BirthCandidateAdmission
 Kernel.BirthExportAdmission
+Kernel.Bounds
 Kernel.CanonicalPolicyRegistry
 Kernel.CanonicalResourceEffect
 Kernel.CapabilityDelegationController
