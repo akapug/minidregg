@@ -81,7 +81,7 @@ theorem activity_storage {config : NativeHost.Config} {opened : NativeHost.Opene
     {ingress : ObjectiveActivityReceiver.DecodedIngress}
     (verdict : ObjectiveActivityReceiver.Verdict config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector⟩ opened.durable ingress) :
+        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress) :
     verdict.intent.exactCharge .storageBytes =
       DeployedCharge.storageCharge opened.durable.snapshot verdict.intent.writes verdict.intent.event := by
   cases verdict with
@@ -101,7 +101,7 @@ theorem seat_storage {config : NativeHost.Config} {opened : NativeHost.Opened co
     {ingress : SeatReceiver.DecodedIngress}
     (verdict : SeatReceiver.Accepted config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable,
-        config.tariff.asset, config.tariff.collector⟩ opened.durable ingress) :
+        config.tariff.asset, config.tariff.collector, {}⟩ opened.durable ingress) :
     (SeatReceiver.intent verdict).exactCharge .storageBytes =
       DeployedCharge.storageCharge opened.durable.snapshot (SeatReceiver.intent verdict).writes
         (SeatReceiver.intent verdict).event := rfl
