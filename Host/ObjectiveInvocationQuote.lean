@@ -202,14 +202,19 @@ def derive (config : Config) (opened : Opened config) (request : Request) :
     | .ok selection =>
       -- The receiver's guard list less nothing it can compute without
       -- signatures: ordinary read guards, audience guards, then the route's
-      -- consumed-read guards (`completeAdmissionGuards`). Ingress here is the
-      -- unsigned command, so `turnBytes` must cover the signed envelope too.
+      -- consumed-read guards (`completeAdmissionGuards`). The retained event
+      -- here carries the unsigned command, so `turnBytes` and the storage
+      -- ceiling must cover the signed envelope too.
       match ← checkAudiences prepared with
       | .error reason => return .error s!"final audience check refused: {repr reason}"
       | .ok audience =>
       let guards := admissionGuards prepared audience ++ selection.core.guards.filter fun guard =>
         decide (guard.cellId ∉ (writes prepared).map DataWrite.cellId)
-      match ObjectiveBendNativeAdmission.admit selection (commandCodec.encode command) (writes prepared) guards with
+      let unsigned : StableEvent :=
+        ⟨3, opened.ground.authority.domain,
+          effectsDigest opened.ground.authority.domain config.profile.semantics command,
+          commandCodec.encode command⟩
+      match ObjectiveBendNativeAdmission.admit selection unsigned (writes prepared) guards with
       | .error reason => return .error s!"final output gate refused: {repr reason}"
       | .ok admitted => return .ok ⟨claim,command,admitted.output.plan,admitted.core.source.loaded.artifact⟩
 

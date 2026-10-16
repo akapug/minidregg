@@ -90,11 +90,10 @@ def Conditional.intent {config : Config} {store : StoreIdentity} {head : Head st
   let ordinary := ApplicationLifecycleClaimCore.intentFromCurrent conditional.current
     (event ingress) ingress.canonicalBytes.length
   let marker := ingress.retryToken
+  -- The retry token is one more nullifier of the same writes, guards and event:
+  -- the World's storage of the turn is the ordinary intent's (no marker term).
   { ordinary with
-    nullifiers := ordinary.nullifiers ++ [marker]
-    exactCharge := fun dimension => match dimension with
-      | .storageBytes => ordinary.exactCharge .storageBytes + marker.canonicalBytes.length
-      | other => ordinary.exactCharge other }
+    nullifiers := ordinary.nullifiers ++ [marker] }
 
 theorem Conditional.intent_consumes_retry {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}

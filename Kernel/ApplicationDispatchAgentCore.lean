@@ -106,8 +106,9 @@ def charge {config : Config} {opened : Opened config}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => base .proofWork + 1
     | .memoryTouches => base .memoryTouches + 1
-    | .storageBytes => base .storageBytes + ingress.canonicalBytes.length +
-        (claimNullifier reserved).canonicalBytes.length
+    | .storageBytes => DeployedCharge.storageCharge opened.ground.view
+        (ApplicationDispatchPending.candidateIntent checked.base.checked).writes
+        (ApplicationDispatchAgentIngress.event ingress)
     | other => base other
 
 /-- The app mutation is unchanged, but the event is version21, the physical

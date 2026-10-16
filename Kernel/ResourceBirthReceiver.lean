@@ -241,9 +241,7 @@ def charge {height : Height}
   | .proofWork => 2 + accepted.descriptor.createRequests.length +
       accepted.descriptor.resourceBatch.operations.length +
       (match accepted.ingress.ownerConsentEnvelopes with | none => 0 | some owners => owners.length)
-  | .storageBytes =>
-      (accepted.prepared.writes.map fun write => write.canonicalPostBytes.length).sum +
-        accepted.ingress.bytes.length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot accepted.prepared.writes (event deployment.domain accepted.ingress)
   | .sideEffectCount => 1
   | .feeDebit => accepted.descriptor.fee.amount
   | .networkBytes | .leaseByteBlocks => 0

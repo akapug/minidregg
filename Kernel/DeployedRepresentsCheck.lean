@@ -80,8 +80,7 @@ def representsCheck {rootBytes : List UInt8 → Theory.TypedAuthorization.Digest
   txs.all (fun x => (w.journal x).isSome) &&
   -- the clock and the meter
   (match w.head with | some (h, _) => h == image.accepted.length | none => false) &&
-  allLanes.all (fun l => l == .storageBytes || w.meter l == snap.model.available l) &&
-  decide (snap.model.available .storageBytes ≤ w.meter .storageBytes)
+  allLanes.all (fun l => w.meter l == snap.model.available l)
 
 theorem lookupRecorded_isSome {C N E : Type} (x : TransactionId) :
     ∀ (l : List (TransactionId × DurableCommitProtocol.Intent TransactionId C N E)),
@@ -108,8 +107,8 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
     SnapRepresents bridge snap image.accepted.length w := by
   unfold representsCheck at ok
   simp only [Bool.and_eq_true, beq_iff_eq, Bool.not_eq_true', decide_eq_true_eq, List.all_eq_true] at ok
-  obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨absentEnc, absentNotRetired⟩, named⟩, cellsNamed⟩, rows⟩, spentAll⟩, journalAll⟩,
-    head⟩, meter⟩, storage⟩ := ok
+  obtain ⟨⟨⟨⟨⟨⟨⟨⟨absentEnc, absentNotRetired⟩, named⟩, cellsNamed⟩, rows⟩, spentAll⟩, journalAll⟩,
+    head⟩, meter⟩ := ok
   obtain ⟨journalEq, consumedEq⟩ := resume_model resumed
   have consumedAll : ∀ n, snap.model.consumed n =
       decide (n ∈ image.accepted.flatMap IntentRecord.nullifiers) := by
@@ -141,7 +140,7 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
             obtain ⟨c', m', e⟩ := List.mem_map.mp this
             exact absurd (by cases c'; simp at e; subst e; exact m') m
       simp [cellOk, none, unretired, ← absentEnc, absentNotRetired]
-  refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, storage, fun c => ?_, fun c => ?_⟩
+  refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l => ?_, fun c => ?_, fun c => ?_⟩
   · -- cells
     have h := cell c
     simp only [cellOk, Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq] at h
@@ -188,9 +187,7 @@ theorem representsCheck_sound {rootBytes : List UInt8 → Theory.TypedAuthorizat
         simp only [beq_iff_eq] at e
         exact ⟨r, by rw [e]⟩
   · -- meter
-    have := meter l (mem_allLanes l)
-    simp only [Bool.or_eq_true, beq_iff_eq] at this
-    exact this.resolve_left e
+    simpa using meter l (mem_allLanes l)
   · -- retired
     have h := cell c
     simp only [cellOk, Bool.and_eq_true, beq_iff_eq] at h

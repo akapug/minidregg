@@ -440,7 +440,9 @@ def charge (accepted : AcceptedRenounce deployment semantics ambient ground ingr
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.accepted).length + (readGuards accepted.accepted).length
-  | .storageBytes => ((writes accepted.accepted).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge ground.view
+      (writes accepted.accepted)
+      (event deployment.domain semantics ingress)
   | .witnessBytes => ingress.ingress.envelopeBytes.length
   | .proofWork => 1
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0

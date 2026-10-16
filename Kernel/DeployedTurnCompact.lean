@@ -108,10 +108,6 @@ end Changes
 
 /-! ## The compact leg -/
 
-/-- The digest guard of a held cell: the deployed per-cell root of its bytes. -/
-def cellDigest (k : deployedR.Kind) (s : Store (deployedR.layout k)) : Digest :=
-  ResourceBirthCodec.rootBytes (encodeCell (some ⟨k, s⟩))
-
 /-- A change's bytes: the read-op carrier `read ns key value` (its op stream). -/
 def changeBytes (k : deployedR.Kind) (c : Change (deployedR.layout k)) : List UInt8 :=
   encodeOp k (.read c.1.1 c.1.2 c.2)
@@ -156,7 +152,7 @@ def encodeLegAt (held : CellId → Option (Cell deployedR)) (leg : Leg deployedR
     if compactable held leg then
       let s' := Patch.run s leg.patch
       [0] ++ StreamCodec.nat.encode leg.cell ++ [CanonicalCellRegistry.Kind.tag leg.kind] ++
-        digestStream.encode (cellDigest leg.kind s) ++
+        digestStream.encode (cellRoot (some ⟨leg.kind, s⟩)) ++
         (StreamCodec.list bytesStream).encode
           ((changesOf (bridge.codec.cover leg.kind s s') s s').map (changeBytes leg.kind))
     else [1] ++ encodeLeg leg
@@ -174,7 +170,7 @@ def decodeLegAt (held : CellId → Option (Cell deployedR)) : List UInt8 → Opt
       let raw ← full (StreamCodec.list bytesStream) b3
       let changes ← raw.mapM (decodeChange k)
       let s ← (held cell).bind fun c => c.storeAt k
-      if cellDigest k s = digest then
+      if cellRoot (some ⟨k, s⟩) = digest then
         some ⟨cell, k, bridge.codec.legPatch k s (applyChanges s changes)⟩
       else none
   | 1 :: bytes => full legStream bytes
@@ -269,7 +265,7 @@ theorem decodeLegAt_other (held held' : CellId → Option (Cell deployedR)) (leg
         | none => simp [hcell, hst] at decoded
         | some s' =>
           simp only [hcell, hst] at decoded
-          by_cases hd : cellDigest k s' = cellDigest k s
+          by_cases hd : cellRoot (some ⟨k, s'⟩) = cellRoot (some ⟨k, s⟩)
           · simp only [hd, ↓reduceIte, Option.some.injEq] at decoded
             by_cases es : s' = s
             · subst es
@@ -313,7 +309,8 @@ def encodeTurnAt (w : World deployedR TransactionId Digest) (t : DTurn deployedR
        StreamCodec.nat.encode t.keyEpoch,
        (StreamCodec.option digestStream).encode t.capability,
        StreamCodec.nat.encode t.notBefore,
-       (StreamCodec.option StreamCodec.nat).encode t.validUntil])
+       (StreamCodec.option StreamCodec.nat).encode t.validUntil,
+       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins])
 
 /-- Decode a persisted turn against the follower's world. -/
 def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8) :
@@ -322,7 +319,7 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     (StreamCodec.list bytesStream)) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
-      fBefore, fUntil] =>
+      fBefore, fUntil, fPins] =>
     let txId ← full digestStream fTx
     let createsRaw ← full (StreamCodec.list bytesStream) fCreates
     let creates ← createsRaw.mapM decodeCreate
@@ -337,8 +334,9 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     let capability ← full (StreamCodec.option digestStream) fCap
     let notBefore ← full StreamCodec.nat fBefore
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
+    let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent }
+           capability, notBefore, validUntil, absent, pins }
   | _ => none
 
 theorem mapM_decodeLegAt (held : CellId → Option (Cell deployedR)) (legs : List (Leg deployedR)) :

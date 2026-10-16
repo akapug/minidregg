@@ -206,11 +206,11 @@ by DRC; the extra package guard is checked against this same old image.
 The new event and second nullifier distinguish an executable pending request
 from a generic begin mutation. The source charge replaces ordinary turn bytes
 with this full ingress, adds one authorized package-observation incidence and
-proof unit, and counts the one extra read guard. Ordinary DRC `storageBytes`
-counts only post-write bytes; this special source tariff additionally counts
-the ingress and new nullifier bytes. Neither ordinary nor special charge is a
-claim to measure every physical journal byte. No external physical effect is
-charged, because none has occurred. -/
+proof unit, and counts the one extra read guard. Its `storageBytes` is the
+World's storage of this intent (`DeployedCharge.storageCharge`: the new values
+it writes and the event it retains, which carries the full ingress); the
+second nullifier adds nothing. No external physical effect is charged,
+because none has occurred. -/
 def intent {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {ground : Ground deployment}
@@ -248,9 +248,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
         | .witnessBytes => ingress.canonicalBytes.length
         | .proofWork => ordinary.exactCharge .proofWork + 1
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 1
-        | .storageBytes => ordinary.exactCharge .storageBytes +
-            ingress.canonicalBytes.length +
-            (stableNullifier deployment.domain profile.semantics source).canonicalBytes.length
+        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (event ingress)
         | other => ordinary.exactCharge other
       event := event ingress
       subject := ordinary.subject

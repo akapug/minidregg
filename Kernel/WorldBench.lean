@@ -57,6 +57,9 @@ def benchH : History benchR Nat Unit UInt64 where
   -- The bench measures the fold, not the meter: no leg is charged storage.
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
+  eventBytes := fun _ => 0
+  -- Bench turns carry no pins.
+  cellDigest := fun _ => 0
 
 def benchGenesis : BenchWorld := genesis benchH 0
 

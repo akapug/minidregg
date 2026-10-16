@@ -43,10 +43,10 @@ structure SnapRepresents (B : Bridge R D) (snap : DataSnapshot rootBytes) (heigh
   journal : ∀ x, (w.journal x).isSome = (Snapshot.lookupRecorded x snap.model.journal).isSome
   /-- The clock: the head height is the deployed height. -/
   head : ∃ r, w.head = some (height, r)
-  /-- Every meter lane but storage is the deployed allowance. -/
-  meter : ∀ l, l ≠ .storageBytes → w.meter l = snap.model.available l
-  /-- Storage: the model charges the patch, the present Host the image (G-CHARGE). -/
-  storage : snap.model.available .storageBytes ≤ w.meter .storageBytes
+  /-- Every meter lane, storage included, is the deployed allowance: the Host
+  debits the derived turn's charge (G-CHARGE, the append path refuses any
+  other). -/
+  meter : ∀ l, w.meter l = snap.model.available l
   /-- A cell is retired exactly when its deployed bytes are the retirement. -/
   retired : ∀ c, (w.retired c).isSome = B.codec.retires (snap.canonicalBytes ⟨c⟩)
   /-- No parent rows: the present Host keeps parentage in the authority
@@ -114,6 +114,56 @@ theorem preflight_facts {before : DataSnapshot rootBytes} {intent : DataIntent r
       (by simpa using m)
   · exact (Theory.ResourceCost.Charge.fundedCheck_eq_true_iff _ _).mp (by simpa using h6)
 
+/-- What a passing preflight establishes about the asserted pre-roots: every
+write's `expectedPre` and every read guard's `expectedRoot` is the snapshot's
+root of its cell. -/
+theorem preflight_roots {before : DataSnapshot rootBytes} {intent : DataIntent rootBytes}
+    (ok : intent.preflight before = .ok ()) :
+    (∀ wr ∈ intent.writes, before.model.roots wr.cellId = wr.expectedPre) ∧
+      ∀ g ∈ intent.readGuards, before.model.roots g.cellId = g.expectedRoot := by
+  have hg : intent.readGuardsMatchCheck before = true := by
+    unfold DataIntent.preflight at ok
+    cases h : intent.readGuardsMatchCheck before
+    · simp [h] at ok
+    · rfl
+  have lower : intent.erase.preflight before.model = .ok () := by
+    unfold DataIntent.preflight at ok
+    split at ok
+    · cases ok
+    split at ok
+    · cases ok
+    split at ok
+    · cases ok
+    · assumption
+  refine ⟨fun wr m => ?_, (DataIntent.readGuardsMatchCheck_eq_true_iff _ _).mp hg⟩
+  unfold DurableCommitProtocol.Intent.preflight at lower
+  split_ifs at lower with h1 h2 h3 h4 h5 h6
+  have roots : ∀ a ∈ intent.writes, before.model.roots a.cellId = a.expectedPre := by
+    simpa using h4
+  exact roots wr m
+
+/-- **The intent's pins hold at a represented world** whose snapshot passes
+preflight: under pin coherence, each asserted root read as a pin is the
+world's digest of that cell's slot. -/
+theorem pins_of_preflight (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    {snap : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
+    (rep : SnapRepresents B snap height w) (coherent : PinCoherent B H rootBytes)
+    {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t) (ready : intent.preflight snap = .ok ()) :
+    (∀ wr ∈ intent.writes, H.cellDigest (w.cells wr.cellId.value) = B.pin wr.expectedPre) ∧
+      ∀ g ∈ intent.readGuards, H.cellDigest (w.cells g.cellId.value) = B.pin g.expectedRoot := by
+  have d := ofCells_ok derived
+  obtain ⟨wroots, groots⟩ := preflight_roots ready
+  have at_cell : ∀ c : DurableDataIntent.CellId, (w.retired c.value).isSome = false →
+      H.cellDigest (w.cells c.value) = B.pin (snap.model.roots c) := by
+    intro c unretired
+    have live : B.codec.retires (snap.canonicalBytes c) = false :=
+      (rep.retired c.value).symm.trans unretired
+    rw [coherent _ _ (rep.cells c.value) live, snap.coherent]
+  refine ⟨fun wr hw => ?_, fun g hg => ?_⟩
+  · rw [at_cell wr.cellId (written_unretired d hw), wroots wr hw]
+  · rw [at_cell g.cellId (d.guards_unretired _ (guard_mem_guardIds hg)), groots g hg]
+
 /-! ### `ofIntent_run` -/
 
 theorem lookupPostBytes_some {c : DurableDataIntent.CellId} :
@@ -159,16 +209,19 @@ theorem lookupPostBytes_none_unwritten {c : CellId} :
         · exact ne (by rw [e])
         · exact lookupPostBytes_none_unwritten h m
 
-/-- **`ofIntent_run`.**  `World.step H w (ofIntent w i)` is the deployed
-post-state: from a represented snapshot, an intent the executor would install
-(fresh id, passing preflight) and its derived turn, `World.step` accepts the
-turn and its world represents `DataSnapshot.install` one height up. -/
-theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D)
+/-- `ofIntent_run` with the pins given: from a represented snapshot, an intent
+the executor would install, and its derived turn charged the intent's charge
+and whose pins hold at the world, `World.step` accepts the turn and its world
+represents `DataSnapshot.install` one height up. -/
+theorem ofIntent_run_pinned (B : Bridge R D) (H : History R TransactionId StableEvent D)
     {snap : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
-    (rep : SnapRepresents B snap height w) {intent : DataIntent rootBytes} {t : DTurn R D}
+    (rep : SnapRepresents B snap height w)
+    {intent : DataIntent rootBytes} {t : DTurn R D}
     (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
     (fresh : Snapshot.lookupRecorded intent.transactionId snap.model.journal = none)
-    (ready : intent.preflight snap = .ok ()) :
+    (ready : intent.preflight snap = .ok ())
+    (pinsHold : ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2) :
     ∃ w', World.step H w t = some w' ∧
       SnapRepresents B (DataSnapshot.install snap intent) (height + 1) w' := by
   obtain ⟨r, hh⟩ := rep.head
@@ -188,16 +241,18 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
         rw [unconsumed _ m] at hc
         cases hc
   have fundedL : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l := by
-    intro l e
-    rw [rep.meter l e]
+    intro l _
+    rw [rep.meter l]
     exact funded l
-  have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes :=
-    le_trans (funded _) rep.storage
-  obtain ⟨w', hs, hcells, hsys⟩ := ofIntent_step B H derived hh jfresh nodup unspent fundedL fundedS
+  have fundedS : intent.exactCharge .storageBytes ≤ w.meter .storageBytes := by
+    rw [rep.meter]
+    exact funded _
+  obtain ⟨w', hs, hcells, hsys⟩ := ofCells_step B H (fun _ => rfl) (fun _ => rfl) derived hh jfresh
+    nodup unspent fundedL fundedS pinsHold
   have derived' : ofCells B H (fun c => w.cells c) (fun c => (w.retired c).isSome) intent = .ok t := derived
-  obtain ⟨htx, hret, hrows, hnull, hchg, hchgS⟩ := ofCells_fields derived
+  obtain ⟨htx, hret, hrows, hnull, -, -⟩ := ofCells_fields derived
   have d := ofCells_ok derived
-  refine ⟨w', hs, ⟨fun c => ?_, fun dd => ?_, fun x => ?_, ⟨H.chain r (H.turnDigest t), ?_⟩, fun l e => ?_, ?_,
+  refine ⟨w', hs, ⟨fun c => ?_, fun dd => ?_, fun x => ?_, ⟨H.chain r (H.turnDigest t), ?_⟩, fun l => ?_,
     fun c => ?_, fun c => ?_⟩⟩
   · -- cells
     rw [DataSnapshot.install_canonicalBytes, hcells c]
@@ -255,22 +310,13 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
   · -- meter
     rw [meter_system, hsys, sysPost_allowance]
     show _ = snap.model.available l - intent.exactCharge l
-    rw [← hchg l e, ← rep.meter l e]
+    rw [← charged, ← rep.meter l]
     split
     · rfl
     · rename_i z
       simp only [not_not] at z
       rw [z, Nat.sub_zero]
       rfl
-  · -- storage
-    rw [meter_system, hsys, sysPost_allowance]
-    show snap.model.available .storageBytes - intent.exactCharge .storageBytes ≤ _
-    have hm := rep.storage
-    split
-    · show _ ≤ w.meter .storageBytes - t.charge .storageBytes
-      omega
-    · show _ ≤ w.meter .storageBytes
-      omega
   · -- retired
     show (w'.system ⟨SysSpace.retired, c⟩).isSome =
       B.codec.retires ((DataSnapshot.install snap intent).canonicalBytes ⟨c⟩)
@@ -308,6 +354,28 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
       run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e),
       Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e))]
     exact rep.parent c
+
+/-- **`ofIntent_run`.**  `World.step H w (ofIntent w i)` is the deployed
+post-state: from a represented snapshot, an intent the executor would install
+(fresh id, passing preflight) and its derived turn whose charge is the intent's
+(`charged`: the Host debits what the World debits), `World.step` accepts the
+turn and its world represents `DataSnapshot.install` one height up.  The
+turn's pins are the intent's asserted roots; `coherent` (proved for the
+deployed bridge and history, `DeployedHistory.deployed_pinCoherent`) is what
+makes the preflight's root equalities the World's pin equalities. -/
+theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    {snap : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
+    (rep : SnapRepresents B snap height w) (coherent : PinCoherent B H rootBytes)
+    {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
+    (fresh : Snapshot.lookupRecorded intent.transactionId snap.model.journal = none)
+    (ready : intent.preflight snap = .ok ()) :
+    ∃ w', World.step H w t = some w' ∧
+      SnapRepresents B (DataSnapshot.install snap intent) (height + 1) w' := by
+  obtain ⟨pinned, guarded⟩ := pins_of_preflight B H rep coherent derived ready
+  exact ofIntent_run_pinned B H rep derived charged fresh ready
+    (pinsHold_of_intent derived pinned guarded)
 
 /-- What a replay does to the journal and the consumed set. -/
 theorem replay_model :
@@ -377,12 +445,14 @@ the executor's `.accepted next` and the derived turn give `World.admit = .ok w'`
 with `next` representing `w'` one height up (`ofIntent_run`, read at `admit`). -/
 theorem admit_of_accepted (B : Bridge R D) (H : History R TransactionId StableEvent D)
     {snap next : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
-    (rep : SnapRepresents B snap height w) {intent : DataIntent rootBytes} {t : DTurn R D}
+    (rep : SnapRepresents B snap height w) (coherent : PinCoherent B H rootBytes)
+    {intent : DataIntent rootBytes} {t : DTurn R D}
     (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
     (executed : execute .complete snap intent = .accepted next) :
     ∃ w', World.admit H w t = .ok w' ∧ SnapRepresents B next (height + 1) w' := by
   rcases execute_cases .complete snap intent with ⟨-, fresh, ready, after⟩ | ⟨installs, -⟩
-  · obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep derived fresh ready
+  · obtain ⟨w', hs, hrep⟩ := ofIntent_run B H rep coherent derived charged fresh ready
     have hn : next = DataSnapshot.install snap intent := by
       rw [executed] at after; exact after
     refine ⟨w', ?_, hn ▸ hrep⟩
@@ -391,6 +461,63 @@ theorem admit_of_accepted (B : Bridge R D) (H : History R TransactionId StableEv
     | error r => rw [ha] at hs; cases hs
     | ok v => rw [ha] at hs; cases hs; rfl
   · rw [executed] at installs; simp [Installs] at installs
+
+/-- **An admitted turn's world is represented**: from a represented snapshot,
+an accepted execution and its derived turn charged the intent's charge, the
+world `World.admit` returned represents the executed snapshot one height up.
+No coherence premise: the World's own pin check, which admitted the turn, is
+what the representation needs of the pins. -/
+theorem represents_of_admitted (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    {snap next : DataSnapshot rootBytes} {height : Nat} {w w' : World R TransactionId D}
+    (rep : SnapRepresents B snap height w) {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t)
+    (charged : t.charge = intent.exactCharge)
+    (executed : execute .complete snap intent = .accepted next)
+    (admitted : World.admit H w t = .ok w') :
+    SnapRepresents B next (height + 1) w' := by
+  obtain ⟨height', logRoot, -, hk⟩ := admit_ok_turnCheck H admitted
+  have pinsHold := ((turnCheck_eq_none_iff H).1 hk).1
+  rcases execute_cases .complete snap intent with ⟨-, fresh, ready, after⟩ | ⟨installs, -⟩
+  · obtain ⟨w'', hs, hrep⟩ := ofIntent_run_pinned B H rep derived charged fresh ready pinsHold
+    have hn : next = DataSnapshot.install snap intent := by
+      rw [executed] at after; exact after
+    rw [(step_eq_some H).1 hs] at admitted
+    cases admitted
+    exact hn ▸ hrep
+  · rw [executed] at installs; simp [Installs] at installs
+
+/-- **The receiver preflight's guard checks are a corollary of admission.**
+At a represented world, under pin coherence and an injective pin reading
+(deployed: the identity), if the World admits an intent's derived turn then
+every read guard matches the snapshot (`readGuardsMatchCheck`) and every
+write's `expectedPre` is the snapshot's root of its cell: the World's pin check
+decided everything the receiver's staleness checks decide. -/
+theorem preflight_of_admit (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    {snap : DataSnapshot rootBytes} {height : Nat} {w : World R TransactionId D}
+    (rep : SnapRepresents B snap height w) (coherent : PinCoherent B H rootBytes)
+    (pinInj : Function.Injective B.pin)
+    {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t)
+    {w' : World R TransactionId D} (admitted : World.admit H w t = .ok w') :
+    intent.readGuardsMatchCheck snap = true ∧
+      ∀ wr ∈ intent.writes, snap.model.roots wr.cellId = wr.expectedPre := by
+  have d := ofCells_ok derived
+  have hpins : t.pins = pinsOf B intent := by rw [d.eq]; rfl
+  obtain ⟨height', logRoot, -, hk⟩ := admit_ok_turnCheck H admitted
+  have held := ((turnCheck_eq_none_iff H).1 hk).1
+  have root_of_pin : ∀ (c : DurableDataIntent.CellId) (asserted : Theory.TypedAuthorization.Digest),
+      (c.value, B.pin asserted) ∈ t.pins → snap.model.roots c = asserted := by
+    intro c asserted m
+    obtain ⟨unretired, same⟩ := held _ m
+    have live : B.codec.retires (snap.canonicalBytes c) = false :=
+      (rep.retired c.value).symm.trans (by simp [unretired])
+    rw [coherent _ _ (rep.cells c.value) live, snap.coherent] at same
+    exact pinInj same
+  refine ⟨(DataIntent.readGuardsMatchCheck_eq_true_iff _ _).mpr fun g hg => ?_, fun wr hw => ?_⟩
+  · exact root_of_pin g.cellId g.expectedRoot
+      (by rw [hpins]; exact List.mem_append_right _ (List.mem_map_of_mem hg))
+  · exact root_of_pin wr.cellId wr.expectedPre
+      (by rw [hpins]; exact List.mem_append_left _ (List.mem_map_of_mem hw))
 
 end Represent
 
@@ -402,6 +529,11 @@ end Represent
 #assert_axioms lookupPostBytes_some
 #assert_axioms decodes_of_derived
 #assert_axioms ofIntent_run
+#assert_axioms ofIntent_run_pinned
+#assert_axioms represents_of_admitted
 #assert_axioms admit_of_accepted
+#assert_axioms preflight_roots
+#assert_axioms pins_of_preflight
+#assert_axioms preflight_of_admit
 
 end Minidregg.Kernel.HostRefinesWorld
