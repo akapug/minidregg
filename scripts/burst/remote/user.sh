@@ -76,7 +76,7 @@ rsync -a "$STAGE/candidate/lane-build.sh" "$STAGE/candidate/lib.sh" "$PIPELINE_R
 # provenance = the commit the scripts were STAGED from (burst-up's checkout), which need not be the tip at $SRV/mini
 { cat "$STAGE/STAGED-FROM" 2>/dev/null || git -C "$SRV/mini" rev-parse HEAD; } > "$PIPELINE_ROOT/scripts/.installed-from"; echo "installed-from: $(cat "$PIPELINE_ROOT/scripts/.installed-from") (staged by burst-up)"
 P=$PIPELINE_ROOT/scripts
-# the FIFO Lean-slot wrapper at its well-known path (sized by WITH_LEAN_SLOT_N/_THREADS/_NICE in box.env, via --set);
+# the FIFO Lean-slot wrapper at its well-known path (sized by PIPELINE_LEAN_SLOTS/_SLOT_THREADS/_SLOT_NICE in box.env, via --set);
 # a hand-installed copy already there is left alone
 mkdir -p "$PIPELINE_ROOT/slots"; [ -e "$PIPELINE_ROOT/slots/with-lean-slot" ] || ln -s ../scripts/with-lean-slot "$PIPELINE_ROOT/slots/with-lean-slot"
 # the warm base's mk-lane.sh is its OWN tree's scripts/pipeline/mk-lane.sh (advance/relay keep it so); refresh when it knows MK_LANE_PROBE
