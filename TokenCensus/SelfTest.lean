@@ -10,7 +10,7 @@ import TokenCensus
 
 namespace Minidregg.TokenCensus
 
-set_option maxHeartbeats 0 in
+-- each plant runs from a fresh heartbeat count (`perConstant`); no unbounded `maxHeartbeats 0`
 #assert_token_census_plants Minidregg.TokenCensus.table
 
 end Minidregg.TokenCensus

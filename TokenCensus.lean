@@ -28,8 +28,9 @@ theorem ProjectionWitness.sound' {request result : Nat}
 
 #assert_axioms ProjectionWitness.sound'
 
--- A scan of every constant: its cost is the size of the tree, not a proof search.
-set_option maxHeartbeats 0 in
+-- A scan of every constant: its cost is the size of the tree, not a proof search. Each
+-- constant's inspection runs from a fresh heartbeat count (`perConstant`) and each L1
+-- witness under its own budget (`l1WitnessFaults`); there is no unbounded `maxHeartbeats 0`.
 #assert_token_census Minidregg.TokenCensus.table
 
 end Minidregg.TokenCensus

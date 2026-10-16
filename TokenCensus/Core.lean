@@ -271,7 +271,8 @@ def valueIndices (tokenType : Expr) : MetaM (Array Expr) := do
 
 /-- Statement faults for an L1 witness.  The row type must occur as the direct
 type of an inhabitant binder; mentioning it elsewhere is not enough. -/
-def l1WitnessFaults (structName witness : Name) (info : ConstantInfo) : MetaM (Array String) := do
+def l1WitnessStatementFaults (structName witness : Name) (info : ConstantInfo) :
+    MetaM (Array String) := do
   unless info matches .thmInfo _ do
     return #[s!"L1 witness {witness} is not a theorem or proof field"]
   let mut prefixFaults := #[]
@@ -306,6 +307,27 @@ def l1WitnessFaults (structName witness : Name) (info : ConstantInfo) : MetaM (A
         let names ← indices.mapM fun index => return (← getFVarLocalDecl index).userName
         faults := faults.push s!"L1 witness {witness} says nothing about the token's indices {names.toList}: they occur only as implicit parameters of the inhabitant's projections"
     return faults
+
+/-- The heartbeat budget (in `maxHeartbeats` units) for inspecting ONE witness statement. -/
+def witnessHeartbeats : Nat := 400000
+
+/-- Statement faults for an L1 witness, inspected under its own heartbeat budget: a
+statement the census cannot inspect within `witnessHeartbeats` is a FAULT naming the
+witness, never a hang (the reduction-bomb class; see `trivialConclusion`). -/
+def l1WitnessFaults (structName witness : Name) (info : ConstantInfo) : MetaM (Array String) :=
+  tryCatchRuntimeEx
+    (withCurrHeartbeats <|
+      withTheReader Core.Context (fun ctx => { ctx with maxHeartbeats := witnessHeartbeats * 1000 }) <|
+        l1WitnessStatementFaults structName witness info)
+    fun ex =>
+      if ex.isMaxHeartbeat then
+        return #[s!"L1 witness {witness}: inspecting its statement exceeded {witnessHeartbeats} heartbeats (a statement the census cannot read without unfolding deployed code is a fault)"]
+      else throw ex
+
+/-- One constant's inspection in the census scans runs under the ambient `maxHeartbeats`
+from a fresh count: the scan over every constant is unbounded in total (its cost is
+the size of the tree) but no single constant can hang it. -/
+@[inline] def perConstant (x : MetaM α) : MetaM α := withCurrHeartbeats x
 
 /-- The plant: a definition exporting the bare private constructor, added to the
 current (scratch) environment. -/
@@ -381,9 +403,9 @@ elab "#assert_token_census " table:ident : command => do
     -- 1. no foreign mint
     let mut homeUses : NameSet := {}
     for (name, info) in env.constants.toList do
-      for (ctor, home) in ← mintsOf privates name info do
+      for (ctor, home) in ← perConstant (mintsOf privates name info) do
         if moduleOf env name == home then homeUses := homeUses.insert ctor
-      for (minter, module, ctor, home) in ← foreignMints privates name info do
+      for (minter, module, ctor, home) in ← perConstant (foreignMints privates name info) do
         faults := faults.push s!"{ctor} (home {home}) is minted by {minter} in {module}"
     -- 5. no mint that does not name the constructor (every census type is evidence)
     let evidenceTypes : NameMap Row := present.foldl (fun map (name, user, _) =>
@@ -409,10 +431,10 @@ elab "#assert_token_census " table:ident : command => do
       if let some value := info.value? then
         let used := info.getUsedConstantsAsSet
         if castLike.any used.contains && (used.toList.any fun c => (evidenceTypes.find? c).isSome) then
-          let targets := (← castTargets value).toList.filter fun type => (evidenceTypes.find? type).isSome
+          let targets := (← perConstant (castTargets value)).toList.filter fun type => (evidenceTypes.find? type).isSome
           unless targets.isEmpty do
             unless info matches .thmInfo _ do
-              unless ← isProp info.type do
+              unless ← perConstant (isProp info.type) do
                 for type in targets.eraseDups do
                   if evidenceHome type != some module then
                     faults := faults.push s!"{name} in {module} casts into the evidence token {type}"
@@ -425,7 +447,7 @@ elab "#assert_token_census " table:ident : command => do
           if let some type := conclusionHead info.type then
             if let some row := evidenceTypes.find? type then
               if row.home == module then
-                let bare ← forallTelescopeReducing info.type fun binders _ => do
+                let bare ← perConstant <| forallTelescopeReducing info.type fun binders _ => do
                   for binder in binders do
                     let binderType ← inferType binder
                     if ← isProp binderType then return false
@@ -442,7 +464,7 @@ elab "#assert_token_census " table:ident : command => do
       | some _ =>
           let allowed := moduleOf env restriction.function :: restriction.allowed
           for (name, info) in env.constants.toList do
-            if ← restrictedCall restriction.function allowed name info then
+            if ← perConstant (restrictedCall restriction.function allowed name info) then
               faults := faults.push s!"restricted {restriction.function} is called by {name} in {moduleOf env name} (allowed: {allowed})"
     unless faults.isEmpty do
       throwError m!"token census failed ({faults.size}):\n{String.intercalate "\n" faults.toList}"
@@ -467,7 +489,7 @@ elab "#assert_token_census_plants " table:ident : command => do
     for restriction in restrictions do
       if let some _ := env.find? restriction.function then
         let allowed := moduleOf env restriction.function :: restriction.allowed
-        let detected ← withoutModifyingEnv do
+        let detected ← perConstant <| withoutModifyingEnv do
           let fnInfo ← getConstInfo restriction.function
           let forge := `Minidregg.TokenCensus.plantedCall ++ restriction.function
           addDecl <| .defnDecl
@@ -481,7 +503,7 @@ elab "#assert_token_census_plants " table:ident : command => do
     for (name, user, _) in present do
       let info ← getConstInfo name
       if ← isProp info.type then continue
-      let detected ← withoutModifyingEnv do
+      let detected ← perConstant <| withoutModifyingEnv do
         let forge ← plantForge name
         let forgeInfo ← getConstInfo forge
         let flagged ← foreignMints privates forge forgeInfo
