@@ -269,8 +269,6 @@ def prepareRequestCarried (config : Config) (opened : Opened config)
     ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
-  if requestCodec.encode request != bytes then
-    throw "noncanonical session enrollment request"
   prepareCarried config opened custody request
 
 /-- Both sides of a carried service use their actual provenance: old issues
@@ -297,8 +295,6 @@ def prepareRequestSuffix (config : Config) {anchor : Opened config} {target : Du
     ExceptT String IO Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
-  if requestCodec.encode request != bytes then
-    throw "noncanonical session enrollment request"
   prepareSuffix config verified request
 
 def prepareRequestVerified (config : Config) {target : Durable}
@@ -306,8 +302,6 @@ def prepareRequestVerified (config : Config) {target : Durable}
     Except String Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical session enrollment request"
-  if requestCodec.encode request != bytes then
-    throw "noncanonical session enrollment request"
   prepareVerified config verified request
 
 /-- Detached signatures are placed only in source-selected canonical headers.

@@ -58,7 +58,7 @@ inductive Choice where
   deriving DecidableEq, Repr
 
 def choiceStream : StreamCodec Choice :=
-  StreamCodec.xmap StreamCodec.nat
+  StreamCodec.retract StreamCodec.nat
     (fun choice => match choice with
       | .create index => index + 1
       | .continue => 0)

@@ -81,8 +81,11 @@ theorem valid_assignments_complete {plan : Plan} (valid : plan.valid = true) :
   simp only [assignments, List.length_zip, schedule_length,
     ← valid_rows_count valid, Nat.min_self]
 
+/-- An op is a tag and two operands. Only the triples that spell an op are
+accepted: an unknown tag (it used to decode as `.constant false`) and a constant
+with non-zero operand fields (they used to be dropped) are refused. -/
 def opStream : StreamCodec Op :=
-  StreamCodec.xmap
+  StreamCodec.retract
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat StreamCodec.nat))
     (fun op => match op with
@@ -120,22 +123,24 @@ def planStream : StreamCodec Plan :=
 
 def frame : List UInt8 := "DREGG.PRIVATE.CIRCUIT.ALLOCATION".toUTF8.toList ++ [1]
 
+/-- The frame is CHECKED (same octets: the length-prefixed `frame`); any other
+frame is refused by the stream decoder. -/
 def framedPlanStream : StreamCodec Plan :=
-  StreamCodec.xmap (StreamCodec.product bytesStream planStream)
-    (fun plan => (frame, plan)) Prod.snd (by intro plan; rfl)
+  StreamCodec.framed (bytesStream.encode frame) planStream
 
 def encode (plan : Plan) : List UInt8 := framedPlanStream.encode plan
 
-/-- Re-encoding excludes alternate operation tags, noncanonical constants,
-wrong framing, and unused trailing bytes. It does not certify approval. -/
-def decode (bytes : List UInt8) : Option Plan := do
-  let plan ← framedPlanStream.toLawful.decode bytes
-  if encode plan = bytes then some plan else none
+/-- `framedPlanStream` is canonical: alternate operation tags, noncanonical
+constants, wrong framing and unused trailing bytes have no decoding
+(`decode_canonical`). It does not certify approval. -/
+def decode (bytes : List UInt8) : Option Plan := framedPlanStream.toLawful.decode bytes
 
-@[simp] theorem decode_encode (plan : Plan) : decode (encode plan) = some plan := by
-  have roundtrip := framedPlanStream.decodePrefix_encode plan []
-  simp only [List.append_nil] at roundtrip
-  simp [decode, encode, StreamCodec.toLawful, roundtrip]
+@[simp] theorem decode_encode (plan : Plan) : decode (encode plan) = some plan :=
+  framedPlanStream.toLawful.decode_encode plan
+
+theorem decode_canonical {bytes : List UInt8} {plan : Plan}
+    (accepted : decode bytes = some plan) : encode plan = bytes :=
+  framedPlanStream.toLawful_canonical bytes plan accepted
 
 theorem encode_injective {left right : Plan} (same : encode left = encode right) :
     left = right := by
@@ -148,4 +153,5 @@ theorem encode_injective {left right : Plan} (same : encode left = encode right)
 #assert_axioms valid_assignments_complete
 #assert_axioms decode_encode
 #assert_axioms encode_injective
+#assert_axioms decode_canonical
 end Minidregg.Compiler.PrivateCircuitAllocation

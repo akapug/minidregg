@@ -84,7 +84,7 @@ def tableOf (value : Instance) : Option Table := do
   if field.codec != .bytes || field.discipline != .rom then none else do
     let raw ← value.store ⟨space, (0 : Nat)⟩
     -- Reuse the declared scalar codec rather than casting a dependent value.
-    let bytes ← (ResourceBirthCodec.strictCodec bytesStream.toLawful).decode
+    let bytes ← bytesStream.toLawful.decode
       (field.codec.stream.encode raw)
     let table ← decode bytes
     if valid value.descriptor table then some table else none
@@ -95,8 +95,8 @@ def resolve (value : Instance) (program : Digest) : Option Method := do
 
 def numeric (codec : ScalarCodec) (bytes : List UInt8) : Option Int :=
   match codec with
-  | .natural => ((ResourceBirthCodec.strictCodec StreamCodec.nat.toLawful).decode bytes).map Int.ofNat
-  | .integer => (ResourceBirthCodec.strictCodec IntStream.intStream.toLawful).decode bytes
+  | .natural => (StreamCodec.nat.toLawful.decode bytes).map Int.ofNat
+  | .integer => IntStream.intStream.toLawful.decode bytes
   | .bytes => none
 
 /-- Exact writes only: no erasure, byte payload or read is represented as an

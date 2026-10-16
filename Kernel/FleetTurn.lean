@@ -212,7 +212,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (snapshot : Snapshot) (semantics : Digest) (command : Command) : Declaration :=
   ⟨snapshot.cell.root, marker snapshot.domain semantics command⟩

@@ -105,17 +105,7 @@ def sourceStream : StreamCodec Source :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/LIFECYCLE-CLAIM/v2".toUTF8.toList
 
-private def rawCodec : LawfulCodec Source where
-  encode source := frame ++ sourceStream.encode source
-  decode bytes := if bytes.take frame.length = frame then
-    sourceStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro source
-    have decoded := sourceStream.toLawful.decode_encode source
-    change sourceStream.toLawful.decode (sourceStream.encode source) = some source at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Source := strictCodec rawCodec
+def codec : LawfulCodec Source := (StreamCodec.framed frame sourceStream).toLawful
 
 def Source.canonicalBytes (source : Source) : List UInt8 := codec.encode source
 
@@ -124,7 +114,7 @@ theorem decode_encode (source : Source) :
 
 theorem decoded_canonical {bytes : List UInt8} {source : Source}
     (decoded : codec.decode bytes = some source) :
-    source.canonicalBytes = bytes := strictCodec_canonical rawCodec decoded
+    source.canonicalBytes = bytes := StreamCodec.toLawful_canonical _ _ _ decoded
 
 def sourceDigest (domain semantics : Digest) (source : Source) : Digest :=
   (Sp800185Cshake256.hash "DREGG/APPLICATION/LIFECYCLE-CLAIM-SOURCE/v1".toUTF8.toList

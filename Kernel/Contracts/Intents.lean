@@ -114,6 +114,11 @@ def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro _ _; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 def objectStream : StreamCodec Object :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat stringStream))

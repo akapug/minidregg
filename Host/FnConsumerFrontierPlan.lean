@@ -53,9 +53,7 @@ def planStream : StreamCodec Plan :=
     (by intro plan; cases plan; rfl)
 
 def planCodec : LawfulCodec Plan :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN/v2".toUTF8.toList
-      planStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN/v2".toUTF8.toList planStream
 
 theorem plan_decode_encode (plan : Plan) :
     planCodec.decode (planCodec.encode plan) = some plan :=

@@ -1755,17 +1755,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressFrame : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
 
-def ingressRawCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+def ingressCodec : LawfulCodec Ingress := (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful
 
 /-- Independent canonical frame for the explicit opted-in source method.
 Every owner envelope is retained by the same birth event on replay. -/
@@ -1776,18 +1766,8 @@ open Minidregg.Compiler.Tower256ConcreteBackend in
 def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
   StreamCodec.product ingressStream (StreamCodec.list bytesStream)
 
-def reserveIngressRawCodec : LawfulCodec (Ingress × List (List UInt8)) where
-  encode ingress := reserveIngressFrame ++ reserveIngressStream.encode ingress
-  decode bytes := if bytes.take reserveIngressFrame.length = reserveIngressFrame then
-    reserveIngressStream.toLawful.decode (bytes.drop reserveIngressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := reserveIngressStream.toLawful.decode_encode ingress
-    change reserveIngressStream.toLawful.decode (reserveIngressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
 def reserveIngressCodec : LawfulCodec (Ingress × List (List UInt8)) :=
-  strictCodec reserveIngressRawCodec
+  (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful
 
 structure DecodedIngress where
   private mk ::
@@ -1833,7 +1813,7 @@ theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedI
       split at decoded
       · contradiction
       · cases Option.some.inj decoded
-        exact strictCodec_canonical ingressRawCodec parsed
+        exact (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
@@ -1844,7 +1824,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     split at decoded
     · contradiction
     · cases Option.some.inj decoded
-      exact strictCodec_canonical reserveIngressRawCodec parsed
+      exact (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful_canonical _ _ parsed
 
 def CredentialBundle.forBranch (bundle : CredentialBundle) : Branch descriptor → Option BranchCredential
   | .factory => some bundle.factory

@@ -89,18 +89,15 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, key⟩)
     (by intro command; cases command; rfl)
 
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  { encode := fun value => frame ++ stream.encode value
-    decode := fun bytes => if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
+
+theorem framed_canonical {α : Type} {frame : List UInt8} {stream : StreamCodec α}
+    {bytes : List UInt8} {value : α} (decoded : (framed frame stream).decode bytes = some value) :
+    (framed frame stream).encode value = bytes :=
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def commandCodec : LawfulCodec Command :=
   framed "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream
@@ -148,9 +145,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
     | none => none
     | some envelope =>
       some ⟨ingress, command,
-        ResourceBirthCodec.strictCodec_canonical
-          (framedRaw "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream)
-          commandExact, envelope, envelopeExact⟩
+        framed_canonical commandExact, envelope, envelopeExact⟩
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
@@ -181,7 +176,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.key, command.expectedAuthorityRoot, marker domain semantics command⟩

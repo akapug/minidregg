@@ -274,13 +274,7 @@ def prepare {NativeError : Type}
           match envelopeCodec.decode envelopeBytes with
           | none => .error .malformedEnvelope
           | some envelope =>
-              if stateCodec.encode state != stateBytes then
-                .error .malformedState
-              else if registryCodec.encode registry != registryBytes then
-                .error .malformedRegistry
-              else if envelopeCodec.encode envelope != envelopeBytes then
-                .error .malformedEnvelope
-              else if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
+              if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
                 .error .malformedRegistry
               else if state.codecVersion != stateCodecVersion then
                 .error .wrongStateVersion

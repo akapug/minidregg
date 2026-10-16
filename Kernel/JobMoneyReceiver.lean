@@ -202,9 +202,11 @@ def jobStream : StreamCodec Job :=
 
 /-- A move as `(tag, a, b, c)`: fund `(1, account, amount, 0)`, claim
 `(2, provider, account, amount)`, settle `(3, provider, caller, retired)`.
-The declaration codec is strict, so only canonical bytes decode. -/
+Only those three shapes decode: an unknown tag (it used to decode as
+`.settle`) and a fund with a non-zero fourth word (it used to be dropped) are
+refused by the stream decoder. -/
 def moveStream : StreamCodec Move :=
-  StreamCodec.xmap
+  StreamCodec.retract
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
     (fun
@@ -235,7 +237,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 /-- The job's pre-root is the loaded one: the signed request carries it as
 `preStateRoot` and the declaration carries the loaded job, so a job that moved

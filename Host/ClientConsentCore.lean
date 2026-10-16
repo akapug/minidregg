@@ -36,8 +36,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -394,8 +393,6 @@ def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8)
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
     | throw (IO.userError "noncanonical retained local intent")
-  unless NativeObservationCodec.intentCodec.encode wanted == intentBytes do
-    throw (IO.userError "noncanonical retained local intent")
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
@@ -411,7 +408,7 @@ def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8)
       | .ok headers => pure (headersBytes headers)
   | 232 =>
       let (planBytes, viewsBytes) ← splitPair rest
-      let viewsCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+      let viewsCodec := (StreamCodec.list bytesStream).toLawful
       let some views := viewsCodec.decode viewsBytes
         | throw (IO.userError "noncanonical served view list")
       match NativeThinConsent.checkPlanThin config.deployment semantics config.federation

@@ -45,7 +45,6 @@ def author (packageBytes replayedPackage offeredCore expectedCore outputCodecByt
   let packet ← parsePacket 4194304 expectedCore
   if (← packet.getObjValAs? String "sourceEntry") != declaration then throw "package/callable selected declaration mismatch"
   let some outputCodec := digestStream.toLawful.decode outputCodecBytes | throw "native output codec encoding required"
-  if digestStream.encode outputCodec != outputCodecBytes then throw "noncanonical native output codec"
   let artifact : Artifact := ⟨Minidregg.Compiler.ObjectiveSourcePackage.identity package,
     declaration,offeredCore,Minidregg.Kernel.ObjectiveBendNativeInput.codecId,outputCodec,laws⟩
   let checked ← checkWithin artifact 4194304 16384

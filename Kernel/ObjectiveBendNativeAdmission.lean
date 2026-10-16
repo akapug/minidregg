@@ -98,7 +98,7 @@ def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
     match policyStream.toLawful.decode (bytes.drop policyFrame.length) with
     | none => none
-    | some p => if encodePolicy p == bytes && p.tariff.valid &&
+    | some p => if p.tariff.valid &&
         decide (p.maximum.extractTicks ≤ p.extractTicksPerTurn) then some p else none
 
 theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
@@ -112,7 +112,7 @@ theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
       · rename_i ok
         cases Option.some.inj decoded
         simp only [Bool.and_eq_true] at ok
-        exact ok.1.2
+        exact ok.1
       · cases decoded
 
 /-- A decoded policy's per-turn extraction ceiling covers one extraction at its per-extraction

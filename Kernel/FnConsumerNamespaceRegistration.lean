@@ -52,9 +52,8 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-SPEC/v1".toUTF8.toList
-      specStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-SPEC/v1".toUTF8.toList
+      specStream
 
 def Spec.valid (spec : Spec) : Bool :=
   FnConsumerScope.validName spec.consumerNamespace.application &&
@@ -93,9 +92,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-INGRESS/v1".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-INGRESS/v1".toUTF8.toList
+      ingressStream
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash

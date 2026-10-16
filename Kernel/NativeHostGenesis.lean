@@ -110,6 +110,7 @@ structure Config where
   clockGenesisNow : Nat
   clockMaxStepSeconds : Nat
 
+
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
 def predicateStream : StreamCodec Minidregg.Pred.Pred where
@@ -123,6 +124,20 @@ def predicateStream : StreamCodec Minidregg.Pred.Pred where
     intro predicate suffix
     simp [(StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix_encode,
       PolicyRecordCodec.decodePred_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : (StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨tokens, rest⟩ := pair
+      cases predicateOk : PolicyRecordCodec.decodePred tokens with
+      | none => simp [ok, predicateOk] at decoded
+      | some predicate =>
+        simp only [ok, predicateOk, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show (StreamCodec.list PolicyRecordCodec.tokenStream).encode (PolicyRecordCodec.encodePred _) ++ _ = _
+        rw [PolicyRecordCodec.encodePred_decodePred predicateOk]
+        exact (StreamCodec.list PolicyRecordCodec.tokenStream).encode_decodePrefix _ _ _ ok
 
 def enrollmentStream : StreamCodec Enrollment :=
   StreamCodec.xmap

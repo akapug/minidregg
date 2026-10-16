@@ -26,8 +26,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -194,7 +193,7 @@ def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   return ((payload.drop 4).take width, payload.drop (4 + width))
 
 def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+  let signaturesCodec := (StreamCodec.list bytesStream).toLawful
   let some signatures := signaturesCodec.decode bytes
     | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures

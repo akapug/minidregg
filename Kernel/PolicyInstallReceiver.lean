@@ -66,17 +66,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressRawCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 def retiredIngressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
@@ -84,7 +74,8 @@ theorem retired_ingress_refused (payload : List UInt8) :
     ingressCodec.decode (retiredIngressFrame ++ payload) = none := by
   have lengthExact : ingressFrame.length = retiredIngressFrame.length := by decide +kernel
   have different : retiredIngressFrame ≠ ingressFrame := by decide +kernel
-  simp [ingressCodec, strictCodec, ingressRawCodec, lengthExact, different]
+  simp [ingressCodec, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap, StreamCodec.product,
+    StreamCodec.literal, lengthExact, different]
 
 structure DecodedIngress where
   private mk ::
@@ -122,7 +113,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       · split at decoded
         · contradiction
         · cases Option.some.inj decoded
-          exact strictCodec_canonical ingressRawCodec parsed
+          exact (StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 /-- Subject, target and nonce scope transaction identity. Changing a payload,
 root, control-capability choice or signature at the same identity conflicts
@@ -628,7 +619,7 @@ theorem installed_head_and_source (accepted : AcceptedInstall profile deployment
       some (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source)) := by
   refine ⟨accepted.actual_post_head, ?_⟩
   rw [installed_source_bytes]
-  simpa only [LifecycleImage.codec, strictCodec, LifecycleImage.rawCodec] using
+  simpa only [LifecycleImage.codec, LifecycleImage.rawCodec] using
     (LifecycleImage.codec Registry).decode_encode
       (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source))
 

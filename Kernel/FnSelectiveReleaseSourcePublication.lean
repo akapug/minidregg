@@ -35,8 +35,7 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-SPEC/v1".toUTF8.toList specStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-SPEC/v1".toUTF8.toList specStream
 
 def sourceBytes (spec : Spec) : List UInt8 :=
   specCodec.encode spec
@@ -53,9 +52,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-INGRESS/v1".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-INGRESS/v1".toUTF8.toList
+      ingressStream
 
 def keyBytes (spec : Spec) : List UInt8 :=
   (StreamCodec.product digestStream

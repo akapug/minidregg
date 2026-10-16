@@ -24,7 +24,6 @@ private def decodeRecords : Block → Option (List IntentRecord)
   | [] => some []
   | bytes :: rest => do
       let record ← DurableCheckpointCodec.recordFrame.decode bytes
-      if DurableCheckpointCodec.recordFrame.encode record != bytes then none else
       let tail ← decodeRecords rest
       some (record :: tail)
 

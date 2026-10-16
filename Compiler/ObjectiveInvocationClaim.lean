@@ -120,17 +120,7 @@ decode. v6: the envelope declares the front end's work (`replayBytes`, `coreByte
 not decode. -/
 def frame : List UInt8 := "DREGG/OBJECTIVE/INVOCATION-CLAIM/v7".toUTF8.toList
 
-def rawCodec : LawfulCodec Claim where
-  encode claim := frame ++ stream.encode claim
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro claim
-    have exact := stream.toLawful.decode_encode claim
-    change stream.toLawful.decode (stream.encode claim) = some claim at exact
-    simp [exact]
-
-def codec : LawfulCodec Claim := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Claim := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 /-- Each independently signed query is paired with its exact ordered selector.
 Signature, query scope, actor, nonce and current authority are checked by native
@@ -205,7 +195,7 @@ theorem decoded_source_not_input {bytes : List UInt8} {claim : Claim}
 
 theorem decoded_canonical {bytes : List UInt8} {claim : Claim}
     (accepted : decode bytes = some claim) : encode claim = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec (decoded_raw accepted)
+  StreamCodec.toLawful_canonical _ _ _ (decoded_raw accepted)
 
 theorem family_exact (claim : Claim) (valid : Valid claim) :
     (family claim).route = .objectiveMethod ∧

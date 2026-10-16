@@ -28,7 +28,7 @@ structure NativePlan where
   effects : List Scalar
   deriving DecidableEq, Repr
 
-def rootCodec : LawfulCodec Digest := ResourceBirthCodec.strictCodec digestStream.toLawful
+def rootCodec : LawfulCodec Digest := digestStream.toLawful
 def writeKey (ref : Ref) (write : Write) : StateKey :=
   .objectField ⟨ref.resourceID⟩ ⟨write.field⟩
 def action (ref : Ref) (write : Write) : DeclaredActionLowering.Action :=

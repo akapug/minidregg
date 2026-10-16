@@ -79,12 +79,22 @@ def theoryMaterializer :
   | .credentialAuthority => CredentialAuthorityCell.materializer
   | .hyperdocument => HyperdocumentCell.contentMaterializer
 
+/-- The three Theory materializers are `StoreCodec` frames, which accept only
+encodings. -/
+theorem theoryMaterializer_canonical (kind : DeployedKind) (bytes : List UInt8)
+    (logical : Store.Store (deployedLayout kind))
+    (accepted : (theoryMaterializer kind).codec.decode bytes = some logical) :
+    (theoryMaterializer kind).codec.encode logical = bytes := by
+  cases kind <;>
+    exact StoreCodec.decode_reencodes _ accepted
+
 /-- A concrete outside-home producer of the previously open
 `DeployedRegistryConfig` carrier. -/
 def theoryConfig : DeployedRegistryConfig Digest where
   schemaRef := theorySchemaRef
   schemaRef_injective := theorySchemaRef_injective
   materializer := theoryMaterializer
+  materializer_canonical := theoryMaterializer_canonical
   rootBytes := Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
 
 /-- The exact generic registry induced by the three-kind Theory configuration. -/
@@ -125,6 +135,12 @@ def kindAtTag : UInt8 -> Option Kind
     kindAtTag kind.tag = some kind := by
   cases kind <;> rfl
 
+/-- The tag table has no aliases: a tag that names a kind is that kind's tag. -/
+theorem tag_of_kindAtTag (t : UInt8) (kind : Kind) (found : kindAtTag t = some kind) :
+    kind.tag = t := by
+  unfold kindAtTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 def schemaRef : Kind -> SchemaRef
   | .declaredEffect => declaredEffectSchemaRef
   | .credentialAuthority => credentialAuthoritySchemaRef
@@ -149,6 +165,15 @@ def materializer : (kind : Kind) -> Materializer (layout kind) Digest
   | .hyperdocumentContent => HyperdocumentCell.contentMaterializer
   | .hyperdocumentEvent => HyperdocumentCell.eventMaterializer
 
+/-- Every materializer codec accepts only encodings: each is a `StoreCodec`
+frame (`StoreCodec.decode_reencodes`). -/
+theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
+    (logical : Store.Store (layout kind))
+    (accepted : (materializer kind).codec.decode bytes = some logical) :
+    (materializer kind).codec.encode logical = bytes := by
+  cases kind <;>
+    exact StoreCodec.decode_reencodes _ accepted
+
 /-- The full heterogeneous registry.  Its dependent payload type is selected
 by `Kind`; no `Dynamic`, erased bytes, or cast participates in storage. -/
 def registry : TypeRegistry Digest where
@@ -156,10 +181,12 @@ def registry : TypeRegistry Digest where
   tag := Kind.tag
   kindAtTag := kindAtTag
   kindAtTag_tag := kindAtTag_tag
+  tag_of_kindAtTag := tag_of_kindAtTag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
   layout := layout
   materializer := materializer
+  materializer_canonical := materializer_canonical
   rootBytes := Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
 
 theorem registry_nonempty : Nonempty (TypeRegistry Digest) :=

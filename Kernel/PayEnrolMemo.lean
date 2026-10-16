@@ -439,6 +439,35 @@ def memoFieldStream : StreamCodec MemoField where
     cases value with
     | present bytes => simp [bytesStream.decodePrefix_encode]
     | _ => rfl
+  decodeAt bytes start :=
+    if inside : start < bytes.size then
+      match bytes[start] with
+      | 0 => some (.absent, start + 1)
+      | 1 =>
+          match bytesStream.decodeAt bytes (start + 1) with
+          | some (value, next) => some (.present value, next)
+          | none => none
+      | 2 => some (.unbound, start + 1)
+      | 3 => some (.invalid, start + 1)
+      | _ => none
+    else none
+  decodeAt_spec := by
+    intro bytes start fits
+    simp only [cursorOfPrefix]
+    by_cases inside : start < bytes.size
+    · rw [dif_pos inside, StreamCodec.octets_drop bytes inside]
+      generalize bytes[start] = tag
+      split
+      · simp; omega
+      · rw [bytesStream.decodeAt_spec bytes _ inside]
+        simp only [cursorOfPrefix]
+        cases bytesStream.decodePrefix (bytes.data.toList.drop (start + 1)) <;> rfl
+      · simp; omega
+      · simp; omega
+      · split <;> simp_all
+    · rw [dif_neg inside, StreamCodec.octets_drop_end bytes (by omega)]
+      rfl
+  cursorNative := true
 
 /-! ## Journal reasons (PAY §11.3) -/
 
@@ -482,6 +511,27 @@ theorem JournalReason.ofCode_code (reason : JournalReason) :
   | memoMalformed refusal => cases refusal <;> decide
   | _ => decide
 
+theorem Refusal.code_ofCode {code : Nat} {refusal : Refusal} (known : Refusal.ofCode code = some refusal) :
+    refusal.code = code := by
+  unfold Refusal.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
+/-- `JournalReason.ofCode` is a partial inverse of `JournalReason.code`. -/
+theorem JournalReason.code_ofCode {code : Nat} {reason : JournalReason}
+    (known : JournalReason.ofCode code = some reason) : reason.code = code := by
+  unfold JournalReason.ofCode at known
+  split at known
+  any_goals (cases known; rfl)
+  split at known
+  · cases refusalOk : Refusal.ofCode (code - 100) with
+    | none => simp [refusalOk] at known
+    | some refusal =>
+      simp only [refusalOk, Option.map_some, Option.some.injEq] at known
+      subst known
+      simp only [JournalReason.code, Refusal.code_ofCode refusalOk]
+      omega
+  · cases known
+
 def journalReasonStream : StreamCodec JournalReason where
   encode reason := StreamCodec.nat.encode reason.code
   decodePrefix bytes := do
@@ -491,6 +541,35 @@ def journalReasonStream : StreamCodec JournalReason where
   decodePrefix_encode := by
     intro reason suffix
     simp [StreamCodec.nat.decodePrefix_encode, JournalReason.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : JournalReason.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [JournalReason.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match JournalReason.ofCode code with
+        | some reason => some (reason, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : JournalReason.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-! ## The self-enrolled subject -/
 

@@ -70,17 +70,7 @@ def ingressStream : StreamCodec Ingress :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH-INGRESS/v2".toUTF8.toList
 
-private def rawCodec : LawfulCodec Ingress where
-  encode ingress := frame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take frame.length = frame then
-    ingressStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Ingress := (StreamCodec.framed frame ingressStream).toLawful
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
   codec.encode ingress
@@ -91,7 +81,7 @@ theorem decode_encode (ingress : Ingress) :
 theorem decoded_canonical {bytes : List UInt8} {ingress : Ingress}
     (decoded : codec.decode bytes = some ingress) :
     ingress.canonicalBytes = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The one-use key is an app/session/operation coordinate. Changing request
 bytes under this key must be a durable transaction conflict, not a new permit.

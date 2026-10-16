@@ -124,17 +124,7 @@ def ticketStream : StreamCodec Ticket :=
 private def ticketFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-TICKET/v3".toUTF8.toList
 
-private def rawTicketCodec : LawfulCodec Ticket where
-  encode ticket := ticketFrame ++ ticketStream.encode ticket
-  decode bytes := if bytes.take ticketFrame.length = ticketFrame then
-    ticketStream.toLawful.decode (bytes.drop ticketFrame.length) else none
-  decode_encode := by
-    intro ticket
-    have decoded := ticketStream.toLawful.decode_encode ticket
-    change ticketStream.toLawful.decode (ticketStream.encode ticket) = some ticket at decoded
-    simp [decoded]
-
-def ticketCodec : LawfulCodec Ticket := ResourceBirthCodec.strictCodec rawTicketCodec
+def ticketCodec : LawfulCodec Ticket := (StreamCodec.framed ticketFrame ticketStream).toLawful
 
 theorem ticket_decode_encode (ticket : Ticket) :
     ticketCodec.decode (ticketCodec.encode ticket) = some ticket :=

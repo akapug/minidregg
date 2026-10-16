@@ -118,7 +118,6 @@ private def item (kind : ResourceKind) (index : Nat) (json : Json) : Result (Ite
       let frame ← unhex s!"{path}.frame" (← str path json "frame")
       let codec := (CredentialAuthorityEntryCodec.storedCapabilityStream kind).toLawful
       let some stored := codec.decode frame | throw s!"{path}: not a stored {kindName kind} capability"
-      unless codec.encode stored == frame do throw s!"{path}: stored capability encoding alias"
       pure (.record stored)
   | "refused" =>
       let id ← match (← str path json "capability").toNat? with

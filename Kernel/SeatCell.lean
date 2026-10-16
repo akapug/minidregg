@@ -53,7 +53,7 @@ def Role.ofTag : Nat → Role
   | 0 => .inst | 1 => .invitation | 2 => .seat | 3 => .holdings | _ => .package
 
 def roleStream : StreamCodec Role :=
-  StreamCodec.xmap StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
+  StreamCodec.retract StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
 
 /-- The seat family: `DREGG.SEAT.CELL.ID/v1`, `DREGG.SEAT.CELL.STATE/v1`,
 frame `DREGG/SEAT-CELL`. -/

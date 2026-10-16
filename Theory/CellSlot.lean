@@ -40,18 +40,25 @@ universe uRoot uCell uPhysical uError
 /-- A deployment registry for heterogeneous cell kinds.
 
 Every kind has a stable one-byte wire tag, a public schema identity/version,
-an exact `Store.Layout`, and the materializer for that layout.  The reverse
-tag law prevents aliases.  The registry supplies codecs; this module never
-manufactures one from countability or choice. -/
+an exact `Store.Layout`, and the materializer for that layout.  The two tag
+laws make the tag table a bijection onto its image (no tag aliases a kind), and
+every materializer codec is canonical (it accepts only the encodings), so a
+packed cell has exactly one spelling (`PackedCell.bytes_of_decode`).  The
+registry supplies codecs; this module never manufactures one from countability
+or choice. -/
 structure TypeRegistry (Root : Type uRoot) where
   Kind : Type
   tag : Kind -> UInt8
   kindAtTag : UInt8 -> Option Kind
   kindAtTag_tag : forall kind, kindAtTag (tag kind) = some kind
+  tag_of_kindAtTag : forall t k, kindAtTag t = some k -> tag k = t
   schemaRef : Kind -> SchemaRef
   schemaRef_injective : Function.Injective schemaRef
   layout : Kind -> Store.Layout.{0, 0, 0}
   materializer : (kind : Kind) -> CellState.Materializer (layout kind) Root
+  materializer_canonical : forall kind bytes logical,
+    (materializer kind).codec.decode bytes = some logical ->
+      (materializer kind).codec.encode logical = bytes
   rootBytes : List UInt8 -> Root
 
 /-! ### The currently deployed Theory-side layout family -/
@@ -80,6 +87,12 @@ def deployedKindAtTag : UInt8 -> Option DeployedKind
     deployedKindAtTag kind.tag = some kind := by
   cases kind <;> rfl
 
+/-- The deployed tag table has no aliases. -/
+theorem tag_of_deployedKindAtTag (t : UInt8) (kind : DeployedKind)
+    (found : deployedKindAtTag t = some kind) : kind.tag = t := by
+  unfold deployedKindAtTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 /-- The dependent layout selected by each stable deployed kind. -/
 def deployedLayout : DeployedKind -> Store.Layout.{0, 0, 0}
   | .declaredEffect => EffectDeclaration.effectLayout
@@ -94,6 +107,9 @@ structure DeployedRegistryConfig (Root : Type uRoot) where
   schemaRef_injective : Function.Injective schemaRef
   materializer : (kind : DeployedKind) ->
     CellState.Materializer (deployedLayout kind) Root
+  materializer_canonical : forall kind bytes logical,
+    (materializer kind).codec.decode bytes = some logical ->
+      (materializer kind).codec.encode logical = bytes
   rootBytes : List UInt8 -> Root
 
 /-- Realize the deployed heterogeneous family as the generic stable registry. -/
@@ -103,10 +119,12 @@ def deployedRegistry {Root : Type uRoot}
   tag := DeployedKind.tag
   kindAtTag := deployedKindAtTag
   kindAtTag_tag := deployedKindAtTag_tag
+  tag_of_kindAtTag := tag_of_deployedKindAtTag
   schemaRef := config.schemaRef
   schemaRef_injective := config.schemaRef_injective
   layout := deployedLayout
   materializer := config.materializer
+  materializer_canonical := config.materializer_canonical
   rootBytes := config.rootBytes
 
 /-- A type-safe heterogeneous cell.  Its tag chooses its layout before the
@@ -161,6 +179,28 @@ def decode : List UInt8 -> Option (PackedCell registry)
   simp only [Option.map_some, Option.some.injEq]
   apply congrArg (PackedCell.mk kind)
   exact CellState.Materialized.ext rfl
+
+/-- The envelope is canonical: whatever `decode` accepts is the envelope of the
+cell it returns.  The tag cannot alias (`tag_of_kindAtTag`) and the payload
+codec accepts only encodings (`materializer_canonical`). -/
+theorem bytes_of_decode {input : List UInt8} {cell : PackedCell registry}
+    (decoded : decode registry input = some cell) : bytes registry cell = input := by
+  unfold decode at decoded
+  split at decoded
+  · rename_i tag payloadBytes
+    split at decoded
+    · cases decoded
+    · rename_i kind found
+      cases accepted : (registry.materializer kind).codec.decode payloadBytes with
+      | none => simp [accepted] at decoded
+      | some logical =>
+        simp only [accepted, Option.map_some, Option.some.injEq] at decoded
+        subst decoded
+        simp only [bytes, materialize_logical]
+        rw [registry.tag_of_kindAtTag _ _ found,
+          registry.materializer_canonical _ _ _ accepted]
+        rfl
+  · cases decoded
 
 /-- The envelope itself has a lawful codec.  Its decoder is dependent rather
 than cast-based. -/
@@ -524,6 +564,8 @@ structure PersistenceRefinement
 
 /-- info: 'Minidregg.Theory.CellRegistry.PackedCell.decode_bytes' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms PackedCell.decode_bytes
+/-- info: 'Minidregg.Theory.CellRegistry.PackedCell.bytes_of_decode' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms PackedCell.bytes_of_decode
 /-- info: 'Minidregg.Theory.CellRegistry.CellSlot.decode_bytes' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms CellSlot.decode_bytes
 /-- info: 'Minidregg.Theory.CellRegistry.duplicate_create_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/

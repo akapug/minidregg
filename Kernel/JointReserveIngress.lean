@@ -26,15 +26,13 @@ def frame : List UInt8 := "DREGG/JOINT/SOURCE-RESERVE/v1".toUTF8.toList
 
 def decodeSource (bytes : List UInt8) : Option ReserveSource := do
   if bytes.take frame.length != frame then none else
-  let source ← reserveSourceStream.toLawful.decode (bytes.drop frame.length)
-  if reserveSourceBytes source != bytes then none else some source
+  reserveSourceStream.toLawful.decode (bytes.drop frame.length)
 
 /-- Structural plan reconstruction checks exact byte syntax, distinct source
 participants and the already required final signer/nullifier. It does not claim
 that an arbitrary submitter invented a complete hidden evaluator footprint. -/
 def decodePlan (bytes : List UInt8) : Option (Plan Descriptor) := do
   let candidate ← (candidateStream descriptorStream).toLawful.decode bytes
-  if (candidateStream descriptorStream).encode candidate != bytes then none else
   if distinct : candidate.required.Nodup then
     let index ← candidate.participants.findIdx? (fun p => p.domain == candidate.lastSigner)
     if bound : index < candidate.participants.length then

@@ -136,8 +136,6 @@ def prepareRequestLoaded {config : NativeHost.Config} {target : NativeHost.Durab
     (bytes : List UInt8) : Except String Plan := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical agent lifetime grant authoring request"
-  if requestCodec.encode request != bytes then
-    throw "noncanonical agent lifetime grant authoring request"
   prepareLoaded verified request.spec request.payer request.funding
     request.sourceCapabilities
 

@@ -37,7 +37,7 @@ def Outcome.ofCode : Nat → Outcome
   | _ => .stopped
 
 def outcomeStream : StreamCodec Outcome :=
-  StreamCodec.xmap StreamCodec.nat Outcome.code Outcome.ofCode
+  StreamCodec.retract StreamCodec.nat Outcome.code Outcome.ofCode
     (by intro outcome; cases outcome <;> rfl)
 
 /-- The custodian's signed stop observation records the systemd manager and

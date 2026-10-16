@@ -34,18 +34,8 @@ def ingressStream : StreamCodec SignedIngress :=
 def ingressFrame : List UInt8 :=
   "DREGG/GRAIN-RESOURCE-BIRTH/SIGNED-INGRESS/v2".toUTF8.toList
 
-def ingressRawCodec : LawfulCodec SignedIngress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
 def ingressCodec : LawfulCodec SignedIngress :=
-  ResourceBirthCodec.strictCodec ingressRawCodec
+  (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
   private mk ::
@@ -103,7 +93,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       split at decoded <;> try contradiction
       split at decoded <;> try contradiction
       cases Option.some.inj decoded
-      exact ResourceBirthCodec.strictCodec_canonical ingressRawCodec parsed
+      exact (StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 /-- This binds the three strict carriers to the source-derived command and
 receiver domain/semantics. The caller obtains `source` from the canonical

@@ -157,24 +157,16 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, systemRoot, height, digest⟩)
     (by intro c; cases c; rfl)
 
-def framedRaw {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-    { encode value := frame ++ stream.encode value
-      decode bytes := if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-      decode_encode := by
-        intro value
-        have exact := stream.toLawful.decode_encode value
-        change stream.toLawful.decode (stream.encode value) = some value at exact
-        simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A)
     {bytes : List UInt8} {value : A}
     (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def commandFrame : List UInt8 := "DREGG/CERTIFY/v1".toUTF8.toList
 
@@ -249,7 +241,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
   ⟨plan, command.expectedSystemRoot, marker domain semantics command⟩

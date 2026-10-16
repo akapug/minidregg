@@ -65,7 +65,7 @@ def encode (anchor : Anchor) : List UInt8 := epochTag ++ anchorStream.encode anc
 /-- Exact decode: the v1 tag, then the canonical record and nothing after it. -/
 def decode (bytes : List UInt8) : Except String Anchor :=
   if bytes.take epochTag.length = epochTag then
-    match (ResourceBirthCodec.strictCodec anchorStream.toLawful).decode
+    match anchorStream.toLawful.decode
         (bytes.drop epochTag.length) with
     | some anchor => .ok anchor
     | none => .error "retained consent anchor is not a canonical MINI-CONSENT-ANCHOR/v1 record"
@@ -77,10 +77,10 @@ theorem decode_encode (anchor : Anchor) : decode (encode anchor) = .ok anchor :=
   have body : (epochTag ++ anchorStream.encode anchor).drop epochTag.length =
       anchorStream.encode anchor :=
     List.drop_left' rfl
-  have exact := (ResourceBirthCodec.strictCodec anchorStream.toLawful).decode_encode anchor
+  have exact := anchorStream.toLawful.decode_encode anchor
   unfold decode encode
   rw [if_pos tagged, body]
-  rw [show (ResourceBirthCodec.strictCodec anchorStream.toLawful).decode
+  rw [show anchorStream.toLawful.decode
       (anchorStream.encode anchor) = some anchor from exact]
 
 #assert_axioms decode_encode

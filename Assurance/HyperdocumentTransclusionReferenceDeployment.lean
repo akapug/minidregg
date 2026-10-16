@@ -131,7 +131,7 @@ def openingShapeOfTag : Nat -> OpeningShape
   | _ => .range
 
 def openingShapeStream : StreamCodec OpeningShape :=
-  StreamCodec.xmap StreamCodec.nat openingShapeTag openingShapeOfTag
+  StreamCodec.retract StreamCodec.nat openingShapeTag openingShapeOfTag
     (by intro shape; cases shape <;> rfl)
 
 def referenceModeTag : Mode -> Nat
@@ -143,7 +143,7 @@ def referenceModeOfTag : Nat -> Mode
   | _ => .live
 
 def referenceModeStream : StreamCodec Mode :=
-  StreamCodec.xmap StreamCodec.nat referenceModeTag referenceModeOfTag
+  StreamCodec.retract StreamCodec.nat referenceModeTag referenceModeOfTag
     (by intro mode; cases mode <;> rfl)
 
 def sourceIdentityStream : StreamCodec SourceIdentity :=

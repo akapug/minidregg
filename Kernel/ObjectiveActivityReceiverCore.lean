@@ -115,11 +115,11 @@ inductive AnswerWire where
 
 def answerStream : StreamCodec AnswerWire :=
   StreamCodec.xmap (StreamCodec.sum bytesStream (StreamCodec.sum stringStream
-      (StreamCodec.sum StreamCodec.nat stringStream)))
+      (StreamCodec.sum (StreamCodec.literal (StreamCodec.nat.encode 0)) stringStream)))
     (fun answer => match answer with
       | .reply value => .inl value
       | .refused reason => .inr (.inl reason)
-      | .unknown => .inr (.inr (.inl 0))
+      | .unknown => .inr (.inr (.inl ()))
       | .broken reason => .inr (.inr (.inr reason)))
     (fun wire => match wire with
       | .inl value => .reply value
@@ -641,7 +641,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE.ACTIVITY.EFFECT/v1".toUTF8.toList
@@ -984,9 +984,14 @@ private def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix suffix := some ((), suffix)
   decodePrefix_encode := by intro value suffix; cases value; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 private def uint32Stream : StreamCodec UInt32 :=
-  StreamCodec.xmap StreamCodec.nat UInt32.toNat UInt32.ofNat
+  StreamCodec.retract StreamCodec.nat UInt32.toNat UInt32.ofNat
     (by intro value; simp)
 
 private def stageStream : StreamCodec (ObjectiveWorkAccount.Stage) :=
@@ -1096,11 +1101,20 @@ private theorem join_split_writeRefusal (reason : ObjectRecord.WriteRefusal) :
           exact congrArg ObjectRecord.WriteRefusal.upgradeConflict ih
   | _ => rfl
 
+/-- Every depth and terminal is the split of the refusal it joins to. -/
+private theorem split_join_writeRefusal (depth : Nat)
+    (terminal : Sum Unit (Sum Unit (Sum LawLeaf Unit))) :
+    splitWriteRefusal (joinWriteRefusal depth terminal) = (depth, terminal) := by
+  induction depth with
+  | zero => rcases terminal with ⟨⟩ | ⟨⟩ | _ | ⟨⟩ <;> rfl
+  | succ depth ih => simp only [joinWriteRefusal, splitWriteRefusal, ih]
+
 private def writeRefusalStream : StreamCodec ObjectRecord.WriteRefusal :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.sum unitStream (StreamCodec.sum unitStream (StreamCodec.sum LawLeaf.stream unitStream))))
     splitWriteRefusal (fun wire => joinWriteRefusal wire.1 wire.2) join_split_writeRefusal
+    (fun wire => split_join_writeRefusal wire.1 wire.2)
 
 private def invitationRefusalStream : StreamCodec (Invitations.Refusal) :=
   StreamCodec.xmap
@@ -1843,12 +1857,23 @@ private def callRefusalTerminalStream : StreamCodec (CallRefusalTerminal) :=
     )
     (by intro value; cases value <;> rfl)
 
+/-- Every account list and terminal is the split of the refusal it joins to. -/
+private theorem split_join_callRefusal (accounts : List (Nat × Nat)) (terminal : CallRefusalTerminal) :
+    splitCallRefusal (joinCallRefusal (accounts, terminal)) = (accounts, terminal) := by
+  induction accounts with
+  | nil => cases terminal <;> rfl
+  | cons account accounts ih =>
+      obtain ⟨remaining, spent⟩ := account
+      change splitCallRefusal (.extractionAccount (joinCallRefusal (accounts, terminal)) remaining spent) = _
+      simp only [splitCallRefusal, ih]
+
 /-- Extraction-account layers are a length-prefixed byte list of pairs. -/
 def callRefusalStream : StreamCodec ObjectiveCall.CallRefusal :=
   StreamCodec.xmap
     (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat))
       callRefusalTerminalStream)
     splitCallRefusal joinCallRefusal join_split_callRefusal
+    (fun wire => split_join_callRefusal wire.1 wire.2)
 
 /-- Every call refusal, including any number of extraction-account layers,
 roundtrips as a prefix while preserving arbitrary following bytes. -/

@@ -43,9 +43,8 @@ def evidenceStream : StreamCodec Evidence :=
     (by intro e; cases e; rfl)
 
 def evidenceCodec : LawfulCodec Evidence :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-PROGRESS/v2".toUTF8.toList
-      evidenceStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-PROGRESS/v2".toUTF8.toList
+      evidenceStream
 
 def maxEvidenceBytes : Nat := 4096
 
@@ -93,8 +92,7 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-SPEC/v2".toUTF8.toList specStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-SPEC/v2".toUTF8.toList specStream
 
 structure Ingress where
   spec : Spec
@@ -115,9 +113,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-INGRESS/v2".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-INGRESS/v2".toUTF8.toList
+      ingressStream
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash

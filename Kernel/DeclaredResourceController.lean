@@ -1673,17 +1673,7 @@ def signedIngressStream : StreamCodec SignedIngress :=
       (domain, semantics, ⟨command, targets, observe, authority⟩))
     (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
 
-def signedIngressRawCodec : LawfulCodec SignedIngress where
-  encode ingress := signedIngressFrame ++ signedIngressStream.encode ingress
-  decode bytes := if bytes.take signedIngressFrame.length = signedIngressFrame then
-    signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have exact := signedIngressStream.toLawful.decode_encode ingress
-    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at exact
-    simp [exact]
-
-def signedIngressCodec : LawfulCodec SignedIngress := ResourceBirthCodec.strictCodec signedIngressRawCodec
+def signedIngressCodec : LawfulCodec SignedIngress := (StreamCodec.framed signedIngressFrame signedIngressStream).toLawful
 
 def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
   signedIngressCodec.encode (domain, semantics, signed)
@@ -1694,7 +1684,7 @@ theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCom
   signedIngressCodec.decode_encode _
 theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
     (decoded : decodeSignedBytes bytes = some ingress) : signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
-  ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 
 /-- Complete guards before final execution/capacity admission. -/
