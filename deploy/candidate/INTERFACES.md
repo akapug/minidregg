@@ -417,8 +417,7 @@ authorityCellId issuer ownerBudget lifetime tariffBase tariffPerBirth
 tariffPerGrant tariffPerInitialPayloadByte collector asset genesisHeight`),
 `expectedSeed: 0`, and three absolute paths: `storageBinary`, `storageRoot`,
 `signatureBinary`. Optional sections (`fnGateway fnPoll fnReplyPoll
-fnReplyCatalog continuityProviderResourceId providerMetering providerServices
-grainBirthTariff completionCustodianKey completionManagement
+fnReplyCatalog providerServices grainBirthTariff completionCustodianKey completionManagement
 residentBeginManagement residentClaimManagement agentDispatchFixed
 agentLifetimeDispatchFixed agentLifetimeDispatchServices`) stay absent/null in
 this candidate.

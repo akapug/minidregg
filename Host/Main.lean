@@ -332,13 +332,6 @@ structure FnReplyCatalogService where
   policyPath : String
   controlPath : String
 
-/-- Operator-pinned source-owned metering context. The socket caller can
-submit exact retained HTTP bytes but cannot select the provider cell or tariff. -/
-structure ProviderMeteringSettings where
-  providerResourceId : Nat
-  tariff : Lean.Json
-  deriving FromJson, ToJson
-
 structure GrainBirthTariffSettings where
   base : Nat
   perBirth : Nat
@@ -619,9 +612,10 @@ structure Settings where
   fnPoll : Option FnPollServiceSettings := none
   fnReplyPoll : Option FnReplyPollServiceSettings := none
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
-  continuityProviderResourceId : Option Nat := none
-  providerMetering : Option ProviderMeteringSettings := none
-  providerServices : Option (List ProviderMeteringSettings) := none
+  /-- The operator's provider services (one to eight): each resource is a
+  provider purse whose law carries its tariff's per-route fees, and the list is
+  shared by continuity (API17), metering quotes (API19) and the profile. -/
+  providerServices : Option (List ProviderUsage.ServiceSettings) := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   jointConsensus : Option JointConsensusSettings := none
@@ -702,55 +696,20 @@ def Settings.checkJointConsensus (settings : Settings) : Except String Unit := d
   let _ ← NativeHost.validateLoaded config genesis
   pure ()
 
-def Settings.providerMeteringPin (settings : Settings) :
-    Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
-  let some metering := settings.providerMetering | return none
-  unless metering.providerResourceId > 0 do
-    throw "provider metering resource ID must be positive"
-  if let some continuityId := settings.continuityProviderResourceId then
-    unless continuityId == metering.providerResourceId do
-      throw "provider metering and continuity resource IDs differ"
-  let tariff ← ProviderUsage.parseTariff metering.tariff.compress
-  return some (metering.providerResourceId, tariff)
-
-/-- Bounded unique service table, parsed once from operator configuration. -/
-def checkedProviderServices (services : List ProviderMeteringSettings) :
-    Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
-  unless 0 < services.length && services.length ≤ 8 do
-    throw "providerServices requires one to eight entries"
-  let ids := services.map (·.providerResourceId)
-  unless ids.all (fun id => decide (0 < id)) && decide ids.Nodup do
-    throw "providerServices resource IDs must be positive and unique"
-  services.mapM fun service => do
-    let tariff ← ProviderUsage.parseTariff service.tariff.compress
-    pure (service.providerResourceId, tariff)
-
-/-- One operator-owned service list is shared by continuity and metering.
-Legacy scalar pins remain byte-compatible but cannot be mixed with the list. -/
+/-- The pinned provider services, parsed once from operator configuration. -/
 def Settings.providerServicePins (settings : Settings) :
     Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
   let some services := settings.providerServices | return []
-  unless settings.continuityProviderResourceId.isNone &&
-      settings.providerMetering.isNone do
-    throw "providerServices cannot be combined with legacy provider pins"
-  checkedProviderServices services
+  ProviderUsage.checkedServices services
 
 /-- The per-operation fees of every pinned provider service, by resource:
 the constants a provider purse born at that resource carries in its law. -/
 def Settings.providerRoutes (settings : Settings) :
     Except String (List (Nat × Kernel.ProviderMetering.Schedule)) := do
-  let legacy ← settings.providerMeteringPin
-  let services ← settings.providerServicePins
-  return (legacy.toList ++ services).map fun pin => (pin.1, pin.2.schedule)
+  return (← settings.providerServicePins).map fun pin => (pin.1, pin.2.schedule)
 
 def Settings.continuityIds (settings : Settings) : Except String (List Nat) := do
-  if settings.providerServices.isSome then
-    return (← settings.providerServicePins).map Prod.fst
-  match settings.continuityProviderResourceId with
-  | some resourceId =>
-      unless resourceId > 0 do throw "provider continuity resource ID must be positive"
-      return [resourceId]
-  | none => return []
+  return (← settings.providerServicePins).map Prod.fst
 
 def checkedLifetimeDispatchServices (services : List AgentLifetimeDispatchFixedSettings) :
     Except String (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
@@ -781,10 +740,14 @@ def loadSettings (path : System.FilePath) : IO Settings := do
       "residentClaimManagement"] do
     if (json.getObjVal? legacy).toOption.isSome then
       throw (IO.userError s!"legacy single-application lifecycle pin {legacy} is no longer accepted; use lifecycleManagement")
+  -- The scalar provider pins were a second spelling of a one-entry service
+  -- list. A config that still carries one must not load as if it pinned
+  -- nothing (or as if continuity and metering could disagree).
+  for legacy in ["continuityProviderResourceId", "providerMetering"] do
+    if (json.getObjVal? legacy).toOption.isSome then
+      throw (IO.userError s!"legacy scalar provider pin {legacy} is no longer accepted; use providerServices")
   let settings : Settings ← IO.ofExcept (fromJson? json)
-  discard <| IO.ofExcept settings.providerMeteringPin
   discard <| IO.ofExcept settings.providerServicePins
-  discard <| IO.ofExcept settings.continuityIds
   discard <| IO.ofExcept settings.lifetimeDispatchPins
   IO.ofExcept settings.checkDisabledEvaluators
   IO.ofExcept settings.checkJointConsensus
@@ -889,7 +852,6 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
 this reads neither storage nor protected resource values. Full-width integers
 are decimal strings so clients cannot silently round a digest. -/
 def profileDescription (config : NativeHost.Config)
-    (metering : Option (Nat × Kernel.ProviderMetering.Tariff) := none)
     (services : List (Nat × Kernel.ProviderMetering.Tariff) := []) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
   let base :=
@@ -928,17 +890,13 @@ def profileDescription (config : NativeHost.Config)
           ("model", toJson tariff.model),
           ("routes", ((ProviderUsage.tariffJson tariff).getObjValD "routes")),
           ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)]
-  let meteringFields := match metering with
-    | none => []
-    | some (providerResourceId, tariff) =>
-        [("providerMetering", meteringJson (providerResourceId, tariff))]
   let serviceFields := if services.isEmpty then [] else
     [("providerMeterings", toJson (services.map meteringJson))]
   let grainBirthFields := match config.grainBirthTariff with
     | none => []
     | some tariff => [("grainBirthTariff", Lean.Json.mkObj
         [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
-  Lean.Json.mkObj (base ++ grainBirthFields ++ meteringFields ++ serviceFields)
+  Lean.Json.mkObj (base ++ grainBirthFields ++ serviceFields)
 
 def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
   let n := fun value : Nat => toJson (toString value)
@@ -6428,7 +6386,6 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "profile", [] =>
           IO.println (profileDescription config
-            (← IO.ofExcept settings.providerMeteringPin)
             (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
       | "pay-claim-status", [input, output] =>
@@ -6786,9 +6743,8 @@ def run (arguments : List String) : IO UInt32 := do
                                 "retained historical request refused")
                         | 19 =>
                             let services ← IO.ofExcept settings.providerServicePins
-                            let legacy ← IO.ofExcept settings.providerMeteringPin
                             let quoted : Except String Lean.Json :=
-                              match legacy.toList ++ services with
+                              match services with
                               | [] => .error "provider metering is not configured"
                               | pins => ProviderUsage.quotePayload pins payload
                             match quoted with
@@ -7832,7 +7788,6 @@ def run (arguments : List String) : IO UInt32 := do
                             "retained historical request refused")
                         else return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
-                    (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
                   let applicationDispatch := fun routeBound payload output =>
                     if settings.carryRegistry.isSome then
