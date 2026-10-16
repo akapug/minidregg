@@ -170,20 +170,28 @@ def justifiedMinters (note : String) : List Name :=
   | [_, rest] => ((rest.splitOn ";").headD "").splitOn "," |>.map (·.trim.toName)
   | _ => []
 
-/-- `true` when a proposition is definitionally just `True`, `x = x`, or one
-of the proposition binders repeated as the conclusion.  These statements carry
-no evidence about the bound token. -/
-def trivialConclusion (binders : Array Expr) (conclusion : Expr) : MetaM Bool := do
-  let conclusion ← whnf conclusion
-  if conclusion.isConstOf ``True then return true
-  if conclusion.isAppOfArity ``Eq 3 then
-    let args := conclusion.getAppArgs
-    if ← isDefEq args[1]! args[2]! then return true
-  for binder in binders do
-    let type ← inferType binder
-    if ← isProp type then
-      if ← isDefEq type conclusion then return true
-  return false
+/-- `true` when a proposition is, up to REDUCIBLE unfolding, just `True`, `x = x`, or
+one of the proposition binders repeated as the conclusion.  These statements carry
+no evidence about the bound token.
+
+The test is reducible-only on purpose (the reduction-bomb class): an L1 witness is
+often `x.field = f …` with `f` a deployed hash or codec (cSHAKE, Poseidon2, SHA-256,
+a world root).  `whnf`/`isDefEq` at default transparency unfold such an `f` to compare
+the sides -- one permutation under `whnf` is tens of GB and an hour -- and with 341 L1
+rows the census elaborated for 39 h (build 3, 2026-10-14).  The vacuous statements this
+rejects are syntactic; nothing deployed needs to unfold to see them. -/
+def trivialConclusion (binders : Array Expr) (conclusion : Expr) : MetaM Bool :=
+  withReducible do
+    let conclusion ← whnfR conclusion
+    if conclusion.isConstOf ``True then return true
+    if conclusion.isAppOfArity ``Eq 3 then
+      let args := conclusion.getAppArgs
+      if ← isDefEq args[1]! args[2]! then return true
+    for binder in binders do
+      let type ← inferType binder
+      if ← isProp type then
+        if ← isDefEq type conclusion then return true
+    return false
 
 /-- A value index is a free-variable argument of the bound token type other than
 a type, proposition, or instance argument.  Each such index must occur in the
