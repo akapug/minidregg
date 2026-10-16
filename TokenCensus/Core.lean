@@ -233,28 +233,31 @@ and instance arguments of an application are skipped.  `x.field` elaborates to
 a conclusion about `x.field` alone names the indices of `x` without saying anything about
 them; this sees only `x`. -/
 partial def explicitFVars (e : Expr) : MetaM (Array FVarId) := do
-  match e with
-  | .fvar id => return #[id]
-  | .mdata _ body => explicitFVars body
-  | .proj _ _ struct => explicitFVars struct
-  | .lam _ type body _ | .forallE _ type body _ =>
-      return (← explicitFVars type) ++ (← explicitFVars body)
-  | .letE _ type value body _ =>
-      return (← explicitFVars type) ++ (← explicitFVars value) ++ (← explicitFVars body)
-  | .app .. =>
-      let fn := e.getAppFn
-      let args := e.getAppArgs
-      let infos ← binderInfosOf fn args.size
-      let head : Array FVarId ← match fn with
-        | .fvar id => pure #[id]
-        | .const .. => pure #[]
-        | other => explicitFVars other
-      let mut found := head
-      for i in [0:args.size] do
-        if infos[i]!.isExplicit then
-          found := found ++ (← explicitFVars args[i]!)
-      return found
-  | _ => return #[]
+  let ((), (_, found)) ← (visit e).run ({}, #[])
+  return found
+where
+  /-- Each distinct subterm is visited once (`Expr` is a DAG; a tree walk of a shared
+  term is exponential in its depth). -/
+  visit (e : Expr) : StateT (Std.HashSet Expr × Array FVarId) MetaM Unit := do
+    if (← get).1.contains e then return
+    modify fun (seen, found) => (seen.insert e, found)
+    match e with
+    | .fvar id => modify fun (seen, found) => (seen, found.push id)
+    | .mdata _ body => visit body
+    | .proj _ _ struct => visit struct
+    | .lam _ type body _ | .forallE _ type body _ => do visit type; visit body
+    | .letE _ type value body _ => do visit type; visit value; visit body
+    | .app .. =>
+        let fn := e.getAppFn
+        let args := e.getAppArgs
+        let infos ← binderInfosOf fn args.size
+        match fn with
+        | .fvar id => modify fun (seen, found) => (seen, found.push id)
+        | .const .. => pure ()
+        | other => visit other
+        for i in [0:args.size] do
+          if infos[i]!.isExplicit then visit args[i]!
+    | _ => pure ()
 
 /-- The value indices of a token type (free-variable arguments other than types,
 propositions and instances). -/
