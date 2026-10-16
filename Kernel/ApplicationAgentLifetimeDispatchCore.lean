@@ -180,10 +180,7 @@ def charge {config : Config} {opened : Opened config}
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 6
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 6
-    | .storageBytes => ordinary.exactCharge .storageBytes +
-        ingress.canonicalBytes.length +
-        (ApplicationDispatchAdmissionIngress.nullifier ingress.dispatch).canonicalBytes.length +
-        (ApplicationAgentLifetimeDispatchReserveCore.claimNullifier reserved).canonicalBytes.length
+    | .storageBytes => DeployedCharge.storageCharge opened.ground.view ordinary.writes (ApplicationAgentLifetimeDispatchIngress.event ingress)
     | other => ordinary.exactCharge other
 
 /-- The one CAS includes the unchanged app/session DRC writes, six current

@@ -1555,6 +1555,42 @@ if [[ -n "$success_baseline_root" ]]; then
   project_c_modules="$output_dir/project-c-recompiled-modules.txt"
   tail -n "+$((resume_prefix + 1))" "$source_modules" > "$project_c_modules"
 fi
+# One compile of one generated C file: cc-object.sh C_PATH OBJECT LOG. Every object this builder makes goes
+# through it, with the one flag set below. MINIDREGG_NATIVE_OBJECT_CACHE=DIR (unset: no cache) reuses an object
+# by CONTENT: the key is sha256 over (the toolchain's clang and include tree, the flags, the C file's path as
+# given -- an ELF object names its source -- and the C file's bytes), so a hit is the object this compile would
+# produce, and a set built with the cache is byte-identical to one built without it. Misses compile and are
+# stored (tmp + rename, so a concurrent build never reads half an object). Hits/misses: object-cache.tsv.
+cc_flags='-fstack-clash-protection -fdata-sections -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument -O3 -DNDEBUG -DLEAN_EXPORTING'
+object_cache=${MINIDREGG_NATIVE_OBJECT_CACHE:-}
+toolchain_key=""
+if [[ -n "$object_cache" ]]; then
+  mkdir -p "$object_cache"
+  toolchain_key=$( { shasum -a 256 "$toolchain/bin/clang"; (cd "$toolchain/include" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256); } | shasum -a 256 | cut -d' ' -f1)
+fi
+cat > "$output_dir/cc-object.sh" <<CC
+#!/usr/bin/env bash
+set -euo pipefail
+c_path=\$1 object=\$2 log=\$3
+compile() {
+  "$toolchain/bin/clang" -c -o "\$1" "\$c_path" -I "$toolchain/include" $cc_flags \\
+    --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" > "\$log" 2>&1
+}
+cache="$object_cache"
+if [[ -z "\$cache" ]]; then compile "\$object"; exit 0; fi
+key=\$( { printf '%s\n%s\n%s\n' "$toolchain_key" "$cc_flags" "\$c_path"; cat "\$c_path"; } | shasum -a 256 | cut -c1-64)
+hit="\$cache/\${key:0:2}/\$key.o"
+if [[ -f "\$hit" ]]; then
+  cp "\$hit" "\$object"; touch "\$hit"; printf 'hit\t%s\n' "\$c_path" >> "$output_dir/object-cache.tsv"; : > "\$log"; exit 0
+fi
+compile "\$object"
+mkdir -p "\$cache/\${key:0:2}"
+tmp="\$cache/\${key:0:2}/.\$key.\$\$"
+cp "\$object" "\$tmp" && mv -f "\$tmp" "\$hit"
+printf 'miss\t%s\n' "\$c_path" >> "$output_dir/object-cache.tsv"
+CC
+chmod +x "$output_dir/cc-object.sh"
+: > "$output_dir/object-cache.tsv"
 # This single-quoted text is the child bash body, not parent interpolation.
 # shellcheck disable=SC2016
 if [[ -s "$project_c_modules" ]]; then
@@ -1566,12 +1602,7 @@ if [[ -s "$project_c_modules" ]]; then
   object="$c_path.o.native"
   [[ -f "$c_path" ]] || { printf "missing generated C: %s\n" "$c_path" >&2; exit 66; }
   mkdir -p "$(dirname "$object")"
-  "$toolchain/bin/clang" -c -o "$object" "$c_path" \
-    -I "$toolchain/include" -fstack-clash-protection -fdata-sections \
-    -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
-    --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
-    -O3 -DNDEBUG -DLEAN_EXPORTING \
-    > "$output_dir/c/${module//./_}.log" 2>&1
+  "$output_dir/cc-object.sh" "$c_path" "$object" "$output_dir/c/${module//./_}.log"
 ' build-module < "$project_c_modules"
 fi
 
@@ -1660,12 +1691,7 @@ if [[ -s "$missing_package_c" ]]; then
     object="$c_path.o.native"
     module=${c_path#*/.lake/build/ir/}
     module=${module%.c}
-    "$toolchain/bin/clang" -c -o "$object" "$c_path" \
-      -I "$toolchain/include" -fstack-clash-protection -fdata-sections \
-      -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
-      --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
-      -O3 -DNDEBUG -DLEAN_EXPORTING \
-      > "$output_dir/c/package-${module//\//_}.log" 2>&1
+    "$output_dir/cc-object.sh" "$c_path" "$object" "$output_dir/c/package-${module//\//_}.log"
   ' build-package < "$missing_package_c"
 fi
 
@@ -1690,11 +1716,7 @@ while IFS=: read -r object _description; do
     printf 'build-native-host: wrong-architecture object has no generated C: %s\n' "$object" >&2
     exit 66
   }
-  "$clang" -c -o "$object" "$c_path" \
-    -I "$toolchain/include" -fstack-clash-protection -fdata-sections \
-    -ffunction-sections -fvisibility=hidden -Wno-unused-command-line-argument \
-    --sysroot "$toolchain" -nostdinc -isystem "$toolchain/include/clang" \
-    -O3 -DNDEBUG -DLEAN_EXPORTING
+  "$output_dir/cc-object.sh" "$c_path" "$object" "$output_dir/c/wrongarch-$(basename "$c_path").log"
 done < "$output_dir/wrong-architecture-package-objects.txt"
 if [[ -s "$output_dir/wrong-architecture-package-objects.txt" ]]; then
   # the recompiled objects are *.c.o.native beside Lake's: resolve the package objects again

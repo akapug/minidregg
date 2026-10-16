@@ -134,14 +134,14 @@ theorem decodeCreate_createBytes (c : CellId × Cell deployedR × Option CellId)
 
 /-! ## The turn -/
 
-/-- **The inverse of `encodeTurn`.**  The absence pins, then exactly the twelve
-`turnFields` slots, each consumed whole. -/
+/-- **The inverse of `encodeTurn`.**  The absence pins, then exactly the
+thirteen `turnFields` slots (the last the digest pins), each consumed whole. -/
 def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
   let (absent, fields) ← full (StreamCodec.product (StreamCodec.list StreamCodec.nat)
     (StreamCodec.list bytesStream)) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
-      fBefore, fUntil] =>
+      fBefore, fUntil, fPins] =>
     let txId ← full digestStream fTx
     let createsRaw ← full (StreamCodec.list bytesStream) fCreates
     let creates ← createsRaw.mapM decodeCreate
@@ -156,8 +156,9 @@ def decodeTurn (bytes : List UInt8) : Option (DTurn deployedR Digest) := do
     let capability ← full (StreamCodec.option digestStream) fCap
     let notBefore ← full StreamCodec.nat fBefore
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
+    let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent }
+           capability, notBefore, validUntil, absent, pins }
   | _ => none
 
 theorem mapM_decodeCreate (cs : List (CellId × Cell deployedR × Option CellId)) :

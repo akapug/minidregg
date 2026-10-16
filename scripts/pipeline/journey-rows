@@ -464,9 +464,24 @@ row_hermes() {
 # bin/ is both the base and the SPK binaries (spk-host, mini-spk-broker, mini-spk-volume-helper). Root-owned
 # files are made only by the journey's installer and removed by the journey's EXIT trap (which runs on failure
 # too); when that trap never reported (the journey was killed), the row runs the journey's own `cleanup` mode.
-# Inputs a box may lack (uid 1001 with linger, sudo -n, uidmap, a subuid range, bwrap, the pinned SPK) are 98.
+# The journey runs AS the operator: MINI_OPERATOR_UID / MINI_OPERATOR_NAME (default 1001 / ember, the burst
+# boxes, where the runner IS the operator and nothing below changes). A runner that is not the operator (hbox: the
+# pipeline is uid 1000, the operator mini-operator uid 1001) runs it through a scoped sudoers rule naming only
+# two-world-journey.sh (RUNNER ALL=(OPERATOR) NOPASSWD: <tree>/scripts/spk-platform/two-world-journey.sh, env_keep
+# MINI_OPERATOR_UID MINI_OPERATOR_NAME), the operator holding root only for that tree's install-user-world. Its run
+# root is then the operator's own /run/user/UID/m6g-ID (the runner's RUN is 0700); the row mirrors the evidence it
+# reads back into RUN/g with the runner's sudo and removes the operator's root after.
+# Inputs a box may lack (the operator account with linger, its sudo rules, sudo -n, uidmap, a subuid range for the
+# operator, bwrap, the pinned SPK) are 98.
+m6grain_mirror() { # OPERATOR_RUN RUN_G: the files the row reads, as root, into the runner's copy
+  mkdir -p "$2" || return 1
+  sudo -n sh -c 'cd "$1" && tar -cf - --ignore-failed-read result.log root-setup.log root-cleanup.log cross-world-plant \
+      binary-sha256.txt volume-helper.log cleanup-services.log broker-*.log a/evidence b/evidence 2>/dev/null' sh "$1" \
+    | tar -xf - -C "$2"
+}
 row_m6grain() {
-  local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk
+  local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk g cmd
+  local op_uid=${MINI_OPERATOR_UID:-1001} op_name=${MINI_OPERATOR_NAME:-ember}
   [ -f "$d" ] || return 99
   echo prod-spk >"$OUT/owner"
   product_native || return $?
@@ -474,13 +489,24 @@ row_m6grain() {
   local CONSENT_BIN=$BIN/minidregg-client-consent
   for w in SPK_HOST_BIN SPK_BROKER_BIN SPK_VOLUME_HELPER_BIN CONSENT_BIN; do product_input "$w" executable || return $?; done
   product_systemd || return $?
-  product_tools jq curl loginctl sudo install od findmnt || return $?
-  [ "$(id -u)" = 1001 ] || { echo "missing input: operator uid 1001 (two-world-journey.sh runs as uid 1001; this runner is uid $(id -u))" >&2; return 98; }
-  [ "$(loginctl show-user 1001 -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for uid 1001" >&2; return 98; }
+  product_tools jq curl loginctl sudo install od findmnt tar getent || return $?
+  [ "$(getent passwd "$op_uid" | cut -d: -f1)" = "$op_name" ] || { echo "missing input: operator account $op_name with uid $op_uid (MINI_OPERATOR_UID/MINI_OPERATOR_NAME)" >&2; return 98; }
+  [ "$(loginctl show-user "$op_uid" -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for operator uid $op_uid" >&2; return 98; }
   sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
+  export MINI_OPERATOR_UID=$op_uid MINI_OPERATOR_NAME=$op_name
+  if [ "$(id -u)" = "$op_uid" ]; then
+    g=$RUN/g cmd=(bash "$d")
+  else
+    d=$(realpath "$d")
+    sudo -n -l -u "$op_name" "$d" >/dev/null 2>&1 || { echo "missing input: sudoers rule $(id -un) ALL=($op_name) NOPASSWD: $d" >&2; return 98; }
+    w=$(dirname "$(dirname "$(dirname "$d")")")/deploy/spk-host/install-user-world
+    sudo -n -l -U "$op_name" "$w" >/dev/null 2>&1 || { echo "missing input: sudoers rule $op_name ALL=(root) NOPASSWD: $w" >&2; return 98; }
+    g=/run/user/$op_uid/m6g-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+    cmd=(env -C / sudo -n -u "$op_name" -- "$d")  # the runner's cwd (RUN) is 0700
+  fi
   product_userns || return $?
   for w in /usr/bin/newuidmap /usr/bin/newgidmap; do [ -x "$w" ] || { echo "missing input: $w (uidmap)" >&2; return 98; }; done
-  awk -F: '$1=="ember" && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for ember" >&2; return 98; }
+  awk -F: -v user="$op_name" '$1==user && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for $op_name" >&2; return 98; }
   # The pinned signed sntfy package: MINI_TEST_SPK, else the repo's pinned fetcher (sha256 and size checked).
   TEST_SPK=${MINI_TEST_SPK:-}
   if [ -z "$TEST_SPK" ]; then
@@ -490,18 +516,25 @@ row_m6grain() {
     fi
   fi
   product_input TEST_SPK file || return $?
-  product_exec m6grain bash "$d" full "$BIN" "$BIN" "$RUN/g" "$TEST_SPK"; rc=$?
+  product_exec m6grain "${cmd[@]}" full "$BIN" "$BIN" "$g" "$TEST_SPK"; rc=$?
+  [ "$g" = "$RUN/g" ] || m6grain_mirror "$g" "$RUN/g" 2>"$OUT/mirror.err" || rc=1
   if [ -f "$RUN/g/root-setup.log" ] && ! grep -q '^cleanup original=' "$RUN/g/result.log" 2>/dev/null; then
-    bash "$d" cleanup "$BIN" "$BIN" "$RUN/g" >"$OUT/row-cleanup.out" 2>&1 || rc=1
+    "${cmd[@]}" cleanup "$BIN" "$BIN" "$g" >"$OUT/row-cleanup.out" 2>&1 || rc=1
+    [ "$g" = "$RUN/g" ] || m6grain_mirror "$g" "$RUN/g" 2>>"$OUT/mirror.err" || rc=1
+  fi
+  if [ "$g" != "$RUN/g" ]; then
+    case $g in /run/user/"$op_uid"/m6g-[0-9a-f]*) sudo -n rm -rf --one-file-system -- "$g" || rc=1 ;; *) rc=1 ;; esac
   fi
   for w in a b; do [ ! -d "$RUN/g/$w/evidence" ] || cp -r "$RUN/g/$w/evidence" "$OUT/evidence-$w"; done
   product_keep "$RUN/g/result.log" "$RUN/g/root-setup.log" "$RUN/g/root-cleanup.log" "$RUN/g/cross-world-plant" \
     "$RUN/g/binary-sha256.txt" "$RUN/g/volume-helper.log" "$RUN/g/cleanup-services.log" "$RUN/g/"broker-*.log
-  # Root custody after the run, whatever its verdict: nothing of either scratch world survives.
+  # Root custody after the run, whatever its verdict: nothing of either scratch world survives. Checked as root:
+  # /etc/sudoers.d (0750) and the operator's /run/user/UID (0700) cannot be stat'ed by the runner, so a plain -e
+  # there is false whether or not the file survived.
   for s in $(awk '/^ROOT SETUP BEGIN store=/ {sub(/^store=/,"",$4); print $4}' "$RUN/g/root-setup.log" 2>/dev/null); do
     for w in "/etc/mini-spk-volumes/$s.json" "/etc/sudoers.d/mini-spk-$s" "/var/lib/mini-spk-worlds/$s" \
-        "/run/user/1001/systemd/user/mini-spk-broker@$s.service"; do
-      [ ! -e "$w" ] || { echo "m6grain root cleanup left $w" >&2; return 1; }
+        "/run/user/$op_uid/systemd/user/mini-spk-broker@$s.service"; do
+      ! sudo -n test -e "$w" || { echo "m6grain root cleanup left $w" >&2; return 1; }
     done
   done
   if [ "$rc" != 0 ]; then

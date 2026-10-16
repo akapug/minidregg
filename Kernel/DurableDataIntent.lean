@@ -26,6 +26,8 @@ states the proof-relevant simulation a database, filesystem, or replicated
 service must discharge; it does not manufacture physical durability.
 -/
 import Kernel.DurableCommitProtocol
+import Theory.AxiomPin
+import Kernel.Bounds
 
 namespace Minidregg.Kernel.DurableDataIntent
 
@@ -317,6 +319,10 @@ inductive RejectReason
   `Kernel.ObjectiveActivityGate.ordinaryGate`). Only the kernel activity's own
   typed turns write those cells. -/
   | protectedWrite (cellId : CellId)
+  /-- **`overBound`**: the intent is past a static limit (`Kernel.Bounds`):
+  `value` of `name` exceeds `limit`. Checked first by the durable admission
+  (`DurableCheckpoint.prepare`), so neither an append nor a replay admits it. -/
+  | overBound (name : Bounds.Name) (value limit : Nat)
   deriving DecidableEq, Repr
 
 namespace DataIntent
@@ -402,6 +408,71 @@ theorem guarded_fresh_claim_only_ready (before : DataSnapshot rootBytes)
       (by simp [erase, noWrites]) (by simpa [erase] using hasClaim)
       (by simpa [erase] using distinctClaims) fresh (by simpa [erase] using funded)
   exact guarded_claim_only_ready before intent noWrites hasClaim hasGuard current lowerReady
+
+/-- The static bounds an intent is held to (`Kernel.Bounds`, HP-1). On the record
+path a written cell is a leg, a written or guarded cell is a touched cell, and
+each post image is one cell's bytes. O(writes): nothing is read. -/
+def bounds (intent : DataIntent rootBytes) : List (Bounds.Name × Nat) :=
+  [(.legsPerTurn, intent.writes.length),
+    (.cellsTouched, intent.writes.length + intent.readGuards.length),
+    (.nullifiersPerTurn, intent.nullifiers.length)] ++
+    intent.writes.map fun write => (.cellBytes, write.canonicalPostBytes.length)
+
+/-- The first bound the intent is past, as a durable rejection. -/
+def checkBounds (intent : DataIntent rootBytes) : Except RejectReason Unit :=
+  match Bounds.checkAll intent.bounds with
+  | .ok () => .ok ()
+  | .error (.overBound name value limit) => .error (.overBound name value limit)
+
+/-- **No false refusal**: an intent within every bound passes. -/
+theorem checkBounds_accepts (intent : DataIntent rootBytes)
+    (legs : intent.writes.length ≤ Bounds.legsPerTurnMax)
+    (touched : intent.writes.length + intent.readGuards.length ≤ Bounds.cellsTouchedMax)
+    (nullifiers : intent.nullifiers.length ≤ Bounds.nullifiersPerTurnMax)
+    (cells : ∀ write ∈ intent.writes, write.canonicalPostBytes.length ≤ Bounds.cellBytesMax) :
+    intent.checkBounds = .ok () := by
+  have h : Bounds.checkAll intent.bounds = .ok () := by
+    apply Bounds.withinBounds_accepts
+    intro p hp
+    simp only [bounds, List.cons_append, List.nil_append, List.mem_cons, List.mem_map] at hp
+    rcases hp with rfl | rfl | rfl | ⟨write, mem, rfl⟩
+    · exact legs
+    · exact touched
+    · exact nullifiers
+    · exact cells write mem
+  simp [checkBounds, h]
+
+/-- An accepted intent is within every bound (the check is not vacuous). -/
+theorem checkBounds_ok {intent : DataIntent rootBytes} (h : intent.checkBounds = .ok ()) :
+    intent.writes.length ≤ Bounds.legsPerTurnMax ∧
+      intent.writes.length + intent.readGuards.length ≤ Bounds.cellsTouchedMax ∧
+      intent.nullifiers.length ≤ Bounds.nullifiersPerTurnMax ∧
+      ∀ write ∈ intent.writes, write.canonicalPostBytes.length ≤ Bounds.cellBytesMax := by
+  have all : Bounds.checkAll intent.bounds = .ok () := by
+    unfold checkBounds at h
+    split at h
+    · assumption
+    · cases h
+  have w := Bounds.checkAll_ok _ all
+  refine ⟨w (.legsPerTurn, _) (by simp [bounds]), w (.cellsTouched, _) (by simp [bounds]),
+    w (.nullifiersPerTurn, _) (by simp [bounds]), fun write mem => w (.cellBytes, _) ?_⟩
+  simp only [bounds, List.cons_append, List.nil_append, List.mem_cons, List.mem_map]
+  exact Or.inr (Or.inr (Or.inr ⟨write, mem, rfl⟩))
+
+/-- A refusal names a bound the intent is past, with its value and limit. -/
+theorem checkBounds_refuses {intent : DataIntent rootBytes} {reason : RejectReason}
+    (h : intent.checkBounds = .error reason) :
+    ∃ p ∈ intent.bounds, p.1.limit < p.2 ∧ reason = .overBound p.1 p.2 p.1.limit := by
+  unfold checkBounds at h
+  split at h
+  · cases h
+  · rename_i name value limit past
+    obtain ⟨p, mem, lt, eq⟩ := Bounds.checkAll_refuses _ _ past
+    cases eq
+    cases h
+    exact ⟨p, mem, lt, rfl⟩
+
+#assert_axioms checkBounds_accepts checkBounds_ok checkBounds_refuses
 
 end DataIntent
 
@@ -710,6 +781,31 @@ the same transaction id with colliding post bytes is a conflict, not a replay. -
 @[simp] theorem byte_tamper_rejected_after_install :
     execute .complete (DataSnapshot.install before intent) tamperedIntent =
       .rejected (.durable .transactionConflict) := by rfl
+
+/-! ### Poles of `ImplementationRefinement`
+
+The model itself, stepping by exact execution, refines; a physical state that
+stops representing anything after a step does not. -/
+
+theorem implementationRefinement_exact :
+    ImplementationRefinement lengthRoot (DataSnapshot lengthRoot)
+      (fun before intent after =>
+        PLift (after = (execute .complete before intent).storeAfter before))
+      Eq := by
+  constructor
+  intro _ _ _ _ rep step
+  subst rep
+  exact ⟨.complete, step.down⟩
+
+theorem implementationRefinement_stuck_refused :
+    ¬ ImplementationRefinement lengthRoot Bool (fun _ _ _ => PUnit) (fun b _ => b = false) := by
+  intro r
+  obtain ⟨_, h⟩ := r.simulates (physicalBefore := false) (physicalAfter := true)
+    (modelBefore := before) (intent := intent) rfl PUnit.unit
+  exact Bool.noConfusion h
+
+#assert_axioms implementationRefinement_exact implementationRefinement_stuck_refused
+
 
 end Witness
 

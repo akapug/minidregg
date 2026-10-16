@@ -1,0 +1,18 @@
+# The candidate builders build the grain launch gate through this manifest (deploy/candidate/package.py
+# RUST_ROLES: launchGate). The source stays the deployed one, deploy/grain-host/launch-gate.rs (std only), which
+# the hermes journeys and the grain-host docs also compile directly with rustc.
+[package]
+name = "launch-gate"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "launch-gate"
+path = "../../deploy/grain-host/launch-gate.rs"
+
+[profile.release]
+opt-level = 3

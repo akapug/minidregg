@@ -161,10 +161,17 @@ cd /tank/dregg-build/pipeline && PIPELINE_ROOT=$PWD bash LANE/src/scripts/pipeli
 
 | row | detail regex | why absent |
 |---|---|---|
-| m6grain | `^missing input: operator uid 1001 ` | the pipeline runs as uid 1000 (`hbox`). There is no uid-1001 operator account or subuid range |. Also hard-coded: the operator name `ember`; the row needs the runner itself at uid 1001, and then hits the bwrap userns restriction (spk-host uses /usr/bin/bwrap) |
 | hostupgrade | `^missing hostupgrade candidate input: .*/e0a8ba21…$` | the pinned old-epoch EF set existed only on burst3 |
 | hostupgrade/HOST-UPGRADE-PREVIOUS | `^no previous READY main set with the tip Store epoch$` | no same-epoch main set has been published on hbox yet |
 | hermes | `^missing input: unprivileged user namespaces for bwrap ` | hbox has `kernel.apparmor_restrict_unprivileged_userns=1` and no AppArmor profile that lets bwrap create a user namespace (`bwrap: setting up uid map: Permission denied`). **DECISION PENDING (Ember, box security):** until a bwrap profile exists, hbox landings do not prove hermes. JPAY6 accepts this message too (its probe comes before TEST_PROVIDER) |
+
+Supplied 2026-10-14 (M6GRAIN-HBOX), no longer declared: **m6grain** runs two-world-journey.sh AS the operator
+(`MINI_OPERATOR_UID`/`MINI_OPERATOR_NAME` in box.env: `mini-operator` uid 1001, linger, subuid 165536:65536) through
+`/etc/sudoers.d/mini-operator` (hbox may run only that script as the operator; the operator may run only `install-user-world`
+as root), with `u:mini-operator:r-x` on `/usr/local/libexec/mini-grain-bwrap` (r-x: an exec-only binary is non-dumpable and
+bwrap cannot write its uid_map), `uidmap` installed and `MINI_TEST_SPK` in `inputs/spk/`. Box changes and their undo:
+`$PIPELINE_ROOT/box-changes.md`. It now RUNS and FAILS (cv 01a13d9c-8a9d): spk-host's resident bootstrap unshares its own
+user namespace, AppArmor moves it to `unprivileged_userns`, which denies CAP_SETGID, so `setgroups(0)` is EPERM.
 
 Supplied 2026-10-14 (INPUTS-HBOX), no longer declared: **m7** takes its reference from the newest other READY
 set with identical compiled inputs (journey-runner `m7_reference_for`); **exchange** gets `MINI_FN_LAUNCHER`/`MINI_FN_CORE`

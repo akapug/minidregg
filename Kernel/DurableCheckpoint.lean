@@ -265,17 +265,49 @@ structure Ready (rootBytes : List UInt8 → Digest) (image : Image) (height : Na
   resumed : resume rootBytes (image.append intent) height state = some next
 
 /-- The receiver calls the shared executor at the resumed snapshot. A stale
-prepared append after a failed CAS is never retried: the caller reloads. -/
+prepared append after a failed CAS is never retried: the caller reloads.
+First, before the snapshot is consulted, the intent is held to the static
+bounds (`DataIntent.checkBounds`, `Kernel.Bounds`): an intent past one is
+rejected `overBound` by name. Replay goes through here too, so a log record
+past a bound refuses to load rather than being reinterpreted. -/
 def prepare {rootBytes : List UInt8 → Digest} (image : Image) (height : Nat) (state : State)
     (before : DataSnapshot rootBytes) (withinLog : height ≤ image.accepted.length)
     (resumed : resume rootBytes image height state = some before)
     (intent : DataIntent rootBytes) :
     Sum (Ready rootBytes image height state before intent) (Outcome rootBytes) :=
-  match executed : DurableDataIntent.execute .complete before intent with
-  | .accepted next =>
-      .inl ⟨next, executed,
-        resume_append rootBytes image height state before next intent withinLog resumed executed⟩
-  | outcome => .inr outcome
+  match intent.checkBounds with
+  | .error reason => .inr (.rejected reason)
+  | .ok () =>
+    match executed : DurableDataIntent.execute .complete before intent with
+    | .accepted next =>
+        .inl ⟨next, executed,
+          resume_append rootBytes image height state before next intent withinLog resumed executed⟩
+    | outcome => .inr outcome
+
+/-- An intent past a static bound is rejected by that bound's name, value and
+limit, before the snapshot is consulted. -/
+theorem prepare_overBound {rootBytes : List UInt8 → Digest} (image : Image) (height : Nat)
+    (state : State) (before : DataSnapshot rootBytes) (withinLog : height ≤ image.accepted.length)
+    (resumed : resume rootBytes image height state = some before)
+    {intent : DataIntent rootBytes} {reason : DurableDataIntent.RejectReason}
+    (past : intent.checkBounds = .error reason) :
+    prepare image height state before withinLog resumed intent = .inr (.rejected reason) := by
+  unfold prepare
+  rw [past]
+
+/-- A prepared append is within every static bound. -/
+theorem prepare_inl_withinBounds {rootBytes : List UInt8 → Digest} {image : Image} {height : Nat}
+    {state : State} {before : DataSnapshot rootBytes} {withinLog : height ≤ image.accepted.length}
+    {resumed : resume rootBytes image height state = some before}
+    {intent : DataIntent rootBytes} {ready : Ready rootBytes image height state before intent}
+    (prepared : prepare image height state before withinLog resumed intent = .inl ready) :
+    intent.checkBounds = .ok () := by
+  unfold prepare at prepared
+  split at prepared
+  · cases prepared
+  · assumption
+
+#assert_axioms prepare_overBound prepare_inl_withinBounds
 
 /-- The state a checkpoint at the head of `image` materializes: every
 enumerable identifier with its current bytes, every consumed nullifier, the

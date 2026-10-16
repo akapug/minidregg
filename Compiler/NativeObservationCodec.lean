@@ -386,10 +386,18 @@ def validBatch (reads : List (List UInt8)) : Bool :=
   !reads.isEmpty && decide (reads.length ≤ maxBatchReads)
 def isBatch (bytes : List UInt8) : Bool := bytes.take batchFrame.length == batchFrame
 
-#guard validBatch [] = false
-#guard validBatch [[]] = true
-#guard validBatch (List.replicate 16 []) = true
-#guard validBatch (List.replicate 17 []) = false
+/-- The batch gate, for every batch: `validBatch` accepts exactly the nonempty batches of at most
+`maxBatchReads` reads. The four boundary instances below are corollaries (kernel-checked). -/
+theorem validBatch_iff (reads : List (List UInt8)) :
+    validBatch reads = true ↔ reads ≠ [] ∧ reads.length ≤ maxBatchReads := by
+  cases reads <;> simp [validBatch]
+
+theorem validBatch_nil : validBatch [] = false := by decide
+theorem validBatch_singleton : validBatch [[]] = true := by decide
+theorem validBatch_at_max : validBatch (List.replicate 16 []) = true := by decide
+theorem validBatch_over_max : validBatch (List.replicate 17 []) = false := by decide
+#assert_axioms validBatch_iff validBatch_nil validBatch_singleton validBatch_at_max
+  validBatch_over_max
 
 theorem batch_roundtrip (reads : List (List UInt8)) :
     batchCodec.decode (batchCodec.encode reads) = some reads :=

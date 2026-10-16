@@ -90,8 +90,7 @@ def charge (accepted : Accepted profile config pins durable ambient ingress) : C
   | .witnessBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => GrainResourceBirthReceiver.charge accepted.grainAccepted .proofWork + 1
-  | .storageBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .storageBytes +
-      ingress.canonicalBytes.length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => GrainResourceBirthReceiver.charge accepted.grainAccepted .sideEffectCount + 1
   | .feeDebit => GrainResourceBirthReceiver.charge accepted.grainAccepted .feeDebit
   | .networkBytes | .leaseByteBlocks => 0

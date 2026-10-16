@@ -25,6 +25,7 @@ changes)`.  Any other leg is persisted verbatim (`encodeLeg`).
   the digest guard is exactly as strong as that hash.
 -/
 import Kernel.DeployedTurnCodec
+import Kernel.Bounds
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.DeployedTurnCompact
@@ -107,10 +108,6 @@ end Changes
 
 /-! ## The compact leg -/
 
-/-- The digest guard of a held cell: the deployed per-cell root of its bytes. -/
-def cellDigest (k : deployedR.Kind) (s : Store (deployedR.layout k)) : Digest :=
-  ResourceBirthCodec.rootBytes (encodeCell (some ⟨k, s⟩))
-
 /-- A change's bytes: the read-op carrier `read ns key value` (its op stream). -/
 def changeBytes (k : deployedR.Kind) (c : Change (deployedR.layout k)) : List UInt8 :=
   encodeOp k (.read c.1.1 c.1.2 c.2)
@@ -155,7 +152,7 @@ def encodeLegAt (held : CellId → Option (Cell deployedR)) (leg : Leg deployedR
     if compactable held leg then
       let s' := Patch.run s leg.patch
       [0] ++ StreamCodec.nat.encode leg.cell ++ [CanonicalCellRegistry.Kind.tag leg.kind] ++
-        digestStream.encode (cellDigest leg.kind s) ++
+        digestStream.encode (cellRoot (some ⟨leg.kind, s⟩)) ++
         (StreamCodec.list bytesStream).encode
           ((changesOf (bridge.codec.cover leg.kind s s') s s').map (changeBytes leg.kind))
     else [1] ++ encodeLeg leg
@@ -173,7 +170,7 @@ def decodeLegAt (held : CellId → Option (Cell deployedR)) : List UInt8 → Opt
       let raw ← full (StreamCodec.list bytesStream) b3
       let changes ← raw.mapM (decodeChange k)
       let s ← (held cell).bind fun c => c.storeAt k
-      if cellDigest k s = digest then
+      if cellRoot (some ⟨k, s⟩) = digest then
         some ⟨cell, k, bridge.codec.legPatch k s (applyChanges s changes)⟩
       else none
   | 1 :: bytes => full legStream bytes
@@ -268,7 +265,7 @@ theorem decodeLegAt_other (held held' : CellId → Option (Cell deployedR)) (leg
         | none => simp [hcell, hst] at decoded
         | some s' =>
           simp only [hcell, hst] at decoded
-          by_cases hd : cellDigest k s' = cellDigest k s
+          by_cases hd : cellRoot (some ⟨k, s'⟩) = cellRoot (some ⟨k, s⟩)
           · simp only [hd, ↓reduceIte, Option.some.injEq] at decoded
             by_cases es : s' = s
             · subst es
@@ -312,7 +309,8 @@ def encodeTurnAt (w : World deployedR TransactionId Digest) (t : DTurn deployedR
        StreamCodec.nat.encode t.keyEpoch,
        (StreamCodec.option digestStream).encode t.capability,
        StreamCodec.nat.encode t.notBefore,
-       (StreamCodec.option StreamCodec.nat).encode t.validUntil])
+       (StreamCodec.option StreamCodec.nat).encode t.validUntil,
+       (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins])
 
 /-- Decode a persisted turn against the follower's world. -/
 def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8) :
@@ -321,7 +319,7 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     (StreamCodec.list bytesStream)) bytes
   match fields with
   | [fTx, fCreates, fLegs, fRetires, fEvent, fNull, fCharge, fSubject, fEpoch, fCap,
-      fBefore, fUntil] =>
+      fBefore, fUntil, fPins] =>
     let txId ← full digestStream fTx
     let createsRaw ← full (StreamCodec.list bytesStream) fCreates
     let creates ← createsRaw.mapM decodeCreate
@@ -336,8 +334,9 @@ def decodeTurnAt (w : World deployedR TransactionId Digest) (bytes : List UInt8)
     let capability ← full (StreamCodec.option digestStream) fCap
     let notBefore ← full StreamCodec.nat fBefore
     let validUntil ← full (StreamCodec.option StreamCodec.nat) fUntil
+    let pins ← full (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)) fPins
     some { txId, creates, legs, retires, event, nullifiers, charge, subject, keyEpoch,
-           capability, notBefore, validUntil, absent }
+           capability, notBefore, validUntil, absent, pins }
   | _ => none
 
 theorem mapM_decodeLegAt (held : CellId → Option (Cell deployedR)) (legs : List (Leg deployedR)) :
@@ -355,6 +354,88 @@ theorem decodeTurnAt_encodeTurnAt (w : World deployedR TransactionId Digest)
   unfold decodeTurnAt encodeTurnAt
   rw [full_encode]
   simp only [bind, Option.bind, full_encode, hc, mapM_decodeLegAt]
+
+/-! ## The log-entry decoder: bounded, refusing by name (HP-1) -/
+
+/-- Why a persisted entry is not a turn. -/
+inductive EntryRefusal where
+  /-- The entry, or the turn it decodes to, is past a static bound (`Kernel.Bounds`). -/
+  | overBound (name : Bounds.Name) (value limit : Nat)
+  /-- The bytes do not decode against this world. -/
+  | undecodable
+  deriving DecidableEq, Repr
+
+def EntryRefusal.ofBound : Bounds.Refusal → EntryRefusal
+  | .overBound name value limit => .overBound name value limit
+
+/-- The cells a turn touches: its creates, legs, retires and absence pins. -/
+def touched (t : DTurn deployedR Digest) : Nat :=
+  t.creates.length + t.legs.length + t.retires.length + t.absent.length
+
+/-- The bounds a decoded turn is held to. -/
+def turnBounds (t : DTurn deployedR Digest) : List (Bounds.Name × Nat) :=
+  [(.legsPerTurn, t.legs.length), (.nullifiersPerTurn, t.nullifiers.length),
+    (.cellsTouched, touched t)]
+
+/-- Whether the writer's entry for `t` at `w` is within every bound. -/
+def entryWithinBounds (w : World deployedR TransactionId Digest) (t : DTurn deployedR Digest) : Bool :=
+  decide ((encodeTurnAt w t).length ≤ Bounds.turnBytesMax) &&
+    (turnBounds t).all fun p => decide (p.2 ≤ p.1.limit)
+
+/-- **The log-entry decoder.** An entry past `turnBytesMax` is refused by that
+name before a byte of it is decoded; a turn past `legsPerTurnMax`,
+`nullifiersPerTurnMax` or `cellsTouchedMax` is refused whole. A refusal returns
+no part of a turn. -/
+def decodeEntry (w : World deployedR TransactionId Digest) (bytes : List UInt8) :
+    Except EntryRefusal (DTurn deployedR Digest) := do
+  (Bounds.check .turnBytes bytes.length).mapError EntryRefusal.ofBound
+  let some t := decodeTurnAt w bytes | throw .undecodable
+  (Bounds.checkAll (turnBounds t)).mapError EntryRefusal.ofBound
+  return t
+
+/-- An entry one byte (or more) past `turnBytesMax` is refused by that name. -/
+theorem decodeEntry_overBytes (w : World deployedR TransactionId Digest) {bytes : List UInt8}
+    (past : Bounds.turnBytesMax < bytes.length) :
+    decodeEntry w bytes = .error (.overBound .turnBytes bytes.length Bounds.turnBytesMax) := by
+  have h : Bounds.check .turnBytes bytes.length =
+      .error (.overBound .turnBytes bytes.length Bounds.turnBytesMax) :=
+    Bounds.check_refuses (name := .turnBytes) past
+  simp [decodeEntry, h, Except.mapError, EntryRefusal.ofBound, bind, Except.bind]
+
+/-- **`withinBounds_accepts` at the decoder (no false refusal)**: the writer's
+entry for a turn within every bound decodes, against the world it was written at,
+to exactly that turn. -/
+theorem decodeEntry_encodeTurnAt (w : World deployedR TransactionId Digest)
+    (t : DTurn deployedR Digest) (within : entryWithinBounds w t = true) :
+    decodeEntry w (encodeTurnAt w t) = .ok t := by
+  simp only [entryWithinBounds, Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true] at within
+  obtain ⟨bytes, counts⟩ := within
+  have hb := Bounds.check_accepts (name := .turnBytes) bytes
+  have hc := Bounds.withinBounds_accepts (turnBounds t) counts
+  simp [decodeEntry, hb, hc, decodeTurnAt_encodeTurnAt, Except.mapError, bind, Except.bind, pure,
+    Except.pure]
+
+/-- An accepted entry is a decoded turn within every bound (the check is not vacuous). -/
+theorem decodeEntry_ok {w : World deployedR TransactionId Digest} {bytes : List UInt8}
+    {t : DTurn deployedR Digest} (h : decodeEntry w bytes = .ok t) :
+    decodeTurnAt w bytes = some t ∧ bytes.length ≤ Bounds.turnBytesMax ∧
+      ∀ p ∈ turnBounds t, p.2 ≤ p.1.limit := by
+  by_cases hb : bytes.length ≤ Bounds.turnBytesMax
+  · unfold decodeEntry at h
+    rw [Bounds.check_accepts (name := .turnBytes) hb] at h
+    cases hd : decodeTurnAt w bytes with
+    | none => simp [hd, Except.mapError, bind, Except.bind, throw, throwThe, MonadExceptOf.throw] at h
+    | some t' =>
+      cases hc : Bounds.checkAll (turnBounds t') with
+      | error r => simp [hd, hc, Except.mapError, bind, Except.bind] at h
+      | ok u =>
+        simp [hd, hc, Except.mapError, bind, Except.bind, pure, Except.pure] at h
+        subst h
+        exact ⟨rfl, hb, Bounds.checkAll_ok _ (by cases u; exact hc)⟩
+  · rw [decodeEntry_overBytes w (Nat.lt_of_not_le hb)] at h
+    cases h
+
+#assert_axioms decodeEntry_overBytes decodeEntry_encodeTurnAt decodeEntry_ok
 
 #assert_axioms applyChanges_changesOf
 #assert_axioms decodeLegAt_encodeLegAt

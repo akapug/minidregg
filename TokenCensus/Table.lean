@@ -305,7 +305,10 @@ Minidregg.Kernel.ObjectiveActivity.Creation.mk | Kernel.ObjectiveActivity | evid
 Minidregg.Kernel.ObjectiveActivity.ChargedFailure.mk | Kernel.ObjectiveActivity | evidence | L2 | 2 proof / 2 data fields; GPT-6 row E charged failure (minted only by chargeFailure); layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Delivery.mk | Kernel.ObjectiveActivity | evidence | L2 | 23 proof / 20 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Exhaustion.mk | Kernel.ObjectiveActivity | evidence | L2 | 20 proof / 15 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.Fronts.mk | Kernel.ObjectiveActivity | evidence | L2 | perf-memo: 1 proof / 1 data field (each held front is methodFront of its name; Fronts.front_eq); mints: Fronts.of (its proof is rfl: every held thunk IS methodFront of its name, so the token asserts nothing a caller supplies)
+Minidregg.Kernel.ObjectiveActivity.Held.mk | Kernel.ObjectiveActivity | evidence | L2 | perf-memo: 1 proof / 5 data fields (the held replay is replayPackageAt of its own key; only Held.of builds one; LoadMemo.replay_eq); mints: Held.of (its proof is rfl: the thunk IS replayPackageAt of the key it stores)
 Minidregg.Kernel.ObjectiveActivity.Instantiated.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 4 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.MethodFront.mk | Kernel.ObjectiveActivity | evidence | L2 | perf-memo: 2 proof / 3 data fields (lowered = lowerParsed, generatedCore = rendering length)
 Minidregg.Kernel.ObjectiveActivity.Migrated.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Migration.mk | Kernel.ObjectiveActivity | evidence | L2 | upgrade-turns ObjectRecord migration (DEPUTY-OB-ENG); L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Postings.mk | Kernel.ObjectiveActivity | evidence | L2 | 1 proof / 1 data fields; layer-1 review pending
@@ -313,7 +316,7 @@ Minidregg.Kernel.ObjectiveActivity.Program.mk | Kernel.ObjectiveActivity | evide
 Minidregg.Kernel.ObjectiveActivity.Publication.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 5 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Rebirth.mk | Kernel.ObjectiveActivityUpgrade | evidence | L2 | upgrade-turns (DEPUTY-OB-ENG): proof fields mirror the admitting checks per its audit; L1 theorem pending from OB-ENG
 Minidregg.Kernel.ObjectiveActivity.Registration.mk | Kernel.ObjectiveDomain | evidence | L2 | 7 proof / 3 data fields; layer-1 review pending
-Minidregg.Kernel.ObjectiveActivity.Replay.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 3 data fields; layer-1 review pending
+Minidregg.Kernel.ObjectiveActivity.ReplayAt.mk | Kernel.ObjectiveActivity | evidence | L2 | 4 proof / 4 data fields (was Replay.mk; + the held method fronts); layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.Resolution.mk | Kernel.ObjectiveActivity | evidence | L2 | 5 proof / 3 data fields; layer-1 review pending
 Minidregg.Kernel.ObjectiveActivity.ResumeHead.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)
 Minidregg.Kernel.ObjectiveActivity.ResumeTail.mk | Kernel.ObjectiveActivity | evidence | L2 | DEPUTY-OB-ENG type; layer-1 review pending (OB-ENG)

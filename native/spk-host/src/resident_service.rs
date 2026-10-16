@@ -1258,6 +1258,10 @@ struct ResidentBound {
     grains_root: PathBuf,
     broker_socket: PathBuf,
     store: String,
+    /// The bwrap bytes the broker pinned for this resident's namespace: the app
+    /// sandbox runs the same build (its path may be a per-app-identity copy,
+    /// scripts/spk-platform/sandbox-launcher-stage.py; the spawn gate pins it).
+    bwrap_sha256: String,
 }
 
 impl ResidentBound {
@@ -1266,11 +1270,12 @@ impl ResidentBound {
             || config.app_gid != self.app_gid
             || config.grains_root != self.grains_root
             || config.store != self.store
+            || config.bwrap_sha256 != self.bwrap_sha256
             || crate::broker::socket_path(&config.grains_root, config.broker_socket.as_deref())?
                 != self.broker_socket
         {
             return Err(invalid(
-                "resident config differs from broker-rendered unit identity or endpoint",
+                "resident config differs from broker-rendered unit identity, endpoint or bwrap",
             ));
         }
         Ok(())
@@ -1299,6 +1304,7 @@ impl ResidentBound {
                 var("MINI_SPK_BROKER_SOCKET")?,
             ),
             store: var("MINI_SPK_STORE")?,
+            bwrap_sha256: var("MINI_SPK_BWRAP_SHA256")?,
         })
     }
 }
@@ -2431,7 +2437,12 @@ mod tests {
             grains_root: config.grains_root.clone(),
             store: config.store.clone(),
             broker_socket: crate::broker::socket_path(&config.grains_root,config.broker_socket.as_deref()).unwrap(),
+            bwrap_sha256: config.bwrap_sha256.clone(),
         };
+        assert!(bound.validate(&config).is_ok());
+        bound.bwrap_sha256 = "c".repeat(64);
+        assert!(bound.validate(&config).is_err());
+        bound.bwrap_sha256 = config.bwrap_sha256.clone();
         assert!(bound.validate(&config).is_ok());
         config.broker_socket = Some(config.grains_root.join("runtime-0123456789abcdef/broker.sock"));
         bound.broker_socket=config.grains_root.join("broker.sock");

@@ -125,10 +125,14 @@ import Kernel.DeployedTurnCodec  -- FD-1 R4a: decodeTurn, the inverse of encodeT
 import Kernel.DeployedTurnCompact  -- FD-1 R4b/FD-2: the persisted Turn: digest guards, new values only (decodeTurnAt_encodeTurnAt)
 import Kernel.WorldSystemCodec  -- checkpoint = World v1: the system cell sub-codec, all six namespaces
 import Kernel.TurnLog  -- FD-1 R4a: deployed genesis World of a Seed; the Turn-log follower IS World.fold
+import Kernel.SnapRepresents  -- FD-1 4a: the snapshot-level Represents and the executor lemmas (moved from HostRefinesWorldCore)
+import Kernel.DeployedRepresentsCheck  -- FD-1 4a: an open decides that its snapshot represents its folded World (representsCheck_sound)
+import Kernel.DeployedCharge  -- FD-1 charge switch: every receiver's storage lane is storageCharge (legs + born images + retained event); charge_eq, mismatch
+import Kernel.TurnGen  -- HP-6 SIM: seeded generator of intents (honest and invalid) and presented turns over a small deployed World
 import Kernel.ObjectiveAdmissible -- Exact receiver intent certificates consumed by the durable writer
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
-import Kernel.ObjectiveTurnTotalityStorage  -- exact full-image receiver charge = World value writes + classified framing
+import Kernel.ObjectiveTurnTotalityStorage  -- the receiver storage lane IS the World storage; full images = value writes + classified framing (no longer charged)
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families

@@ -34,6 +34,7 @@ operational completion of `Dead` is not ported; `[LIVENESS-crossvat-cycle]`
 `crossvat_cycle_leaks` and `refcount_ne_reachability` are not ported.
 -/
 import Mathlib.Computability.Halting
+import Theory.AxiomPin
 
 namespace Minidregg.Theory.RevocationConsensus
 
@@ -217,5 +218,20 @@ theorem dead_undecidable (n : ℕ) :
 
 /-- info: 'Minidregg.Theory.RevocationConsensus.dead_undecidable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in #print axioms dead_undecidable
+
+/-! ## Poles of `CrossVatSound`
+
+Satisfied when every party's view retires the cap; refuted by a split brain in
+which vat 2 still honours it. -/
+
+theorem crossVatSound_unanimous :
+    CrossVatSound [1, 2] ⟨1, fun _ => True⟩ (fun _ _ => True) := fun _ _ => trivial
+
+theorem crossVatSound_split_brain :
+    ¬ CrossVatSound [1, 2] ⟨1, fun _ => True⟩ (fun v _ => v = 1) := by
+  intro h
+  exact absurd (h 2 (by simp)) (by decide)
+
+#assert_axioms crossVatSound_unanimous crossVatSound_split_brain
 
 end Minidregg.Theory.RevocationConsensus

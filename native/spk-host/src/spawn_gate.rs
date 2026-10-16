@@ -104,6 +104,56 @@ pub(crate) fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, 
     mode & bit != 0
 }
 
+/// The execute decision of the kernel's discretionary check for exactly
+/// `uid`/`gid` with no supplementary groups, from the file's POSIX access ACL
+/// (`system.posix_acl_access`, the kernel's own v2 encoding) when it has one:
+/// owner entry; else a named-user entry under the mask; else the owning-group
+/// or a named-group entry for `gid` under the mask (a matching group class that
+/// grants nothing denies); else other. Without an ACL it is the mode bits.
+/// LSM policy is still decided only at the exec boundary.
+pub(crate) fn acl_execute_permits(acl: Option<&[u8]>, owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> Option<bool> {
+    let Some(acl) = acl else { return Some(execute_mode_permits(owner, group, mode, uid, gid)); };
+    if owner == uid {
+        return Some(mode & 0o100 != 0);
+    }
+    if acl.len() < 4 || (acl.len() - 4) % 8 != 0 || u32::from_le_bytes(acl[..4].try_into().ok()?) != 2 {
+        return None;
+    }
+    let entries: Vec<(u16, u16, u32)> = acl[4..]
+        .chunks_exact(8)
+        .map(|e| (u16::from_le_bytes([e[0], e[1]]), u16::from_le_bytes([e[2], e[3]]), u32::from_le_bytes([e[4], e[5], e[6], e[7]])))
+        .collect();
+    const USER: u16 = 0x02; const GROUP_OBJ: u16 = 0x04; const GROUP: u16 = 0x08; const MASK: u16 = 0x10; const OTHER: u16 = 0x20;
+    let mask = entries.iter().find(|e| e.0 == MASK).map_or(7, |e| e.1);
+    if let Some(e) = entries.iter().find(|e| e.0 == USER && e.2 == uid) {
+        return Some(e.1 & mask & 1 != 0);
+    }
+    let groups: Vec<u16> = entries
+        .iter()
+        .filter(|e| (e.0 == GROUP_OBJ && group == gid) || (e.0 == GROUP && e.2 == gid))
+        .map(|e| e.1)
+        .collect();
+    if !groups.is_empty() {
+        return Some(groups.iter().any(|p| p & mask & 1 != 0));
+    }
+    entries.iter().find(|e| e.0 == OTHER).map(|e| e.1 & 1 != 0)
+}
+
+fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
+    let name = c"system.posix_acl_access";
+    let mut buffer = vec![0_u8; 4 + 8 * 64];
+    let n = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if n < 0 {
+        let e = io::Error::last_os_error();
+        return match e.raw_os_error() {
+            Some(libc::ENODATA) | Some(libc::EOPNOTSUPP) => Ok(None),
+            _ => Err(e),
+        };
+    }
+    buffer.truncate(n as usize);
+    Ok(Some(buffer))
+}
+
 /// Refuse an unexecutable pinned launcher before consuming a native START
 /// claim. Repeat the same check at the actual one-shot spawn boundary.
 pub(crate) fn preflight(spec: &SpawnSpec) -> io::Result<()> {
@@ -137,15 +187,22 @@ fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     }
     let file = unsafe { File::from_raw_fd(raw) };
     let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.uid() == spec.app_uid
-        || meta.mode() & 0o022 != 0
-        || !crate::os::executes_as_app(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
-        || meta.len() > MAX_ELF_BYTES
-    {
-        return Err(invalid(
-            "launch executable is writable, untrusted, unexecutable after identity drop or oversized",
-        ));
+    if !meta.is_file() {
+        return Err(invalid("launch executable is not a regular file"));
+    }
+    if meta.uid() == spec.app_uid {
+        return Err(invalid("launch executable is owned by the app identity"));
+    }
+    if meta.mode() & 0o022 != 0 {
+        return Err(invalid("launch executable is group- or other-writable"));
+    }
+    if meta.len() > MAX_ELF_BYTES {
+        return Err(invalid("launch executable is oversized"));
+    }
+    match acl_execute_permits(access_acl(&file)?.as_deref(), meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid) {
+        Some(true) => {}
+        Some(false) => return Err(invalid("launch executable is not executable by the app identity after identity drop (mode/ACL)")),
+        None => return Err(invalid("launch executable access ACL is malformed")),
     }
     let mut hash = Sha256::new();
     let mut reader = &file;
@@ -529,6 +586,33 @@ mod tests {
         // Unix owner/group classes take precedence over other execute bits.
         assert!(!execute_mode_permits(64010, 0, 0o655, 64010, 64010));
         assert!(!execute_mode_permits(0, 64010, 0o705, 64010, 64010));
+    }
+
+    fn acl(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+        let mut b = 2_u32.to_le_bytes().to_vec();
+        for (tag, perm, id) in entries {
+            b.extend(tag.to_le_bytes()); b.extend(perm.to_le_bytes()); b.extend(id.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn launch_acl_named_app_entry_under_mask_decides_execute() {
+        let u = u32::MAX;
+        // root:hbox 0750 + user:165536:r-x + mask r-x (hbox's profiled bwrap).
+        let a = acl(&[(1, 7, u), (2, 5, 165536), (4, 5, u), (0x10, 5, u), (0x20, 0, u)]);
+        assert_eq!(acl_execute_permits(Some(&a), 0, 1000, 0o750, 165536, 165536), Some(true));
+        assert_eq!(acl_execute_permits(Some(&a), 0, 1000, 0o750, 165552, 165552), Some(false));
+        assert_eq!(acl_execute_permits(None, 0, 1000, 0o750, 165536, 165536), Some(false));
+        // The mask limits a named entry; a matching group class that grants nothing denies.
+        let m = acl(&[(1, 7, u), (2, 5, 165536), (4, 5, u), (0x10, 4, u), (0x20, 5, u)]);
+        assert_eq!(acl_execute_permits(Some(&m), 0, 1000, 0o745, 165536, 165536), Some(false));
+        let g = acl(&[(1, 7, u), (4, 5, u), (8, 4, 165536), (0x10, 5, u), (0x20, 1, u)]);
+        assert_eq!(acl_execute_permits(Some(&g), 0, 1000, 0o751, 165536, 165536), Some(false));
+        assert_eq!(acl_execute_permits(Some(&g), 0, 1000, 0o751, 165552, 165552), Some(true));
+        // The owner class is the mode's owner bits, never a named entry.
+        assert_eq!(acl_execute_permits(Some(&a), 165536, 1000, 0o650, 165536, 165536), Some(false));
+        assert_eq!(acl_execute_permits(Some(&a[..7]), 0, 1000, 0o750, 165536, 165536), None);
     }
 
     #[test]

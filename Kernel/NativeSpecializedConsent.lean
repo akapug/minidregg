@@ -5,6 +5,7 @@ codecs. It has no operator Bool, sparse state defaults, or planner semantic twin
 -/
 import Kernel.NativeClientConsent
 import Kernel.NativeHostPayClaims
+import Kernel.NativeHostHeld
 
 namespace Minidregg.Kernel.NativeSpecializedConsent
 open Minidregg.Compiler Minidregg.Kernel
@@ -80,7 +81,8 @@ def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
       pure (NativeHost.claimSigningPlanCodec.encode (← IO.ofExcept (NativeHost.payClaimPlanLoaded config opened request)))
   | 210 =>
       pure (ObjectiveActivityReceiver.signingPlanCodec.encode
-        (← IO.ofExcept (NativeHost.activityPlanLoaded config opened request)))
+        (← IO.ofExcept (NativeHost.activityPlanLoaded config opened
+          (← NativeHostHeld.heldFor config opened) request)))
   | 215 =>
       pure (SeatReceiver.signingPlanCodec.encode
         (← IO.ofExcept (NativeHost.seatPlanLoaded config opened request)))

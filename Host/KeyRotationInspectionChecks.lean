@@ -14,10 +14,21 @@ private def accepts (value : SubjectKeyRotation.SigningPlan) : Bool :=
   (Minidregg.Host.Json.inspect "subject-key-rotation-plan"
     (SubjectKeyRotation.signingPlanCodec.encode value)).isOk
 
-#guard accepts plan
-#guard !accepts { plan with possessionHeader := [0] }
-#guard !accepts { plan with domain := ⟨8502⟩ }
-#guard !accepts { plan with commandBytes :=
-  SubjectKeyRotation.commandCodec.encode { command with nonce := 32 } }
+/-! The inspection route runs the Host's JSON renderer over the canonical plan bytes, so only the
+compiled evaluator reaches these instances: `native_decide` + `#assert_compiled`. -/
+
+theorem canonical_plan_accepted : accepts plan = true := by native_decide
+theorem foreign_possession_header_refused :
+    accepts { plan with possessionHeader := [0] } = false := by native_decide
+theorem other_domain_refused : accepts { plan with domain := ⟨8502⟩ } = false := by native_decide
+theorem other_command_refused :
+    accepts { plan with
+      commandBytes := SubjectKeyRotation.commandCodec.encode { command with nonce := 32 } }
+      = false := by
+  native_decide
+#assert_compiled canonical_plan_accepted
+#assert_compiled foreign_possession_header_refused
+#assert_compiled other_domain_refused
+#assert_compiled other_command_refused
 
 end Minidregg.Host.KeyRotationInspectionChecks

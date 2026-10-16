@@ -8,6 +8,7 @@ import Compiler.GrainResourceBirthController
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceBirthPolicyController
 import Kernel.DeclaredResourceController
+import Kernel.Bounds
 
 namespace Minidregg.Kernel.GrainResourceBirthPolicyController
 
@@ -46,14 +47,12 @@ def ingressRawCodec : LawfulCodec SignedIngress where
 def ingressCodec : LawfulCodec SignedIngress :=
   ResourceBirthCodec.strictCodec ingressRawCodec
 
-/-- The new source carrier is bounded before nested descriptor decoding. This
-cap applies only to grain-backed birth, not to the legacy bare-birth route. -/
-def maxSourceBytes : Nat := 8 * 1024 * 1024
-
 structure DecodedIngress where
   private mk ::
   raw : SignedIngress
-  sourceSizeBound : raw.sourceBytes.length ≤ maxSourceBytes
+  /-- The source carrier is bounded by one cell's bytes (`Kernel.Bounds.cellBytesMax`)
+  before nested descriptor decoding. -/
+  sourceSizeBound : raw.sourceBytes.length ≤ Kernel.Bounds.cellBytesMax
   source : GrainResourceBirthController.Source
   birth : ResourceBirthPolicyController.Concrete.DecodedIngress
   grain : DeclaredResourceController.SignedIngress
@@ -67,7 +66,7 @@ structure DecodedIngress where
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let raw ← ingressCodec.decode bytes
-  if size : raw.sourceBytes.length ≤ maxSourceBytes then
+  if size : raw.sourceBytes.length ≤ Kernel.Bounds.cellBytesMax then
   match sourceDecoded : GrainResourceBirthHostCodec.sourceCodec.decode raw.sourceBytes with
   | none => none
   | some source =>

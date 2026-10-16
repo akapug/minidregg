@@ -33,12 +33,17 @@ theorem reservation_post_funded {F : Type} [Field F] [DecidableEq F]
       (DataSnapshot.install durable.snapshot r.intent).model.available :=
   held_funded_after_actual_debit durable.snapshot r.intent _ _ r.funded
 
-/-- Charging the explicit reserve operation preserves every lane charged by
-its independently accepted current source control method. -/
+/-- Charging the explicit reserve operation preserves every lane but storage
+charged by its independently accepted current source control method, and
+charges exactly the given storage (the World's storage of the reserve turn). -/
 theorem reserve_preserves_control_charge {rootBytes : List UInt8 → TypedAuthorization.Digest}
-    (bytes : List UInt8) (control effect : DataIntent rootBytes) (guards : List ReadGuard) :
-    control.exactCharge ≤ reserveCharge bytes control effect guards := by
-  intro lane
+    (bytes : List UInt8) (control effect : DataIntent rootBytes) (guards : List ReadGuard)
+    (storage : Nat) :
+    (∀ lane, lane ≠ .storageBytes →
+        control.exactCharge lane ≤ reserveCharge bytes control effect guards storage lane) ∧
+      reserveCharge bytes control effect guards storage .storageBytes = storage := by
+  refine ⟨fun lane ne => ?_, if_pos rfl⟩
+  simp only [reserveCharge, if_neg ne]
   exact Nat.le_add_right _ _
 
 #assert_axioms held_funded_after_actual_debit

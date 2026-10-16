@@ -144,6 +144,10 @@ def censusH : History R Nat Unit Nat where
   logRoot0 := 0
   legBytes := fun l => 16 * (l.patch.filter fun op => !Op.isRead op).length
   imageBytes := fun b => if b.store = 0 then 0 else 16
+  -- A census event is `()`: it retains no bytes.
+  eventBytes := fun _ => 0
+  -- Census turns carry no pins; a slot's digest is whether it is present.
+  cellDigest := fun o => if o.isSome then 1 else 0
 
 /-! ## The census world -/
 
@@ -204,7 +208,7 @@ def mk (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)
     charge := fun l =>
       if l = .storageBytes then
         storage.getD ((legs.map censusH.legBytes).sum +
-          (creates.map fun c => censusH.imageBytes c.2.1).sum)
+          (creates.map fun c => censusH.imageBytes c.2.1).sum + censusH.eventBytes ())
       else if l = .feeDebit then fee else 0,
     subject := some ⟨1⟩, keyEpoch := 0, capability := cap, notBefore := notBefore,
     validUntil := validUntil }

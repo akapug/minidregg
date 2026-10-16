@@ -104,6 +104,7 @@ by the Book by name, and the deposit has left only with the record. Every postin
 loaded Book (`AcceptedBatch`), so every turn conserves every asset
 (`Birth.conserves`, `Delivery.conserves`). No amount depends on how much
 computation ran (`refund_measurement_free`). -/
+import Std.Data.HashMap
 import Kernel.AnswerSlot
 import Compiler.ObjectiveBendSourceArtifact
 import Compiler.ObjectiveBendPublication
@@ -572,47 +573,6 @@ id. The directory gives that id to the record cell, so no account cell (and so
 no account capability) can exist at it; the birth registers it fresh. -/
 def heldAccount (cell : CellId) : AccountId := cell.value
 
-/-! ## Configuration and fees -/
-
-structure Config where
-  /-- The deployment: its domain names the activity coordinates; its Book holds the fees. -/
-  deployment : CanonicalCellRegistry.Deployment
-  /-- The credit asset fees are paid in, and the account that collects them. -/
-  asset : AssetId
-  collector : AccountId
-  limits : Limits
-  /-- One extraction's ceiling. Activity segments reserve it via extractCovered;
-  cumulative call turns additionally clamp it to their remaining allowance. -/
-  planBudget : Budget
-  maxTicks : Nat
-  /-- The cumulative extraction tick ceiling of one turn (the policy's `extractTicksPerTurn`):
-  an envelope declares at most this many extraction ticks (`Config.covers`); `planBudget.ticks`
-  is the per-extraction ceiling. -/
-  maxExtractTicks : Nat
-  maxPatience : Nat
-  typeFuel : Nat
-  maxArtifactBytes : Nat
-  tariff : Tariff
-  /-- Heights past an await's deadline after which anyone may abandon it. -/
-  abandonGrace : Nat
-  /-- The storage deposit per byte of a retained activity record: every yield
-  reserves `storageRate * |encodeRecord record|` in the purse beside the fee pair. -/
-  storageRate : Nat
-
-/-- A declared envelope covers what the kernel spends on a turn: its source
-ticks are within the ceiling, and it declares at least the kernel's fixed heap,
-stack, type-checking fuel and Plan extraction output sizes, so the whole turn's work
-(the run, the per-turn package check, the extraction) is in the price. The extraction's
-tick budget is checked by name right after (`extractUncovered`). -/
-def Config.covers (config : Config) (envelope : Capacity) : Bool :=
-  decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
-    decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
-    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes) &&
-    decide (envelope.extractTicks ≤ config.maxExtractTicks)
-
-def Config.domain (config : Config) : Digest := config.deployment.domain
-def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
-
 /-- The escrow terms for an activity. -/
 def escrowOf (tariff : Tariff) (payer : SubjectId) (account : AccountId) (resume timeout : Capacity) :
     Escrow :=
@@ -816,6 +776,257 @@ inductive Refusal where
   | domainUncovered (units allowance : Nat)
   deriving Repr
 
+/-! ## The pinned program, held
+
+Everything a load does before a frame's view and arguments exist is a function of the pin's
+stored pair and two numbers of the configuration (`maxArtifactBytes`, `typeFuel`): the parse,
+the entry's lowering and acceptance, the comparison with the stored core, and each method's
+lowering and acceptance. A resident Host holds these per pin (`LoadMemo`) as lazy values, so a
+package is replayed once per Host process, not once per load; a frame load still types its
+view and arguments (`ObjectiveCall.methodOf`). Holding changes how fast an answer comes, never
+the answer: `LoadMemo.replay_eq`, `Fronts.front_eq`. -/
+
+/-- The name a declaration is selected by. -/
+def declName? : ObjectiveBendElaborate.Decl → Option String
+  | .function name .. => some name
+  | .extension name .. => some name
+  | .record name .. => some name
+  | .sum name .. => some name
+  | .spec _ => none
+
+/-- One declaration of a parse, lowered in definition mode and accepted by the checker, with the
+length of its typed-core rendering: what a frame needs of a method before its view and
+arguments exist. -/
+structure MethodFront (parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module)
+    (entryModule : Nat) (method : String) where
+  private mk ::
+  lowering : ObjectiveBendFrontEnd.Lowering
+  lowered : ObjectiveBendPublication.lowerParsed parsed entryModule method = .ok lowering
+  accepted : ObjectiveBendFrontEnd.Accepted lowering
+  generatedCore : Nat
+  generatedExact : generatedCore = lowering.packet.compress.toUTF8.toList.length
+
+/-- Lower and accept one declaration of a parse. -/
+def methodFront (parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module)
+    (entryModule : Nat) (method : String) : Except ObjectiveBendFrontEnd.Diagnostic (MethodFront parsed entryModule method) :=
+  match lowered : ObjectiveBendPublication.lowerParsed parsed entryModule method with
+  | .error d => .error d
+  | .ok lowering =>
+    match ObjectiveBendFrontEnd.accept lowering with
+    | .error d => .error d
+    | .ok accepted => .ok ⟨lowering, lowered, accepted, _, rfl⟩
+
+/-- A held front of one declaration. -/
+abbrev HeldFront (parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module)
+    (entryModule : Nat) : Type :=
+  Σ method : String, Thunk (Except ObjectiveBendFrontEnd.Diagnostic (MethodFront parsed entryModule method))
+
+/-- The held front named `method`, if one is held. -/
+def frontIn {parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module}
+    {entryModule : Nat} :
+    List (HeldFront parsed entryModule) → (method : String) →
+      Option (Thunk (Except ObjectiveBendFrontEnd.Diagnostic (MethodFront parsed entryModule method)))
+  | [], _ => none
+  | ⟨name, front⟩ :: rest, method => if h : name = method then some (h ▸ front) else frontIn rest method
+
+/-- **The entry module's declarations of a parse, each lowered at most once**: a lazy front per
+declaration name, forced at its first call and kept with the parse. -/
+structure Fronts (parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module)
+    (entryModule : Nat) where
+  private mk ::
+  held : List (HeldFront parsed entryModule)
+  exact : ∀ front ∈ held, front.2.get = methodFront parsed entryModule front.1
+
+def Fronts.of (parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module)
+    (entryModule : Nat) : Fronts parsed entryModule :=
+  ⟨((parsed.2[entryModule]?).map fun m => m.decls.filterMap declName?).getD [] |>.map
+      fun name => ⟨name, Thunk.mk fun _ => methodFront parsed entryModule name⟩,
+    by
+      intro front member
+      simp only [List.mem_map] at member
+      obtain ⟨name, _, rfl⟩ := member
+      rfl⟩
+
+/-- A declaration's front: the held one, or computed. -/
+def Fronts.front {parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module}
+    {entryModule : Nat} (fronts : Fronts parsed entryModule) (method : String) :
+    Except ObjectiveBendFrontEnd.Diagnostic (MethodFront parsed entryModule method) :=
+  match frontIn fronts.held method with
+  | some front => front.get
+  | none => methodFront parsed entryModule method
+
+theorem frontIn_get {parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module}
+    {entryModule : Nat} :
+    ∀ (held : List (HeldFront parsed entryModule)) (method : String)
+      (front : Thunk (Except ObjectiveBendFrontEnd.Diagnostic (MethodFront parsed entryModule method))),
+      (∀ f ∈ held, f.2.get = methodFront parsed entryModule f.1) →
+      frontIn held method = some front → front.get = methodFront parsed entryModule method
+  | [], _, _, _, found => by simp [frontIn] at found
+  | ⟨name, t⟩ :: rest, method, front, exact, found => by
+    unfold frontIn at found
+    split at found
+    · rename_i h
+      subst h
+      cases found
+      exact exact ⟨name, t⟩ (List.mem_cons_self ..)
+    · exact frontIn_get rest method front (fun f m => exact f (List.mem_cons_of_mem _ m)) found
+
+/-- **A held front is the front**: whichever declarations are held, a front is `methodFront`. -/
+theorem Fronts.front_eq {parsed : List ObjectiveBendFrontEnd.SourceModule × List ObjectiveBendElaborate.Module}
+    {entryModule : Nat} (fronts : Fronts parsed entryModule) (method : String) :
+    fronts.front method = methodFront parsed entryModule method := by
+  unfold Fronts.front
+  split
+  · rename_i front found
+    exact frontIn_get fronts.held method front fronts.exact found
+  · rfl
+
+/-- A package cell's pair, replayed at checker fuel `fuel`: the artifact (named by the pin) and
+its source package, which names this kernel's front end and selects the artifact's declaration,
+the front end's replay of that package, whose rendering is the artifact's typed core, and the
+package's declarations, each lowered at most once (`Fronts`). -/
+structure ReplayAt (fuel : Nat) (pin : Digest) where
+  private mk ::
+  artifact : ObjectiveBendSourceArtifact.Artifact
+  identity : ObjectiveBendSourceArtifact.identity artifact = pin
+  package : ObjectiveSourcePackage.Package
+  packageExact : ObjectiveSourcePackage.identity package = artifact.package
+  frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity
+  declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration
+  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore artifact.laws fuel
+  fronts : Fronts replayed.parsed package.entryModule
+
+/-- The replay of a stored pair under a byte cap and checker fuel. -/
+def replayPackageAt (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) : Except Refusal (ReplayAt fuel pin) := do
+  if stored.artifact.length > maxBytes then throw .packageMissing
+  if stored.package.length > maxBytes then throw (.packageSource "package byte capacity")
+  let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
+  if identity : ObjectiveBendSourceArtifact.identity artifact = pin then
+    let some package := ObjectiveSourcePackage.decode stored.package
+      | throw (.packageSource "canonical Objective source package required")
+    if packageExact : ObjectiveSourcePackage.identity package = artifact.package then
+      if frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity then
+        if declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration then
+          match ObjectiveBendPublication.replayAccept package artifact.typedCore artifact.laws fuel with
+          | .ok replayed => pure ⟨artifact, identity, package, packageExact, frontEndOwn, declarationExact, replayed,
+              Fronts.of replayed.parsed package.entryModule⟩
+          | .error d => throw (.packageReplay d.message)
+        else throw (.packageSource "the package selects another declaration")
+      else throw (.packageSource "the package names another front end")
+    else throw (.packageSource "the artifact names another package")
+  else throw .packageIdentity
+
+/-- **One pin's replay, held**: the stored pair and the two numbers it was replayed under, and
+the replay as a lazy value, forced at its first load. The only constructor computes it
+(`Held.of`), so a held replay is `replayPackageAt` of its own key: no API can hold another. -/
+structure Held where
+  private mk ::
+  maxBytes : Nat
+  fuel : Nat
+  stored : Stored
+  pin : Digest
+  replay : Thunk (Except Refusal (ReplayAt fuel pin))
+  exact : replay.get = replayPackageAt maxBytes fuel stored pin
+
+def Held.of (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) : Held :=
+  ⟨maxBytes, fuel, stored, pin, Thunk.mk fun _ => replayPackageAt maxBytes fuel stored pin, rfl⟩
+
+/-- A held replay answers a load only for exactly its own key: the same stored bytes, pin and
+numbers. Anything else is not answered from it. -/
+def Held.answer (held : Held) (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) :
+    Option {r : Except Refusal (ReplayAt fuel pin) // r = replayPackageAt maxBytes fuel stored pin} :=
+  if same : held.maxBytes = maxBytes ∧ held.fuel = fuel ∧ held.stored = stored ∧ held.pin = pin then
+    some (match held, same with
+      | ⟨_, _, _, _, replay, exact⟩, ⟨rfl, rfl, rfl, rfl⟩ => ⟨replay.get, exact⟩)
+  else none
+
+/-- The replays a resident Host holds, by pin (`Digest.value`). -/
+structure LoadMemo where
+  held : Std.HashMap Nat Held := {}
+
+instance : Inhabited LoadMemo := ⟨{}⟩
+
+/-- The replay of a stored pair: the held one when the memo holds exactly this key, else computed. -/
+def LoadMemo.replay (memo : LoadMemo) (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) :
+    Except Refusal (ReplayAt fuel pin) :=
+  match (memo.held[pin.value]?).bind (·.answer maxBytes fuel stored pin) with
+  | some r => r.1
+  | none => replayPackageAt maxBytes fuel stored pin
+
+/-- **A memo changes no load**: whatever a memo holds, its replay is `replayPackageAt`. -/
+theorem LoadMemo.replay_eq (memo : LoadMemo) (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) :
+    memo.replay maxBytes fuel stored pin = replayPackageAt maxBytes fuel stored pin := by
+  unfold LoadMemo.replay
+  split
+  · rename_i r _
+    exact r.2
+  · rfl
+
+/-- Hold the replay of `stored` under `pin` (replacing whatever the pin held). -/
+def LoadMemo.hold (memo : LoadMemo) (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) : LoadMemo :=
+  { held := memo.held.insert pin.value (Held.of maxBytes fuel stored pin) }
+
+/-- Whether the memo already holds exactly this key. -/
+def LoadMemo.holds (memo : LoadMemo) (maxBytes fuel : Nat) (stored : Stored) (pin : Digest) : Bool :=
+  ((memo.held[pin.value]?).bind (·.answer maxBytes fuel stored pin)).isSome
+
+/-- **A held replay answers only its own bytes**: once a pin holds the replay of `stored`, a load
+of that pin over any other bytes (a tampered or rewritten cell) is not answered from it; it is
+replayed (`LoadMemo.replay`, `replay_eq`). -/
+theorem LoadMemo.hold_answers_only_its_bytes (memo : LoadMemo) (maxBytes fuel : Nat) {stored other : Stored}
+    (pin : Digest) (differs : stored ≠ other) :
+    ((memo.hold maxBytes fuel stored pin).held[pin.value]?).bind (·.answer maxBytes fuel other pin) = none := by
+  simp only [LoadMemo.hold, Std.HashMap.getElem?_insert_self, Option.bind_some]
+  unfold Held.answer Held.of
+  simp [differs]
+
+#assert_axioms Fronts.front_eq
+#assert_axioms LoadMemo.replay_eq
+#assert_axioms LoadMemo.hold_answers_only_its_bytes
+
+/-! ## Configuration and fees -/
+
+structure Config where
+  /-- The deployment: its domain names the activity coordinates; its Book holds the fees. -/
+  deployment : CanonicalCellRegistry.Deployment
+  /-- The credit asset fees are paid in, and the account that collects them. -/
+  asset : AssetId
+  collector : AccountId
+  limits : Limits
+  /-- One extraction's ceiling. Activity segments reserve it via extractCovered;
+  cumulative call turns additionally clamp it to their remaining allowance. -/
+  planBudget : Budget
+  maxTicks : Nat
+  /-- The cumulative extraction tick ceiling of one turn (the policy's `extractTicksPerTurn`):
+  an envelope declares at most this many extraction ticks (`Config.covers`); `planBudget.ticks`
+  is the per-extraction ceiling. -/
+  maxExtractTicks : Nat
+  maxPatience : Nat
+  typeFuel : Nat
+  maxArtifactBytes : Nat
+  tariff : Tariff
+  /-- Heights past an await's deadline after which anyone may abandon it. -/
+  abandonGrace : Nat
+  /-- The storage deposit per byte of a retained activity record: every yield
+  reserves `storageRate * |encodeRecord record|` in the purse beside the fee pair. -/
+  storageRate : Nat
+  /-- The replays the deciding Host holds (`LoadMemo`): a memo, never a meaning (`LoadMemo.replay_eq`). -/
+  held : LoadMemo := {}
+
+/-- A declared envelope covers what the kernel spends on a turn: its source
+ticks are within the ceiling, and it declares at least the kernel's fixed heap,
+stack, type-checking fuel and Plan extraction output sizes, so the whole turn's work
+(the run, the per-turn package check, the extraction) is in the price. The extraction's
+tick budget is checked by name right after (`extractUncovered`). -/
+def Config.covers (config : Config) (envelope : Capacity) : Bool :=
+  decide (envelope.sourceTicks ≤ config.maxTicks) && decide (config.limits.heap ≤ envelope.heap) &&
+    decide (config.limits.stack ≤ envelope.stack) && decide (config.typeFuel ≤ envelope.typeFuel) &&
+    decide (config.planBudget.nodes ≤ envelope.outputNodes) && decide (config.planBudget.bytes ≤ envelope.outputBytes) &&
+    decide (envelope.extractTicks ≤ config.maxExtractTicks)
+
+def Config.domain (config : Config) : Digest := config.deployment.domain
+def Config.bookCell (config : Config) : CellId := ⟨config.deployment.resourceBookId⟩
+
 /-! ## Typing data against declared types
 
 The kernel never asks whether data "conforms": it types the data's own closed
@@ -930,40 +1141,23 @@ def replyType (assumptions : Assumptions) (response : Ty) : Option Ty := do
 
 /-! ## The pinned program -/
 
-/-- A package cell's pair, replayed: the artifact (named by the pin) and its source package,
-which names this kernel's front end and selects the artifact's declaration, and the front
-end's replay of that package, whose rendering is the artifact's typed core. -/
-structure Replay (config : Config) (pin : Digest) where
-  private mk ::
-  artifact : ObjectiveBendSourceArtifact.Artifact
-  identity : ObjectiveBendSourceArtifact.identity artifact = pin
-  package : ObjectiveSourcePackage.Package
-  packageExact : ObjectiveSourcePackage.identity package = artifact.package
-  frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity
-  declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration
-  replayed : ObjectiveBendPublication.Replayed package artifact.typedCore artifact.laws config.typeFuel
+/-- A package cell's pair, replayed under this configuration's checker fuel (`ReplayAt`). -/
+abbrev Replay (config : Config) (pin : Digest) : Type := ReplayAt config.typeFuel pin
 
 /-- The definition the replay accepted: the elaborator's own term with its annotations. -/
 def Replay.source {config : Config} {pin : Digest} (r : Replay config pin) : AnnotatedTerm :=
   r.replayed.accepted.source
 
-def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Refusal (Replay config pin) := do
-  if stored.artifact.length > config.maxArtifactBytes then throw .packageMissing
-  if stored.package.length > config.maxArtifactBytes then throw (.packageSource "package byte capacity")
-  let some artifact := ObjectiveBendSourceArtifact.decode stored.artifact | throw .packageMissing
-  if identity : ObjectiveBendSourceArtifact.identity artifact = pin then
-    let some package := ObjectiveSourcePackage.decode stored.package
-      | throw (.packageSource "canonical Objective source package required")
-    if packageExact : ObjectiveSourcePackage.identity package = artifact.package then
-      if frontEndOwn : package.frontEnd = ObjectiveBendFrontEndIdentity.identity then
-        if declarationExact : ObjectiveSourcePackage.selectedDeclaration package = some artifact.declaration then
-          match ObjectiveBendPublication.replayAccept package artifact.typedCore artifact.laws config.typeFuel with
-          | .ok replayed => pure ⟨artifact, identity, package, packageExact, frontEndOwn, declarationExact, replayed⟩
-          | .error d => throw (.packageReplay d.message)
-        else throw (.packageSource "the package selects another declaration")
-      else throw (.packageSource "the package names another front end")
-    else throw (.packageSource "the artifact names another package")
-  else throw .packageIdentity
+/-- The replay of a stored pair under this configuration, answered from the configuration's memo
+when it holds exactly this key (`replayPackage_eq`). -/
+def replayPackage (config : Config) (stored : Stored) (pin : Digest) : Except Refusal (Replay config pin) :=
+  config.held.replay config.maxArtifactBytes config.typeFuel stored pin
+
+theorem replayPackage_eq (config : Config) (stored : Stored) (pin : Digest) :
+    replayPackage config stored pin = replayPackageAt config.maxArtifactBytes config.typeFuel stored pin :=
+  LoadMemo.replay_eq _ _ _ _ _
+
+#assert_axioms replayPackage_eq
 
 /-- **The front-end work account of a package cell** for the envelopes that pay for its replay
 (`payers`): every payer covers the stored package's source bytes and the typed core its replay
@@ -1025,14 +1219,20 @@ theorem frontEndPaid_at_quote {config : Config} {bytes : Bytes} {payers : List C
 
 /-- The typed core a replay generated: the rendering of the front end's lowering. -/
 def Replay.generatedCore {config : Config} {pin : Digest} (r : Replay config pin) : Bytes :=
-  r.replayed.lowering.packet.compress.toUTF8.toList
+  r.artifact.typedCore
+
+/-- It is the rendering of the replay's lowering (`Replayed.coreExact`), never rendered again. -/
+theorem Replay.generatedCore_eq {config : Config} {pin : Digest} (r : Replay config pin) :
+    r.generatedCore = r.replayed.lowering.packet.compress.toUTF8.toList :=
+  r.replayed.coreExact.symm
 
 theorem replayPackage_decoded {config : Config} {stored : Stored} {pin : Digest} {r : Replay config pin}
     (replayed : replayPackage config stored pin = .ok r) :
     ObjectiveBendSourceArtifact.decode stored.artifact = some r.artifact ∧
       ObjectiveSourcePackage.decode stored.package = some r.package ∧
       stored.artifact.length ≤ config.maxArtifactBytes ∧ stored.package.length ≤ config.maxArtifactBytes := by
-  unfold replayPackage at replayed
+  rw [replayPackage_eq] at replayed
+  unfold replayPackageAt at replayed
   simp only [bind, Except.bind, pure, Except.pure] at replayed
   by_cases a : stored.artifact.length > config.maxArtifactBytes
   · rw [if_pos a] at replayed; cases replayed
@@ -1214,9 +1414,7 @@ theorem frontEnd_work_within {config : Config} {bytes : Bytes} {pin : Digest} {i
     have each := List.findSome?_eq_none_iff.mp found envelope payer
     obtain ⟨sourceOk, coreOk⟩ := ObjectiveWorkAccount.uncovered_none each
     refine ⟨sourceOk, ?_, program.definition.replayed.fuelWithin⟩
-    have core := program.definition.replayed.coreExact
     unfold Replay.generatedCore
-    rw [core]
     exact coreOk
 
 /-- **A refusal of the front-end account precedes the replay.** `frontEndPaid` names an

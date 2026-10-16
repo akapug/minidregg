@@ -50,6 +50,22 @@ run() { local n=$1; shift; local s=$(date +%s); timeout -k 30 "$TMO" "$@" > "$L/
   if [ $rc = 124 ] || [ $rc = 137 ]; then st="TIMEOUT(${TMO}s)"; echo "merge-gate: $n killed after ${TMO}s" >> "$L/gate-$TAG-$n.log"
   elif [ $rc != 0 ]; then st=RED; fi
   echo "$n $st rc=$rc $(( $(date +%s) - s ))s :: $(tail -n 1 "$L/gate-$TAG-$n.log" | cut -c1-200)" | tee -a "$S"; }
+# Self-tests run only when the instrument could have changed (scripts/pipeline/instruments.tsv): selftests NAME
+# prints 1 when FROM..TO touched one of NAME's files or the gate itself, else 0, recording
+# "NAME: instrument unchanged since <sha>: self-tests skipped" in the mode file and the summary.
+selftests() {
+  local n=$1 paths last
+  paths=$(awk -F'\t' -v n="$n" '$1==n{print $2}' "$H/instruments.tsv")
+  [ -n "$paths" ] || { echo 1; return; }
+  # shellcheck disable=SC2086
+  if [ -n "$(git diff --name-only "$FROM" "$TO" -- $paths scripts/pipeline/merge-gate-checks.sh scripts/pipeline/instruments.tsv)" ]; then
+    echo 1
+  else
+    last=$(git log -1 --format=%h "$TO" -- $paths)
+    echo "$n: instrument unchanged since $last: self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
+    echo 0
+  fi
+}
 ACR=$L/gate-$TAG.acr   # written by the builders once AxiomCensusResearch is built: "ok" or "red"
 rm -f "$ACR"
 # lean targets the range DECLARES (new [[lean_lib]]/[[lean_exe]] names in lakefile.toml) are built too:
@@ -68,6 +84,10 @@ ledger_imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/Hypothesis
 builders() {
   if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $newt; fi
   run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
+  # HP-6 SIM (HP-DESIGN section 4): seeded Host-path vs follower simulation with crash-restart, and its
+  # plant (the follower skipping a failed guard) red at its recorded seed and step. Needs the world-sim
+  # exe (exe-roots, just above, builds it). The nightly knob is in the script header.
+  run world-sim       bash scripts/gates/check-world-sim .lake/build/bin/world-sim
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
@@ -84,7 +104,7 @@ builders() {
   # module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
   # detected. Elaborates TokenCensus over the research umbrella.
   run token-census    $LAKE_WRAP lake build TokenCensus
-  run objective-proofs $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
+  run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
   # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
   # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
   # After the AxiomCensusResearch build: scripts/NativeTranscripts.lean imports it; before it, a
@@ -102,7 +122,8 @@ ledger() {
   # the builders job writes $ACR; if it ended without writing it, that is a red, not a wait
   while [ ! -s "$ACR" ]; do { [ -n "${BP:-}" ] && kill -0 "$BP" 2>/dev/null; } || break; sleep 10; done
   if [ "$(cat "$ACR" 2>/dev/null)" != ok ]; then echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; return; fi
-  timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh > "$log" 2>&1; rc=$?
+  local nst=""; [ "$(selftests hyp-ledger)" = 0 ] && nst=--no-self-test
+  HYP_LEDGER_BASE="$FROM" timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh $nst > "$log" 2>&1; rc=$?
   reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
   new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
   if [ $rc = 0 ]; then st=PASS
@@ -125,7 +146,8 @@ readers() {
   # Only the finish/checkInert routes hand out the object kernel facet (Config.kernelTransport): an
   # environment census (scripts/KernelTransportCensus.lean) after self-test plants; a new caller or a
   # stale row is red. Needs Kernel.NativeHost + Kernel.NativeHostReplay built (the umbrella does); ~30 s.
-  run kernel-transport $SB bash scripts/check-kernel-transport.sh
+  local kst=""; [ "$(selftests kernel-transport)" = 0 ] && kst=--no-self-test
+  run kernel-transport $SB bash scripts/check-kernel-transport.sh $kst
   run import-boundary bash scripts/check-import-boundary.sh
   run proof-hygiene   bash scripts/check-proof-hygiene.sh
   run build-surfaces  python3 scripts/lean-build-surfaces.py check
@@ -136,6 +158,10 @@ readers() {
   # (gen-sheetlaw), a stale status page (website).
   run build-closure   bash -c 'bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py'
   run exports         bash scripts/check-exports.sh
+  # #guard runs the compiled evaluator, leaves no term and no axiom record (scripts/gates/check-guard-discipline.py
+  # header). The per-module count may only FALL: a new #guard anywhere, or a converted module whose row was not
+  # retired, is red by name. Pure python, ~2 s; self-test plants every arm first.
+  run guard-discipline bash -c "python3 scripts/gates/check-guard-discipline.py --self-test && python3 scripts/gates/check-guard-discipline.py"
   run unit-tests      $SB bash scripts/check-unit-tests.sh
   run policy-portal   bash scripts/check-canonical-policy-portal.sh
   run shell-paths     bash scripts/check-shell-paths.sh

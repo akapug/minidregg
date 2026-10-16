@@ -59,9 +59,9 @@ def charge {F : Type} [Field F] [DecidableEq F]
   | .witnessBytes => ingress.bytes.length
   | .proofWork => (GrainResourceBirthAdmission.branches tariff source).length + 2 +
       source.birth.resourceBatch.operations.length
-  | .storageBytes =>
-      ((GrainResourceBirthTransaction.writes birth grain).map
-        fun write => write.canonicalPostBytes.length).sum + ingress.bytes.length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (GrainResourceBirthTransaction.writes birth grain)
+      (event deployment.domain ingress)
   | .sideEffectCount => 1
   | .feeDebit => source.birth.fee.amount
   | .networkBytes | .leaseByteBlocks => 0

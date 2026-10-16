@@ -919,12 +919,15 @@ def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent 
 def nullifier (domain semantics : Digest) (command : Command) : StableNullifier :=
   CredentialAuthorityReplay.nullifier domain (marker domain semantics command)
 
-/-- The exact charge of a turn's footprint. -/
-def charge (ingress : DecodedIngress) (posts : List Post) (guards : List ReadGuard) : ResourceCost.Charge
+/-- The exact charge of a turn's footprint against the image `snap` it is
+admitted on: its storage lane is the World's storage of the posts and the
+retained event (`DeployedCharge.storageCharge`). -/
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : DecodedIngress) (posts : List Post)
+    (guards : List ReadGuard) (retained : StableEvent) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => posts.length + guards.length
-  | .storageBytes => (posts.map fun post => post.bytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes)) retained
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -934,7 +937,7 @@ carrying the signed ingress, the signer. -/
 def sealAt (authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot) (command : Command)
     (ingress : DecodedIngress) : Seal :=
   ⟨authority.readGuards, [nullifier deployment.domain profile.semantics command],
-    event deployment.domain profile.semantics ingress, some command.subject, charge ingress⟩
+    event deployment.domain profile.semantics ingress, some command.subject, charge durable.snapshot ingress⟩
 
 /-- This receiver's sealing on the kernel turn (`sealAt` its authority). -/
 def admissionSeal (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) : Seal :=

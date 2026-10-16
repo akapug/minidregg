@@ -1,8 +1,10 @@
 # Operator SPK deployment
 
 Prerequisites: systemd user manager, linger for the operator, cgroup v2 with
-memory/pids/cpu delegation, unprivileged user namespaces, bubblewrap supporting
-`--disable-userns`, and the distribution `uidmap` package (root-owned
+memory/pids/cpu delegation, a bubblewrap that can create a user namespace
+(`deploy/grain-host/resolve-bwrap` names it: on a host restricting unprivileged
+namespaces, the AppArmor-profiled `/usr/local/libexec/mini-grain-bwrap`), supporting
+`--disable-userns` and `--userns-block-fd`, and the distribution `uidmap` package (root-owned
 `/usr/bin/newuidmap` and `newgidmap`). `/etc/subuid` and `/etc/subgid` must grant
 the operator the selected range. The installer refuses missing mapping helpers
 and overlapping app uids in root-installed world registries.
@@ -21,8 +23,9 @@ operator-private `broker/config.json` using `mini-spk-broker.example.json`.
 Start `systemctl --user enable --now mini-spk-broker@STORE.service`. Resident
 units are generated user units; their sole constructor requires the store id.
 The socket is operator-owned 0600 in `WORLD/runtime-STORE/broker.sock`.
-The v1 root broker config and global socket are refused; re-emit v2 configs
-and native grain profiles for a fresh deployment. This does not migrate a live
+The v1 root broker config and global socket are refused, and so is v2 (no
+`bwrap`/`bwrapSha256`: the resident namespace is bwrap-created); re-emit v3
+configs and native grain profiles for a fresh deployment. This does not migrate a live
 Store or erase uncertain lifecycle attempts.
 
 The helper is a one-shot exec, never a daemon. Its strict JSON verbs are create,

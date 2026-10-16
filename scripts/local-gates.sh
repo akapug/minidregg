@@ -81,7 +81,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports guard-discipline shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -118,6 +118,7 @@ g_unit-tests()    { bash scripts/check-unit-tests.sh; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
+g_guard-discipline() { python3 scripts/gates/check-guard-discipline.py --self-test && python3 scripts/gates/check-guard-discipline.py; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
 g_world-cohorts() { bash scripts/check-world-cohorts.sh; }

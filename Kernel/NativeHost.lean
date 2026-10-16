@@ -111,12 +111,23 @@ def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
 
 /-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
 with the head, the certified height and `L`): it is a fact about the public
-chain head, not about the request.  Every other durable reason is the
+chain head, not about the request.  A static bound is named (`overBound`, with
+`over-bound NAME VALUE > LIMIT`).  Every other durable reason is the
 receiver's `operationRejected`. -/
 def durableRefusal : DurableDataIntent.RejectReason → Outcome
   | .tailBound head certified bound =>
       refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}"
+  | .overBound name value limit =>
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render
   | reason => refused .operationRejected "durable" s!"{repr reason}"
+
+/-- A static bound's refusal names `overBound` and renders the bound, the value
+and the limit. -/
+theorem durableRefusal_overBound (name : Kernel.Bounds.Name) (value limit : Nat) :
+    durableRefusal (.overBound name value limit) =
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render := rfl
+
+#assert_axioms durableRefusal_overBound
 
 /-- The tail bound's refusal names `tailBound` and the three heights. -/
 theorem durableRefusal_tailBound (head certified bound : Nat) :
@@ -146,6 +157,7 @@ private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .transactionConflict => .conflict
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
+  | .durable (.overBound ..) => .overBound
   | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)
@@ -2367,14 +2379,18 @@ lookup quartet; the signed ingress is `DREGG/OBJECTIVE/ACTIVITY/SIGNED/v1`;
 every activity cell is public (op 214), so the reason discloses nothing the
 view does not. -/
 
-def activityAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+/-- The moment a turn is decided in, with the package replays the deciding Host holds (`held`;
+a memo, so it changes no decision: `ObjectiveActivity.LoadMemo.replay_eq`). -/
+def activityAmbient (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo) :
+    ObjectiveKernelConfig.Ambient :=
+  { federation := config.federation, height := logicalHeight config opened.durable,
+    asset := config.tariff.asset, collector := config.tariff.collector, held }
 
-def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
-    Except String ObjectiveActivityReceiver.SigningPlan := do
+def activityPlanLoaded (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo)
+    (commandBytes : List UInt8) : Except String ObjectiveActivityReceiver.SigningPlan := do
   let command ← need "noncanonical activity command"
     (ObjectiveActivityReceiver.commandCodec.decode commandBytes)
-  let ambient := activityAmbient config opened
+  let ambient := activityAmbient config opened held
   -- one decision, five projections (`ObjectiveActivityReceiver.planDecision_*`)
   let decision := ObjectiveActivityReceiver.planDecision config.deployment config.profile ambient
     opened.durable command
@@ -2394,10 +2410,10 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
-def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
+def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (held : ObjectiveActivity.LoadMemo) (bytes : List UInt8) : IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
-      (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
+      (activityAmbient config opened held) config.signature config.kernelTransport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .charged kind receipt cause =>
       chargedVia confirm kind receipt.transactionId receipt.eventId cause
@@ -2451,7 +2467,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
   let authority := opened.authority
   let snapshot := opened.durable.snapshot
   let height := logicalHeight config opened.durable
-  let kernel? := ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened)
+  let kernel? := ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened {})
   let extractTicks := match kernel? with
     | .ok kernel => some kernel.maxExtractTicks
     | .error _ => none
@@ -2495,7 +2511,8 @@ to the signer: every seat cell is public (op 219), so the reason discloses
 nothing the view does not. -/
 
 def seatAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+  { federation := config.federation, height := logicalHeight config opened.durable,
+    asset := config.tariff.asset, collector := config.tariff.collector }
 
 def seatPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String SeatReceiver.SigningPlan := do

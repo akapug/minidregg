@@ -227,14 +227,16 @@ def readOnly (rootBytes : Bytes → Digest) (posts : List Post) (guards : List R
 /-- What the admitting receiver adds to a kernel turn: the guards of the
 authority it checked (authority cell, capability laws), its own claims (the
 signed marker), the replay event that carries the signed ingress, the signer,
-and the exact charge of the turn's footprint. The kernel turn is ONE intent
+and the exact charge of the turn's footprint: a function of its posts, its
+guards and the event it retains, so a seal whose event is replaced (a charged
+failure's) charges the event it carries. The kernel turn is ONE intent
 whatever sealing it carries: `intentOf` below. -/
 structure Seal where
   guards : List ReadGuard
   nullifiers : List StableNullifier
   event : StableEvent
   subject : Option SubjectId
-  charge : List Post → List ReadGuard → Minidregg.Theory.ResourceCost.Charge
+  charge : List Post → List ReadGuard → StableEvent → Minidregg.Theory.ResourceCost.Charge
 
 /-- The one constructor of every activity-kernel intent: writes are exactly the
 post images, so their roots are bound by construction; the seal's guards and
@@ -245,7 +247,7 @@ def intentOf (rootBytes : Bytes → Digest) (transaction : TransactionId) (posts
   writes := posts.map (Post.write rootBytes)
   readGuards := readOnly rootBytes posts (guards ++ sealing.guards)
   nullifiers := nullifiers ++ sealing.nullifiers
-  exactCharge := sealing.charge posts (readOnly rootBytes posts (guards ++ sealing.guards))
+  exactCharge := sealing.charge posts (readOnly rootBytes posts (guards ++ sealing.guards)) sealing.event
   event := sealing.event
   subject := sealing.subject
   postRootsBound := by

@@ -96,10 +96,8 @@ def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deplo
         | .witnessBytes => wireBytes
         | .proofWork => ordinary.exactCharge .proofWork + 2
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 2
-        | .storageBytes => ordinary.exactCharge .storageBytes +
-            wireBytes +
-            (stableNullifier config.deployment.domain config.profile.semantics
-              ingress.source).canonicalBytes.length
+        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
+            wireEvent
         | other => ordinary.exactCharge other
       event := wireEvent
       subject := ordinary.subject

@@ -1,7 +1,11 @@
-/- Exact storage accounting for the Objective receiver's full post images.
-The framing gap is intentional until FD-1; no tariff is changed here.
-Activity: 40 bytes; Book: 26; seat: 26 (the real SEAT-CELL frame has 15 bytes);
-retirement: 4; unchanged posts: their full image. Counts inspect actual deltas.
+/- Exact storage accounting for the Objective receiver.
+Since the FD-1 charge switch the receiver's storage lane IS the World's: the new
+values its derived turn writes, its born images and its retained event
+(`prepared_intent_charge_eq_storage`).  What the receiver charged before -- its
+full post images -- exceeds the World's value bytes by a classified framing
+(`posts_bytes_eq_storage_plus_framing`): activity 40 bytes; Book 26; seat 26 (the
+real SEAT-CELL frame has 15 bytes); retirement 4; unchanged posts their full
+image.  Counts inspect actual deltas.  That gap is no longer charged.
 This is source-level accounting, not evidence of deployment or admission totality. -/
 import Kernel.DeployedHistory
 import Kernel.ObjectiveActivityReceiver
@@ -139,7 +143,7 @@ theorem live_leg_bytes (k : BlobKind) (c : CellId)
     · simp [diff, guardOp, changeOp, h, BlobKind.state, opBytes, BlobKind.valueBytes, eq]
 
 /-- The named per-live-post equality includes the unchanged-post case explicitly. -/
-theorem receiver_charge_eq_legBytes_plus_framing (k : BlobKind) (c : CellId)
+theorem image_bytes_eq_legBytes_plus_framing (k : BlobKind) (c : CellId)
     (s : Store (deployedR.layout k.kind)) (v : k.Value) :
     (encodeCell (some ⟨k.kind, k.state (some v)⟩)).length =
       legBytes ⟨c, k.kind, bridge.codec.legPatch k.kind s (k.state (some v))⟩ +
@@ -150,7 +154,7 @@ theorem receiver_charge_eq_legBytes_plus_framing (k : BlobKind) (c : CellId)
   · simp
   · exact live_image_bytes k v
 
-theorem retired_charge_eq_legBytes_plus_framing (k : deployedR.Kind) (c : CellId)
+theorem retired_bytes_eq_legBytes_plus_framing (k : deployedR.Kind) (c : CellId)
     (s : Store (deployedR.layout k)) :
     (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry .retired).length =
       legBytes ⟨c, k, bridge.codec.legPatch k s 0⟩ + 4 := by
@@ -158,7 +162,7 @@ theorem retired_charge_eq_legBytes_plus_framing (k : deployedR.Kind) (c : CellId
   rw [retire_diff_bytes]
 
 #assert_axioms self_diff_bytes retire_diff_bytes live_image_bytes
-#assert_axioms receiver_charge_eq_legBytes_plus_framing retired_charge_eq_legBytes_plus_framing
+#assert_axioms image_bytes_eq_legBytes_plus_framing retired_bytes_eq_legBytes_plus_framing
 
 /-- Only image/delta shapes, with no accounting assumption. The pre-store of
 an update or retirement is unrestricted. -/
@@ -243,7 +247,7 @@ theorem post_shape_charge (c : CellId) {bytes : List UInt8} {d : Delta deployedR
       cases k <;> exact live_image_bytes _ _
   | retire k s =>
     simpa [deltaStorage, Delta.leg?, Delta.create?, deltaClass, classFraming] using
-      retired_charge_eq_legBytes_plus_framing k c s
+      retired_bytes_eq_legBytes_plus_framing k c s
 
 variable {rootBytes : List UInt8 → Digest}
 
@@ -278,14 +282,16 @@ def writeStorage (cells : CellId → Option (Cell deployedR)) (w : DataWrite) : 
   | .ok d => deltaStorage w.cellId.value d
   | .error _ => 0
 
-/-- Folding decoded deltas accounts for both legs and ROM birth images. -/
-theorem deltas_storage (cells : CellId → Option (Cell deployedR)) (ws : List DataWrite) :
+/-- Folding decoded deltas accounts for legs and ROM birth images; the event
+adds its retained bytes. -/
+theorem deltas_storage (cells : CellId → Option (Cell deployedR)) (ws : List DataWrite)
+    (event : DurableDataIntent.StableEvent) :
     storageOf history
       ((deltas bridge.codec cells ws).filterMap fun d => d.2.create? d.1)
-      ((deltas bridge.codec cells ws).filterMap fun d => d.2.leg? bridge.codec d.1) =
-    (ws.map (writeStorage cells)).sum := by
+      ((deltas bridge.codec cells ws).filterMap fun d => d.2.leg? bridge.codec d.1) event =
+    (ws.map (writeStorage cells)).sum + eventBytes event := by
   induction ws with
-  | nil => rfl
+  | nil => simp [storageOf, history, WorldRoot.cshakeHistory, deltas]
   | cons w ws ih =>
     cases h : deltaOf bridge.codec cells w with
     | error e => simpa [deltas, h, writeStorage] using ih
@@ -293,30 +299,19 @@ theorem deltas_storage (cells : CellId → Option (Cell deployedR)) (ws : List D
       cases hc : d.create? w.cellId.value <;> cases hl : d.leg? bridge.codec w.cellId.value <;>
         simp_all [storageOf, history, WorldRoot.cshakeHistory, deltas, writeStorage, deltaStorage] <;> omega
 
-/-- Guard legs have no newly written values even outside the three post kinds. -/
-theorem guard_storage_zero (cells : CellId → Option (Cell deployedR)) (ids : List CellId) :
-    ((ids.filterMap (guardLeg bridge.codec cells)).map legBytes).sum = 0 := by
-  induction ids with
-  | nil => rfl
-  | cons c cs ih =>
-    cases h : cells c with
-    | none => simpa [guardLeg, h] using ih
-    | some cell =>
-      simpa [guardLeg, h, legBytes, Codec.legPatch, self_diff_bytes] using ih
-
 theorem intent_storage (cells : CellId → Option (Cell deployedR)) (intent : DataIntent rootBytes) :
-    storageOf history (createsOf bridge.codec cells intent) (legsOf bridge.codec cells intent) =
-      (intent.writes.map (writeStorage cells)).sum := by
-  have h := deltas_storage cells intent.writes
-  simpa [createsOf, legsOf, storageOf, history, WorldRoot.cshakeHistory,
-    List.map_append, List.sum_append, guard_storage_zero] using h
+    storageOf history (createsOf bridge.codec cells intent) (legsOf bridge.codec cells intent)
+        intent.event =
+      (intent.writes.map (writeStorage cells)).sum + eventBytes intent.event := by
+  have h := deltas_storage cells intent.writes intent.event
+  simpa [createsOf, legsOf, storageOf, history, WorldRoot.cshakeHistory] using h
 
-/-- The receiver charge definition is essential: it is the sum of full images. -/
-theorem receiver_charge_eq_storage_plus_framing
-    (ingress : ObjectiveActivityReceiver.DecodedIngress)
-    (cells : CellId → Option (Cell deployedR)) (posts : List Post) (guards : List ReadGuard)
+/-- The full post images exceed the World's value bytes by the classified
+framing: what the receiver charged before the FD-1 switch, and no longer does. -/
+theorem posts_bytes_eq_storage_plus_framing
+    (cells : CellId → Option (Cell deployedR)) (posts : List Post)
     (supported : PostsSupported (rootBytes := rootBytes) cells posts) :
-    ObjectiveActivityReceiver.charge ingress posts guards .storageBytes =
+    (posts.map fun post => post.bytes.length).sum =
       ((posts.map (Post.write rootBytes)).map (writeStorage cells)).sum +
         framing (rootBytes := rootBytes) cells posts := by
   induction posts with
@@ -327,72 +322,57 @@ theorem receiver_charge_eq_storage_plus_framing
     have ht := ih (fun q hq => supported q (by simp [hq]))
     have cell : (Post.write rootBytes p).cellId.value = p.cell.value := rfl
     cases hc : deltaClass d <;>
-      simp_all [ObjectiveActivityReceiver.charge, framing, countClass, unchangedBytes,
+      simp_all [framing, countClass, unchangedBytes,
         postClass, writeStorage, classFraming, Nat.mul_add] <;> omega
 
-#assert_axioms burn_storage_zero post_shape_charge intent_storage receiver_charge_eq_storage_plus_framing
+#assert_axioms burn_storage_zero post_shape_charge intent_storage posts_bytes_eq_storage_plus_framing
 
-/-- The actual `intentOf`, sealed with this receiver's charge function. -/
-theorem intentOf_charge_eq_storage_plus_framing
+/-- **The receiver's storage lane is the World's.**  The actual `intentOf`,
+sealed with this receiver's charge against the image `snap` it is admitted on,
+charges exactly `storageOf` of its derived creates, legs and event there. -/
+theorem intentOf_charge_eq_storage
+    (snap : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes)
     (ingress : ObjectiveActivityReceiver.DecodedIngress) (sealing : Seal)
-    (cells : CellId → Option (Cell deployedR)) (transaction : TransactionId)
-    (posts : List Post) (guards : List ReadGuard) (nullifiers : List StableNullifier)
-    (supported : PostsSupported (rootBytes := rootBytes) cells posts) :
-    let intent := intentOf rootBytes transaction posts guards nullifiers
-      { sealing with charge := ObjectiveActivityReceiver.charge ingress }
+    (transaction : TransactionId) (posts : List Post) (guards : List ReadGuard)
+    (nullifiers : List StableNullifier) :
+    let intent := intentOf ResourceBirthCodec.rootBytes transaction posts guards nullifiers
+      { sealing with charge := ObjectiveActivityReceiver.charge snap ingress }
     intent.exactCharge .storageBytes =
-      storageOf history (createsOf bridge.codec cells intent) (legsOf bridge.codec cells intent) +
-        framing (rootBytes := rootBytes) cells posts := by
-  dsimp only
-  rw [intent_storage]
-  exact receiver_charge_eq_storage_plus_framing ingress cells posts
-    (readOnly rootBytes posts (guards ++ sealing.guards)) supported
+      storageOf history (createsOf bridge.codec (HostRefinesWorld.cellsOf bridge snap) intent)
+        (legsOf bridge.codec (HostRefinesWorld.cellsOf bridge snap) intent) intent.event :=
+  rfl
 
 /-- All admitted turn constructors use the same final posts and receiver seal. -/
-theorem finalIntent_charge_eq_storage_plus_framing
-    {config : ObjectiveActivity.Config} {snapshot : ObjectiveActivity.Snapshot rootBytes} {height : Nat}
+theorem finalIntent_charge_eq_storage
+    {config : ObjectiveActivity.Config}
+    {snapshot : ObjectiveActivity.Snapshot ResourceBirthCodec.rootBytes} {height : Nat}
+    (snap : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes)
     (ingress : ObjectiveActivityReceiver.DecodedIngress) (sealing : Seal)
-    (cells : CellId → Option (Cell deployedR)) (posts : List Post) (extra : List ReadGuard)
-    (turn : ObjectiveActivity.AdmittedTurn config snapshot height)
-    (supported : PostsSupported (rootBytes := rootBytes) cells posts) :
+    (posts : List Post) (extra : List ReadGuard)
+    (turn : ObjectiveActivity.AdmittedTurn config snapshot height) :
     let intent := ActivitySeatEnd.AdmittedTurn.finalIntent
-      { sealing with charge := ObjectiveActivityReceiver.charge ingress } posts extra turn
+      { sealing with charge := ObjectiveActivityReceiver.charge snap ingress } posts extra turn
     intent.exactCharge .storageBytes =
-      storageOf history (createsOf bridge.codec cells intent) (legsOf bridge.codec cells intent) +
-        framing (rootBytes := rootBytes) cells posts := by
-  cases turn <;> exact intentOf_charge_eq_storage_plus_framing ingress sealing cells _ posts _ _ supported
+      storageOf history (createsOf bridge.codec (HostRefinesWorld.cellsOf bridge snap) intent)
+        (legsOf bridge.codec (HostRefinesWorld.cellsOf bridge snap) intent) intent.event := by
+  cases turn <;> exact intentOf_charge_eq_storage snap ingress sealing _ posts _ _
 
-/-- Specialization to the intent the native Objective receiver actually emits. -/
-theorem prepared_intent_charge_eq_storage_plus_framing
+/-- Specialization to the intent the native Objective receiver actually emits:
+its storage lane is the World's storage of that intent at the durable image. -/
+theorem prepared_intent_charge_eq_storage
     {F : Type} [Field F] {deployment : ObjectiveActivityReceiver.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : ObjectiveKernelConfig.Ambient}
     {durable : ObjectiveActivityReceiver.Durable} {command : ObjectiveActivityReceiver.Command}
     (prepared : ObjectiveActivityReceiver.Prepared deployment profile ambient durable command)
-    (ingress : ObjectiveActivityReceiver.DecodedIngress)
-    (cells : CellId → Option (Cell deployedR))
-    (supported : PostsSupported (rootBytes := ResourceBirthCodec.rootBytes) cells prepared.final.1) :
+    (ingress : ObjectiveActivityReceiver.DecodedIngress) :
     (prepared.intent ingress).exactCharge .storageBytes =
-      storageOf history (createsOf bridge.codec cells (prepared.intent ingress))
-        (legsOf bridge.codec cells (prepared.intent ingress)) +
-      framing (rootBytes := ResourceBirthCodec.rootBytes) cells prepared.final.1 :=
-  finalIntent_charge_eq_storage_plus_framing ingress
-    (ObjectiveActivityReceiver.admissionSeal prepared ingress) cells prepared.final.1 prepared.final.2
-    prepared.decided supported
-
-/-- In particular, the storage-above-charge condition is false. -/
-theorem prepared_storage_le_charge
-    {F : Type} [Field F] {deployment : ObjectiveActivityReceiver.Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : ObjectiveKernelConfig.Ambient}
-    {durable : ObjectiveActivityReceiver.Durable} {command : ObjectiveActivityReceiver.Command}
-    (prepared : ObjectiveActivityReceiver.Prepared deployment profile ambient durable command)
-    (ingress : ObjectiveActivityReceiver.DecodedIngress)
-    (cells : CellId → Option (Cell deployedR))
-    (supported : PostsSupported (rootBytes := ResourceBirthCodec.rootBytes) cells prepared.final.1) :
-    storageOf history (createsOf bridge.codec cells (prepared.intent ingress))
-      (legsOf bridge.codec cells (prepared.intent ingress)) ≤
-      (prepared.intent ingress).exactCharge .storageBytes := by
-  rw [prepared_intent_charge_eq_storage_plus_framing prepared ingress cells supported]
-  exact Nat.le_add_right _ _
+      storageOf history
+        (createsOf bridge.codec (HostRefinesWorld.cellsOf bridge durable.snapshot) (prepared.intent ingress))
+        (legsOf bridge.codec (HostRefinesWorld.cellsOf bridge durable.snapshot) (prepared.intent ingress))
+        (prepared.intent ingress).event :=
+  finalIntent_charge_eq_storage durable.snapshot ingress
+    (ObjectiveActivityReceiver.admissionSeal prepared ingress) prepared.final.1 prepared.final.2
+    prepared.decided
 
 /-- Wire constructors used by the Objective receiver. This premise says nothing
 about costs, old stores, patches, or framing counts. -/
@@ -455,8 +435,8 @@ theorem postsSupported_ofLoaded
   obtain ⟨d, hd, _⟩ := delta_of_write derived member
   exact ⟨d, hd, postShape_of_delta_success hd (images p hp)⟩
 
-#assert_axioms intentOf_charge_eq_storage_plus_framing finalIntent_charge_eq_storage_plus_framing
-#assert_axioms prepared_intent_charge_eq_storage_plus_framing prepared_storage_le_charge
+#assert_axioms intentOf_charge_eq_storage finalIntent_charge_eq_storage
+#assert_axioms prepared_intent_charge_eq_storage
 #assert_axioms postShape_of_delta_success postsSupported_ofLoaded
 
 namespace SeedlessWitness
@@ -491,28 +471,26 @@ theorem counts :
     unchangedBytes (rootBytes := ResourceBirthCodec.rootBytes) cells posts = 0 := by
   decide +kernel
 
-/-- The general equality instantiated with the seedless intent's actual creates
-and legs; the ingress cannot affect the storage lane. -/
-theorem receiver_equality (ingress : ObjectiveActivityReceiver.DecodedIngress) :
-    ObjectiveActivityReceiver.charge ingress posts [] .storageBytes =
-      storageOf history (createsOf bridge.codec cells seedlessCreateIntent)
-        (legsOf bridge.codec cells seedlessCreateIntent) +
+/-- The general framing equality instantiated with the seedless intent's posts:
+its full image is the World's value bytes plus the named counts (the gap the
+receiver no longer charges). -/
+theorem image_equality :
+    (posts.map fun post => post.bytes.length).sum =
+      (seedlessCreateIntent.writes.map (writeStorage cells)).sum +
         (40 * 1 + 26 * 0 + 26 * 0 + 4 * 0 + 0) := by
-  rw [intent_storage]
-  have h := receiver_charge_eq_storage_plus_framing ingress cells posts [] supported
+  have h := posts_bytes_eq_storage_plus_framing cells posts supported
   have gap : framing (rootBytes := ResourceBirthCodec.rootBytes) cells posts = 40 := by
     simp [framing, counts.1, counts.2.1, counts.2.2.1, counts.2.2.2.1, counts.2.2.2.2.2]
   simpa only [gap] using h
 
-/-- The witness's own storage lane equals the real derived storage plus the named counts. -/
+/-- The witness's own storage lane IS the real derived storage: no framing. -/
 theorem intent_equality :
     seedlessCreateIntent.exactCharge .storageBytes =
       storageOf history (createsOf bridge.codec cells seedlessCreateIntent)
-        (legsOf bridge.codec cells seedlessCreateIntent) +
-        (40 * 1 + 26 * 0 + 26 * 0 + 4 * 0 + 0) := by
+        (legsOf bridge.codec cells seedlessCreateIntent) seedlessCreateIntent.event := by
   decide +kernel
 
-#assert_axioms supported counts receiver_equality intent_equality
+#assert_axioms supported counts image_equality intent_equality
 
 end SeedlessWitness
 
@@ -899,28 +877,8 @@ theorem prepared_posts_images
 
 #assert_axioms prepared_posts_images
 
-/-- Loaded-path equality: the receiver's finalization supplies all image shapes;
-only successful turn conversion remains as a premise. -/
-theorem prepared_ofLoaded_charge_eq_storage_plus_framing
-    {F : Type} [Field F] {deployment : ObjectiveActivityReceiver.Deployment}
-    {profile : CanonicalRuntimeProfile.Profile F} {ambient : ObjectiveKernelConfig.Ambient}
-    {durable : ObjectiveActivityReceiver.Durable} {command : ObjectiveActivityReceiver.Command}
-    (prepared : ObjectiveActivityReceiver.Prepared deployment profile ambient durable command)
-    (ingress : ObjectiveActivityReceiver.DecodedIngress) {t : DTurn deployedR Digest}
-    (success : HostRefinesWorld.Turn.ofLoaded bridge history durable (prepared.intent ingress) = .ok t) :
-    (prepared.intent ingress).exactCharge .storageBytes = storageOf history t.creates t.legs +
-      framing (rootBytes := ResourceBirthCodec.rootBytes)
-        (HostRefinesWorld.cellsOf bridge durable.snapshot) prepared.final.1 := by
-  have images := prepared_posts_images prepared
-  have supported := postsSupported_ofLoaded success
-    (finalIntent_writes _ _ _ prepared.decided) images
-  have eqTurn := (ofCells_ok success).eq
-  subst t
-  exact prepared_intent_charge_eq_storage_plus_framing prepared ingress _ supported
-
 #assert_axioms unchanged_post_is_read activity_image_supported seat_image_supported
 #assert_axioms book_image_supported retired_image_supported finalIntent_writes
-#assert_axioms prepared_ofLoaded_charge_eq_storage_plus_framing
 
 
 namespace BurnWitness
@@ -941,19 +899,36 @@ theorem counts :
     unchangedBytes (rootBytes := ResourceBirthCodec.rootBytes) SeedlessWitness.cells posts = 0 := by
   decide +kernel
 
-/-- The actual fresh-retirement intent has zero World storage and four image bytes. -/
+/-- The actual fresh-retirement intent has zero World storage (its event retains
+no bytes) and is charged exactly that: its four image bytes are not charged. -/
 theorem intent_equality :
     storageOf history (createsOf bridge.codec SeedlessWitness.cells freshRetirementIntent)
-      (legsOf bridge.codec SeedlessWitness.cells freshRetirementIntent) = 0 ∧
+      (legsOf bridge.codec SeedlessWitness.cells freshRetirementIntent) freshRetirementIntent.event = 0 ∧
     freshRetirementIntent.exactCharge .storageBytes =
       storageOf history (createsOf bridge.codec SeedlessWitness.cells freshRetirementIntent)
-        (legsOf bridge.codec SeedlessWitness.cells freshRetirementIntent) +
-        (40 * 0 + 26 * 0 + 26 * 0 + 4 * 1 + 0) := by
+        (legsOf bridge.codec SeedlessWitness.cells freshRetirementIntent) freshRetirementIntent.event := by
   decide +kernel
 
 #assert_axioms counts intent_equality
 
 end BurnWitness
 
+
+/-! ## Poles of `PostShape`
+
+The retired lifecycle image is the shape of a burn; no image is the shape of an
+absent delta. -/
+
+theorem postShape_retired_burn :
+    PostShape (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry .retired)
+      (.burn .objectiveActivity) :=
+  .burn _
+
+theorem postShape_absent_refused :
+    ¬ PostShape (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry .retired)
+      .absent := by
+  intro h; cases h
+
+#assert_axioms postShape_retired_burn postShape_absent_refused
 
 end Minidregg.Kernel.ObjectiveTurnTotalityStorage

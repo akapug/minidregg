@@ -190,6 +190,10 @@ pub struct BrokerConfig {
     pub unit_prefix: String,
     pub spk_host: PathBuf,
     pub spk_host_sha256: String,
+    /// The physical bubblewrap that creates each resident's user namespace (and
+    /// sandboxes its app): one of `namespace_identity::PHYSICAL_BWRAPS`, pinned.
+    pub bwrap: PathBuf,
+    pub bwrap_sha256: String,
     pub ingest_helper: PathBuf,
     pub volume_helper: PathBuf,
     pub app_uids: Vec<u32>,
@@ -597,7 +601,7 @@ impl Broker {
     fn load(config_path: &Path) -> io::Result<Self> {
         let config: BrokerConfig =
             serde_json::from_slice(&read_private_operator(config_path, MAX_CONFIG)?)?;
-        if config.protocol != "mini-spk-broker-config-v2"
+        if config.protocol != "mini-spk-broker-config-v3"
             || !store_key(&config.store)
             || config.grains_root.file_name().and_then(|n|n.to_str())!=Some(config.store.as_str())
             || config.spk_root.is_none()
@@ -617,6 +621,7 @@ impl Broker {
         validate_world_package_namespace(&config.store, &config.grains_root, config.spk_root.as_deref())?;
         validate_spk_namespace(config.spk_root.as_deref())?;
         pinned_root_executable(&config.spk_host, Some(&config.spk_host_sha256))?;
+        crate::namespace_identity::pinned_bwrap(&config.bwrap, &config.bwrap_sha256)?;
         pinned_root_executable(&config.ingest_helper, None)?;
         let registry=crate::volume_helper::Registry::load(&config.store)?;
         if registry.grains_root!=config.grains_root || registry.app_uids!=config.app_uids || registry.helper!=config.volume_helper {
@@ -1033,7 +1038,8 @@ impl Broker {
                      OnFailure={supervisor}\n\n[Service]\nType=exec\n\
                      Slice={slice}\n\
                      Environment=MINI_SPK_APP_UID={uid} MINI_SPK_APP_GID={gid} MINI_SPK_OPERATOR_UID={operator_uid} MINI_SPK_OPERATOR_GID={operator_gid} \
-                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_UNIT={unit} MINI_SPK_BROKER_SOCKET={broker_socket}\n\
+                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_UNIT={unit} MINI_SPK_BROKER_SOCKET={broker_socket} \
+                     MINI_SPK_BWRAP={bwrap} MINI_SPK_BWRAP_SHA256={bwrap_sha256}\n\
                      ExecStart={spk} resident-bootstrap {config}\n\
                      AmbientCapabilities=\n\
                      NoNewPrivileges=no\n\
@@ -1047,6 +1053,8 @@ impl Broker {
                     root = self.root().display(),
                     broker_socket = socket_path(self.root(), self.config.broker_socket.as_deref())?.display(),
                     spk = runtime.spk_host.display(),
+                    bwrap = self.config.bwrap.display(),
+                    bwrap_sha256 = self.config.bwrap_sha256,
                     config = config.display(),
                 );
                 self.render_store_supervisor(&store, &app, &runtime)?;

@@ -479,8 +479,10 @@ pub fn run(path: &Path) -> io::Result<()> {
         || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
         || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
     { return Err(refused("namespace bootstrap differs from root-registered world")); }
+    let bwrap=std::env::var_os("MINI_SPK_BWRAP").ok_or_else(||refused("broker namespace bwrap absent"))?;
+    let bwrap_sha256=std::env::var("MINI_SPK_BWRAP_SHA256").map_err(|_|refused("broker namespace bwrap pin absent"))?;
     crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
-    crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
+    crate::namespace_identity::enter(Path::new(&bwrap),&bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid)?;
     let (parent, child) = UnixStream::pair()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -578,11 +580,22 @@ mod tests {
                     uid: unsafe{libc::geteuid()},
                     gid: unsafe{libc::getegid()},
                 };
-                let app = Identity {
-                    uid: 165536,
-                    gid: 165536,
+                // The first identity of this user's /etc/subuid grant (the same
+                // grant newuidmap checks), and the bwrap resolve-bwrap would pick.
+                let name = unsafe { std::ffi::CStr::from_ptr((*libc::getpwuid(operator.uid)).pw_name) }
+                    .to_str().map_err(|_| refused("user name"))?.to_owned();
+                let first = fs::read_to_string("/etc/subuid")?.lines()
+                    .find_map(|l| l.strip_prefix(&format!("{name}:")).and_then(|r| r.split(':').next()).and_then(|n| n.parse::<u32>().ok()))
+                    .ok_or_else(|| refused("no /etc/subuid grant for the test user"))?;
+                let app = Identity { uid: first, gid: first };
+                let bwrap = match std::env::var("MINI_BWRAP") {
+                    Ok(b) => std::path::PathBuf::from(b),
+                    Err(_) => crate::namespace_identity::PHYSICAL_BWRAPS.iter().map(std::path::PathBuf::from)
+                        .find(|b| unsafe { libc::access(std::ffi::CString::new(b.as_os_str().as_encoded_bytes()).unwrap().as_ptr(), libc::X_OK) } == 0)
+                        .ok_or_else(|| refused("no physical bwrap"))?,
                 };
-                crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
+                let sha = format!("{:x}", Sha256::digest(fs::read(&bwrap)?));
+                crate::namespace_identity::enter(&bwrap,&sha,operator.uid,operator.gid,app.uid,app.gid)?;
                 let (mut a, b) = UnixStream::pair()?;
                 let worker_pid = unsafe { libc::fork() };
                 if worker_pid < 0 {

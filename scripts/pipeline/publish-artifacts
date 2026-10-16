@@ -53,6 +53,11 @@ if [ -f "$out/READY" ]; then
   for l in $labels; do pipeline_label "$l" "$tip"; done; pipeline_log "$tip already READY; labelled $label"; exit 0
 fi
 t0=$(date +%s)
+# The native builder reuses objects by content (MINIDREGG_NATIVE_OBJECT_CACHE, scripts/build-native-host.sh
+# cc-object.sh; a hit is touched). Entries no build has used for PIPELINE_OBJECT_CACHE_DAYS (14) days go.
+if [ -n "${MINIDREGG_NATIVE_OBJECT_CACHE:-}" ] && [ -d "$MINIDREGG_NATIVE_OBJECT_CACHE" ]; then
+  find "$MINIDREGG_NATIVE_OBJECT_CACHE" -name '*.o' -type f -mtime +"${PIPELINE_OBJECT_CACHE_DAYS:-14}" -delete 2>/dev/null || true
+fi
 from=$(pipeline_find_tree "$tip" "$tree")
 moved=""
 if [ -z "$from" ]; then
