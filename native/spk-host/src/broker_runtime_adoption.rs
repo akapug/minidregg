@@ -665,7 +665,7 @@ mod tests {
         assert!(check_install_pin(Some("hash"), "hash", true).is_ok());
         let config = BrokerConfig {
             resident_home_read_only_paths: Vec::new(),
-            protocol: "mini-spk-broker-config-v2".into(),
+            protocol: "mini-spk-broker-config-v3".into(),
             store: "0123456789abcdef".into(),
             grains_root: "/var/lib/grains".into(),
             broker_socket: None,
@@ -674,6 +674,8 @@ mod tests {
             unit_prefix: "mini".into(),
             spk_host: "/old/spk-host".into(),
             spk_host_sha256: "a".repeat(64),
+            bwrap: "/usr/bin/bwrap".into(),
+            bwrap_sha256: "b".repeat(64),
             ingest_helper: "/ingest".into(),
             volume_helper: "/volume".into(),
             app_uids: vec![1000],

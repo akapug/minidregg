@@ -124,6 +124,8 @@ for world in a b; do
 done
 [[ ${stores[0]} != "${stores[1]}" ]] || { echo 'two-world store identity collision' >&2; exit 1; }
 start=$(awk -F: -v user="$op_name" '$1==user && $3>=32 {print $2;exit}' /etc/subuid)
+# The physical bwrap that creates each resident's user namespace (MINI_BWRAP selects; see resolve-bwrap).
+bwrap=$(sh "$repo/deploy/grain-host/resolve-bwrap") || exit 1
 [[ $start =~ ^[0-9]+$ ]] || exit 1
 for index in 0 1; do
   store=${stores[$index]} root=${roots[$index]}
@@ -132,8 +134,9 @@ for index in 0 1; do
   printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$run/root-setup.log"
   sudo -n -- "$installer" install "$run/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$host" "$op_uid" "$((start+index*16))" 16 >>"$run/root-setup.log" 2>&1
   registry=/etc/mini-spk-volumes/$store.json
-  jq -n --slurpfile registry "$registry" --arg binary "$run/bin/spk-host" --arg sha "$(sha256sum "$run/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$run/bin/spk-ingest" --arg op "$op_name" '
-    $registry[0] as $r | {protocol:"mini-spk-broker-config-v2",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[]}' >"$root/broker/config.json"
+  jq -n --slurpfile registry "$registry" --arg binary "$run/bin/spk-host" --arg sha "$(sha256sum "$run/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$run/bin/spk-ingest" --arg op "$op_name" \
+    --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" '
+    $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[]}' >"$root/broker/config.json"
   chmod 600 "$root/broker/config.json"
   sed "s|%h/.local/libexec/mini-spk-broker|$run/bin/mini-spk-broker|" "$repo/deploy/spk-host/mini-spk-broker@.service" >"$units/mini-spk-broker@$store.service"
   systemctl --user daemon-reload

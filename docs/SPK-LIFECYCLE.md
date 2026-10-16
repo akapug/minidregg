@@ -126,14 +126,15 @@ has seven typed verbs and a root-owned registry binding caller uid, Store,
 deployment, grain path, quota and disjoint subordinate uids. Cross-world volume
 paths refuse. Separate loop ext4, nosuid/nodev/noatime, quota, retained exact
 preimage checks and durable FIFREEZE/FITHAW custody remain. No root broker or
-root daemon is required. `newuidmap`/`newgidmap` establish distinct app identities;
+root daemon is required. The pinned bwrap creates each resident's user namespace
+and `newuidmap`/`newgidmap` map distinct app identities into it ([boundary](SPK-RESIDENT-PRIVILEGE-BOUNDARY.md));
 parser/reaper/app retain the capability, group, no_new_privs and seccomp floor.
 Read-only `volumes-status` enumerates root-owned registrations for checkpoint
 coverage; every running app still requires its complete settled pause.
 
 The native grain author emits resident config and runs the resident's own decoder
 before installing a unit; `prepare-resident-config.sh` delegates to that author.
-The v1 broker config/global socket refuse; re-emit v2 broker configs and native
+The v1 and v2 broker configs/global socket refuse; re-emit v3 broker configs and native
 profiles for a fresh deployment. [Deployment and acceptance](../deploy/spk-host/USER-TENANCY.md)
 use one installer with explicit root setup/cleanup. On burst3-a, j475058235
 passed both scratch worlds under uid 1001: install, HTTP, stop/restart and second
