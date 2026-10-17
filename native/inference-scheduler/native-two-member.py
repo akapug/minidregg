@@ -80,7 +80,7 @@ insert('# ---------------------------------------------------------------- keys 
 insert('json.dump(operator, open(path("operator.json"), "w"), indent=1)',
        'operator["providerServices"].append({"providerResourceId":'+str(a.task2+3)+',"tariff":operator["providerServices"][0]["tariff"]})')
 insert('json.dump(genesis, open(path("genesis.json"), "w"), indent=1)',
-       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"')
+       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"\ngenesis["issuanceCap"]="1000000000000000"')
 insert('json.dump(birth, open(path("birth-intent.json"), "w"))',
        'import copy\nresources=birth["birth"]["resources"]\nresources[0]["budget"]="1000"\nresources[3]["owner"]="20"\nresources[3]["budget"]="0"\nsecond=copy.deepcopy(resources)\n'+
        'second[0].update(target="'+str(a.task2)+'",ownerCapability="171",controlCapability="172",workerSubjects=["8","19"])\n'+
