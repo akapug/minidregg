@@ -2,8 +2,8 @@
 World: /tank/dregg-build/pipeline/lanes/integrator-next/fx-world (objective-native-acceptance.py all), accepted call `objective-first` at
 Store height 4, refused call `dishonest-r01-source-is-package` (Host: Minidregg.Kernel.DeclaredResourceController.Reject.objectiveSource).
 Verifier: /tank/dregg-build/pipeline/lanes/integrator-next/artifacts/minidregg-credential-signature-verifier (sha256 8fb9640ef2a9f27be2526373ca7c43cbd75955d882a8dc7255d684d379077e0f).
-The consumer is Assurance.NativeAcceptedFixture. -/
-namespace Minidregg.Assurance.NativeAcceptedFixtureData
+The consumer is Fixtures.NativeAcceptedFixture. -/
+namespace Minidregg.Fixtures.NativeAcceptedFixtureData
 
 /-! The deployment's pinned config (w/deployment/pinned-config.json). -/
 def pinDomain : Nat := 8501
@@ -54,4 +54,4 @@ def verifiedTriples : List (String × String × String) := [
   ("1d14558c9114aede2611db44545af763360b4541f775e132ca04066f813caac0", "02ff4dff04ff0607ff0102ff0a07ff02ff017a1bff02ff01ff07ff20ff1d14558c9114aede2611db44545af763360b4541f775e132ca04066f813caac0ff91600fff000c0207ff02ff01070207ff02ff000f01ff7a1bff02ff01ff1aff44524547472f415554482f5349474e45442d5245515545535402a3ff44524547472f415554482f504c414e0211ff5621ffa798c2de9ca154ccb3a85416bcb29105e092ae5335b3dff1d0cdc8a3fe13e0fdff09ff01ff07ff02ffdd1ed70572e6b8feff01ff762778495321a310d4754ef76a35c43b1c1e3e069517351810c173709259c625ffafd55fb7bdd76ba95e682370fba2cf95100f99622e02b96968e192cbde496a03ffbb1540b65685e02effffffdd1ed70572e6b8feffffff4ffff7aae12d87633dbc8386950cad9b3b89dd57d020521eead0428cc879f2f8ae18ff", "3bb215145aef2990e7b726644431788b089ef655f0f3d0d5cc009f404c7ff6ffa475fa86a43d00f501ffd8c8a45c042aa40674f04c61e42e8fd1092998cc1f01")
 ]
 
-end Minidregg.Assurance.NativeAcceptedFixtureData
+end Minidregg.Fixtures.NativeAcceptedFixtureData

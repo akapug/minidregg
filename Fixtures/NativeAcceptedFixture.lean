@@ -29,9 +29,9 @@ or the deployed hash -- only the compiled evaluator runs them):
 * `first_projection`: the re-run's SEMANTIC PROJECTION (who signed, which cells it
   writes by kind and role, what it guards and spends, what it is charged, and the
   refused call's verdict and reason) is the hand-written authority
-  `Assurance.NativeAcceptedFixtureAuthority`, read from the acceptance driver's intent.  The
+  `Fixtures.NativeAcceptedFixtureAuthority`, read from the acceptance driver's intent.  The
   bytes above are regenerated from a run; this is what a regeneration cannot move
-  without an authority change (`Assurance.NativeAcceptedFixtureProjection`);
+  without an authority change (`Fixtures.NativeAcceptedFixtureProjection`);
 * `refused_admission`: the same admission refuses the dishonest call `r01`
   (a validly signed command naming the package as its source) with
   `objectiveSource`, the Host's own refusal, on the image right after `first`.
@@ -48,22 +48,22 @@ Regenerate the data (a wire or semantics change turns this module red, by design
 on a fresh world with this tree's binaries.
 -/
 import Assurance.PrivateEvaluatorCustodyJoin
-import Assurance.NativeAcceptedFixtureData
-import Assurance.NativeAcceptedFixtureProjection
-import Assurance.NativeAcceptedFixtureAuthority
+import Fixtures.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureProjection
+import Fixtures.NativeAcceptedFixtureAuthority
 import Kernel.NativeHostContext
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
 import Theory.AssertCompiled
 
-namespace Minidregg.Assurance.NativeAcceptedFixture
+namespace Minidregg.Fixtures.NativeAcceptedFixture
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler Minidregg.Compiler.DurableCheckpointCodec
 open Minidregg.Kernel Minidregg.Kernel.DurableReceiver Minidregg.Kernel.DurableDataIntent
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Kernel.PrivateSuccessorCustody
 open Minidregg.Assurance.PrivateEvaluatorCustodyJoin
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 set_option autoImplicit false
 
 /-- Lowercase hex to bytes (accumulating: the records are ~100 KB). -/
@@ -240,13 +240,13 @@ def isObjectiveSource : Option Reject → Bool
 
 /-! ## The authority -/
 
-open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+open Minidregg.Fixtures.NativeAcceptedFixtureProjection in
 /-- The authority: hand-written, read from the acceptance driver's intent; no
 generator writes it. -/
 def authority : List NativeAcceptedFixtureProjection.Line :=
   parseAuthority NativeAcceptedFixtureAuthority.text
 
-open Minidregg.Assurance.NativeAcceptedFixtureProjection in
+open Minidregg.Fixtures.NativeAcceptedFixtureProjection in
 /-- The re-run's projection: the accepted call's record and receipts, then the
 refused call's verdict. -/
 def projectionRun : Option (List NativeAcceptedFixtureProjection.Line) := do
@@ -327,4 +327,4 @@ set_option maxHeartbeats 4000000 in
 set_option maxHeartbeats 4000000 in
 #assert_compiled refused_call_unbound
 
-end Minidregg.Assurance.NativeAcceptedFixture
+end Minidregg.Fixtures.NativeAcceptedFixture

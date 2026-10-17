@@ -52,7 +52,7 @@ def source_modules(root):
     ).decode().split("\0")
     # During an authorized source-first publication, include staged and new
     # library source as well. Exclude build output and standalone scripts.
-    tops = {"Theory", "Pred", "Kernel", "Compiler", "Assurance", "Effects", "Selvage", "Host", "Verify"}
+    tops = {"Theory", "Pred", "Kernel", "Compiler", "Assurance", "Effects", "Selvage", "Host", "Verify", "Fixtures"}
     for top in tops:
         files.extend(str(p.relative_to(root)) for p in (root / top).glob("**/*.lean"))
     files.extend(name + ".lean" for name in GROUPS)

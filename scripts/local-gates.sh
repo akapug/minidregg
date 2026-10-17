@@ -21,7 +21,7 @@
 #                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
 #                  assumption, no stale allowlist entry; self-tests its instrument each run
 #   native-transcripts every recorded verifier transcript (CredentialSignatureIO.Transcript; the
-#                  one Assurance.NativeAcceptedFixture replays the first native Objective acceptance
+#                  one Fixtures.NativeAcceptedFixture replays the first native Objective acceptance
 #                  with) is still the pinned verifier's answer: scripts/check-native-transcripts.sh
 #                  lists them all from AxiomCensusResearch and re-submits each triple (verified; a
 #                  flipped signature byte must read invalid)

@@ -19,4 +19,4 @@ systemd-run --user --scope -q -p MemoryMax=10G -p MemorySwapMax=0 \
   --bin "$evidence/bin" --root "$evidence/world"
 systemd-run --user --scope -q -p MemoryMax=10G -p MemorySwapMax=0 \
   bash "$src/scripts/native-accepted-fixture/generate.sh" "$evidence/world"
-sha256sum "$src/Assurance/NativeAcceptedFixtureData.lean"
+sha256sum "$src/Fixtures/NativeAcceptedFixtureData.lean"

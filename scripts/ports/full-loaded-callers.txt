@@ -4,7 +4,7 @@
 # replays retained prefixes read-only to measure expressibility; replaces no production path.
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 Assurance/HyperdocumentLinkFramedRecovery.lean
-Assurance/NativeAcceptedFixture.lean
+Fixtures/NativeAcceptedFixture.lean
 Compiler/CarriedSegmentIO.lean
 Compiler/DurableCheckpointCodec.lean
 Compiler/DurableLogTags.lean

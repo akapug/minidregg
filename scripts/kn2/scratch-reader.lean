@@ -14,7 +14,7 @@ config and read back as a history Reader of that real Store.
    objective-first, at height 4) altered in its root or its height -> refused by name.
 
 Usage: lake env lean --run scripts/kn2/scratch-reader.lean STORE-HELPER -/
-import Assurance.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureData
 import Kernel.NativeHostContext
 import Compiler.DurableHistoryStore
 import Compiler.NativeHostCodec
@@ -26,7 +26,7 @@ open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableCheckpointCodec
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 
 namespace ScratchReader
 

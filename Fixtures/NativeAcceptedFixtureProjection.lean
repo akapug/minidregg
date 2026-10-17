@@ -1,7 +1,7 @@
 /-
 # The semantic projection of the native accepted fixture
 
-`Assurance.NativeAcceptedFixture` re-runs the first native Objective acceptance and
+`Fixtures.NativeAcceptedFixture` re-runs the first native Objective acceptance and
 checks that its record is byte for byte the Host's.  Both sides are this tree's
 code, and the bytes it pins are regenerated from a run of the same tree, so a
 change to WHAT an accepted invocation records (a dropped write, a changed charge,
@@ -11,7 +11,7 @@ This module is the other half: a small, pure projection of an accepted
 invocation's record onto what the acceptance DRIVER asked for
 (`native/resource-client/objective-native-acceptance.py`, `objective-first`), as
 `key = value` lines.  The expected lines are the hand-written authority file
-`Assurance/NativeAcceptedFixtureAuthority.lean`, which no generator writes.  The
+`Fixtures/NativeAcceptedFixtureAuthority.lean`, which no generator writes.  The
 fixture module checks the projection of its re-run against that file
 (`first_projection`), and `scripts/native-accepted-fixture/generate.sh` refuses to
 write data whose projection differs from it (`replay.lean` prints the same
@@ -28,7 +28,7 @@ import Kernel.ObjectiveBendNativeInput
 import Kernel.ContentResource
 import Compiler.ObjectiveBendPlanAdapter
 
-namespace Minidregg.Assurance.NativeAcceptedFixtureProjection
+namespace Minidregg.Fixtures.NativeAcceptedFixtureProjection
 
 open Minidregg.Compiler
 open Minidregg.Kernel
@@ -186,4 +186,4 @@ def diff (expected actual : List Line) : List String :=
     | none, some a => some s!"{key}: run {a}, authority has no such field"
     | none, none => none
 
-end Minidregg.Assurance.NativeAcceptedFixtureProjection
+end Minidregg.Fixtures.NativeAcceptedFixtureProjection

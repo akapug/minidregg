@@ -178,6 +178,12 @@ name = "SimplexQualification"
 [[lean_lib]]
 name = "ObjectiveProofs"
 
+# Fixtures/ -- recorded native runs replayed in Lean (Fixtures.lean says why it is its own library).
+# Not imported by Minidregg, Deployed or any census; built explicitly by the umbrella target list
+# (scripts/pipeline/umbrella-targets).
+[[lean_lib]]
+name = "Fixtures"
+
 # Source-first research is an explicit opt-in build.
 [[lean_lib]]
 name = "ResearchWip"

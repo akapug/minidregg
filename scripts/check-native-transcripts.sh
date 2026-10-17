@@ -2,7 +2,7 @@
 # check-native-transcripts.sh -- every recorded verifier transcript is still the verifier's.
 #
 # A `CredentialSignatureIO.Transcript` answers for the native Ed25519 verifier
-# inside a Lean fixture that evaluates a real admission (Assurance.NativeAcceptedFixture
+# inside a Lean fixture that evaluates a real admission (Fixtures.NativeAcceptedFixture
 # names the first native Objective acceptance through one). This gate is what that
 # substitution rests on:
 #   * scripts/NativeTranscripts.lean lists EVERY transcript in the research umbrella

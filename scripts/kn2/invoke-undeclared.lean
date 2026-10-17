@@ -2,7 +2,7 @@
 an invocation key the request's basis did not declare is refused BY NAME on a REAL
 deployment Store, and the declared request prepares.
 
-The Store is the accepted fixture's (`Assurance.NativeAcceptedFixtureData`): the pinned
+The Store is the accepted fixture's (`Fixtures.NativeAcceptedFixtureData`): the pinned
 genesis seed, bootstrapped under the pinned config, then the fixture's journal prefix
 (`recordHexes`, each record bound by `IntentRecord.bind?` and committed by
 `DurableReceiverIO.receive`), so the Store is at the height where the native Host
@@ -22,7 +22,7 @@ The command is `objective-first`'s, decoded from the Host's call bytes.
     the missing verifier answers `unavailable` naming zero reply bytes (no panic).
 
 Usage: lake env lean --run scripts/kn2/invoke-undeclared.lean STORE-HELPER [VERIFIER] -/
-import Assurance.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureData
 import Kernel.NativeHostLight
 import Compiler.NativeHostCodec
 import Kernel.ObjectiveBendAuthenticatedInputs
@@ -33,7 +33,7 @@ open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.NativeHost
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableCheckpointCodec
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 
 namespace InvokeUndeclared
 
