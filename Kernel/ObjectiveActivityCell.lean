@@ -56,14 +56,15 @@ def Role.ofTag : Nat → Role
 def roleStream : StreamCodec Role :=
   StreamCodec.retract StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
 
-/-- The activity family: `DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1`,
-`DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v1`, frame `DREGG/OBJECTIVE/ACTIVITY-CELL`. -/
+/-- The activity family: `DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v2`,
+`DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v2`, frame `DREGG/OBJECTIVE/ACTIVITY-CELL/v2`
+(the unversioned frame of the Book before its floors section refuses). -/
 abbrev spec : ProtectedCell.Spec where
   Role := Role
   roleStream := roleStream
-  idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1".toUTF8.toList
-  rootCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v1".toUTF8.toList
-  wireFrame := "DREGG/OBJECTIVE/ACTIVITY-CELL".toUTF8.toList
+  idCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v2".toUTF8.toList
+  rootCustomization := "DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v2".toUTF8.toList
+  wireFrame := "DREGG/OBJECTIVE/ACTIVITY-CELL/v2".toUTF8.toList
   wireVersion := wireVersion
 
 abbrev Payload := ProtectedCell.Payload spec

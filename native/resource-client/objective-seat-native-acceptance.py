@@ -189,6 +189,13 @@ X = json.loads((alice_ws / 'refs' / 'gold.json').read_text())['target']
 Y = json.loads((alice_ws / 'refs' / 'kelp.json').read_text())['target']
 
 
+def cap(asset_name, amount):
+    # Issuance is capped (floors): a well's own floor is its cap, set by a floor command on the
+    # well (verb mintAsset, the founder's owner grant); a mint past it refuses belowFloor.
+    sh(f'cap-{asset_name}-{amount}', mini, 'well', '--action', 'floor', '--dir', alice_ws,
+       '--well', asset_name, '--account', asset_name, '--amount', str(amount))
+
+
 def mint(asset_name, account, amount):
     sh(f'mint-{asset_name}-{account}-{amount}', mini, 'well', '--action', 'mint', '--dir', alice_ws,
        '--well', asset_name, '--account', account, '--amount', str(amount))
@@ -365,6 +372,8 @@ PIN = published['artifactId']
 ARTIFACT_HEX = (pub / 'out' / 'artifact.bin').read_bytes().hex()
 PACKAGE_HEX = (pub / 'out' / 'package.bin').read_bytes().hex()
 v0 = view('credit', {})
+cap('gold', 30)
+cap('kelp', 21)
 mint('gold', ALICE_ACCOUNT, 30)
 mint('kelp', BOB_ACCOUNT, 21)
 start = world('genesis')

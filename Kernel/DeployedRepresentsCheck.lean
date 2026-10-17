@@ -26,6 +26,7 @@ open Minidregg.Kernel.DurableCommitProtocol (Snapshot)
 open Minidregg.Kernel.DurableDataIntent (DataSnapshot StableNullifier TransactionId)
 open Minidregg.Kernel.DeployedBridge (deployedR bridge encodeCell retiresCell)
 open Minidregg.Kernel.DurableReceiver (Image IntentRecord)
+open Minidregg.Kernel.DurableEngine (resume_model)
 
 set_option autoImplicit false
 

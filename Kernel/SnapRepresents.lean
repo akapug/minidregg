@@ -4,11 +4,13 @@
 Below `Compiler.DurableReceiverCore`, so a `Loaded` can carry its World and the
 proof that its snapshot represents it (FD-1 4a).  `SnapRepresents`, the
 executor's shapes, `ofIntent_run` (a represented snapshot's admitted intent is a
-`World.step` of its derived turn) and `replay_model`/`resume_model` moved here
-unchanged from `Kernel.HostRefinesWorldCore` (same namespace, same statements).
+`World.step` of its derived turn) moved here unchanged from
+`Kernel.HostRefinesWorldCore` (same namespace, same statements); `replay_model`/`resume_model`
+live in `Kernel.DurableEngine`.
 -/
 import Kernel.TurnOfIntent
 import Kernel.DurableCheckpoint
+import Kernel.DurableEngine
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.HostRefinesWorld
@@ -377,69 +379,6 @@ theorem ofIntent_run (B : Bridge R D) (H : History R TransactionId StableEvent D
   exact ofIntent_run_pinned B H rep derived charged fresh ready
     (pinsHold_of_intent derived pinned guarded)
 
-/-- What a replay does to the journal and the consumed set. -/
-theorem replay_model :
-    ∀ (records : List DurableReceiver.IntentRecord) (before after : DataSnapshot rootBytes),
-      DurableReceiver.replay rootBytes before records = some after →
-        after.model.journal =
-            (records.map fun r => (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse ++
-              before.model.journal ∧
-          ∀ n, after.model.consumed n =
-            (decide (n ∈ records.flatMap DurableReceiver.IntentRecord.nullifiers) ||
-              before.model.consumed n)
-  | [], before, after, h => by
-      simp only [DurableReceiver.replay, Option.some.injEq] at h
-      subst h
-      exact ⟨by simp, fun n => by simp⟩
-  | r :: rs, before, after, h => by
-      unfold DurableReceiver.replay at h
-      cases hb : r.bind? rootBytes with
-      | none => rw [hb] at h; cases h
-      | some intent =>
-          rw [hb] at h
-          change (match DurableDataIntent.execute .complete before intent with
-            | .accepted next => DurableReceiver.replay rootBytes next rs
-            | _ => none) = some after at h
-          split at h
-          · rename_i next he
-            have hn : next = DataSnapshot.install before intent := by
-              rcases execute_cases .complete before intent with ⟨-, -, -, a⟩ | ⟨i, -⟩
-              · rw [he] at a; exact a
-              · rw [he] at i; cases i
-            obtain ⟨hj, hc⟩ := replay_model rs next after h
-            have he' := DurableCheckpoint.IntentRecord.erase_bind hb
-            subst hn
-            refine ⟨?_, fun n => ?_⟩
-            · rw [hj]
-              show _ ++ ((intent.erase.transactionId, intent.erase) :: before.model.journal) = _
-              rw [he']
-              simp [DurableCheckpoint.IntentRecord.erase]
-            · rw [hc n]
-              show (decide _ || (if n ∈ intent.erase.nullifiers then true else
-                before.model.consumed n)) = _
-              rw [he']
-              by_cases hm : n ∈ r.nullifiers <;>
-                simp [hm, DurableCheckpoint.IntentRecord.erase, List.flatMap_cons]
-          · cases h
-
-/-- What a resume is: the whole log's journal, and the prefix's nullifiers plus
-the replayed suffix's. -/
-theorem resume_model {image : DurableReceiver.Image} {bh : Nat} {st : DurableCheckpoint.State}
-    {snap : DataSnapshot rootBytes} (h : DurableCheckpoint.resume rootBytes image bh st = some snap) :
-    snap.model.journal =
-        (image.accepted.map fun r => (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse ∧
-      ∀ n, snap.model.consumed n =
-        (decide (n ∈ (image.accepted.drop bh).flatMap DurableReceiver.IntentRecord.nullifiers) ||
-          decide (n ∈ (image.accepted.take bh).flatMap DurableReceiver.IntentRecord.nullifiers)) := by
-  unfold DurableCheckpoint.resume at h
-  split at h
-  · obtain ⟨hj, hc⟩ := replay_model _ _ _ h
-    refine ⟨?_, fun n => hc n⟩
-    rw [hj]
-    show _ ++ ((image.accepted.take bh).map fun r =>
-      (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse = _
-    rw [← List.reverse_append, ← List.map_append, List.take_append_drop]
-  · cases h
 /-- **An accepted execution from a represented snapshot is an admitted turn**:
 the executor's `.accepted next` and the derived turn give `World.admit = .ok w'`
 with `next` representing `w'` one height up (`ofIntent_run`, read at `admit`). -/
@@ -521,8 +460,6 @@ theorem preflight_of_admit (B : Bridge R D) (H : History R TransactionId StableE
 
 end Represent
 
-#assert_axioms replay_model
-#assert_axioms resume_model
 #assert_axioms cellsOf_eq
 #assert_axioms execute_cases
 #assert_axioms preflight_facts

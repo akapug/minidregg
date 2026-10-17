@@ -279,10 +279,11 @@ theorem StoreEpoch.differing_logTag (host : StoreEpoch) (logTag : String)
 
 def seedFrameName : List UInt8 := Minidregg.Compiler.PersistedCodecTags.durable_seed.toUTF8.toList
 
-/-- Seed frame v2: the name, version byte 2, then the epoch label. The v1 frame
+/-- Seed frame v3: the name, version byte 3, then the epoch label. The v1 frame
 (name and byte 1) carried no epoch, so a v1 Store's components are unknown (it
 may be of any earlier epoch, including this one's components): it refuses as
-unlabelled. -/
+unlabelled. A v2 frame (labelled, but its seed codec nests the cell codecs from
+before the Book's floors section) refuses as retired, whatever its label says. -/
 def seedFrameFor (epoch : StoreEpoch) : Framed Seed :=
   ⟨seedFrameName ++ [UInt8.ofNat PersistedCodecTags.seedWireVersion] ++ epoch.label.toUTF8.toList, seedStream⟩
 
@@ -292,6 +293,7 @@ def seedFrame : Framed Seed := seedFrameFor StoreEpoch.current
 inductive SeedEpoch where
   | labelled (epoch : StoreEpoch)
   | unlabelled (version : UInt8)
+  | retired (version : UInt8)
   | foreign
 
 def SeedEpoch.ofBytesFor (host : StoreEpoch) (bytes : List UInt8) : SeedEpoch :=
@@ -299,14 +301,15 @@ def SeedEpoch.ofBytesFor (host : StoreEpoch) (bytes : List UInt8) : SeedEpoch :=
   | none => .foreign
   | some (frame, _) =>
       if frame = (seedFrameFor host).frame then .labelled host
-      else if frame = seedFrameName ++ [1] then .unlabelled 1
       else if frame.take seedFrameName.length = seedFrameName then
         match frame.drop seedFrameName.length with
-        | 2 :: label =>
-            match String.fromUTF8? label.toByteArray >>= StoreEpoch.parse with
-            | some epoch => .labelled epoch
-            | none => .foreign
         | [version] => .unlabelled version
+        | version :: label =>
+            if version = UInt8.ofNat PersistedCodecTags.seedWireVersion then
+              match String.fromUTF8? label.toByteArray >>= StoreEpoch.parse with
+              | some epoch => .labelled epoch
+              | none => .foreign
+            else .retired version
         | _ => .foreign
       else .foreign
 
@@ -321,6 +324,8 @@ def SeedEpoch.refusalFor (host : StoreEpoch) : SeedEpoch → Option String
       | named => some s!"this Store was born in another epoch ({String.intercalate "; " named}); re-genesis the world"
   | .unlabelled version =>
       some s!"this Store's seed frame is version {version}, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads {host.label}; re-genesis the world"
+  | .retired version =>
+      some s!"this Store's seed frame is version {version}, retired: this Host reads seed frame version {PersistedCodecTags.seedWireVersion} ({host.label}), and a retired frame's seed codec is never reinterpreted; re-genesis the world"
   | .foreign => some "the Store's seed is not a durable seed frame"
 
 def SeedEpoch.refusal (epoch : SeedEpoch) : Option String :=
@@ -362,12 +367,37 @@ theorem seedEpoch_v1_refusedFor (host : StoreEpoch) (rest : List UInt8) :
     intro same
     have tails := List.append_cancel_left
       (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ [1] = seedFrameName ++ (2 :: host.label.toUTF8.toList))
+      seedFrameName ++ [1] = seedFrameName ++ (3 :: host.label.toUTF8.toList))
     simp at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
-  simp only [older, if_false, if_true]
+  simp only [older, if_false, List.take_left, List.drop_left, if_true]
   exact ⟨_, rfl⟩
+
+/-- **Every v2 Store refuses by name**, whatever label it carries: its seed
+codec predates the Book's floors section, and a retired frame is not read as a
+labelled epoch. -/
+theorem seedEpoch_v2_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 2 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 2 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
+      seedFrameName ++ 2 :: label = seedFrameName ++ (3 :: host.label.toUTF8.toList))
+    simp at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v2_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 2 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v2_refusedFor StoreEpoch.current label rest
 
 /-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
 theorem seedEpoch_v1_refused (rest : List UInt8) :
@@ -389,7 +419,8 @@ theorem StoreEpoch.differing_commands (host : StoreEpoch) (commands : String)
   simp [StoreEpoch.differing, changed]
 
 /-- The seed frame of a Store whose label is `label`. -/
-def labelledFrame (label : String) : List UInt8 := seedFrameName ++ 2 :: label.toUTF8.toList
+def labelledFrame (label : String) : List UInt8 :=
+  seedFrameName ++ UInt8.ofNat PersistedCodecTags.seedWireVersion :: label.toUTF8.toList
 
 /-- The refusal for a Store labelled `label`, which `SeedEpoch.ofBytes` reads
 from its frame alone (whatever follows). -/
@@ -461,6 +492,8 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_current
 #assert_axioms seedEpoch_ofBytes_forCurrent
 #assert_axioms seedEpoch_currentFor
+#assert_axioms seedEpoch_v2_refusedFor
+#assert_axioms seedEpoch_v2_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
 /-- Version 2: a record carries its signing subject (`IntentRecord.subject`),

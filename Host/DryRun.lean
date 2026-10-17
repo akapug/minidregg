@@ -180,7 +180,7 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   split <;> first | rfl | (rename_i h; exact absurd h (refused _))
 
 /-- The dry transport names the Store's system cell, so the tail law
@@ -217,7 +217,7 @@ theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reache
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, bounded]
 
 /-- The dry transport's only write marks `reached` and observes a conflict,
@@ -252,7 +252,7 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
         | .ok prepared =>
             DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded commit prepared) := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_prepareAppend]
   simp only [DurableReceiverIO.publish, DurableReceiverIO.Candidate.intent]
   congr 1

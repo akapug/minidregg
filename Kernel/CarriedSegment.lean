@@ -240,7 +240,7 @@ theorem install_journal (before : DataSnapshot ResourceBirthCodec.rootBytes)
 theorem install_history (before : DataSnapshot ResourceBirthCodec.rootBytes)
     (body : Body) (changes : List (CellId × List UInt8)) :
     (DataSnapshot.install before (intent before body changes)).model.history =
-      before.model.history ++ [(intent before body changes).erase.event] := rfl
+      (intent before body changes).erase.event :: before.model.history := rfl
 
 /-- Preserve every original byte and its ordering. No regenerated genesis,
 filtered origin index, balance reset or journal reset exists on this path. -/

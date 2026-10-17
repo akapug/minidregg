@@ -101,7 +101,8 @@ def genesis (config : NativeHost.Config) (alice bob : List UInt8) :
     clockTickers := []
     tailBound := 10000
     clockGenesisNow := 0
-    clockMaxStepSeconds := 300 }
+    clockMaxStepSeconds := 300
+    issuanceCap := 1000000000000000 }
 
 def derive (root : System.FilePath) (helpers : Helpers) (context : Context)
     (alice bob : List UInt8) : IO (NativeHostGenesis.Built

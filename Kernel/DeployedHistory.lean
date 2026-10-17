@@ -123,17 +123,17 @@ theorem read_bytes (c : CellId) (k : deployedR.Kind) (ns : (deployedR.layout k).
     (key : (deployedR.layout k).Key ns) (value : Option ((deployedR.layout k).Value ns)) :
     legBytes ⟨c, k, [.read ns key value]⟩ = 0 := rfl
 
-/-- The receiver's live post image has 40 bytes beyond the encoded payload:
-4 lifecycle + 4 registry + 29 protected frame + 2 version + 1 presence tag. -/
+/-- The receiver's live post image has 43 bytes beyond the encoded payload:
+4 lifecycle + 4 registry + 32 protected frame + 2 version + 1 presence tag. -/
 theorem objective_post_bytes (payload : ObjectiveActivityCell.Payload) :
     (encodeCell (some ⟨.objectiveActivity,
       ProtectedCell.stateOfOption ObjectiveActivityCell.spec (some payload)⟩)).length =
-      (ObjectiveActivityCell.payloadStream.encode payload).length + 40 := by
+      (ObjectiveActivityCell.payloadStream.encode payload).length + 43 := by
   change (List.append [68,82,2,1] (List.append [68,82,1,19]
     (ObjectiveActivityCell.spec.wireFrame ++
       (ProtectedCell.wirePayloadStream ObjectiveActivityCell.spec).encode
         (1, some payload)))).length = _
-  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL".toByteArray.toList.length = 29 := by decide +kernel
+  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v2".toByteArray.toList.length = 32 := by decide +kernel
   have versionLength : (StreamCodec.nat.encode 1).length = 2 := rfl
   simp [ProtectedCell.wirePayloadStream, StreamCodec.product, StreamCodec.option,
     ObjectiveActivityCell.spec, ObjectiveActivityCell.payloadStream, frameLength, versionLength,

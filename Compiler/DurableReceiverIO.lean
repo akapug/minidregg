@@ -252,8 +252,7 @@ call installed the entry. -/
 def receiveCandidateWithFresh (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (candidate : Candidate loaded) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) := do
-  match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot loaded.withinLog
-      loaded.resumed candidate.intent with
+  match loaded.prepare candidate.intent with
   | .inr (.replayed _) => return (false, .ordinary (.confirmed .replayed loaded.snapshot))
   | .inr (.rejected reason) => return (false, .ordinary (.rejected reason))
   | .inr _ => return (false, .ordinary (.unavailable "unexpected complete-schedule outcome"))
@@ -315,17 +314,6 @@ def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
           | .contention => receive transport rootBytes intent attempts
           | result => return result
 
-/-- Rebasing at the head keeps the image and the log start. -/
-theorem Loaded.rebase_image {rootBytes : List UInt8 → Digest} {loaded rebased : Loaded rootBytes}
-    (done : loaded.rebase = some rebased) :
-    rebased.image = loaded.image ∧ rebased.logStart = loaded.logStart := by
-  unfold Loaded.rebase at done
-  dsimp only at done
-  split at done
-  · cases done
-  · cases done
-    exact ⟨rfl, rfl⟩
-
 /-- Replay stored records onto a loaded image through the shared executor, one
 `Loaded.extend` each. The result's image is the given one followed by exactly
 these records. -/
@@ -339,8 +327,7 @@ def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
       match bound : record.bind? rootBytes with
       | none => .error "durable log record does not bind its roots"
       | some intent =>
-          match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
-              loaded.withinLog loaded.resumed intent with
+          match loaded.prepare intent with
           | .inl ready =>
               match (loaded.extend ready).track with
               | .lost reason => .error s!"durable log is not a turn log: {reason}"
@@ -409,12 +396,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
           return .error "durable log root tag differs from the replayed root"
         let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
         if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
-          match rebased : current.rebase with
-          | some next =>
-              have kept := Loaded.rebase_image rebased
-              return .ok ⟨next, by rw [kept.1]; exact extended.1,
-                by rw [kept.1]; exact extended.2.1, by rw [kept.2]; exact extended.2.2⟩
-          | none => return .error "rebase at the head does not resume through the canonical executor"
+          return .ok ⟨current.rebase, extended⟩
         return .ok ⟨current, extended⟩
 
 /-- Explicit bootstrap, separate from receipt acceptance. An existing different

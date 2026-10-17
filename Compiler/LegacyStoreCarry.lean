@@ -1,5 +1,7 @@
 /-
-Frozen Store2 boundary for the audited 3b1f628a deployment. The generic codec
+Frozen Store2 boundary for the audited 3b1f628a deployment.
+codec-shapes-regen: frozen -- these descriptors spell the deployment's OLD codec names; a regen bump
+never rewrites them. The generic codec
 below only describes source bytes; it authorizes nothing. The closed role
 converters pin old descriptors and are used only after retained-source audit.
 Transform2 begins each retained hiding key's target ratchet at the carry height;

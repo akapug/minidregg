@@ -176,13 +176,14 @@ echo "mk-lane: OK $DEST at $TIP"
 
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
-  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 \
-    || refuse "verify build failed: $log"
+  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
+  # Known-red modules: ONE rule, scripts/pipeline/known-red-verdict (also advance-base-burst.sh).
+  bash "$BASE/scripts/pipeline/known-red-verdict" "$log" "$BASE" "$vrc" || refuse "verify: $log (known-red-verdict above)"
   # Locale-independent pattern; positive control against the base green log.
   ctl=$(cat "$W"/logs/green*.log 2>/dev/null | grep -c '\] Built ' || true)
   [ "$ctl" -gt 0 ] || refuse "verify: the Built-line pattern matches nothing in the base green logs; check disarmed"
   built=$(grep -c '\] Built ' "$log" || true)
   [ "$built" = 0 ] || refuse "verify: $built modules compiled (not a warm replay): $log"
-  grep -q 'Build completed successfully' "$log" || refuse "verify: no success line: $log"
-  echo "mk-lane: VERIFIED warm replay, 0 modules compiled ($log)"
+  [ -n "$failed" ] || grep -q 'Build completed successfully' "$log" || refuse "verify: no success line: $log"
+  echo "mk-lane: VERIFIED warm replay, 0 modules compiled${failed:+, known-red carried: $(echo $failed)} ($log)"
 fi

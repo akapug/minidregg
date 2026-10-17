@@ -12,8 +12,8 @@ resumes and executes; the native helper stores opaque bytes, appends entry
   `DurableCheckpoint.resume` — materialize the checkpoint and replay only the
   records after it. No signed ingress is re-admitted here; that is the operator `audit` (`NativeHostReplay.verifyLoaded`).
 * **Receive** (`receiveLoadedDetailed`): run the shared executor at the loaded
-  snapshot (`DurableCheckpoint.prepare`), append one entry, read that one entry
-  back. Every `checkpointEvery` records the receiver seals a checkpoint of the
+  engine (`Loaded.prepare`, which IS `DurableCheckpoint.prepare` at its snapshot:
+  `Loaded.prepare_eq`), append one entry, read that one entry back. Every `checkpointEvery` records the receiver seals a checkpoint of the
   new head and rebases its in-memory state on it.
 * A store holding the retired whole-image record refuses (the helper reports
   it); there is no migration: re-genesis.
@@ -36,6 +36,7 @@ import Kernel.SessionIndex
 import Kernel.DeployedRepresentsCheck
 import Kernel.DeployedCharge
 import Kernel.TurnLog
+import Kernel.DurableEngine
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -629,42 +630,6 @@ theorem entriesOf_step {rootBytes : List UInt8 → Digest} (image : Image)
               rw [newIds]; tauto
             simp [absent, old]
 
-/-- A cell list read back by `Seed.lookup` gives each listed id its own bytes. -/
-theorem seedLookup_map (ids : List CellId) (bytes : CellId → List UInt8) (id : CellId)
-    (member : id ∈ ids) : Seed.lookup (ids.map fun i => (i, bytes i)) id = some (bytes id) := by
-  induction ids with
-  | nil => cases member
-  | cons a rest ih =>
-      simp only [List.map_cons, Seed.lookup]
-      split
-      next same => subst same; rfl
-      next differs =>
-        rcases List.mem_cons.mp member with rfl | inRest
-        · exact absurd rfl differs
-        · exact ih inRest
-
-/-- Materializing the head and resuming from it with nothing to replay serves
-the same entries. -/
-theorem entriesOf_rebase {rootBytes : List UInt8 → Digest} (image : Image)
-    (snapshot rebased : DataSnapshot rootBytes) (chain : Digest)
-    (resumed : resume rootBytes image image.accepted.length (State.ofSnapshot image snapshot) =
-      some rebased) :
-    entriesOf image rebased chain = entriesOf image snapshot chain := by
-  unfold resume at resumed
-  split at resumed
-  · simp only [List.drop_length, replay, Option.some.injEq] at resumed
-    subst resumed
-    unfold entriesOf
-    congr 1
-    apply List.map_congr_left
-    intro id member
-    rw [← (State.snapshot rootBytes _ _).coherent id, ← snapshot.coherent id]
-    show (_, rootBytes ((Seed.lookup (State.ofSnapshot image snapshot).cells id).getD _)) = _
-    simp only [State.ofSnapshot]
-    rw [seedLookup_map _ _ _ member]
-    rfl
-  · cases resumed
-
 /-- A checkpoint body's world-root tree, evaluated once by its open
 (`DurableCheckpointCodec.openSealedWith`); the full open and the light open
 both advance it to the head. -/
@@ -1015,7 +980,14 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   image : Image
   baseHeight : Nat
   base : State
+  /-- The state at the head, as data (`DurableEngine.Engine`): the one
+  representation a session holds. `Loaded.snapshot` is its view. -/
+  engine : DurableEngine.Engine
+  /-- The engine's view (`snapshotExact`), kept beside it: O(1) to build, and
+  an opaque field to every consumer that reasons about the snapshot (unfolding
+  the view into its closures makes defeq checks evaluate the root hash). -/
   snapshot : DataSnapshot rootBytes
+  snapshotExact : snapshot = engine.view rootBytes
   withinLog : baseHeight ≤ image.accepted.length
   resumed : resume rootBytes image baseHeight base = some snapshot
   /-- The log chain's start and its value after the last accepted record. -/
@@ -1043,6 +1015,14 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   `findIdx?` over the log on a receipt lookup. -/
   txs : SessionIndex.TxIndex
   txsExact : txs.Exact image.accepted
+  /-- Nullifier ↦ the first accepted index consuming it: a past read's consumed
+  set is this index against the read's base height (`KeyIndex.below_eq`). -/
+  spentAt : SessionIndex.KeyIndex StableNullifier
+  spentAtExact : spentAt.Exact IntentRecord.nullifiers image.accepted
+  /-- Written cell id ↦ the first accepted index writing it: a past read's
+  admissibility check (`Loaded.admissibleAt`). -/
+  writesAt : SessionIndex.KeyIndex CellId
+  writesAtExact : writesAt.Exact (fun record => record.writes.map DataWrite.cellId) image.accepted
   /-- The receipt root after each accepted record, oldest first: read from each
   entry's verified tag on open (`DurableLogTags.verifyTags_root`), pushed at
   every append (`Loaded.extend`). `none` where this image never saw the root
@@ -1127,20 +1107,26 @@ seed as the height-0 checkpoint). History selection and the audit walk use
 this; the request path never does. -/
 def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : Image) :
     Except String (Loaded rootBytes) :=
-  match resumed : resume rootBytes image 0 (State.ofSeed image.seed) with
+  match found : DurableEngine.resumeEngine rootBytes image 0 (State.ofSeed image.seed) with
   | none => .error "durable image journal does not replay through the canonical executor"
-  | some snapshot =>
+  | some engine =>
       let chain := chainAfter logStart image.accepted
-      let built := RootCache.build (entriesOf image snapshot chain)
-      match trackOf rootBytes image resumed with
+      let built := RootCache.build (entriesOf image (engine.view rootBytes) chain)
+      match trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found) with
       | .lost reason => .error s!"durable image is not a turn log: {reason}"
       | track@(.held _ _) =>
-      .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
+      .ok ⟨image, 0, State.ofSeed image.seed, engine, engine.view rootBytes, rfl, Nat.zero_le _,
+        DurableEngine.resume_of_resumeEngine found, logStart, chain,
         rfl, built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
+        SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
+        SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+        SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
+        SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
+          image.accepted,
         Array.replicate image.accepted.length none, Array.size_replicate,
         if image.accepted.isEmpty then some [] else none, none, track⟩
 
@@ -1295,18 +1281,22 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       if sized : rootLog.size ≠ image.accepted.length then
         return .error "durable log entries and records differ in number"
       else if within : baseHeight ≤ image.accepted.length then
-        match resumed : resume rootBytes image baseHeight base with
+        match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
-        | some snapshot =>
-            let built : (cache : RootCache) ×' RootsExact cache (entriesOf image snapshot headChain) :=
+        | some engine =>
+            have resumed := DurableEngine.resume_of_resumeEngine found
+            let built : (cache : RootCache) ×'
+                RootsExact cache (entriesOf image (engine.view rootBytes) headChain) :=
               match opened.2.2.2.2 with
-              | none => RootCache.build (entriesOf image snapshot headChain)
+              | none => RootCache.build (entriesOf image (engine.view rootBytes) headChain)
               | some ⟨baseChain, cache, exact⟩ =>
                   exact.advance (checkpointSlots (rootBytes := rootBytes) image base (image.accepted.drop baseHeight)
                       image.accepted.length headChain)
-                    (entriesOf_checkpoint_step image base baseHeight snapshot resumed baseChain headChain)
+                    (entriesOf_checkpoint_step image base baseHeight (engine.view rootBytes) resumed
+                      baseChain headChain)
             let loaded : Loaded rootBytes :=
-              ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
+              ⟨image, baseHeight, base, engine, engine.view rootBytes, rfl, within, resumed, logStart,
+              headChain,
               (by show chains.getLast?.getD logStart = _; rw [chainsEq]
                   exact DurableLogTags.chainPrefixes_getLast? logStart records),
               built.1, built.2,
@@ -1314,6 +1304,12 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
               SessionIndex.TxIndex.ofRecords_exact image.accepted,
+              SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
+              SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+              SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId)
+                image.accepted,
+              SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
+                image.accepted,
               rootLog, Decidable.of_not_not sized, some frontier,
               stored.entries.getLast?.map (·.tag), trackOf rootBytes image resumed⟩
             if let .lost reason := loaded.track then
@@ -1369,22 +1365,63 @@ def DetailedResult.toResult {rootBytes : List UInt8 → Digest}
   | .exact kind appended => .confirmed kind appended.next.snapshot
   | .ordinary result => result
 
-/-- The prepared successor: same checkpoint base, one more record, the chain
-advanced by it, and the root cache advanced by its slot writes (one path each). -/
+/-- The executor at the loaded engine, as `DurableCheckpoint.prepare` reads it
+(`Loaded.prepare_eq`): the journal guard off the engine's index, preflight off
+its tables. -/
+def Loaded.prepare {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (intent : DataIntent rootBytes) :
+    Sum (Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
+      (Outcome rootBytes) :=
+  match intent.checkBounds with
+  | .error reason => .inr (.rejected reason)
+  | .ok () =>
+    match executed : loaded.engine.execute rootBytes intent with
+    | .accepted next =>
+        have spec : DurableDataIntent.execute .complete loaded.snapshot intent = .accepted next := by
+          rw [loaded.snapshotExact, ← DurableEngine.Engine.execute_eq]; exact executed
+        .inl ⟨next, spec, resume_append rootBytes loaded.image loaded.baseHeight loaded.base
+          loaded.snapshot next intent loaded.withinLog loaded.resumed spec⟩
+    | outcome => .inr outcome
+
+/-- **Refinement**: the engine's prepare is the protocol's at the loaded snapshot. -/
+theorem Loaded.prepare_eq {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (intent : DataIntent rootBytes) :
+    loaded.prepare intent = DurableCheckpoint.prepare loaded.image loaded.baseHeight loaded.base
+      loaded.snapshot
+      loaded.withinLog loaded.resumed intent := by
+  have same := DurableEngine.Engine.execute_eq rootBytes loaded.engine intent
+  rw [← loaded.snapshotExact] at same
+  unfold Loaded.prepare DurableCheckpoint.prepare
+  generalize intent.checkBounds = bounds
+  cases bounds with
+  | error reason => rfl
+  | ok unit =>
+      cases unit
+      dsimp only
+      split <;> split <;> simp_all <;> rename_i notAccepted <;> exact notAccepted _ same.symm
+
+/-- The prepared successor: same checkpoint base, one more record installed
+into the engine, the chain advanced by it, and the root cache advanced by its
+slot writes (one path each). -/
 def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     {intent : DataIntent rootBytes}
     (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent) :
     Loaded rootBytes :=
   let record := IntentRecord.ofIntent intent
   let chain := chainStep loaded.chain record
+  let engine := loaded.engine.install rootBytes intent
+  have nextEq : ready.next = engine.view rootBytes := by
+    rw [DurableReceiver.execute_accepted_install _ _ _ ready.executed, loaded.snapshotExact,
+      DurableEngine.Engine.view_install]
   let roots := loaded.rootsExact.advance (recordSlots (loaded.image.accepted.length + 1) chain record)
-    (entriesOf_step loaded.image loaded.snapshot ready.next intent loaded.chain chain ready.executed)
+    (entriesOf_step loaded.image loaded.snapshot (engine.view rootBytes) intent loaded.chain chain
+      (nextEq ▸ ready.executed))
   -- The served root after this record (`Loaded.worldRoot` of the result), kept
   -- as its receipt root.
   let served := roots.1.root
-  ⟨loaded.image.append intent, loaded.baseHeight, loaded.base, ready.next,
+  ⟨loaded.image.append intent, loaded.baseHeight, loaded.base, engine, engine.view rootBytes, rfl,
     by simp only [Image.append, List.length_append]; exact Nat.le_add_right_of_le loaded.withinLog,
-    ready.resumed, loaded.logStart, chain,
+    nextEq ▸ ready.resumed, loaded.logStart, chain,
     by show chainStep loaded.chain record = _
        rw [loaded.chainExact]; simp [chainAfter, Image.append, List.foldl_append, record],
     roots.1, roots.2,
@@ -1400,12 +1437,28 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     loaded.txs.admitAt loaded.image.accepted.length record,
     by unfold Image.append
        exact SessionIndex.TxIndex.admitAt_exact loaded.txsExact record,
+    loaded.spentAt.admitAt IntentRecord.nullifiers loaded.image.accepted.length record,
+    by unfold Image.append
+       exact SessionIndex.KeyIndex.admitAt_exact loaded.spentAtExact record,
+    loaded.writesAt.admitAt (fun record => record.writes.map DataWrite.cellId)
+      loaded.image.accepted.length record,
+    by unfold Image.append
+       exact SessionIndex.KeyIndex.admitAt_exact loaded.writesAtExact record,
     loaded.rootLog.push (some served),
     by simp [Image.append, loaded.rootLogSize],
     loaded.frontier.map fun frontier => DurableHistory.Frontier.push frontier
       (leafDigest (loaded.image.accepted.length + 1) (recordFrame.encode record) chain served),
     none,
-    loaded.track.advance ready.executed (by simp [Image.append])⟩
+    loaded.track.advance (nextEq ▸ ready.executed) (by simp [Image.append])⟩
+
+/-- **The extended snapshot is the executor's next snapshot.** -/
+theorem Loaded.extend_snapshot {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent) :
+    (loaded.extend ready).snapshot = ready.next := by
+  show (loaded.engine.install rootBytes intent).view rootBytes = ready.next
+  rw [DurableReceiver.execute_accepted_install _ _ _ ready.executed, loaded.snapshotExact,
+    DurableEngine.Engine.view_install]
 
 /-- **The root log keeps the served root**: after an append, the newest stored
 receipt root is the root the extended image serves. -/
@@ -1425,36 +1478,35 @@ theorem Loaded.extend_rootLog_prefix {rootBytes : List UInt8 → Digest} (loaded
   rw [if_neg (Nat.ne_of_lt earlier)]
 
 #assert_axioms Loaded.extend_rootLog_back
+#assert_axioms Loaded.extend_snapshot
+#assert_axioms Loaded.prepare_eq
 #assert_axioms Loaded.extend_rootLog_prefix
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
-open of a checkpoint at the head would. The root cache carries over: the
-rebased snapshot serves the same entries (`entriesOf_rebase`). -/
+open of a checkpoint at the head would. The engine and the root cache carry
+over unchanged: resuming the head's own state at the head IS the head's
+snapshot (`DurableEngine.resume_rebase`), so nothing is replayed or rebuilt. -/
 def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
-    Option (Loaded rootBytes) :=
-  let state := State.ofSnapshot loaded.image loaded.snapshot
-  let height := loaded.image.accepted.length
-  match resumed : resume rootBytes loaded.image height state with
-  | none => none
-  | some snapshot =>
-      have same := entriesOf_rebase loaded.image loaded.snapshot snapshot loaded.chain resumed
-      some ⟨loaded.image, height, state, snapshot, Nat.le_refl _, resumed, loaded.logStart,
-        loaded.chain, loaded.chainExact, loaded.roots,
-        by rw [same]; exact loaded.rootsExact,
-        loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
-        loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
-        loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag,
-        loaded.track.recheck loaded.image resumed⟩
-
-def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
-  loaded.rebase.getD loaded
+  ⟨loaded.image, loaded.image.accepted.length,
+    ⟨loaded.image.seed.absentBytes, loaded.cells, loaded.snapshot.model.available⟩,
+    loaded.engine, loaded.snapshot, loaded.snapshotExact, Nat.le_refl _,
+    DurableEngine.resume_rebase loaded.resumed, loaded.logStart,
+    loaded.chain, loaded.chainExact, loaded.roots, loaded.rootsExact,
+    loaded.index, loaded.indexExact, loaded.links, loaded.linksExact,
+    loaded.ids, loaded.idsExact, loaded.txs, loaded.txsExact,
+    loaded.spentAt, loaded.spentAtExact, loaded.writesAt, loaded.writesAtExact,
+    loaded.rootLog, loaded.rootLogSize, loaded.frontier, loaded.headTag, loaded.track⟩
 
-theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
-    loaded.rebaseD.image = loaded.image := by
-  unfold rebaseD rebase
-  dsimp only
-  split <;> rfl
+/-- The rebased base is the head's state (`State.ofSnapshot`). -/
+theorem Loaded.rebase_base {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.rebase.base = State.ofSnapshot loaded.image loaded.snapshot := rfl
+
+/-- Rebasing keeps the image, the log start and the snapshot. -/
+theorem Loaded.rebase_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.rebase.image = loaded.image ∧ loaded.rebase.logStart = loaded.logStart ∧
+      loaded.rebase.snapshot = loaded.snapshot :=
+  ⟨rfl, rfl, rfl⟩
 
 /-- **The index is the replay's index**: the cached index is the fold of the
 whole log, and equally the fold of the checkpoint's prefix advanced by the
@@ -1505,17 +1557,25 @@ def Loaded.build {rootBytes : List UInt8 → Digest} (image : Image) (baseHeight
     (chainExact : chain = chainAfter logStart image.accepted)
     (rootLog : Array (Option Digest)) (rootLogSize : rootLog.size = image.accepted.length) :
     Except String {built : Loaded rootBytes // built.image = image ∧ built.logStart = logStart} :=
-  match resumed : resume rootBytes image baseHeight base with
+  match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
   | none => .error "durable image journal does not replay through the canonical executor"
-  | some snapshot =>
-      let built := RootCache.build (entriesOf image snapshot chain)
-      .ok ⟨⟨image, baseHeight, base, snapshot, withinLog, resumed, logStart, chain, chainExact,
+  | some engine =>
+      let built := RootCache.build (entriesOf image (engine.view rootBytes) chain)
+      .ok ⟨⟨image, baseHeight, base, engine, engine.view rootBytes, rfl, withinLog,
+        DurableEngine.resume_of_resumeEngine found,
+        logStart, chain, chainExact,
         built.1, built.2,
         PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
         SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
         SessionIndex.TxIndex.ofRecords image.accepted,
         SessionIndex.TxIndex.ofRecords_exact image.accepted,
-        rootLog, rootLogSize, none, none, trackOf rootBytes image resumed⟩, rfl, rfl⟩
+        SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
+        SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+        SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
+        SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
+          image.accepted,
+        rootLog, rootLogSize, none, none,
+        trackOf rootBytes image (DurableEngine.resume_of_resumeEngine found)⟩, rfl, rfl⟩
 
 /-- **The loaded image cut at log height `height`**, from an open that kept its
 chain prefixes (`loadChained`): the chain after `height` records is read off
@@ -1583,6 +1643,120 @@ def Loaded.atPrefixFrom {rootBytes : List UInt8 → Digest} (loaded : Loaded roo
           resume rootBytes (loaded.prefixImage height) base.height base.state
         else resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
     | none => resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
+
+/-- The base a past read at `height` resumes from, as `atPrefixFrom` picks it:
+the open's own base, else the kept checkpoint, else the seed. -/
+def Loaded.pastBase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (kept : Option (loaded.Kept)) (height : Nat) : Nat × State :=
+  if loaded.baseHeight ≤ height then (loaded.baseHeight, loaded.base)
+  else
+    match kept with
+    | some base =>
+        if base.height ≤ height then (base.height, base.state)
+        else (0, State.ofSeed loaded.image.seed)
+    | none => (0, State.ofSeed loaded.image.seed)
+
+theorem Loaded.atPrefixFrom_pastBase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (kept : Option (loaded.Kept)) (height : Nat) :
+    loaded.atPrefixFrom kept height = resume rootBytes (loaded.prefixImage height)
+      (loaded.pastBase kept height).1 (loaded.pastBase kept height).2 := by
+  unfold Loaded.atPrefixFrom Loaded.pastBase
+  split
+  · rfl
+  · cases kept with
+    | none => rfl
+    | some base =>
+        simp only
+        split <;> rfl
+
+theorem Loaded.pastBase_le {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (kept : Option (loaded.Kept)) (height : Nat) :
+    (loaded.pastBase kept height).1 ≤ height ∧
+      (loaded.pastBase kept height).1 ≤ loaded.image.accepted.length := by
+  unfold Loaded.pastBase
+  split
+  · rename_i above
+    exact ⟨above, loaded.withinLog⟩
+  · cases kept with
+    | none => exact ⟨Nat.zero_le _, Nat.zero_le _⟩
+    | some base =>
+        simp only
+        split
+        · rename_i above
+          exact ⟨above, base.within⟩
+        · exact ⟨Nat.zero_le _, Nat.zero_le _⟩
+
+/-- A checkpoint state's admissibility at a past height, off the session's
+indexes: duplicate-freedom in one pass, every identifier the seed's or written
+below `height` (`writesAt`), no pass over the prefix's records. -/
+def Loaded.admissibleAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) (state : State) : Bool :=
+  let seeded : Std.HashSet CellId := Std.HashSet.ofList (loaded.image.seed.cells.map Prod.fst)
+  DurableEngine.nodupFast (state.cells.map Prod.fst) &&
+    decide (state.absentBytes = loaded.image.seed.absentBytes) &&
+    (state.cells.map Prod.fst).all fun cellId =>
+      seeded.contains cellId || (loaded.writesAt[cellId]?).any fun first => decide (first < height)
+
+theorem Loaded.admissibleAt_iff {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) (state : State) :
+    loaded.admissibleAt height state = true ↔ state.Admissible (loaded.prefixImage height) := by
+  unfold Loaded.admissibleAt State.Admissible Image.cellIds Loaded.prefixImage
+  simp only [Bool.and_eq_true, DurableEngine.nodupFast_iff, decide_eq_true_eq, List.all_eq_true,
+    Bool.or_eq_true, Std.HashSet.contains_ofList, List.contains_iff_mem,
+    SessionIndex.KeyIndex.below_eq loaded.writesAtExact, List.mem_eraseDups, List.mem_append,
+    and_assoc]
+
+/-- The engine at a past base height `height`: the base state's cells, the
+prefix's nullifiers and transaction ids read off the session's first-index
+tables (`spentAt`, `txs`) against `height`. Nothing walks the prefix. -/
+def Loaded.engineAt {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) (height : Nat)
+    (state : State) : DurableEngine.Engine :=
+  DurableEngine.Engine.ofIndexed state loaded.image.accepted height
+    (fun nullifier => (loaded.spentAt[nullifier]?).any fun first => decide (first < height))
+    (SessionIndex.KeyIndex.below_eq loaded.spentAtExact height)
+    (fun transactionId => (loaded.txs[transactionId]?).any fun first => decide (first < height))
+    (SessionIndex.TxIndex.below_eq loaded.txsExact height)
+
+/-- **The past read, compiled**: from the base `pastBase` picks, the indexed
+engine replays only the records between that base and `height`. -/
+def Loaded.atPrefixFast {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (kept : Option (loaded.Kept)) (height : Nat) : Option (DataSnapshot rootBytes) :=
+  let start := loaded.pastBase kept height
+  if loaded.admissibleAt height start.2 then
+    ((loaded.engineAt start.1 start.2).replay rootBytes
+      ((loaded.image.accepted.drop start.1).take (height - start.1))).map
+        (DurableEngine.Engine.view rootBytes)
+  else none
+
+/-- **Refinement, compiled**: every past read the host runs is `atPrefixFast`;
+the replacement is this theorem, not a trusted `implemented_by`. -/
+@[csimp] theorem Loaded.atPrefixFrom_eq_atPrefixFast :
+    @Loaded.atPrefixFrom = @Loaded.atPrefixFast := by
+  funext rootBytes loaded kept height
+  rw [Loaded.atPrefixFrom_pastBase]
+  unfold Loaded.atPrefixFast
+  have bounded := loaded.pastBase_le kept height
+  generalize loaded.pastBase kept height = start at bounded ⊢
+  obtain ⟨base, state⟩ := start
+  simp only at bounded ⊢
+  unfold resume
+  by_cases admissible : state.Admissible (loaded.prefixImage height)
+  · rw [if_pos admissible, if_pos ((loaded.admissibleAt_iff height state).mpr admissible)]
+    have takeEq : (loaded.prefixImage height).accepted.take base = loaded.image.accepted.take base := by
+      show (loaded.image.accepted.take height).take base = _
+      rw [List.take_take, Nat.min_eq_left bounded.1]
+    have dropEq : (loaded.prefixImage height).accepted.drop base =
+        (loaded.image.accepted.drop base).take (height - base) := by
+      show (loaded.image.accepted.take height).drop base = _
+      rw [List.drop_take]
+    rw [takeEq, dropEq, ← DurableEngine.Engine.view_ofIndexed rootBytes state loaded.image.accepted base
+      _ (SessionIndex.KeyIndex.below_eq loaded.spentAtExact base)
+      _ (SessionIndex.TxIndex.below_eq loaded.txsExact base), DurableEngine.Engine.replay_view]
+    rfl
+  · rw [if_neg admissible,
+      if_neg (fun fast => admissible ((loaded.admissibleAt_iff height state).mp fast))]
+
+#assert_axioms Loaded.atPrefixFrom_eq_atPrefixFast
 
 theorem Loaded.prefixImage_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     loaded.prefixImage loaded.height = loaded.image := by
@@ -1722,16 +1896,24 @@ def Loaded.prefixOwn {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBy
           rw [chainsExact, DurableLogTags.chainPrefixes_getElem? _ _ _ within] at found
           exact (Option.some.inj found).symm
         let image : Image := ⟨loaded.image.seed, loaded.image.accepted.take height⟩
-        match resumed : resume rootBytes image 0 (State.ofSeed loaded.image.seed) with
+        match found : DurableEngine.resumeEngine rootBytes image 0 (State.ofSeed loaded.image.seed) with
         | none => .error "durable image journal does not replay from genesis through the canonical executor"
-        | some snapshot =>
-            let built := RootCache.build (entriesOf image snapshot chain)
-            .ok ⟨⟨image, 0, State.ofSeed loaded.image.seed, snapshot, Nat.zero_le _, resumed,
+        | some engine =>
+            have resumed := DurableEngine.resume_of_resumeEngine found
+            let built := RootCache.build (entriesOf image (engine.view rootBytes) chain)
+            .ok ⟨⟨image, 0, State.ofSeed loaded.image.seed, engine, engine.view rootBytes, rfl,
+              Nat.zero_le _, resumed,
               loaded.logStart, chain, chainExact, built.1, built.2,
               PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
               SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
               SessionIndex.TxIndex.ofRecords image.accepted,
               SessionIndex.TxIndex.ofRecords_exact image.accepted,
+              SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
+              SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+              SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId)
+                image.accepted,
+              SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
+                image.accepted,
               Array.replicate image.accepted.length none, Array.size_replicate, none, none,
               trackOf rootBytes image resumed⟩,
               rfl, rfl, rfl, rfl, rfl⟩
@@ -1791,8 +1973,6 @@ theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
 #guard_msgs (whitespace := lax) in #print axioms entriesOf_step
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.cachedSeal_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cachedSeal_root
-/-- info: 'Minidregg.Compiler.DurableReceiverIO.entriesOf_rebase' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms entriesOf_rebase
 /-- info: 'Minidregg.Compiler.DurableReceiverIO.stateEntries_ofSnapshot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stateEntries_ofSnapshot
 
@@ -1821,13 +2001,13 @@ def checkpointDue {rootBytes : List UInt8 → Digest} (transport : Transport)
 /-- After a stored checkpoint, rebase on it; otherwise keep the base. -/
 def afterCheckpoint {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : Loaded rootBytes :=
-  if stored then loaded.rebaseD else loaded
+  if stored then loaded.rebase else loaded
 
 theorem afterCheckpoint_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : (afterCheckpoint loaded stored).image = loaded.image := by
   unfold afterCheckpoint
   split
-  · exact Loaded.rebaseD_image _
+  · exact (Loaded.rebase_image _).1
   · rfl
 
 /-- **The checkpoint differential** (operator diagnostic): rebuild the stored
@@ -1858,8 +2038,7 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
       for record in records.take height do
         let some intent := record.bind? rootBytes
           | return .error "durable log record does not bind its roots"
-        match prepare current.image current.baseHeight current.base current.snapshot
-            current.withinLog current.resumed intent with
+        match current.prepare intent with
         | .inl ready =>
             let extended := current.extend ready
             current := afterCheckpoint extended (checkpointDue transport extended)

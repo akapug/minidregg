@@ -327,7 +327,7 @@ descriptors stay opaque bytes authenticated by their original profile's record.
 Hash collision resistance is external; digest equality is not byte equality. -/
 def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v2".toUTF8.toList ++
+  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v3".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
 
 def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
@@ -337,7 +337,7 @@ def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.reg
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v3".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)
@@ -352,10 +352,10 @@ def appRequestFromSourceBytes (domain semantics : Digest) (federation : Federati
   target := ⟨spec.ticket.scope.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v3".toUTF8.toList
     originalSourceBytes).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v3".toUTF8.toList
     originalSourceBytes).digest
   nonce := spec.ticket.issueNonce
   height := height

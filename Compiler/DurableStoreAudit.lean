@@ -205,8 +205,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
   for (height, record, entry) in (List.range' 1 records.length).zip (records.zip stored.entries) do
     let some intent := record.bind? rootBytes
       | return refused s!"the record at height {height} does not bind its roots"
-    match prepare current.image current.baseHeight current.base current.snapshot
-        current.withinLog current.resumed intent with
+    match current.prepare intent with
     | .inl ready => current := current.extend ready
     | .inr _ => return refused s!"the record at height {height} does not replay through the canonical executor"
     indexAt := (trailerCarried entry.tag).map (·.indexRoot) |>.getD indexAt

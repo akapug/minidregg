@@ -1,12 +1,14 @@
 /-
 # Compiler.CanonicalResourcePageMaterializer
 
-The existing finite Book is the wire carrier. Accounts and both sparse-map
-supports are sorted; all nonzero coordinates are encoded, including balances
+The existing finite Book is the wire carrier. Accounts and the three
+sparse-map supports (balances, leases, floors) are sorted; all nonzero coordinates are encoded, including balances
 outside the registered account set. There is no bounded-book twin or caller
 post-state. Absent book fields remain distinct from a present empty book.
 
-Version 2 replaces the countability/unary representation and length roots.
+Version 2 replaced the countability/unary representation and length roots.
+Version 3 adds the Book's floors section and the `setFloor`/`sweep`
+operations; version-2 frames are refused, not reinterpreted.
 The codec is mechanically composed from compact first-order stream codecs;
 decoding additionally requires exact re-encoding. State roots use the actual
 Lean cSHAKE256 implementation. Hash collision resistance is an explicit
@@ -74,15 +76,18 @@ def leaseStream : StreamCodec LeaseRecord :=
       wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
     (by intro lease; rfl)
 
-abbrev BookTuple := List Nat × List ((Nat × Nat) × Int) × List (Nat × Option LeaseRecord)
+abbrev BookTuple := List Nat × List ((Nat × Nat) × Int) × List (Nat × Option LeaseRecord) ×
+  List ((Nat × Nat) × Nat)
 
 def bookTuple (book : Book) : BookTuple :=
-  (book.accounts.sort (· ≤ ·), entries book.balances, entries book.leaseRecords)
+  (book.accounts.sort (· ≤ ·), entries book.balances, entries book.leaseRecords,
+    entries book.floors)
 
 def bookOfTuple (wire : BookTuple) : Book where
   accounts := wire.1.toFinset
   balances := fromEntries wire.2.1
-  leaseRecords := fromEntries wire.2.2
+  leaseRecords := fromEntries wire.2.2.1
+  floors := fromEntries wire.2.2.2
 
 @[simp] theorem bookOfTuple_bookTuple (book : Book) : bookOfTuple (bookTuple book) = book := by
   cases book
@@ -93,13 +98,16 @@ def bookTupleStream : StreamCodec BookTuple :=
     (StreamCodec.product
       (StreamCodec.list (StreamCodec.product
         (StreamCodec.product StreamCodec.nat StreamCodec.nat) intStream))
-      (StreamCodec.list (StreamCodec.product StreamCodec.nat
-        (StreamCodec.option leaseStream))))
+      (StreamCodec.product
+        (StreamCodec.list (StreamCodec.product StreamCodec.nat
+          (StreamCodec.option leaseStream)))
+        (StreamCodec.list (StreamCodec.product
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat) StreamCodec.nat))))
 
 /-- The lax tuple codec above spells every tuple, including unsorted,
 duplicated and explicit-zero ones; `bookStream` spells only canonical books
 and REFUSES the rest in the stream decoder (sorted strict account list, strictly
-key-sorted non-zero map entries). Its bytes are the tuple codec's bytes at the
+key-sorted non-zero map entries: balances, leases, floors). Its bytes are the tuple codec's bytes at the
 canonical tuple (`bookStream_encode`). -/
 def bookStream : StreamCodec Book :=
   StreamCodec.xmap
@@ -107,9 +115,12 @@ def bookStream : StreamCodec Book :=
       (StreamCodec.product
         (FiniteDependentMapCodec.mapStream (StreamCodec.product StreamCodec.nat StreamCodec.nat)
           (fun _ => intStream))
-        (FiniteDependentMapCodec.mapStream StreamCodec.nat (fun _ => StreamCodec.option leaseStream))))
-    (fun book => (book.accounts, book.balances, book.leaseRecords))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+        (StreamCodec.product
+          (FiniteDependentMapCodec.mapStream StreamCodec.nat (fun _ => StreamCodec.option leaseStream))
+          (FiniteDependentMapCodec.mapStream (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+            (fun _ => StreamCodec.nat)))))
+    (fun book => (book.accounts, book.balances, book.leaseRecords, book.floors))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro book; rfl)
 
 private theorem encodeMany_entryStream {K V : Type} (keyStream : StreamCodec K)
@@ -164,9 +175,9 @@ def stateStream : StreamCodec (Store CanonicalResourceKernel.layout) :=
     (by intro state; exact (state_ext state).symm)
     (by intro wire; cases wire <;> simp [bookAt, stateOfOption])
 
-def wireVersion : Nat := 2
+def wireVersion : Nat := 3
 
-def wireFrame : List UInt8 := [68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,2]
+def wireFrame : List UInt8 := [68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,3]
 
 /-- The resource frame and the codec's kind byte, CHECKED, then one value.
 Every stream below is canonical, so the decoder accepts exactly the encodings
@@ -194,7 +205,7 @@ theorem framedCodec_decode_iff {α : Type} (kind : UInt8) (stream : StreamCodec 
 def stateCodec : LawfulCodec (Store CanonicalResourceKernel.layout) :=
   framedCodec 0 stateStream
 
-def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v2".toUTF8.toList
+def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v3".toUTF8.toList
 
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest
@@ -212,6 +223,9 @@ def operationWire : Operation → OperationWire
   | .fee payer collector asset amount => (3, [payer, collector, asset, amount])
   | .lease leaseId holder lessor asset rate epochs starts =>
       (4, [leaseId, holder, lessor, asset, rate, epochs, starts])
+  | .setFloor asset account floor => (5, [asset, account, floor])
+  | .sweep holder commons asset permille epochs amount =>
+      (6, [holder, commons, asset, permille, epochs, amount])
 
 def operationOfWire : OperationWire → Option Operation
   | (0, [source, destination, asset, amount]) => some (.transfer source destination asset amount)
@@ -220,6 +234,9 @@ def operationOfWire : OperationWire → Option Operation
   | (3, [payer, collector, asset, amount]) => some (.fee payer collector asset amount)
   | (4, [leaseId, holder, lessor, asset, rate, epochs, starts]) =>
       some (.lease leaseId holder lessor asset rate epochs starts)
+  | (5, [asset, account, floor]) => some (.setFloor asset account floor)
+  | (6, [holder, commons, asset, permille, epochs, amount]) =>
+      some (.sweep holder commons asset permille epochs amount)
   | _ => none
 
 @[simp] theorem operationOfWire_operationWire (operation : Operation) :
@@ -320,6 +337,12 @@ theorem reject_version_one (payload : List UInt8) :
     stateCodec.decode
       ([68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,1] ++ payload) = none := rfl
 
+/-- So is version 2, the Book without floors: an old state is refused, never
+read as a Book whose floors are all zero. -/
+theorem reject_version_two (payload : List UInt8) :
+    stateCodec.decode
+      ([68,82,69,71,71,47,82,69,83,79,85,82,67,69,47,2] ++ payload) = none := rfl
+
 /-- The superseded countability materializer emitted only zero-byte unary
 strings; they are all refused, including the empty string. -/
 theorem reject_legacy_unary (count : Nat) :
@@ -395,43 +418,64 @@ private theorem entries_nonzero {K V : Type} [LinearOrder K] [Zero V] [Decidable
 merely proving that the canonical encoder never emits the bad shape. -/
 theorem rejects_duplicate_accounts :
     stateCodec.decode (wireFrame ++ [0, 1] ++
-      bookTupleStream.encode ([7, 7], [], [])) = none := by
+      bookTupleStream.encode ([7, 7], [], [], [])) = none := by
   rw [decode_tuple_eq_none_iff]
   intro same
-  have unique : (bookTuple (bookOfTuple ([7, 7], [], []))).1.Nodup :=
-    (bookOfTuple ([7, 7], [], [])).accounts.sort_nodup (· ≤ ·)
+  have unique : (bookTuple (bookOfTuple ([7, 7], [], [], []))).1.Nodup :=
+    (bookOfTuple ([7, 7], [], [], [])).accounts.sort_nodup (· ≤ ·)
   rw [same] at unique
   simp at unique
 
 theorem rejects_duplicate_balance_coordinates :
     stateCodec.decode (wireFrame ++ [0, 1] ++
-      bookTupleStream.encode ([1], [((1, 0), 5), ((1, 0), 5)], [])) = none := by
+      bookTupleStream.encode ([1], [((1, 0), 5), ((1, 0), 5)], [], [])) = none := by
   rw [decode_tuple_eq_none_iff]
   intro same
   have unique := entries_keys_nodup
-    (bookOfTuple ([1], [((1, 0), 5), ((1, 0), 5)], [])).balances
-  change ((bookTuple (bookOfTuple ([1], [((1, 0), 5), ((1, 0), 5)], []))).2.1.map Prod.fst).Nodup at unique
+    (bookOfTuple ([1], [((1, 0), 5), ((1, 0), 5)], [], [])).balances
+  change ((bookTuple (bookOfTuple ([1], [((1, 0), 5), ((1, 0), 5)], [], []))).2.1.map Prod.fst).Nodup at unique
   rw [same] at unique
   simp at unique
 
 theorem rejects_zero_balance_support :
     stateCodec.decode (wireFrame ++ [0, 1] ++
-      bookTupleStream.encode ([1], [((1, 0), 0)], [])) = none := by
+      bookTupleStream.encode ([1], [((1, 0), 0)], [], [])) = none := by
   rw [decode_tuple_eq_none_iff]
   intro same
   have member : ((1, 0), (0 : Int)) ∈
-      (bookTuple (bookOfTuple ([1], [((1, 0), 0)], []))).2.1 := by rw [same]; simp
+      (bookTuple (bookOfTuple ([1], [((1, 0), 0)], [], []))).2.1 := by rw [same]; simp
   exact entries_nonzero _ _ member rfl
 
 theorem rejects_unsorted_accounts :
     stateCodec.decode (wireFrame ++ [0, 1] ++
-      bookTupleStream.encode ([2, 1], [], [])) = none := by
+      bookTupleStream.encode ([2, 1], [], [], [])) = none := by
   rw [decode_tuple_eq_none_iff]
   intro same
-  have ordered : (bookTuple (bookOfTuple ([2, 1], [], []))).1.Pairwise (· ≤ ·) :=
-    (bookOfTuple ([2, 1], [], [])).accounts.pairwise_sort (· ≤ ·)
+  have ordered : (bookTuple (bookOfTuple ([2, 1], [], [], []))).1.Pairwise (· ≤ ·) :=
+    (bookOfTuple ([2, 1], [], [], [])).accounts.pairwise_sort (· ≤ ·)
   rw [same] at ordered
   norm_num at ordered
+
+theorem rejects_duplicate_floor_coordinates :
+    stateCodec.decode (wireFrame ++ [0, 1] ++
+      bookTupleStream.encode ([1], [], [], [((1, 0), 5), ((1, 0), 5)])) = none := by
+  rw [decode_tuple_eq_none_iff]
+  intro same
+  have unique := entries_keys_nodup
+    (bookOfTuple ([1], [], [], [((1, 0), 5), ((1, 0), 5)])).floors
+  change ((bookTuple (bookOfTuple ([1], [], [], [((1, 0), 5), ((1, 0), 5)]))).2.2.2.map
+    Prod.fst).Nodup at unique
+  rw [same] at unique
+  simp at unique
+
+theorem rejects_zero_floor_support :
+    stateCodec.decode (wireFrame ++ [0, 1] ++
+      bookTupleStream.encode ([1], [], [], [((1, 0), 0)])) = none := by
+  rw [decode_tuple_eq_none_iff]
+  intro same
+  have member : ((1, 0), (0 : Nat)) ∈
+      (bookTuple (bookOfTuple ([1], [], [], [((1, 0), 0)]))).2.2.2 := by rw [same]; simp
+  exact entries_nonzero _ _ member rfl
 
 theorem rejects_unknown_operation :
     operationCodec.decode (wireFrame ++ [1] ++

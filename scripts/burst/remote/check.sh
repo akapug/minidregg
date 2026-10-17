@@ -41,6 +41,12 @@ else
 [ -n "$cap" ] && [ "$cap" -ge $((ram*70/100)) ] && [ "$cap" -le $((ram*90/100)) ] && ok swarm.slice "${cap}G of ${ram}G" || diff swarm.slice "cap ${cap:-none}G of ${ram}G (want 70-90%)"
 fi
 for t in elan lake lean cargo rustc bun; do have $t && ok "tool:$t" || diff "tool:$t" missing; done
+# lane-build's rust step is --offline --locked: the tip's cargo deps must be on the box (user.sh fetches them once)
+if [ -f "$SRV/mini/Cargo.lock" ]; then
+  rt=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$SRV/mini/rust-toolchain.toml")
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked --offline >/dev/null 2>&1 ) && ok cargo-deps "offline fetch of $SRV/mini resolves" \
+    || rootonly cargo-deps "cargo deps" "cargo fetch --locked --offline fails in $SRV/mini (user.sh fetches them)"
+fi
 [ -d "$SRV/mini/.git" ] && ok repo "$SRV/mini at $(git -C "$SRV/mini" rev-parse --short HEAD)" || diff repo "no $SRV/mini"
 [ -n "$tip" ] && { [ "$(git -C "$SRV/mini" rev-parse HEAD 2>/dev/null)" = "$tip" ] && ok repo-tip || diff repo-tip "$(git -C "$SRV/mini" rev-parse --short HEAD 2>/dev/null) != ${tip:0:8}"; }
 if [ "$noroot" = 1 ]; then
@@ -58,7 +64,7 @@ if [ -f "$SRV/pipeline/box.env" ]; then . "$SRV/pipeline/box.env"
   [ "$role" = gate ] && { [ -n "${PIPELINE_GATE_SLOTS:-}" ] && ok gate-slots "$PIPELINE_GATE_SLOTS" || diff gate-slots "none declared"; }
   [ -n "${PIPELINE_PEER:-}" ] && ok peer "$PIPELINE_PEER" || { [ "$single" = 1 ] && ok peer "(single box)" || diff peer "PIPELINE_PEER unset"; }
   [ -z "$peergate" ] || [ "${PIPELINE_PEER:-}" = "$peergate" ] || diff peer "PIPELINE_PEER ${PIPELINE_PEER:-unset} != the outside gate $peergate"
-  echo "$PATH" | grep -q lake-shim && ok lake-shim || diff lake-shim "not on PATH via box.env"
+  [ "${LAKE_ARTIFACT_CACHE:-}" = true ] && [ -d "${LAKE_CACHE_DIR:-/nonexistent}" ] && ok lake-cache "$LAKE_CACHE_DIR" || diff lake-cache "box.env does not turn the shared Lake cache on (box-env --lake-cache)"
 fi
 P=$SRV/pipeline/scripts
 for f in lib.sh slot.sh slots build-anywhere peer-build box-peer-gate lane-check lean-ask mk-lane.sh publish-artifacts fetch-artifacts journey-runner install-sccache; do [ -x "$P/$f" ] || [ -f "$P/$f" ] || diff "script:$f" missing; done; ok scripts "$(ls "$P" | wc -l) files, from $(cat "$P/.installed-from" 2>/dev/null | cut -c1-8 || echo '? (hand-installed)')"
@@ -97,6 +103,6 @@ else diff warm-base "no FROZEN"; fi
 if [ -x "$P/lake-cache-audit" ]; then
   [ -d "$SRV/lake-cache" ] && { out=$("$P/lake-cache-audit" --cache "$SRV/lake-cache" --tree "$SRV/warm-base/src" 2>&1 | tail -1); [ $? -eq 0 ] && grep -q ' 0 bad' <<<"$out" && ok lake-cache:clean "$(cut -c1-80 <<<"$out")" || diff lake-cache:clean "$out (purge: lake-cache-audit --purge)"; }
   [ -d "$SRV/warm-base/src/.lake/build/ir" ] && { n=$("$P/lake-cache-audit" --tree "$SRV/warm-base/src" --scan-tree "$SRV/warm-base/src" 2>/dev/null | wc -l); [ "$n" = 0 ] && ok warm-base:prefixed-c || diff warm-base:prefixed-c "$n .c/.o files with unprefixed initializers"; }
-  grep -q lake-cache-audit "$P/lake-shim/lake" 2>/dev/null && ok lake-shim:guard || diff lake-shim:guard "the shim does not audit the cache before Lake reads it"
+  grep -q 'pipeline_cache_audit()' "$P/lib.sh" 2>/dev/null && ok lake-cache:guard || diff lake-cache:guard "lib.sh has no pipeline_cache_audit: slot builds would read the cache unguarded"
 else diff lake-cache-audit missing; fi
 echo "== burst-check $(hostname): $ndiff DIFF$( [ "$nabsent" -gt 0 ] && echo ", $nabsent ABSENT (no root: $NR)")"; exit $ndiff
