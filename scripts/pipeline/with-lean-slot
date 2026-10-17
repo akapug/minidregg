@@ -20,6 +20,7 @@
 #   WITH_LEAN_SLOT_PIDFILE   also write this wrapper's PID here (stop the waiter by it)
 #   WITH_LEAN_SLOT_PRIORITY=1  queue ahead of every ordinary ticket (the tip service / integrator); a
 #                            priority ticket is backdated one day, so among priority tickets FIFO holds
+#   PIPELINE_LEAN_SLOT_POLL_S  seconds between polls (default 1: a slot kept for an older waiter idles at most this long)
 #   WITH_LEAN_SLOT_DEADLINE_S  give up after this many seconds without a slot (default 14400; exit 75)
 # Every grant is measured: SLOTS/waits.tsv gets one line per run
 #   pid  enqueued  granted  released  slot  rc  command   (epoch seconds; the CYCLE-TIME F5 instrument)
@@ -42,37 +43,52 @@ if [ "${WITH_LEAN_SLOT_PRIORITY:-0}" = 1 ]; then touch -d "@$(( enq - 86400 ))" 
 trap 'rm -f "$ticket"; [ -n "${WITH_LEAN_SLOT_PIDFILE:-}" ] && rm -f "$WITH_LEAN_SLOT_PIDFILE"' EXIT
 deadline=$(( enq + ${WITH_LEAN_SLOT_DEADLINE_S:-14400} ))
 cmd="$*"; cmd=${cmd:0:200}
-oldest_live() {
+# the live tickets, oldest first (priority tickets are backdated a day); a dead PID's ticket is pruned
+live_in_order() {
   local f p
   for f in $(ls -tr "$W"/*.pid 2>/dev/null); do
     p=$(cat "$f" 2>/dev/null)
-    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "$p"; return; fi
-    rm -f "$f"
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "$p"; else rm -f "$f"; fi
   done
 }
 pipeline_cache_audit || pipeline_die "the shared Lake cache is unguarded (lake-cache-audit failed): not building on it"
 told=0
+poll=${PIPELINE_LEAN_SLOT_POLL_S:-1}
+# One poll, under SLOTS/queue.lock (so two waiters never count the same free slot): count the live tickets AHEAD of
+# this one and the slots free right now. This waiter takes a slot iff ahead < free: every older waiter still has a
+# free slot left for it, so FIFO and priority hold, and no slot idles while any waiter could use it (the old rule,
+# "only the single oldest ticket may try", left a second free slot idle for a whole poll and let a later priority
+# ticket pass a waiter that had a slot available: test-with-lean-slot.sh, burst5 10-17).
 while :; do
-  if [ "$(oldest_live)" = "$$" ]; then
+  exec {q}>"$SLOTS/queue.lock"
+  if flock -w 30 "$q"; then
+    ahead=0 mine=0
+    for p in $(live_in_order); do [ "$p" = "$$" ] && { mine=1; break; }; ahead=$((ahead + 1)); done
+    [ "$mine" = 1 ] || { echo $$ > "$ticket"; touch -d "@$enq" "$ticket"; }   # a pruned ticket (never ours to lose) re-enters at its own time
+    fds=() slots=()
     for s in $(seq 1 "$N"); do
-      exec {fd}>"$SLOTS/lean-$s.lock"
-      if flock -n "$fd"; then
-        rm -f "$ticket"
-        granted=$(date +%s)
-        export LEAN_NUM_THREADS=${PIPELINE_LEAN_SLOT_THREADS:-4}
-        export THREADS=$LEAN_NUM_THREADS
-        ( exec {fd}>&-; exec nice -n "${PIPELINE_LEAN_SLOT_NICE:-0}" "$@" ); rc=$?
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$$" "$enq" "$granted" "$(date +%s)" "$s" "$rc" "$cmd" >> "$SLOTS/waits.tsv"
-        exit "$rc"
-      fi
-      exec {fd}>&-
+      exec {t}>"$SLOTS/lean-$s.lock"
+      if flock -n "$t"; then fds+=("$t"); slots+=("$s"); else exec {t}>&-; fi
     done
+    if [ "$mine" = 1 ] && [ "$ahead" -lt "${#fds[@]}" ]; then
+      fd=${fds[0]} s=${slots[0]}
+      for t in "${fds[@]:1}"; do exec {t}>&-; done
+      rm -f "$ticket"; exec {q}>&-
+      granted=$(date +%s)
+      export LEAN_NUM_THREADS=${PIPELINE_LEAN_SLOT_THREADS:-4}
+      export THREADS=$LEAN_NUM_THREADS
+      ( exec {fd}>&-; exec nice -n "${PIPELINE_LEAN_SLOT_NICE:-0}" "$@" ); rc=$?
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$$" "$enq" "$granted" "$(date +%s)" "$s" "$rc" "$cmd" >> "$SLOTS/waits.tsv"
+      exit "$rc"
+    fi
+    for t in "${fds[@]}"; do exec {t}>&-; done
   fi
+  exec {q}>&-
   if [ "$(date +%s)" -ge "$deadline" ]; then
     printf '%s\t%s\t-\t%s\t-\t75\t%s\n' "$$" "$enq" "$(date +%s)" "$cmd" >> "$SLOTS/waits.tsv"
     pipeline_log "no Lean slot in $(( deadline - enq )) s" >&2
     exit 75
   fi
   if [ "$told" = 0 ]; then told=1; pipeline_log "queued for one of $N Lean slots under $SLOTS (ticket $ticket)" >&2; fi
-  sleep 15
+  sleep "$poll"
 done
