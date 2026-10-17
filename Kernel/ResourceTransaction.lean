@@ -249,11 +249,12 @@ def commandStream : StreamCodec Command :=
     (fun (body,family) => Command.ofBody body family)
     (by intro command; cases command; rfl)
 
-/-- Transaction13: a family command over the transaction10 body. Frame 11 (the
-retired signed Bend claim) and frame 12 (a family over a body that still carried
-the Bend claim option) are not decoded: they refuse instead of being
-reinterpreted. -/
-def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [13]
+/-- Transaction15: a family command over the transaction14 body. Frame 11 (the
+retired signed Bend claim), frame 12 (a family over a body that still carried
+the Bend claim option), and frames 10 and 13 (the body and family command over
+the Book before its floors section) are not decoded: they refuse instead of
+being reinterpreted. -/
+def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [15]
 
 /-- Complete unsigned body, excluding only the family, in exact transaction10
 framing: not a lossy projection or a supplied byte string. -/
@@ -362,6 +363,22 @@ theorem v12_command_refused (payload : List UInt8) :
   simp [rawCommandCodec, commandFrame, familyCommandFrame,
     List.append_assoc, take_tagged_frame]
 
+/-- A transaction10 command (the body over the Book before its floors section)
+refuses to decode rather than being read under the transaction14 body. -/
+theorem v10_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 10 :: payload) = none := by
+  simp [rawCommandCodec, commandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
+
+/-- A transaction13 family command (over the Book before its floors section)
+refuses to decode rather than being read under the transaction15 body. -/
+theorem v13_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 13 :: payload) = none := by
+  simp [rawCommandCodec, commandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
+
+#assert_axioms v10_command_refused
+#assert_axioms v13_command_refused
 #assert_axioms v11_command_refused
 #assert_axioms v12_command_refused
 
@@ -409,11 +426,11 @@ theorem statement_body_exact (domain semantics : Digest) (command : Command) :
     (statement domain semantics command).bodyBytes = command.bodyBytes := rfl
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v4".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v4".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 /-- The operation identity is (domain, semantics, subject, nonce) for EVERY
@@ -495,9 +512,9 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     target := ⟨target.target⟩
     verb := target.verb
     argsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
+      "DREGG.RESOURCE.TRANSACTION.ARGS/v4".toUTF8.toList framedBytes).digest
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList framedBytes).digest
+      "DREGG.RESOURCE.TRANSACTION.EFFECT/v4".toUTF8.toList framedBytes).digest
     nonce := command.nonce
     height := ambient.height
     preStateRoot := preRoot

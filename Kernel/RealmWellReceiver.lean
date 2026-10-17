@@ -421,7 +421,7 @@ def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.well, command.op, command.account, command.amount, marker domain semantics command⟩
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.WELL.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.WELL.EFFECT/v2".toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -446,7 +446,7 @@ def context (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (comm
       policyRevision := snapshot.authState.policyRevision ⟨command.target⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.WELL.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash "DREGG.WELL.ARGS/v2".toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
 abbrev BookMaterialized := Materialized (CanonicalCellRegistry.materializer .resourceBook)

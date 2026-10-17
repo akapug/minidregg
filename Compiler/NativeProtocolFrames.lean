@@ -44,8 +44,9 @@ end Minidregg.Kernel.PolicyInstallReceiver
 
 namespace Minidregg.Kernel.DeclaredResourceController
 
-/-- Version10 adds authenticated whole-definition observe-only tag7 and exact
-canonical noun constructor output. Older receiving frames refuse reinterpretation. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [10]
+/-- Version14: the transaction10 body (authenticated whole-definition observe-only
+tag7, exact canonical noun constructor output) over the Book with its floors
+section. Older receiving frames, 10 included, refuse reinterpretation. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [14]
 
 end Minidregg.Kernel.DeclaredResourceController

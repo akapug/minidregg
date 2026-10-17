@@ -3,7 +3,7 @@ Since the FD-1 charge switch the receiver's storage lane IS the World's: the new
 values its derived turn writes, its born images and its retained event
 (`prepared_intent_charge_eq_storage`).  What the receiver charged before -- its
 full post images -- exceeds the World's value bytes by a classified framing
-(`posts_bytes_eq_storage_plus_framing`): activity 40 bytes; Book 26; seat 26 (the
+(`posts_bytes_eq_storage_plus_framing`): activity 43 bytes (its frame is `DREGG/OBJECTIVE/ACTIVITY-CELL/v2`); Book 26; seat 26 (the
 real SEAT-CELL frame has 15 bytes); retirement 4; unchanged posts their full
 image.  Counts inspect actual deltas.  That gap is no longer charged.
 This is source-level accounting, not evidence of deployment or admission totality. -/
@@ -49,7 +49,7 @@ def BlobKind.state (k : BlobKind) (v : Option k.Value) : Store (deployedR.layout
   (0 : Store (deployedR.layout k.kind)).set k.address v
 
 def BlobKind.framing : BlobKind → Nat
-  | .activity => 40 | .book => 26 | .seat => 26
+  | .activity => 43 | .book => 26 | .seat => 26
 
 def BlobKind.valueBytes (k : BlobKind) (v : k.Value) : Nat :=
   ((wireOf k.kind).valueStream k.address.1 |>.encode v).length
@@ -209,7 +209,7 @@ theorem burn_storage_zero (c : CellId) (k : deployedR.Kind) :
     Codec.legPatch, self_diff_bytes]
 
 def classFraming (bytes : List UInt8) : PostClass → Nat
-  | .activityChanged => 40 | .bookChanged => 26 | .seatChanged => 26
+  | .activityChanged => 43 | .bookChanged => 26 | .seatChanged => 26
   | .retired => 4 | .unchanged => bytes.length
 
 theorem state_eq_iff (k : BlobKind) (s : Store (deployedR.layout k.kind)) (v : k.Value) :
@@ -266,7 +266,7 @@ def unchangedBytes (cells : CellId → Option (Cell deployedR)) (posts : List Po
     then post.bytes.length else 0).sum
 
 def framing (cells : CellId → Option (Cell deployedR)) (posts : List Post) : Nat :=
-  40 * countClass (rootBytes := rootBytes) cells posts .activityChanged +
+  43 * countClass (rootBytes := rootBytes) cells posts .activityChanged +
   26 * countClass (rootBytes := rootBytes) cells posts .bookChanged +
   26 * countClass (rootBytes := rootBytes) cells posts .seatChanged +
   4 * countClass (rootBytes := rootBytes) cells posts .retired +
@@ -477,9 +477,9 @@ receiver no longer charges). -/
 theorem image_equality :
     (posts.map fun post => post.bytes.length).sum =
       (seedlessCreateIntent.writes.map (writeStorage cells)).sum +
-        (40 * 1 + 26 * 0 + 26 * 0 + 4 * 0 + 0) := by
+        (43 * 1 + 26 * 0 + 26 * 0 + 4 * 0 + 0) := by
   have h := posts_bytes_eq_storage_plus_framing cells posts supported
-  have gap : framing (rootBytes := ResourceBirthCodec.rootBytes) cells posts = 40 := by
+  have gap : framing (rootBytes := ResourceBirthCodec.rootBytes) cells posts = 43 := by
     simp [framing, counts.1, counts.2.1, counts.2.2.1, counts.2.2.2.1, counts.2.2.2.2.2]
   simpa only [gap] using h
 
