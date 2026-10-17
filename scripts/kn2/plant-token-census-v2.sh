@@ -93,7 +93,7 @@ case "$mode" in
     echo "positive bare-projection witness accepted"
     ;;
   old-rule)
-    perl -0pi -e 's{              for fault in ← l1WitnessFaults structName thm\.toName info do}{              let declared? : Option Expr := match info with
+    perl -0pi -e 's{              for fault in ← l1WitnessFaults structName witness info do}{              let declared? : Option Expr := match info with
                 | .thmInfo proved => some proved.value
                 | .defnInfo definition => some definition.value
                 | _ => none
@@ -107,7 +107,7 @@ case "$mode" in
                       | none => pure false
                 if renamed then
                   faults := faults.push s!"{row.ctor}: L1 theorem {thm} is a renamed projection; name the proof field instead"
-              for fault in ← l1WitnessFaults structName thm.toName info do}' TokenCensus/Core.lean
+              for fault in ← l1WitnessFaults structName witness info do}' TokenCensus/Core.lean
     grep -F "is a renamed projection; name the proof field instead" TokenCensus/Core.lean
     expect_red "ProjectionWitness.mk: L1 theorem Minidregg.TokenCensus.ProjectionWitness.sound' is a renamed projection"
     ;;
