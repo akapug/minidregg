@@ -107,7 +107,7 @@ def bookTupleStream : StreamCodec BookTuple :=
 /-- The lax tuple codec above spells every tuple, including unsorted,
 duplicated and explicit-zero ones; `bookStream` spells only canonical books
 and REFUSES the rest in the stream decoder (sorted strict account list, strictly
-key-sorted non-zero map entries). Its bytes are the tuple codec's bytes at the
+key-sorted non-zero map entries: balances, leases, floors). Its bytes are the tuple codec's bytes at the
 canonical tuple (`bookStream_encode`). -/
 def bookStream : StreamCodec Book :=
   StreamCodec.xmap
@@ -115,9 +115,12 @@ def bookStream : StreamCodec Book :=
       (StreamCodec.product
         (FiniteDependentMapCodec.mapStream (StreamCodec.product StreamCodec.nat StreamCodec.nat)
           (fun _ => intStream))
-        (FiniteDependentMapCodec.mapStream StreamCodec.nat (fun _ => StreamCodec.option leaseStream))))
-    (fun book => (book.accounts, book.balances, book.leaseRecords))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+        (StreamCodec.product
+          (FiniteDependentMapCodec.mapStream StreamCodec.nat (fun _ => StreamCodec.option leaseStream))
+          (FiniteDependentMapCodec.mapStream (StreamCodec.product StreamCodec.nat StreamCodec.nat)
+            (fun _ => StreamCodec.nat)))))
+    (fun book => (book.accounts, book.balances, book.leaseRecords, book.floors))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro book; rfl)
 
 private theorem encodeMany_entryStream {K V : Type} (keyStream : StreamCodec K)
