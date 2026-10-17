@@ -85,6 +85,13 @@ Environment:
                                    The seats are the ONLY Lean concurrency bound: Lake builds the closure
                                    in parallel and each real Lean holds one seat while it runs.
   MINIDREGG_LEAN_SEAT_WAIT=S       seconds one Lean process waits for a free seat before it fails with 75
+  MINIDREGG_LEAN_MEM_CAP=SIZE      the memory the seats share (default: the tightest cgroup memory.max this
+                                   build runs under, e.g. swarm-build's scope; else SWARM_MEM_MAX, else 48G)
+  MINIDREGG_LEAN_RSS_FROM=F[:F..]  further lean-module-rss.tsv tables (a previous build at this tip) merged
+                                   with the tree's scripts/pipeline/lean-module-rss.tsv, per module the max.
+                                   Seats are MEMORY-WEIGHTED: a module takes ceil(maxrss / (cap / seats))
+                                   seats; a module with no recorded RSS takes all of them (heavy until
+                                   measured); a module whose recorded RSS alone exceeds the cap refuses.
                                    (default 7200; 0 = refuse at once)
 EOF
 }
@@ -1322,32 +1329,85 @@ set -u
 : "${MINIDREGG_LEAN_RUSAGE:?}"
 source_file=-
 for arg in "$@"; do case "$arg" in *.lean) source_file=$arg ;; esac; done
-seat=""
+# Memory-weighted seats: this compiler takes WEIGHT of the host's MINIDREGG_LEAN_SEATS seats, read from
+# MINIDREGG_LEAN_SEAT_WEIGHTS (module<TAB>weight, written by build-native-host from recorded peak RSS).
+# A module with no row is heavy (all seats) until a build has measured it; a non-module invocation takes 1.
+module=-
+if [[ "$source_file" == *.lean ]]; then
+  module=${source_file#"$MINIDREGG_LEAN_BUILD_ROOT"/}; module=${module#./}; module=${module%.lean}; module=${module//\//.}
+fi
+weight=1
+if [[ "$module" != - ]]; then
+  weight=$(awk -F '\t' -v m="$module" '$1 == m { print $2; exit }' "${MINIDREGG_LEAN_SEAT_WEIGHTS:-/dev/null}")
+  [[ -n "$weight" ]] || weight=$MINIDREGG_LEAN_SEATS
+fi
+if (( weight > MINIDREGG_LEAN_SEATS )); then
+  printf 'build-native-host: %s alone needs %s of %s Lean seats (its recorded peak RSS exceeds the memory cap): refusing\n' \
+    "$module" "$weight" "$MINIDREGG_LEAN_SEATS" >&2
+  exit 64
+fi
+# Acquisition is all-or-nothing under one lock (a mkdir), in ticket order: a waiter takes its WEIGHT seats
+# iff (the weights of the live tickets ahead of it) + WEIGHT <= the free seats, so a heavy compiler is never
+# starved by a stream of light ones and two half-seated compilers never deadlock.
+seats=() locked=0
+lockdir=$MINIDREGG_LEAN_SEAT_ROOT/.alloc-lock
+waiters=$MINIDREGG_LEAN_SEAT_ROOT/waiters
+lock() {
+  local tries=0 owner
+  until mkdir "$lockdir" 2>/dev/null; do
+    owner=$(cat "$lockdir/pid" 2>/dev/null || true)
+    if [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null; then rm -f "$lockdir/pid"; rmdir "$lockdir" 2>/dev/null || true; continue; fi
+    tries=$((tries + 1)); (( tries < 600 )) || return 1
+    sleep 0.05
+  done
+  echo "$$" > "$lockdir/pid"; locked=1
+}
+unlock() { if (( locked )); then rm -f "$lockdir/pid"; rmdir "$lockdir" 2>/dev/null || true; locked=0; fi; }
 release() {
-  if [[ -n "$seat" ]]; then rm -f "$seat/owner.txt"; rmdir "$seat" 2>/dev/null || true; seat=""; fi
+  local d
+  for d in ${seats[@]+"${seats[@]}"}; do rm -f "$d/owner.txt"; rmdir "$d" 2>/dev/null || true; done
+  seats=(); rm -f "$waiters/$$"; unlock
 }
 trap release EXIT
+mkdir -p "$waiters"; echo "$weight" > "$waiters/$$"
 waited=0
-until [[ -n "$seat" ]]; do
-  for number in $(seq 1 "$MINIDREGG_LEAN_SEATS"); do
-    candidate="$MINIDREGG_LEAN_SEAT_ROOT/lean-seat-$number"
-    # One mkdir(2): the seat is taken or it is not; no utility-level race handling.
-    if mkdir "$candidate" 2>/dev/null; then
-      seat=$candidate
-      printf 'pid=%s\nstarted_utc=%s\nroot=%s\nsource=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        "$MINIDREGG_LEAN_BUILD_ROOT" "$source_file" > "$seat/owner.txt"
-      break
+while :; do
+  if lock; then
+    ahead=0
+    for f in $(ls -tr "$waiters" 2>/dev/null); do
+      [[ "$f" == "$$" ]] && break
+      if kill -0 "$f" 2>/dev/null; then ahead=$(( ahead + $(cat "$waiters/$f" 2>/dev/null || echo 0) )); else rm -f "$waiters/$f"; fi
+    done
+    free=()
+    for number in $(seq 1 "$MINIDREGG_LEAN_SEATS"); do
+      [[ -e "$MINIDREGG_LEAN_SEAT_ROOT/lean-seat-$number" ]] || free+=("$number")
+    done
+    if (( ahead + weight <= ${#free[@]} )); then
+      for number in "${free[@]:0:$weight}"; do
+        candidate="$MINIDREGG_LEAN_SEAT_ROOT/lean-seat-$number"
+        # a wrapper from before the lock may take a seat between the count and here: give back and retry
+        if mkdir "$candidate" 2>/dev/null; then
+          seats+=("$candidate")
+          printf 'pid=%s\nstarted_utc=%s\nroot=%s\nsource=%s\nweight=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$MINIDREGG_LEAN_BUILD_ROOT" "$source_file" "$weight" > "$candidate/owner.txt"
+        else
+          break
+        fi
+      done
+      if (( ${#seats[@]} == weight )); then rm -f "$waiters/$$"; unlock; break; fi
+      for d in ${seats[@]+"${seats[@]}"}; do rm -f "$d/owner.txt"; rmdir "$d" 2>/dev/null || true; done; seats=()
     fi
-  done
-  [[ -n "$seat" ]] && break
+    unlock
+  fi
   if (( waited >= MINIDREGG_LEAN_SEAT_WAIT )); then
-    printf 'build-native-host: all %s Lean compiler seats under %s are occupied after %s s (%s)\n' \
-      "$MINIDREGG_LEAN_SEATS" "$MINIDREGG_LEAN_SEAT_ROOT" "$waited" "$source_file" >&2
+    printf 'build-native-host: %s needs %s of %s Lean compiler seats under %s; not free after %s s (%s)\n' \
+      "$module" "$weight" "$MINIDREGG_LEAN_SEATS" "$MINIDREGG_LEAN_SEAT_ROOT" "$waited" "$source_file" >&2
     exit 75
   fi
-  sleep 2
-  waited=$((waited + 2))
+  sleep 1
+  waited=$((waited + 1))
 done
+printf 'SEATS\t%s\t%s\t%s\n' "$$" "$weight" "$module" >> "$MINIDREGG_LEAN_WRAPPER_LOG"
 child=""
 forward_signal() { [[ -z "$child" ]] || kill -"$1" "$child" 2>/dev/null || true; }
 trap 'forward_signal HUP' HUP
@@ -1374,6 +1434,45 @@ printf 'END\t%s\t%s\t%s\n' "$(date +%s)" "$$" "$code" >> "$MINIDREGG_LEAN_WRAPPE
 exit "$code"
 EOF
 chmod +x "$wrapper_root/bin/lean"
+# --- memory-weighted seats: the cap the seats share, one seat's bytes, and each module's weight -------------
+size_kib() {   # SIZE (bytes, or with K/M/G/T) -> KiB
+  local v=$1 n u
+  [[ "$v" =~ ^([0-9]+)([KkMmGgTt]?)$ ]] || return 1
+  n=${BASH_REMATCH[1]} u=${BASH_REMATCH[2]}
+  case "$u" in '') echo $(( n / 1024 )) ;; [Kk]) echo "$n" ;; [Mm]) echo $(( n * 1024 )) ;; [Gg]) echo $(( n * 1024 * 1024 )) ;; [Tt]) echo $(( n * 1024 * 1024 * 1024 )) ;; esac
+}
+mem_cap_kib=""
+if [[ -n "${MINIDREGG_LEAN_MEM_CAP:-}" ]]; then
+  mem_cap_kib=$(size_kib "$MINIDREGG_LEAN_MEM_CAP") || { printf 'MINIDREGG_LEAN_MEM_CAP must be a size (e.g. 48G)\n' >&2; exit 64; }
+  mem_cap_from=MINIDREGG_LEAN_MEM_CAP
+elif [[ -r /proc/self/cgroup ]] && cg=$(sed -n 's/^0:://p' /proc/self/cgroup) && [[ -n "$cg" ]]; then
+  p=/sys/fs/cgroup${cg%/}
+  while :; do
+    m=$(cat "$p/memory.max" 2>/dev/null || true)
+    if [[ "$m" =~ ^[0-9]+$ ]] && { [[ -z "$mem_cap_kib" ]] || (( m / 1024 < mem_cap_kib )); }; then mem_cap_kib=$(( m / 1024 )); mem_cap_from=$p/memory.max; fi
+    [[ "$p" == /sys/fs/cgroup || "$p" != /sys/fs/cgroup/* ]] && break
+    p=${p%/*}
+  done
+fi
+if [[ -z "$mem_cap_kib" ]]; then mem_cap_kib=$(size_kib "${SWARM_MEM_MAX:-48G}") || { printf 'SWARM_MEM_MAX must be a size\n' >&2; exit 64; }; mem_cap_from="SWARM_MEM_MAX (${SWARM_MEM_MAX:-48G}; no cgroup cap)"; fi
+seat_kib=$(( mem_cap_kib / lean_seats ))
+seat_weights="$output_dir/lean-seat-weights.tsv"
+rss_sources=()
+if [[ -f "$root/scripts/pipeline/lean-module-rss.tsv" ]]; then rss_sources+=("$root/scripts/pipeline/lean-module-rss.tsv"); fi
+IFS=: read -r -a extra_rss <<< "${MINIDREGG_LEAN_RSS_FROM:-}"
+for f in ${extra_rss[@]+"${extra_rss[@]}"}; do [[ -z "$f" ]] && continue; [[ -f "$f" ]] || { printf 'MINIDREGG_LEAN_RSS_FROM: no table %s\n' "$f" >&2; exit 64; }; rss_sources+=("$f"); done
+# module<TAB>weight<TAB>maxrss_kib: per module the max recorded peak over every table; weight = ceil(rss / seat)
+awk -F '\t' -v seat="$seat_kib" '$0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if ($3 > r[$1]) r[$1] = $3 }
+  END { for (m in r) { w = int((r[m] + seat - 1) / seat); if (w < 1) w = 1; print m "\t" w "\t" r[m] } }' \
+  ${rss_sources[@]+"${rss_sources[@]}"} /dev/null | LC_ALL=C sort > "$seat_weights"
+over=$(awk -F '\t' -v cap="$mem_cap_kib" -v root="$root" '$3 > cap { f = $1; gsub(/\./, "/", f); if ((getline l < (root "/" f ".lean")) >= 0) print $1 " (" $3 " KiB)" }' "$seat_weights")
+if [[ -n "$over" ]]; then
+  printf 'build-native-host: refusing: recorded peak RSS exceeds the %s KiB Lean memory cap (%s) for one module alone:\n%s\n' \
+    "$mem_cap_kib" "$mem_cap_from" "$over" >&2
+  exit 64
+fi
+printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take all %s seats\n' \
+  "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$lean_seats" | tee -a "$output_dir/build.log"
 wrapper_log="$output_dir/lake-lean-wrapper.tsv"
 : > "$wrapper_log"
 lake_cc=${MINIDREGG_NATIVE_LAKE_CC:-$toolchain/bin/clang}
@@ -1394,6 +1493,7 @@ seated_lake() {
     MINIDREGG_LEAN_WRAPPER_LOG="$wrapper_log" \
     MINIDREGG_LEAN_BUILD_ROOT="$root" \
     MINIDREGG_LEAN_RUSAGE="$wrapper_root/lean-rusage.py" \
+    MINIDREGG_LEAN_SEAT_WEIGHTS="$seat_weights" \
     lake build "$@" > "$log" 2>&1
 }
 
@@ -1551,18 +1651,20 @@ EOF
   compiled_sources=$(awk -F '\t' '$1 == "START" && $4 ~ /\.lean( |$)/ { n++ } END { print n+0 }' "$wrapper_log")
 fi
 
-# Every compiler the wrapper started has ended, each pid once, and at no point did this build hold
-# more compilers than the host has seats (START is logged after a seat is taken, END before it is
+# Every compiler the wrapper started has ended, each pid once, each with its SEATS line, and at no point did
+# this build hold more seat WEIGHT than the host has seats (START is logged after a seat is taken, END before it is
 # released, so the file order bounds the overlap).
-if ! max_concurrent_lean=$(awk -F '\t' -v seats="$lean_seats" '
-    $1 == "START" { if ($3 in open) bad = 1; open[$3] = 1; n++; if (n > m) m = n; starts++ }
-    $1 == "END" { if (!($3 in open)) bad = 1; delete open[$3]; n--; ends++ }
-    END { if (bad || n != 0 || starts != ends || m > seats) exit 1; print m + 0 }
+if ! concurrency=$(awk -F '\t' -v seats="$lean_seats" '
+    $1 == "SEATS" { w[$2] = $3 }
+    $1 == "START" { if ($3 in open || !($3 in w)) bad = 1; open[$3] = 1; n++; if (n > m) m = n; held += w[$3]; if (held > mh) mh = held; starts++ }
+    $1 == "END" { if (!($3 in open)) bad = 1; delete open[$3]; n--; held -= w[$3]; ends++ }
+    END { if (bad || n != 0 || held != 0 || starts != ends || mh > seats) exit 1; print m + 0, mh + 0 }
   ' "$wrapper_log"); then
   printf 'build-native-host: seated Lean wrapper log is unbalanced or exceeds %s seats: %s\n' \
     "$lean_seats" "$wrapper_log" >&2
   exit 70
 fi
+read -r max_concurrent_lean max_seat_weight <<< "$concurrency"
 # Per compiled module: wall and peak RSS, so seats and threads are sized from data (CYCLE-TIME F10).
 # lean-module-rss.tsv: module<TAB>wall_s<TAB>maxrss_kib<TAB>rc, heaviest first; one line each into build.log.
 rss_table="$output_dir/lean-module-rss.tsv"
@@ -1576,8 +1678,10 @@ rss_stats=$(awk -F '\t' '$3 ~ /^[0-9]+$/ { v[n++] = $3 } END {
     # sorted descending already: p50 and p95 by rank
     print v[int(n * 0.5)], v[int(n * 0.05)], v[0] }' "$rss_table")
 read -r rss_p50 rss_p95 rss_max <<< "$rss_stats"
-printf 'lean_seats=%s\nmax_concurrent_real_lean=%s\nwrapper_invocations=%s\nlean_maxrss_kib_p50=%s\nlean_maxrss_kib_p95=%s\nlean_maxrss_kib_max=%s\n' \
-  "$lean_seats" "$max_concurrent_lean" "$(grep -c '^START' "$wrapper_log")" "$rss_p50" "$rss_p95" "$rss_max" \
+printf 'lean_seats=%s\nlean_mem_cap_kib=%s\nlean_seat_kib=%s\nmax_concurrent_real_lean=%s\nmax_concurrent_seat_weight=%s\nunrecorded_rss_modules=%s\nwrapper_invocations=%s\nlean_maxrss_kib_p50=%s\nlean_maxrss_kib_p95=%s\nlean_maxrss_kib_max=%s\n' \
+  "$lean_seats" "$mem_cap_kib" "$seat_kib" "$max_concurrent_lean" "$max_seat_weight" \
+  "$(awk -F '\t' 'NR == FNR { k[$1] = 1; next } $1 == "SEATS" && $4 != "-" && !($4 in k) { n++ } END { print n + 0 }' "$seat_weights" "$wrapper_log")" \
+  "$(grep -c '^START' "$wrapper_log")" "$rss_p50" "$rss_p95" "$rss_max" \
   > "$output_dir/lake-wrapper-summary.txt"
 printf 'lean-rss summary: %s compiled modules, maxrss p50=%sKiB p95=%sKiB max=%sKiB (%s)\n' \
   "$(wc -l < "$rss_table" | tr -d ' ')" "$rss_p50" "$rss_p95" "$rss_max" "$rss_table" | tee -a "$output_dir/build.log"
