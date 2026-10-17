@@ -215,9 +215,9 @@ gate_proofs() {
   # (W20-GATE-MUTATION left the old gate green under exactly this)
   planted_c=1 planted_d=1
   scratch_module Kernel/ObjectiveBendAdmissionSemantics.lean "$tmp/premise.lean" \
-    "    (admitted : Admitted prepared ingress writes guards) :
+    "    (admitted : Admitted prepared event writes guards) :
     runBounded" \
-    "    (admitted : Admitted prepared ingress writes guards) (_vacuous : False) :
+    "    (admitted : Admitted prepared event writes guards) (_vacuous : False) :
     runBounded" \
     "$ns_c" "$ns_c.admitted_source_semantics" || planted_c=0
   # (d) the redefinition defect: `Evaluates` (mentioned by lazy_fixed_function's statement, and
