@@ -51,6 +51,7 @@
 # updated 2026-10-15: turn-log 4a 88e790b9: the open folds the turn log and decides the snapshot represents the World it holds (TurnLog, DeployedTurnCodec/Compact, SnapRepresents, DeployedRepresentsCheck)  [counts: Minidregg 0 1, Theory 107 180, Kernel 410 561, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 124, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-14: HP-1 BOUNDS: Kernel.Bounds (the static limits; imports only Theory.AssertAxioms) enters through Host.Main, Compiler.DurableReceiverIO  [counts: Minidregg 0 1, Theory 106 179, Kernel 406 555, Pred 7 11, Effects 0 3, Compiler 158 328, Selvage 12 153, Assurance 0 155, Host 87 123, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 2, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, ResearchWip 0 1]
 # updated 2026-10-17: batch 2 (codec-shapes, census-review, consent-model, collision fixes) and batch 1 (perf-memo, hp-1-bounds): Compiler.PersistedCodecShapes (the persisted codec structure fingerprints the Host checks), Kernel.DeployedCharge (the deployed charge rule), Kernel.NativeHostHeld (perf-memo held state) enter the Host closure  [counts: Minidregg 0 1, Theory 107 180, Kernel 413 566, Pred 7 11, Effects 0 3, Compiler 159 329, Selvage 12 153, Assurance 0 151, Host 87 125, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 5, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, Fixtures 0 5, CensusChecks 0 1, ResearchWip 0 1]
+# updated 2026-10-17: batch 3: the C2 durable engine (Loaded holds the engine) brings Kernel.CellTable and Kernel.DurableEngine into the Host closure; CellTable leaves ResearchWip  [counts: Minidregg 0 1, Theory 107 180, Kernel 415 567, Pred 7 11, Effects 0 3, Compiler 159 329, Selvage 12 153, Assurance 0 151, Host 87 125, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 5, Verify 0 14, SimplexQualification 0 1, ObjectiveProofs 0 1, Fixtures 0 5, CensusChecks 0 1, ResearchWip 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -457,6 +458,7 @@ Kernel.CarriedNativeHostSession
 Kernel.CarriedSegment
 Kernel.CarriedSessionEnrollmentAdmission
 Kernel.CarriedSessionEnrollmentReceiver
+Kernel.CellTable
 Kernel.CertifyReceiver
 Kernel.ClockCell
 Kernel.ClockCellDomain
@@ -483,6 +485,7 @@ Kernel.Door
 Kernel.DurableCheckpoint
 Kernel.DurableCommitProtocol
 Kernel.DurableDataIntent
+Kernel.DurableEngine
 Kernel.DurableReceiver
 Kernel.DurableView
 Kernel.FieldClosure
