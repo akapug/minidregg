@@ -12,9 +12,9 @@ cell with 1000 bytes and spending one nullifier. Then, timed (compiled code):
 * `append`: one more record through `receiveLoaded` on the fresh opening;
 * `light open`: `DurableServed.openHead` (checkpoint + the records after it);
 * `light open+append`: one more record through `DurableServed.receiveServed` on it.
-Best of three for each (the past reads too). Not part of the umbrella gate. `KN2_BENCH_CREATES=1`:
-each record instead births a fresh cell, so N records hold N cells (the axis the
-world root's cost grows on).
+Best of three for each (the past reads too). Not part of the umbrella gate.
+`KN2_BENCH_CREATES=1`: each record instead births a fresh cell, so N records hold
+N cells (the axis the world root's cost grows on).
 
 With `KN2_BENCH_AT=1`, also the past reads (`at h`) on the cold opening, at
 heights near a quarter, a half and three quarters of the way up, each 32 records
@@ -117,7 +117,8 @@ def grow (creates : Bool) (transport : Transport) (count : Nat) : IO (Loaded roo
     | .ordinary _ => throw (IO.userError s!"append {number} did not confirm")
   return loaded
 
-def run (creates : Bool) (binary : System.FilePath) (directory : System.FilePath) (count : Nat) (reuse : Bool := false) : IO Unit := do
+def run (creates : Bool) (binary : System.FilePath) (directory : System.FilePath) (count : Nat)
+    (reuse : Bool := false) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 64 }

@@ -386,7 +386,7 @@ theorem installed_semantic_terminal_outbox_exact (before : Store) :
 
 @[simp] theorem installed_appends_exactly_one_history (before : Store) :
     (DataSnapshot.install before intent).model.history =
-      before.model.history ++ [intent.erase.event] := rfl
+      intent.erase.event :: before.model.history := rfl
 
 @[simp] theorem exact_retry_is_replay (before : Store) (schedule : Schedule) :
     run schedule (DataSnapshot.install before intent) =
@@ -397,7 +397,7 @@ theorem exact_retry_does_not_append_second_history
     (before : Store) (schedule : Schedule) :
     (after (DataSnapshot.install before intent)
       (run schedule (DataSnapshot.install before intent))).model.history =
-        before.model.history ++ [intent.erase.event] := by
+        intent.erase.event :: before.model.history := by
   rw [exact_retry_is_replay]
   rfl
 

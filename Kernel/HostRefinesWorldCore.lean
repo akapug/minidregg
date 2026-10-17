@@ -22,7 +22,7 @@ produces on the turn `Turn.ofIntent` derives from the admitted intent.
   `notAPatch` (`TurnOfIntent.Delta.create_patchOk`).
 * `confirmed_represents`: the confirmed append path, checkpoint rebase
   included -- `afterCheckpoint (p.extend ready) stored` represents the stepped
-  world (`represents_rebaseD`).
+  world (`represents_rebase`).
 * ROM births: `policy_source_birth_is_turn` (the deployed source birth is an
   accepted turn holding the record), `ofIntent_policySource_birth` (the derived
   turn of an intent writing a source cell creates it with the record),
@@ -68,7 +68,7 @@ Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
 * capability / key epoch / window -- not in `DataIntent` (G-AUTH): T4 must
   prove `ofAdmission_auth : derived = .ok t → t.capability = some (capDigest admitted) ∧
     t.keyEpoch = subjectKeyEpoch admitted`.
-* rebase (G-REBASE) -- closed: `represents_rebaseD`, `confirmed_represents`, with
+* rebase (G-REBASE) -- closed: `represents_rebase`, `confirmed_represents`, with
   no premise: since KN2 (ii) a checkpoint carries no consumed list; the consumed
   set is derived from the verified prefix records (`consumed_of_loaded`), so the
   former custody premise `BaseHonest` (and T4's `load_baseHonest`) is gone.
@@ -471,7 +471,7 @@ def extendStep (B : Bridge R D) (H : History R TransactionId StableEvent D) (p :
   derived := derived
   schedule := .complete
   charged := fun _ => charged
-  snapshot := by rw [ready.executed]; rfl
+  snapshot := by rw [ready.executed]; exact Loaded.extend_snapshot p ready
   height := by
     rw [ready.executed]
     simp [Installs, Loaded.height, Loaded.extend, DurableReceiver.Image.append]
@@ -515,16 +515,17 @@ def failedAppendStep (B : Bridge R D) (H : History R TransactionId StableEvent D
 /-! ### `Represents` survives the checkpoint rebase (G-REBASE, T3b)
 
 A confirmed append ends in `afterCheckpoint (p.extend ready) stored`, which
-re-materializes the head as a fresh checkpoint base (`Loaded.rebaseD`) when a
-checkpoint was stored.  The rebased snapshot is `State.snapshot` of
-`State.ofSnapshot`: every enumerable identifier with its current bytes, the
-whole log's journal, the whole log's nullifiers, the remaining allowance.  It
-agrees with the replayed snapshot on everything `Represents` reads, with no
-premise: the consumed set of any resumed snapshot is its whole log's nullifiers
-(`consumed_of_loaded`), because a checkpoint state carries none and
-`State.snapshot` derives them from the prefix records. -/
+re-materializes the head as a fresh checkpoint base (`Loaded.rebase`) when a
+checkpoint was stored.  The rebase keeps the engine, so its snapshot IS the
+loaded one; what makes that sound is `DurableEngine.resume_rebase`: the head
+materialized as a checkpoint (`State.ofSnapshot`: every enumerable identifier
+with its current bytes, the remaining allowance) resumes, with no premise, to
+exactly the snapshot it was taken from — the consumed set of any resumed
+snapshot is its whole log's nullifiers (`consumed_of_loaded`), because a
+checkpoint state carries none and `State.snapshot` derives them from the prefix
+records. -/
 
-
+open Minidregg.Kernel.DurableEngine (replay_model resume_model)
 /-- **A loaded state has consumed exactly its log's nullifiers** (no premise:
 the checkpoint carries none, the prefix records supply them). -/
 theorem consumed_of_loaded (p : Loaded rootBytes) (n : StableNullifier) :
@@ -538,78 +539,17 @@ theorem consumed_of_loaded (p : Loaded rootBytes) (n : StableNullifier) :
   · simp only [h1, decide_true, Bool.true_or, List.mem_append, or_true]
   · simp only [h1, decide_false, Bool.false_or, List.mem_append, or_false]
 
-theorem lookup_map_self (l : List DurableDataIntent.CellId) (f : DurableDataIntent.CellId → List UInt8)
-    (c : DurableDataIntent.CellId) :
-    DurableReceiver.Seed.lookup (l.map fun x => (x, f x)) c = if c ∈ l then some (f c) else none := by
-  induction l with
-  | nil => rfl
-  | cons x rest ih =>
-      simp only [List.map_cons, DurableReceiver.Seed.lookup, List.mem_cons]
-      by_cases e : x = c
-      · subst e; simp
-      · rw [if_neg e, ih]
-        by_cases m : c ∈ rest
-        · simp [m]
-        · simp [m, Ne.symm e]
+/-- **The rebased snapshot is the loaded one**, at the same height: the rebase
+keeps the engine (`DurableEngine.resume_rebase` is why that is sound). -/
+theorem rebase_agrees (p : Loaded rootBytes) :
+    p.rebase.snapshot = p.snapshot ∧ p.rebase.height = p.height :=
+  ⟨rfl, rfl⟩
 
-/-- **The rebased snapshot agrees with the loaded one** on bytes, journal,
-consumed set and allowance, at the same height. -/
-theorem rebase_agrees {p p' : Loaded rootBytes} (h : p.rebase = some p') :
-    (∀ c, p'.snapshot.canonicalBytes c = p.snapshot.canonicalBytes c) ∧
-      p'.snapshot.model.journal = p.snapshot.model.journal ∧
-      (∀ n, p'.snapshot.model.consumed n = p.snapshot.model.consumed n) ∧
-      p'.snapshot.model.available = p.snapshot.model.available ∧ p'.height = p.height := by
-  have fields : p'.image = p.image ∧ p'.baseHeight = p.image.accepted.length ∧
-      p'.base = DurableCheckpoint.State.ofSnapshot p.image p.snapshot := by
-    unfold Loaded.rebase at h
-    dsimp only at h
-    split at h
-    · cases h
-    · cases h
-      exact ⟨rfl, rfl, rfl⟩
-  obtain ⟨himg, hbh, hbase⟩ := fields
-  have resumed := p'.resumed
-  rw [himg, hbh, hbase] at resumed
-  unfold DurableCheckpoint.resume at resumed
-  rw [if_pos (DurableCheckpoint.ofSnapshot_admissible _ _), List.drop_length,
-    List.take_length] at resumed
-  simp only [DurableReceiver.replay, Option.some.injEq] at resumed
-  have hp' : p'.height = p.height := by
-    show p'.image.accepted.length = p.image.accepted.length
-    rw [himg]
-  refine ⟨fun c => ?_, ?_, fun n => ?_, ?_, hp'⟩
-  · rw [← resumed]
-    show (DurableReceiver.Seed.lookup (p.image.cellIds.map fun c => (c, p.snapshot.canonicalBytes c))
-      c).getD p.image.seed.absentBytes = _
-    rw [lookup_map_self]
-    by_cases m : c ∈ p.image.cellIds
-    · simp [m]
-    · simp only [m, if_false, Option.getD_none]
-      exact (DurableCheckpoint.resume_outside_support rootBytes _ _ _ _ p.resumed c m).symm
-  · rw [← resumed, (resume_model p.resumed).1]
-    rfl
-  · rw [← resumed, consumed_of_loaded p]
-    rfl
-  · rw [← resumed]
-    rfl
-
-/-- **`represents_rebaseD`.**  A loaded state that represents a world still
+/-- **`represents_rebase`.**  A loaded state that represents a world still
 represents it after the checkpoint rebase. -/
-theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R TransactionId D}
-    (rep : Represents B p w) : Represents B p.rebaseD w := by
-  unfold Loaded.rebaseD
-  cases hr : p.rebase with
-  | none => exact rep
-  | some p' =>
-      obtain ⟨hbytes, hj, hc, ha, hh⟩ := rebase_agrees hr
-      show SnapRepresents B p'.snapshot p'.height w
-      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l => ?_, fun c => ?_, rep.parent⟩
-      · rw [hbytes]; exact rep.cells c
-      · simp only [hc]; exact rep.spent d
-      · rw [hj]; exact rep.journal x
-      · rw [hh]; exact rep.head
-      · rw [ha]; exact rep.meter l
-      · rw [hbytes]; exact rep.retired c
+theorem represents_rebase (B : Bridge R D) {p : Loaded rootBytes} {w : World R TransactionId D}
+    (rep : Represents B p w) : Represents B p.rebase w :=
+  rep
 
 /-- **The pole: a rebase that drops a cell breaks representation.**  The
 materialized checkpoint must carry every enumerable identifier; a state whose
@@ -652,13 +592,13 @@ theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId Stabl
       unfold Represents
       have hh : (p.extend ready).height = p.height + 1 := by
         simp [Loaded.height, Loaded.extend, DurableReceiver.Image.append]
-      have hsnap : (p.extend ready).snapshot = ready.next := rfl
+      have hsnap : (p.extend ready).snapshot = ready.next := Loaded.extend_snapshot p ready
       rw [hh, hsnap, hnext]
       exact hrep0
     refine ⟨w', hs, ?_⟩
     unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
     split
-    · exact represents_rebaseD B hrep
+    · exact represents_rebase B hrep
     · exact hrep
   · rw [ready.executed] at hi
     simp [Installs] at hi
@@ -942,9 +882,8 @@ end Example
 #assert_axioms policy_source_birth_is_turn
 #assert_axioms policy_source_rewrite_has_no_turn
 #assert_axioms consumed_of_loaded
-#assert_axioms lookup_map_self
 #assert_axioms rebase_agrees
-#assert_axioms represents_rebaseD
+#assert_axioms represents_rebase
 #assert_axioms rebase_dropping_cell_breaks
 #assert_axioms confirmed_represents
 #assert_axioms deployedRepresents_cells
@@ -976,8 +915,6 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms policy_source_birth_is_turn
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.policy_source_rewrite_has_no_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms policy_source_rewrite_has_no_turn
-/-- info: 'Minidregg.Kernel.HostRefinesWorld.represents_rebaseD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms represents_rebaseD
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.confirmed_represents' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms confirmed_represents
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.Example.toy_rebase_dropping_cell_breaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/

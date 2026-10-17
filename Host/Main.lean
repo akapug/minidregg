@@ -1064,7 +1064,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   discard <| timedPure "checkpoint: every cell's rootBytes" fun _ =>
     durable.image.cellIds.foldl (fun acc id =>
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0
-  discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.isSome
+  discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.base.cells.length
   discard <| timedPure "checkpoint: image.cellIds" fun _ => durable.image.cellIds.length
   discard <| timed "past state: Reader.stateAt (head)" do
     match ← reader.stateAt durable.height with
