@@ -5,9 +5,9 @@ cd "$(dirname "$0")/../.."
 
 mode=${1:-}
 case "$mode" in
-  ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous) ;;
+  ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted) ;;
   *)
-    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous}" >&2
+    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted}" >&2
     exit 2
     ;;
 esac
@@ -16,11 +16,13 @@ plant_tmp=$(mktemp -d)
 cp TokenCensus.lean "$plant_tmp/TokenCensus.lean"
 cp TokenCensus/Core.lean "$plant_tmp/Core.lean"
 cp TokenCensus/Table.lean "$plant_tmp/Table.lean"
+cp Fixtures.lean "$plant_tmp/Fixtures.lean"
 
 restore_sources() {
   cp "$plant_tmp/TokenCensus.lean" TokenCensus.lean
   cp "$plant_tmp/Core.lean" TokenCensus/Core.lean
   cp "$plant_tmp/Table.lean" TokenCensus/Table.lean
+  cp "$plant_tmp/Fixtures.lean" Fixtures.lean
   rm -r "$plant_tmp"
 }
 trap restore_sources EXIT
@@ -45,7 +47,7 @@ add_row() {
 expect_red() {
   local expected=$1
   local log="$plant_tmp/build.log"
-  if lake build TokenCensus >"$log" 2>&1; then
+  if lake build "${target:-TokenCensus}" >"$log" 2>&1; then
     echo "plant unexpectedly stayed green: $mode" >&2
     exit 1
   fi
@@ -53,6 +55,13 @@ expect_red() {
 }
 
 case "$mode" in
+  scoped-unlisted)
+    # An unlisted private constructor in a Fixtures module: no whole-tree census imports it, so
+    # only the scoped census (TokenCensus.Fixtures) can see it, and it must.
+    printf '\nnamespace Minidregg.Fixtures\nstructure CensusPlant where\n  private mk ::\n  n : Nat\nend Minidregg.Fixtures\n' >> Fixtures.lean
+    grep -F "structure CensusPlant" Fixtures.lean
+    target=TokenCensus.Fixtures expect_red "unlisted private constructor: Minidregg.Fixtures.CensusPlant.mk"
+    ;;
   ignored-index)
     insert_after_positive "theorem ProjectionWitness.ignoresResult {request result : Nat}\n    (witness : ProjectionWitness request result) : request = 0 := witness.sound.1"
     select_witness "Minidregg.TokenCensus.ProjectionWitness.ignoresResult"

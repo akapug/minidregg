@@ -55,7 +55,7 @@ end Minidregg.Compiler.ObjectiveBendFrontEndIdentity
 /-! The TokenCensus witness of `ObjectiveBendFrontEnd.Accepted` lives here, not in its home
 module: the front end's source files are fingerprinted into `identity` byte for byte, so a
 theorem added to them rotates the front-end identity and every published package names a
-stale one (measured: `Assurance.NativeAcceptedFixture` refused its honest call with
+stale one (measured: `Fixtures.NativeAcceptedFixture` refused its honest call with
 `objectiveSource`). -/
 namespace Minidregg.Compiler.ObjectiveBendFrontEnd
 open Minidregg.Theory.ObjectiveBendTyping (decodePacket check)

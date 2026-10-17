@@ -364,9 +364,16 @@ def restrictedCall (function : Name) (allowed : List Name) (name : Name) (info :
   if ← isProp info.type then return false
   return !allowed.contains (moduleOf (← getEnv) name)
 
-/-- Checks 1, 2, 3, 5 and 6 over the current environment. -/
-elab "#assert_token_census " table:ident : command => do
-  let (rows, restrictions) ← loadCensus table.getId
+/-- Checks 1, 2, 3, 5 and 6 over the current environment.  With `scope := some root` the
+constants checked are those of the modules under `root` only (checks 1, 5, 6, and check 2 for the
+private constructors those modules define), against the same table; the row checks (stale rows,
+reasons, witnesses) belong to the whole-tree census and are not repeated.  The scoped form
+censuses a library no whole-tree census imports (`Fixtures`, `TokenCensus/Fixtures.lean`). -/
+def runTokenCensus (table : Name) (scope : Option Name) : CommandElabM Unit := do
+  let (rows, restrictions) ← loadCensus table
+  let inScope : Name → Bool := fun module => match scope with
+    | none => true
+    | some root => root.isPrefixOf module
   liftTermElabM do
     let env ← getEnv
     let present := privateCtors env
@@ -376,14 +383,14 @@ elab "#assert_token_census " table:ident : command => do
     let mut defects : Array String := #[]
     -- 2. no silent omission, no stale row
     let rowMap : NameMap Row := rows.foldl (fun map row => map.insert row.ctor row) {}
-    for (_, user, home) in present do
+    for (_, user, home) in present.filter (fun (_, _, home) => inScope home) do
       match rowMap.find? user with
       | none => faults := faults.push s!"unlisted private constructor: {user} | {home} | L1 <theorem> | <what it states about which indices> -- or drop `private` if no guarantee rests on who builds it"
       | some row =>
           if row.home != home then
             faults := faults.push s!"{user}: census says home {row.home}, the environment says {home}"
     let presentUsers : NameSet := present.foldl (fun set (_, user, _) => set.insert user) {}
-    for row in rows do
+    for row in (if scope.isNone then rows else #[]) do
       unless presentUsers.contains row.ctor do
         faults := faults.push s!"stale census row: {row.ctor} (no such private constructor)"
       if row.note.trim.isEmpty then
@@ -406,6 +413,7 @@ elab "#assert_token_census " table:ident : command => do
     -- 1. no foreign mint
     let mut homeUses : NameSet := {}
     for (name, info) in env.constants.toList do
+      unless inScope (moduleOf env name) do continue
       for (ctor, home) in ← perConstant (mintsOf privates name info) do
         if moduleOf env name == home then homeUses := homeUses.insert ctor
       for (minter, module, ctor, home) in ← perConstant (foreignMints privates name info) do
@@ -423,6 +431,7 @@ elab "#assert_token_census " table:ident : command => do
     for (name, info) in env.constants.toList do
       if name.isInternal && !(isPrivateName name) then continue
       let module := moduleOf env name
+      unless inScope module do continue
       -- minting instances
       if isInstanceCore env name then
         if let some cls := conclusionHead info.type then
@@ -467,15 +476,23 @@ elab "#assert_token_census " table:ident : command => do
       | some _ =>
           let allowed := moduleOf env restriction.function :: restriction.allowed
           for (name, info) in env.constants.toList do
+            unless inScope (moduleOf env name) do continue
             if ← perConstant (restrictedCall restriction.function allowed name info) then
               faults := faults.push s!"restricted {restriction.function} is called by {name} in {moduleOf env name} (allowed: {allowed})"
     unless faults.isEmpty do
       throwError m!"token census failed ({faults.size}):\n{String.intercalate "\n" faults.toList}"
     let l1 := rows.size - defects.size
-    logInfo m!"token census: {present.size} private constructors, all listed, none minted \
+    let scopeNote := match scope with | none => "" | some root => s!" (scope {root}: its modules only)"
+    logInfo m!"token census{scopeNote}: {present.size} private constructors, all listed, none minted \
       abroad; {l1} L1 rows backed by their witness; {defects.size} reviewed defects: \
       {String.intercalate ", " defects.toList}; {homeUses.size} constructors used at home; \
       {restrictions.size} restricted minting functions"
+
+elab "#assert_token_census " table:ident : command => runTokenCensus table.getId none
+
+/-- The census over the modules under `root` only (see `runTokenCensus`). -/
+elab "#assert_token_census_within " table:ident root:ident : command =>
+  runTokenCensus table.getId (some root.getId)
 
 /-- Check 4 and check 6's plants: the instrument's self-test.  For EVERY private
 constructor a forgery is added to a scratch copy of the environment and the foreign-mint

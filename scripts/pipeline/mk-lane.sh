@@ -3,7 +3,7 @@
 #
 # Give a lane a PRIVATE warm copy of this box's frozen Mini warm base ($PIPELINE_WARM_BASE/src,
 # default /srv/warm-base/src) at $PIPELINE_LANES/<lane-name>/src (+ logs/), warm enough that
-# `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` replays without compiling, and
+# `lake build $(bash scripts/pipeline/umbrella-targets)` replays without compiling, and
 # isolated enough that nothing the lane does writes into the base. ONE copy of this script: the
 # repo's scripts/pipeline/mk-lane.sh; advance-base-burst.sh and relay-base.sh install the TIP TREE's
 # copy as $PIPELINE_WARM_BASE/mk-lane.sh at every advance (hbox and persvati carry older ports).
@@ -176,7 +176,7 @@ echo "mk-lane: OK $DEST at $TIP"
 
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
-  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$log" 2>&1 \
+  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 \
     || refuse "verify build failed: $log"
   # Locale-independent pattern; positive control against the base green log.
   ctl=$(cat "$W"/logs/green*.log 2>/dev/null | grep -c '\] Built ' || true)

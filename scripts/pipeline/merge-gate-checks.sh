@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # merge-gate-checks.sh SRC FROM TO TAG  -- MERGE-KEEPER post-merge checks (run AFTER the umbrella
-# `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` is green in SRC at TO).
+# `lake build $(bash scripts/pipeline/umbrella-targets)` is green in SRC at TO).
 # Every check runs even after a red. Logs: <basedir>/logs/gate-TAG-<check>.log; summary
 # <basedir>/logs/gate-TAG.summary (one line per check: name PASS|RED rc secs). Exit = number red.
 # Rust: only the rows of scripts/check-rust-tests.sh whose crate FROM..TO touches (rust-rows.py).
@@ -104,16 +104,19 @@ builders() {
   # or a defect naming its cv task) and minted only in its home module (a `private mk` stops names,
   # not `by constructor`). Elaborates TokenCensus over the research umbrella.
   run token-census    $LAKE_WRAP lake build TokenCensus
+  # The same census over the recorded-run library (Fixtures), which no whole-tree census imports so
+  # that a stale recording cannot hide the verdict above. Red while a fixture is red.
+  run token-census-fixtures $LAKE_WRAP lake build TokenCensus.Fixtures
   # The instrument's self-test (a planted forgery per private constructor, a planted call per
   # restriction, and the plant script's statement plants) tests the detector, not the tree: it runs
   # when the instrument changes. Lake builds, so in the builders job (one .lake writer).
-  if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
+  if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest|Fixtures)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
     run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
-    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous; do
+    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous scoped-unlisted; do
       run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
     done
   else
-    echo "token-census: instrument unchanged since $(git log -1 --format=%h "$TO" -- TokenCensus.lean TokenCensus/Core.lean TokenCensus/SelfTest.lean scripts/kn2/plant-token-census-v2.sh): self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
+    echo "token-census: instrument unchanged since $(git log -1 --format=%h "$TO" -- TokenCensus.lean TokenCensus/Core.lean TokenCensus/SelfTest.lean TokenCensus/Fixtures.lean scripts/kn2/plant-token-census-v2.sh): self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
   fi
   run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
   # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
@@ -157,6 +160,8 @@ readers() {
     else echo "token-census-defects PASS ($(defects "$TO" | wc -l) defects, none added)" | tee -a "$S"; fi
   else echo "token-census-defects SKIP (the defect ratchet starts in this range)" | tee -a "$S"; fi
   run host-closure    bash scripts/check-host-closure.sh
+  # The umbrella builds every Lean root the candidate ships, and the recorded runs (Fixtures).
+  run umbrella-targets bash scripts/pipeline/umbrella-targets --check
   # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
   run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
   # Each planted fault against the pinned history API is refused by the guard it plants

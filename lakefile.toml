@@ -184,6 +184,13 @@ name = "ObjectiveProofs"
 [[lean_lib]]
 name = "Fixtures"
 
+# The census checks no whole-tree census may import: the token census's self-test (planted
+# forgeries, TokenCensus/SelfTest.lean) and its scoped run over Fixtures (TokenCensus/Fixtures.lean).
+# The merge gate builds each by name; this root makes them reachable (check-build-closure) and puts
+# them in local-gates' library list.
+[[lean_lib]]
+name = "CensusChecks"
+
 # Source-first research is an explicit opt-in build.
 [[lean_lib]]
 name = "ResearchWip"
