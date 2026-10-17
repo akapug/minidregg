@@ -184,6 +184,7 @@ if [ "$verify" = 1 ]; then
   [ "$ctl" -gt 0 ] || refuse "verify: the Built-line pattern matches nothing in the base green logs; check disarmed"
   built=$(grep -c '\] Built ' "$log" || true)
   [ "$built" = 0 ] || refuse "verify: $built modules compiled (not a warm replay): $log"
-  [ -n "$failed" ] || grep -q 'Build completed successfully' "$log" || refuse "verify: no success line: $log"
-  echo "mk-lane: VERIFIED warm replay, 0 modules compiled${failed:+, known-red carried: $(echo $failed)} ($log)"
+  # vrc != 0 passed known-red-verdict only if the failed set EQUALS the known-red list; vrc = 0 needs the success line.
+  [ "$vrc" != 0 ] || grep -q 'Build completed successfully' "$log" || refuse "verify: no success line: $log"
+  echo "mk-lane: VERIFIED warm replay, 0 modules compiled$([ "$vrc" = 0 ] || echo ", known-red carried: $(grep -v '^#' "$BASE/scripts/pipeline/known-red-modules" 2>/dev/null | cut -f1 | tr '\n' ' ')") ($log)"
 fi
