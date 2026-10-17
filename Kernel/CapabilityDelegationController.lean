@@ -551,6 +551,11 @@ structure Accepted [DecidableEq F]
   private mk ::
   receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
+  /-- The receipt is for exactly this delegation: its request is the delegation's
+  complete request and its nullifier the declared operation nullifier. -/
+  bound : CredentialSignatureAdmission.verifySignature ground.authority
+    command.declaration.operationNullifier
+    (request ground.authority profile.semantics ambient command) receipt = true
   authorization : Authorized (portal prepared) ground.authority.authState
     (request ground.authority profile.semantics ambient command)
   parentNamed : authorization.evidence.capabilityValue =
@@ -607,9 +612,14 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
     if same : receipt.envelopeBytes = envelope then
-      match authorize prepared receipt with
-      | .error reason => return .error reason
-      | .ok authorization => return .ok ⟨receipt, same, authorization.val, authorization.property⟩
+      if bound : CredentialSignatureAdmission.verifySignature ground.authority
+          command.declaration.operationNullifier
+          (request ground.authority profile.semantics ambient command) receipt = true then
+        match authorize prepared receipt with
+        | .error reason => return .error reason
+        | .ok authorization =>
+            return .ok ⟨receipt, same, bound, authorization.val, authorization.property⟩
+      else return .error .parentSubstitution
     else return .error .parentSubstitution
 
 def Accepted.evidence [DecidableEq F]
@@ -675,6 +685,34 @@ theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
   apply ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
     (request ground.authority profile.semantics ambient command)
   simpa only [portal] using accepted.authorization
+
+/-- **The delegation an envelope authorizes.** The checked signature is over exactly
+`envelope`, it is for this delegation's complete request (built from `ground`'s authority,
+`profile`'s semantics, `ambient` and `command`) under the declared operation nullifier, and
+the current policy loaded for `prepared` evaluates true on the step's old and
+source-computed new authority state. -/
+theorem Accepted.envelope_authorizes [DecidableEq F]
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
+    (accepted : Accepted prepared envelope) :
+    accepted.receipt.envelopeBytes = envelope ∧
+    accepted.receipt.request = ⟨kind, request ground.authority profile.semantics ambient command⟩ ∧
+    accepted.receipt.nullifier = command.declaration.operationNullifier ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  have exact := CredentialSignatureAdmission.verified_request_exact ground.authority
+    command.declaration.operationNullifier
+    (request ground.authority profile.semantics ambient command) accepted.receipt accepted.bound
+  ⟨accepted.envelopeExact, exact.1, exact.2, accepted.policy_evaluated_actual_post⟩
+
+#assert_axioms Accepted.envelope_authorizes
 
 /-- info: 'Minidregg.Kernel.CapabilityDelegationController.project_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms project_noninterference

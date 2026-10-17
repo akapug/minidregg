@@ -713,6 +713,12 @@ private structure CachedRoots (ids : List CellId) (entries : List (WorldRoot.Key
   cache : WorldRootCache.RootCache
   exact : WorldRootCache.RootsExact cache entries
 
+/-- A cached root tree is exact for its entries, over a duplicate-free enumeration of ids. -/
+private theorem CachedRoots.sound {ids : List CellId} {entries : List (WorldRoot.Key × Digest)}
+    (cached : CachedRoots ids entries) :
+    ids.Nodup ∧ WorldRootCache.RootsExact cached.cache entries :=
+  ⟨cached.nodup, cached.exact⟩
+
 /-- What an extension starts from: a verified state (bare snapshot, its
 enumeration, the fresh-cell bytes) at `height`, with the chain, accumulator
 frontier and index root there, and the head tag there when it is not 0. -/

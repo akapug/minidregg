@@ -245,6 +245,24 @@ def admitDecodedNative (deployment : Deployment) (semantics : Digest) (durable :
       | .ok accepted => return .ok ⟨prepared, accepted, physical⟩
     else return .error .physicalPreparation
 
+/-- **An accepted adoption is prepared on `durable` for `ingress.command`.** The authority
+write expects `durable`'s exact root and obeys `deployment`'s physical post law, every read
+guard is at `durable`'s exact root, and the operation marker of `ingress.command` under
+`semantics` is unspent in the loaded authority. The signature leg is NOT stated: it rests on
+`Accepted`, whose verdicts are identity carriers (census defect 01a13c42-4d9b). -/
+theorem AcceptedAdoption.prepared_on {ingress : DecodedIngress}
+    (accepted : AcceptedAdoption deployment semantics durable ingress) :
+    (∀ write ∈ writes accepted.prepared,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      (∀ write ∈ writes accepted.prepared,
+        ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+      (∀ guard ∈ readGuards accepted.prepared,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      accepted.prepared.authority.snapshot.spent
+        (marker accepted.prepared.authority.snapshot.domain semantics ingress.command) = false :=
+  ⟨accepted.physical.2.1, accepted.physical.2.2.1, accepted.physical.2.2.2,
+    accepted.prepared.unspent⟩
+
 variable {ingress : DecodedIngress}
 
 def charge (accepted : AcceptedAdoption deployment semantics durable ingress) :

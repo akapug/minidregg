@@ -383,6 +383,7 @@ def runTokenCensus (table : Name) (scope : Option Name) : CommandElabM Unit := d
     let mut defects : Array String := #[]
     -- 2. no silent omission, no stale row
     let rowMap : NameMap Row := rows.foldl (fun map row => map.insert row.ctor row) {}
+    let ctorByUser : NameMap Name := present.foldl (fun map (name, user, _) => map.insert user name) {}
     for (_, user, home) in present.filter (fun (_, _, home) => inScope home) do
       match rowMap.find? user with
       | none => faults := faults.push s!"unlisted private constructor: {user} | {home} | L1 <theorem> | <what it states about which indices> -- or drop `private` if no guarantee rests on who builds it"
@@ -398,11 +399,26 @@ def runTokenCensus (table : Name) (scope : Option Name) : CommandElabM Unit := d
       -- 3. every row is backed: an L1 witness, or a reviewed defect with its task
       match row.layer.splitOn " " with
       | ["L1", thm] =>
-          match (← getEnv).find? thm.toName with
+          -- The row names its constructor and witness by their USER names. The row's type is the
+          -- inductive of the constructor itself: a `private structure`'s type and fields carry
+          -- private names (`_private.<home>.0.…`), so the witness is looked up under its user name
+          -- and then as a private name of the home module, and the inhabitant is matched against
+          -- the real inductive, never against a name spelled from the row.
+          let env ← getEnv
+          let structName := match ctorByUser.find? row.ctor with
+            | some ctor => match env.find? ctor with
+                | some (.ctorInfo info) => info.induct
+                | _ => row.ctor.getPrefix
+            | none => row.ctor.getPrefix
+          let witness? := match env.find? thm.toName with
+            | some info => some (thm.toName, info)
+            | none =>
+                let hidden := mkPrivateNameCore row.home thm.toName
+                (env.find? hidden).map (hidden, ·)
+          match witness? with
           | none => faults := faults.push s!"{row.ctor}: L1 witness {thm} does not exist"
-          | some info =>
-              let structName := row.ctor.getPrefix
-              for fault in ← l1WitnessFaults structName thm.toName info do
+          | some (witness, info) =>
+              for fault in ← l1WitnessFaults structName witness info do
                 faults := faults.push s!"{row.ctor}: {fault}"
       | ["defect", task] => defects := defects.push s!"{row.ctor} (cv {task})"
       | ["restricted", functions] =>

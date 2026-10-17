@@ -5,9 +5,9 @@ cd "$(dirname "$0")/../.."
 
 mode=${1:-}
 case "$mode" in
-  ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted) ;;
+  ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted|private-structure) ;;
   *)
-    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted}" >&2
+    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted|private-structure}" >&2
     exit 2
     ;;
 esac
@@ -123,6 +123,15 @@ case "$mode" in
     perl -0pi -e "s{L1 Minidregg\.TokenCensus\.ProjectionWitness\.sound' \|}{L2 |}" TokenCensus/Table.lean
     grep -F "Minidregg.TokenCensus.ProjectionWitness.mk | TokenCensus | L2 |" TokenCensus/Table.lean
     expect_red "ProjectionWitness.mk: layer must be \`L1 <theorem>\`, \`restricted <function,…>\` or \`defect <cv task>\`, not \`L2\`"
+    ;;
+  private-structure)
+    # a `private structure`: its type, fields and witness carry private names (`_private.<home>.0.…`).
+    # The census resolves the row's witness in the home module and matches the inhabitant against the
+    # real inductive, and the statement checks still apply: this witness ignores `result`.
+    insert_after_positive "private structure PrivatePlant (request result : Nat) where\n  sound : request = 0\n\nprivate theorem PrivatePlant.w {request result : Nat} (x : PrivatePlant request result) :\n    request = 0 := x.sound"
+    add_row 'Minidregg.TokenCensus.PrivatePlant.mk | TokenCensus | L1 Minidregg.TokenCensus.PrivatePlant.w | planted: a private structure whose witness ignores result'
+    grep -F "private theorem PrivatePlant.w" TokenCensus.lean
+    expect_red "PrivatePlant.mk: L1 witness _private.TokenCensus.0.Minidregg.TokenCensus.PrivatePlant.w ignores the bound token indices: [result]"
     ;;
   unlisted-vacuous)
     # a new private-mk type in a censused module, carrying only a vacuous theorem and no row

@@ -159,6 +159,25 @@ theorem Committed.postRecord_exact {config : Config} {anchor : Opened config}
       (DurableReceiver.IntentRecord.ofIntent committed.admitted.intent) :=
   committed.appended.entryExact
 
+/-- The retained receipt is the recomputed receipt at `old`'s height (past the
+anchor's prefix) of the suffix that `config` natively admitted from `anchor` up
+to the post-CAS image. -/
+theorem Committed.receipt_admitted_suffix {config : Config} {anchor : Opened config}
+    (committed : Committed config anchor) :
+    anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height ∧
+      committed.verified.receipts[committed.old.opened.durable.height -
+        anchor.durable.image.accepted.length]? = some committed.receipt ∧
+      NativeHostReplay.AdmittedSuffix config anchor
+        (committed.appended.next.image.accepted.drop anchor.durable.image.accepted.length)
+        committed.verified.opened committed.verified.receipts := by
+  have exact := committed.receiptExact
+  unfold NativeHostReplay.SuffixVerified.receiptAt at exact
+  by_cases within : anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height
+  · rw [if_pos within] at exact
+    exact ⟨within, exact, committed.verified.accepted_suffix⟩
+  · rw [if_neg within] at exact
+    cases exact
+
 /-- Only the physical fresh-winner branch below can construct this. Recovered,
 already-present and historical outcomes retain receipts, never this value. -/
 structure Permit (config : Config) (anchor : Opened config) where

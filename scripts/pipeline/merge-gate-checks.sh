@@ -112,7 +112,7 @@ builders() {
   # when the instrument changes. Lake builds, so in the builders job (one .lake writer).
   if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest|Fixtures)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
     run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
-    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous scoped-unlisted; do
+    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous scoped-unlisted private-structure; do
       run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
     done
   else

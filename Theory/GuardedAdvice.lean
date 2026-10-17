@@ -115,6 +115,25 @@ structure VerifiedFill
   guard_bound : verifier.guardAccepts spec advice = true
   effect_bound : verifier.effectAccepts spec advice = true
 
+/-- **What verified evidence guarantees about its indices**: the observation
+height `now` is within the specification's deadline, every check of `verifier`
+admits this `spec` and `advice`, and the carried post-root is the one
+`verifier` computes for them. -/
+theorem VerifiedFill.sound
+    {U : FirstOrderUniverse.{u, v}} {V : Vocabulary.{w}}
+    [LinearOrder V.Height]
+    {verifier : FillVerifier U V} {now : V.Height}
+    {spec : HoleSpec U V} {advice : Advice spec}
+    (fill : VerifiedFill verifier now spec advice) :
+    fill.postRoot = verifier.postRoot spec advice ∧
+      verifier.supports spec = true ∧ verifier.backendAvailable spec = true ∧
+      now ≤ spec.deadline ∧ verifier.ready spec advice = true ∧
+      verifier.authorityAccepts spec advice = true ∧
+      verifier.guardAccepts spec advice = true ∧
+      verifier.effectAccepts spec advice = true :=
+  ⟨fill.postRoot_eq, fill.supported, fill.backend_available, fill.within_deadline,
+    fill.ready, fill.authority_bound, fill.guard_bound, fill.effect_bound⟩
+
 /-- Exhaustive verification result.  Only `accepted` contains evidence that
 may be presented to the durable commit boundary. -/
 inductive VerifyOutcome

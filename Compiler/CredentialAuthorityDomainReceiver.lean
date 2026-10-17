@@ -608,6 +608,28 @@ theorem PreparedGrantBatch.batchFresh {F : Type} [Field F]
       (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) :=
   ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh⟩
 
+/-- **What a prepared grant batch guarantees about its indices**: the batch's slots and grant ids
+are distinct, every parent row is absent in `loaded`'s authority cell, and every initial policy of
+`descriptor` decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`
+(the profile has a descriptor, the record names this domain and the profile's semantics, is version 0
+with no predecessor, and its predicate is one the profile's compiler supports). -/
+theorem PreparedGrantBatch.sound {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {descriptor : Descriptor registry}
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
+      descriptor.GrantIdsDistinct ∧
+      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) ∧
+      ∀ initial ∈ descriptor.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record :=
+  ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh,
+    fun initial member => by
+      obtain ⟨record, _, decoded, facts⟩ := prepared.initialSources.record_of_member initial member
+      exact ⟨record, decoded, facts⟩⟩
+
 def prepareGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)

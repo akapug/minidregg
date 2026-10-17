@@ -173,9 +173,21 @@ theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore :
   simp only [String.toUTF8] at core
   simp [r.replayExact, r.accepted.proposed, bind, Except.bind, Except.toOption, pure, Except.pure, core]
 
+/-- **What a replay token guarantees about its indices**: the offered typed core is the one
+`replayedCore` computes from package `p`, the offered laws are the ones `publishedLaws` reads from
+`p`, and the checker fuel of the accepted lowering — the lowering `replay p` produces — is within the
+receiver's `maxFuel`. -/
+theorem Replayed.sound {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8}
+    {laws : List (String × ObjectiveBendLaw.LawExpr)} {maxFuel : Nat}
+    (r : Replayed p typedCore laws maxFuel) :
+    ObjectiveBendPublication.replayedCore p = some typedCore ∧ publishedLaws p = .ok laws ∧
+      replay p = .ok r.lowering ∧ r.accepted.packet.fuel ≤ maxFuel :=
+  ⟨r.core_replayed, r.laws_replayed, r.replayExact, r.fuelWithin⟩
+
 #assert_axioms replayedCore_is_lowering
 #assert_axioms replay_select
 #assert_axioms Replayed.replayExact
 #assert_axioms Replayed.core_replayed
 #assert_axioms Replayed.laws_replayed
+#assert_axioms Replayed.sound
 end Minidregg.Compiler.ObjectiveBendPublication

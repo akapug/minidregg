@@ -6143,6 +6143,18 @@ theorem Publication.retention_cells_have_payer {rootBytes : Bytes → Digest} {c
   refine ⟨cellsPaid_of_posts config snapshot _ (fun post member _ => ?_), each⟩
   rw [each post member]; rfl
 
+/-- **A creation is a first record whose seed passed at its height**: the indexed snapshot holds no
+record for the request's object, the pinned package's laws are the ones the creation carries, and
+any seed the request supplies is admitted by the seed law under the creator's facts at `height`. -/
+theorem Creation.fresh_seed_judged {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} {request : CreateRequest}
+    (created : Creation config snapshot height request) :
+    readObject config snapshot request.object = .ok none ∧
+      packageLawsAt config snapshot request.pin = .ok created.laws ∧
+      ∀ seed, request.seed = some seed →
+        ObjectRecord.admitSeed (request.record created.laws) (seedFacts request height) seed = .ok () :=
+  ⟨created.absent, created.lawsExact, created.seedJudged⟩
+
 /-- **The record a creation installs is what the post-state holds**: read back from the bytes
 the creation commits, the object's record is `(request.record created.laws) created.laws`. -/
 theorem Creation.object_installed {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -6330,6 +6342,7 @@ theorem Resolution.retention_cells_have_payer {rootBytes : Bytes → Digest} {co
 #assert_axioms Publication.retention_cells_have_payer
 #assert_axioms Creation.retention_cells_have_payer
 #assert_axioms Creation.object_installed
+#assert_axioms Creation.fresh_seed_judged
 #assert_axioms create_installs_pin
 #assert_axioms create_seed_judged
 #assert_axioms create_seed_refused_names_clause

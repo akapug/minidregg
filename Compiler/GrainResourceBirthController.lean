@@ -263,6 +263,31 @@ def prepareSourceAuthority {F : Type} [Field F]
     some ⟨shape, combined⟩
   else none
 
+/-- **What a prepared source authority guarantees about its indices**: `source` has the source
+shape at `loaded`'s domain for `semantics` and `tariff` (distinct unborn tool and parent tasks,
+reserved/running statuses, the tool's reservation covers `tariff.charge source.birth`, and the birth's
+authority nullifier differs from the source-derived operation marker); `source.birth` is batch-ready
+at `loaded`'s authority snapshot; that operation marker is unspent in the consumed set of the
+physical snapshot `durable` holds, read in `deployment`'s domain; and every initial policy decodes
+to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
+theorem PreparedSourceAuthority.sound {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {semantics : Digest} {tariff : Tariff} {source : Source}
+    (prepared : PreparedSourceAuthority profile deployment loaded semantics tariff source) :
+    SourceShape loaded.snapshot.domain semantics tariff source ∧
+      CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot source.birth ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+          (source.grainCommand tariff)) = false ∧
+      ∀ initial ∈ source.birth.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record := by
+  obtain ⟨_, ready, fresh, initials⟩ := prepared.combined.sound
+  exact ⟨prepared.shape, ready, (congrFun loaded.spentExact _).symm.trans fresh, initials⟩
+
 def PreparedSourceAuthority.auxiliaryCreates {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
@@ -303,6 +328,34 @@ def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
         (source.grainCommand tariff)) height sourced
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
+
+/-- **What a prepared source birth guarantees about its indices**: `source` has the source shape at
+`deployment`'s domain for `semantics` and `tariff`; `pins` name `deployment`'s factory and domain and
+carry `profile`'s semantics; the birth's authority nullifier and the source-derived operation marker
+are both unspent in the consumed set of `durable`'s physical snapshot, read in `deployment`'s domain;
+and every initial policy decodes to a record satisfying `InitialFacts` for `deployment`'s domain and
+`profile`. -/
+theorem PreparedSourceBirth.sound {F : Type} [Field F]
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {semantics : Digest} {tariff : Tariff} {source : Source}
+    (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
+    SourceShape deployment.domain semantics tariff source ∧
+      ResourceBirthController.Concrete.PinsBound deployment pins ∧
+      ResourceBirthController.Concrete.ProfileBound profile pins ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        source.birth.authorityNullifier = false ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        (DeclaredResourceController.operationMarker deployment.domain semantics
+          (source.grainCommand tariff)) = false ∧
+      ∀ initial ∈ source.birth.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record := by
+  obtain ⟨_, ready, fresh, initials⟩ := prepared.prepared.authorityCombined.sound
+  have spent := prepared.prepared.pre.authority.spentExact
+  exact ⟨prepared.shape, prepared.prepared.pre.pinsBound, prepared.prepared.pre.profileBound,
+    (congrFun spent _).symm.trans ready.2.2.2.1, (congrFun spent _).symm.trans fresh, initials⟩
 
 /-- The birth's authority patch validated at the loaded cell's own root. -/
 def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
