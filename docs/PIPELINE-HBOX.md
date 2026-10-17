@@ -95,7 +95,7 @@ cd /tank/dregg-build/pipeline && PIPELINE_ROOT=$PWD setsid nohup bash <tree>/scr
    source.tar sha256. `SELF-CHECK PASS|FAIL` says whether the executed runner is byte-identical to
    `git show TIP:scripts/pipeline/journey-runner` from the shared repo; FAIL exits 12. If the plant marker
    exists, a `STALE-COPY EXECUTED` line follows. Then the verdict body: `awk -F'\t' '$2!="PASS"' results.tsv` and the row count. Then check every id in
-   `required-rows`, read from the **main base's** tree so a lane cannot drop its own required rows. Each must be
+   `required-rows`, read from the **baseline's own tree** (`journeys/.trees/<artifacts/main>`, the tree main's standing run executed) so a lane cannot drop its own required rows or add its own known-red lines; never from the warm base, which is a build cache. No baseline tree: `NO POLICY`, exit 13. Each must be
    PASS, or UNCONFIGURED with a detail that matches that row's declaration in `absent-inputs.tsv`. A required id
    with no line in results.tsv is MISSING. Exit 0 only if every required id passes this check; otherwise exit 13.
    The verdict is also written to `LANE/logs/landing-TIP.txt`.

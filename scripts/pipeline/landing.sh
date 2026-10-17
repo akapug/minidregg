@@ -45,12 +45,19 @@ pipeline_log "landing.sh $here/landing.sh sha256:$(self_sha "$here/landing.sh");
 # --- the verdict (step 5), also alone with --check ------------------------------------------------
 judge() {
   local J=$JOURNEY_ROOT/$tip req decl
-  req=$W/src/scripts/pipeline/required-rows; [ -f "$req" ] || req=$here/required-rows
   decl=$PIPELINE_ROOT/absent-inputs.tsv; [ -f "$decl" ] || decl=/dev/null
   # BASELINE: main's own most recent standing run on THIS box ($ARTIFACT_ROOT/main -> its journeys DONE)
   local base_t base_res=/dev/null
   base_t=$(readlink "$ARTIFACT_ROOT/main" 2>/dev/null || true)
   if [ -n "$base_t" ] && [ -f "$JOURNEY_ROOT/$base_t/DONE" ]; then base_res=$JOURNEY_ROOT/$base_t/results.tsv; fi
+  # POLICY: the required-rows of the BASELINE's own tree (the tree main's standing run executed,
+  # $JOURNEY_ROOT/.trees/<main>), never the candidate's (a candidate cannot add its own known-red
+  # lines) and never the warm base's (a build cache, not policy; ROOT 2026-10-16). No baseline tree:
+  # no policy, so no verdict.
+  req=$JOURNEY_ROOT/.trees/${base_t:-none}/scripts/pipeline/required-rows
+  if [ -z "$base_t" ] || [ ! -f "$req" ]; then
+    echo "NO POLICY: no required-rows in main's standing-run tree ($req); run main's standing run on this box first"; return 13
+  fi
   [ -f "$J/DONE" ] || { pipeline_log "no finished standing run at $J"; return 12; }
   # Which tree the standing run executed, and whether that runner is TIP's own: a greppable line, never an
   # absence. The dispatch record is the service's (install-journey-units); the reference sha is TIP's blob
