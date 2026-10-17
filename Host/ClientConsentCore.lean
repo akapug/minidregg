@@ -550,8 +550,10 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let operation := body[0]!
   let payload := body.toList.drop 1
   if operation ≥ 230 && operation ≤ 232 || operation == 226 then
-    let answer ← try pure (operation, ← if operation == 226 then possession config payload
-        else thin (← IO.ofExcept settings.providerRoutes) config operation payload)
+    let answer ← try
+        let reply ← if operation == 226 then possession config payload
+          else do thin (← IO.ofExcept settings.providerRoutes) config operation payload
+        pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained held input output own
@@ -598,10 +600,12 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
         let (full, upgraded) ← upgrade config admitted own
         pure (some full, upgraded)
       else pure (none, admitted)
-    let answer ← try pure (operation, ← if operation == 224 then
-        specialized extraExpected settings config updated full payload
-      else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
-      else consent (← IO.ofExcept settings.providerRoutes) config updated operation payload)
+    let answer ← try
+        let reply ← if operation == 224 then
+            specialized extraExpected settings config updated full payload
+          else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
+          else do consent (← IO.ofExcept settings.providerRoutes) config updated operation payload
+        pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
     serve extraExpected extraObjective settings config retained (some updated) input output own
