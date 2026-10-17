@@ -27,7 +27,7 @@ is_listed() { local f=$1 g; for g in "${generated[@]}"; do [[ "$f" == $g ]] && r
 looks_generated() { [[ "$1" == *FixtureData* || "$1" == */golden/* || "$1" == *.snapshot || "$1" == native/*/fixtures/* ]]; }
 red=0
 for commit in $(git rev-list --reverse "$range"); do
-  mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$commit")
+  mapfile -t files < <(git diff-tree -M --no-commit-id --name-only -r "$commit")
   auth_files=() ; impl_files=() ; unlisted=()
   for f in "${files[@]}"; do
     is_authority "$f" && auth_files+=("$f")
