@@ -41,6 +41,12 @@ else
 [ -n "$cap" ] && [ "$cap" -ge $((ram*70/100)) ] && [ "$cap" -le $((ram*90/100)) ] && ok swarm.slice "${cap}G of ${ram}G" || diff swarm.slice "cap ${cap:-none}G of ${ram}G (want 70-90%)"
 fi
 for t in elan lake lean cargo rustc bun; do have $t && ok "tool:$t" || diff "tool:$t" missing; done
+# lane-build's rust step is --offline --locked: the tip's cargo deps must be on the box (user.sh fetches them once)
+if [ -f "$SRV/mini/Cargo.lock" ]; then
+  rt=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$SRV/mini/rust-toolchain.toml")
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked --offline >/dev/null 2>&1 ) && ok cargo-deps "offline fetch of $SRV/mini resolves" \
+    || rootonly cargo-deps "cargo deps" "cargo fetch --locked --offline fails in $SRV/mini (user.sh fetches them)"
+fi
 [ -d "$SRV/mini/.git" ] && ok repo "$SRV/mini at $(git -C "$SRV/mini" rev-parse --short HEAD)" || diff repo "no $SRV/mini"
 [ -n "$tip" ] && { [ "$(git -C "$SRV/mini" rev-parse HEAD 2>/dev/null)" = "$tip" ] && ok repo-tip || diff repo-tip "$(git -C "$SRV/mini" rev-parse --short HEAD 2>/dev/null) != ${tip:0:8}"; }
 if [ "$noroot" = 1 ]; then

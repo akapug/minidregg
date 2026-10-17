@@ -58,6 +58,15 @@ else
 elan toolchain install "$lt" 2>&1 | tail -1
 rustup toolchain install "$rt" --profile minimal -c clippy -c rustfmt 2>&1 | tail -1
 fi
+# --- the tip's cargo dependencies, once: lane-build's rust step builds --offline --locked, so a fresh box without
+# them fails at its first git dependency (burst5 10-17: sandstorm-package from emberian/dregg). A no-root host's
+# ~/.cargo is its owner's: not fetched there, declared in NO-ROOT.txt.
+if [ "$noroot" = 1 ]; then
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked --offline >/dev/null 2>&1 ) && echo "cargo deps: present" \
+    || { echo "NOT FETCHED (no-root host): cargo deps of $tip"; echo "cargo deps" >> "$NR"; }
+else
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked ) 2>&1 | tail -1
+fi
 
 # --- profile: PATH + box.env (the one box-local file every script reads; a login shell gets it too) ---
 if [ "$noroot" = 1 ]; then
