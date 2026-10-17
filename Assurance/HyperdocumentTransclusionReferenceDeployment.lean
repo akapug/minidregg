@@ -194,14 +194,35 @@ def openingStream (n : Nat) : StreamCodec (RangeOrValueOpening n Fld) :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
     (by intro opening; cases opening; rfl)
 
-def disclosureSetStream : StreamCodec (Finset DisclosureAtom) :=
-  StreamCodec.xmap (StreamCodec.list disclosureAtomStream)
-    (fun atoms => atoms.sort (fun left right => left <= right))
-    List.toFinset
-    (by
-      intro atoms
-      ext atom
-      simp)
+/-- A disclosure set travels as its sorted list, and only as that: the decoder
+refuses a wire list that is not the sorted list of its own elements (unsorted or
+duplicated), so one set has one spelling (the canonical StreamCodec). -/
+def disclosureSetStream : StreamCodec (Finset DisclosureAtom) where
+  encode atoms := (StreamCodec.list disclosureAtomStream).encode
+    (atoms.sort (fun left right => left <= right))
+  decodePrefix bytes := do
+    let (atoms, suffix) ← (StreamCodec.list disclosureAtomStream).decodePrefix bytes
+    if atoms.toFinset.sort (fun left right => left <= right) = atoms then
+      some (atoms.toFinset, suffix)
+    else none
+  decodePrefix_encode := by
+    intro atoms suffix
+    simp [(StreamCodec.list disclosureAtomStream).decodePrefix_encode, Finset.sort_toFinset]
+  encode_decodePrefix := by
+    intro bytes atoms suffix decoded
+    cases ok : (StreamCodec.list disclosureAtomStream).decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases sorted : wire.toFinset.sort (fun left right => left <= right) = wire
+      · simp only [ok, bind, Option.bind, sorted, if_true, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show (StreamCodec.list disclosureAtomStream).encode
+          (wire.toFinset.sort (fun left right => left <= right)) ++ rest = bytes
+        rw [sorted]
+        exact (StreamCodec.list disclosureAtomStream).encode_decodePrefix _ _ _ ok
+      · simp [ok, sorted] at decoded
 
 /-- A structural codec assembled from the same canonical digest, disclosure,
 finite-coordinate, and typed-field leaves used by the bounded Hyperdocument
