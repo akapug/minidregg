@@ -36,6 +36,20 @@ set_option autoImplicit false
 /-- The pinned services: resource id and the per-operation fees of its tariff. -/
 abbrev Services := List (Nat × Schedule)
 
+private theorem all_inj_iff {a b : List Pred} : Pred.all a = Pred.all b ↔ a = b := by
+  constructor
+  · intro h
+    have := congrArg (fun p => match p with | .allL ps => ps.toList | _ => []) h
+    simpa [Pred.all] using this
+  · rintro rfl; rfl
+
+private theorem any_inj_iff {a b : List Pred} : Pred.any a = Pred.any b ↔ a = b := by
+  constructor
+  · intro h
+    have := congrArg (fun p => match p with | .anyL ps => ps.toList | _ => []) h
+    simpa [Pred.any] using this
+  · rintro rfl; rfl
+
 /-- Whether `predicate` is the route law of `schedule` over its own base. -/
 def carries (schedule : Schedule) : Pred → Bool
   | .all [base, guard] => decide (Pred.all [base, guard] = ProviderRoute.policy schedule base)
@@ -50,24 +64,16 @@ theorem carries_iff (schedule : Schedule) (predicate : Pred) :
     · exact ⟨_, of_decide_eq_true accepted⟩
     · cases accepted
   · rintro ⟨base, rfl⟩
-    simp [carries, ProviderRoute.policy]
+    simp [carries, ProviderRoute.policy, Pred.all, PredList.ofList]
 
 /-- Distinct schedules give distinct route laws. -/
 theorem transition_injective : Function.Injective ProviderRoute.transition := by
-  intro a b same
-  cases a with
-  | mk au ap ah =>
-    cases b with
-    | mk bu bp bh =>
-      simp only [ProviderRoute.transition, ProviderRoute.reserveRule, ProviderRoute.settleRule,
-        Pred.all.injEq, Pred.any.injEq, Pred.eq.injEq, Pred.not.injEq, Pred.le.injEq,
-        List.cons.injEq, and_true, true_and] at same
-      obtain ⟨u, p, h⟩ := same
-      have hu : au = bu := by exact_mod_cast u
-      have hp : ap = bp := by omega
-      have hh : ah = bh := by omega
-      subst hu hp hh
-      rfl
+  rintro ⟨au, ap, ah⟩ ⟨bu, bp, bh⟩ same
+  simp only [ProviderRoute.transition, ProviderRoute.reserveRule, ProviderRoute.settleRule,
+    all_inj_iff, any_inj_iff, List.cons.injEq, Pred.eq.injEq, Pred.not.injEq, Pred.le.injEq,
+    Pred.memberOf.injEq, true_and, and_true] at same
+  simp only [Schedule.mk.injEq]
+  omega
 
 /-- The policy records a draft would install: a birth's initial policies (either
 birth source encoding) and an installation's declared source. Other drafts
@@ -115,11 +121,10 @@ private theorem forM_ok {α : Type} (f : α → Except String Unit) :
     ∀ (xs : List α), xs.forM f = .ok () → ∀ x ∈ xs, f x = .ok ()
   | [], _, x, mem => by simp at mem
   | y :: ys, h, x, mem => by
-      simp only [List.forM_cons] at h
       cases hy : f y with
-      | error e => rw [hy] at h; cases h
+      | error e => simp [List.forM_cons, hy] at h
       | ok u =>
-          rw [hy] at h
+          simp [List.forM_cons, hy] at h
           cases mem with
           | head => exact hy
           | tail _ mem => exact forM_ok f ys h x mem
@@ -142,12 +147,11 @@ theorem check_binds (services : Services) (draft : Draft) (records : List Policy
   unfold check at accepted
   rw [nonempty, if_neg (by simp), installs] at accepted
   have one := forM_ok (checkRecord services) records accepted record member
-  unfold checkRecord at one
-  rw [pinned] at one
+  simp only [checkRecord, pinned] at one
   have carried : carries schedule record.predicate = true := by
     cases h : carries schedule record.predicate with
     | true => rfl
-    | false => rw [h] at one; cases one
+    | false => simp [h] at one
   obtain ⟨base, shape⟩ := (carries_iff schedule record.predicate).mp carried
   refine ⟨⟨base, shape⟩, fun old st admitted mutation => ?_⟩
   rw [shape] at admitted
@@ -166,12 +170,11 @@ theorem other_schedule_refused (services : Services) (record : PolicyRecord)
     | true =>
         obtain ⟨base2, shape⟩ := (carries_iff schedule record.predicate).mp h
         rw [law] at shape
-        simp only [ProviderRoute.policy, Pred.all.injEq, Pred.any.injEq, List.cons.injEq,
-          and_true, true_and] at shape
-        exact absurd (transition_injective shape.2) differs
-  unfold checkRecord
-  rw [pinned]
-  simp [absent]
+        simp only [ProviderRoute.policy] at shape
+        simp only [all_inj_iff, any_inj_iff, List.cons.injEq] at shape
+        exact absurd (transition_injective shape.2.1.2.1) differs
+  simp only [checkRecord, pinned, absent]
+  rfl
 
 #assert_axioms carries_iff
 #assert_axioms transition_injective
