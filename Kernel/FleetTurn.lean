@@ -134,7 +134,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  NativeHostCodec.framed "DREGG/FLEET/TURN/SIGNED/v1".toUTF8.toList ingressStream
+  NativeHostCodec.framed "DREGG/FLEET/TURN/SIGNED/v2".toUTF8.toList ingressStream
 
 structure DecodedIngress where
   mk ::

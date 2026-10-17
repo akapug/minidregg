@@ -203,7 +203,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/CLOCK/TICK/SIGNED/v1".toUTF8.toList ingressStream
+  framed "DREGG/CLOCK/TICK/SIGNED/v2".toUTF8.toList ingressStream
 
 structure DecodedIngress where
   mk ::
@@ -567,7 +567,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EVENT/v2".toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
