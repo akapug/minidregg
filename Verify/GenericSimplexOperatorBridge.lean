@@ -37,8 +37,7 @@ def retainedOfferedPayload (replicas : Array Replica) (ingress : Bytes) :
     let state := prior.state
     for payload in state.offers do
       if let some record := DurableCheckpointCodec.recordFrame.decode payload then
-        if DurableCheckpointCodec.recordFrame.encode record == payload &&
-            record.event.canonicalBytes == ingress then
+        if record.event.canonicalBytes == ingress then
           return some payload
   return none
 

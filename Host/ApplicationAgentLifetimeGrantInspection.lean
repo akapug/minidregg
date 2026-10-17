@@ -74,15 +74,11 @@ private def requestJson (request : Request) : Json :=
 def inspectRequest (bytes : List UInt8) : Except String Json := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical agent lifetime grant request"
-  unless requestCodec.encode request == bytes do
-    throw "noncanonical agent lifetime grant request"
   pure (requestJson request)
 
 def inspectPlan (bytes : List UInt8) : Except String Json := do
   let some plan := planCodec.decode bytes
     | throw "noncanonical agent lifetime grant plan"
-  unless planCodec.encode plan == bytes do
-    throw "noncanonical agent lifetime grant plan"
   unless plan.birth.slots.all (fun slot =>
       (CredentialSignedEnvelopeController.headerCodec.decode slot.header).isSome) &&
       (CredentialSignedEnvelopeController.headerCodec.decode plan.appSlot.header).isSome do

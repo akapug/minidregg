@@ -105,22 +105,51 @@ def finStream (size : Nat) : StreamCodec (Fin size) where
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, value.isLt]
+  encode_decodePrefix := by
+    intro bytes index suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases inBounds : wire < size
+      · simp only [ok, bind, Option.bind, dif_pos inBounds, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+      · simp [ok, inBounds] at decoded
 
 noncomputable def fldStream : StreamCodec Fld where
   encode value := StreamCodec.nat.encode (Encodable.encode value)
   decodePrefix bytes := do
     let (code, suffix) <- StreamCodec.nat.decodePrefix bytes
     let value <- Encodable.decode code
-    some (value, suffix)
+    if Encodable.encode value = code then some (value, suffix) else none
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, Encodable.encodek]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases dec : (Encodable.decode code : Option Fld) with
+      | none => simp [ok, dec] at decoded
+      | some decodedValue =>
+        by_cases canonical : Encodable.encode decodedValue = code
+        · simp only [ok, dec, canonical, bind, Option.bind, if_true, Option.some.injEq,
+            Prod.mk.injEq] at decoded
+          obtain ⟨rfl, rfl⟩ := decoded
+          rw [canonical]
+          exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+        · simp [ok, dec, canonical] at decoded
 
 def boundReceiptIxStream (n : Nat) : StreamCodec (BoundReceiptIx n) :=
   StreamCodec.xmap (finStream (16 + n * 3))
     (boundReceiptIxEquivRuntime n)
     (boundReceiptIxEquivRuntime n).symm
     (boundReceiptIxEquivRuntime n).symm_apply_apply
+    (fun wire => (boundReceiptIxEquivRuntime n).apply_symm_apply wire)
 
 def openingShapeTag : OpeningShape -> Nat
   | .value => 0
@@ -131,7 +160,7 @@ def openingShapeOfTag : Nat -> OpeningShape
   | _ => .range
 
 def openingShapeStream : StreamCodec OpeningShape :=
-  StreamCodec.xmap StreamCodec.nat openingShapeTag openingShapeOfTag
+  StreamCodec.retract StreamCodec.nat openingShapeTag openingShapeOfTag
     (by intro shape; cases shape <;> rfl)
 
 def referenceModeTag : Mode -> Nat
@@ -143,7 +172,7 @@ def referenceModeOfTag : Nat -> Mode
   | _ => .live
 
 def referenceModeStream : StreamCodec Mode :=
-  StreamCodec.xmap StreamCodec.nat referenceModeTag referenceModeOfTag
+  StreamCodec.retract StreamCodec.nat referenceModeTag referenceModeOfTag
     (by intro mode; cases mode <;> rfl)
 
 def sourceIdentityStream : StreamCodec SourceIdentity :=
@@ -165,14 +194,35 @@ def openingStream (n : Nat) : StreamCodec (RangeOrValueOpening n Fld) :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
     (by intro opening; cases opening; rfl)
 
-def disclosureSetStream : StreamCodec (Finset DisclosureAtom) :=
-  StreamCodec.xmap (StreamCodec.list disclosureAtomStream)
-    (fun atoms => atoms.sort (fun left right => left <= right))
-    List.toFinset
-    (by
-      intro atoms
-      ext atom
-      simp)
+/-- A disclosure set travels as its sorted list, and only as that: the decoder
+refuses a wire list that is not the sorted list of its own elements (unsorted or
+duplicated), so one set has one spelling (the canonical StreamCodec). -/
+def disclosureSetStream : StreamCodec (Finset DisclosureAtom) where
+  encode atoms := (StreamCodec.list disclosureAtomStream).encode
+    (atoms.sort (fun left right => left <= right))
+  decodePrefix bytes := do
+    let (atoms, suffix) ← (StreamCodec.list disclosureAtomStream).decodePrefix bytes
+    if atoms.toFinset.sort (fun left right => left <= right) = atoms then
+      some (atoms.toFinset, suffix)
+    else none
+  decodePrefix_encode := by
+    intro atoms suffix
+    simp [(StreamCodec.list disclosureAtomStream).decodePrefix_encode, Finset.sort_toFinset]
+  encode_decodePrefix := by
+    intro bytes atoms suffix decoded
+    cases ok : (StreamCodec.list disclosureAtomStream).decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases sorted : wire.toFinset.sort (fun left right => left <= right) = wire
+      · simp only [ok, bind, Option.bind, sorted, if_true, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show (StreamCodec.list disclosureAtomStream).encode
+          (wire.toFinset.sort (fun left right => left <= right)) ++ rest = bytes
+        rw [sorted]
+        exact (StreamCodec.list disclosureAtomStream).encode_decodePrefix _ _ _ ok
+      · simp [ok, sorted] at decoded
 
 /-- A structural codec assembled from the same canonical digest, disclosure,
 finite-coordinate, and typed-field leaves used by the bounded Hyperdocument

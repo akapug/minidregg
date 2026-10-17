@@ -139,13 +139,17 @@ def systemStream : StreamCodec System :=
     (fun (height, digest, bound) => ⟨height, digest, bound⟩)
     (by intro system; cases system; rfl)
 
-def namespaceStream : StreamCodec Namespace where
+/-- The namespace tag's list codec; `namespaceStream` is it on the cursor. -/
+def namespaceListStream : StreamCodec Namespace where
   encode
     | .system => [0]
   decodePrefix
     | 0 :: suffix => some (.system, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space; rfl
+
+def namespaceStream : StreamCodec Namespace :=
+  withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
 
 def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .system => unitStream

@@ -171,7 +171,7 @@ ssh mini@BOX key revoke openrouter        # delete the key and every grant
 ## Charges: the Host's per-route tariff
 
 The Host profile pins one tariff per provider task, with a row per route
-(`providerMetering.tariff` or each `providerServices[].tariff`; credit units,
+(each `providerServices[].tariff`; credit units,
 one credit per purse micro-unit):
 
 ```json

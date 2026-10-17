@@ -471,18 +471,8 @@ def dispatchStream : StreamCodec DispatchIntent :=
 private def dispatchFrame : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH/v1".toUTF8.toList
 
-private def rawDispatchCodec : LawfulCodec DispatchIntent where
-  encode intent := dispatchFrame ++ dispatchStream.encode intent
-  decode bytes := if bytes.take dispatchFrame.length = dispatchFrame then
-    dispatchStream.toLawful.decode (bytes.drop dispatchFrame.length) else none
-  decode_encode := by
-    intro intent
-    have decoded := dispatchStream.toLawful.decode_encode intent
-    change dispatchStream.toLawful.decode (dispatchStream.encode intent) = some intent at decoded
-    simp [decoded]
-
 def dispatchCodec : LawfulCodec DispatchIntent :=
-  ResourceBirthCodec.strictCodec rawDispatchCodec
+  (StreamCodec.framed dispatchFrame dispatchStream).toLawful
 
 def DispatchIntent.canonicalBytes (intent : DispatchIntent) : List UInt8 :=
   dispatchCodec.encode intent

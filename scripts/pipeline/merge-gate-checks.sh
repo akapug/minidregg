@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # merge-gate-checks.sh SRC FROM TO TAG  -- MERGE-KEEPER post-merge checks (run AFTER the umbrella
-# `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` is green in SRC at TO).
+# `lake build $(bash scripts/pipeline/umbrella-targets)` is green in SRC at TO).
 # Every check runs even after a red. Logs: <basedir>/logs/gate-TAG-<check>.log; summary
 # <basedir>/logs/gate-TAG.summary (one line per check: name PASS|RED rc secs). Exit = number red.
 # Rust: only the rows of scripts/check-rust-tests.sh whose crate FROM..TO touches (rust-rows.py).
@@ -100,10 +100,24 @@ builders() {
   else
     echo red > "$ACR"
   fi
-  # Every private constructor is listed in TokenCensus/Table.lean and minted only in its home
-  # module (a `private mk` stops names, not `by constructor`); a planted forgery per row must be
-  # detected. Elaborates TokenCensus over the research umbrella.
+  # Every private constructor is listed in TokenCensus/Table.lean with a reviewed row (an L1 witness
+  # or a defect naming its cv task) and minted only in its home module (a `private mk` stops names,
+  # not `by constructor`). Elaborates TokenCensus over the research umbrella.
   run token-census    $LAKE_WRAP lake build TokenCensus
+  # The same census over the recorded-run library (Fixtures), which no whole-tree census imports so
+  # that a stale recording cannot hide the verdict above. Red while a fixture is red.
+  run token-census-fixtures $LAKE_WRAP lake build TokenCensus.Fixtures
+  # The instrument's self-test (a planted forgery per private constructor, a planted call per
+  # restriction, and the plant script's statement plants) tests the detector, not the tree: it runs
+  # when the instrument changes. Lake builds, so in the builders job (one .lake writer).
+  if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest|Fixtures)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
+    run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
+    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous scoped-unlisted private-structure; do
+      run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
+    done
+  else
+    echo "token-census: instrument unchanged since $(git log -1 --format=%h "$TO" -- TokenCensus.lean TokenCensus/Core.lean TokenCensus/SelfTest.lean TokenCensus/Fixtures.lean scripts/kn2/plant-token-census-v2.sh): self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
+  fi
   run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
   # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
   # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
@@ -133,7 +147,21 @@ ledger() {
 }
 
 readers() {
+  # Defects only shrink: a commit may delete a `defect` row (its type now carries its guarantee),
+  # never add one. A new token is reviewed to L1 or loses `private`. The ratchet starts at the
+  # commit that introduced the grammar (TokenCensus/Core.lean absent at FROM). git only; its RED
+  # line is counted from the summary like every other.
+  defects() { git show "$1:TokenCensus/Table.lean" | awk -F'|' '$3 ~ /^ *defect / {gsub(/ /,"",$1); print $1}' | sort -u; }
+  if git cat-file -e "$FROM:TokenCensus/Core.lean" 2>/dev/null; then
+    local added_defects
+    added_defects=$(comm -13 <(defects "$FROM") <(defects "$TO") | tr '\n' ' ')
+    if [ -n "$added_defects" ]; then
+      echo "token-census-defects RED (defect rows added; review the type to L1 instead): $added_defects" | tee -a "$S"
+    else echo "token-census-defects PASS ($(defects "$TO" | wc -l) defects, none added)" | tee -a "$S"; fi
+  else echo "token-census-defects SKIP (the defect ratchet starts in this range)" | tee -a "$S"; fi
   run host-closure    bash scripts/check-host-closure.sh
+  # The umbrella builds every Lean root the candidate ships, and the recorded runs (Fixtures).
+  run umbrella-targets bash scripts/pipeline/umbrella-targets --check
   # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
   run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
   # Each planted fault against the pinned history API is refused by the guard it plants

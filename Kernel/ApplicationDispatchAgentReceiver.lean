@@ -57,6 +57,14 @@ theorem Committed.postRecord_exact {config : Config} (permit : Committed config)
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
+/-- The exact readback installs the intent admitted at `old.opened`, and the
+post-CAS image is the `config`-validated successor of `old` extended by it. -/
+theorem Committed.validated_successor {config : Config} (permit : Committed config) :
+    permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+  ⟨permit.derivedExact, permit.readback.validated⟩
+
 /-- Exact readback alone is not delivery authority. Both witnesses must come
 from this attempt's fresh installed physical CAS branch. -/
 structure Permit (config : Config) extends Committed config where
@@ -85,6 +93,15 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
 theorem Permit.won_fresh_installed {config : Config} (permit : Permit config) :
     permit.freshCasWinner = true ∧ permit.confirmation = .installed :=
   ⟨permit.fresh, permit.installed⟩
+
+/-- Delivery authority: this attempt freshly won and installed the CAS whose
+post-image is the `config`-validated successor carrying the admitted intent. -/
+theorem Permit.installed_validated_successor {config : Config} (permit : Permit config) :
+    permit.freshCasWinner = true ∧ permit.confirmation = .installed ∧
+      permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+  ⟨permit.fresh, permit.installed, permit.toCommitted.validated_successor⟩
 
 private def permitCodec : LawfulCodec
     (ApplicationDispatchAgentProjection.Paid × NativeHostCodec.Receipt) :=
@@ -155,6 +172,8 @@ theorem fresh_installed_permitted {config : Config} (committed : Committed confi
 #assert_axioms recovered_receipt_only
 #assert_axioms fresh_installed_permitted
 #assert_axioms Permit.won_fresh_installed
+#assert_axioms Committed.validated_successor
+#assert_axioms Permit.installed_validated_successor
 
 def receiveVerified (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target)

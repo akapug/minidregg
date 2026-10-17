@@ -169,24 +169,16 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, capability, nonce, authorityRoot, clockRoot, now, slot⟩)
     (by intro c; cases c; rfl)
 
-def framedRaw {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-    { encode value := frame ++ stream.encode value
-      decode bytes := if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-      decode_encode := by
-        intro value
-        have exact := stream.toLawful.decode_encode value
-        change stream.toLawful.decode (stream.encode value) = some value at exact
-        simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A)
     {bytes : List UInt8} {value : A}
     (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 /-- v2: the command names the sponsor's `C_tick` on the clock cell and pins
 no factory root (v1 named the factory control capability and the factory
@@ -211,10 +203,10 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/CLOCK/TICK/SIGNED/v1".toUTF8.toList ingressStream
+  framed "DREGG/CLOCK/TICK/SIGNED/v2".toUTF8.toList ingressStream
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : Command
   canonical : commandCodec.encode command = ingress.commandBytes
@@ -264,7 +256,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
   ⟨plan, command.expectedClockRoot, marker domain semantics command⟩
@@ -517,6 +509,24 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  ⟨accepted.envelopeExact, ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient
+      command prepared.plan)
+    accepted.semantic.authorization⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -557,7 +567,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EVENT/v2".toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
@@ -608,6 +618,14 @@ structure AcceptedTick [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ClockTickReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedTick.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedTick deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    clockOf accepted.prepared.clockPost.logical = some ingress.command.tick ∧
+    accepted.prepared.clock.clock.now < ingress.command.now ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, (clock_monotone accepted.prepared).1,
+    (clock_monotone accepted.prepared).2.1, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

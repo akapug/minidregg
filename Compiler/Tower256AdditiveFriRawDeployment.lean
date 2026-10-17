@@ -53,6 +53,18 @@ def finStream (size : Nat) : StreamCodec (Fin size) where
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, value.isLt]
+  encode_decodePrefix := by
+    intro bytes index suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases inBounds : wire < size
+      · simp only [ok, bind, Option.bind, dif_pos inBounds, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+      · simp [ok, inBounds] at decoded
 
 /-- Per-level identifiers are derived injectively from the level.  These are
 the fixture namespace, not the production artifact's final registry IDs. -/

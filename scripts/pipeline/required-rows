@@ -66,8 +66,10 @@ jpay
 exchange
 hostupgrade
 # known red at main's hbox baseline 7dea0626 (2026-10-14); remove the line when the row is fixed
-known-red fleetsign 01a13985-48ef interleaved turns refused 'remote challenge differs from locally prepared intent' (Kernel/NativeClientConsent.lean:55); 3/3 on hbox, PASS on burst3 timing
 known-red jpay/JPAY6 01a13c42-dc55 Host/ClientConsentCore.lean consent allowlist refuses the continuityProviderResourceId/providerMetering keys jpay6 writes; non-PASS at main (it was UNCONFIGURED, input declared absent)
+known-red jpay 01a13c42-dc55 the jpay parent row is FAIL only through its sub-row JPAY6 (JPAY1-4 PASS)
+known-red m6grain 01a14736-3181 the standing run executes install-user-world from its private extract /run/user/1000/pjs.*, outside /etc/sudoers.d/mini-operator paths (journeys/.trees/*, claude-lanes/*/src)
+known-red m7 01a14736-31a4 no M7 reference: no other READY set on hbox has the compiled inputs of the batch-1 epoch
 pending births when-green-at-main required when green at main. THE BAR (cv 01a0f9c0-521b): write p99 <= 5 s, cold reopen <= 60 s, judged per landing on 64 creates (journey-rows row_births); the nightly runs 1000 (docs/PIPELINE-HBOX.md Nightly); growth (updates) is nightly-only
 pending HERMES-LIVE real inference + BYOK; needs Ember's providers.json (MATURATION-MAP 2.6)
 pending jcertify certifier unit; 320 records PASS on dregg-infra edge/mini-certify (MATURATION-MAP 1)

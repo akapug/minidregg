@@ -107,7 +107,7 @@ theorem admitKey_records (keys : Std.HashSet String) (key : String)
 #assert_axioms admitKey_refuses_held
 #assert_axioms admitKey_records
 
-private structure ScanFrame where
+structure ScanFrame where
   object : Bool
   expectKey : Bool := false
   keys : Std.HashSet String := {}
@@ -886,16 +886,14 @@ private def annotationBefore (path : String) (annotation : Hyperdocument.Annotat
   let codec := StoreCodec.entryStream HyperdocumentCell.contentWire
   match codec.toLawful.decode bytes with
   | some entry =>
-      if codec.encode entry != bytes then failAt path "annotation guard is not canonical"
-      else
-        match entry with
-        | ⟨⟨.annotations, identifier⟩, record⟩ =>
-            let identifier : Hyperdocument.AnnotationId := identifier
-            let record : Hyperdocument.AnnotationRecord := record
-            if identifier.digest.value != annotation.digest.value then
-              failAt path "annotation guard names another annotation"
-            else pure record
-        | _ => failAt path "annotation guard is not an annotation entry"
+      match entry with
+      | ⟨⟨.annotations, identifier⟩, record⟩ =>
+          let identifier : Hyperdocument.AnnotationId := identifier
+          let record : Hyperdocument.AnnotationRecord := record
+          if identifier.digest.value != annotation.digest.value then
+            failAt path "annotation guard names another annotation"
+          else pure record
+      | _ => failAt path "annotation guard is not an annotation entry"
   | none => failAt path "invalid exact annotation guard"
 
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
@@ -1831,7 +1829,7 @@ private def agentLifetimeGrantRequest (json : Lean.Json) : Result (List UInt8) :
       (← field "$" "sourceCapabilities" obj) }
   return ApplicationAgentLifetimeGrantAuthoring.requestCodec.encode request
 
-private structure BirthParts where
+structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
   ownerGrant : ResourceBirth.AuthorityGrant
   controlGrant : ResourceBirth.AuthorityGrant
@@ -2495,7 +2493,7 @@ private def applicationSessionBirth (path : String) (json : Lean.Json)
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
     context.sourceCapabilities)
 
-private structure GrainBirthPeer where
+structure GrainBirthPeer where
   task : Nat
   capability : CapabilityId
   observeCapability : CapabilityId
@@ -3919,7 +3917,7 @@ def signatures (json : Lean.Json) : Result (List UInt8) := do
   let values ← list "$" decodeHex json
   for signature in values do
     unless signature.length = 64 do throw "$: every signature must contain exactly 64 bytes"
-  pure <| (ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful).encode values
+  pure <| ((StreamCodec.list bytesStream).toLawful).encode values
 
 private def draftJson : Draft → Lean.Json
   | .birth bytes capabilities =>
@@ -5529,7 +5527,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let source ← match WorldPrototypeConstruction.bytesOfNoun value with
         | some source => pure source
         | none => failAt kind "expected canonical byte-list noun"
-      let definition ← decoded kind (ResourceBirthCodec.strictCodec WorldKindCell.definitionStream.toLawful) source
+      let definition ← decoded kind WorldKindCell.definitionStream.toLawful source
       let instantiated ← match definition.instantiate with
         | some instantiated => pure instantiated
         | none => failAt kind "invalid descriptor/defaults"
@@ -5538,7 +5536,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("defaults", worldEntriesJson instantiated.descriptor instantiated.store)]),
         ("definitionBytes", hexJson source)]
   | "predicate" => predicateJson <$> decoded "predicate"
-      (ResourceBirthCodec.strictCodec NativeHostGenesis.predicateStream.toLawful) bytes
+      NativeHostGenesis.predicateStream.toLawful bytes
   | "observation-batch" => do
       unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
         failAt "observation-batch" "observation batch exceeds its bounded presentation size"

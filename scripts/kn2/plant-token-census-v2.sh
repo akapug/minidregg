@@ -5,20 +5,24 @@ cd "$(dirname "$0")/../.."
 
 mode=${1:-}
 case "$mode" in
-  ignored-index|tautology|closed|unlisted-minter|positive|old-rule) ;;
+  ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted|private-structure) ;;
   *)
-    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule}" >&2
+    echo "usage: $0 {ignored-index|tautology|closed|unlisted-minter|positive|old-rule|implicit-index|pending-layer|unlisted-vacuous|scoped-unlisted|private-structure}" >&2
     exit 2
     ;;
 esac
 
 plant_tmp=$(mktemp -d)
 cp TokenCensus.lean "$plant_tmp/TokenCensus.lean"
+cp TokenCensus/Core.lean "$plant_tmp/Core.lean"
 cp TokenCensus/Table.lean "$plant_tmp/Table.lean"
+cp Fixtures.lean "$plant_tmp/Fixtures.lean"
 
 restore_sources() {
   cp "$plant_tmp/TokenCensus.lean" TokenCensus.lean
+  cp "$plant_tmp/Core.lean" TokenCensus/Core.lean
   cp "$plant_tmp/Table.lean" TokenCensus/Table.lean
+  cp "$plant_tmp/Fixtures.lean" Fixtures.lean
   rm -r "$plant_tmp"
 }
 trap restore_sources EXIT
@@ -34,10 +38,16 @@ select_witness() {
   grep -F "L1 ${witness} |" TokenCensus/Table.lean
 }
 
+add_row() {
+  local row=$1
+  perl -0pi -e "s{\nMinidregg\.TokenCensus\.ProjectionWitness\.mk }{\n${row}\nMinidregg.TokenCensus.ProjectionWitness.mk }" TokenCensus/Table.lean
+  grep -F "$row" TokenCensus/Table.lean
+}
+
 expect_red() {
   local expected=$1
   local log="$plant_tmp/build.log"
-  if lake build TokenCensus >"$log" 2>&1; then
+  if lake build "${target:-TokenCensus}" >"$log" 2>&1; then
     echo "plant unexpectedly stayed green: $mode" >&2
     exit 1
   fi
@@ -45,6 +55,13 @@ expect_red() {
 }
 
 case "$mode" in
+  scoped-unlisted)
+    # An unlisted private constructor in a Fixtures module: no whole-tree census imports it, so
+    # only the scoped census (TokenCensus.Fixtures) can see it, and it must.
+    printf '\nnamespace Minidregg.Fixtures\nstructure CensusPlant where\n  private mk ::\n  n : Nat\nend Minidregg.Fixtures\n' >> Fixtures.lean
+    grep -F "structure CensusPlant" Fixtures.lean
+    target=TokenCensus.Fixtures expect_red "unlisted private constructor: Minidregg.Fixtures.CensusPlant.mk"
+    ;;
   ignored-index)
     insert_after_positive "theorem ProjectionWitness.ignoresResult {request result : Nat}\n    (witness : ProjectionWitness request result) : request = 0 := witness.sound.1"
     select_witness "Minidregg.TokenCensus.ProjectionWitness.ignoresResult"
@@ -59,7 +76,7 @@ case "$mode" in
     ;;
   closed)
     insert_after_positive "structure ClosedPlant where\n  private mk ::\n  payload : Nat\n\ntheorem ClosedPlant.w (_witness : ClosedPlant) : ∃ n : Nat, n = 5 := ⟨5, rfl⟩\n\n#assert_axioms ClosedPlant.w"
-    perl -0pi -e 's{Minidregg\.Theory\.CanonicalReactiveView\.PreparedReaction\.mk}{Minidregg.TokenCensus.ClosedPlant.mk | TokenCensus | evidence | L1 Minidregg.TokenCensus.ClosedPlant.w | planted unindexed witness with a closed conclusion\nMinidregg.Theory.CanonicalReactiveView.PreparedReaction.mk}' TokenCensus/Table.lean
+    add_row 'Minidregg.TokenCensus.ClosedPlant.mk | TokenCensus | L1 Minidregg.TokenCensus.ClosedPlant.w | planted unindexed witness with a closed conclusion'
     grep -F "theorem ClosedPlant.w" TokenCensus.lean
     grep -F "Minidregg.TokenCensus.ClosedPlant.mk |" TokenCensus/Table.lean
     expect_red "ClosedPlant.mk: L1 witness Minidregg.TokenCensus.ClosedPlant.w has a conclusion closed over the bound inhabitant and its indices"
@@ -76,7 +93,7 @@ case "$mode" in
     echo "positive bare-projection witness accepted"
     ;;
   old-rule)
-    perl -0pi -e 's{              for fault in ← l1WitnessFaults structName thm\.toName info do}{              let declared? : Option Expr := match info with
+    perl -0pi -e 's{              for fault in ← l1WitnessFaults structName witness info do}{              let declared? : Option Expr := match info with
                 | .thmInfo proved => some proved.value
                 | .defnInfo definition => some definition.value
                 | _ => none
@@ -90,8 +107,36 @@ case "$mode" in
                       | none => pure false
                 if renamed then
                   faults := faults.push s!"{row.ctor}: L1 theorem {thm} is a renamed projection; name the proof field instead"
-              for fault in ← l1WitnessFaults structName thm.toName info do}' TokenCensus.lean
-    grep -F "is a renamed projection; name the proof field instead" TokenCensus.lean
+              for fault in ← l1WitnessFaults structName witness info do}' TokenCensus/Core.lean
+    grep -F "is a renamed projection; name the proof field instead" TokenCensus/Core.lean
     expect_red "ProjectionWitness.mk: L1 theorem Minidregg.TokenCensus.ProjectionWitness.sound' is a renamed projection"
+    ;;
+  implicit-index)
+    # a proof field about the payload alone: `request` occurs only as the implicit parameter of
+    # `x.payload`, so the statement says nothing about the index (the 10-08 rule's third clause)
+    insert_after_positive "structure ImplicitIndexPlant (request : Nat) where\n  private mk ::\n  payload : Nat\n  positive : payload > 0"
+    add_row 'Minidregg.TokenCensus.ImplicitIndexPlant.mk | TokenCensus | L1 Minidregg.TokenCensus.ImplicitIndexPlant.positive | planted: the witness never names request'
+    expect_red "ImplicitIndexPlant.mk: L1 witness Minidregg.TokenCensus.ImplicitIndexPlant.positive says nothing about the token's indices [request]"
+    ;;
+  pending-layer)
+    # the deleted tier: an unreviewed `L2` row no longer passes
+    perl -0pi -e "s{L1 Minidregg\.TokenCensus\.ProjectionWitness\.sound' \|}{L2 |}" TokenCensus/Table.lean
+    grep -F "Minidregg.TokenCensus.ProjectionWitness.mk | TokenCensus | L2 |" TokenCensus/Table.lean
+    expect_red "ProjectionWitness.mk: layer must be \`L1 <theorem>\`, \`restricted <function,…>\` or \`defect <cv task>\`, not \`L2\`"
+    ;;
+  private-structure)
+    # a `private structure`: its type, fields and witness carry private names (`_private.<home>.0.…`).
+    # The census resolves the row's witness in the home module and matches the inhabitant against the
+    # real inductive, and the statement checks still apply: this witness ignores `result`.
+    insert_after_positive "private structure PrivatePlant (request result : Nat) where\n  sound : request = 0\n\nprivate theorem PrivatePlant.w {request result : Nat} (x : PrivatePlant request result) :\n    request = 0 := x.sound"
+    add_row 'Minidregg.TokenCensus.PrivatePlant.mk | TokenCensus | L1 Minidregg.TokenCensus.PrivatePlant.w | planted: a private structure whose witness ignores result'
+    grep -F "private theorem PrivatePlant.w" TokenCensus.lean
+    expect_red "PrivatePlant.mk: L1 witness _private.TokenCensus.0.Minidregg.TokenCensus.PrivatePlant.w ignores the bound token indices: [result]"
+    ;;
+  unlisted-vacuous)
+    # a new private-mk type in a censused module, carrying only a vacuous theorem and no row
+    insert_after_positive "structure VacuousPlant (request : Nat) where\n  private mk ::\n  trivial : True\n\ntheorem VacuousPlant.w {request : Nat} (x : VacuousPlant request) : True := x.trivial"
+    grep -F "theorem VacuousPlant.w" TokenCensus.lean
+    expect_red "unlisted private constructor: Minidregg.TokenCensus.VacuousPlant.mk | TokenCensus"
     ;;
 esac

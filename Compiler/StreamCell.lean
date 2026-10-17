@@ -210,6 +210,12 @@ def headNamespaceStream : StreamCodec headLayout.Namespace where
   encode _ := []
   decodePrefix bytes := some (.head, bytes)
   decodePrefix_encode := by intro space suffix; cases space; rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    cases space
+    simp only [Option.some.injEq, Prod.mk.injEq, true_and] at decoded
+    subst decoded
+    rfl
 
 def headWire : Wire headLayout where
   name := "minidregg/stream-head/v2"
@@ -298,6 +304,12 @@ def entryNamespaceStream : StreamCodec entryLayout.Namespace where
   encode _ := []
   decodePrefix bytes := some (.entry, bytes)
   decodePrefix_encode := by intro space suffix; cases space; rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    cases space
+    simp only [Option.some.injEq, Prod.mk.injEq, true_and] at decoded
+    subst decoded
+    rfl
 
 def entryWire : Wire entryLayout where
   name := "minidregg/stream-entry/v1"

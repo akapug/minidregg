@@ -37,16 +37,13 @@ def packetStream : StreamCodec Packet :=
     (by intro packet; cases packet; rfl)
 
 def packetCodec : LawfulCodec Packet :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream
 
 theorem packetCodec_accepted_bytes {bytes : List UInt8} {packet : Packet}
     (accepted : packetCodec.decode bytes = some packet) :
     packetCodec.encode packet = bytes := by
   unfold packetCodec at accepted ⊢
-  exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream)
-    accepted
+  exact NativeHostCodec.framed_canonical _ _ accepted
 
 /-- Source and destination fields remain signed context, not evidence of
 source admission. The current recipient law is deliberately the exact

@@ -164,12 +164,12 @@ structure Program where
 /-! ## Codecs `DREGG/ABI/v5`, `DREGG/PROGRAM/v1` -/
 
 def slotTypeStream : StreamCodec SlotType :=
-  StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
+  StreamCodec.retract StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
     (fun n => if n = 1 then .int else if n = 2 then .noun else .nat)
     (by intro value; cases value <;> rfl)
 
 def contextStream : StreamCodec ContextMode :=
-  StreamCodec.xmap StreamCodec.nat (fun | .live => 0 | .pinned => 1)
+  StreamCodec.retract StreamCodec.nat (fun | .live => 0 | .pinned => 1)
     (fun n => if n = 1 then .pinned else .live) (by intro value; cases value <;> rfl)
 
 def sampleSlotStream : StreamCodec SampleSlot :=
@@ -212,13 +212,11 @@ def programStream : StreamCodec Program :=
     (fun p => (p.evaluator, p.jam, p.abi, p.params)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- A frame-tagged stream codec that accepts only its own re-encoding. -/
+/-- A frame-tagged stream codec. The frame is checked and the stream is
+canonical, so it accepts exactly its own encodings (`framedDecode_canonical`). -/
 def framedDecode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     (bytes : List UInt8) : Option α :=
-  if bytes.take frame.length = frame then
-    match stream.toLawful.decode (bytes.drop frame.length) with
-    | some value => if frame ++ stream.encode value = bytes then some value else none
-    | none => none
+  if bytes.take frame.length = frame then stream.toLawful.decode (bytes.drop frame.length)
   else none
 
 theorem framedDecode_encode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
@@ -232,11 +230,10 @@ theorem framedDecode_canonical {α : Type} {frame : List UInt8} {stream : Stream
     frame ++ stream.encode value = bytes := by
   unfold framedDecode at accepted
   split at accepted
-  · split at accepted
-    · split at accepted
-      · cases accepted; assumption
-      · cases accepted
-    · cases accepted
+  · rename_i framed
+    rw [stream.toLawful_canonical _ _ accepted]
+    conv => rhs; rw [← List.take_append_drop frame.length bytes]
+    rw [framed]
   · cases accepted
 
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α where
@@ -525,39 +522,43 @@ def wireFrame : List UInt8 :=
 def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, programAt state)
 
-def decodeRaw (bytes : List UInt8) : Option (Store layout) :=
+/-- The frame is checked, `payloadStream` is canonical, and the version is
+pinned, so the decoder accepts exactly the encodings (`decode_canonical`):
+`programAt (stateOfOption program) = program`. -/
+def decode (bytes : List UInt8) : Option (Store layout) :=
   if bytes.take wireFrame.length = wireFrame then do
     let (version, program) ← payloadStream.toLawful.decode (bytes.drop wireFrame.length)
     if version = wireVersion then some (stateOfOption program) else none
   else none
 
-@[simp] theorem decodeRaw_encode (state : Store layout) :
-    decodeRaw (encode state) = some state := by
+@[simp] theorem decode_encode (state : Store layout) : decode (encode state) = some state := by
   have decoded := payloadStream.toLawful.decode_encode (wireVersion, programAt state)
   change payloadStream.toLawful.decode
     (payloadStream.encode (wireVersion, programAt state)) =
       some (wireVersion, programAt state) at decoded
-  simp [decodeRaw, encode, decoded, ← state_ext state]
-
-def decode (bytes : List UInt8) : Option (Store layout) := do
-  let state ← decodeRaw bytes
-  if encode state = bytes then some state else none
-
-@[simp] theorem decode_encode (state : Store layout) : decode (encode state) = some state := by
-  simp [decode]
+  simp [decode, encode, decoded, ← state_ext state]
 
 theorem decode_canonical {bytes : List UInt8} {state : Store layout}
     (accepted : decode bytes = some state) : encode state = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
+  split at accepted
+  · rename_i framed
+    cases payload : payloadStream.toLawful.decode (bytes.drop wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some pair =>
+      obtain ⟨version, program⟩ := pair
+      simp only [payload, bind, Option.bind] at accepted
       split at accepted
-      next canonical =>
+      · rename_i current
         cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+        subst current
+        have exact := payloadStream.toLawful_canonical _ _ payload
+        simp only [encode, programAt_stateOfOption]
+        rw [exact]
+        conv => rhs; rw [← List.take_append_drop wireFrame.length bytes]
+        rw [framed]
+      · cases accepted
+  · cases accepted
 
 theorem wrong_version_refused (version : Nat) (program : Option Program)
     (different : version ≠ wireVersion) :
@@ -565,7 +566,7 @@ theorem wrong_version_refused (version : Nat) (program : Option Program)
   have decoded := payloadStream.toLawful.decode_encode (version, program)
   change payloadStream.toLawful.decode (payloadStream.encode (version, program)) =
     some (version, program) at decoded
-  simp [decode, decodeRaw, decoded, different]
+  simp [decode, decoded, different]
 
 def stateCodec : LawfulCodec (Store layout) where
   encode := encode

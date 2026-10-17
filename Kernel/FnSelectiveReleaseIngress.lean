@@ -39,16 +39,13 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream
 
 theorem ingressCodec_accepted_bytes {bytes : List UInt8} {ingress : Ingress}
     (accepted : ingressCodec.decode bytes = some ingress) :
     ingressCodec.encode ingress = bytes := by
   unfold ingressCodec at accepted ⊢
-  exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
-    accepted
+  exact NativeHostCodec.framed_canonical _ _ accepted
 
 /-- The release key excludes gateway witness choice and owner subject. It is
 the same recipient-domain/target/nonce namespace across all attempted

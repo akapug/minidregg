@@ -105,6 +105,10 @@ structure DecodedIngress where
   canonical : commandCodec.encode command = ingress.commandBytes
   signatureShape : ingress.possessionSignature.length = 64
   commandShape : command.valid
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      decoded.ingress.possessionSignature.length = 64 ∧ decoded.command.valid :=
+  ⟨decoded.canonical, decoded.signatureShape, decoded.commandShape⟩
 
 def maxIngressBytes : Nat := 4096
 
@@ -117,8 +121,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
       | some command =>
         if commandShape : command.valid then
           some ⟨ingress, command,
-            ResourceBirthCodec.strictCodec_canonical
-              (ParticipantKeyEnrollment.framedRaw commandFrame commandStream) exact,
+            ParticipantKeyEnrollment.framed_canonical exact,
             signatureShape, commandShape⟩
         else none
     else none

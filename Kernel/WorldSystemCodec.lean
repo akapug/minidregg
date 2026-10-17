@@ -29,16 +29,32 @@ open Minidregg.Kernel.DurableDataIntent (TransactionId)
 
 set_option autoImplicit false
 
-/-- A one-byte tag codec for a finite enumeration. -/
+/-- A one-byte tag codec for a finite enumeration. Canonical: a byte decodes only
+if it is the tag of the value it names (so a table mapping two bytes to one value
+still has one spelling per value). -/
 def tagStream {α : Type} (tag : α → UInt8) (ofTag : UInt8 → Option α)
     (roundtrip : ∀ a, ofTag (tag a) = some a) : StreamCodec α where
   encode a := [tag a]
   decodePrefix
     | [] => none
-    | b :: rest => (ofTag b).map fun a => (a, rest)
+    | b :: rest => (ofTag b).bind fun a => if tag a = b then some (a, rest) else none
   decodePrefix_encode := by
     intro a suffix
     simp [roundtrip]
+  encode_decodePrefix := by
+    intro bytes a suffix decoded
+    rcases bytes with _ | ⟨b, rest⟩
+    · cases decoded
+    · cases found : ofTag b with
+      | none => simp [found] at decoded
+      | some x =>
+        simp only [found, Option.bind_some] at decoded
+        split at decoded
+        · rename_i same
+          simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+          obtain ⟨rfl, rfl⟩ := decoded
+          simp [same]
+        · cases decoded
 
 def spaceTag : SysSpace → UInt8
   | .journal => 0 | .head => 1 | .retired => 2 | .parent => 3 | .spent => 4 | .allowance => 5

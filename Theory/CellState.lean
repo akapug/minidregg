@@ -46,7 +46,7 @@ def Materializer.rootOf {L : Layout.{u, v, w}} {Root : Type y}
 constructor prevents alternate root/encoding fields from being introduced. -/
 structure Materialized {L : Layout.{u, v, w}} {Root : Type y}
     (M : Materializer L Root) where
-  private mk ::
+  mk ::
   logical : Store L
 
 /-- The one constructor for canonical cells. -/
@@ -199,6 +199,15 @@ theorem ValidatedPatch.executes {L : Layout.{u, v, w}} {Root : Type y}
     {patch : Patch L} (validated : ValidatedPatch M pre expectedPreRoot patch) :
     Patch.Executes pre.logical patch validated.apply.logical :=
   ⟨validated.valid, rfl⟩
+
+/-- **What a validated patch guarantees about its indices**: the quoted pre-root
+is the pre-cell's root, and every operation of the patch is enabled at the
+store its prefix produced from the pre-cell's logical store. -/
+theorem ValidatedPatch.sound {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {pre : Materialized M} {expectedPreRoot : Root}
+    {patch : Patch L} (validated : ValidatedPatch M pre expectedPreRoot patch) :
+    expectedPreRoot = pre.root ∧ Patch.ValidFrom pre.logical patch :=
+  ⟨validated.preRoot_bound, validated.valid⟩
 
 /-- A rejected validation reports the exact failing guard. -/
 theorem validate_disabledOperation {L : Layout.{u, v, w}} {Root : Type y}

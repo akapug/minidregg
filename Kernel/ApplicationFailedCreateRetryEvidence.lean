@@ -198,4 +198,25 @@ theorem Conditional.recovery_record_exact {config : Config} {store : StoreIdenti
       (ApplicationFailedStartRecoveryCore.intent accepted.recovered) :=
   accepted.matched.selected.symm.trans accepted.matched.exact
 
+/-- The recovery record is the one verified under `head` at height
+`selector.recoveryIndex + 1` and decodes to exactly the record of the re-admitted
+failed-start recovery intent; the new BEGIN `begin` binds to `selector`'s recovered
+state, app, volume, create and package, and `selector`'s markers are current at
+`ground` under `config`. -/
+theorem Conditional.recovery_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {selector : Selector} {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
+    (accepted : Conditional config head ground selector begin) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (selector.recoveryIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent (ApplicationFailedStartRecoveryCore.intent accepted.recovered))) ∧
+      bindingMatches selector begin = true ∧
+      markersCurrent config ground selector = true :=
+  ⟨⟨accepted.selected.read.verified.record, accepted.selected.read.verified.chain,
+      accepted.selected.read.verified.root, accepted.selected.read.verified.included,
+      accepted.selected.read.decoded.trans (congrArg some (accepted.selected.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord accepted.matched)))⟩,
+    accepted.bindingExact, accepted.markersExact⟩
+
 end Minidregg.Kernel.ApplicationFailedCreateRetryEvidence

@@ -1755,17 +1755,7 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressFrame : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
 
-def ingressRawCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+def ingressCodec : LawfulCodec Ingress := (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful
 
 /-- Independent canonical frame for the explicit opted-in source method.
 Every owner envelope is retained by the same birth event on replay. -/
@@ -1776,18 +1766,8 @@ open Minidregg.Compiler.Tower256ConcreteBackend in
 def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
   StreamCodec.product ingressStream (StreamCodec.list bytesStream)
 
-def reserveIngressRawCodec : LawfulCodec (Ingress × List (List UInt8)) where
-  encode ingress := reserveIngressFrame ++ reserveIngressStream.encode ingress
-  decode bytes := if bytes.take reserveIngressFrame.length = reserveIngressFrame then
-    reserveIngressStream.toLawful.decode (bytes.drop reserveIngressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := reserveIngressStream.toLawful.decode_encode ingress
-    change reserveIngressStream.toLawful.decode (reserveIngressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
 def reserveIngressCodec : LawfulCodec (Ingress × List (List UInt8)) :=
-  strictCodec reserveIngressRawCodec
+  (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful
 
 structure DecodedIngress where
   private mk ::
@@ -1833,7 +1813,7 @@ theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedI
       split at decoded
       · contradiction
       · cases Option.some.inj decoded
-        exact strictCodec_canonical ingressRawCodec parsed
+        exact (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
@@ -1844,7 +1824,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     split at decoded
     · contradiction
     · cases Option.some.inj decoded
-      exact strictCodec_canonical reserveIngressRawCodec parsed
+      exact (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful_canonical _ _ parsed
 
 def CredentialBundle.forBranch (bundle : CredentialBundle) : Branch descriptor → Option BranchCredential
   | .factory => some bundle.factory
@@ -2181,6 +2161,25 @@ theorem AcceptedBirth.births_named {height : Height}
 def AcceptedBirth.descriptor {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
 
+/-- **An accepted birth is bound to its indices.** `pins` is `deployment`'s factory pin
+and `profile`'s compiler semantics pin; every write the birth commits expects `durable`'s
+exact root; the descriptor obeys the ingress method's factory template of `profile` over the
+loaded authority at `height`; and every birth write is named by the admitted factory step. -/
+theorem AcceptedBirth.indexed {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    ResourceBirthController.Concrete.PinsBound deployment pins ∧
+      ResourceBirthController.Concrete.ProfileBound profile.compilerProfile pins ∧
+      (∀ write ∈ accepted.prepared.writes,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      MethodTemplateBound accepted.ingress.method profile.template
+        (oldAuthority accepted.prepared) height accepted.descriptor ∧
+      ResourceBirthController.Concrete.Named accepted.factoryStep accepted.prepared.writes := by
+  refine ⟨accepted.prepared.pinsBound, accepted.prepared.profileBound,
+    accepted.prepared.writePreExact, ?_, accepted.named⟩
+  have shape := accepted.pending.templateBound
+  rw [accepted.methodExact] at shape
+  exact shape
+
 /-- Extract the actually verified owner receipts retained by a reservation
 method ingress. No public receipt/flag can reconstruct these native tokens. -/
 def AcceptedBirth.reserveOwners {height : Height}
@@ -2279,6 +2278,7 @@ def AcceptedBirth.sourceReadGuards {height : Height}
 
 
 #assert_axioms BranchAccepted.law_admits_step AcceptedBirth.births_named
+#assert_axioms AcceptedBirth.indexed
 
 end Concrete
 

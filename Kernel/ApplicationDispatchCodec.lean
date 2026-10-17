@@ -208,17 +208,7 @@ def dispatchStream : StreamCodec Dispatch :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH-REQUEST/v1".toUTF8.toList
 
-private def rawCodec : LawfulCodec Dispatch where
-  encode dispatch := frame ++ dispatchStream.encode dispatch
-  decode bytes := if bytes.take frame.length = frame then
-    dispatchStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro dispatch
-    have decoded := dispatchStream.toLawful.decode_encode dispatch
-    change dispatchStream.toLawful.decode (dispatchStream.encode dispatch) = some dispatch at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Dispatch := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Dispatch := (StreamCodec.framed frame dispatchStream).toLawful
 
 def Dispatch.canonicalBytes (dispatch : Dispatch) : List UInt8 :=
   codec.encode dispatch
@@ -229,6 +219,6 @@ theorem decode_encode (dispatch : Dispatch) :
 theorem decoded_canonical {bytes : List UInt8} {dispatch : Dispatch}
     (decoded : codec.decode bytes = some dispatch) :
     dispatch.canonicalBytes = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 end Minidregg.Kernel.ApplicationDispatchCodec

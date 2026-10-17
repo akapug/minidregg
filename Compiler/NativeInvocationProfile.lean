@@ -28,16 +28,7 @@ def stream : StreamCodec Policy :=
 
 def frame : List UInt8 := "DREGG/NATIVE/REGISTERED-INVOCATION-PROFILE/v1".toUTF8.toList
 
-def rawCodec : LawfulCodec Policy where
-  encode p := frame ++ stream.encode p
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro p
-    have exact := stream.toLawful.decode_encode p
-    change stream.toLawful.decode (stream.encode p) = some p at exact
-    simp [exact]
-def codec : LawfulCodec Policy := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Policy := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 

@@ -72,18 +72,15 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, holder, capability⟩)
     (by intro command; cases command; rfl)
 
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  { encode := fun value => frame ++ stream.encode value
-    decode := fun bytes => if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
+
+theorem framed_canonical {α : Type} {frame : List UInt8} {stream : StreamCodec α}
+    {bytes : List UInt8} {value : α} (decoded : (framed frame stream).decode bytes = some value) :
+    (framed frame stream).encode value = bytes :=
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def commandFrame : List UInt8 := "DREGG/PARTICIPANT/FACTORY-OBSERVE/v1".toUTF8.toList
 
@@ -111,6 +108,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.sponsorEnvelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.sponsorEnvelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -121,8 +123,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
     | none => none
     | some envelope =>
       some ⟨ingress, command,
-        ResourceBirthCodec.strictCodec_canonical (framedRaw commandFrame commandStream)
-          commandExact, envelope, envelopeExact⟩
+        framed_canonical commandExact, envelope, envelopeExact⟩
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
@@ -173,7 +174,7 @@ def declarationStream : StreamCodec (IssueDeclaration .object) :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec (IssueDeclaration .object) :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command)
     (d : IssueDeclaration .object) : Digest :=
@@ -250,6 +251,14 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
+theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    command.expectedFactoryRoot = prepared.factory.before.payload.root ∧
+      prepared.directory.directory.slots deployment.factoryId = .present prepared.factory.before ∧
+      (show Option Epoch from
+        prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true :=
+  ⟨prepared.factory.rootExact, prepared.factory.present, prepared.holderEnrolled⟩
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -403,6 +412,13 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
+        (request deployment profile.template prepared.authority.snapshot profile.semantics ambient command)) :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)

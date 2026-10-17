@@ -71,7 +71,7 @@ theorem decode_encode (value : Committed) :
 theorem decoded_canonical {bytes : List UInt8} {value : Committed}
     (decoded : codec.decode bytes = some value) :
     value.canonicalBytes = bytes :=
-  strictCodec_canonical (NativeHostCodec.framedRaw frame committedStream) decoded
+  NativeHostCodec.framed_canonical _ _ decoded
 
 /-- V2 host handoff includes the full signed-SPK descriptor preimage. The v1
 projection is retained only for historical source compatibility and cannot
@@ -108,7 +108,6 @@ theorem decode_encode_v2 (value : CommittedV2) :
 theorem decoded_canonical_v2 {bytes : List UInt8} {value : CommittedV2}
     (decoded : codecV2.decode bytes = some value) :
     value.canonicalBytes = bytes :=
-  strictCodec_canonical
-    (NativeHostCodec.framedRaw frameV2 committedV2Stream) decoded
+  NativeHostCodec.framed_canonical _ _ decoded
 
 end Minidregg.Kernel.ApplicationLifecycleClaimProjection

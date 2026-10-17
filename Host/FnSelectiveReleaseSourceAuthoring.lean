@@ -49,8 +49,6 @@ def assemble (specBytes headerBytes signatureBytes : List UInt8) :
     | throw "selected source spec is noncanonical"
   let some header := CredentialSignedEnvelopeController.headerCodec.decode headerBytes
     | throw "selected source signing header is noncanonical"
-  if CredentialSignedEnvelopeController.headerCodec.encode header != headerBytes then
-    throw "selected source signing header is noncanonical"
   if signatureBytes.length != 64 then
     throw "selected source signature must be 64 bytes"
   let envelopeBytes := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode

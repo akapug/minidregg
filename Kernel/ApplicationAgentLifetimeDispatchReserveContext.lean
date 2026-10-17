@@ -42,10 +42,10 @@ def contextStream : StreamCodec Context :=
       ⟨base, grantResource, grantIssueIndex, grantDigest⟩)
     (by intro context; cases context; rfl)
 
-def codec : LawfulCodec Context := ResourceBirthCodec.strictCodec
-  (Minidregg.Compiler.NativeHostCodec.framed
+def codec : LawfulCodec Context :=
+  Minidregg.Compiler.NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-RESERVE-CONTEXT/v3".toUTF8.toList
-    contextStream)
+    contextStream
 
 def Context.canonicalBytes (context : Context) : List UInt8 :=
   codec.encode context

@@ -86,41 +86,47 @@ def declarationFrame : List UInt8 := "LOOM/POLICY/INSTALL".toUTF8.toList ++ [2]
 def encodeDeclaration (declaration : Declaration) : List UInt8 :=
   declarationFrame ++ declarationTupleStream.encode (declarationTuple declaration)
 
-def decodeDeclarationRaw (bytes : List UInt8) : Option Declaration :=
+theorem declarationTuple_of_tuple {tuple : DeclarationTuple} {declaration : Declaration}
+    (decoded : declarationOfTuple tuple = some declaration) :
+    declarationTuple declaration = tuple := by
+  obtain ⟨root, expected, nonce, sourceBytes⟩ := tuple
+  simp only [declarationOfTuple, Option.bind_eq_bind, Option.bind_eq_some_iff,
+    Option.some.injEq] at decoded
+  obtain ⟨source, sourceOk, rfl⟩ := decoded
+  simp [declarationTuple, policyRecordCodec_canonical sourceOk]
+
+/-- The frame, a fully consumed tuple, and a canonical policy record: one
+spelling per declaration (`decodeDeclaration_canonical`), with no re-encode. -/
+def decodeDeclaration (bytes : List UInt8) : Option Declaration :=
   if bytes.take declarationFrame.length = declarationFrame then do
     let tuple ← declarationTupleStream.toLawful.decode (bytes.drop declarationFrame.length)
     declarationOfTuple tuple
   else none
 
-@[simp] theorem decodeDeclarationRaw_encode (declaration : Declaration) :
-    decodeDeclarationRaw (encodeDeclaration declaration) = some declaration := by
+@[simp] theorem decodeDeclaration_encode (declaration : Declaration) :
+    decodeDeclaration (encodeDeclaration declaration) = some declaration := by
   have payload := declarationTupleStream.toLawful.decode_encode (declarationTuple declaration)
   change declarationTupleStream.toLawful.decode
     (declarationTupleStream.encode (declarationTuple declaration)) =
       some (declarationTuple declaration) at payload
-  simp [decodeDeclarationRaw, encodeDeclaration, payload]
-
-def decodeDeclaration (bytes : List UInt8) : Option Declaration := do
-  let declaration ← decodeDeclarationRaw bytes
-  if encodeDeclaration declaration = bytes then some declaration else none
-
-@[simp] theorem decodeDeclaration_encode (declaration : Declaration) :
-    decodeDeclaration (encodeDeclaration declaration) = some declaration := by
-  simp [decodeDeclaration]
+  simp [decodeDeclaration, encodeDeclaration, payload]
 
 theorem decodeDeclaration_canonical {bytes : List UInt8} {declaration : Declaration}
     (decoded : decodeDeclaration bytes = some declaration) :
     encodeDeclaration declaration = bytes := by
   unfold decodeDeclaration at decoded
-  cases raw : decodeDeclarationRaw bytes with
-  | none => simp [raw] at decoded
-  | some selected =>
-      simp only [raw, bind, Option.bind] at decoded
-      split at decoded
-      next canonical =>
-        cases Option.some.inj decoded
-        exact canonical
-      next => contradiction
+  split at decoded
+  · rename_i prefixed
+    cases payload : declarationTupleStream.toLawful.decode (bytes.drop declarationFrame.length) with
+    | none => simp [payload] at decoded
+    | some tuple =>
+        simp only [payload, bind, Option.bind] at decoded
+        have exact := declarationTupleStream.toLawful_canonical _ _ payload
+        change declarationFrame ++ declarationTupleStream.encode (declarationTuple declaration) = bytes
+        rw [declarationTuple_of_tuple decoded, exact]
+        conv => rhs; rw [← List.take_append_drop declarationFrame.length bytes]
+        rw [prefixed]
+  · cases decoded
 
 def declarationCodec : LawfulCodec Declaration where
   encode := encodeDeclaration

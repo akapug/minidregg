@@ -3,7 +3,7 @@ renounce, install):
 a key the request's basis did not declare is refused BY NAME on a real deployment
 Store, never read as absent or unspent.
 
-The Store is the deployment's pinned genesis (`Assurance.NativeAcceptedFixtureData`),
+The Store is the deployment's pinned genesis (`Fixtures.NativeAcceptedFixtureData`),
 bootstrapped and opened as the Host opens a served Store (`NativeHostLight.start`);
 every basis is `Light.basis` of that opening. The ingresses are hand-built and only
 need to decode: every refusal below happens before any state is consulted.
@@ -35,7 +35,7 @@ The positive control end to end is the journeys (J3 delegates, JPRIV1 kicks = re
 on this tree's Host.
 
 Usage: lake env lean --run scripts/kn2/authority-undeclared.lean STORE-HELPER -/
-import Assurance.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureData
 import Kernel.NativeHostLight
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
@@ -50,7 +50,7 @@ open Minidregg.Kernel
 open Minidregg.Kernel.NativeHost
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableCheckpointCodec
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 
 namespace AuthorityUndeclared
 

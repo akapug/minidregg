@@ -154,7 +154,7 @@ admission runs in: `live` is the pinned native process and exists only at `IO`;
 `recorded` is a recorded run of it and exists only at `Id`. The Host's receivers
 run at `IO`, so the only oracle they can be handed is the process
 (`Oracle.io_process`); a transcript can answer only a pure evaluation, such as
-`Assurance.NativeAcceptedFixture`. Every receipt keeps `source` of the oracle that
+`Fixtures.NativeAcceptedFixture`. Every receipt keeps `source` of the oracle that
 answered it (`CredentialSignatureAdmission.CheckedSignature.source`). -/
 inductive Oracle : (Type → Type) → Type where
   | live (config : NativeConfig) : Oracle IO

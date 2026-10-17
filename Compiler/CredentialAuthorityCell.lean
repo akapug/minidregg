@@ -115,6 +115,12 @@ theorem planeOfTag_tag (plane : AuthorityPlane) : planeOfTag (planeTag plane) = 
   | capability kind => cases kind <;> rfl
   | _ => rfl
 
+/-- The plane tag table has no aliases. -/
+theorem planeOfTag_some {tag : UInt8} {plane : AuthorityPlane}
+    (found : planeOfTag tag = some plane) : planeTag plane = tag := by
+  unfold planeOfTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 def planeStream : StreamCodec AuthorityPlane where
   encode plane := [planeTag plane]
   decodePrefix
@@ -123,6 +129,19 @@ def planeStream : StreamCodec AuthorityPlane where
   decodePrefix_encode := by
     intro plane suffix
     simp [planeOfTag_tag]
+  encode_decodePrefix := by
+    intro bytes plane suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    · change (planeOfTag tag).map (fun plane => (plane, bytes)) = some (plane, suffix)
+        at decoded
+      cases found : planeOfTag tag with
+      | none => simp [found] at decoded
+      | some decodedPlane =>
+        simp only [found, Option.map_some, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [planeOfTag_some found]
+        rfl
 
 def keyStream : (plane : AuthorityPlane) → StreamCodec plane.Key
   | .capability _ => capabilityIdStream

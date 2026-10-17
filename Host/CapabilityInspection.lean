@@ -76,8 +76,6 @@ def inspect (kind : ResourceKind) (bytes : List UInt8) : Except String Json := d
   let codec := (storedCapabilityStream kind).toLawful
   let some stored := codec.decode bytes
     | throw "noncanonical stored capability"
-  unless codec.encode stored == bytes do
-    throw "stored capability encoding alias"
   pure <| .mkObj [("type", "capability"),
     ("kind", match kind with | .object => "object" | .account => "account" | .program => "program"),
     ("canonical", hex bytes), ("head", headJson stored.head),

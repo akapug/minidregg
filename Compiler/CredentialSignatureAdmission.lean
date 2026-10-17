@@ -46,18 +46,18 @@ def ed25519Algorithm : Nat := 1
 def signatureDomain : List UInt8 := "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [2]
 abbrev requestFrame := TypedAuthorizationRequestCodec.requestFrame
 
-/-- Canonical ingress uses the existing signed-envelope parser and encoding.
-The legacy stream remains useful inside a source-owned ordered bundle, whose
-whole-message decoder must likewise enforce exact re-encoding. Parsing a
-canonical envelope alone does not authenticate it or mint a receipt. -/
+/-- Canonical ingress uses the existing signed-envelope stream codec, which is
+canonical by construction: an accepted envelope has exactly one spelling, so no
+re-encoding is compared. Parsing a canonical envelope alone does not
+authenticate it or mint a receipt. -/
 def canonicalEnvelopeCodec : LawfulCodec CredentialSignedEnvelopeController.SignedEnvelope :=
-  ResourceBirthCodec.strictCodec CredentialSignedEnvelopeController.envelopeCodec
+  CredentialSignedEnvelopeController.envelopeStream.toLawful
 
 theorem canonicalEnvelopeCodec_accepted_bytes
     {bytes : List UInt8} {envelope : CredentialSignedEnvelopeController.SignedEnvelope}
     (accepted : canonicalEnvelopeCodec.decode bytes = some envelope) :
     canonicalEnvelopeCodec.encode envelope = bytes :=
-  ResourceBirthCodec.strictCodec_canonical CredentialSignedEnvelopeController.envelopeCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 /-- Signing uses the sole complete kind-indexed codec. No second projection of
 request fields exists in the native signature adapter. -/
@@ -297,6 +297,14 @@ structure CheckedSignature (snapshot : Snapshot) where
   admission : CredentialSignedEnvelopeController.Admission
   admitted : CredentialSignedEnvelopeController.finish prepared.controller (Except.ok true : Except CredentialSignatureIO.Error Bool) =
     .ok admission
+/-- The receipt's admission is the controller's finish of the preparation of exactly
+its envelope against the snapshot index. -/
+theorem CheckedSignature.admittedFrom {snapshot : Snapshot}
+    (receipt : CheckedSignature snapshot) :
+    prepare snapshot receipt.nullifier receipt.request receipt.envelopeBytes = .ok receipt.prepared ∧
+      CredentialSignedEnvelopeController.finish receipt.prepared.controller
+        (Except.ok true : Except CredentialSignatureIO.Error Bool) = .ok receipt.admission :=
+  ⟨receipt.preparedFrom, receipt.admitted⟩
 
 def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.Oracle m) (snapshot : Snapshot) (nullifier : Nat)
     {kind : ResourceKind} (request : Request kind) (envelopeBytes : List UInt8) :

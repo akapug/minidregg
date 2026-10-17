@@ -34,6 +34,7 @@ the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
 import Compiler.PersistedCodecTags
+import Compiler.PersistedCodecShapes
 import Compiler.CanonicalCellRegistry
 import Compiler.DurableReceiverCodec
 import Compiler.Sp800185Cshake256
@@ -59,8 +60,10 @@ set_option autoImplicit false
 
 /-! ## Framed objects -/
 
-/-- A fixed frame followed by one stream value, recovered only on exact
-re-encoding (no aliases, no trailing bytes). -/
+/-- A fixed frame (length-prefixed) followed by one stream value.  The frame is
+CHECKED by the stream (`StreamCodec.framed`), and the stream is canonical, so a
+decode accepts exactly the encodings (`decode_canonical`): no aliases, no
+trailing bytes, no re-encode. -/
 structure Framed (α : Type) where
   frame : List UInt8
   stream : StreamCodec α
@@ -69,42 +72,26 @@ namespace Framed
 
 variable {α : Type}
 
+/-- The checked frame octets, then the value. -/
+def codec (framed : Framed α) : StreamCodec α :=
+  StreamCodec.framed (bytesStream.encode framed.frame) framed.stream
+
 def encode (framed : Framed α) (value : α) : List UInt8 :=
-  (StreamCodec.product bytesStream framed.stream).encode (framed.frame, value)
+  framed.codec.encode value
 
-def decode (framed : Framed α) (bytes : List UInt8) : Option α := do
-  let (frame, value) ← (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes
-  if frame = framed.frame ∧ framed.encode value = bytes then some value else none
+theorem encode_eq (framed : Framed α) (value : α) :
+    framed.encode value = bytesStream.encode framed.frame ++ framed.stream.encode value := rfl
 
-/-- Executable `decode`: the frame and the re-encoding are compared by `bytesEqual`
-(tail-recursive, unboxed) instead of the derived `List UInt8` equality. -/
-def decodeFast (framed : Framed α) (bytes : List UInt8) : Option α := do
-  let (frame, value) ← (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes
-  if bytesEqual frame framed.frame && bytesEqual (framed.encode value) bytes then some value else none
-
-@[csimp] theorem decode_eq_decodeFast : @decode = @decodeFast := by
-  funext α framed bytes
-  simp only [decode, decodeFast, Bool.and_eq_true, bytesEqual_eq_true_iff]
+def decode (framed : Framed α) (bytes : List UInt8) : Option α :=
+  framed.codec.toLawful.decode bytes
 
 theorem decode_encode (framed : Framed α) (value : α) :
-    framed.decode (framed.encode value) = some value := by
-  have roundtrip : (StreamCodec.product bytesStream framed.stream).toLawful.decode
-      (framed.encode value) = some (framed.frame, value) :=
-    (StreamCodec.product bytesStream framed.stream).toLawful.decode_encode (framed.frame, value)
-  unfold decode
-  rw [roundtrip]
-  simp
+    framed.decode (framed.encode value) = some value :=
+  framed.codec.toLawful.decode_encode value
 
 theorem decode_canonical (framed : Framed α) {bytes : List UInt8} {value : α}
-    (decoded : framed.decode bytes = some value) : framed.encode value = bytes := by
-  unfold decode at decoded
-  cases raw : (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes with
-  | none => simp [raw] at decoded
-  | some pair =>
-      simp only [raw, bind, Option.bind] at decoded
-      split at decoded
-      next ok => cases Option.some.inj decoded; exact ok.2
-      next => contradiction
+    (decoded : framed.decode bytes = some value) : framed.encode value = bytes :=
+  framed.codec.toLawful_canonical bytes value decoded
 
 /-- Bytes carrying any other frame refuse: the frame is the first stream
 value, so a decode would re-encode to a different first value. -/
@@ -116,8 +103,7 @@ theorem decode_other_frame (framed : Framed α) {other : List UInt8}
   | some value =>
       have exact := decode_canonical framed decoded
       have prefixed := bytesStream.decodePrefix_encode framed.frame (framed.stream.encode value)
-      simp only [encode, StreamCodec.product] at exact
-      rw [exact, bytesStream.decodePrefix_encode] at prefixed
+      rw [← encode_eq, exact, bytesStream.decodePrefix_encode] at prefixed
       exact absurd (congrArg Prod.fst (Option.some.inj prefixed)) different
 
 end Framed
@@ -171,15 +157,19 @@ def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
     pure (tag, schema.schemaId.value, schema.version, descriptor)
 
 /-- Canonical, length-prefixed corpus: the automatically collected source tag
-entries plus the actual exhaustive cell schema/layout descriptors. -/
+entries, their structural fingerprints (`Compiler.PersistedCodecShapes`, checked
+by the census), and the actual exhaustive cell schema/layout descriptors: a codec
+whose structure moves moves the epoch. -/
 def persistedCodecCorpus : List UInt8 :=
   let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
+  let shapes := PersistedCodecShapes.pins.map fun (identity, fingerprint) =>
+    (identity ++ ":" ++ fingerprint).toUTF8.toList
   (StreamCodec.product
-    (StreamCodec.list bytesStream)
+    (StreamCodec.product (StreamCodec.list bytesStream) (StreamCodec.list bytesStream))
     (StreamCodec.list (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat bytesStream))))).encode
-    (entries, persistedCellDescriptors)
+    ((entries, shapes), persistedCellDescriptors)
 
 /-- Derived from the content of every registered persisted tag and cell
 descriptor. This is a flag day: every old schema-refs/v5 Store requires
@@ -527,8 +517,8 @@ theorem storedRecordDigest_eq {bytes : List UInt8} {record : IntentRecord}
     storedRecordDigest bytes = recordDigest record := by
   have canonical := Framed.decode_canonical recordFrame decoded
   unfold storedRecordDigest recordDigest
-  rw [← canonical]
-  simp [Framed.encode, StreamCodec.product, recordFrame]
+  rw [← canonical, Framed.encode_eq]
+  simp [recordFrame]
 
 /-- One chain link from a record's stored bytes. -/
 def chainStepStored (previous : Digest) (bytes : List UInt8) : Digest :=

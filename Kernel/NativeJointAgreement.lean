@@ -41,21 +41,25 @@ def phaseTag : RecoveryPhase → Nat
 def phaseOfTag : Nat → RecoveryPhase
   | 0 => .collecting | 1 => .installing | 2 => .releasing | _ => .complete
 
+/-- The four phase tags; any other natural is refused (it used to decode as
+`.complete`). -/
+def phaseStream : StreamCodec RecoveryPhase :=
+  StreamCodec.retract StreamCodec.nat phaseTag phaseOfTag (by intro p; cases p <;> rfl)
+
 def recoveryStream : StreamCodec RecoveryJob :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream (StreamCodec.product bytesStream
       (StreamCodec.product (StreamCodec.list bytesStream)
         (StreamCodec.product StreamCodec.nat
-          (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+          (StreamCodec.product phaseStream StreamCodec.nat)))))
     (fun j => (j.accessCapability, j.opaqueParticipantMask, j.evidence,
-      j.originFence, phaseTag j.phase, j.sequence))
-    (fun (a, m, e, f, p, s) => ⟨a, m, e, f, phaseOfTag p, s⟩)
-    (by intro j; cases j with | mk a m e f p s => cases p <;> rfl)
+      j.originFence, j.phase, j.sequence))
+    (fun (a, m, e, f, p, s) => ⟨a, m, e, f, p, s⟩)
+    (by intro j; cases j; rfl)
 
 /-- Canonical decoding rejects unknown phase aliases and trailing bytes. -/
-def decodeRecovery (bytes : List UInt8) : Option RecoveryJob := do
-  let job ← recoveryStream.toLawful.decode bytes
-  if recoveryStream.encode job = bytes then some job else none
+def decodeRecovery (bytes : List UInt8) : Option RecoveryJob :=
+  recoveryStream.toLawful.decode bytes
 
 @[simp] theorem decodeRecovery_encode (job : RecoveryJob) :
     decodeRecovery (recoveryStream.encode job) = some job := by

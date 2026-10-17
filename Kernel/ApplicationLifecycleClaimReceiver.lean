@@ -58,6 +58,18 @@ theorem Reservation.postRecord_exact {config : Config}
         (DurableReceiver.IntentRecord.ofIntent reservation.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord reservation.old reservation.readback
 
+/-- The reserved successor is admitted under `config`: the read-back intent
+is the intent admitted for this ingress at `old.opened`, and
+`validateLoaded config` accepts the one candidate extending the verified tip
+by that read-back intent. -/
+theorem Reservation.successor_validated {config : Config} (reservation : Reservation config) :
+    reservation.readback.derived.intent = reservation.admitted.intent ∧
+      NativeHost.validateLoaded config
+          (NativeHostReplay.exactCandidate reservation.old
+            reservation.readback.derived reservation.readback.ready) =
+        .ok reservation.readback.after :=
+  ⟨reservation.derivedExact, reservation.readback.validated⟩
+
 /-- Every projected coordinate is selected from the exact claimed post-image
 or from the source ingress admitted by the same one-shot claim. The raw SPK
 SHA-256 mapping is intentionally absent until a separate descriptor/install

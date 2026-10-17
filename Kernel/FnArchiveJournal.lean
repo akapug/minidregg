@@ -112,7 +112,7 @@ def basisOfCode : Nat → Basis
   | 0 => .accepted | 1 => .duplicate | _ => .lookup
 
 def basisStream : StreamCodec Basis :=
-  StreamCodec.xmap StreamCodec.nat basisCode basisOfCode (by intro b; cases b <;> rfl)
+  StreamCodec.retract StreamCodec.nat basisCode basisOfCode (by intro b; cases b <;> rfl)
 
 def ackStream : StreamCodec Ack :=
   StreamCodec.xmap

@@ -115,11 +115,11 @@ inductive AnswerWire where
 
 def answerStream : StreamCodec AnswerWire :=
   StreamCodec.xmap (StreamCodec.sum bytesStream (StreamCodec.sum stringStream
-      (StreamCodec.sum StreamCodec.nat stringStream)))
+      (StreamCodec.sum (StreamCodec.literal (StreamCodec.nat.encode 0)) stringStream)))
     (fun answer => match answer with
       | .reply value => .inl value
       | .refused reason => .inr (.inl reason)
-      | .unknown => .inr (.inr (.inl 0))
+      | .unknown => .inr (.inr (.inl ()))
       | .broken reason => .inr (.inr (.inr reason)))
     (fun wire => match wire with
       | .inl value => .reply value
@@ -413,6 +413,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -641,7 +646,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE.ACTIVITY.EFFECT/v1".toUTF8.toList
@@ -810,6 +815,14 @@ structure Gated {F : Type} [Field F] (deployment : Deployment)
   preRootExact : preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot claimed = .ok ()
   funded : funding config durable command = .ok ()
+theorem Gated.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} {claimed : Digest} (gated : Gated deployment profile ambient durable command claimed) :
+    configOf deployment profile ambient = .ok gated.config ∧
+      gated.preRoot = durable.snapshot.model.roots ⟨(signedTarget deployment.domain command).2⟩ ∧
+      authorized gated.authority.snapshot profile.semantics ambient command gated.preRoot claimed = .ok () ∧
+      funding gated.config durable command = .ok () :=
+  ⟨gated.configExact, gated.preRootExact, gated.authorizedExact, gated.funded⟩
 
 def gate {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -865,6 +878,15 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   outcome : Digest
   outcomeExact : outcome = outcomeDigest final.1
   authorizedExact : authorized authority.snapshot profile.semantics ambient command preRoot outcome = .ok ()
+theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    decideTurn prepared.config durable.snapshot ambient.height command = .ok prepared.decided ∧
+      ActivitySeatEnd.finish prepared.config durable.snapshot ambient.height prepared.decided = .ok prepared.final ∧
+      prepared.outcome = outcomeDigest prepared.final.1 ∧
+      authorized prepared.authority.snapshot profile.semantics ambient command prepared.preRoot prepared.outcome =
+        .ok () :=
+  ⟨prepared.decidedExact, prepared.finalExact, prepared.outcomeExact, prepared.authorizedExact⟩
 
 /-- The decision of a gated command (after its signature verified): the kernel turn, the seat
 and domain end, and the outcome, which must be the one the signer claimed. -/
@@ -984,9 +1006,14 @@ private def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix suffix := some ((), suffix)
   decodePrefix_encode := by intro value suffix; cases value; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 private def uint32Stream : StreamCodec UInt32 :=
-  StreamCodec.xmap StreamCodec.nat UInt32.toNat UInt32.ofNat
+  StreamCodec.retract StreamCodec.nat UInt32.toNat UInt32.ofNat
     (by intro value; simp)
 
 private def stageStream : StreamCodec (ObjectiveWorkAccount.Stage) :=
@@ -1096,11 +1123,20 @@ private theorem join_split_writeRefusal (reason : ObjectRecord.WriteRefusal) :
           exact congrArg ObjectRecord.WriteRefusal.upgradeConflict ih
   | _ => rfl
 
+/-- Every depth and terminal is the split of the refusal it joins to. -/
+private theorem split_join_writeRefusal (depth : Nat)
+    (terminal : Sum Unit (Sum Unit (Sum LawLeaf Unit))) :
+    splitWriteRefusal (joinWriteRefusal depth terminal) = (depth, terminal) := by
+  induction depth with
+  | zero => rcases terminal with ⟨⟩ | ⟨⟩ | _ | ⟨⟩ <;> rfl
+  | succ depth ih => simp only [joinWriteRefusal, splitWriteRefusal, ih]
+
 private def writeRefusalStream : StreamCodec ObjectRecord.WriteRefusal :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.sum unitStream (StreamCodec.sum unitStream (StreamCodec.sum LawLeaf.stream unitStream))))
     splitWriteRefusal (fun wire => joinWriteRefusal wire.1 wire.2) join_split_writeRefusal
+    (fun wire => split_join_writeRefusal wire.1 wire.2)
 
 private def invitationRefusalStream : StreamCodec (Invitations.Refusal) :=
   StreamCodec.xmap
@@ -1843,12 +1879,23 @@ private def callRefusalTerminalStream : StreamCodec (CallRefusalTerminal) :=
     )
     (by intro value; cases value <;> rfl)
 
+/-- Every account list and terminal is the split of the refusal it joins to. -/
+private theorem split_join_callRefusal (accounts : List (Nat × Nat)) (terminal : CallRefusalTerminal) :
+    splitCallRefusal (joinCallRefusal (accounts, terminal)) = (accounts, terminal) := by
+  induction accounts with
+  | nil => cases terminal <;> rfl
+  | cons account accounts ih =>
+      obtain ⟨remaining, spent⟩ := account
+      change splitCallRefusal (.extractionAccount (joinCallRefusal (accounts, terminal)) remaining spent) = _
+      simp only [splitCallRefusal, ih]
+
 /-- Extraction-account layers are a length-prefixed byte list of pairs. -/
 def callRefusalStream : StreamCodec ObjectiveCall.CallRefusal :=
   StreamCodec.xmap
     (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat))
       callRefusalTerminalStream)
     splitCallRefusal joinCallRefusal join_split_callRefusal
+    (fun wire => split_join_callRefusal wire.1 wire.2)
 
 /-- Every call refusal, including any number of extraction-account layers,
 roundtrips as a prefix while preserving arbitrary following bytes. -/
@@ -2315,6 +2362,11 @@ structure Accepted [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   preparedExact : prepare gated = .ok prepared
   physical : PhysicalShape prepared ingress
+theorem Accepted.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : Accepted deployment profile ambient durable ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      prepare accepted.gated = .ok accepted.prepared ∧ PhysicalShape accepted.prepared ingress :=
+  ⟨accepted.envelopeExact, accepted.preparedExact, accepted.physical⟩
 
 /-- The intent of a charged failure: the kernel's `failed` turn (the Book only) under this
 receiver's seal. -/
@@ -2351,6 +2403,12 @@ structure Failed [DecidableEq F] (deployment : Deployment)
   physical : IntentShape deployment durable
     (failedIntent (profile := profile) (ambient := ambient) gated.authority gated.config ingress cause
       request failure final)
+theorem Failed.sound [DecidableEq F] {ingress : DecodedIngress}
+    (failed : Failed deployment profile ambient durable ingress) :
+    failed.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      prepare failed.gated = .error failed.cause ∧ chargedCause failed.cause = true ∧
+      failureRequest deployment.domain profile.semantics ingress.command = some failed.request :=
+  ⟨failed.envelopeExact, failed.causeExact, failed.charged, failed.requestExact⟩
 
 /-- What admission decides for a signed ingress: an accepted turn, or a charged failure. -/
 inductive Verdict [DecidableEq F] (deployment : Deployment)

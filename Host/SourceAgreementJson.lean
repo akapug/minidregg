@@ -24,7 +24,7 @@ def admitKey (keys : Std.HashSet String) (key : String) : Result (Std.HashSet St
   if keys.contains key then .error s!"duplicate JSON object field: {key}"
   else .ok (keys.insert key)
 
-private structure ScanFrame where
+structure ScanFrame where
   object : Bool
   expectKey : Bool := false
   keys : Std.HashSet String := {}
@@ -783,16 +783,14 @@ private def annotationBefore (path : String) (annotation : Hyperdocument.Annotat
   let codec := StoreCodec.entryStream HyperdocumentCell.contentWire
   match codec.toLawful.decode bytes with
   | some entry =>
-      if codec.encode entry != bytes then failAt path "annotation guard is not canonical"
-      else
-        match entry with
-        | ⟨⟨.annotations, identifier⟩, record⟩ =>
-            let identifier : Hyperdocument.AnnotationId := identifier
-            let record : Hyperdocument.AnnotationRecord := record
-            if identifier.digest.value != annotation.digest.value then
-              failAt path "annotation guard names another annotation"
-            else pure record
-        | _ => failAt path "annotation guard is not an annotation entry"
+      match entry with
+      | ⟨⟨.annotations, identifier⟩, record⟩ =>
+          let identifier : Hyperdocument.AnnotationId := identifier
+          let record : Hyperdocument.AnnotationRecord := record
+          if identifier.digest.value != annotation.digest.value then
+            failAt path "annotation guard names another annotation"
+          else pure record
+      | _ => failAt path "annotation guard is not an annotation entry"
   | none => failAt path "invalid exact annotation guard"
 
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
@@ -1384,7 +1382,7 @@ private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.In
     ← nat (path ++ ".asset") (← field path "asset" obj),
     ← nat (path ++ ".amount") (← field path "amount" obj)⟩
 
-private structure BirthParts where
+structure BirthParts where
   item : ResourceBirth.BirthItem CanonicalCellRegistry.registry
   ownerGrant : ResourceBirth.AuthorityGrant
   controlGrant : ResourceBirth.AuthorityGrant
@@ -1751,7 +1749,7 @@ def signatures (json : Lean.Json) : Result (List UInt8) := do
   let values ← list "$" decodeHex json
   for signature in values do
     unless signature.length = 64 do throw "$: every signature must contain exactly 64 bytes"
-  pure <| (ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful).encode values
+  pure <| ((StreamCodec.list bytesStream).toLawful).encode values
 
 private def draftJson : Draft → Lean.Json
   | .birth bytes capabilities =>
@@ -2383,7 +2381,7 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
   | "predicate" => predicateJson <$> decoded "predicate"
-      (ResourceBirthCodec.strictCodec NativeHostGenesis.predicateStream.toLawful) bytes
+      NativeHostGenesis.predicateStream.toLawful bytes
   | "observation-batch" => do
       unless bytes.length ≤ NativeObservationCodec.maxBatchBytes do
         failAt "observation-batch" "observation batch exceeds its bounded presentation size"

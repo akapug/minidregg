@@ -351,35 +351,34 @@ fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
     Ok(iterations)
 }
 
+/// The configured task's tariff from the Host profile's one service list
+/// (`providerMeterings`). A profile from a Host that still emits the retired
+/// scalar `providerMetering` refuses by name rather than being read as a pin.
 fn select_provider_metering<'a>(profile: &'a Value, task: &str) -> Result<&'a Value> {
-    if let Some(services) = profile.get("providerMeterings") {
-        if profile.get("providerMetering").is_some() {
-            return Err("Host profile mixes singular and multi-provider tariffs".into());
-        }
-        let services = services
-            .as_array()
-            .filter(|services| !services.is_empty() && services.len() <= 8)
-            .ok_or("Host provider metering list is not bounded")?;
-        let mut ids = std::collections::HashSet::new();
-        for service in services {
-            let id = service
-                .get("providerResourceId")
-                .and_then(Value::as_str)
-                .ok_or("Host provider metering resource ID absent")?;
-            decimal(id, "providerResourceId")?;
-            if id == "0" || !ids.insert(id) {
-                return Err("Host profile repeats or zeroes a provider metering ID".into());
-            }
-        }
-        services
-            .iter()
-            .find(|service| service.get("providerResourceId").and_then(Value::as_str) == Some(task))
-            .ok_or("pinned Host profile has no tariff for configured provider task".into())
-    } else {
-        profile
-            .get("providerMetering")
-            .ok_or("pinned Host profile has no provider metering tariff".into())
+    if profile.get("providerMetering").is_some() {
+        return Err("Host profile carries the retired scalar providerMetering; the Host must pin providerServices".into());
     }
+    let services = profile
+        .get("providerMeterings")
+        .ok_or("pinned Host profile has no provider metering tariff")?
+        .as_array()
+        .filter(|services| !services.is_empty() && services.len() <= 8)
+        .ok_or("Host provider metering list is not bounded")?;
+    let mut ids = std::collections::HashSet::new();
+    for service in services {
+        let id = service
+            .get("providerResourceId")
+            .and_then(Value::as_str)
+            .ok_or("Host provider metering resource ID absent")?;
+        decimal(id, "providerResourceId")?;
+        if id == "0" || !ids.insert(id) {
+            return Err("Host profile repeats or zeroes a provider metering ID".into());
+        }
+    }
+    services
+        .iter()
+        .find(|service| service.get("providerResourceId").and_then(Value::as_str) == Some(task))
+        .ok_or("pinned Host profile has no tariff for configured provider task".into())
 }
 
 fn provider_required_network(task: &ProviderTask) -> &'static str {
@@ -19576,10 +19575,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         mixed["providerMetering"] = json!({"providerResourceId":"7950"});
         assert!(select_provider_metering(&mixed, "7950").is_err());
         let legacy = json!({"providerMetering":{"providerResourceId":"7004"}});
-        assert_eq!(
-            select_provider_metering(&legacy, "7004").unwrap()["providerResourceId"],
-            "7004"
-        );
+        assert!(select_provider_metering(&legacy, "7004")
+            .unwrap_err()
+            .contains("retired scalar providerMetering"));
     }
 
     #[test]

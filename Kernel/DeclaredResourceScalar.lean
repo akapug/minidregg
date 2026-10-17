@@ -121,19 +121,7 @@ def commandStream : StreamCodec Command :=
 /-- Version 2: the command carries no authority root (`Theory.PlanBinding`). -/
 def commandFrame : List UInt8 := "DREGG/RESOURCE/INVOKE".toUTF8.toList ++ [2]
 
-def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes :=
-    if bytes.take commandFrame.length = commandFrame then
-      commandStream.toLawful.decode (bytes.drop commandFrame.length)
-    else none
-  decode_encode := by
-    intro command
-    have decoded := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec Command := (StreamCodec.framed commandFrame commandStream).toLawful
 
 @[simp] theorem command_decode_encode (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command :=
@@ -142,7 +130,7 @@ def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawComm
 theorem command_decode_canonical {bytes : List UInt8} {command : Command}
     (decoded : commandCodec.decode bytes = some command) :
     commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 def Command.declaration (command : Command) :
     DeclaredActionLowering.Declaration (⟨command.target⟩ : ResourceId command.kind) :=

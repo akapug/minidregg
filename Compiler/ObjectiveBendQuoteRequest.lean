@@ -28,7 +28,9 @@ structure Role where
 def Role.target (r : Role) (payload : Payload) : Target :=
   ⟨r.kind,r.resource,r.capability,r.schemaVersion,r.root,payload,
     r.observeCapability,r.audienceEpoch,r.audienceRoster⟩
-def roleStream : StreamCodec Role := StreamCodec.xmap targetStream
+/-- A role always writes the `.read` placeholder payload; a target carrying any
+other payload is not the spelling of a role and is refused (`retract`). -/
+def roleStream : StreamCodec Role := StreamCodec.retract targetStream
   (fun r => r.target .read)
   (fun t => ⟨t.kind,t.target,t.capability,t.schemaVersion,t.expectedTargetRoot,
     t.observeCapability,t.audienceEpoch,t.audienceRoster⟩)

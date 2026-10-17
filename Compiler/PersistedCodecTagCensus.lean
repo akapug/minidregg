@@ -3,9 +3,25 @@ reachable from elaborated codec/materializer/byte-encoder bodies must equal
 Compiler.PersistedCodecTags' registry set, in both directions. Definitions are
 traversed, not comments or theorem fixtures. Registry enumeration and the epoch
 hash are excluded from discovery, so they cannot manufacture reverse coverage.
-Inline receiving identities need no relocation or declaration exceptions. -/
+Inline receiving identities need no relocation or declaration exceptions.
+
+SHAPES.  Each identity also has a structural fingerprint: the definitions that
+spell it (its owners) and the codec definitions that use an owner, closed under
+the package definitions they reference, each hashed by type and value.  Proofs
+do not count (a definition's tactic proofs are auxiliary theorems, hashed by
+name only), so restating a proof never moves a fingerprint; adding a field,
+reordering a product, changing a nested codec or a nested frame does.
+`Compiler.PersistedCodecShapes.pins` is the generated record of those
+fingerprints, and `#assert_persisted_codec_tags` requires every identity's
+current fingerprint to equal its pin.  A codec whose structure changed while
+its identity did not therefore fails the build BY NAME.  The answer is never a
+hand edit: `scripts/codec-shapes-regen.py` bumps the identity's version
+(everywhere it is spelled, Lean and Rust) and re-emits the pins, and since the
+pins feed `DurableCheckpointCodec.persistedCodecCorpus`, the derived StoreEpoch
+moves with them. -/
 import Kernel.NativeHostReplay
 import Compiler.PersistedCodecTags
+import Compiler.PersistedCodecShapes
 import Lean
 
 namespace Minidregg.Compiler.PersistedCodecTagCensus
@@ -94,6 +110,66 @@ def registeredIdentity (name : Name) (info : ConstantInfo) : TermElabM (List UIn
   else
     unsafe evalExpr (List UInt8) (mkApp (mkConst ``List [.zero]) (mkConst ``UInt8)) value
 
+/-- Persisted identities are excluded from fingerprints: an identity names a
+shape, it is not part of it (a nested codec's identity still counts through the
+definition that spells it). -/
+def excludedFromShape (n : Name) : Bool :=
+  n.toString.startsWith "Minidregg.Compiler.PersistedCodecTags." ||
+    n.toString.startsWith "Minidregg.Compiler.PersistedCodecShapes."
+
+def hexDigit (n : Nat) : Char :=
+  #['0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'][n % 16]!
+
+def hex64 (value : UInt64) : String :=
+  String.ofList ((List.range 16).reverse.map fun i => hexDigit (value.toNat / 16 ^ i % 16))
+
+def hexOf (bytes : List UInt8) : String :=
+  String.ofList (bytes.flatMap fun b => [hexDigit (b.toNat / 16), hexDigit (b.toNat % 16)])
+
+def render (bytes : List UInt8) : String :=
+  String.ofList (bytes.map fun b => if 32 ≤ b.toNat && b.toNat < 127 then Char.ofNat b.toNat else '?')
+
+/-- One definition's own structure: its type and (for a definition) its value.
+Theorems are never entered (a proof is not structure), and every other constant
+it names is a separate node of the closure. -/
+def declarationHash (env : Environment) (n : Name) : UInt64 :=
+  match env.find? n with
+  | some (.defnInfo info) => mixHash (hash info.type) (hash info.value)
+  | some (.thmInfo _) => hash n
+  | some info => hash info.type
+  | none => hash n
+
+/-- Per identity: the owners (definitions that spell it), the codec definitions
+that use an owner, closed under the package definitions they reference; the
+fingerprint hashes every member's name and own structure, in name order. -/
+def computeShapes (env : Environment) (owners : Std.HashMap (List UInt8) (Array Name))
+    (packageRefs : Std.HashMap Name (Array Name)) (registered : List (List UInt8)) :
+    Array (List UInt8 × String × Array Name) := Id.run do
+  let mut referrers : Std.HashMap Name (Array Name) := {}
+  for (user, refs) in packageRefs.toList do
+    for target in refs do
+      referrers := referrers.insert target ((referrers.getD target #[]).push user)
+  let mut result := #[]
+  for bytes in registered do
+    let ownerNames := owners.getD bytes #[]
+    let mut start : Array Name := ownerNames
+    for owner in ownerNames do
+      for user in referrers.getD owner #[] do
+        if let some info := env.find? user then
+          if codecRoot user info then start := start.push user
+    let mut members : NameSet := {}
+    let mut stack := start.toList
+    while !stack.isEmpty do
+      let n := stack.head!
+      stack := stack.tail!
+      if members.contains n then continue
+      members := members.insert n
+      stack := (packageRefs.getD n #[]).toList ++ stack
+    let ordered := (members.toList.map (·.toString)).mergeSort (· ≤ ·)
+    let fingerprint := ordered.foldl (fun acc s => mixHash acc (mixHash (hash s) (declarationHash env s.toName))) 7
+    result := result.push (bytes, hex64 fingerprint, ownerNames)
+  return result
+
 elab "#assert_persisted_codec_tags" : command => do
   let env ← getEnv
   let mut queue : List Name := []
@@ -104,6 +180,8 @@ elab "#assert_persisted_codec_tags" : command => do
   let mut seen : NameSet := {}
   let mut observed : List (List UInt8) := []
   let mut unregistered : Array (Name × Name × String) := #[]
+  let mut owners : Std.HashMap (List UInt8) (Array Name) := {}
+  let mut packageRefs : Std.HashMap Name (Array Name) := {}
   let registered := Minidregg.Compiler.PersistedCodecTags.canonicalSet
     (Minidregg.Compiler.PersistedCodecTags.entries.map (·.bytes))
   while !queue.isEmpty do
@@ -129,20 +207,95 @@ elab "#assert_persisted_codec_tags" : command => do
           (mkApp (mkConst ``List [.zero]) (mkConst ``UInt8)) frame
         if bytes.take 5 == [68,82,69,71,71] then
           observed := bytes :: observed
+          owners := owners.insert bytes ((owners.getD bytes #[]).push name)
           unless registered.contains bytes do
             unregistered := unregistered.push (name, source, s!"complete frame {bytes}")
       for tag in literals info.value do
         let bytes := tag.toUTF8.toList
         observed := bytes :: observed
+        owners := owners.insert bytes ((owners.getD bytes #[]).push name)
         unless registered.contains bytes do
           unregistered := unregistered.push (name, source, tag)
-      queue := dependencies info.value ++ queue
+      let deps := dependencies info.value
+      if packageDeclaration env name then
+        packageRefs := packageRefs.insert name
+          ((deps.filter (fun d => packageDeclaration env d && !excludedFromShape d)).eraseDups.toArray)
+      queue := deps ++ queue
   let reachable := Minidregg.Compiler.PersistedCodecTags.canonicalSet observed
   let registryOnly := Minidregg.Compiler.PersistedCodecTags.entries.filter
     (fun entry => !reachable.contains entry.bytes)
   unless reachable == registered do
     throwError m!"persisted codec tag set equality failed: reachable-only {unregistered.toList}; registry-only {registryOnly.map (·.name)}"
-  logInfo m!"#assert_persisted_codec_tags: {seen.size} definitions reached; {reachable.length} canonical identities; reachable set = registry set (both directions)"
+  let shapes := computeShapes env owners packageRefs registered
+  let pinned := Minidregg.Compiler.PersistedCodecShapes.pins
+  let mut changed : Array String := #[]
+  let mut unpinned : Array String := #[]
+  for (bytes, fingerprint, ownerNames) in shapes do
+    match pinned.find? (fun pin => pin.1 == hexOf bytes) with
+    | none => unpinned := unpinned.push (render bytes)
+    | some pin =>
+        unless pin.2 == fingerprint do
+          changed := changed.push s!"{render bytes} (pinned {pin.2}, now {fingerprint}; owners {ownerNames.toList})"
+  let stale := pinned.filter (fun pin => !shapes.any (fun shape => hexOf shape.1 == pin.1))
+  unless changed.isEmpty do
+    throwError m!"persisted codec structure changed under an unchanged identity (bump it: scripts/codec-shapes-regen.py): {changed.toList}"
+  unless unpinned.isEmpty && stale.isEmpty do
+    throwError m!"persisted codec shape pins out of date (re-emit: scripts/codec-shapes-regen.py): unpinned {unpinned.toList}; stale {stale.map (·.1)}"
+  logInfo m!"#assert_persisted_codec_tags: {seen.size} definitions reached; {reachable.length} canonical identities; reachable set = registry set (both directions); {shapes.size} structural fingerprints equal their pins"
+
+/-- Regeneration: the same census, writing the pins module instead of checking it. -/
+elab "#emit_persisted_codec_shapes " path:str : command => do
+  let env ← getEnv
+  let mut queue : List Name := []
+  for (name, info) in env.constants.toList do
+    if packageDeclaration env name && codecRoot name info &&
+        !name.toString.startsWith "Minidregg.Compiler.PersistedCodecTags." then
+      queue := name :: queue
+  let mut seen : NameSet := {}
+  let mut owners : Std.HashMap (List UInt8) (Array Name) := {}
+  let mut packageRefs : Std.HashMap Name (Array Name) := {}
+  let registered := Minidregg.Compiler.PersistedCodecTags.canonicalSet
+    (Minidregg.Compiler.PersistedCodecTags.entries.map (·.bytes))
+  while !queue.isEmpty do
+    let name := queue.head!
+    queue := queue.tail!
+    if seen.contains name then continue
+    seen := seen.insert name
+    if let some (.defnInfo info) := env.find? name then
+      if name.toString.startsWith "Minidregg.Compiler.PersistedCodecTags." then continue
+      let type := info.type.consumeMData
+      let leaf := name.toString.splitOn "." |>.getLast!
+      let constants := if type.isAppOfArity ``List 1 && type.appArg!.isConstOf ``UInt8 &&
+          (leaf.endsWith "Frame" || leaf.endsWith "FrameName" || leaf == "frame" || leaf == "magic")
+        then [mkConst name] else []
+      for frame in constants ++ fixedFrames info.value do
+        let bytes ← liftTermElabM <| unsafe evalExpr (List UInt8)
+          (mkApp (mkConst ``List [.zero]) (mkConst ``UInt8)) frame
+        if bytes.take 5 == [68,82,69,71,71] then
+          owners := owners.insert bytes ((owners.getD bytes #[]).push name)
+      for tag in literals info.value do
+        let bytes := tag.toUTF8.toList
+        owners := owners.insert bytes ((owners.getD bytes #[]).push name)
+      let deps := dependencies info.value
+      if packageDeclaration env name then
+        packageRefs := packageRefs.insert name
+          ((deps.filter (fun d => packageDeclaration env d && !excludedFromShape d)).eraseDups.toArray)
+      queue := deps ++ queue
+  let shapes := computeShapes env owners packageRefs registered
+  let mut out := "/- GENERATED by scripts/codec-shapes-regen.py from `#emit_persisted_codec_shapes`.\n" ++
+    "Do not edit: the structural fingerprint of every persisted codec identity, checked by\n" ++
+    "`Compiler.PersistedCodecTagCensus` and hashed into the derived StoreEpoch. -/\n" ++
+    "namespace Minidregg.Compiler.PersistedCodecShapes\n\n" ++
+    "/-- (identity octets in hex, structural fingerprint in hex). -/\n" ++
+    "def pins : List (String × String) := [\n"
+  let mut index := 0
+  for (bytes, fingerprint, _) in shapes do
+    index := index + 1
+    let comma := if index == shapes.size then "" else ","
+    out := out ++ s!"  (\"{hexOf bytes}\", \"{fingerprint}\"){comma}  -- {render bytes}\n"
+  out := out ++ "]\n\nend Minidregg.Compiler.PersistedCodecShapes\n"
+  IO.FS.writeFile path.getString out
+  logInfo m!"#emit_persisted_codec_shapes: {shapes.size} fingerprints written to {path.getString}"
 
 #assert_persisted_codec_tags
 end Minidregg.Compiler.PersistedCodecTagCensus

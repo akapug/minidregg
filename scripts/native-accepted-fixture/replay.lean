@@ -12,7 +12,7 @@ declared marker. A prefix whose directory or authority does not load is refused 
 over a Store prefix, under the deployment's pinned settings, with the NATIVE verifier
 named on the command line. `generate.sh` points that at `verify-logger.py`, which
 records every triple the admission asks about: that record is the transcript
-`Assurance.NativeAcceptedFixture` replays without a process.
+`Fixtures.NativeAcceptedFixture` replays without a process.
 
 usage: lake env lean --run replay.lean DIR SETTINGS VERIFIER HEIGHT
   DIR holds seed.bin, rec-1.bin .. rec-HEIGHT.bin (the Store's own frames), call.bin
@@ -20,17 +20,17 @@ usage: lake env lean --run replay.lean DIR SETTINGS VERIFIER HEIGHT
   Host appended after it).
 prints `ACCEPTED record=<same|DIFFERENT> root=<world root after>` or `REFUSED <reason>`,
 then the call's semantic projection (`PROJECTION key = value` lines,
-`Assurance.NativeAcceptedFixtureProjection`, the definition the fixture checks
+`Fixtures.NativeAcceptedFixtureProjection`, the definition the fixture checks
 against the hand-written authority), exit 0; any other outcome exits non-zero. The interpreter recurses deeply: run it
 under `ulimit -s unlimited`.
 -/
 import Host.ClientConsentCore
 import Kernel.ObjectiveBendAuthenticatedInputs
-import Assurance.NativeAcceptedFixtureProjection
+import Fixtures.NativeAcceptedFixtureProjection
 open Minidregg Minidregg.Compiler Minidregg.Kernel
 open Minidregg.Compiler.DurableCheckpointCodec Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DeclaredResourceController
-open Minidregg.Assurance.NativeAcceptedFixtureProjection (projectAccepted projectRefused reasonName receiptSubjects)
+open Minidregg.Fixtures.NativeAcceptedFixtureProjection (projectAccepted projectRefused reasonName receiptSubjects)
 
 def printProjection (lines : List (String × String)) : IO Unit :=
   for (key, value) in lines do IO.println s!"PROJECTION {key} = {value}"

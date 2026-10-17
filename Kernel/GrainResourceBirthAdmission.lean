@@ -1178,6 +1178,34 @@ theorem Accepted.births_named {F : Type} [Field F] [DecidableEq F]
           (accepted.pending.branchStep (.inl .factory)).newState = true :=
   ⟨accepted.named, (accepted.checked (.inl .factory)).law_admits_step⟩
 
-#assert_axioms CheckedBranch.law_admits_step Accepted.births_named
+/-- **An accepted grain-backed birth is bound to its indices.** Both signed carriers of
+`ingress` describe the operation `source` derives under `profile`, `deployment` and `tariff`;
+the union of `birth`'s and `grain`'s writes has its physical shape; every read guard of the
+CAS is at `durable`'s exact root; the descriptor obeys `profile`'s factory template over the
+loaded authority at `ambient`'s height; and every birth write of the composite patch is named
+by the admitted factory step. -/
+theorem Accepted.indexed {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    SignedShape profile deployment tariff source ingress ∧
+      GrainResourceBirthTransaction.PhysicalShape birth grain ∧
+      (∀ guard ∈ accepted.readGuards,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+        birth.prepared.pre.authority.snapshot.authState ambient.height source.birth ∧
+      ResourceBirthController.Concrete.Named (accepted.pending.branchStep (.inl .factory))
+        (GrainResourceBirthTransaction.writes birth grain) :=
+  ⟨accepted.signed, accepted.pending.physical, accepted.readGuards_exact,
+    accepted.pending.templateBound, accepted.named⟩
+
+#assert_axioms CheckedBranch.law_admits_step Accepted.births_named Accepted.indexed
 
 end Minidregg.Kernel.GrainResourceBirthAdmission

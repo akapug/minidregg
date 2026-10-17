@@ -98,6 +98,7 @@ import Theory.ObjectiveBendDemandMachine
 import Kernel.ObjectiveResumeContract
 import Theory.ObjectiveBendLedgerPoles
 import Kernel.GenericSimplexObservationSafety
+import Fixtures.NativeAcceptedFixture  -- the NativeBinding poles (first_binding, refused_call_unbound) live in the recorded run
 
 open Lean Elab Meta
 

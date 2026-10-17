@@ -150,6 +150,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.decoded (ingress : DecodedIngress) :
+    commandCodec.encode ingress.command = ingress.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.ingress.envelope =
+        some ingress.envelope :=
+  ⟨ingress.canonical, ingress.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -209,7 +214,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.SEAT.EFFECT/v1".toUTF8.toList
@@ -463,6 +468,13 @@ structure Accepted [DecidableEq F] (deployment : Deployment)
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   physical : PhysicalShape prepared ingress
+theorem Accepted.bound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : Accepted deployment profile ambient durable ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      authorized durable.snapshot accepted.prepared.authority.snapshot profile.semantics ambient
+        ingress.command accepted.prepared.preRoot accepted.prepared.outcome = .ok () ∧
+      PhysicalShape accepted.prepared ingress :=
+  ⟨accepted.envelopeExact, accepted.prepared.authorizedExact, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

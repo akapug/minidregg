@@ -3,7 +3,7 @@
 
 A `CredentialSignatureIO.Transcript` stands in for the native signature verifier
 inside a Lean fixture that evaluates a real admission
-(`Assurance.NativeAcceptedFixture`).  It is trusted exactly as far as the pinned
+(`Fixtures.NativeAcceptedFixture`).  It is trusted exactly as far as the pinned
 verifier still answers `verified` on each of its triples, so this file finds EVERY
 transcript the research umbrella holds and prints its triples for
 `scripts/check-native-transcripts.sh`, which re-submits them to the verifier.

@@ -65,9 +65,9 @@ def specStream : StreamCodec Spec :=
       ⟨grant, grantOwnerCapability, grantControlCapability⟩)
     (by intro spec; cases spec; rfl)
 
-def specCodec : LawfulCodec Spec := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v1".toUTF8.toList specStream)
+def specCodec : LawfulCodec Spec :=
+  NativeHostCodec.framed
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v1".toUTF8.toList specStream
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec :=
@@ -88,10 +88,10 @@ def ingressStream : StreamCodec Ingress :=
       ⟨spec, birthIngress, appEnvelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressCodec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
+def ingressCodec : LawfulCodec Ingress :=
+  NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-INGRESS/v1".toUTF8.toList
-    ingressStream)
+    ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
   ingressCodec.encode ingress

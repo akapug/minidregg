@@ -27,7 +27,7 @@ if [ -z "$GL" ]; then
   cd "$GL/src" && git fetch -q github main && [ "$(git rev-parse FETCH_HEAD)" = "$TIP" ] || { echo "advance: github main != $TIP"; exit 3; }
   git checkout -q -B main "$TIP"
   ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
-      "$here/slot-mk.sh" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$GL/logs/advance-umbrella.log" 2>&1 \
+      "$here/slot-mk.sh" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$GL/logs/advance-umbrella.log" 2>&1 \
     || { echo "advance: umbrella RED in $GL (logs/advance-umbrella.log)"; exit 4; }
   green=$GL/logs/advance-umbrella.log
 else

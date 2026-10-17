@@ -354,4 +354,25 @@ def quotePayload (services : List (Nat × Tariff))
   let quote ← quoteResponse tariff route request response contentType status reserve
   pure (reportJson providerResourceId quote)
 
+/-- One pinned provider service as the deployment config spells it
+(`providerServices[]`): the purse resource and its per-route tariff. The
+serving Host and the local consent provider parse it with `checkedServices`,
+so the two can never read different pins from one file. -/
+structure ServiceSettings where
+  providerResourceId : Nat
+  tariff : Json
+  deriving FromJson, ToJson
+
+/-- Bounded unique service table: one to eight entries, positive distinct
+resource ids, each tariff the per-route v2 schema. -/
+def checkedServices (services : List ServiceSettings) : Result (List (Nat × Tariff)) := do
+  unless 0 < services.length && services.length ≤ 8 do
+    throw "providerServices requires one to eight entries"
+  let ids := services.map (·.providerResourceId)
+  unless ids.all (fun id => decide (0 < id)) && decide ids.Nodup do
+    throw "providerServices resource IDs must be positive and unique"
+  services.mapM fun service => do
+    let tariff ← parseTariff service.tariff.compress
+    pure (service.providerResourceId, tariff)
+
 end Minidregg.Host.ProviderUsage

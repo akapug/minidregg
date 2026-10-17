@@ -54,7 +54,7 @@ def Role.ofTag : Nat → Role
   | 0 => .record | 1 => .slot | 2 => .state | 3 => .package | 4 => .object | 5 => .inbox | 7 => .inboxGeneration | _ => .domain
 
 def roleStream : StreamCodec Role :=
-  StreamCodec.xmap StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
+  StreamCodec.retract StreamCodec.nat Role.tag Role.ofTag (by intro role; cases role <;> rfl)
 
 /-- The activity family: `DREGG.OBJECTIVE.ACTIVITY.CELL.ID/v1`,
 `DREGG.OBJECTIVE.ACTIVITY.CELL.STATE/v1`, frame `DREGG/OBJECTIVE/ACTIVITY-CELL`. -/

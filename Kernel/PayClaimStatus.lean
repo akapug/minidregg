@@ -84,6 +84,13 @@ def LeaseState.ofCode : Nat → Option LeaseState
 theorem LeaseState.ofCode_code (value : LeaseState) :
     LeaseState.ofCode value.code = some value := by cases value <;> rfl
 
+/-- `LeaseState.ofCode` is a partial inverse of `LeaseState.code`: every code it accepts is
+the code of the value it returns. -/
+theorem LeaseState.code_ofCode {code : Nat} {value : LeaseState} (known : LeaseState.ofCode code = some value) :
+    value.code = code := by
+  unfold LeaseState.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def leaseStateStream : StreamCodec LeaseState where
   encode value := StreamCodec.nat.encode value.code
   decodePrefix bytes := do
@@ -93,6 +100,20 @@ def leaseStateStream : StreamCodec LeaseState where
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, LeaseState.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : LeaseState.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [LeaseState.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 structure Entry where
   subject : Nat
@@ -141,6 +162,13 @@ def AuthorizationKind.ofCode : Nat → Option AuthorizationKind
 theorem AuthorizationKind.ofCode_code (value : AuthorizationKind) :
     AuthorizationKind.ofCode value.code = some value := by cases value <;> rfl
 
+/-- `AuthorizationKind.ofCode` is a partial inverse of `AuthorizationKind.code`: every code it accepts is
+the code of the value it returns. -/
+theorem AuthorizationKind.code_ofCode {code : Nat} {value : AuthorizationKind} (known : AuthorizationKind.ofCode code = some value) :
+    value.code = code := by
+  unfold AuthorizationKind.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def authorizationKindStream : StreamCodec AuthorizationKind where
   encode value := StreamCodec.nat.encode value.code
   decodePrefix bytes := do
@@ -150,6 +178,20 @@ def authorizationKindStream : StreamCodec AuthorizationKind where
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, AuthorizationKind.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : AuthorizationKind.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [AuthorizationKind.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 structure Consumed where
   amountAtomic : Nat

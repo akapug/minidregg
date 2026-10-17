@@ -230,6 +230,37 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
     DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
 
+/-- The signed command bytes encode the prepared command, and every incidence but an
+observe-only read target has a signature over exactly `signed`'s envelope for that
+incidence whose leg this policy's `authorizeLeg` admits over `prepared`, the prepared
+tuple and the `physical` report. -/
+theorem Accepted.legs_admitted {F : Type} [Field F] [DecidableEq F]
+    {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : DeclaredResourceController.Ambient}
+    {ground : Ground deployment}
+    {command : DeclaredResourceController.Command}
+    {prepared : DeclaredResourceController.PreparedInvocation
+      deployment profile ambient ground command}
+    {signed : DeclaredResourceController.SignedCommand}
+    {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleBeginV2Ingress.Ingress}
+    {physical : Checked domain semantics publicKey begin}
+    (accepted : Accepted prepared signed physical) :
+    DeclaredResourceController.commandCodec.encode command = signed.commandBytes ∧
+      ∀ incidence : DeclaredResourceController.Incidence command,
+        DeclaredResourceController.incidenceObserveOnly command incidence = false →
+        ∃ (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority)
+          (authorization : Authorized (portals prepared accepted.tuple physical incidence)
+            ground.authority.authState (accepted.tuple.request incidence).2),
+          receipt.envelopeBytes = signed.envelope command incidence ∧
+            authorizeLeg prepared accepted.tuple incidence physical receipt = .ok authorization :=
+  ⟨accepted.ingressExact, fun incidence observeOnly =>
+    ⟨(accepted.legs incidence observeOnly).receipt,
+      (accepted.legs incidence observeOnly).authorization,
+      (accepted.legs incidence observeOnly).envelopeExact,
+      (accepted.legs incidence observeOnly).admitted⟩⟩
+
 def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}

@@ -58,9 +58,7 @@ def planStream : StreamCodec Plan :=
     (by intro plan; cases plan; rfl)
 
 def planCodec : LawfulCodec Plan :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-PLAN/v1".toUTF8.toList
-      planStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-PLAN/v1".toUTF8.toList planStream
 
 theorem plan_decode_encode (plan : Plan) :
     planCodec.decode (planCodec.encode plan) = some plan :=
@@ -198,7 +196,7 @@ def inspectPlanBytes (bytes : List UInt8) : Except String Lean.Json := do
     throw "fn consumer namespace plan exceeds strict frame"
   let some plan := planCodec.decode bytes
     | throw "fn consumer namespace plan is not canonical"
-  unless planCodec.encode plan == bytes && plan.spec.valid &&
+  unless plan.spec.valid &&
       plan.spec.initialPosition == 0 && plan.spec.legacyAnchor.isNone &&
       !plan.signingHeader.isEmpty && plan.signingHeader.length ≤ 4096 do
     throw "fn consumer namespace plan is not fresh or canonical"

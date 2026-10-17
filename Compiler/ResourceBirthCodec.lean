@@ -84,6 +84,20 @@ def packedCellStream (registry : TypeRegistry Digest) :
   decodePrefix_encode := by
     intro cell suffix
     simp [bytesStream.decodePrefix_encode, PackedCell.decode_bytes]
+  encode_decodePrefix := by
+    intro bytes cell suffix decoded
+    cases ok : bytesStream.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨payload, rest⟩ := pair
+      cases unpacked : PackedCell.decode registry payload with
+      | none => simp [ok, unpacked] at decoded
+      | some decodedCell =>
+        simp only [ok, unpacked, bind, Option.bind, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PackedCell.bytes_of_decode registry unpacked]
+        exact bytesStream.encode_decodePrefix _ _ _ ok
 
 def resourceKindStream : StreamCodec ResourceKind where
   encode
@@ -324,7 +338,10 @@ def rawCodec : LawfulCodec (LifecycleImage registry) where
   decode := rawDecode registry
   decode_encode := rawDecode_bytes registry
 
-def codec : LawfulCodec (LifecycleImage registry) := strictCodec (rawCodec registry)
+/-- The three tagged images, the live one over the canonical packed-cell
+decoder (`PackedCell.bytes_of_decode`): canonical without a re-encode
+(`decode_canonical`). -/
+def codec : LawfulCodec (LifecycleImage registry) := rawCodec registry
 
 theorem decode_encode (image : LifecycleImage registry) :
     (codec registry).decode ((codec registry).encode image) = some image :=
@@ -332,8 +349,16 @@ theorem decode_encode (image : LifecycleImage registry) :
 
 theorem decode_canonical {encoded : List UInt8} {image : LifecycleImage registry}
     (accepted : (codec registry).decode encoded = some image) :
-    bytes registry image = encoded :=
-  strictCodec_canonical (rawCodec registry) accepted
+    bytes registry image = encoded := by
+  change rawDecode registry encoded = some image at accepted
+  unfold rawDecode at accepted
+  split at accepted
+  · cases accepted; rfl
+  · cases accepted; rfl
+  · rename_i payload
+    obtain ⟨cell, decoded, rfl⟩ := Option.map_eq_some_iff.mp accepted
+    simp [bytes, PackedCell.bytes_of_decode registry decoded]
+  · cases accepted
 
 def view (directory : Directory Nat registry) (cellId : Nat) : LifecycleImage registry :=
   match directory.slots cellId with

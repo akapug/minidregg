@@ -66,17 +66,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressRawCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 def retiredIngressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
@@ -84,7 +74,8 @@ theorem retired_ingress_refused (payload : List UInt8) :
     ingressCodec.decode (retiredIngressFrame ++ payload) = none := by
   have lengthExact : ingressFrame.length = retiredIngressFrame.length := by decide +kernel
   have different : retiredIngressFrame ≠ ingressFrame := by decide +kernel
-  simp [ingressCodec, strictCodec, ingressRawCodec, lengthExact, different]
+  simp [ingressCodec, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap, StreamCodec.product,
+    StreamCodec.literal, lengthExact, different]
 
 structure DecodedIngress where
   private mk ::
@@ -94,6 +85,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode
     ingress.envelopeBytes = some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    PolicyInstallController.decodeDeclaration decoded.ingress.declarationBytes = some decoded.declaration ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelopeBytes =
+        some decoded.envelope :=
+  ⟨decoded.declarationExact, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -122,7 +118,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       · split at decoded
         · contradiction
         · cases Option.some.inj decoded
-          exact strictCodec_canonical ingressRawCodec parsed
+          exact (StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 /-- Subject, target and nonce scope transaction identity. Changing a payload,
 root, control-capability choice or signature at the same identity conflicts
@@ -242,6 +238,19 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   physicalShape : PhysicalShape deployment ground
     (planWrites (representationCreates deployment semantic.declaration)
       (ground.authorityWrites semantic.update.validated.apply))
+theorem Prepared.sound {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {ground : Ground deployment} {federation : FederationId} {height : Height} {ingress : DecodedIngress}
+    (prepared : Prepared profile deployment ground federation height ingress) :
+    WorldKindLawDependencies.loadTarget deployment ground.directory
+        ingress.declaration.source.policyId.value = some prepared.structural ∧
+      prepared.semantic.additional = prepared.structural.additional ∧
+      prepared.semantic.declaration = ingress.declaration ∧
+      ingress.marker = (PolicyInstallController.requestDigest profile ground.authority
+        (context federation height ground.authority ingress) prepared.semantic.declaration).value ∧
+      ResourceBirth.allocate Registry ground.directory
+        (representationCreates deployment prepared.semantic.declaration) = .ok prepared.allocated :=
+  ⟨prepared.structuralExact, prepared.additionalExact, prepared.declarationExact, prepared.markerExact,
+    prepared.allocationExact⟩
 
 def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
     (ground : Ground deployment) (federation : FederationId) (height : Height)
@@ -394,6 +403,13 @@ structure AcceptedInstall (profile : CanonicalRuntimeProfile.Profile F) (deploym
   /-- Every birth write the installation commits (its successor source) is named by
   the step the old source's law admitted. -/
   named : ResourceBirthController.Concrete.Named prepared.semantic.step prepared.writes
+theorem AcceptedInstall.sound (accepted : AcceptedInstall profile deployment ground federation height) :
+    accepted.receipt.envelopeBytes = accepted.ingress.ingress.envelopeBytes ∧
+      accepted.prepared.semantic.admit (payloadStore ground) accepted.ingress.ingress.controlCapability
+        accepted.receipt = .ok accepted.semantic ∧
+      dependencyGuards accepted.prepared accepted.semantic = some accepted.lawGuards ∧
+      accepted.lawGuards.all (fun guard => decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true :=
+  ⟨accepted.envelopeExact, accepted.admitted, accepted.lawGuardsExact, accepted.lawGuardsBound⟩
 
 /-- Admission on a ground. The marker's spent bit is answered declared and
 unspent by `prepare` before the native verifier reads the authority's spent set
@@ -628,7 +644,7 @@ theorem installed_head_and_source (accepted : AcceptedInstall profile deployment
       some (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source)) := by
   refine ⟨accepted.actual_post_head, ?_⟩
   rw [installed_source_bytes]
-  simpa only [LifecycleImage.codec, strictCodec, LifecycleImage.rawCodec] using
+  simpa only [LifecycleImage.codec, LifecycleImage.rawCodec] using
     (LifecycleImage.codec Registry).decode_encode
       (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source))
 

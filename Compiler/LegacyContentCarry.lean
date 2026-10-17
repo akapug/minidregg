@@ -93,10 +93,11 @@ def elementBodyStream : StreamCodec ElementBody where
     | 2 => do
         let (reference, suffix) ← embedRefStream.decodePrefix afterTag
         some (.embed reference, suffix)
-    | _ => do
+    | 3 => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
         some (.opaque schema payload, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;>
@@ -106,6 +107,7 @@ def elementBodyStream : StreamCodec ElementBody where
         (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
         embedRefStream.decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def elementRecordStream : StreamCodec ElementRecord :=
   StreamCodec.xmap
@@ -172,9 +174,10 @@ def atomKindStream : StreamCodec AtomKind where
     let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
     match tag with
     | 0 => some (.text, afterTag)
-    | _ => do
+    | 1 => do
         let (schema, suffix) ← digestStream.decodePrefix afterTag
         some (.inlineObject schema, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value with
@@ -182,6 +185,7 @@ def atomKindStream : StreamCodec AtomKind where
     | inlineObject schema =>
         simp [atomKindTag, atomKindPayload, List.append_assoc,
           StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def atomRecordStream : StreamCodec AtomRecord :=
   StreamCodec.xmap

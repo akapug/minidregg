@@ -100,6 +100,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -153,7 +158,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
   ⟨plan, command.expectedPayRoot, marker domain semantics command⟩

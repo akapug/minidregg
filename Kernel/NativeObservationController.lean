@@ -398,6 +398,16 @@ structure CheckedGrant (context : Context deployment) (profile : CanonicalRuntim
   balancesExact : preparation.accountBalances = selected.accountBalances
   envelope : List UInt8
   checked : ResourceObservationAdmission.Checked preparation envelope
+theorem CheckedGrant.observedPresent {context : Context deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId} {genesisHeight : Nat}
+    {intent : Intent} {grant : GrantRef}
+    (granted : CheckedGrant context profile federation genesisHeight intent grant) :
+    context.directory.slots grant.target = .present granted.preparation.observed.before ∧
+      ResourceObservationAdmission.authorize granted.preparation granted.checked.signature =
+        some granted.checked.authorization := by
+  refine ⟨?_, granted.checked.authorized⟩
+  rw [granted.selectedExact]
+  exact granted.selected.present
 
 private def headerAt (context : Context deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (worldRoot : Digest)
@@ -832,9 +842,7 @@ theorem v1_tail_view_refused (payload : List UInt8) :
       tailViewFrame.length := by decide +kernel
   have ne : "DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList ≠ tailViewFrame := by
     decide +kernel
-  simp only [tailViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [tailViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 /-! ## Presence and past views (PLACE §2.5 K-INDEX, §4.5 K-HISTORY-READ)
 
@@ -1271,9 +1279,7 @@ theorem v2_at_view_refused (payload : List UInt8) :
     decide +kernel
   have ne : "DREGG/NATIVE-HOST/AT-VIEW/v2".toUTF8.toList ≠ atViewFrame := by
     decide +kernel
-  simp only [atViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [atViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.v2_at_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v2_at_view_refused
@@ -1819,9 +1825,7 @@ theorem v5_view_refused (payload : List UInt8) :
       resourceViewFrame.length := by decide +kernel
   have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList ≠ resourceViewFrame := by
     decide +kernel
-  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [resourceViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 /-- A version-4 resource view (an unsalted root, no opening) refuses: its
 frame is not the v6 frame. -/
@@ -1832,9 +1836,7 @@ theorem v4_view_refused (payload : List UInt8) :
       resourceViewFrame.length := by decide +kernel
   have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList ≠ resourceViewFrame := by
     decide +kernel
-  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [resourceViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 /-- The earlier unsalted v3 resource view also cannot decode as the current view. -/
 theorem v3_view_refused (payload : List UInt8) :
@@ -1844,9 +1846,7 @@ theorem v3_view_refused (payload : List UInt8) :
       resourceViewFrame.length := by decide +kernel
   have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ≠ resourceViewFrame := by
     decide +kernel
-  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [resourceViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 /-- A version-1 at-height view (no opening) refuses. -/
 theorem v1_at_view_refused (payload : List UInt8) :
@@ -1855,9 +1855,7 @@ theorem v1_at_view_refused (payload : List UInt8) :
     decide +kernel
   have ne : "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList ≠ atViewFrame := by
     decide +kernel
-  simp only [atViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
-    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
-  rfl
+  simp only [atViewCodec, NativeHostCodec.framed_decode, ← len, List.take_left', ne, if_false]
 
 theorem resourceView_roundtrip (view : ResourceView) :
     resourceViewCodec.decode (resourceViewCodec.encode view) = some view :=

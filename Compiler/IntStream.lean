@@ -23,8 +23,18 @@ open Minidregg.Theory.EffectDeclaration
 
 set_option autoImplicit false
 
+/-- Zigzag is a bijection: every natural is the word of exactly one integer. -/
+theorem encodeInt_decodeInt (word : Nat) : encodeInt (decodeInt word) = word := by
+  by_cases even : word % 2 = 0
+  · simp only [decodeInt, if_pos even]
+    show 2 * (word / 2) = word
+    omega
+  · simp only [decodeInt, if_neg even]
+    show 2 * (word / 2) + 1 = word
+    omega
+
 def intStream : StreamCodec Int :=
-  StreamCodec.xmap StreamCodec.nat encodeInt decodeInt decodeInt_encodeInt
+  StreamCodec.xmap StreamCodec.nat encodeInt decodeInt decodeInt_encodeInt encodeInt_decodeInt
 
 /-- The declared codec id a store layout descriptor commits to. -/
 def intCodecId : String := "int/zigzag-base255"

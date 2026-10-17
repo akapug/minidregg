@@ -47,6 +47,11 @@ def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro value suffix; cases value; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 def subjectStream : StreamCodec SubjectId :=
   StreamCodec.xmap StreamCodec.nat (fun subject => subject.value) (fun value => ⟨value⟩)
@@ -59,20 +64,10 @@ def readGuardStream : StreamCodec ReadGuard :=
 
 def stringStream : StreamCodec String := PolicyRecordCodec.stringStream
 
-/-- A frame prefix plus a stream codec, strict: decoding refuses any other
-spelling of the same value (`ResourceBirthCodec.strictCodec`). -/
-def framedRaw {α : Type} (frame : Bytes) (stream : StreamCodec α) : LawfulCodec α where
-  encode value := frame ++ stream.encode value
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro value
-    have exact := stream.toLawful.decode_encode value
-    change stream.toLawful.decode (stream.encode value) = some value at exact
-    simp [exact]
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : Bytes) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_roundTrip {α : Type} (frame : Bytes) (stream : StreamCodec α) (value : α) :
     (framed frame stream).decode ((framed frame stream).encode value) = some value :=
@@ -81,7 +76,7 @@ theorem framed_roundTrip {α : Type} (frame : Bytes) (stream : StreamCodec α) (
 theorem framed_canonical {α : Type} {frame : Bytes} {stream : StreamCodec α} {bytes : Bytes}
     {value : α} (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 /-! ## Checkpoint bytes
 

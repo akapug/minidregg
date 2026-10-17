@@ -232,7 +232,9 @@ theorem packageBytes_eq {rootBytes : Bytes → Digest} {config : Config} {snapsh
 
 theorem decodeStored_nil : decodeStored [] = none := by
   have frame : storedFrame ≠ [] := by decide +kernel
-  simp [decodeStored, storedCodec, framed, framedRaw, ResourceBirthCodec.strictCodec, frame.symm]
+  simp [decodeStored, storedCodec, framed, Tower256ConcreteBackend.StreamCodec.toLawful,
+    Tower256ConcreteBackend.StreamCodec.framed, Tower256ConcreteBackend.StreamCodec.xmap,
+    Tower256ConcreteBackend.StreamCodec.product, Tower256ConcreteBackend.StreamCodec.literal, frame.symm]
 
 /-- A program loads only from a package the snapshot holds. -/
 theorem loadProgram_present {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}

@@ -310,6 +310,12 @@ def kindAtTag : UInt8 → Option Kind
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
   cases kind <;> rfl
 
+/-- The tag table has no aliases: a tag that names a kind is that kind's tag. -/
+theorem tag_of_kindAtTag (t : UInt8) (kind : Kind) (found : kindAtTag t = some kind) :
+    kind.tag = t := by
+  unfold kindAtTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 /-- The retired catalogue tag selects no role: a packed catalogue cell refuses
 to decode. -/
 theorem retired_catalogue_tag : kindAtTag 7 = none := rfl
@@ -390,6 +396,23 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .objectiveActivity => Kernel.ObjectiveActivityCell.materializer
   | .seat => Kernel.SeatCell.materializer
 
+/-- Every materializer codec accepts only encodings: the `StoreCodec` frames by
+`StoreCodec.decode_reencodes`, the resource book by its framed stream
+(`framedCodec_canonical`), and the
+policy-source, Nock-program and protected cells by their own `decode_canonical`. -/
+theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
+    (logical : Store (layout kind))
+    (accepted : (materializer kind).codec.decode bytes = some logical) :
+    (materializer kind).codec.encode logical = bytes := by
+  cases kind
+  all_goals first
+    | exact StoreCodec.decode_reencodes _ accepted
+    | exact CanonicalResourcePageMaterializer.framedCodec_canonical 0
+        CanonicalResourcePageMaterializer.stateStream accepted
+    | exact PolicySourceCell.decode_canonical accepted
+    | exact NockProgramCodec.decode_canonical accepted
+    | exact Kernel.ProtectedCell.decode_canonical _ accepted
+
 /-- The store wire of every kind whose materializer is the generic
 `StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
 def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
@@ -432,10 +455,12 @@ def registry : TypeRegistry Digest where
   tag := Kind.tag
   kindAtTag := kindAtTag
   kindAtTag_tag := kindAtTag_tag
+  tag_of_kindAtTag := tag_of_kindAtTag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
   layout := layout
   materializer := materializer
+  materializer_canonical := materializer_canonical
   rootBytes := ResourceBirthCodec.rootBytes
 
 instance registryKindDecidableEq : DecidableEq registry.Kind :=
@@ -478,17 +503,17 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_lifecycle_root :
     registry.rootBytes = ResourceBirthCodec.rootBytes := rfl
 
-/-- Strict dependent decoding preserves the exact selected native codec/root.
-It also rejects aliases accepted by older primitive prefix decoders. -/
-def cellCodec : LawfulCodec (PackedCell registry) :=
-  ResourceBirthCodec.strictCodec (PackedCell.codec registry)
+/-- Dependent decoding preserves the exact selected native codec/root. The
+envelope is canonical (`PackedCell.bytes_of_decode`: the tag cannot alias and
+every materializer codec accepts only encodings), so nothing is re-encoded. -/
+def cellCodec : LawfulCodec (PackedCell registry) := PackedCell.codec registry
 
 @[simp] theorem cell_roundtrip (cell : PackedCell registry) :
     cellCodec.decode (cellCodec.encode cell) = some cell := cellCodec.decode_encode cell
 
 theorem decoded_cell_canonical {bytes : List UInt8} {cell : PackedCell registry}
     (accepted : cellCodec.decode bytes = some cell) : PackedCell.bytes registry cell = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (PackedCell.codec registry) accepted
+  PackedCell.bytes_of_decode registry accepted
 
 /-! ## Source-owned role and identity laws -/
 

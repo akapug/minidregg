@@ -115,9 +115,6 @@ theorem receiving_prepare_deadline {NativeError : Type}
         obtain ⟨_, accepted⟩ := refusal_else accepted
         obtain ⟨_, accepted⟩ := refusal_else accepted
         obtain ⟨_, accepted⟩ := refusal_else accepted
-        obtain ⟨_, accepted⟩ := refusal_else accepted
-        obtain ⟨_, accepted⟩ := refusal_else accepted
-        obtain ⟨_, accepted⟩ := refusal_else accepted
         obtain ⟨notExpired, accepted⟩ := refusal_else accepted
         obtain ⟨_, accepted⟩ := refusal_else accepted
         obtain ⟨_, accepted⟩ := refusal_else accepted

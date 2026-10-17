@@ -33,6 +33,40 @@ structure Conditional (config : Config) {store : StoreIdentity} (head : Head sto
   markers : ApplicationFailedCreateRetryEvidence.markersCurrent config ground
     ingress.originalBegin.retry = true
 
+theorem Conditional.original_record_exact {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (conditional : Conditional config head ground ingress) :
+    conditional.original.record =
+      DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent :=
+  conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
+
+/-- The original record is the one verified under `head` at height
+`ingress.base.source.originalIndex + 1` and decodes to exactly the record of the
+re-admitted retry BEGIN `ingress.originalBegin`; the ingress is original-exact, the
+claim's current world root is `ground`'s, the package cell the current claim observed
+holds the retry BEGIN's installed descriptor under `config`, and the retry markers are
+current at `ground`. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (conditional : Conditional config head ground ingress) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (ingress.base.source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent)) ∧
+      ingress.originalExact = true ∧
+      ingress.base.source.currentWorldRoot = ground.worldRoot ∧
+      ApplicationLifecycleBeginV3Admission.installedExact config.deployment
+        ingress.originalBegin.begin conditional.current.packageRead.selected.observed.before = true ∧
+      ApplicationFailedCreateRetryEvidence.markersCurrent config ground
+        ingress.originalBegin.retry = true :=
+  ⟨⟨conditional.original.read.verified.record, conditional.original.read.verified.chain,
+      conditional.original.read.verified.root, conditional.original.read.verified.included,
+      conditional.original.read.decoded.trans (congrArg some (conditional.original.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.originalMatch)))⟩,
+    conditional.exact, conditional.current.boundary, conditional.installed, conditional.markers⟩
+
 /-- Every key the current part of a retry claim reads: the claim's and the retry markers'. -/
 def keys (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) : DurableView.Keys :=
   let current := ApplicationLifecycleClaimCurrent.keys ingress.base

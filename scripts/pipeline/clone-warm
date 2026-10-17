@@ -3,7 +3,7 @@
 #
 #   scripts/pipeline/clone-warm SRC DEST
 #
-# SRC is a built clone (its `lake build Minidregg +Host.Main:leanArts ObjectiveProofs` replays);
+# SRC is a built clone (its `lake build $(bash scripts/pipeline/umbrella-targets)` replays);
 # DEST/ must not exist. The recipe of the burst boxes' mk-lane.sh (itself from the persvati and
 # hbox bases), with the base path as an argument, so the artifact publisher can copy a gated
 # clone, the warm base or the `next` base alike:

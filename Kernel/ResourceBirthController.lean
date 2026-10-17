@@ -740,6 +740,23 @@ structure PreparedPostAuthority {profile : PolicyCompilerProfile F}
   finalCells : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
       resources.post authorityWrites, PhysicalPostLaw deployment write
 
+/-- The planned writes of a post-authority preparation (allocations, factory, Book post and the
+given `authorityWrites`) touch distinct cells, each expects exactly the durable snapshot's root at
+its cell, and each final cell satisfies its physical cell law. -/
+theorem PreparedPostAuthority.planExact {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry}
+    {pre : PreparedPreAuthority profile deployment pins durable descriptor}
+    {authorityWrites : List DataWrite} (post : PreparedPostAuthority pre authorityWrites) :
+    ((planWrites deployment descriptor pre.factory.payload pre.book.payload
+        post.resources.post authorityWrites).map DataWrite.cellId).Nodup ∧
+      (∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+          post.resources.post authorityWrites,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+          post.resources.post authorityWrites, PhysicalPostLaw deployment write :=
+  ⟨post.writesUnique, post.writePreExact, post.finalCells⟩
+
 def preparePostAuthority {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
     {descriptor : Descriptor Registry}
@@ -1337,5 +1354,6 @@ end Concrete
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed
 #assert_axioms Concrete.unnamedBirth_none_iff Concrete.unnamedBirth_some
+#assert_axioms Concrete.PreparedPostAuthority.planExact
 
 end Minidregg.Kernel.ResourceBirthController
