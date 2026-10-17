@@ -1466,10 +1466,13 @@ awk -F '\t' -v seat="$seat_kib" '$0 !~ /^#/ && $3 ~ /^[0-9]+$/ { if ($3 > r[$1])
   END { for (m in r) { w = int((r[m] + seat - 1) / seat); if (w < 1) w = 1; print m "\t" w "\t" r[m] } }' \
   ${rss_sources[@]+"${rss_sources[@]}"} /dev/null | LC_ALL=C sort > "$seat_weights"
 over=$(awk -F '\t' -v cap="$mem_cap_kib" -v root="$root" '$3 > cap { f = $1; gsub(/\./, "/", f); if ((getline l < (root "/" f ".lean")) >= 0) print $1 " (" $3 " KiB)" }' "$seat_weights")
+# A module whose recorded peak alone exceeds the cap gets a weight above the seats, and the wrapper refuses
+# it by name (64) at the moment Lake asks to COMPILE it. It is not refused here: a replay or a cache fetch
+# (a gated tree published under a small cap) never invokes the compiler for it, and must not be refused
+# for a compile that does not happen. The list is printed so a refusal later is expected, not a surprise.
 if [[ -n "$over" ]]; then
-  printf 'build-native-host: refusing: recorded peak RSS exceeds the %s KiB Lean memory cap (%s) for one module alone:\n%s\n' \
-    "$mem_cap_kib" "$mem_cap_from" "$over" >&2
-  exit 64
+  printf 'build-native-host: over-cap modules (recorded peak RSS exceeds the %s KiB Lean memory cap, %s): each refuses by name if it must compile here:\n%s\n' \
+    "$mem_cap_kib" "$mem_cap_from" "$over" | tee -a "$output_dir/build.log" >&2
 fi
 printf 'lean-seats memory-weighted: cap=%sKiB (%s) seats=%s seat=%sKiB; %s modules weighted from %s table(s), unrecorded modules take all %s seats\n' \
   "$mem_cap_kib" "$mem_cap_from" "$lean_seats" "$seat_kib" "$(wc -l < "$seat_weights" | tr -d ' ')" "${#rss_sources[@]}" "$lean_seats" | tee -a "$output_dir/build.log"
