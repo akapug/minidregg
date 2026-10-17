@@ -417,6 +417,11 @@ structure Accepted [DecidableEq F]
   private mk ::
   receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
+  /-- The receipt is for exactly this revocation: its request is the revocation's
+  complete request and its nullifier the operation marker. -/
+  bound : CredentialSignatureAdmission.verifySignature ground.authority
+    (operationMarker ground.authority.domain profile.semantics command)
+    (request ground.authority profile.semantics ambient command) receipt = true
   semantic : prepared.SemanticAccepted
 
 def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient ground command)
@@ -448,9 +453,13 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
     if same : receipt.envelopeBytes = envelope then
-      match authorize prepared receipt with
-      | .error reason => return .error reason
-      | .ok accepted => return .ok ⟨receipt, same, accepted⟩
+      if bound : CredentialSignatureAdmission.verifySignature ground.authority
+          (operationMarker ground.authority.domain profile.semantics command)
+          (request ground.authority profile.semantics ambient command) receipt = true then
+        match authorize prepared receipt with
+        | .error reason => return .error reason
+        | .ok accepted => return .ok ⟨receipt, same, bound, accepted⟩
+      else return .error .capabilityRejected
     else return .error .capabilityRejected
 
 /-- Revocation is not merely logged: the actual accepted post participates in
@@ -545,6 +554,34 @@ theorem Accepted.current_policy_evaluated [DecidableEq F]
   ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
     (request ground.authority profile.semantics ambient command)
     accepted.semantic.authorization
+
+/-- **The revocation an envelope authorizes.** The checked signature is over exactly
+`envelope`, it is for this revocation's complete request (built from `ground`'s authority,
+`profile`'s semantics, `ambient` and `command`) under its operation marker, and the current
+resource law loaded for `prepared` evaluates true on the step's old and source-computed
+post authority view. -/
+theorem Accepted.envelope_authorizes [DecidableEq F]
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
+    (accepted : Accepted prepared envelope) :
+    accepted.receipt.envelopeBytes = envelope ∧
+    accepted.receipt.request = ⟨.program, request ground.authority profile.semantics ambient command⟩ ∧
+    accepted.receipt.nullifier = operationMarker ground.authority.domain profile.semantics command ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  have exact := CredentialSignatureAdmission.verified_request_exact ground.authority
+    (operationMarker ground.authority.domain profile.semantics command)
+    (request ground.authority profile.semantics ambient command) accepted.receipt accepted.bound
+  ⟨accepted.envelopeExact, exact.1, exact.2, accepted.current_policy_evaluated⟩
+
+#assert_axioms Accepted.envelope_authorizes
 
 /-- info: 'Minidregg.Kernel.CapabilityRevocationController.Accepted.revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.revoked

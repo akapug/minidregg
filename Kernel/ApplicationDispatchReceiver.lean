@@ -68,6 +68,14 @@ theorem Committed.postRecord_exact {config : Config} (permit : Committed config)
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
+/-- The exact readback installs the intent admitted at `old.opened`, and the
+post-CAS image is the `config`-validated successor of `old` extended by it. -/
+theorem Committed.validated_successor {config : Config} (permit : Committed config) :
+    permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+  ⟨permit.derivedExact, permit.readback.validated⟩
+
 /-- Receipt evidence alone cannot construct physical delivery authority. -/
 structure Permit (config : Config) extends Committed config where
   private mk ::
@@ -98,6 +106,15 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
 theorem Permit.won_fresh_installed {config : Config} (permit : Permit config) :
     permit.freshCasWinner = true ∧ permit.confirmation = .installed :=
   ⟨permit.fresh, permit.installed⟩
+
+/-- Delivery authority: this attempt freshly won and installed the CAS whose
+post-image is the `config`-validated successor carrying the admitted intent. -/
+theorem Permit.installed_validated_successor {config : Config} (permit : Permit config) :
+    permit.freshCasWinner = true ∧ permit.confirmation = .installed ∧
+      permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+  ⟨permit.fresh, permit.installed, permit.toCommitted.validated_successor⟩
 
 /-- A distinct wire frame ensures the physical host cannot confuse a checked
 candidate with an actually committed dispatch permit. The host accepts this
@@ -213,6 +230,8 @@ theorem recovered_receipt_only {config : Config} (committed : Committed config)
 #assert_axioms nonwinner_receipt_only
 #assert_axioms recovered_receipt_only
 #assert_axioms Permit.won_fresh_installed
+#assert_axioms Committed.validated_successor
+#assert_axioms Permit.installed_validated_successor
 
 /-- A private resident's immutable route constraint. This grants no authority;
 current signed dispatch admission remains mandatory. The distinct envelope

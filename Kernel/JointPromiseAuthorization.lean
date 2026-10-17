@@ -263,6 +263,22 @@ def admit (native : CredentialSignatureIO.NativeConfig)
     else return .error .physicalPreparation
   else return .error .malformedCommand
 
+/-- **What an accepted promise permission binds.** The signed declaration names exactly
+the selected command's signed bytes under `deployment`'s domain and `profile`'s semantics,
+exactly `ground`'s encoded source image, and one capability and one envelope per target of
+`command`; and the prepared invocation's physical shape holds. -/
+theorem Accepted.bound {prepared : PreparedInvocation deployment profile ambient ground command}
+    {selected : SignedCommand} {signed : Signed} (accepted : Accepted prepared selected signed) :
+    signed.declaration.selectedSignedBytes =
+        signedBytes deployment.domain profile.semantics selected ∧
+      ground.sourceImage.map DurableReceiverCodec.imageStream.encode =
+        some signed.declaration.sourceImageBytes ∧
+      signed.declaration.capabilities.length = command.targets.length ∧
+      signed.targetEnvelopes.length = command.targets.length ∧
+      PhysicalShape prepared :=
+  ⟨accepted.selectedExact, accepted.sourceExact, accepted.targetCount, accepted.envelopeCount,
+    accepted.shape⟩
+
 end Minidregg.Kernel.JointPromiseAuthorization
 namespace Minidregg.Kernel.JointPromiseAuthorization
 open Minidregg.Compiler

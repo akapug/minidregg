@@ -39,6 +39,24 @@ theorem Conditional.original_record_exact {config : Config} {store : StoreIdenti
       DurableReceiver.IntentRecord.ofIntent conditional.admitted.intent := by
   exact conditional.exact.selected.symm.trans conditional.exact.exact
 
+/-- The original record is the one verified under `head` at height
+`source.originalIndex + 1` (`Included` in the head's frontier) and it decodes to
+exactly the record of the re-admitted original BEGIN, whose ingress is
+`source.begin` under `config`'s domain and semantics. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {source : Source} (conditional : Conditional config head source) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.admitted.intent)) ∧
+      source.begin.domain = config.deployment.domain ∧
+      source.begin.semantics = config.profile.semantics :=
+  ⟨⟨conditional.selected.read.verified.record, conditional.selected.read.verified.chain,
+      conditional.selected.read.verified.root, conditional.selected.read.verified.included,
+      conditional.selected.read.decoded.trans (congrArg some (conditional.selected.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.exact)))⟩,
+    conditional.admitted.profileExact.1, conditional.admitted.profileExact.2⟩
+
 /-- The keys the original BEGIN reads on its prior state. -/
 def keys (source : Source) : DurableView.Keys :=
   ApplicationLifecycleBeginReceiver.keys source.begin

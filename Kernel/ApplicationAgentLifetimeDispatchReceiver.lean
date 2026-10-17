@@ -52,6 +52,15 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
+/-- The exact readback installs the intent of the lifetime dispatch admitted at
+`old.opened`, and the post-CAS image is the `config`-validated successor of
+`old` extended by it. -/
+theorem Permit.validated_successor {config : Config} (permit : Permit config) :
+    permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+  ⟨permit.derivedExact, permit.readback.validated⟩
+
 private def permitCodec : LawfulCodec
     (ApplicationAgentLifetimeDispatchProjection.Paid × NativeHostCodec.Receipt) :=
   NativeHostCodec.framed

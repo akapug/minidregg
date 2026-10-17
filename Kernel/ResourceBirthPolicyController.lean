@@ -2161,6 +2161,25 @@ theorem AcceptedBirth.births_named {height : Height}
 def AcceptedBirth.descriptor {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
 
+/-- **An accepted birth is bound to its indices.** `pins` is `deployment`'s factory pin
+and `profile`'s compiler semantics pin; every write the birth commits expects `durable`'s
+exact root; the descriptor obeys the ingress method's factory template of `profile` over the
+loaded authority at `height`; and every birth write is named by the admitted factory step. -/
+theorem AcceptedBirth.indexed {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height) :
+    ResourceBirthController.Concrete.PinsBound deployment pins ∧
+      ResourceBirthController.Concrete.ProfileBound profile.compilerProfile pins ∧
+      (∀ write ∈ accepted.prepared.writes,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      MethodTemplateBound accepted.ingress.method profile.template
+        (oldAuthority accepted.prepared) height accepted.descriptor ∧
+      ResourceBirthController.Concrete.Named accepted.factoryStep accepted.prepared.writes := by
+  refine ⟨accepted.prepared.pinsBound, accepted.prepared.profileBound,
+    accepted.prepared.writePreExact, ?_, accepted.named⟩
+  have shape := accepted.pending.templateBound
+  rw [accepted.methodExact] at shape
+  exact shape
+
 /-- Extract the actually verified owner receipts retained by a reservation
 method ingress. No public receipt/flag can reconstruct these native tokens. -/
 def AcceptedBirth.reserveOwners {height : Height}
@@ -2259,6 +2278,7 @@ def AcceptedBirth.sourceReadGuards {height : Height}
 
 
 #assert_axioms BranchAccepted.law_admits_step AcceptedBirth.births_named
+#assert_axioms AcceptedBirth.indexed
 
 end Concrete
 

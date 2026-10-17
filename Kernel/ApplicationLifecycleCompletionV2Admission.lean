@@ -194,6 +194,30 @@ structure PackageRead (config : Config) (ground : Ground config.deployment)
         (ApplicationLifecycleClaimCurrent.observationGuard
           source.originalBegin.base.source.packageManifest cell).cellId
 
+/-- The `cell` index is the cell present in the prepared invocation's read directory
+at the package request's target, its root is the request's expected root, the
+signature checked for the read is over exactly the `envelope` index, and the
+package observation guard built from `cell` is current at `ground`. -/
+theorem PackageRead.sound {config : Config} {ground : Ground config.deployment}
+    {source : ApplicationLifecycleCompletionV2Source.Source}
+    {prepared : DeclaredResourceController.PreparedInvocation config.deployment
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground (source.command config.deployment.domain config.profile.semantics)}
+    {cell : PackedCell CanonicalCellRegistry.registry} {envelope : List UInt8}
+    (read : PackageRead config ground source prepared cell envelope) :
+    (DeclaredResourceController.readContext prepared).directory.slots
+        (packageRequest config ground source prepared).target.value = .present cell ∧
+      (packageRequest config ground source prepared).preStateRoot = cell.payload.root ∧
+      read.checked.signature.envelopeBytes = envelope ∧
+      (ApplicationLifecycleClaimCurrent.observationGuard
+        source.originalBegin.base.source.packageManifest cell).expectedRoot =
+        ground.view.model.roots
+          (ApplicationLifecycleClaimCurrent.observationGuard
+            source.originalBegin.base.source.packageManifest cell).cellId := by
+  refine ⟨?_, ?_, read.checked.envelopeExact, read.physicalCurrent⟩
+  · rw [← read.observedExact]; exact read.selected.observed.present
+  · rw [← read.observedExact]; exact read.selected.observed.rootExact
+
 def checkPackage (config : Config) (ground : Ground config.deployment)
     (source : ApplicationLifecycleCompletionV2Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment

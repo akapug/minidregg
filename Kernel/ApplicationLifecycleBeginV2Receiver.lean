@@ -51,6 +51,18 @@ theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
   rw [confirmed.derivedExact]
   exact confirmed.accepted.intent_event
 
+/-- The confirmed successor is admitted under `config`: the read-back intent
+carries this ingress's event, and `validateLoaded config` accepts the one
+candidate extending the verified tip by that read-back intent. -/
+theorem Confirmed.successor_validated {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.derived.intent.event =
+        ApplicationLifecycleBeginV2Ingress.event confirmed.ingress ∧
+      NativeHost.validateLoaded config
+          (NativeHostReplay.exactCandidate confirmed.old
+            confirmed.readback.derived confirmed.readback.ready) =
+        .ok confirmed.readback.after :=
+  ⟨confirmed.event_exact, confirmed.readback.validated⟩
+
 inductive Result (config : Config) where
   | confirmed (confirmed : Confirmed config)
   | rejected (detail : String)

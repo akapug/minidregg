@@ -59,6 +59,23 @@ theorem Checked.purseGuard_current {config : Config} {opened : Opened config}
       opened.durable.snapshot.model.roots (purseGuard checked.payer).cellId :=
   checked.payer.physicalCurrent
 
+/-- The reserve context bound by the original reserve is the ingress's, it is
+scoped to the issued ticket, and the payer purse read at `opened` holds exactly
+that reserve over the reserve's before-state. -/
+theorem Checked.reserve_held_at_opened {config : Config} {opened : Opened config}
+    {ingress : ApplicationDispatchAgentIngress.Ingress}
+    {issued : ApplicationDispatchHistoricalCore.IssuedEvidence config}
+    {reserved : ReservedEvidence config}
+    (checked : Checked config opened ingress issued reserved) :
+    reserved.context = ingress.reserveContext ∧
+      matchesIngress ingress.reserveContext ingress.dispatch
+        issued.spec.ticket.resource = true ∧
+      checked.payer.state = AgentGrain.reserve reserved.beforeState
+        ingress.reserveContext.reserveAmount ∧
+      ResourceBirthCodec.physicalRoot (.live checked.payer.cell) =
+        opened.durable.snapshot.model.roots ⟨ingress.reserveContext.purseTask⟩ :=
+  ⟨checked.contextExact, checked.scopeExact, checked.holdExact, checked.payer.physicalCurrent⟩
+
 def checkCurrent (config : Config) (opened : Opened config)
     (ingress : ApplicationDispatchAgentIngress.Ingress)
     (issued : ApplicationDispatchHistoricalCore.IssuedEvidence config)

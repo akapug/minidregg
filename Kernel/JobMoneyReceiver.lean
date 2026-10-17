@@ -696,6 +696,12 @@ structure Accepted [DecidableEq F]
   private mk ::
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
+  /-- The receipt is for exactly this money turn: its request is the turn's complete
+  request and its nullifier the command's marker. -/
+  bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+    (marker prepared.authority.snapshot.domain profile.semantics command)
+    (request prepared.authority.snapshot prepared.job profile.semantics ambient command
+      prepared.plan) receipt = true
   semantic : prepared.SemanticAccepted
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
@@ -709,9 +715,14 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
-        match authorize prepared receipt with
-        | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        if bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+            (marker prepared.authority.snapshot.domain profile.semantics command)
+            (request prepared.authority.snapshot prepared.job profile.semantics ambient command
+              prepared.plan) receipt = true then
+          match authorize prepared receipt with
+          | .error reason => return .error reason
+          | .ok semantic => return .ok ⟨receipt, same, bound, semantic⟩
+        else return .error .capabilityRejected
       else return .error .capabilityRejected
 
 /-- The exact header the signer signs.  It discloses no decision: when the
@@ -894,6 +905,31 @@ theorem accepted_balanced (accepted : AcceptedMoney deployment profile ambient d
     aggregateDelta (bookOf accepted.prepared.book) accepted.prepared.plan = 0 :=
   accepted.prepared.balanced
 
+/-- **An accepted money turn is signed for `ingress` and shaped on `durable`.** The checked
+signature is over exactly the ingress's envelope bytes, for the turn's complete request over
+`ingress.command` (`profile`'s semantics, `ambient`) under the command's marker; every write
+of the prepared turn expects `durable`'s exact root, every read guard is at `durable`'s exact
+root, every write obeys `deployment`'s physical post law, and the effect law accepts. -/
+theorem AcceptedMoney.signed_and_shaped
+    (accepted : AcceptedMoney deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      accepted.accepted.receipt.request =
+        ⟨kindOf ingress.command, request accepted.prepared.authority.snapshot accepted.prepared.job
+          profile.semantics ambient ingress.command accepted.prepared.plan⟩ ∧
+      accepted.accepted.receipt.nullifier =
+        marker accepted.prepared.authority.snapshot.domain profile.semantics ingress.command ∧
+      (∀ write ∈ writes accepted.prepared,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      (∀ guard ∈ readGuards accepted.prepared,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      (∀ write ∈ writes accepted.prepared,
+        ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+      effectLawAccepted accepted.prepared = true :=
+  have exact := CredentialSignatureAdmission.verified_request_exact _ _ _
+    accepted.accepted.receipt accepted.accepted.bound
+  ⟨accepted.accepted.envelopeExact, exact.1, exact.2, accepted.physical.2.1,
+    accepted.physical.2.2.2.2.2.1, accepted.physical.2.2.1, accepted.physical.2.2.2.2.2.2.2⟩
+
 structure Receipt where
   transactionId : Digest
   eventId : Digest
@@ -956,5 +992,6 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms readGuards_readonly
 #assert_axioms intent_writes
 #assert_axioms accepted_balanced
+#assert_axioms AcceptedMoney.signed_and_shaped
 
 end Minidregg.Kernel.JobMoneyReceiver

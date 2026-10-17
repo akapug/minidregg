@@ -143,6 +143,26 @@ theorem Accepted.grant_write_member {ingress}
   rw [accepted.sourceDescriptor]
   simp [Ready.expectedDescriptor, Ready.descriptor, Ready.births]
 
-#assert_axioms Accepted.special_fee_bound Accepted.grant_write_member
+/-- **An accepted lifetime-grant issue is bound to its indices.** The admitted birth's ingress
+bytes are exactly `ingress.birthIngress`; its descriptor is exactly the source-expected
+grant descriptor of `ingress.spec` under `profile` and `config` at `height`; `pins` carries
+`config`'s tariff; every committed write expects `durable`'s exact root; and every birth write
+is named by the admitted factory step. -/
+theorem Accepted.indexed {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (accepted : Accepted profile config pins durable height ingress) :
+    accepted.birth.ingress.bytes = ingress.birthIngress ∧
+      accepted.birth.descriptor =
+        { accepted.sourceReady.expectedDescriptor profile config
+            accepted.birth.prepared.authority.snapshot.authState height
+            accepted.birth.descriptor.fee.payer accepted.birth.descriptor.funding with
+          auxiliaryCreates := accepted.birth.prepared.grants.auxiliaryCreates } ∧
+      pins.tariff = config.tariff ∧
+      (∀ write ∈ finalWrites accepted.birth,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      ResourceBirthController.Concrete.Named accepted.birth.factoryStep (finalWrites accepted.birth) :=
+  ⟨accepted.birthBytes, accepted.sourceDescriptor, accepted.baseTariff,
+    accepted.birth.prepared.writePreExact, accepted.named⟩
+
+#assert_axioms Accepted.special_fee_bound Accepted.grant_write_member Accepted.indexed
 
 end Minidregg.Kernel.ApplicationAgentLifetimeGrantAdmission

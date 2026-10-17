@@ -134,6 +134,23 @@ structure CheckedCandidate (config : Config) (ground : DeclaredResourceControlle
     ⟨config.federation, config.genesisHeight + ground.height⟩ ground ingress
     issued.spec issued.descriptor
 
+/-- The dispatch names the issue's ingress bytes, the issued spec's installed
+ticket is live at `ground`'s logical height under `config`, and the issuer
+lineage is current over `ground` from the issue's own source bytes. -/
+theorem CheckedCandidate.issuer_current {config : Config}
+    {ground : DeclaredResourceController.Ground config.deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {issued : IssuedEvidence config}
+    (candidate : CheckedCandidate config ground ingress issued) :
+    ingress.issueIngressBytes = issued.ingressBytes ∧
+      candidate.checked.ticket.liveAt (config.genesisHeight + ground.height) = true ∧
+      issuerLineageCurrentFromSourceBytes config.deployment config.profile
+        ⟨config.federation, config.genesisHeight + ground.height⟩ ground ingress issued.spec
+        candidate.checked.selection
+        (ApplicationShareIssueSource.sourceBytes issued.spec issued.descriptor)
+        candidate.checked.prepared = true :=
+  ⟨candidate.issueBytesExact, candidate.checked.ticketLive, candidate.checked.issuerCurrent⟩
+
 def checkCurrent (config : Config) (ground : DeclaredResourceController.Ground config.deployment)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (issued : IssuedEvidence config) :

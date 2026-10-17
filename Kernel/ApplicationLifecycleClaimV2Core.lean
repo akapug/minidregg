@@ -50,6 +50,29 @@ theorem Conditional.original_record_exact {config : Config} {store : StoreIdenti
       DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent := by
   exact conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
 
+/-- The original record is the one verified under `head` at height
+`ingress.base.source.originalIndex + 1` and decodes to exactly the record of the
+re-admitted `ingress.originalBegin`; the ingress's original BEGIN is its claim's
+source BEGIN, the claim's current world root is `ground`'s, and the package cell the
+current claim observed holds `ingress.originalBegin`'s installed descriptor under
+`config`. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (ingress.base.source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent)) ∧
+      ingress.originalExact = true ∧
+      ingress.base.source.currentWorldRoot = ground.worldRoot ∧
+      ApplicationLifecycleBeginV2Admission.installedExact config.deployment ingress.originalBegin
+        conditional.current.packageRead.selected.observed.before = true :=
+  ⟨⟨conditional.original.read.verified.record, conditional.original.read.verified.chain,
+      conditional.original.read.verified.root, conditional.original.read.verified.included,
+      conditional.original.read.decoded.trans (congrArg some (conditional.original.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.originalMatch)))⟩,
+    conditional.sourceExact, conditional.current.boundary, conditional.currentInstalled⟩
+
 /-- Every key the current part of a v2 claim reads. -/
 def keys (ingress : Ingress) : DurableView.Keys :=
   ApplicationLifecycleClaimCurrent.keys ingress.base

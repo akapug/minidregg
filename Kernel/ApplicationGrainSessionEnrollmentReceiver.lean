@@ -73,6 +73,14 @@ theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed conf
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
 
+/-- The exact readback installs the intent admitted at `old.opened`, and the
+post-CAS image is the `config`-validated successor of `old` extended by it. -/
+theorem Confirmed.validated_successor {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.derived.intent = confirmed.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate confirmed.old
+        confirmed.readback.derived confirmed.readback.ready) = .ok confirmed.readback.after :=
+  ⟨confirmed.derivedExact, confirmed.readback.validated⟩
+
 inductive Result (config : Config) where
   | confirmed (confirmed : Confirmed config)
   | historical (receipt : Receipt)

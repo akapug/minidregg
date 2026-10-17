@@ -214,6 +214,12 @@ def endpoints(tag, tip, primary, extras=()):
     for side in ("a", "b"):
         dest = path("ticks", tag, side)
         shutil.copytree(os.path.join(FIXTURES, primary, "endpoints", side), dest)
+        # the standing run executes from a read-only tree (journeys/.trees/<tip>): copytree keeps
+        # its modes, so the copy is made writable before the tip is rewritten and the dir removed
+        for base, dirs, files in os.walk(dest):
+            os.chmod(base, 0o755)
+            for name in files:
+                os.chmod(os.path.join(base, name), 0o644)
         for extra in extras:
             src = os.path.join(FIXTURES, extra, "endpoints", side)
             for base, _, files in os.walk(src):

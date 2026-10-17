@@ -324,8 +324,10 @@ theorem RenewLegs.sound {directory : LoadedDirectory durable}
     (legs : RenewLegs deployment ambient directory pay book tariff input) :
     EconomicReady pay.cell.logical tariff input.economic ∧ input.economic.consumption.terms.mode = .renew ∧
       enrolmentAt pay.cell.logical input.economic.identityKey = some input.before ∧
-      input.economic.consumption.birthFee = 0 :=
-  ⟨legs.economics, legs.mode, legs.recordExact, legs.noBirth⟩
+      input.economic.consumption.birthFee = 0 ∧
+      (renewBatch tariff ambient.tariff.collector input).Admission
+        (CanonicalResourceKernel.logicalBook book.payload.logical) :=
+  ⟨legs.economics, legs.mode, legs.recordExact, legs.noBirth, legs.resources.admission⟩
 
 def prepareRenewLegs (directory : LoadedDirectory durable)
     (pay : PayCellDomain.Loaded deployment durable.snapshot)
@@ -451,5 +453,6 @@ theorem acceptance_origin_preserved (origin : PayEnrolClaim.Claim)
 #assert_axioms direct_origin_preserved
 #assert_axioms acceptance_origin_preserved
 #assert_axioms renewal_writes_only_book
+#assert_axioms RenewLegs.sound
 
 end Minidregg.Kernel.PayEnrolV2Legs

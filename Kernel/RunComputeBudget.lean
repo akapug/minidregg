@@ -234,6 +234,20 @@ structure Prepared (subject : SubjectId) (payPre : PayCell.Cell)
   book : PreparedBook bookPre
   sameCharge : book.credits = quota.quoted.credits
 
+/-- The Book leg over `bookPre` burns exactly the credits the usage quota for `subject` quotes
+over `payPre` at `payRoot`: the burn of the retained funding is admitted on `bookPre`'s logical
+Book, the funding carries exactly the quoted credits, and the quota's usage-row patch for
+`subject` validates against `payPre` at `payRoot`. -/
+theorem Prepared.charged {subject : SubjectId} {payPre : PayCell.Cell} {payRoot : Digest}
+    {bookPre : BookCell} (prepared : Prepared subject payPre payRoot bookPre) :
+    (burnBatch prepared.book.funding).Admission
+        (CanonicalResourceKernel.logicalBook bookPre.logical) ∧
+      (prepared.book.funding.map Funding.credits).getD 0 = prepared.quota.quoted.credits ∧
+      ValidatedPatch PayCell.materializer payPre payRoot
+        (usagePatch subject prepared.quota.before prepared.quota.quoted.after) :=
+  ⟨prepared.book.accepted.admission, prepared.book.fundingExact.trans prepared.sameCharge,
+    prepared.quota.validated⟩
+
 /-- The tariff is read from the SAME pay pre-state as activation and usage. -/
 def prepare (subject : SubjectId) (clock : ClockCell.Clock)
     (payPre : PayCell.Cell) (payRoot : Digest) (bookPre : BookCell)

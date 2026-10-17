@@ -100,6 +100,14 @@ variable {deployment : Deployment} {physical : Physical}
   {book : LoadedBook deployment physical} {expectedOriginalRoot : Digest}
   {funding : RunComputeBudget.PreparedBook book.cell} {operations : List Operation}
 
+/-- The prepared operations are pinned to the original Book: `expectedOriginalRoot` is the
+physical Book cell's root, and `operations` are admitted in order on the Book after the
+`funding` prefix. -/
+theorem Prepared.admitted (prepared : Prepared book expectedOriginalRoot funding operations) :
+    expectedOriginalRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment) ∧
+      OperationsAdmitted (logicalBook funding.post.logical) operations :=
+  ⟨prepared.rootExact, prepared.applicationAdmitted⟩
+
 def Prepared.applicationPre
     (_prepared : Prepared book expectedOriginalRoot funding operations) : Book :=
   logicalBook funding.post.logical
@@ -204,6 +212,14 @@ def Prepared.checkSamples (prepared : Prepared book expectedOriginalRoot funding
     else throw .samplesRefused
   else throw .duplicateSampleCoordinate
 
+/-- The checked `samples` name distinct (account, asset) coordinates, and each sample's account
+is present in, with its balance equal to, the `prepared` post-funding application Book. -/
+theorem CheckedSamples.sampled {prepared : Prepared book expectedOriginalRoot funding operations}
+    {samples : List Sample} (checked : CheckedSamples prepared samples) :
+    (samples.map fun sample => (sample.account, sample.asset)).Nodup ∧
+      SamplesExact prepared.applicationPre samples :=
+  ⟨checked.distinct, checked.exact⟩
+
 /-- Sampling precedes source execution. Bind the exact original Book and
 validated funding prefix without requiring application operations first. -/
 structure SampledFunding {deployment : Deployment} {physical : Physical}
@@ -230,6 +246,15 @@ def sampleFunding {deployment : Deployment} {physical : Physical}
       else throw .duplicateSampleCoordinate
     else throw .originalBookLaw
   else throw .staleBookRoot
+
+/-- `expectedRoot` is the physical Book cell's root, and the `samples` name distinct
+coordinates each present in, with its balance equal to, the Book after the `funding` prefix. -/
+theorem SampledFunding.sampled {expectedRoot : Digest} {samples : List Sample}
+    (sampled : SampledFunding book expectedRoot funding samples) :
+    expectedRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment) ∧
+      (samples.map fun sample => (sample.account, sample.asset)).Nodup ∧
+      SamplesExact (logicalBook funding.post.logical) samples :=
+  ⟨sampled.rootExact, sampled.distinct, sampled.exact⟩
 
 theorem stale_root_refused (suppliedRoot : Digest)
     (stale : suppliedRoot ≠ physical.model.roots (RunComputeBudgetDomain.bookId deployment)) :

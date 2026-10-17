@@ -134,6 +134,26 @@ theorem Accepted.special_fee_bound {ingress}
   rw [accepted.baseTariff] at bound
   exact bound
 
-#assert_axioms Accepted.special_fee_bound
+/-- **An accepted share issue is bound to its indices.** The admitted birth's ingress
+bytes are exactly `ingress.birthIngress`; its descriptor is exactly the source-expected
+ticket descriptor of `ingress.spec` under `profile` and `config` at `height`; `pins` carries
+`config`'s tariff; every committed write expects `durable`'s exact root; and every birth write
+is named by the admitted factory step. -/
+theorem Accepted.indexed {ingress : ApplicationShareIssueSource.Ingress}
+    (accepted : Accepted profile config pins durable height ingress) :
+    accepted.birth.ingress.bytes = ingress.birthIngress ∧
+      accepted.birth.descriptor =
+        { accepted.sourceReady.expectedDescriptor profile config
+            accepted.birth.prepared.authority.snapshot.authState height
+            accepted.birth.descriptor.fee.payer accepted.birth.descriptor.funding with
+          auxiliaryCreates := accepted.birth.prepared.grants.auxiliaryCreates } ∧
+      pins.tariff = config.tariff ∧
+      (∀ write ∈ finalWrites accepted.birth,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      ResourceBirthController.Concrete.Named accepted.birth.factoryStep (finalWrites accepted.birth) :=
+  ⟨accepted.birthBytes, accepted.sourceDescriptor, accepted.baseTariff,
+    accepted.birth.prepared.writePreExact, accepted.named⟩
+
+#assert_axioms Accepted.special_fee_bound Accepted.indexed
 
 end Minidregg.Kernel.ApplicationShareIssueAdmission
