@@ -1,0 +1,7 @@
+# scripts/pipeline/known-red-modules -- Lean modules main is KNOWN to fail, each with the cv task that owns its fix.
+# One line per module: MODULE<TAB>CV-TASK<TAB>note.  Read by mk-lane.sh --verify (the warm-base check behind
+# make-warm-base, relay-base and advance-base-burst): a base whose umbrella replay fails ONLY on modules listed here
+# is READY and says which known-red modules it carries; any other failure, a compiled module, or a listed module
+# that now BUILDS refuses. The baseline-relative rule of landing.sh (required-rows known-red) applied to the base.
+# Fixing a module means deleting its line in the same commit: the day it builds, the base verify is red.
+Assurance.NativeAcceptedFixture	01a146dd-4f9d	fixture authority storageBytes 2000000 vs run 3966 after turn-log 7877e6e7 storage rule (fix: CODEC-SHAPES 01a1478b)
