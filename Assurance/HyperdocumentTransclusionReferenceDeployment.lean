@@ -105,22 +105,51 @@ def finStream (size : Nat) : StreamCodec (Fin size) where
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, value.isLt]
+  encode_decodePrefix := by
+    intro bytes index suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨wire, rest⟩ := pair
+      by_cases inBounds : wire < size
+      · simp only [ok, bind, Option.bind, dif_pos inBounds, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+      · simp [ok, inBounds] at decoded
 
 noncomputable def fldStream : StreamCodec Fld where
   encode value := StreamCodec.nat.encode (Encodable.encode value)
   decodePrefix bytes := do
     let (code, suffix) <- StreamCodec.nat.decodePrefix bytes
     let value <- Encodable.decode code
-    some (value, suffix)
+    if Encodable.encode value = code then some (value, suffix) else none
   decodePrefix_encode := by
     intro value suffix
     simp [StreamCodec.nat.decodePrefix_encode, Encodable.encodek]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases dec : (Encodable.decode code : Option Fld) with
+      | none => simp [ok, dec] at decoded
+      | some decodedValue =>
+        by_cases canonical : Encodable.encode decodedValue = code
+        · simp only [ok, dec, canonical, bind, Option.bind, if_true, Option.some.injEq,
+            Prod.mk.injEq] at decoded
+          obtain ⟨rfl, rfl⟩ := decoded
+          rw [canonical]
+          exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+        · simp [ok, dec, canonical] at decoded
 
 def boundReceiptIxStream (n : Nat) : StreamCodec (BoundReceiptIx n) :=
   StreamCodec.xmap (finStream (16 + n * 3))
     (boundReceiptIxEquivRuntime n)
     (boundReceiptIxEquivRuntime n).symm
     (boundReceiptIxEquivRuntime n).symm_apply_apply
+    (fun wire => (boundReceiptIxEquivRuntime n).apply_symm_apply wire)
 
 def openingShapeTag : OpeningShape -> Nat
   | .value => 0

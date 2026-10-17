@@ -37,11 +37,8 @@ theorem decodeDefinition_encode_append (descriptor : Descriptor) {rest : List UI
     (nonempty : rest ≠ []) :
     decodeDefinition (descriptorCodec.encode descriptor ++ rest) = none := by
   have refused : descriptorCodec.decode (descriptorCodec.encode descriptor ++ rest) = none := by
-    show (ResourceBirthCodec.strictCodec descriptorStream.toLawful).decode
-      (descriptorStream.encode descriptor ++ rest) = none
-    rw [ResourceBirthCodec.strictCodec_decode_eq_list_comparison,
-      toLawful_decode_encode_append descriptorStream descriptor nonempty]
-    rfl
+    show descriptorStream.toLawful.decode (descriptorStream.encode descriptor ++ rest) = none
+    exact toLawful_decode_encode_append descriptorStream descriptor nonempty
   unfold decodeDefinition
   rw [refused]
   rfl

@@ -428,10 +428,7 @@ theorem v5_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrameV5 ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV5.length := by decide +kernel
   have different : retiredOutcomeFrameV5 ≠ outcomeFrame := by decide +kernel
-  have raw : (framedRaw outcomeFrame outcomeStream).decode
-      (retiredOutcomeFrameV5 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [outcomeCodec, framed_decode, lengthExact, different]
 
 /-- A version-4 signing plan (its draft without `renounce`) refuses to decode. -/
 theorem v4_signingPlan_refused (payload : List UInt8) :
