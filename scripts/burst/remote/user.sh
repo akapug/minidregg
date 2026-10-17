@@ -58,6 +58,15 @@ else
 elan toolchain install "$lt" 2>&1 | tail -1
 rustup toolchain install "$rt" --profile minimal -c clippy -c rustfmt 2>&1 | tail -1
 fi
+# --- the tip's cargo dependencies, once: lane-build's rust step builds --offline --locked, so a fresh box without
+# them fails at its first git dependency (burst5 10-17: sandstorm-package from emberian/dregg). A no-root host's
+# ~/.cargo is its owner's: not fetched there, declared in NO-ROOT.txt.
+if [ "$noroot" = 1 ]; then
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked --offline >/dev/null 2>&1 ) && echo "cargo deps: present" \
+    || { echo "NOT FETCHED (no-root host): cargo deps of $tip"; echo "cargo deps" >> "$NR"; }
+else
+  ( cd "$SRV/mini" && cargo "+$rt" fetch --locked ) 2>&1 | tail -1
+fi
 
 # --- profile: PATH + box.env (the one box-local file every script reads; a login shell gets it too) ---
 if [ "$noroot" = 1 ]; then
@@ -76,7 +85,7 @@ rsync -a "$STAGE/candidate/lane-build.sh" "$STAGE/candidate/lib.sh" "$PIPELINE_R
 # provenance = the commit the scripts were STAGED from (burst-up's checkout), which need not be the tip at $SRV/mini
 { cat "$STAGE/STAGED-FROM" 2>/dev/null || git -C "$SRV/mini" rev-parse HEAD; } > "$PIPELINE_ROOT/scripts/.installed-from"; echo "installed-from: $(cat "$PIPELINE_ROOT/scripts/.installed-from") (staged by burst-up)"
 P=$PIPELINE_ROOT/scripts
-# the FIFO Lean-slot wrapper at its well-known path (sized by WITH_LEAN_SLOT_N/_THREADS/_NICE in box.env, via --set);
+# the FIFO Lean-slot wrapper at its well-known path (sized by PIPELINE_LEAN_SLOTS/_SLOT_THREADS/_SLOT_NICE in box.env, via --set);
 # a hand-installed copy already there is left alone
 mkdir -p "$PIPELINE_ROOT/slots"; [ -e "$PIPELINE_ROOT/slots/with-lean-slot" ] || ln -s ../scripts/with-lean-slot "$PIPELINE_ROOT/slots/with-lean-slot"
 # the warm base's mk-lane.sh is its OWN tree's scripts/pipeline/mk-lane.sh (advance/relay keep it so); refresh when it knows MK_LANE_PROBE
@@ -101,7 +110,7 @@ systemctl --user show pipeline-sccache.service -p FragmentPath 2>/dev/null | gre
 PIPELINE_SCCACHE_PORT=$port "$P/install-sccache" --cache-dir "$SRV/sccache" 2>&1 | tail -1
 
 # --- box.env ---
-args=(--slots "$BURST_LANE_SLOTS" --lean-threads "$BURST_LEAN_THREADS" --small-slots "$BURST_SMALL_SLOTS")
+args=(--slots "$BURST_LANE_SLOTS" --lean-threads "$BURST_LEAN_THREADS" --small-slots "$BURST_SMALL_SLOTS" --lake-cache "$SRV/lake-cache")
 [ -n "$BURST_GATE_SLOTS" ] && args+=(--gate-slots "$BURST_GATE_SLOTS")
 [ -n "$origin" ] && args+=(--origin "$origin"); [ -n "$mirrors" ] && args+=(--mirrors "$mirrors")
 [ -n "$peer" ] && args+=(--peer "$peer"); [ -n "$from" ] && args+=(--fetch-from "$from")
