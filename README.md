@@ -1,5 +1,15 @@
 # Mini
 
+> **The Dragon's Egg repositories.**
+>
+> - [`dregg`](https://github.com/emberian/dregg) — the whole system built first (working name *breadstuffs*), waiting to be resumed or composted.
+> - [`minidregg`](https://github.com/emberian/minidregg) — the production demoland and the spec/battleground the rebuild measures itself against.
+> - [`nanodregg`](https://github.com/emberian/nanodregg) — the single-writer rebuild: twelve laws, a judge that refuses, meaningful theorems.
+> - [`zkml-research`](https://github.com/emberian/zkml-research) — the zero-knowledge / machine-learning research line.
+> - [`degg-research`](https://github.com/emberian/degg-research) — dark coordination: MPC/FHE swarm coordination research.
+> - [`delvetalk`](https://github.com/emberian/delvetalk) — the conversations and design talks behind all of it.
+
+
 **A programmable shared world for people and agents.**
 
 Mini is the construction home of the next Dregg: a world in which documents,
