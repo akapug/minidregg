@@ -1,0 +1,137 @@
+{
+  "base_commit": "322ad7f4e6781fc9a4b7d2d41a4ca871aad4fd0b",
+  "date": "2026-10-26",
+  "docker_linux_intake_helper_tests": 7,
+  "linux": {
+    "architecture": "x86_64",
+    "binaries": {
+      "inspect": {
+        "bytes": 16377136,
+        "sha256": "1bc133a777bbae14223aa8a00ab33e358f7a23315ce6c473cb8d02e19c1617a1"
+      },
+      "minidregg-oracle-appliance": {
+        "bytes": 40553464,
+        "sha256": "45ad0b6cb55f1bddc7a7c4296143b2f2a110d8ed7e2a7d6cafd1987e6528b4eb"
+      },
+      "spk-host": {
+        "bytes": 92254816,
+        "sha256": "c40d72ab573cbde7953ef859c39fa637698aedf36e96d1b7804a94249180f95a"
+      }
+    },
+    "cargo_jobs": 2,
+    "checks_log_sha256": "4530a306251d3597709174d7228f43c1fbcf5113ab0d3ac59dab30f88e353895",
+    "completion_marker": "MINI_ORACLE_LINUX_CHECKS_COMPLETE",
+    "cpu_quota": "200%",
+    "host": "hbox",
+    "memory_max": "4G",
+    "qualifier_resource_tests": 2,
+    "rust_tests": {
+      "broker": 9,
+      "install": 7,
+      "launch_descriptor": 4,
+      "materialize_wake": 1,
+      "oracle_bridge": 6,
+      "signed_inventory": 2,
+      "spk_stream": 8
+    },
+    "rustc": "1.100.0-nightly (0dfb098f3 2026-08-31)"
+  },
+  "macos_package_launcher_tests": 8,
+  "real_engine_bridge": {
+    "binaries": {
+      "bridge": "ab801832a3493dc93f5c3a732a2cc20fc55c7e7b3af96cb5dbbaa3b0d8b6eed7",
+      "probe": "f853d4881416fac254ee8d1529460ad44cb49197bb45841f98117c449e72f501"
+    },
+    "checks": {
+      "changed_body_conflict_409": true,
+      "conflict_persists_after_restart": true,
+      "emma_austen": true,
+      "five_bridge_direct_replays_identical": true,
+      "five_replays_identical_after_adapter_restart": true,
+      "invalid_speed_unit_not_answered": true,
+      "isa_3000m_minus_4_5": true,
+      "leaves_of_grass_whitman": true,
+      "owned_process_groups_stopped": true,
+      "pronoun_1775": true,
+      "runtime_inventory_unchanged": true,
+      "same_process_bridge_replay_identical": true
+    },
+    "inventory_scope": "all paths/modes/sizes/mtime/ctime/link targets; SHA256 for files <=1MiB; no full store rehash",
+    "passed": true,
+    "platform": "macOS",
+    "queries": [
+      {
+        "bytes": 755,
+        "question": "Who wrote Leaves of Grass?",
+        "sha256": "81d7d17f2e948fa31ab50151e2b698b03a1eaa771aa385c78f0440c259c995d1"
+      },
+      {
+        "bytes": 737,
+        "question": "ISA temperature at 3,000 m altitude?",
+        "sha256": "e6bddec4bc69782c584a73a108c39da91396fbf94eec98f0706afca0995ba4d0"
+      },
+      {
+        "bytes": 983,
+        "question": "ISA temperature at 3,000 m/s altitude?",
+        "sha256": "cee01b825de3c84a73175cb46f608ede9dee7cece8247d754bc82a54564be961"
+      },
+      {
+        "bytes": 776,
+        "question": "Who wrote Emma?",
+        "sha256": "3ccb42745538c594700cd9ac07c3c353fc69be1fe244df63495b814650a6b863"
+      },
+      {
+        "bytes": 1025,
+        "question": "When was she born?",
+        "sha256": "038a5602d8a3ad3057fb11c767e18725578c9d159d7f66bcdd0c3380657af567"
+      }
+    ],
+    "runtime_inventory_entries": 4735
+  },
+  "remaining": [
+    "No full appliance signed SPK: six files exceed SPK member limit.",
+    "Mini semantic package identity still caps admitted raw SPKs at256MiB; larger profiles are physical preparation only.",
+    "No admitted immutable data attachment, production Linux rootfs or live mini_application_api journey.",
+    "Free-space preflight is not disk reservation; interrupted named stages require operator inspection; broker administrative requests remain serialized."
+  ],
+  "schema": "mini-oracle-integration-evidence-v1",
+  "scope": "Application transport, signed package inspection and physical intake; no live Mini admission, full appliance package, deployment or new specialist panel score.",
+  "source_sha256": {
+    "Cargo.lock": "cbec57c29ce0b1d45421e90d959546c5d737ba5dd931823d9022fc38f19da419",
+    "Cargo.toml": "1ea3be9bfb212371364703248612a582fb7d36427da06d3678b6352a8eea0a9b",
+    "deploy/oracle/candidate-2026-10-26.json": "e9a1b68306634306e2dca68c472d6b1bd4c6999c3ec3b1aa9bd1333fe8826dac",
+    "deploy/oracle/check-runtime.py": "d57d0fe7c15d18d24e4ba87b8cea208340dc5ca971ee40220e29774ea0a666fe",
+    "deploy/oracle/launch.py": "fc6bdc369319521ebc8d396e283a84cc04bb378b20b94b1f9e28d07843af552c",
+    "deploy/oracle/stage.py": "7c1f5e981780dfa80780e99e9396a2f89348819537cfa60904135ab1254bb112",
+    "deploy/oracle/test_stage.py": "771b28b311411f0b6359a9e789259e53949887d21cc9fcca99943fe520d4ef04",
+    "deploy/spk-host/spk-ingest": "b6892502081e3c79e828851a8225861633c99fdcb7e1299dd2fc7cc9454db514",
+    "deploy/spk-host/spk-ingest-prepared": "52f0afa6a6231b6b8f8838b36a5c81f621389b666e7a6b4b540d18a65062b78d",
+    "deploy/spk-host/spk-install-phase": "6b394d8b523f2bfd70302afc6bf5911a3259c242c2056e8fc20dadcd4d7c1ffd",
+    "deploy/spk-host/spk-qualify": "afa00f5123b45bd46c9e27d5e84651784b8fbc1215818f63d3ed6b03c7f78e3d",
+    "native/oracle-appliance/Cargo.toml": "3af88acc67120c6924722eead06e10a4dafb3f8c17863739b98bd7af23e6b6bf",
+    "native/oracle-appliance/examples/query.rs": "16e89638753a617a076109ac3571419bb9d166e7546b7fdea90a00f38481d270",
+    "native/oracle-appliance/src/lib.rs": "c2134e3efbf4c10f85b614224e6ed7a41d9f29018567624e624db0fbb41e8f95",
+    "native/oracle-appliance/src/main.rs": "e8ad389c09415592c78de576053ed7e3b02b6e4cbb6f19e032b3831521e23ca6",
+    "native/oracle-appliance/tests/bridge.rs": "a80d9783cb8314f488a72483efa254040206671ee9efe89e81e956f325ace2f0",
+    "native/spk-host/Cargo.toml": "a716238f32241692bb30d92dbed1c47af47bf1b9b00af8bd6b9bd7de60ecdf8b",
+    "native/spk-host/src/broker.rs": "cdc6be8d0924c7c06f8de891043aeaa48a35cbf3b626f8240748c5e64320ce44",
+    "native/spk-host/src/broker_endpoint.rs": "f8fec6bb35fb79867187715ceaa7c08d94a79005fef5bbfcc7f9335f6f242664",
+    "native/spk-host/src/broker_runtime_adoption.rs": "a72c1d876fd46d34b31e99c33e78d3cf353f09b0c59ed52fdb5c0f7707de23b2",
+    "native/spk-host/src/grain.rs": "74c88c312fd9cf5228fc20f2f8ed2fc145cb6d5178e59d00b88be9ef401f5df3",
+    "native/spk-host/src/install_service.rs": "23245b3a1c403a684ccbe9f48a1ee489d682c0fcd4dd4d0428b62585b393ff1e",
+    "native/spk-host/src/install_v3.rs": "a2f1f8eff77fe4202faa3bceab5b77f4b61bb255323a578ad793b3e70af8a7f9",
+    "native/spk-host/src/launch_descriptor_native.rs": "718d927cde6b2ffba6c0b9e2a1c1ea9bf98976e630adedf230c3bdd8cbadf9c7",
+    "native/spk-host/src/main.rs": "884177d4a9880dd7f805d6d580af985cf87e15834904130e21fc47e33818a0d2",
+    "native/spk-host/src/materialize.rs": "357ede53550e75a40918225297c490b6eebc517418094e6b73c371a2ca93b3e4",
+    "native/spk-host/tests/fixture-os/spk-ingest": "69b3beb54ac4610e6a5d2d2e3331b4fa1831d0bd5bcaeab6a76166c96f40a03d",
+    "native/spk-package-stream/Cargo.toml": "2f2ec3dcafe17e349765c54381019861326993690eb7c1959ef183b1d9becfe9",
+    "native/spk-package-stream/build.rs": "c2afbf54c0d750dd586e9cfc4172eeab8cdfe8e8895f7e74a1aa867453e5e4dd",
+    "native/spk-package-stream/examples/inspect.rs": "857d340636e653e916a7eadceecc44673e9dd0fbea5eb4d389fcd811a0f994b1",
+    "native/spk-package-stream/examples/qualification_fixture.rs": "d323f0584c022921fc563847cef844bcd7b4634ce39569ce8a320e03c6e28cdf",
+    "native/spk-package-stream/schema/archive.capnp": "8d88279a1c80d1c698355ad7bdd6c2984d51898b6e520f2a66826ea7e8d112e1",
+    "native/spk-package-stream/src/lib.rs": "7350f000c86331b77032655be9bc37876018c304c8e6e013357d14912e0a3472",
+    "scripts/oracle-transport-smoke.py": "9056832ff454468694857af66c5062deb09d22fb5d5e3e310652a1aa313d9e96",
+    "scripts/spk-platform/tests/test_spk_ingest_profiles.py": "aafc0d18d750e6b075908a64bf10549ea06d6ffb8bca6ae0eaec51a87c0415a8",
+    "scripts/spk-platform/tests/test_spk_qualification_profiles.py": "92a531d1485d72a0822fccb7186e26630786c4af18c45d504ad6134492d18562"
+  }
+}

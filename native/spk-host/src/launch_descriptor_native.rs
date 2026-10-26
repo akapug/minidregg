@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use crate::descriptor_native::{author_signed_package, SourceDescriptor, SourceStep, SourceTool};
 use crate::dispatch_native::{private_dir, write_new};
-use crate::materialize::qualify_bridge_spk;
 use crate::materialize::InstalledPackage;
+use crate::materialize::{qualify_bridge_spk_with_profile, ImportProfile};
 use serde::Deserialize;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -226,6 +226,8 @@ impl OfflineSourceHost {
 struct QualificationConfig {
     protocol: String,
     source_spk: PathBuf,
+    #[serde(default)]
+    import_profile: Option<String>,
     mini_host: PathBuf,
     mini_host_sha256: String,
     mini_config: PathBuf,
@@ -260,6 +262,11 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
     {
         return Err(invalid("offline launch qualification config refused"));
     }
+    let import_profile: ImportProfile = config
+        .import_profile
+        .as_deref()
+        .unwrap_or("standard-v1")
+        .parse()?;
     let source_host = OfflineSourceHost {
         host: config.mini_host,
         host_sha256: config.mini_host_sha256,
@@ -267,7 +274,7 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
         config_sha256: config.mini_config_sha256,
     };
     source_host.check_pin()?;
-    let (package, _) = qualify_bridge_spk(&config.source_spk)?;
+    let (package, _) = qualify_bridge_spk_with_profile(&config.source_spk, import_profile)?;
     let launch = author_signed_launch(&source_host, &package, &config.attempt_dir)?;
     if read_private(config_path, MAX_SOURCE_CONFIG)? != config_bytes {
         return Err(invalid("offline launch qualification input changed"));

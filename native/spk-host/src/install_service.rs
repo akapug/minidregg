@@ -6,9 +6,10 @@
 #[path = "install_v3.rs"]
 mod install_v3;
 
-use crate::dispatch_native::{private_dir, PrivateOperator};
 #[cfg(test)]
 use crate::dispatch_native::write_new;
+use crate::dispatch_native::{private_dir, PrivateOperator};
+use crate::materialize::ImportProfile;
 use crate::sandbox::open_protected_directory;
 use serde::Deserialize;
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -17,7 +18,6 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const MAX_CONFIG: u64 = 16 * 1024;
-const MAX_SPK: u64 = 256 * 1024 * 1024;
 const MAX_CLAIM: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -44,7 +44,7 @@ fn hidden_by_private_tmp(path: &Path) -> bool {
     path.starts_with("/tmp") || path.starts_with("/var/tmp")
 }
 
-fn private_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
+fn open_private_file(path: &Path, maximum: u64) -> io::Result<std::fs::File> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("private parent absent"))?;
@@ -60,9 +60,9 @@ fn private_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
         }
     }
     private_dir(parent)?;
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     let meta = file.metadata()?;
     let named = fs::symlink_metadata(path)?;
@@ -77,6 +77,12 @@ fn private_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
     {
         return Err(invalid("private file identity or bound refused"));
     }
+    Ok(file)
+}
+
+fn private_file(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
+    let mut file = open_private_file(path, maximum)?;
+    let meta = file.metadata()?;
     let mut bytes = Vec::new();
     file.by_ref().take(maximum + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 != meta.len() {
@@ -91,6 +97,8 @@ struct InstallConfig {
     protocol: String,
     journal_dir: PathBuf,
     source_spk: PathBuf,
+    #[serde(default)]
+    import_profile: Option<String>,
     image_dir: PathBuf,
     expected_raw_sha256: String,
     app_uid: u32,
@@ -110,6 +118,13 @@ struct InstallConfig {
 }
 
 impl InstallConfig {
+    fn selected_import_profile(&self) -> io::Result<ImportProfile> {
+        self.import_profile
+            .as_deref()
+            .unwrap_or("standard-v1")
+            .parse()
+    }
+
     fn valid_host_identity(&self) -> bool {
         match self.protocol.as_str() {
             "mini-spk-resident-install-v2" => {
@@ -126,6 +141,7 @@ impl InstallConfig {
 
     fn load(path: &Path) -> io::Result<Self> {
         let config: Self = serde_json::from_slice(&private_file(path, MAX_CONFIG)?)?;
+        config.selected_import_profile()?;
         if config.protocol != "mini-spk-resident-install-v2"
             || path.parent() != Some(config.journal_dir.as_path())
             || !config.valid_host_identity()
@@ -290,6 +306,7 @@ mod tests {
             source_spk: PathBuf::from("/nonexistent/source.spk"),
             image_dir: PathBuf::from("/nonexistent/image"),
             expected_raw_sha256: "a".repeat(64),
+            import_profile: None,
             app_uid: 12345,
             deployment_id: None,
             host_id: None,

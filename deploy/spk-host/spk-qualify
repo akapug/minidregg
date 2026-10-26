@@ -3,7 +3,19 @@
 set -euo pipefail
 umask 077
 
-(( $# == 3 )) || { echo 'usage: spk-qualify HOST_BINARY HOST_SHA256 INBOX_SPK' >&2; exit 2; }
+profile=standard-v1
+if [[ ${1:-} == --import-profile ]]; then
+  (( $# >= 2 )) || exit 2
+  profile=$2
+  shift 2
+fi
+(( $# == 3 )) || { echo 'usage: spk-qualify [--import-profile PROFILE] HOST_BINARY HOST_SHA256 INBOX_SPK' >&2; exit 2; }
+# Trusted operator invocation selects fixed parser/resource limits.
+case $profile in
+  standard-v1) raw_limit=268435456; file_limit=805306368; seconds=120 ;;
+  operator-appliance-v1) raw_limit=8589934592; file_limit=21474836480; seconds=1800 ;;
+  *) echo 'unknown SPK import profile' >&2; exit 2 ;;
+esac
 host_binary=$1 expected_host_sha=$2 package=$3
 [[ $expected_host_sha =~ ^[0-9a-f]{64}$ ]] || exit 2
 (( EUID == 0 )) || { echo 'spk-qualify requires root' >&2; exit 1; }
@@ -41,7 +53,7 @@ flock -n 9 || { echo 'another SPK ingest/qualification is active' >&2; exit 1; }
 [[ $(stat -c '%u:%a' -- "$package") == 0:600 ]] || {
   echo 'SPK inbox file owner/mode drift' >&2; exit 1;
 }
-(( $(stat -c '%s' -- "$package") <= 268435456 )) || {
+(( $(stat -c '%s' -- "$package") <= raw_limit )) || {
   echo 'SPK exceeds input cap' >&2; exit 1;
 }
 input_sha=$(sha256sum -- "$package")
@@ -75,12 +87,13 @@ cleanup_unit() {
 }
 trap cleanup_unit EXIT
 run_rc=0
-timeout --kill-after=5s 150s systemd-run --unit="$unit" --wait --pipe --collect \
+timeout --kill-after=5s "$((seconds + 30))s" systemd-run --unit="$unit" --wait --pipe --collect \
   -p Type=exec -p User=root -p NoNewPrivileges=yes \
   -p PrivateNetwork=yes -p PrivateTmp=yes -p ProtectSystem=strict \
   -p MemoryMax=1G -p CPUQuota=100% -p TasksMax=16 \
-  -p RuntimeMaxSec=120 -p LimitFSIZE=1048576 -p KillMode=control-group \
-  -- "$host_binary" qualify "$package" >"$stdout_log" 2>"$stderr_log" || run_rc=$?
+  -p "ReadWritePaths=$inbox" \
+  -p "RuntimeMaxSec=$seconds" -p "LimitFSIZE=$file_limit" -p KillMode=control-group \
+  -- "$host_binary" qualify --import-profile "$profile" "$package" >"$stdout_log" 2>"$stderr_log" || run_rc=$?
 if [[ $run_rc != 0 ]] ||
   ! grep -Eq "^Running as unit: ${unit}[.]service(; invocation ID: [0-9a-f]{32})?$" "$stderr_log" ||
   ! grep -Fxq 'Finished with result: success' "$stderr_log" ||
@@ -100,7 +113,7 @@ jq -e --arg sha "$input_sha" '
   (.manifestSha256 | test("^[0-9a-f]{64}$")) and
   (.bridgeConfigSha256 | test("^[0-9a-f]{64}$")) and
   (.signedBridgeConfigHex | test("^([0-9a-f]{2})+$")) and
-  (.bridgeApiPath == "" or .bridgeApiPath == "/repo.git/")
+  (.bridgeApiPath | type == "string")
 ' "$stdout_log" >/dev/null || { echo 'qualification JSON refused' >&2; exit 1; }
 install -o root -g root -m 0600 -- "$stdout_log" "$output"
 [[ $(stat -c '%u:%a' -- "$output") == 0:600 ]] || {

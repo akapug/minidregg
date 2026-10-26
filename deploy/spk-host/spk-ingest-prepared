@@ -88,7 +88,8 @@ inspect_image() {
     -p Type=exec -p User=root -p NoNewPrivileges=yes \
     -p PrivateNetwork=yes -p PrivateTmp=yes -p ProtectSystem=strict \
     -p MemoryMax=1G -p CPUQuota=100% -p TasksMax=16 \
-    -p RuntimeMaxSec=120 -p LimitFSIZE=1048576 -p KillMode=control-group \
+    -p ReadWritePaths=/var/lib/minidregg/spk/packages \
+    -p RuntimeMaxSec=120 -p LimitFSIZE=805306368 -p KillMode=control-group \
     -- "$host" inspect-installed "$image" "$uid" \
     >"$inspection/inspection.json" 2>"$inspection/unit.stderr" || run_rc=$?
   systemctl stop -- "$unit" >/dev/null 2>&1 || true

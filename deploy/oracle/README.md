@@ -1,0 +1,202 @@
+# Oracle7 package preparation
+
+This directory supplies a fixed appliance launcher, an SPK source-map stager
+with point-in-time validation, and a post-pack inventory verifier. It does not
+deploy a service, create Mini authority, or contain a signed
+package. The October 26 appliance **cannot fit the current SPK format**: six
+SQLite files exceed the format's per-member limit of less than 512 MiB. Increasing
+Mini's total upload limit alone cannot fix this. The stager refuses those files
+before copying anything or hashing all 15 GB again.
+
+The launcher and small-file staging path are tested. A production Linux rootfs,
+Linux bridge build, signing tool/key, and the immutable large-data integration
+are still required. `spk` was unavailable on the development host; no full-appliance
+packaging or signature verification is claimed here.
+
+## Exact inputs
+
+`candidate-2026-10-26.json` pins the retained appliance's `APPLIANCE.json`. That
+receipt pins every source file, adapter, corrected release patch, store and
+kernel overlay. The stager verifies every listed file's SHA-256, size and
+executable bit, and rejects unlisted files and symlinks. These checks concern
+byte identity; the adapter is untrusted computation, and earlier kernel panel
+receipts do not qualify all Oracle answers.
+
+Prepare an explicit, dedicated **Linux x86-64 rootfs**, containing Python 3.12 at
+`/usr/bin/python3.12` as a regular executable. It needs the exact dependencies in
+`check-runtime.py`, their transitive dependencies, the interpreter's standard
+library (including SQLite and multiprocessing), `libgmp.so.10`, glibc >=2.34 and
+`/lib64/ld-linux-x86-64.so.2`. Preserve package licenses. Use a digest-pinned base
+image and retained hash-locked wheels/package inputs; there is no floating
+distribution download or automatic pip install in this recipe.
+
+Run the import check **inside that rootfs on Linux**, retaining stdout as build
+evidence. A rootfs inventory records required versions but cannot prove that
+Python imports work. For example, with an operator-owned rootfs:
+
+```sh
+chroot "$ROOTFS" /usr/bin/python3.12 -B - < deploy/oracle/check-runtime.py
+python3 -B deploy/oracle/stage.py inventory --rootfs "$ROOTFS" --out "$ROOTFS_LOCK"
+sha256sum "$ROOTFS_LOCK"
+```
+
+Review the resulting lock and pin its hash separately. `inventory` walks only
+the explicitly supplied directory, never follows links, refuses special/setid
+files, and never overwrites a lock. It is not intended for `/` or an operator's
+home. Keep `/var`, `/tmp`, `/proc` and `/dev` empty real directories, plus a real
+`/opt`. Links must resolve inside the image. Input inventories contain every
+entry and the stager rejects discrepancies. No host credential/home directories
+are automatically added. Build the bridge from `native/oracle-appliance` using
+the repository's independent native build route, retain the build receipt, and
+pin the resulting **Linux** ELF binary's SHA-256; a macOS development binary is
+refused.
+
+## Stage and sign once the data-format blocker is resolved
+
+For a package whose individual members fit SPK, use the following. All variables
+are explicit operator inputs; the app and its callers cannot select them.
+
+```sh
+python3 -B deploy/oracle/stage.py stage \
+  --rootfs "$ROOTFS" --rootfs-manifest "$ROOTFS_LOCK" --rootfs-sha256 "$ROOTFS_LOCK_SHA256" \
+  --appliance "$APPLIANCE" --appliance-sha256 "$APPLIANCE_RECEIPT_SHA256" \
+  --bridge "$LINUX_BRIDGE" --bridge-sha256 "$LINUX_BRIDGE_SHA256" \
+  --app-id "$EXISTING_SPK_KEY_ID" --version "$PACKAGE_VERSION" \
+  --target "$NEW_STAGE"
+python3 -B deploy/oracle/stage.py verify "$NEW_STAGE"
+```
+
+The source-map stage uses an exact `files.list`; it has no recursive
+`alwaysInclude` and does not duplicate the corpus. Only the small bridge,
+launcher, schemas and generated binary metadata are copied. Publication is an
+atomic no-replace rename. An existing target is preserved. The stage contains
+binary `sandstorm-manifest`, binary `sandstorm-http-bridge-config`, the
+`sandstorm-pkgdef.capnp:pkgdef` package definition and an unsigned `STAGE.json`
+receipt. Keep inputs in immutable operator snapshots while packing: hash checks
+are not a filesystem snapshot and cannot prevent concurrent mutation.
+`STAGE.json` records the exact expected final member inventory, including source,
+stores, rootfs, launcher, bridge, binary manifest and binary bridge configuration.
+Packaging schema sources remain outside the image; their hashes and the encoded
+metadata hashes are retained. Pin the hash of `STAGE.json` separately **before**
+packing. An unsigned stage or a successful recheck of its external paths cannot
+establish what a subsequently signed package actually contains.
+
+Use an operator-supplied, hash-pinned upstream Sandstorm `spk` builder and its
+existing private keyring. Inspect that builder's `spk help pack` and use the
+generated package definition; retain the builder hash/version and key's public
+identity. Never store signing keys in the stage or image.
+The missing builder's CLI and signing outcome are deliberately not guessed.
+After packing, use the `inspect` example from `native/spk-package-stream`, built
+in an independent native snapshot. Pin the inspector binary hash as an operator
+input. The example verifies a private snapshot's signature and streams each
+regular member into SHA-256, retaining at most 16 MiB of inventory JSON. Its
+explicit protected scratch directory must be disk-backed with room for the raw
+and decoded package; do not use a small tmpfs for appliance imports.
+The wrapper parses the same receipt bytes it hashes and executes a private
+hash-checked copy of the inspector, so replacing either input path afterward
+does not change this verification.
+
+```sh
+python3 -B deploy/oracle/stage.py verify-package \
+  --stage "$NEW_STAGE" --stage-sha256 "$REVIEWED_STAGE_SHA256" \
+  --inspector "$INSPECTOR" --inspector-sha256 "$INSPECTOR_SHA256" \
+  --package "$SIGNED_SPK" --scratch "$PROTECTED_DISK_SCRATCH" \
+  --profile operator-appliance-v1 --out "$NEW_POST_PACK_RECEIPT"
+```
+
+This checks the signature-derived application identity, version, every member's
+path/type/size/hash/executable flag or link target, and absence of extra members.
+It rejects packing-time changes even if inputs were restored before a later
+source recheck. The receipt binds the exact verified package SHA-256 to the
+separately pinned stage and inspector. A package path may change afterward:
+Mini's importer must import **that same raw SHA-256**, verify its signature, and record its
+application/manifests; `STAGE.json` does not substitute for that admission.
+
+The present candidate needs either a format/materializer change or an explicit
+Mini contract for a separately pinned, immutable store image. Chunking and
+reconstructing 15 GB into each grain's `/var` is not this recipe: it duplicates
+data and consumes mutable volume space. Nor does this recipe silently omit the
+stores, introduce host bind mounts, or grant an app access to host paths. The
+larger archive parser and a larger operator import budget address total package
+size, not the member-size limitation.
+
+## Inside the grain
+
+Both first launch and restart execute `/usr/bin/python3.12 -B
+/opt/oracle-bin/launch.py`, with a fixed environment. The launcher takes no
+arguments, confirms connected supervisor fd 3, and starts:
+
+```text
+/usr/bin/python3.12 -B /opt/oracle/adapter/serve.py
+  --runtime /opt/oracle --data-root /opt/oracle/root
+  --workspace /var/oracle-workspace --port 7070
+/opt/oracle-bin/minidregg-oracle-appliance --port 7070
+```
+
+Python and its engine receive no supervisor fd. After bounded adapter health
+readiness, only the Rust bridge receives fd 3. Each child has its own process
+group. Shutdown signals the leaders for journal/engine cleanup, then kills only
+the groups this launcher created; Linux subreaping collects orphan descendants.
+An adapter crash also tears down the bridge and remaining engine workers. Mini's
+existing process namespace/cgroup lifecycle remains the outer cleanup boundary.
+
+Mini mounts the package read-only; `/opt/oracle` holds source and stores. `/var`
+is the grain's private persistent volume, and `/tmp` is the host's bounded
+temporary mount. The adapter's HTTP socket is namespace-local loopback only,
+not an exposed host listener. One grain means one conversation workspace shared
+by its grant holders; use separate grains for separate tenants.
+
+The signed API prefix is `/`. Permission zero is `query`, title `Ask questions`,
+description `Use this appliance's shared conversation workspace`. Role zero is
+`Researcher`, verb `can ask questions`, description `Ask questions and inspect
+this appliance`, permission `[true]`, default false. These match the bridge's
+`getViewInfo`; the package cannot grant this permission to itself.
+
+## Reach it through Mini
+
+After actual signed import and the existing Mini create/start/share/API-session
+operations, configure the operator route catalog from the returned application,
+session, current grants, purse and subject. Record these real returned values in
+the deployment receipt alongside the signed package hash, selected workspace,
+signed prefix and exact permission metadata. The fixture-specific
+`scripts/spk-platform/prepare-lifetime-route.sh` is not a ready-made Oracle
+deployment: its fixture identities and `/repo.git/` prefix cannot be reused.
+
+Agents use the existing `mini_application_api` tool with the application name
+present in that tool's live enum. For example, construct its arguments from the
+actual catalog name and freshly chosen Oracle request IDs:
+
+```python
+body = b'{"request_id":"q1","conversation_id":"research","text":"Who wrote Leaves of Grass?"}'
+arguments = {
+    "application": actual_catalog_application_name,
+    "method": "POST", "path": "query", "query": "",
+    "headers": [{"name": "content-type", "value": "application/json"}],
+    "bodyHex": body.hex(),
+}
+```
+
+No model-supplied URL, host path, socket or invented grant ID appears here.
+`GET health` and `GET capabilities` use empty headers/body. Mini rechecks current
+authority and purse settlement on each call. Preserve exact bytes for retries:
+the same request ID with different bytes conflicts; a lost reply may still have
+executed. The bridge's original HTTP status header and complete JSON reply
+preserve busy/failure outcomes. Mini may omit large bodies from model text
+presentation while retaining the exact native response.
+
+## Narrow verification
+
+```sh
+python3 -B -m unittest discover -s deploy/oracle -p test_stage.py -v
+# In an independent native source snapshot:
+cargo test --offline -p minidregg-spk-package-stream --example inspect
+```
+
+Eight Python fixtures cover actual child processes (fd exclusion, graceful termination,
+adapter crash and orphan-worker cleanup), Cap'n Proto encoding/decoding and
+package-definition evaluation, changed/unlisted bytes, input link boundaries,
+no overwrite, explicit oversized-store refusal and final-inventory mutation,
+extra-file and wrong-signer refusal. Two Rust inspector tests use a real signed
+Bread SPK fixture to check streamed member hashes and signature-derived identity,
+snapshot retention after source replacement, and bounded output. They neither run specialist
+panels nor establish a signed/deployed Linux appliance.

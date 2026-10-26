@@ -41,7 +41,11 @@ fn connect(path: &Path, uid: u32) -> io::Result<UnixStream> {
     Ok(stream)
 }
 fn exchange(mut stream: UnixStream, request: &Request) -> io::Result<Value> {
-    stream.set_read_timeout(Some(Duration::from_secs(600)))?;
+    // The operator appliance importer has a 30-minute unit deadline. Waiting
+    // less than that abandons a still-running import with an uncertain reply.
+    // This changes only physical transport; it does not retry or grant a request.
+    let seconds = if matches!(request, Request::Ingest { .. }) { 1860 } else { 600 };
+    stream.set_read_timeout(Some(Duration::from_secs(seconds)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut line = serde_json::to_vec(request)?;
     line.push(b'\n');

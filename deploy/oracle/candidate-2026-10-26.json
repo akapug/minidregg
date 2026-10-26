@@ -1,0 +1,49 @@
+{
+  "appliance_receipt_sha256": "5e2115181f1b6f0b3fb27894e8c9838f1cf526e5242021420283779dd220517b",
+  "assurance": "Pins an existing local composition. No new signing, Linux rootfs, Mini admission or deployment is claimed.",
+  "earth_binary_sha256": "61646341c4baa7b68eef779baa1c67e9faa6f27f9ec2ac233bd5fca00d87674e",
+  "format_blocker": "SPK regular/executable members are Capnp Data, limited to less than 512 MiB.",
+  "kernel_overlay_manifest_sha256": "91e3525e922f98a662d81e0c8a154dfaf51ee55ec24e37f6125cc0ea873be1d4",
+  "oversized_members": {
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_dbpedia_build_a_v2/wikipedia_specialist.sqlite3": {
+      "executable": false,
+      "sha256": "cdbcfc53f8d12952ad748f47107384e218b5221b32b91c2d4ae59b2bbdbcdbd3",
+      "size": 1154691072
+    },
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_simplewiki_build_a_v1/wikipedia_specialist.sqlite3": {
+      "executable": false,
+      "sha256": "206020fdc40b7d3a76ce89d5b4e590a05e0772a363b254e139153a5b506e6b62",
+      "size": 816103424
+    },
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_simplewiki_full_build_a_v1/wikipedia_specialist.sqlite3": {
+      "executable": false,
+      "sha256": "cdbcfc53f8d12952ad748f47107384e218b5221b32b91c2d4ae59b2bbdbcdbd3",
+      "size": 1154691072
+    },
+    "root/relstore/names_v1.sqlite3": {
+      "executable": false,
+      "sha256": "042f94dbe34089e70ca0ae1d3c8bf13c00610f0e22872dc4ba15360690922f2d",
+      "size": 1660297216
+    },
+    "root/relstore/relations_v1.sqlite3": {
+      "executable": false,
+      "sha256": "8ef21f19237b8f977735e56a7b62e29943b37d01b5cb6778c217f9c080fbb6da",
+      "size": 3593560064
+    },
+    "root/relstore/relations_v2.sqlite3": {
+      "executable": false,
+      "sha256": "7df5c620982634e7ed6ff097f7d9082605cc879e9ee938d36d6a14af11cc4095",
+      "size": 5569425408
+    }
+  },
+  "patches": [
+    {
+      "name": "oracle7-slim-4.9-correctness.patch",
+      "sha256": "feb44d407634699545634350281e530b1bcc0ecf7bd951bdfc01655dbf99ecd6"
+    }
+  ],
+  "schema": "oracle-candidate-pin-v1",
+  "source_repository": "https://huggingface.co/psiloceyeben/oracle7-slim",
+  "source_revision": "083e3a6c0e2cfc131e62bdc16cb4ec1346194635",
+  "spk_packable": false
+}

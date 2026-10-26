@@ -21,7 +21,7 @@
 use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
-use crate::materialize::verify_installed_spk;
+use crate::materialize::{verify_installed_spk, ImportProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -38,7 +38,6 @@ mod profile_upgrade;
 mod management;
 
 const MAX_JSON: u64 = 64 * 1024;
-const MAX_SPK: u64 = 256 * 1024 * 1024;
 /// How long `grain start` waits for the resident's START completion before
 /// reporting UNRESOLVED (the resident keeps going either way). Measured on
 /// final (SPK-APPS 2026-10-01): a START is BEGIN, claim, launch, report,
@@ -175,6 +174,28 @@ fn file_sha256(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+/// Hash/copy a regular input under the operator's bound without an archive-sized
+/// allocation. Check the bytes actually read as well as the opening length.
+fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> io::Result<String> {
+    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > maximum {
+        return Err(invalid("signed SPK input refused"));
+    }
+    let mut digest = Sha256::new();
+    let mut chunk = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 { break; }
+        total = total.checked_add(count as u64).ok_or_else(|| invalid("SPK length overflow"))?;
+        if total > maximum { return Err(invalid("SPK exceeds input bound")); }
+        digest.update(&chunk[..count]); output.write_all(&chunk[..count])?;
+    }
+    if total != meta.len() { return Err(invalid("SPK changed while reading")); }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if !path.is_absolute()
@@ -195,6 +216,9 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    /// Operator-selected input budget; never supplied by a grain request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    import_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     genesis_config_sha256: Option<String>,
     #[serde(default)]
@@ -219,6 +243,12 @@ struct HostProfile {
     bwrap_sha256: String,
     spk_host: PathBuf,
     spk_host_sha256: String,
+}
+
+impl HostProfile {
+    fn selected_import_profile(&self) -> io::Result<ImportProfile> {
+        self.import_profile.as_deref().unwrap_or("standard-v1").parse()
+    }
 }
 
 struct HostIdentity {
@@ -246,6 +276,7 @@ impl Host {
             ));
         }
         let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
+        profile.selected_import_profile()?;
         if let Some(seconds) = profile.ws_authority_lease_seconds {
             crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
         }
@@ -472,25 +503,30 @@ fn place(
 /// descriptor through the pinned Host. Qualification is pure (no Store
 /// effect), so an interrupted attempt is set aside and repeated.
 fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBuf)> {
-    let meta = fs::metadata(spk)?;
-    if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_SPK {
-        return Err(invalid("signed SPK input refused"));
-    }
-    let raw_sha256 = file_sha256(spk)?;
+    let profile = host.profile.selected_import_profile()?;
+    let maximum = profile.limits().raw_bytes;
+    let raw_sha256 = copy_package_bounded(spk, &mut io::sink(), maximum)?;
     private_directory(&host.profile.state_root.join("packages"))?;
     let dir = host.package_dir(&raw_sha256);
     private_directory(&dir)?;
     let copy = dir.join("package.spk");
     if !exists(&copy)? {
-        let temp = dir.join(".package.spk.tmp");
-        let _ = fs::remove_file(&temp);
-        fs::copy(spk, &temp)?;
-        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
-        File::open(&temp)?.sync_all()?;
-        fs::rename(&temp, &copy)?;
-        File::open(&dir)?.sync_all()?;
+        let mut random = [0u8; 8];
+        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        let temp = dir.join(format!(".package-{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
+        let copied = (|| -> io::Result<()> {
+            if copy_package_bounded(spk, &mut staged, maximum)? != raw_sha256 {
+                return Err(invalid("SPK changed while staging"));
+            }
+            staged.sync_all()?;
+            fs::rename(&temp, &copy)?;
+            File::open(&dir)?.sync_all()
+        })();
+        if copied.is_err() { let _ = fs::remove_file(&temp); }
+        copied?;
     }
-    if file_sha256(&copy)? != raw_sha256 {
+    if copy_package_bounded(&copy, &mut io::sink(), maximum)? != raw_sha256 {
         return Err(invalid("staged SPK copy differs from input hash"));
     }
     let attempt = dir.join("qualification");
@@ -506,7 +542,7 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
             fs::rename(&attempt, aside)?;
         }
         let config = dir.join("qualify.json");
-        let bytes = serde_json::to_vec(&json!({
+        let mut qualification_config = json!({
             "protocol":"mini-spk-launch-qualification-v1",
             "sourceSpk":copy,
             "miniHost":host.profile.mini_host,
@@ -514,7 +550,11 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
             "miniConfig":host.profile.mini_config,
             "miniConfigSha256":host.profile.mini_config_sha256,
             "attemptDir":attempt,
-        }))?;
+        });
+        if profile != ImportProfile::Standard {
+            qualification_config["importProfile"] = json!(profile.as_str());
+        }
+        let bytes = serde_json::to_vec(&qualification_config)?;
         if exists(&config)? {
             fs::remove_file(&config)?;
         }
@@ -717,7 +757,7 @@ fn install(
     let journal = host.app_dir(&selector.app).join("install");
     private_directory(&journal)?;
     let config_path = journal.join("install.json");
-    let config = json!({
+    let mut config = json!({
         "protocol":"mini-spk-resident-install-v2",
         "journalDir":journal,
         "sourceSpk":staged,
@@ -738,6 +778,11 @@ fn install(
         "completionCustodianSeed":host.profile.completion_custodian_seed,
         "completionSemantics":host.profile.completion_semantics,
     });
+    // Preserve exact legacy standard config bytes when resuming admitted work.
+    let import_profile = host.profile.selected_import_profile()?;
+    if import_profile != ImportProfile::Standard {
+        config["importProfile"] = json!(import_profile.as_str());
+    }
     derived_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
     let prepared = journal.join("install-prepared-v2.json");
     if !exists(&prepared)? {

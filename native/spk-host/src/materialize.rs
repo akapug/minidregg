@@ -1,12 +1,14 @@
 //! Signature-verified SPK archive materialization into a new immutable image.
-//! Package decoding comes only from the pinned Bread `sandstorm-package` crate.
+//! Archive decoding streams through bounded private files; the pinned Bread crate
+//! decodes the exact verified manifest. Publication remains atomic and exclusive.
 
-use sandstorm_package::{File as SpkFile, FileContent, Spk, SpkManifest};
+pub use minidregg_spk_package_stream::ImportProfile;
+use minidregg_spk_package_stream::{self as stream, EntryKind, VerifiedPackage};
+use sandstorm_package::SpkManifest;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,24 +17,14 @@ use crate::sandbox::open_protected_directory;
 use minidregg_spk_rpc::{decode_bridge_config, BridgeConfig};
 use serde_json::{json, Value};
 
-const MAX_SPK_BYTES: u64 = 256 * 1024 * 1024;
-/// The decompressed-package bound handed to Bread's parser in place of its
-/// 256 MiB default. Measured 2026-10-01 (SPK-APPS): 4 of 10 market packages
-/// decompress past 256 MiB (TT-RSS 298 MiB, Etherpad 341 MiB, Davros 477 MiB,
-/// Wekan 525 MiB) and were refused `TooLarge`. The parse holds the plain
-/// stream and the decoded archive at once, about 2.2x the decompressed size
-/// (Wekan: 1.17 GB RSS, 16 s), so `spk-ingest` runs this with MemoryMax=2G.
-/// An xz bomb is still refused at this bound, before signature work.
-pub const MAX_DECOMPRESSED_PACKAGE_BYTES: usize = 768 * 1024 * 1024;
+/// Standard import bound; operator appliance imports use their explicitly selected profile.
+pub const MAX_DECOMPRESSED_PACKAGE_BYTES: usize = stream::Limits::DEFAULT.decoded_bytes as usize;
 /// Modes inside the published image root, Sandstorm's (0644/0755/0755).
 /// Root owns every entry and the sandbox binds the root read-only; the
 /// sandbox still refuses a task-owned or group/world-writable image.
 const IMAGE_FILE_MODE: u32 = 0o644;
 const IMAGE_EXECUTABLE_MODE: u32 = 0o755;
 const IMAGE_DIRECTORY_MODE: u32 = 0o755;
-const MAX_FILES: usize = 100_000;
-const MAX_DEPTH: usize = 64;
-const MAX_SIGNED_BRIDGE_CONFIG_BYTES: usize = 64 * 1024;
 
 pub struct InstalledPackage {
     pub directory: PathBuf,
@@ -55,119 +47,34 @@ fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
-fn valid_name(name: &str) -> io::Result<()> {
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.as_bytes().contains(&0)
-    {
-        return Err(invalid("invalid archive path component"));
-    }
-    Ok(())
-}
-
-fn valid_link(parent: &Path, target: &str) -> io::Result<()> {
-    if target.is_empty() || target.as_bytes().contains(&0) {
-        return Err(invalid("empty or NUL symlink target"));
-    }
-    // Absolute symlinks are common in real SPKs (e.g. libc.so -> /lib/...). In
-    // the eventual sandbox they start at the package root. We never follow them
-    // while materializing on the host, and reject any lexical escape above root.
-    let mut depth = if target.starts_with('/') {
-        0
-    } else {
-        parent.components().count()
-    };
-    for component in target.trim_start_matches('/').split('/') {
-        match component {
-            "" | "." => {}
-            ".." if depth > 0 => depth -= 1,
-            ".." => return Err(invalid("symlink target escapes package root")),
-            _ => depth += 1,
-        }
-    }
-    Ok(())
-}
-
-fn validate_tree(
-    files: &[SpkFile],
-    parent: &Path,
-    depth: usize,
-    count: &mut usize,
-) -> io::Result<()> {
-    if depth > MAX_DEPTH {
-        return Err(invalid("archive nesting limit exceeded"));
-    }
-    let mut names = HashSet::new();
-    for file in files {
-        *count += 1;
-        if *count > MAX_FILES {
-            return Err(invalid("archive file count limit exceeded"));
-        }
-        valid_name(&file.name)?;
-        if !names.insert(&file.name) {
-            return Err(invalid("duplicate archive entry"));
-        }
-        match &file.content {
-            FileContent::Directory(children) => {
-                validate_tree(children, &parent.join(&file.name), depth + 1, count)?;
-            }
-            FileContent::Symlink(target) => valid_link(parent, target)?,
-            FileContent::Regular(_) | FileContent::Executable(_) => {}
-        }
-    }
-    if parent.as_os_str().is_empty() {
-        for reserved in ["var", "tmp", "proc", "dev"] {
-            if let Some(entry) = files.iter().find(|f| f.name == reserved) {
-                if !matches!(entry.content, FileContent::Directory(_)) {
-                    return Err(invalid(format!(
-                        "{reserved} mountpoint is not a real directory"
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn write_tree(
-    files: &[SpkFile],
-    parent: &Path,
+    spk: &VerifiedPackage,
+    root: &Path,
     directories: &mut Vec<PathBuf>,
     links: &mut Vec<(PathBuf, String)>,
 ) -> io::Result<()> {
-    for entry in files {
-        let path = parent.join(&entry.name);
-        match &entry.content {
-            FileContent::Directory(children) => {
+    for (index, entry) in spk.entries().iter().enumerate() {
+        let path = root.join(&entry.path);
+        match &entry.kind {
+            EntryKind::Directory => {
                 fs::DirBuilder::new().mode(0o700).create(&path)?;
-                directories.push(path.clone());
-                write_tree(children, &path, directories, links)?;
+                directories.push(path);
             }
-            FileContent::Regular(bytes) | FileContent::Executable(bytes) => {
-                let mut output = OpenOptions::new()
+            EntryKind::Symlink(target) => links.push((path, target.clone())),
+            EntryKind::Regular { executable } => {
+                let mut out = OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .mode(0o600)
                     .open(&path)?;
-                output.write_all(bytes)?;
-                // Sandstorm's unpack (spk.c++) creates files 0666/0777 and
-                // directories 0777 under umask 022: 0644/0755. An app that
-                // copies part of its image into /var (Hacker Slides' static
-                // publish folder) inherits these modes and must be able to
-                // delete its copy later; with 0444/0555 it got EACCES on
-                // restart. The owner write bit is root's and the image is
-                // bound read-only, so the app gains nothing in the image.
-                let mode = if matches!(entry.content, FileContent::Executable(_)) {
+                spk.copy_member(index, &mut out)?;
+                out.set_permissions(fs::Permissions::from_mode(if *executable {
                     IMAGE_EXECUTABLE_MODE
                 } else {
                     IMAGE_FILE_MODE
-                };
-                output.set_permissions(fs::Permissions::from_mode(mode))?;
-                output.sync_all()?;
+                }))?;
+                out.sync_all()?;
             }
-            FileContent::Symlink(target) => links.push((path, target.clone())),
         }
     }
     Ok(())
@@ -213,82 +120,47 @@ fn publish_no_replace(stage: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn bounded_spk(path: &Path) -> io::Result<Vec<u8>> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_SPK_BYTES {
-        return Err(invalid("SPK input is not a bounded regular file"));
+fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> InstalledPackage {
+    let raw_sha256 = spk
+        .raw_sha256
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    InstalledPackage {
+        directory,
+        raw_sha256,
+        raw_sha256_bytes: spk.raw_sha256,
+        raw_length: spk.raw_length,
+        signed_manifest_sha256: Sha256::digest(&spk.manifest_bytes).into(),
+        signed_bridge_config_sha256: spk
+            .bridge_config_bytes
+            .as_ref()
+            .map(|bytes| Sha256::digest(bytes).into()),
+        signed_bridge_config: spk.bridge_config_bytes.clone(),
+        manifest: spk.manifest.clone(),
     }
-    let mut raw = Vec::with_capacity(metadata.len() as usize);
-    file.take(MAX_SPK_BYTES + 1).read_to_end(&mut raw)?;
-    if raw.len() as u64 > MAX_SPK_BYTES || raw.len() as u64 != metadata.len() {
-        return Err(invalid("SPK input changed while reading"));
-    }
-    Ok(raw)
 }
 
-/// Return the signed tree and all descriptor inputs from one Bread parse.
-/// Later schema decoding consumes the retained signed member, not a second
-/// lookup in the extracted image.
-fn verified_identity(raw: &[u8], directory: PathBuf) -> io::Result<(Spk, InstalledPackage)> {
-    let raw_sha256_bytes: [u8; 32] = Sha256::digest(raw).into();
-    let mut raw_sha256 = String::with_capacity(64);
-    for byte in raw_sha256_bytes {
-        raw_sha256.push_str(&format!("{byte:02x}"));
-    }
-    let raw_length = raw.len() as u64;
-    let spk = Spk::parse_with_limit(raw, MAX_DECOMPRESSED_PACKAGE_BYTES)
-        .map_err(|e| invalid(format!("SPK verification failed: {e}")))?;
-    let manifest =
-        SpkManifest::from_spk(&spk).map_err(|e| invalid(format!("SPK manifest failed: {e}")))?;
-    let signed_manifest_sha256: [u8; 32] = Sha256::digest(
-        spk.archive
-            .find("sandstorm-manifest")
-            .ok_or_else(|| invalid("verified SPK lacks signed manifest bytes"))?,
-    )
-    .into();
-    let signed_bridge_config = spk
-        .archive
-        .find("sandstorm-http-bridge-config")
-        .map(|bytes| {
-            if bytes.is_empty() || bytes.len() > MAX_SIGNED_BRIDGE_CONFIG_BYTES {
-                return Err(invalid(
-                    "signed bridge config exceeds supported profile bound",
-                ));
-            }
-            Ok(bytes.to_vec())
-        })
-        .transpose()?;
-    let signed_bridge_config_sha256 = signed_bridge_config
-        .as_ref()
-        .map(|bytes| -> [u8; 32] { Sha256::digest(bytes).into() });
-    let mut count = 0;
-    validate_tree(&spk.archive.files, Path::new(""), 0, &mut count)?;
-    Ok((
-        spk,
-        InstalledPackage {
-            directory,
-            raw_sha256,
-            raw_sha256_bytes,
-            raw_length,
-            signed_manifest_sha256,
-            signed_bridge_config_sha256,
-            signed_bridge_config,
-            manifest,
-        },
-    ))
-}
-
-/// Parse one signed SPK without publishing an image. The caller must run this
-/// decoder inside a bounded offline service: Bread's XZ block allocation is
-/// not bounded by the final archive size. A later INSTALL must materialize the
-/// same raw SHA-256 and compare its retained signed members again.
+/// Parse one signed SPK without publishing an image, using the standard profile.
 pub fn qualify_bridge_spk(package: &Path) -> io::Result<(InstalledPackage, BridgeConfig)> {
-    let raw = bounded_spk(package)?;
-    let (_, verified) = verified_identity(&raw, PathBuf::new())?;
+    qualify_bridge_spk_with_profile(package, ImportProfile::Standard)
+}
+
+/// The caller selects this operator policy; no archive member can enlarge it.
+pub fn qualify_bridge_spk_with_profile(
+    package: &Path,
+    profile: ImportProfile,
+) -> io::Result<(InstalledPackage, BridgeConfig)> {
+    let input = if package.is_absolute() {
+        package.to_owned()
+    } else {
+        std::env::current_dir()?.join(package)
+    };
+    let parent = input
+        .parent()
+        .ok_or_else(|| invalid("package parent absent"))?;
+    let spk = stream::verify_in_private_temp_at(&input, parent, profile.limits())?;
+    let verified = verified_identity(&spk, PathBuf::new());
     let member = verified
         .signed_bridge_config
         .as_deref()
@@ -333,14 +205,34 @@ pub fn signed_schema_source(bridge: &BridgeConfig, signed_app_version: u32) -> V
     })
 }
 
-/// Install a package only after Bread's real SPK signature, archive hash, and
+/// Install a package only after its real SPK signature, archive hash, and Bread's
 /// manifest parser accept it. `store` must already be an operator-owned protected
 /// directory; its private staging child is never visible to an app account.
 pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result<InstalledPackage> {
-    let raw = bounded_spk(package)?;
-    let (spk, mut verified) = verified_identity(&raw, PathBuf::new())?;
+    materialize_spk_with_profile(package, store, app_uid, ImportProfile::Standard)
+}
 
+/// Selected policy is retained outside the untrusted archive root under image custody.
+pub fn materialize_spk_with_profile(
+    package: &Path,
+    store: &Path,
+    app_uid: u32,
+    profile: ImportProfile,
+) -> io::Result<InstalledPackage> {
     let _protected_store = open_protected_directory(store, app_uid, false)?;
+    let limits = profile.limits();
+    let input_length = fs::symlink_metadata(package)?.len();
+    // Simultaneous raw+decoded spools, extracted image, and retained compressed SPK.
+    // This is an available-space preflight, not a disk reservation.
+    stream::check_workspace(
+        store,
+        input_length
+            .saturating_mul(2)
+            .saturating_add(limits.decoded_bytes.saturating_mul(2)),
+        limits,
+    )?;
+    let spk = stream::verify(package, store, limits)?;
+    let mut verified = verified_identity(&spk, PathBuf::new());
     let store_metadata = fs::symlink_metadata(store)?;
     if !store_metadata.is_dir() || store_metadata.file_type().is_symlink() {
         return Err(invalid("package store is not a real directory"));
@@ -363,7 +255,7 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
         fs::DirBuilder::new().mode(0o700).create(&root)?;
         let mut directories = vec![root.clone()];
         let mut links = Vec::new();
-        write_tree(&spk.archive.files, &root, &mut directories, &mut links)?;
+        write_tree(&spk, &root, &mut directories, &mut links)?;
         for mountpoint in ["var", "tmp", "proc", "dev"] {
             let path = root.join(mountpoint);
             if !path.exists() {
@@ -379,7 +271,7 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
             .create_new(true)
             .mode(0o600)
             .open(stage.join("package.spk"))?;
-        stored_spk.write_all(&raw)?;
+        spk.copy_raw(&mut stored_spk)?;
         stored_spk.set_permissions(fs::Permissions::from_mode(0o444))?;
         stored_spk.sync_all()?;
         let manifest_json = serde_json::to_vec_pretty(&verified.manifest)
@@ -392,6 +284,14 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
         manifest_file.write_all(&manifest_json)?;
         manifest_file.set_permissions(fs::Permissions::from_mode(0o444))?;
         manifest_file.sync_all()?;
+        let mut policy_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(stage.join("import-policy.json"))?;
+        policy_file.write_all(&serde_json::to_vec(&json!({"profile":profile.as_str()}))?)?;
+        policy_file.set_permissions(fs::Permissions::from_mode(0o444))?;
+        policy_file.sync_all()?;
         for directory in directories.into_iter().rev() {
             fs::set_permissions(&directory, fs::Permissions::from_mode(IMAGE_DIRECTORY_MODE))?;
             sync_directory(&directory)?;
@@ -411,7 +311,7 @@ pub fn materialize_spk(package: &Path, store: &Path, app_uid: u32) -> io::Result
 }
 
 /// Reopen an operator-owned, content-addressed image for a resident wake.
-/// Bread verifies the one retained `package.spk` again in this new process;
+/// The streaming reader verifies retained `package.spk` again in this new process;
 /// its signed bridge bytes, manifest and raw digest come from that same parse.
 /// Protected immutable image custody is separate from signature verification.
 pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<InstalledPackage> {
@@ -426,8 +326,12 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     {
         return Err(invalid("installed SPK custody changed"));
     }
-    let raw = bounded_spk(&package_path)?;
-    let (_, verified) = verified_identity(&raw, image_dir.to_owned())?;
+    let profile = retained_import_profile(image_dir)?;
+    let store = image_dir
+        .parent()
+        .ok_or_else(|| invalid("image store parent absent"))?;
+    let spk = stream::verify_in_private_temp_at(&package_path, store, profile.limits())?;
+    let verified = verified_identity(&spk, image_dir.to_owned());
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())
     {
@@ -455,24 +359,118 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     Ok(verified)
 }
 
+/// Only protected host metadata selects a larger re-verification bound. Legacy images
+/// without this metadata retain the standard bound. A package member with this name
+/// lives under root/ and is never consulted.
+fn retained_import_profile(image_dir: &Path) -> io::Result<ImportProfile> {
+    let path = image_dir.join("import-policy.json");
+    let metadata = match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(ImportProfile::Standard)
+        }
+        other => other?,
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.nlink() != 1
+        || (metadata.uid() != 0 && metadata.uid() != unsafe { libc::geteuid() })
+        || metadata.permissions().mode() & 0o777 != 0o444
+        || metadata.len() > 128
+    {
+        return Err(invalid("installed import policy custody changed"));
+    }
+    let value: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid("invalid import policy"))?;
+    if object.len() != 1 {
+        return Err(invalid("invalid import policy fields"));
+    }
+    object
+        .get("profile")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("missing import profile"))?
+        .parse()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn rejects_archive_escape_and_mountpoint_substitution() {
-        assert!(valid_name("../escape").is_err());
-        assert!(valid_name(".").is_err());
-        assert!(valid_link(Path::new(""), "../escape").is_err());
-        assert!(valid_link(Path::new("a"), "../../escape").is_err());
-        assert!(valid_link(Path::new("a"), "../inside").is_ok());
-        assert!(valid_link(Path::new("a"), "/lib/libc.so").is_ok());
-        assert!(valid_link(Path::new("a"), "/../../escape").is_err());
-        let files = vec![SpkFile {
-            name: "var".into(),
-            content: FileContent::Symlink("elsewhere".into()),
-            mtime_ns: 0,
-        }];
-        assert!(validate_tree(&files, Path::new(""), 0, &mut 0).is_err());
+    fn materialized_profile_survives_wake_and_archive_cannot_choose_it() {
+        let home = std::env::var_os("HOME").expect("test requires protected home directory");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let scratch = PathBuf::from(home).join(format!(
+            ".spk-materialize-test-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&scratch).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                cleanup_staging(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(scratch.clone());
+        let package = scratch.join("input.spk");
+        let bytes = sandstorm_package::SpkBuilder::new()
+            .manifest_json(r#"{"app_id":"ignored","app_title":"test","app_version":1,"continue_command":{"argv":["/app"]}}"#)
+            .file(sandstorm_package::File::executable("app", b"fixture".to_vec()))
+            .file(sandstorm_package::File::regular("import-policy.json", b"untrusted policy".to_vec()))
+            .pack(&ed25519_dalek::SigningKey::from_bytes(&[9;32]));
+        fs::write(&package, &bytes).unwrap();
+        let app_uid = unsafe { libc::geteuid() }.wrapping_add(1);
+        let installed = materialize_spk_with_profile(
+            &package,
+            &scratch,
+            app_uid,
+            ImportProfile::OperatorAppliance,
+        )
+        .unwrap();
+        assert_eq!(
+            retained_import_profile(&installed.directory).unwrap(),
+            ImportProfile::OperatorAppliance
+        );
+        assert_eq!(
+            fs::read(installed.directory.join("root/app")).unwrap(),
+            b"fixture"
+        );
+        assert_eq!(
+            fs::read(installed.directory.join("root/import-policy.json")).unwrap(),
+            b"untrusted policy"
+        );
+        assert_eq!(
+            fs::read(installed.directory.join("package.spk")).unwrap(),
+            bytes
+        );
+        let reopened = verify_installed_spk(&installed.directory, app_uid).unwrap();
+        assert_eq!(reopened.raw_sha256_bytes, installed.raw_sha256_bytes);
+        assert_eq!(
+            reopened.signed_manifest_sha256,
+            installed.signed_manifest_sha256
+        );
+        assert_eq!(
+            materialize_spk(&package, &scratch, app_uid)
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        let policy = installed.directory.join("import-policy.json");
+        fs::set_permissions(&policy, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(verify_installed_spk(&installed.directory, app_uid).is_err());
+        fs::set_permissions(&installed.directory, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::remove_file(&policy).unwrap();
+        assert_eq!(
+            retained_import_profile(&installed.directory).unwrap(),
+            ImportProfile::Standard
+        );
+        assert!(verify_installed_spk(&installed.directory, app_uid).is_ok());
+        std::os::unix::fs::symlink("root/import-policy.json", &policy).unwrap();
+        assert!(verify_installed_spk(&installed.directory, app_uid).is_err());
     }
 }

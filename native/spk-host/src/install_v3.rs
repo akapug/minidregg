@@ -1,7 +1,7 @@
 //! Launch-bound INSTALL in two physical phases. Historical v1 attempts stay
 //! in their own namespace and never supply a v2 launch root.
 
-use super::{invalid, InstallConfig, MAX_CONFIG, MAX_SPK};
+use super::{invalid, InstallConfig, MAX_CONFIG};
 use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_native::{write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -22,7 +22,7 @@ use crate::lifecycle_v3_native::{
 use crate::lifecycle_v3_report_native::{
     prepare_once as prepare_report_once, PhysicalMode, ReportInput,
 };
-use crate::materialize::{qualify_bridge_spk, verify_installed_spk, InstalledPackage};
+use crate::materialize::{qualify_bridge_spk_with_profile, verify_installed_spk, InstalledPackage};
 use crate::resident_launch::SourceBoundLaunch;
 use crate::sandbox::open_protected_directory;
 use serde::Deserialize;
@@ -280,12 +280,11 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
         config.app_uid,
         false,
     )?;
-    let source = super::private_file(&config.source_spk, MAX_SPK)?;
-    if super::hex(&Sha256::digest(&source)) != config.expected_raw_sha256 {
-        return Err(invalid("v3 INSTALL source SPK differs from pinned raw SHA"));
-    }
-    drop(source);
-    let (package, _) = qualify_bridge_spk(&config.source_spk)?;
+    let profile = config.selected_import_profile()?;
+    // Check private source custody without allocating the compressed package. The
+    // verifier hashes the same bounded snapshot whose archive/signature it verifies.
+    let _source = super::open_private_file(&config.source_spk, profile.limits().raw_bytes)?;
+    let (package, _) = qualify_bridge_spk_with_profile(&config.source_spk, profile)?;
     if package.raw_sha256 != config.expected_raw_sha256 {
         return Err(invalid("v3 INSTALL signed source SPK changed"));
     }
@@ -521,8 +520,7 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
         || receipt.get("eventId").and_then(Value::as_str) != Some(claim.event_id.as_str())
         || receipt.get("acceptedCount").and_then(Value::as_str)
             != Some(claim.accepted_count.as_str())
-        || receipt.get("worldRoot").and_then(Value::as_str)
-            != Some(claim.world_root.as_str())
+        || receipt.get("worldRoot").and_then(Value::as_str) != Some(claim.world_root.as_str())
     {
         return Err(invalid(
             "v3 INSTALL retained source claim inspection differs",
@@ -712,6 +710,7 @@ mod tests {
             source_spk: PathBuf::from("/nonexistent/source.spk"),
             image_dir: PathBuf::from("/nonexistent/image"),
             expected_raw_sha256: "a".repeat(64),
+            import_profile: None,
             app_uid: 12345,
             deployment_id: Some("d".repeat(64)),
             host_id: Some("e".repeat(64)),

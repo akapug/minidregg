@@ -195,6 +195,9 @@ pub struct BrokerConfig {
     pub bwrap: PathBuf,
     pub bwrap_sha256: String,
     pub ingest_helper: PathBuf,
+    /// Operator-selected physical intake budget; never accepted in an Ingest request.
+    #[serde(default)]
+    pub import_profile: Option<String>,
     pub volume_helper: PathBuf,
     pub app_uids: Vec<u32>,
     #[serde(default)]
@@ -244,7 +247,7 @@ fn validate_world_package_namespace(store: &str, world: &Path, packages: Option<
     Ok(())
 }
 
-fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32) -> io::Result<Vec<String>> {
+fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32, profile: crate::materialize::ImportProfile) -> io::Result<Vec<String>> {
     let (_,expected_inbox)=spk_namespace_paths(root)?;
     if inbox.parent()!=Some(expected_inbox.as_path()) {
         return Err(invalid("ingest package is outside selected SPK inbox"));
@@ -253,9 +256,17 @@ fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Pa
     if let Some(root)=root {
         args.extend(["--root".to_owned(),root.to_str().ok_or_else(||invalid("SPK root path"))?.to_owned()]);
     }
+    if profile != crate::materialize::ImportProfile::Standard {
+        args.extend(["--import-profile".to_owned(), profile.as_str().to_owned()]);
+    }
     args.extend([host.to_str().ok_or_else(||invalid("Host path"))?.to_owned(),host_sha.to_owned(),
         inbox.to_str().ok_or_else(||invalid("inbox path"))?.to_owned(),uid.to_string()]);
     Ok(args)
+}
+
+fn import_profile(config: &BrokerConfig) -> io::Result<crate::materialize::ImportProfile> {
+    config.import_profile.as_deref().unwrap_or("standard-v1").parse()
+        .map_err(|_| invalid("unknown operator importProfile"))
 }
 
 pub(crate) fn image_path_from_identity(identity: &Value, raw_sha256: &str) -> io::Result<PathBuf> {
@@ -601,6 +612,7 @@ impl Broker {
     fn load(config_path: &Path) -> io::Result<Self> {
         let config: BrokerConfig =
             serde_json::from_slice(&read_private_operator(config_path, MAX_CONFIG)?)?;
+        import_profile(&config)?;
         if config.protocol != "mini-spk-broker-config-v3"
             || !store_key(&config.store)
             || config.grains_root.file_name().and_then(|n|n.to_str())!=Some(config.store.as_str())
@@ -928,12 +940,15 @@ impl Broker {
                 let image = package_store.join(format!("sha256-{sha256}"));
                 if fs::symlink_metadata(&image).is_err() {
                     let package = format!("sha256-{sha256}");
-                    let mut source = open_operator_file(
+                    let source = open_operator_file(
                         self.root(),
                         &[&store, "host", "packages", &package, "package.spk"],
                         self.operator_uid,
                     )?;
-                    if source.metadata()?.len() > 256 * 1024 * 1024 {
+                    let profile = import_profile(&self.config)?;
+                    let bound = profile.limits().raw_bytes;
+                    let source_length = source.metadata()?.len();
+                    if source_length > bound {
                         return Err(invalid("staged package exceeds bound"));
                     }
                     let inbox = private_inbox.join(format!("grain-{sha256}.spk"));
@@ -944,7 +959,11 @@ impl Broker {
                         .create_new(true)
                         .mode(0o600)
                         .open(&temp)?;
-                    io::copy(&mut source, &mut out)?;
+                    let copied = io::copy(&mut source.take(bound + 1), &mut out)?;
+                    if copied > bound || copied != source_length {
+                        let _ = fs::remove_file(&temp);
+                        return Err(invalid("staged package changed or exceeds import profile bound"));
+                    }
                     out.sync_all()?;
                     if file_sha256(&mut File::open(&temp)?)? != sha256 {
                         let _ = fs::remove_file(&temp);
@@ -952,7 +971,7 @@ impl Broker {
                     }
                     fs::rename(&temp, &inbox)?;
                     let arguments=ingest_arguments(self.config.spk_root.as_deref(),&runtime.spk_host,
-                        &runtime.spk_host_sha256,&inbox,placement.app_uid)?;
+                        &runtime.spk_host_sha256,&inbox,placement.app_uid,profile)?;
                     let borrowed=arguments.iter().map(String::as_str).collect::<Vec<_>>();
                     helper(&self.config.ingest_helper,&borrowed)?;
                 }
@@ -1267,7 +1286,7 @@ mod tests {
     #[test]
     fn spk_namespace_refuses_missing_world_namespace() {
         assert!(spk_namespace_paths(None).is_err());
-        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536).is_err());
+        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536,crate::materialize::ImportProfile::Standard).is_err());
     }
 
     #[test]
@@ -1277,11 +1296,11 @@ mod tests {
         assert_eq!(packages,root.join("packages"));
         assert_eq!(inbox,root.join("inbox"));
         let args=ingest_arguments(Some(root),Path::new("/root/candidate/spk-host"),"hash",
-            &inbox.join("grain-package.spk"),64010).unwrap();
+            &inbox.join("grain-package.spk"),64010,crate::materialize::ImportProfile::Standard).unwrap();
         assert_eq!(&args[..2],["--root","/var/lib/mini-bigstep-hbox-r2/spk"]);
         assert_eq!(args[4],"/var/lib/mini-bigstep-hbox-r2/spk/inbox/grain-package.spk");
         assert!(ingest_arguments(Some(root),Path::new("/root/spk-host"),"hash",
-            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010).is_err());
+            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010,crate::materialize::ImportProfile::Standard).is_err());
     }
 
     #[test]
@@ -1309,6 +1328,9 @@ mod tests {
     #[test]
     fn protocol_refuses_unknown_verbs_and_fields() {
         assert!(serde_json::from_str::<Request>(
+            r#"{"verb":"ingest","store":"0123456789abcdef","app":"7","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","importProfile":"operator-appliance-v1"}"#
+        ).is_err());
+        assert!(serde_json::from_str::<Request>(
             r#"{"verb":"start","unit":"mini-spk-s0123456789abcdef-a1-g2.service"}"#
         )
         .is_ok());
@@ -1321,6 +1343,19 @@ mod tests {
             r#"{"verb":"install-unit","store":"0123456789abcdef","app":"7","generation":"2","unitText":"x"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn operator_import_profile_reaches_helper_without_changing_package_coordinates() {
+        let root = Path::new("/var/lib/mini-spk-worlds/0123456789abcdef/spk");
+        let package = root.join("inbox/package.spk");
+        let args = ingest_arguments(Some(root), Path::new("/operator/spk-host"), "pin",
+            &package, 64010, crate::materialize::ImportProfile::OperatorAppliance).unwrap();
+        assert_eq!(&args[2..4], ["--import-profile", "operator-appliance-v1"]);
+        assert_eq!(args[4], "/operator/spk-host");
+        assert_eq!(args[6], package.to_str().unwrap());
+        assert_eq!(args[7], "64010");
+        assert!("unlimited".parse::<crate::materialize::ImportProfile>().is_err());
     }
 
     #[test]
