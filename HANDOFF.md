@@ -1,53 +1,33 @@
-# Mini / agent-grain handoff
+# Start here (2026-10-26)
 
-**Current direction, September 28 UTC:** build the programmable Mini resource
-world through common participant, human-client and Hermes contracts. Read the
-suite's [current handoff](https://github.com/emberian/dregg-assortia/blob/main/HANDOFF.md)
-and [bounded recovery construction mandate](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-28/recovery-construction.md).
-The September 27 [platform reorientation](https://github.com/emberian/dregg-assortia/blob/main/research/platform-reorientation-2026-09-27.md)
-supersedes the fixture-first instructions below. Application grains are instances,
-not the organizing architecture. The preserved r3 INSTALL refusal is not an
-instruction to retry it. Source/component evidence is not deployment qualification.
+**The plan is [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md):** the finite
+prefix from main to a public Mini on Hetzner with every surface on, then the coherence work that
+follows. It is a present-state document and is rewritten whole when the state changes.
 
-**Historical September 27 construction goal:** read the suite's
-[SPK application platform cycle](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/spk-platform-cycle.md).
-Ember cleared the previous goal after a retrospective and requested substantially
-greater use of actual packaged apps, shared browser/API access and fn version
-publication. Mini remains the semantic construction home. Prior lanes stopped
-safely; current work grounds actual package execution and implements the missing
-application lifecycle and compatibility contract. Existing independent fixture
-results are not a combined SPK deployment.
+**The evidence behind it is the review corpus under [`docs/review/`](docs/review/):**
 
-**Previous September 26 overnight construction:** the suite's
-[current construction brief](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/overnight.md)
-and [construction checkpoint](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/checkpoint-17.md).
-Main now contains the recovered fn integration lineage and persistent-host,
-gateway-policy and client checkpoints. Native convergence, actual hosted
-grain supervision and fn receiving tests are ongoing. The [fresh fn evidence](docs/evidence/2026-09-26-fresh-fn/README.md)
-preserves the earlier failures; a [fresh typed A/B exchange](docs/evidence/2026-09-26-fresh-fn/public-ab-socket-bbf/README.md)
-now passes on the qualified fn image. The [persistent-host evidence](docs/evidence/2026-09-26-host-session/README.md)
-records the initial exact-source native build, valid rollback/fork refusal and
-matched cold/persistent latency. Later grain/fn source is still converging;
-do not infer a finished service from a commit.
+| directory | what it answers |
+|---|---|
+| `2026-10-26-history/HISTORY.md` | what the Aug–Oct sessions did, decided and abandoned; why "rip and tear" never started; the one public node |
+| `2026-10-26-deploy/HCLOUD-GAP.md` | the gap from main to a URL a stranger can use (22 items, three shapes) |
+| `2026-10-26-deploy/AFFORDANCES.md` | what Mini exposes today: CLI, shell verbs, SDKs, protocol, Hermes, datamodel, performance vs the bar |
+| `2026-10-26-deploy/WEB-SPK-PUBLIC.md` | the public web docuverse and SPK grain path; identity in the browser; the week-1 list |
+| `2026-10-26-native-crates/SYNTHESIS.md` | every Rust crate read whole: where Rust decides semantics, the triage, the literature, the Rust prefix |
+| `2026-10-26-triage/RUST-TRIAGE.md`, `LEAN-TRIAGE.md` | the unanchored second opinions: what to delete now, what to rescue, what to move to the research repos |
 
-The September 19 construction cycle is complete. Start with the suite's
-**[handoff for a new person or agent](https://github.com/emberian/dregg-assortia/blob/main/HANDOFF.md)**
-(local sibling: `../dregg-assortia/HANDOFF.md`). It contains accepted decisions,
-source-scoped results, next work, actual run commands and local-only artifact
-boundaries. Assortia owns current project status; this page is a pointer.
+**The live system:** one public node, `dregg-workhorse` (Hetzner cx33, fsn1), serving candidate
+`5688775a` of 2026-09-30 over ssh; roster = ember plus three test keys. Its replacement is the
+confined box described in `~/dev/dregg-infra` branch `demo-vm` (`edge/demo/CONFINEMENT.md`,
+`CHECKLIST.md`). The deploy frame, runbook and gate live in `~/dev/dregg-infra/edge/mini`.
 
-Then read [the cycle contract and completed result](docs/CYCLE-2026-09-19.md)
-and [the Rust client interface and acceptance recipes](native/resource-client/README.md).
-Semantic checkpoint `66d74dd` has the complete source-matched umbrella/native
-build; the fresh full journey and later exact replay checks have distinct
-executed-artifact scopes documented in the result. Do not treat a newer checkout
-or untracked build output as already validated.
+**The rules every lane obeys** are in the plan's §4 and in [`CLAUDE.md`](CLAUDE.md) /
+[`AGENTS.md`](AGENTS.md); the founding laws are in [`ATLAS.md`](ATLAS.md) §6.
 
-Next construction joins persistent verified host sessions with actual hosted
-Nous Hermes/tool supervision. Existing resource semantics and a kernel stale-worker
-fence do not establish a hosted service or physical process interruption.
+**Sibling repositories:** `~/dev/nanodregg` (the object of study; its laws are the target
+shape of the consolidation), `~/dev/breadstuffs` (the whole first system, resumed or composted
+later), `~/dev/zkml-research` and `~/dev/degg-research` (where the proof-system and MPC research
+in this tree moves), `~/dev/o7vn` (veri7vn, arriving here as an SPK appliance), `~/dev/fn`
+(the NNTP transport; its own sessions).
 
-This tree is shared and contains unrelated WIP. Preserve it, inspect ownership
-before editing, and use the bounded shell build scripts in an independent snapshot.
-The untracked Python platform/build attempts are not the accepted implementation
-route. No new implementation cycle is launched merely by reading this handoff.
+Older orientation (`GOAL.md`, `REORIENTATION.md`, `PROJECT.md`, the dregg-assortia pointers)
+is history, kept for its dated scope; nothing in it is current authority.
