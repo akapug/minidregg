@@ -8,3 +8,6 @@
 /target-gates/
 /.spw/_workbench
 __pycache__/
+
+# cargo build output anywhere in the tree (native/*/target, prover/target)
+target/
