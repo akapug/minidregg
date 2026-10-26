@@ -124,3 +124,14 @@ unchanged for Oracle.
 The detailed review and subsequent dispositions are in
 `oracle-integration-review-2026-10-26.md`. Unrelated Mini review and Lean work
 from the concurrent session remain outside this change.
+
+## Upstream writer follow-up
+
+The pinned Bread revision `5819115352bdfa43c5cbd329727d4f8d8a1b5be9` has an
+empty-file encoding defect in `sandstorm-package/src/capnp_wire.rs:535`:
+`bytes_ptr_at` writes pointer word `1` for empty Data, selecting a void list
+instead of a byte list. The generated Cap'n Proto reader rejects that encoding.
+Fix the writer to retain the byte element tag and test its output with an
+independent decoder before updating the dependency. Mini's generated-schema
+fixture already verifies that correctly encoded empty files work; it does not
+make the old writer's invalid output valid. No upstream writer fix landed here.
