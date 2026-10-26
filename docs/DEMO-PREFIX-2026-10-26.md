@@ -43,9 +43,18 @@ six to eight parallel lanes, with four long poles (§3).
   (fixture-only), required rows `jpay/JPAY6`, `m6grain`, `m7`; pending rows `births`,
   `HERMES-LIVE`, `jcertify`. The hbox standing run of Oct 16 was PASS 136 / FAIL 2 /
   UNCONFIGURED 6 / UNJUDGED 3.
-- **An hbox candidate build of main is in flight** (`/tank/dregg-build/claude-candidate-20261026/`);
-  its report lands at `docs/review/2026-10-26-deploy/HBOX-CANDIDATE-a0db11f8.md` with the
-  first recorded cold wall time at the 784-module closure and the `jdeploy3` verdict per phase.
+- **A candidate of main `a0db11f8` was built on hbox today**
+  (`docs/review/2026-10-26-deploy/HBOX-CANDIDATE-a0db11f8.md`): 35 minutes from fetch to
+  candidate off the warm base (host C-compile + link 454 s; the cold Lean time is still
+  unmeasured because every module replayed). Journey rows: PASS 136 / FAIL 2 / UNCONFIGURED 6 /
+  UNJUDGED 3, the same shape as main's Oct 16 baseline (JPAY6 fails on a 70-byte socket-path
+  row in the journey driver; m6grain needs a sudoers rule). **`jdeploy3` FAILS** twice over:
+  (1) growth is over the write bar at every level on a loaded box (max 6.1 s at 10 records;
+  p99 12.3 s, max 57.3 s at 1000; reopen 11.8 s is fine); (2) the composed scenario never
+  started because dregg-infra's `candidate_manifest()` (`edge/mini/lib.sh`) rewrites the
+  manifest without the `minidregg-candidate-manifest-v2` type that Mini's `run.sh` has
+  required since `295cab11` (Oct 8). `ship.sh:185` uses the same function, so **no v2
+  candidate can ship until dregg-infra is fixed**.
 - **dregg-infra is reconciled locally** (merge `7260dee`, roster landmine fix `4fd80fa`,
   `demo-vm` branch with the confined box: `edge/demo/`, `edge/tofu-demo/`, merged with main at
   `bfa0972`). Nothing pushed, nothing applied. The tail-bound certifier branch
@@ -71,7 +80,8 @@ L > 3 days. Sources: `SYNTHESIS.md` §F (Rust), `LEAN-TRIAGE.md` §3–§4 (Lean
 | 0.2 | Push `dregg-infra` main and `demo-vm` to the hbox mirror and the anchor (both fast-forward; fetch both first) | integrator | S |
 | 0.3 | hcloud project `dreggnet-demo` + token in 1Password; DNS `demo.dregg.online`, `calc.demo.dregg.online`; `edge/demo/friends/ember.pub`; the external accounts: Discord application, OpenRouter pool key **with a spend limit**, two Solana mainnet RPC endpoints, the enrolment address (#2, #18, #21, PAY) | ember | S |
 | 0.4 | Genesis for the new box: `issuanceCap`, `clock.genesisNow`/`maxStepSeconds`, `lifetime` raised from 10,000 records (about 7 days of minute ticks) (#5, #7); sponsor key custody choice (#16) | integrator | S |
-| 0.5 | Read the hbox candidate report; add its reds to the lane briefs (#3) | orchestrator | S |
+| 0.5 | dregg-infra: `candidate_manifest()` emits the v2 manifest type (and `ship.sh` with it); re-run `jdeploy3` on the existing candidate so the composed phases are actually judged | integrator | S |
+| 0.6 | hbox: the sudoers rule for `install-user-world` admits the candidate lane's tree so m6grain is exercised; stop the three orphaned journey-world processes in `run-u59970.scope` (no PID file: ember's call) | ember / integrator | S |
 
 ### Phase 1: code lanes (days 2–9, parallel; one Host rebuild at the end)
 
@@ -86,6 +96,7 @@ L > 3 days. Sources: `SYNTHESIS.md` §F (Rust), `LEAN-TRIAGE.md` §3–§4 (Lean
 | **L7 web (resource-client)** | `mini web --read-only` and `--render-static` under uid `mini-pubread` with no network, served by Caddy (W1–W3); the `public` reader subject and its snapshot timer; history/diff escapes rendered one-line; a malformed shared-name link renders invalid instead of breaking every reader; a lower per-op Host budget or per-uid share | `web/surface.rs`, `world_surface.rs`; the `include_str!` templates move into the crate | S×3 |
 | **L8 fn + fleet + selected** | one unit and one journey row for the fn consumer worker; fn-r route; one NNTP repost rule; `fleet_sign` receipts are Lean's four fields | the fn-e path; `fn_namespace`/`fn_frontier` twins (1,462) after the fn protocol rewrite; `publisher.rs` (552) | M |
 | **L9 build + deploy + gate** | every crate a workspace member or an explicit `exclude` with a reason, gated (today `prover`, `hyperdocument-link-store`, `bend-ir2-proof` are unbuildable and their tests silently stopped); `lib.sh` optional roles optional; test fixtures out of `RUST_ROLES`; `hermes-test-provider` leaves the candidate; the journey split into a demo journey inside the 3 h gate and a nightly kernel journey; `m6.sh` as a thin wrapper over `two-world-journey.sh` plus an edge phase (D9) | GitWeb root chain (601, calls a 6-argument contract with 4), `probe_control.rs` (does not compile), `host-frontend.rs` (744, a hand op allowlist), MUD `sim.py` (433, a hand twin of `Pred.eval`), `package.py --capsule` (always dies), stray `Cargo.lock`s, the bend pair (874, ruling Q4) | M |
+| **L11 performance (the growth bar)** | measure the write path on a quiet box first (today's G ran at load 7–16); then the named costs: consent replay per signing, the serial Host thread, the 4–5 Host processes per request, room create 262 s; the bar is write p99 ≤ 5 s and reopen ≤ 60 s at 1000 records, and `jdeploy3` refuses without it, so this is Phase 1 work, not Phase 3 | — | M |
 | **L10 docs** | present-state rewrite of the 25 documents the code contradicts (`RUST-TRIAGE.md` §2.3), the README honest-state table, FRIENDS.md for the shipped candidate, OPERATOR.md, `DURABLE-STORE.md`, the two SPK contracts, this file's companion HANDOFF.md | the `docs/evidence` dirs that no gate reads are left alone until the research move (§3 Phase 3) | S–M |
 
 Phase 1 deletes ~24,400 Rust lines and ~3,967 Lean lines as the last step of its merges
@@ -122,7 +133,7 @@ record, per-call fence, mirror fix) and ~1K of Lean.
 | C5 | **One wire**: generated op constants at all 159 literal sites, consent namespace 220–233 registered, envelope v1 refused after the three senders and nine scripts migrate, the agent API wire in `spk-rpc` | M |
 | C6 | **The grain economy in Lean**: a grain work tariff, the provider route bound to an operator table digest, paid-slot room admission carrying the ledger `transactionId`; delete the Rust concierge decision and room-turn sequencing | L + M |
 | C7 | Never-admissible witness + settle-by-anchor (Lean); private rooms owned by Lean (`Kernel/RoomRelease*` wired); receipts with inclusion (op 151); the two choreographies (grain purse lifecycle, SPK lifecycle) as Lean data with projected Rust skeletons | L each |
-| C8 | Performance against the bar: measure main first (the Oct 14–17 perf landings have no post-landing number), room create 262 s and resolve 6 s, a 10k-record soak, the in-process codec (~68% of a read), the serial Host submit profile, SPK STOP's five re-hashes of the 159 MB image | M each |
+| C8 | Performance beyond the bar (L11 meets it): a 10k-record week-scale soak, the in-process codec (~68% of a read), the serial Host submit profile, SPK STOP's five re-hashes of the 159 MB image | M each |
 
 ## 4. Rules for the prefix (from `HISTORY.md` §8, binding on every lane brief)
 
