@@ -1,0 +1,410 @@
+{
+  "created_utc": "2026-10-02T10:03:12.385923+00:00",
+  "system": "Darwin nextop.local 25.6.0 Darwin Kernel Version 25.6.0: Sat Jul 11 15:25:34 PDT 2026; root:xnu-12377.161.13~4/RELEASE_ARM64_T6020 arm64",
+  "hardware": [
+    "Mac14,5",
+    "12",
+    "103079215104",
+    "Apple M2 Max"
+  ],
+  "rustc": "rustc 1.98.0-nightly (8b6558a02 2026-06-20)",
+  "load": "6:03  up 7 days,  5:37, 66 users, load averages: 16.77 10.80 9.36",
+  "scope": "in-process release component costs; one actual single-source canonical roster encoded by qualified source codec; no authority/custody/network throughput claim",
+  "groups": {
+    "keygen": {
+      "timing": {
+        "wall_ns": {
+          "samples": 100,
+          "min_ns": 24334,
+          "median_ns": 24500.0,
+          "mean_ns": 24983.35,
+          "p95_nearest_rank_ns": 27583,
+          "max_ns": 33041
+        },
+        "cpu_ns": {
+          "samples": 100,
+          "min_ns": 24000,
+          "median_ns": 25000.0,
+          "mean_ns": 25370,
+          "p95_nearest_rank_ns": 28000,
+          "max_ns": 34000
+        }
+      }
+    },
+    "message": {
+      "seal": {
+        "wall_ns": {
+          "samples": 100,
+          "min_ns": 20250,
+          "median_ns": 20520.5,
+          "mean_ns": 20881.68,
+          "p95_nearest_rank_ns": 23125,
+          "max_ns": 26667
+        },
+        "cpu_ns": {
+          "samples": 100,
+          "min_ns": 20000,
+          "median_ns": 21000.0,
+          "mean_ns": 21190,
+          "p95_nearest_rank_ns": 23000,
+          "max_ns": 27000
+        }
+      },
+      "open": {
+        "wall_ns": {
+          "samples": 100,
+          "min_ns": 39708,
+          "median_ns": 40375.0,
+          "mean_ns": 40685.04,
+          "p95_nearest_rank_ns": 42375,
+          "max_ns": 45292
+        },
+        "cpu_ns": {
+          "samples": 100,
+          "min_ns": 40000,
+          "median_ns": 41000.0,
+          "mean_ns": 41010,
+          "p95_nearest_rank_ns": 43000,
+          "max_ns": 46000
+        }
+      },
+      "wire_bytes": [
+        1318
+      ],
+      "plaintext_bytes": [
+        1024
+      ]
+    },
+    "epoch-1": {
+      "issue": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 188750,
+          "median_ns": 199479.0,
+          "mean_ns": 210862.4,
+          "p95_nearest_rank_ns": 333791,
+          "max_ns": 333791
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 189000,
+          "median_ns": 200500.0,
+          "mean_ns": 212200,
+          "p95_nearest_rank_ns": 342000,
+          "max_ns": 342000
+        }
+      },
+      "receive_all": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 138041,
+          "median_ns": 148812.0,
+          "mean_ns": 158779,
+          "p95_nearest_rank_ns": 215083,
+          "max_ns": 215083
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 138000,
+          "median_ns": 149500.0,
+          "mean_ns": 158300,
+          "p95_nearest_rank_ns": 207000,
+          "max_ns": 207000
+        }
+      },
+      "receive_single": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 135083,
+          "median_ns": 147687.5,
+          "mean_ns": 147087.5,
+          "p95_nearest_rank_ns": 158000,
+          "max_ns": 158000
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 135000,
+          "median_ns": 148500.0,
+          "mean_ns": 147600,
+          "p95_nearest_rank_ns": 159000,
+          "max_ns": 159000
+        }
+      },
+      "manifest_bytes": [
+        3946
+      ],
+      "roster_bytes": [
+        145
+      ],
+      "binary_wrap_bytes_each": [
+        1192
+      ],
+      "json_hex_wrap_bytes_each": [
+        2384
+      ],
+      "publickey_bytes_each": [
+        1216
+      ],
+      "size_breakdown_bytes": {
+        "complete_manifest": 3946,
+        "u64_length_and_ed25519_signature": 72,
+        "binary_wraps_if_unencoded": 1192,
+        "hex_wrap_content": 2384,
+        "canonical_roster_binary": 145,
+        "hex_roster_content": 290,
+        "other_json_metadata_and_delimiters": 1200
+      }
+    },
+    "epoch-10": {
+      "issue": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 1383333,
+          "median_ns": 1463479.0,
+          "mean_ns": 1472004.3,
+          "p95_nearest_rank_ns": 1584292,
+          "max_ns": 1584292
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 1383000,
+          "median_ns": 1463500.0,
+          "mean_ns": 1466900,
+          "p95_nearest_rank_ns": 1559000,
+          "max_ns": 1559000
+        }
+      },
+      "receive_all": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 2655000,
+          "median_ns": 2811896.0,
+          "mean_ns": 2810037.6,
+          "p95_nearest_rank_ns": 3019542,
+          "max_ns": 3019542
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 2655000,
+          "median_ns": 2811500.0,
+          "mean_ns": 2799800,
+          "p95_nearest_rank_ns": 2959000,
+          "max_ns": 2959000
+        }
+      },
+      "receive_single": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 258958,
+          "median_ns": 276604.0,
+          "mean_ns": 281712.4,
+          "p95_nearest_rank_ns": 314292,
+          "max_ns": 314292
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 259000,
+          "median_ns": 277500.0,
+          "mean_ns": 281200,
+          "p95_nearest_rank_ns": 307000,
+          "max_ns": 307000
+        }
+      },
+      "manifest_bytes": [
+        28814
+      ],
+      "roster_bytes": [
+        811
+      ],
+      "binary_wrap_bytes_each": [
+        1192
+      ],
+      "json_hex_wrap_bytes_each": [
+        2384
+      ],
+      "publickey_bytes_each": [
+        1216
+      ],
+      "size_breakdown_bytes": {
+        "complete_manifest": 28814,
+        "u64_length_and_ed25519_signature": 72,
+        "binary_wraps_if_unencoded": 11920,
+        "hex_wrap_content": 23840,
+        "canonical_roster_binary": 811,
+        "hex_roster_content": 1622,
+        "other_json_metadata_and_delimiters": 3280
+      }
+    },
+    "epoch-100": {
+      "issue": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 13292209,
+          "median_ns": 13529896.0,
+          "mean_ns": 13527979,
+          "p95_nearest_rank_ns": 13742583,
+          "max_ns": 13742583
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 13288000,
+          "median_ns": 13507000.0,
+          "mean_ns": 13485700,
+          "p95_nearest_rank_ns": 13671000,
+          "max_ns": 13671000
+        }
+      },
+      "receive_all": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 157009375,
+          "median_ns": 158657187.5,
+          "mean_ns": 159257504.1,
+          "p95_nearest_rank_ns": 162180041,
+          "max_ns": 162180041
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 156895000,
+          "median_ns": 158446000.0,
+          "mean_ns": 158900300,
+          "p95_nearest_rank_ns": 161513000,
+          "max_ns": 161513000
+        }
+      },
+      "receive_single": {
+        "wall_ns": {
+          "samples": 10,
+          "min_ns": 1541709,
+          "median_ns": 1587604.0,
+          "mean_ns": 1616437.5,
+          "p95_nearest_rank_ns": 1760208,
+          "max_ns": 1760208
+        },
+        "cpu_ns": {
+          "samples": 10,
+          "min_ns": 1542000,
+          "median_ns": 1586500.0,
+          "mean_ns": 1614100,
+          "p95_nearest_rank_ns": 1748000,
+          "max_ns": 1748000
+        }
+      },
+      "manifest_bytes": [
+        277607
+      ],
+      "roster_bytes": [
+        7487
+      ],
+      "binary_wrap_bytes_each": [
+        1192
+      ],
+      "json_hex_wrap_bytes_each": [
+        2384
+      ],
+      "publickey_bytes_each": [
+        1216
+      ],
+      "size_breakdown_bytes": {
+        "complete_manifest": 277607,
+        "u64_length_and_ed25519_signature": 72,
+        "binary_wraps_if_unencoded": 119200,
+        "hex_wrap_content": 238400,
+        "canonical_roster_binary": 7487,
+        "hex_roster_content": 14974,
+        "other_json_metadata_and_delimiters": 24161
+      }
+    }
+  },
+  "execution": {
+    "arguments": [
+      "/Users/ember/workbox/mini-private-objects-20261002/component-refresh-target/release/mini-object-components",
+      "/Users/ember/workbox/mini-private-objects-20261002/src/native/resource-client/benchmarks/object-components/wait-for-codec.sh",
+      "/home/ember/build/mini-private-objects-20261002/src",
+      "/Users/ember/dev/minidregg/docs/evidence/2026-10-02-private-object-components/2026-10-02T09-24-final-source"
+    ],
+    "benchmark_binary_sha256": "278f986ee541d716995f9ac894c858aee9a9600aa5c4a4871562319b9cc5340d",
+    "compiled_source_sha256": {
+      "benchmarks/object-components/Cargo.lock": "033618687901f6cf93a7bdd0515edd050b9436c95d0ce045d7ad3ee1782eb74e",
+      "benchmarks/object-components/src/main.rs": "5e299a1912ad4bc196fc24aa89e7662048e1408567fd3a4e11038943f1821331",
+      "src/object_keys_hybrid.rs": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+      "src/object_messages.rs": "5b4f4e44bacd9160aa0a05133ec186ea870f6d037a5c60ba17b615036d314c12",
+      "src/private.rs": "7d330315784aa4e6354d86a31bda4efca20042a63df8521d0aed6ea8ce83f0f7",
+      "src/roomkey.rs": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703"
+    },
+    "device_counts": [
+      1,
+      10,
+      100
+    ],
+    "fixture": "single source2000, actual source roster/device commitments; synthetic authority/history/context labels; no accepted authority",
+    "samples": {
+      "epoch_per_device_count": 10,
+      "keygen": 100,
+      "message": 100
+    },
+    "timing": "Instant wall ns; getrusage user+system CPU microsecond resolution; one primitive warmup; release process; excludes codec/key provisioning/network/native admission/custody/fsync"
+  },
+  "codec_provenance": {
+    "command": [
+      "lake",
+      "env",
+      "lean",
+      "--root=/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp",
+      "--run",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/EncodeRoster.lean",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-1.json",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-1.bin",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-10.json",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-10.bin",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-100.json",
+      "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-100.bin"
+    ],
+    "result": 0,
+    "qualification": "Actual source-owned Compiler.ObjectAudienceRoster encoder and digest definitions evaluated by Lean --run against coherent direct-compiled dependency artifacts; component data is not source authority acceptance.",
+    "roster_source_sha256": "cf2420ce84f5ae5ca11d31f3fc5a1c25580c245cd14f0998d8db60ce7df99e34",
+    "roster_olean_sha256": "a71ec38c7ae5823e2f9f8a8f365cf295b656f2f2cfcd70d5608451c6693cd174",
+    "roster_c_sha256": "f897bf016459a26542e53072b4ab45c30f84edacebdeffea39f160bf5b86db5f",
+    "driver_sha256": "9b77573e2d5220d10be57e05c12cd71349c91f225aa15685e5588ee5e7de40a9",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lean_version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)",
+    "files": {
+      "roster-10.json": {
+        "sha256": "a32ee9289e893acd3d8be98280d945954039849e895ffcb95271fa0828d5c6ff",
+        "bytes": 3252
+      },
+      "roster-1.json": {
+        "sha256": "77a65a323220d9631e661a84187de9ad17e292406ec37f7fcf7d446f326c7698",
+        "bytes": 528
+      },
+      "roster-10.bin.meta.json": {
+        "sha256": "3d0c166c203d5a7feb4275a75df3e8ba79129d38afd9bd10267d583dc4a4c15f",
+        "bytes": 182
+      },
+      "roster-100.bin.meta.json": {
+        "sha256": "a194889e6cf4a10593094b1f79385473ace2d3e7614e11f7268ee203d0f19070",
+        "bytes": 183
+      },
+      "roster-1.bin.meta.json": {
+        "sha256": "25a010846b878eff0c9a099a5ce2842d550779c0ff2397e2bfa0c1731d5c030b",
+        "bytes": 182
+      },
+      "roster-100.json": {
+        "sha256": "2518f09345f4bd058fb8e797328ef5df0c9302f1b1da20a6f354a46a0e4e1d00",
+        "bytes": 30617
+      },
+      "roster-1.bin": {
+        "sha256": "f223999ba720db1a032c1df6860b10d332521e6ae6bd8722dfd0b2242203b4bc",
+        "bytes": 145
+      },
+      "roster-100.bin": {
+        "sha256": "d8b17e12f4cef8dfd5d7abd270820141a6d9c34eb2516c467f655139752583a0",
+        "bytes": 7487
+      },
+      "roster-10.bin": {
+        "sha256": "75738cf80593e5839ab27d8ee86608b1572c7fe1d46261412b876f784db0a340",
+        "bytes": 811
+      }
+    }
+  }
+}

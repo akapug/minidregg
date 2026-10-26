@@ -1,0 +1,10 @@
+baseline_snapshot=/private/tmp/minidregg-provider-ownr-stable-native
+baseline_output=/private/tmp/minidregg-overnight-20260926/build-local-provider-ownr-stable
+baseline_binary_sha256=c37a35073b9d19ac342d91ba0a071b3a732f51b0f5f0991fc995ec64573edcff
+changed_module=Kernel.ResourceTransaction
+unchanged_imported_modules=128
+unchanged_later_sources=42
+additional_changed_sources=1
+changed_source_manifest=/private/tmp/minidregg-overnight-20260926/build-local-provider-ownr-resource-transaction-v2/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=9f46c56f8eb50e0660c8b499b1b1ab5e8b4d8b3f1c81d877eacdb2b1a7034f38

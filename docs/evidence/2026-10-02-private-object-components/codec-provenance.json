@@ -1,0 +1,39 @@
+{
+  "remote_snapshot": "/home/ember/build/mini-private-objects-20261002/src",
+  "lean_version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)",
+  "source_module": "Compiler.ObjectAudienceRoster",
+  "source_sha256": "cf2420ce84f5ae5ca11d31f3fc5a1c25580c245cd14f0998d8db60ce7df99e34",
+  "source_olean_sha256": "a71ec38c7ae5823e2f9f8a8f365cf295b656f2f2cfcd70d5608451c6693cd174",
+  "qualified_source_import_signature": "b975aa4205bad02e1b0b011fe6c3419253829031c4fa5da56b7ef59b5f2aa046",
+  "qualified_record": [
+    "b975aa4205bad02e1b0b011fe6c3419253829031c4fa5da56b7ef59b5f2aa046",
+    "a71ec38c7ae5823e2f9f8a8f365cf295b656f2f2cfcd70d5608451c6693cd174"
+  ],
+  "driver_sha256": "9b77573e2d5220d10be57e05c12cd71349c91f225aa15685e5588ee5e7de40a9",
+  "command": "cd /home/ember/build/mini-private-objects-20261002/src && PATH=/home/ember/.elan/bin:$PATH LEAN_NUM_THREADS=2 flock -n -E75 ../compile.lock lake env lean --run /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/EncodeRoster.lean /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-1.json /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-1.bin /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-10.json /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-10.bin /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-100.json /home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR/roster-100.bin",
+  "result": 0,
+  "log": "",
+  "inputs": {
+    "roster-1.json": "d8add5e967d1bc8222042f164bca651400ebc985b4263d37a31a79ed7e268cc4",
+    "roster-10.json": "d14ee3e46c880e0fe451099cfcd8ce41455f98bd7ecfa9d38edc13b801b7f1f0",
+    "roster-100.json": "82115edc78693b67967a30eb57e1ae28549eab6c876fd6ddbc7ba16ded814197"
+  },
+  "outputs": {
+    "roster-1.bin": {
+      "sha256": "564e7687395e3ff3cf5e22c364b611d37c04476a9e46a297f2d04adf8b2884d0",
+      "bytes": 143,
+      "metadata_sha256": "08b28012fbf8f84613b573fa89827cbe58afe325f4d883f1b3496d05965ce2bc"
+    },
+    "roster-10.bin": {
+      "sha256": "fd731e457d194e704b5d3de0b3b05cb3471374ad87a438f4dfbe25831b4e1910",
+      "bytes": 811,
+      "metadata_sha256": "762fcf73dfff2a2516bdc4533707a81ce0aeec69dffd7eeb8c62e1c554fffe69"
+    },
+    "roster-100.bin": {
+      "sha256": "64689b9d5a560d20a9566f1ac01679092222de7ddf65a9b2c1a6bd8cdfc8f856",
+      "bytes": 7493,
+      "metadata_sha256": "b98587809fa80d8df166dc1d44dff73a4374faa0a2890d2812de326dc3b503fd"
+    }
+  },
+  "remote_scratch": "/home/ember/build/mini-private-objects-20261002/pq-single-codec.lf2qMR"
+}

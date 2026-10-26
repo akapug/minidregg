@@ -1,0 +1,62 @@
+{
+  "command": [
+    "lake",
+    "env",
+    "lean",
+    "--root=/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp",
+    "--run",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/EncodeRoster.lean",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-1.json",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-1.bin",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-10.json",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-10.bin",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-100.json",
+    "/home/ember/build/mini-private-objects-20261002/pq-final-codec.18cDnp/roster-100.bin"
+  ],
+  "result": 0,
+  "qualification": "Actual source-owned Compiler.ObjectAudienceRoster encoder and digest definitions evaluated by Lean --run against coherent direct-compiled dependency artifacts; component data is not source authority acceptance.",
+  "roster_source_sha256": "cf2420ce84f5ae5ca11d31f3fc5a1c25580c245cd14f0998d8db60ce7df99e34",
+  "roster_olean_sha256": "a71ec38c7ae5823e2f9f8a8f365cf295b656f2f2cfcd70d5608451c6693cd174",
+  "roster_c_sha256": "f897bf016459a26542e53072b4ab45c30f84edacebdeffea39f160bf5b86db5f",
+  "driver_sha256": "9b77573e2d5220d10be57e05c12cd71349c91f225aa15685e5588ee5e7de40a9",
+  "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "lean_version": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)",
+  "files": {
+    "roster-10.json": {
+      "sha256": "a32ee9289e893acd3d8be98280d945954039849e895ffcb95271fa0828d5c6ff",
+      "bytes": 3252
+    },
+    "roster-1.json": {
+      "sha256": "77a65a323220d9631e661a84187de9ad17e292406ec37f7fcf7d446f326c7698",
+      "bytes": 528
+    },
+    "roster-10.bin.meta.json": {
+      "sha256": "3d0c166c203d5a7feb4275a75df3e8ba79129d38afd9bd10267d583dc4a4c15f",
+      "bytes": 182
+    },
+    "roster-100.bin.meta.json": {
+      "sha256": "a194889e6cf4a10593094b1f79385473ace2d3e7614e11f7268ee203d0f19070",
+      "bytes": 183
+    },
+    "roster-1.bin.meta.json": {
+      "sha256": "25a010846b878eff0c9a099a5ce2842d550779c0ff2397e2bfa0c1731d5c030b",
+      "bytes": 182
+    },
+    "roster-100.json": {
+      "sha256": "2518f09345f4bd058fb8e797328ef5df0c9302f1b1da20a6f354a46a0e4e1d00",
+      "bytes": 30617
+    },
+    "roster-1.bin": {
+      "sha256": "f223999ba720db1a032c1df6860b10d332521e6ae6bd8722dfd0b2242203b4bc",
+      "bytes": 145
+    },
+    "roster-100.bin": {
+      "sha256": "d8b17e12f4cef8dfd5d7abd270820141a6d9c34eb2516c467f655139752583a0",
+      "bytes": 7487
+    },
+    "roster-10.bin": {
+      "sha256": "75738cf80593e5839ab27d8ee86608b1572c7fe1d46261412b876f784db0a340",
+      "bytes": 811
+    }
+  }
+}

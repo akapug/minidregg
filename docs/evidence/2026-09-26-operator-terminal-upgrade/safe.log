@@ -1,0 +1,16 @@
+Persvati dedicated-account 780x e213b4f terminal upgrade, 2026-09-26
+installer source SHA3a993bd29f415e688bd8a8c9c34c5fcd9e52d7a3646d5307f479c81eaba0a206, bash -n PASS, shellcheck PASS
+candidate render PASS; bad worker SHA REFUSED; wrong worker root REFUSED; repeated --runtime-root REFUSED
+old controller and worker A/B SHA27cc1b4766a5b276a069345bffa581383c787c308352b5241216dd6b17bea176
+backup private /tmp/mini-offer-cross-uid-20260926-r1/runtime-upgrade-e213-backup/source-sha256.txt
+before: quiescence 7801 UID1001 PASS; 7803 UID1002 PASS; all known worker units inactive/MainPID0/empty cgroup
+before: signed content8001 root56640510124634512405133386310248957445866959012628426531175294065387003551223
+stopped: controllers 7801 and 7803 inactive/MainPID0; journals no child/pending/holds/unresolved external
+new controller and worker A/B SHA c95f87a8abad50dc0e4f6c0bb90d62c3b65fc06995df8680ce04d036bfc49b61
+new installer SHA3a993bd29f415e688bd8a8c9c34c5fcd9e52d7a3646d5307f479c81eaba0a206; active manifest SHAe3242fbe2c08be9f69db6a504255af7f5f3ca2c841ece529ac10ff6473c82dc2
+operator status PASS: host PID1596019, front A PID1596895, front B PID1597742, local providers PID1598661/1599533
+controller 7801 UID1001 PID2006539 /proc/exe SHAc95f87a8; controller 7803 UID1002 PID2009903 /proc/exe SHAc95f87a8
+after: quiescence 7801 and 7803 PASS; signed content8001 root56640510124634512405133386310248957445866959012628426531175294065387003551223 unchanged
+terminal A soft /status /quit: source [state] ready twice; transcript SHA680f55bee36a9d316d3cab7c44a4439ecc9abb0824d9353f146a79685abf9bf4
+terminal B soft /status /quit: source [state] ready twice; transcript SHA4a641d6d77afe3698e62270e3e3b8b4a7556ec3ca8b39a805b6fb5f5bed057fc
+after terminal: quiescence PASS both; signed content8001 root unchanged; no Hermes prompt in this upgrade probe

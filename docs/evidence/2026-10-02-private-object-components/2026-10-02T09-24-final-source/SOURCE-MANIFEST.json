@@ -1,0 +1,57 @@
+{
+  "recorded_utc": "2026-10-02T09:25:42.481458+00:00",
+  "previous_evidence": "../execution.json",
+  "current_evidence": "execution.json",
+  "source_drift": {
+    "src/object_keys_hybrid.rs": {
+      "previous_sha256": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+      "current_compiled_sha256": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+      "current_source_sha256": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+      "changed": false
+    },
+    "src/object_messages.rs": {
+      "previous_sha256": "37ff3b4553795fbc5efc500c11f22b85263cd5b7ff9593e279624c4706dabdb6",
+      "current_compiled_sha256": "5b4f4e44bacd9160aa0a05133ec186ea870f6d037a5c60ba17b615036d314c12",
+      "current_source_sha256": "5b4f4e44bacd9160aa0a05133ec186ea870f6d037a5c60ba17b615036d314c12",
+      "changed": true
+    },
+    "src/private.rs": {
+      "previous_sha256": "7d330315784aa4e6354d86a31bda4efca20042a63df8521d0aed6ea8ce83f0f7",
+      "current_compiled_sha256": "7d330315784aa4e6354d86a31bda4efca20042a63df8521d0aed6ea8ce83f0f7",
+      "current_source_sha256": "7d330315784aa4e6354d86a31bda4efca20042a63df8521d0aed6ea8ce83f0f7",
+      "changed": false
+    },
+    "src/roomkey.rs": {
+      "previous_sha256": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703",
+      "current_compiled_sha256": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703",
+      "current_source_sha256": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703",
+      "changed": false
+    }
+  },
+  "assessment": "Only object_messages.rs changed: bounded untrusted context parser added. Measured seal/open and v1 framing unchanged; parser not invoked by benchmark. Native owner confirmed benchmark imports frozen. Key/custody CLI changes are outside component benchmark imports/scope.",
+  "provider_interop_repeated": false,
+  "provider_interop_reason": "object_keys_hybrid.rs unchanged; prior64 full-envelope differential cases retained",
+  "build": {
+    "mode": "release",
+    "locked": true,
+    "offline": true,
+    "jobs": 2,
+    "target": "isolated component-refresh-target",
+    "result": "PASS",
+    "duration_seconds": 45.95
+  },
+  "fixture": "singlecatalog deviceSource2000; actual source digest sidecars; snapshots/context/history synthetic; no accepted authority",
+  "codec_wait_pause": {
+    "paused_utc": "2026-10-02T09:52:55.561734+00:00",
+    "purpose": "Preserve original in-memory keys/counter while serialized native compile completes; only owned offclock wait wrapper paused, no shared process/source affected.",
+    "measurement_scope": "No component timer running during wait/pause.",
+    "resumed_after_atomic_marker": true
+  },
+  "finished_utc": "2026-10-02T10:03:55.871151+00:00",
+  "verification": {
+    "production_source_hashes_match": true,
+    "actual_source_digest_bindings_match": true,
+    "single_source_profile_match": true,
+    "raw_samples": 230
+  }
+}

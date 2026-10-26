@@ -1,0 +1,17 @@
+Running as unit: run-r05ebf029b9e345f5ab7d20c83f787e62.scope; invocation ID: 2fa68960d6844a93ab281cb6ac4e5e77
+   Compiling minidregg-spk-host v0.1.0 (/tank/dregg-build/mini-spk-v3-agent/native/spk-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.35s
+────────────
+ Nextest run ID b11781a6-c6d9-45dc-a4e2-24e30dec4bd1 with nextest profile: default
+    Starting 9 tests across 1 binary (112 tests skipped)
+        PASS [   0.008s] (1/9) minidregg-spk-host install_service::install_v3::tests::retained_qualifier_must_equal_entire_source_authored_launch
+        PASS [   0.008s] (2/9) minidregg-spk-host install_service::install_v3::tests::deployment_and_host_pins_are_required_only_for_v2_install
+        PASS [   0.008s] (3/9) minidregg-spk-host lifecycle_v3_native::tests::inspected_unit_and_image_are_joined_to_signed_spk
+        PASS [   0.008s] (4/9) minidregg-spk-host install_service::install_v3::tests::v3_artifact_namespace_refuses_v1_or_v3_attempt
+        PASS [   0.008s] (5/9) minidregg-spk-host lifecycle_v3_native::tests::plan_pin_uses_launch_root_for_installed_package_and_exact_request
+        PASS [   0.008s] (6/9) minidregg-spk-host lifecycle_v3_native::tests::request_requires_source_owned_launch_and_exact_create_selection
+        PASS [   0.007s] (7/9) minidregg-spk-host lifecycle_v3_native::tests::v3_plan_and_ingress_reply_tags_cannot_accept_historical_payload
+        PASS [   0.008s] (8/9) minidregg-spk-host resident_launch::tests::inspected_create_index_and_digest_select_exact_signed_action
+        PASS [   0.008s] (9/9) minidregg-spk-host resident_launch::tests::resident_refuses_app_uid_equal_to_operator_before_opening_paths
+────────────
+     Summary [   0.041s] 9 tests run: 9 passed, 112 skipped
