@@ -948,10 +948,13 @@ impl Site {
                 title,
                 stamp: Stamp::Read(context),
                 body: format!(
-                    "<p class=note>{0} is not a document; its fields are below (<a href=\"{base}/board/{0}\">as a \
-                     board</a>).</p>\n{1}",
+                    "<p class=note>{0} is not a document; its fields are below{2}.</p>\n{1}",
                     escape(name),
-                    render_fields(&entries, false)
+                    render_fields(&entries, false),
+                    match self.face {
+                        Face::Server => format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name)),
+                        Face::Static => String::new(),
+                    }
                 ),
             };
         }
