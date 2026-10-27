@@ -549,7 +549,8 @@ mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", sec
 # workspace's subject and signing key), granted to the provider runner 9.
 FRIEND_WS = path("friend-workspace")
 ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
-                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS],
+                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--no-prerotation",
+                     "--dir", FRIEND_WS],
                     capture_output=True)
 if ws.returncode != 0:
     fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
