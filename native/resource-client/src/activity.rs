@@ -139,10 +139,13 @@ fn command_for(ws: &Ws, turn: &Value, authority: &str, nonce: Option<&str>) -> R
 
 /// The nonce a non-invoke `turn` is signed under, from its record `WS/activity-operations/KEY-N.json`
 /// (KEY the digest of the turn): a rerun of the same turn reuses the record, so it is never a
-/// second operation (`topUp` twice, review §5.3). A record whose `out` retains an ingress is not
-/// signed again: an undecided one is looked up or resubmitted exactly by its ingress; a decided
-/// one is followed only by the member's decision (`again`). A record that never reached an
-/// ingress reuses its nonce (nothing was sent).
+/// second operation (`topUp` twice, review §5.3). A record whose `out` retains a TRANSMITTED
+/// ingress (the `submitted` marker, written before the send, or an outcome) is not signed again: an
+/// undecided one is looked up or resubmitted exactly by its ingress; a decided one is followed only
+/// by the member's decision (`again`). A record that never reached an ingress, or whose ingress was
+/// assembled with `--prepare-only` and never submitted by this client, reuses its nonce: nothing
+/// was sent, so there is nothing to decide, and the same nonce makes any later send of either
+/// ingress one operation (the Host replays, it never charges twice).
 fn turn_nonce(ws: &Ws, turn: &Value, out: &Path, again: bool) -> Result<Option<String>> {
     if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
         return Ok(None);
@@ -167,6 +170,9 @@ fn turn_nonce(ws: &Ws, turn: &Value, out: &Path, again: bool) -> Result<Option<S
     let previous = PathBuf::from(field(&record, "out")?);
     let nonce = field(&record, "nonce")?.to_owned();
     if !previous.join("ingress.bin").is_file() {
+        return Ok(Some(nonce));
+    }
+    if !previous.join(SUBMITTED).is_file() && !previous.join("outcome.json").is_file() {
         return Ok(Some(nonce));
     }
     let decided = fs::read(previous.join("outcome.json")).ok()
@@ -270,6 +276,19 @@ fn create_out(out: &Path) -> Result<()> {
     fs::create_dir(out).map_err(|error| format!("activity: cannot create {}: {error}", out.display()))
 }
 
+/// The attempt's pre-send marker: written (durably) before its ingress is first submitted, by
+/// `submit` or by a `resubmit` of the attempt's own `ingress.bin`, so a crash after the send leaves
+/// an attempt that reads as transmitted (undecided until looked up), and an attempt without it was
+/// never sent by this client (`turn_nonce`).
+const SUBMITTED: &str = "submitted";
+
+fn mark_submitted(dir: &Path) -> Result<()> {
+    if dir.join(SUBMITTED).exists() {
+        return Ok(());
+    }
+    write_new(&dir.join(SUBMITTED), b"")
+}
+
 /// Quote only: the declaration an invoke would carry (`quote_front_end`), nothing signed or submitted.
 fn quote(ws: &Ws, turn: &Value, out: &Path, front_end: &FrontEndQuote) -> Result<Value> {
     create_out(out)?;
@@ -310,6 +329,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
         json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
             "report": report, "verdict": verdict, "frontEnd": front_end})
     } else {
+        mark_submitted(out)?;
         let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
         write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
         outcome["transaction"] = transaction;
@@ -331,18 +351,22 @@ fn read_ingress(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|error| format!("activity: cannot read {}: {error}", path.display()))
 }
 
-/// A `resubmit` or `lookup` by an attempt's OWN `ingress.bin` decides that attempt: `turn_nonce`
-/// reads the attempt's `outcome.json` to tell a decided record (followed only by `--again true`)
-/// from an undecided one, so a turn prepared with `--prepare-only` and then resubmitted or looked
-/// up would stay "undecided" forever unless the decided answer is retained where the record looks.
-/// Only a decided answer is retained (confirmed or refused), only once, and only beside an ingress
-/// that is an attempt's own (`plan.bin` beside it): a copy or a forged ingress elsewhere decides
-/// nothing.
+/// Whether `ingress` is an attempt's OWN `ingress.bin` (its `plan.bin` beside it): a copy or a
+/// forged ingress elsewhere neither marks nor decides any attempt.
+fn own_attempt(ingress: &Path) -> Option<&Path> {
+    let dir = ingress.parent()?;
+    (ingress.file_name() == Some(std::ffi::OsStr::new("ingress.bin")) && dir.join("plan.bin").is_file()).then_some(dir)
+}
+
+/// A `resubmit` or `lookup` by an attempt's own ingress decides that attempt: `turn_nonce` reads the
+/// attempt's `outcome.json` to tell a decided record (followed only by `--again true`) from an
+/// undecided one, so a turn prepared with `--prepare-only` and then resubmitted or looked up would
+/// stay "undecided" forever unless the decided answer is retained where the record looks. Only a
+/// decided answer is retained (confirmed or refused), only once.
 fn retain_decision(ingress: &Path, outcome: &Value) -> Result<()> {
-    let Some(dir) = ingress.parent() else { return Ok(()) };
-    let own = ingress.file_name() == Some(std::ffi::OsStr::new("ingress.bin")) && dir.join("plan.bin").is_file();
+    let Some(dir) = own_attempt(ingress) else { return Ok(()) };
     let decided = matches!(outcome.get("type").and_then(Value::as_str), Some("confirmed" | "refused"));
-    if own && decided && !dir.join("outcome.json").exists() {
+    if decided && !dir.join("outcome.json").exists() {
         write_new(&dir.join("outcome.json"), outcome.to_string().as_bytes())?;
     }
     Ok(())
@@ -382,6 +406,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let ingress = read_ingress(&retained)?;
             args.finish()?;
             let op = if action == "resubmit" { 212 } else { 213 };
+            if op == 212 {
+                if let Some(dir) = own_attempt(&retained) {
+                    mark_submitted(dir)?;
+                }
+            }
             let outcome = inspect(&ws, "outcome", &invoke(&ws, op, &ingress)?)?;
             retain_decision(&retained, &outcome)?;
             outcome
