@@ -51,7 +51,7 @@ Environment=MINI_FN_CONTRACT=/etc/mini/fn/%i.json
 Environment=MINI_FN_STATE=/var/lib/mini-fn/%i
 # fn's helper is SBCL; the default 32000 MiB dynamic-space reservation is
 # not needed for one poll and one decode.
-Environment=SBCL_USER_ARGS=--dynamic-space-size 2048
+Environment="SBCL_USER_ARGS=--dynamic-space-size 2048"
 ExecStart=/bin/sh -c 'exec "$MINI" selected-exchange --phase receive-transport --contract "$MINI_FN_CONTRACT" --state-dir "$MINI_FN_STATE"'
 StateDirectory=mini-fn
 StateDirectoryMode=0700
