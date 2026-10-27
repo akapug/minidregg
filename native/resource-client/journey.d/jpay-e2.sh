@@ -111,6 +111,9 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
            "payControlCapability": str(PAY_CONTROL),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
                            "enrolCapability": "4032"}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
