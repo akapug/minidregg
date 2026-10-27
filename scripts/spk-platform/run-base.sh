@@ -119,15 +119,7 @@ jq -n --arg store "$STORE_BINARY" \
     genesisHeight:10,expectedSeed:0,storageBinary:$store,
     storageRoot:$storeRoot,signatureBinary:$signature,
     grainBirthTariff:{base:2,perBirth:1},completionCustodianKey:$completion,
-    completionManagement:{app:8401,packageManifest:8402,
-      managementSubject:8,managementKeyId:8008,appCapability:141,
-      appObserveCapability:141,packageCapability:143,packageObserveCapability:143},
-    residentBeginManagement:{app:8401,packageManifest:8402,
-      snapshotManifest:8403,managementSubject:8,managementKeyId:8008,
-      appCapability:141,packageObserveCapability:143},
-    residentClaimManagement:{app:8401,packageManifest:8402,
-      managementSubject:8,managementKeyId:8008,appCapability:141,
-      appObserveCapability:141,packageObserveCapability:143}}' >"$OFFLINE_CONFIG"
+    lifecycleManagement:{managementSubject:8,managementKeyId:8008}}' >"$OFFLINE_CONFIG"
 chmod 600 "$OFFLINE_CONFIG"
 OFFLINE_SHA=$(sha256sum "$OFFLINE_CONFIG" | cut -d ' ' -f 1)
 jq -n --arg spk "$ROOT/packages/gitweb.spk" --arg host "$HOST" \
@@ -181,48 +173,37 @@ jq -e --slurpfile result "$QUALIFY_RESULT" \
 
 export SPK_COMPLETION_PUBLIC
 export MINI STORE_BINARY SIGNATURE_BINARY
-SPK_OFFLINE_CONFIG=$OFFLINE_CONFIG
-export SPK_OFFLINE_CONFIG
-PROVISION_SOURCE="$ROOT/source-stage/provision-checked.sh"
-[ ! -e "$PROVISION_SOURCE" ] && [ ! -L "$PROVISION_SOURCE" ] || {
-  echo "checked provision source already exists" >&2; exit 2;
+# The shared genesis template produces the actual config. Workroom compares it
+# with the qualified pure-authoring config after profile and before bootstrap.
+WORKROOM_EXPECTED_OPERATOR_CONFIG=$OFFLINE_CONFIG
+WORKROOM_OPERATOR_POLICY="$ROOT/source-stage/operator-policy.json"
+[ -f "$WORKROOM_OPERATOR_POLICY" ] && [ ! -L "$WORKROOM_OPERATOR_POLICY" ] || {
+  echo "prepared operator policy absent; prepare a fresh fixture with current sources" >&2; exit 2;
 }
-# The original workroom source still authors operator.json. Compare its entire
-# canonical Settings object with the pre-Store Host config before profile or
-# bootstrap, after the positive-fee and grain-tariff overlays have run.
-awk '
-  index($0, "\"$HOST\" \"$EVIDENCE/operator.json\" profile") {
-    print "test -s \"$SPK_OFFLINE_CONFIG\""
-    print "jq -S . \"$SPK_OFFLINE_CONFIG\" >\"$EVIDENCE/offline-operator-canonical.json\""
-    print "jq -S . \"$EVIDENCE/operator.json\" >\"$EVIDENCE/generated-operator-canonical.json\""
-    print "cmp \"$EVIDENCE/offline-operator-canonical.json\" \"$EVIDENCE/generated-operator-canonical.json\""
-    matches++
-  }
-  { print }
-  END { if (matches != 1) exit 2 }
-' "$ROOT/source-stage/provision-spk.sh" >"$PROVISION_SOURCE"
-chmod 700 "$PROVISION_SOURCE"
+jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
+  . == {completionCustodianKey:$key,lifecycleManagement:{managementSubject:8,managementKeyId:8008},
+        grainBirthTariff:{base:2,perBirth:1}}' "$WORKROOM_OPERATOR_POLICY" >/dev/null || {
+  echo "prepared operator policy differs from fixture custody" >&2; exit 2;
+}
+export WORKROOM_OPERATOR_POLICY WORKROOM_EXPECTED_OPERATOR_CONFIG
+PROVISION_SOURCE="$ROOT/source-stage/provision-spk.sh"
 ALLOCATION_SOURCE="$REPO/scripts/spk-platform/allocation-v1.json"
-AGENT_OVERLAY="$REPO/scripts/spk-platform/agent-genesis-overlay.sh"
+AGENT_CHECK="$REPO/scripts/spk-platform/check-agent-allocation.sh"
+AGENT_LIBRARY="$REPO/scripts/workroom/agent-enrollment.sh"
 SPK_AGENT_ALLOCATION="$ROOT/source-stage/agent-allocation.json"
-AGENT_SOURCE="$ROOT/source-stage/provision-agents.sh"
-for input in "$ALLOCATION_SOURCE" "$AGENT_OVERLAY"; do
+for input in "$ALLOCATION_SOURCE" "$AGENT_CHECK" "$AGENT_LIBRARY"; do
   [ -f "$input" ] || { echo "agent source input unavailable" >&2; exit 2; }
 done
 [ ! -e "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || exit 2
 install -m 600 "$ALLOCATION_SOURCE" "$SPK_AGENT_ALLOCATION"
-"$AGENT_OVERLAY" "$PROVISION_SOURCE" "$SPK_AGENT_ALLOCATION" "$AGENT_SOURCE"
-# The positive-fee base rewrites exactly the two original quoted balances.
-# The agent overlay adds one already-funded owner line, which must remain
-# separate from those substitutions.
-[ "$(rg -c '"initialBalance":"100"' "$AGENT_SOURCE")" -eq 2 ] || exit 2
-[ "$(rg -c 'initialBalance:"1000000",accountPredicate' "$AGENT_SOURCE")" -eq 1 ] || exit 2
-sha256sum "$ALLOCATION_SOURCE" "$AGENT_OVERLAY" "$SPK_AGENT_ALLOCATION" \
-  "$PROVISION_SOURCE" "$AGENT_SOURCE" \
+sh "$AGENT_CHECK" "$SPK_AGENT_ALLOCATION"
+sha256sum "$ALLOCATION_SOURCE" "$AGENT_CHECK" "$AGENT_LIBRARY" \
+  "$SPK_AGENT_ALLOCATION" "$PROVISION_SOURCE" \
   >"$ROOT/source-stage/provision-agent-input-sha256.txt"
 sha256sum -c "$ROOT/source-stage/provision-agent-input-sha256.txt" >/dev/null
-PROVISION_SOURCE=$AGENT_SOURCE
-export SPK_AGENT_ALLOCATION
+WORKROOM_AGENT_ALLOCATION=$SPK_AGENT_ALLOCATION
+# The session fixture still consumes the SPK name; workroom enrollment consumes data.
+export SPK_AGENT_ALLOCATION WORKROOM_AGENT_ALLOCATION
 MEMBER_SOURCE="$REPO/scripts/grain-birth/native-share-member.sh"
 APP_BASE_SOURCE="$REPO/scripts/application-current-birth/native-share-base.sh"
 APP_OVERLAY="$REPO/scripts/spk-platform/agent-session-overlay.sh"
@@ -279,15 +260,9 @@ jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
   "$ADDITIONAL_SESSIONS" >/dev/null
 jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
   .completionCustodianKey == $key and
-  .completionManagement == {app:8401,packageManifest:8402,
-    managementSubject:8,managementKeyId:8008,appCapability:141,
-    appObserveCapability:141,packageCapability:143,packageObserveCapability:143} and
-  .residentBeginManagement == {app:8401,packageManifest:8402,
-    snapshotManifest:8403,managementSubject:8,managementKeyId:8008,
-    appCapability:141,packageObserveCapability:143} and
-  .residentClaimManagement == {app:8401,packageManifest:8402,
-    managementSubject:8,managementKeyId:8008,appCapability:141,
-    appObserveCapability:141,packageObserveCapability:143}' "$CONFIG" >/dev/null
+  .lifecycleManagement == {managementSubject:8,managementKeyId:8008} and
+  (has("completionManagement") or has("residentBeginManagement") or
+   has("residentClaimManagement") | not)' "$CONFIG" >/dev/null
 # This is a source-qualified lifecycle handoff, not an installed manifest.
 # The app birth leaves package/snapshot pages empty; BEGIN-v3 and completion
 # must bind the retained v2 launchRoot and canonical descriptor later.

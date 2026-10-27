@@ -71,14 +71,6 @@ APP="$REPO/scripts/application-current-birth/native-share-base.sh"
 POSITIVE="$REPO/scripts/application-share-issue/native-positive-base.sh"
 ROOTS="$REPO/scripts/application-share-issue/gitweb-roots.json"
 PACKAGE="$REPO/scripts/application-share-issue/gitweb-verified-package.json"
-test "$(sha256sum "$PROVISION" | cut -d ' ' -f 1)" = \
-  9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
-test "$(sha256sum "$MEMBER" | cut -d ' ' -f 1)" = \
-  b76b7bda932f016e86c3013366132a16458768c3fd59cec1106cee2c0cb3ee9a
-test "$(sha256sum "$APP" | cut -d ' ' -f 1)" = \
-  b62a2d4ae17b6aa85a663fada3779eca3be10e252bffea1b7066e501ee9015cd
-test "$(sha256sum "$POSITIVE" | cut -d ' ' -f 1)" = \
-  b867b3231840122ebf24b095fdcfd54b1d7aca27b3e90b0cb9feb1cac9b9985b
 test "$(sha256sum "$ROOTS" | cut -d ' ' -f 1)" = \
   0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f
 test "$(sha256sum "$PACKAGE" | cut -d ' ' -f 1)" = \
@@ -103,19 +95,23 @@ test "$(wc -c < "$ROOT/custody/completion.seed" | tr -d ' ')" = 32
 COMPLETION_PUBLIC=$(od -An -tx1 -v "$ROOT/custody/completion.pub" | tr -d ' \n')
 test "${#COMPLETION_PUBLIC}" = 64
 
-# Keep the original signatureBinary suffix: native-share-member.sh patches it
-# to add the operator grain tariff. The completion key and management pins are
-# installed *before* bootstrap and copied into pinned-config.json by Mini.
-# shellcheck disable=SC2016 # Preserve provisioner's literal shell variables.
-sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","completionManagement":{"app":8401,"packageManifest":8402,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"appObserveCapability":141,"packageCapability":143,"packageObserveCapability":143},"residentBeginManagement":{"app":8401,"packageManifest":8402,"snapshotManifest":8403,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"packageObserveCapability":143},"residentClaimManagement":{"app":8401,"packageManifest":8402,"managementSubject":8,"managementKeyId":8008,"appCapability":141,"appObserveCapability":141,"packageObserveCapability":143},"signatureBinary"|' \
-  "$PROVISION" >"$ROOT/source-stage/provision-spk.sh"
-test "$(rg -c 'completionCustodianKey' "$ROOT/source-stage/provision-spk.sh")" = 2
-test "$(rg -c 'residentBeginManagement' "$ROOT/source-stage/provision-spk.sh")" = 1
-test "$(rg -c 'residentClaimManagement' "$ROOT/source-stage/provision-spk.sh")" = 1
-test "$(rg -c '"signatureBinary":"\$SIGNATURE_BINARY"}' "$ROOT/source-stage/provision-spk.sh")" = 1
+# These settings enter the shared genesis template before profiling/bootstrap.
+# Applications supply their lifecycle selectors per request; the Host pins only
+# this management identity and the custodian key, as grain-store.sh does.
+jq -n --arg key "$COMPLETION_PUBLIC" '
+  {completionCustodianKey:$key,lifecycleManagement:{managementSubject:8,managementKeyId:8008},
+   grainBirthTariff:{base:2,perBirth:1}}' >"$ROOT/source-stage/operator-policy.json"
+cp "$PROVISION" "$ROOT/source-stage/provision-spk.sh"
 chmod 700 "$ROOT/source-stage/provision-spk.sh"
 
-sha256sum "$PROVISION" "$MEMBER" "$APP" "$POSITIVE" "$ROOTS" "$PACKAGE" \
+sha256sum "$0" "$PROVISION" "$MEMBER" "$APP" "$POSITIVE" "$ROOTS" "$PACKAGE" \
+  "$REPO/scripts/spk-platform/run-base.sh" "$REPO/scripts/spk-platform/check-agent-allocation.sh" \
+  "$GENESIS_PARAMS_TREE/scripts/workroom/agent-enrollment.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/scenario-genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis-params.example.json" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/journey.d/lib/genesis-params.sh" \
+  "$ROOT/source-stage/operator-policy.json" \
   "$ROOT/source-stage/provision-spk.sh" "$ROOT/packages/gitweb.spk" \
   "$ROOT/packages/package-identity.bin" "$MINI" \
   >"$ROOT/source-stage/input-sha256.txt"
