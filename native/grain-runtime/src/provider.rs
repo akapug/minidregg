@@ -1854,7 +1854,7 @@ mod tests {
 
     #[test]
     fn metered_request_pins_exact_forwarded_output_ceiling() {
-        let original = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}"#;
+        let original = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}"#;
         let value: Value = serde_json::from_slice(original).unwrap();
         let exact = bounded_chat_request(value, 64, 16_384).unwrap();
         let normalized: Value = serde_json::from_slice(&exact).unwrap();
@@ -1939,7 +1939,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(5))
             .unwrap();
-        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"hello"}]}"#;
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"hello"}]}"#;
         let client = thread::spawn({
             let address = endpoint.local_addr();
             move || post(address, TOKEN, body)
