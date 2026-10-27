@@ -338,7 +338,7 @@ pub(crate) fn role(name: &str) -> Result<Role, String> {
         "librarian" => (LIBRARIAN_GRANTS, LIBRARIAN_BUDGET),
         "runner" => (RUNNER_GRANTS, RUNNER_BUDGET),
         "gm" => {
-            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; its template is deploy/shell/templates/hermes/gm, marked for MUD-GM".into())
+            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; there is no gm template until MUD-GM writes one".into())
         }
         _ => return Err(format!("no role {name}")),
     };
