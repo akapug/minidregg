@@ -1,11 +1,11 @@
 //! Local consent and the local codec, selected by local custody: the remote transport never
 //! supplies these executables or their settings. The processes themselves, the retained consent
-//! anchors and the resident provider are `mini_sdk::consent` and `mini_sdk::local`; this module
-//! selects them (`--local-host`/pins, `MINI_LOCAL_HOST`, `MINI_CONSENT_HOST`,
-//! `MINI_CONSENT_CONFIG`), keeps one of each per process, and reports their refusals as Host
-//! decisions.
+//! anchors and the residents are `mini_sdk::consent` and `mini_sdk::local`; this module selects
+//! them (`--local-host`/pins, `MINI_LOCAL_HOST`, `MINI_CONSENT_HOST`, `MINI_CONSENT_CONFIG`),
+//! keeps one of each per process (or this user's one resident of each per binding: `mini
+//! consent-resident`, `mini codec-resident`), and reports their refusals as Host decisions.
 use super::*;
-use mini_sdk::consent::{Consent, ConsentError};
+use mini_sdk::consent::{Consent, ConsentError, ResidentKind};
 use mini_sdk::local::{Codec, CodecError};
 
 const CAP: usize = mini_sdk::local::CAP;
@@ -33,6 +33,14 @@ pub(crate) fn take_stale_observation() -> bool {
 }
 
 fn resident_enabled()->bool { std::env::var("MINI_CONSENT_RESIDENT").as_deref()!=Ok("0") }
+/// HOT-PATH 2a: the storeless codec Host is resident the same way (`mini codec-resident`), ONE per
+/// `pure_host` binding for every `mini` process of this user instead of one 159 MB Lean image per
+/// process. `MINI_CODEC_RESIDENT=0` keeps the per-process child.
+fn codec_resident_enabled()->bool { std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
+/// A resident with no frame for `$variable` seconds (default `RESIDENT_IDLE_S`, 600) ends.
+fn resident_idle(variable:&str)->std::time::Duration {
+    std::time::Duration::from_secs(std::env::var(variable).ok().and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S))
+}
 
 /// The selected consent provider of this process, started (or reached as this binding's resident
 /// provider) on first use and kept: restarting would discard its independently verified frontier.
@@ -72,9 +80,19 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
 /// binding and serve its frames until the provider ends or no frame arrives for
 /// `MINI_CONSENT_IDLE_S` (600) seconds.
 pub(crate) fn resident(executable:PathBuf,settings:PathBuf)->Result<()> {
-    let idle=std::time::Duration::from_secs(std::env::var("MINI_CONSENT_IDLE_S").ok()
-        .and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S));
+    let idle=resident_idle("MINI_CONSENT_IDLE_S");
     Ok(mini_sdk::consent::serve_resident(&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
+}
+/// `mini codec-resident --host EXECUTABLE --settings SETTINGS` (HOT-PATH 2a): hold ONE storeless
+/// codec Host (`HOST SETTINGS codec`, `Host.Main.serveCodec`) for this binding and serve every
+/// `mini` process's codec frames (7-11) on the binding's socket, one frame at a time, until the
+/// Host ends or no frame arrives for `MINI_CODEC_IDLE_S` (600) seconds. The codec is pure and
+/// holds no state between frames, so sharing one across processes changes no reply; it removes
+/// one 159 MB Lean image start per `mini` process. The image is the client's own selected
+/// semantic Host (`pure_host`), never the serving Store's.
+pub(crate) fn codec_resident(executable:PathBuf,settings:PathBuf)->Result<()> {
+    let idle=resident_idle("MINI_CODEC_IDLE_S");
+    Ok(mini_sdk::consent::serve_resident_kind(ResidentKind::Codec,&mini_sdk::consent::private_anchor_dir()?,executable,settings,idle)?)
 }
 
 fn read(path:&Path)->Result<Vec<u8>> { crate::fsio::read_bounded_or_empty(path, CAP) }
@@ -178,16 +196,29 @@ pub(crate) fn codec_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->R
     local_frame(host, config, operation, payload)
 }
 
-/// One frame to this process's storeless codec child (`mini_sdk::local::Codec`), as
-/// `[operation] ++ body`. A refusal is the child's own: it decodes its frame (`inspect outcome`),
-/// the decision is noted as the Host's, and the client never decodes it itself.
+/// One frame to this process's storeless codec session (`mini_sdk::local::Codec`), as
+/// `[operation] ++ body`: this binding's resident codec Host (one `HOST SETTINGS codec` child for
+/// every `mini` process of this user, started by the first that finds none listening), or this
+/// process's own child under `MINI_CODEC_RESIDENT=0`. A refusal is the Host's own: it decodes its
+/// frame (`inspect outcome`), the decision is noted as the Host's, and the client never decodes
+/// it itself.
 fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u8>> {
     let executable=pure_host(host)?;
     let settings=PINS.get().map(|pins|pins.config.clone())
         .or_else(||std::env::var_os("MINI_CONSENT_CONFIG").map(PathBuf::from))
         .unwrap_or_else(||config.to_path_buf());
     let mut codec=CODEC.lock().map_err(|_|"local codec lock poisoned")?;
-    match codec.frame(&executable,&settings,operation,payload) {
+    let answer=if codec_resident_enabled() {
+        codec.frame_with(&executable,&settings,operation,payload,&|executable,settings,settings_bytes|{
+            let mini=std::env::current_exe().map_err(|e|format!("{}: {e}",ResidentKind::Codec.name()))?;
+            let mut launch=Command::new(mini);
+            launch.arg("codec-resident").arg("--host").arg(&executable).arg("--settings").arg(settings);
+            mini_sdk::consent::connect_resident_kind(ResidentKind::Codec,&executable,settings_bytes,launch)
+        })
+    } else {
+        codec.frame(&executable,&settings,operation,payload)
+    };
+    match answer {
         Ok(body)=>Ok([vec![operation],body].concat()),
         Err(CodecError::Failed(error))=>Err(error),
         Err(CodecError::Refused{marker,encoded,decoded})=>{
@@ -205,7 +236,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         }
     }
 }
-/// The storeless codec child of this process.
+/// The storeless codec session of this process (its own child, or its connection to the resident).
 static CODEC: Mutex<Codec> = Mutex::new(Codec::new());
 
 /// Test stand-in for the local Host's storeless codec loop (`HOST SETTINGS codec`,
@@ -245,6 +276,9 @@ pub(crate) fn codec_loop_arm(inspect: &str) -> String {
 pub(crate) fn codec_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static CODEC_TESTS: Mutex<()> = Mutex::new(());
     let guard = CODEC_TESTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // These tests count this process's own child; the resident is tested on its own
+    // (`mini_sdk::consent` and tests/codec_resident.rs), and a test binary has no `codec-resident` verb.
+    std::env::set_var("MINI_CODEC_RESIDENT", "0");
     CODEC.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).reset();
     guard
 }

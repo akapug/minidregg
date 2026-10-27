@@ -6,7 +6,10 @@
 //!
 //! This is the client's working path, moved here from `resource-client` (`client_consent.rs`):
 //! one codec child per process, reused only under the same [`binding`], whose refusals the same
-//! child decodes (`inspect outcome`), so the client never decodes a Host frame itself.
+//! child decodes (`inspect outcome`), so the client never decodes a Host frame itself. The
+//! session a [`Codec`] holds may instead be a connection to the binding's resident codec Host
+//! ([`crate::consent::ResidentKind::Codec`], [`Codec::frame_with`]): one `HOST SETTINGS codec`
+//! child for every process of this user under that binding, since the codec is pure.
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -181,8 +184,21 @@ impl Codec {
         self.slot = None;
     }
 
-    /// One codec frame (7–11) to the image `executable` under `settings`; the answer's body.
+    /// One codec frame (7–11) to the image `executable` under `settings`; the answer's body. The
+    /// session is this process's own `HOST SETTINGS codec` child.
     pub fn frame(&mut self, executable: &Path, settings: &Path, operation: u8, payload: &[u8]) -> std::result::Result<Vec<u8>, CodecError> {
+        self.frame_with(executable, settings, operation, payload,
+            &|executable, settings, settings_bytes| Session::spawn(executable, settings, settings_bytes, "codec", "local native codec"))
+    }
+
+    /// [`Codec::frame`] over a session `start` supplies for `(executable, settings, settings bytes)`
+    /// when none is held under this binding: this process's own child, or a connection to the
+    /// binding's resident codec Host ([`crate::consent::connect_resident_kind`]). Whichever it is,
+    /// the reply bytes are the same pure function of the frame (`Host.Main.pureCodec` holds no
+    /// state), and a session that fails a frame is dropped the same way: the next frame starts
+    /// (or reconnects to) a fresh one.
+    pub fn frame_with(&mut self, executable: &Path, settings: &Path, operation: u8, payload: &[u8],
+        start: &dyn Fn(PathBuf, &Path, Vec<u8>) -> Result<Session>) -> std::result::Result<Vec<u8>, CodecError> {
         let failed = |e: Error| CodecError::Failed(e.0);
         if !(crate::host_operations::AUTHOR..=CALL_ASSEMBLE).contains(&operation) {
             return Err(CodecError::Failed("not a local codec opcode".into()));
@@ -196,8 +212,7 @@ impl Codec {
             self.slot = None;
         }
         if self.slot.is_none() {
-            let session = Session::spawn(executable.to_path_buf(), settings, settings_bytes.clone(), "codec", "local native codec")
-                .map_err(failed)?;
+            let session = start(executable.to_path_buf(), settings, settings_bytes.clone()).map_err(failed)?;
             self.slot = Some((binding, session));
         }
         let session = &mut self.slot.as_mut().expect("codec child").1;
@@ -274,7 +289,17 @@ pub(crate) mod fake {
     //! Scripts keep the request pipe open with `exec 3<&0; cat <&3 >/dev/null &`: dash gives a
     //! background job /dev/null as stdin BEFORE applying its explicit redirections (so `<&0` would
     //! duplicate /dev/null), which closes the pipe before the client writes (EPIPE).
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    /// A stand-in `HOST SETTINGS codec` loop: appends a line to `<dir>/starts` when it starts, then
+    /// answers frame i with the bytes of `<dir>/reply-i` (else `<dir>/reply`) until EOF.
+    pub(crate) fn codec_stub(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("codec-host");
+        std::fs::write(&path, format!("#!/bin/sh\necho start >> '{d}/starts'\ni=0\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  i=$((i+1))\n  if [ -f '{d}/reply-'$i ]; then cat '{d}/reply-'$i; else cat '{d}/reply'; fi\ndone\n", d = dir.display())).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
 
     /// The `ssh` stand-in used by the operator's ssh-route tests. It is run as
     /// `/bin/sh SCRIPT -T -v -o … -- DEST` and behaves by DEST (its last argument):
@@ -318,13 +343,7 @@ mod tests {
     fn framed(body: &[u8]) -> Vec<u8> {
         [(body.len() as u32).to_le_bytes().as_slice(), body].concat()
     }
-    /// A stand-in `codec` loop: counts its starts, answers frame i with `reply-i` (else `reply`).
-    fn codec_stub(dir: &Path) -> PathBuf {
-        let path = dir.join("codec-host");
-        fs::write(&path, format!("#!/bin/sh\necho start >> '{d}/starts'\ni=0\nwhile :; do\n  n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \\n')\n  [ -n \"$n\" ] || exit 0\n  dd bs=1 count=\"$n\" of=/dev/null 2>/dev/null\n  i=$((i+1))\n  if [ -f '{d}/reply-'$i ]; then cat '{d}/reply-'$i; else cat '{d}/reply'; fi\ndone\n", d = dir.display())).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
-        path
-    }
+    use super::fake::codec_stub;
     fn starts(dir: &Path) -> usize {
         fs::read_to_string(dir.join("starts")).unwrap_or_default().lines().count()
     }
