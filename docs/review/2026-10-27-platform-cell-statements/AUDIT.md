@@ -650,3 +650,22 @@ handoff exactly when `gate (decide …) = none` (`handoff_runs_iff`).
 `appended_headTag` pins `Appended.next.headTag = some entry.tag`. The stale, forked and below-birth teeth
 quantify over every verifier `v` through `decideWith`, which is stronger than a closed instance, not
 weaker. Proofs may start once the file elaborates green.
+
+**Addendum, un-pred-census 0d7156f19 (reasoned, not built).** The shape requested in the eighth pass is
+in place:
+- `Ran` is the live `Answered`, minted once, after `verify`/`verifySshsig` returned `.ok`.
+- `live_voucher_has_ran` is the IO-level tooth over the type.
+- `admitted_live_ran` (`Kernel/Receiving.lean:512`) is the top-level theorem at
+  `receiverVerifier (.live config)`, and it covers both verified and observed.
+- `receiverVerifier` is restricted to the receiving modules, and `ofAnswered` is honest in its docstring.
+
+Two gaps remain:
+1. **`Ran` has no fields, so `by constructor` or `⟨⟩` in any other file mints one without writing
+   `Ran.mk`.** The module's own comment says it: private `mk` "stops names but not `by constructor`".
+   `check-receiver-verifier.sh` counts the text `Ran\.mk`, so it misses that. The guarantee therefore
+   rests entirely on `TokenCensus` checking, at the term level, which compiled constants reference
+   `Ran.mk`. Confirm the restricted row is checked over the environment (not by grep), and add a plant
+   (`⟨⟩ : Ran c q a` in another module) that the gate must catch.
+2. **`.recorded`:** `receiverVerifier (.recorded t)` vouches for whatever a constructible transcript
+   says. That is fine for fixtures, but the Host's receivers must be shown to run at `.live`. Add a census
+   row or check that `.recorded` is named only in fixture or assurance modules.
