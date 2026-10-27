@@ -343,24 +343,13 @@ impl ReadContext {
     }
 }
 
-pub(crate) fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for character in text.chars() {
-        match character {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            other => out.push(other),
-        }
-    }
-    out
-}
+/// The one escaper (and its URL-attribute twin), defined beside the HTML renderer.
+pub(crate) use crate::render::html::{escape, url};
 
 fn short(id: &str) -> String {
-    if id.len() > 14 {
-        format!("<span class=id title=\"{}\">{}...</span>", escape(id), escape(&id[..12]))
+    if id.chars().count() > 14 {
+        let head: String = id.chars().take(12).collect();
+        format!("<span class=id title=\"{}\">{}...</span>", escape(id), escape(&head))
     } else {
         format!("<span class=id>{}</span>", escape(id))
     }

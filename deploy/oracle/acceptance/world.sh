@@ -5,6 +5,21 @@
 # Mini's Host and broker remain the authority and physical-custody receivers.
 # Every root effect uses the existing fixed deployment installer/helper.
 
+# One source list for both fresh and continued execution. Immutable snapshot
+# manifests cover the remaining inherited tree; these are the direct runtime
+# helpers and fixture inputs selected by this harness.
+world_source_manifest() {
+  sha256sum "$repo/scripts/oracle-shared-data-journey.sh" \
+    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
+    "$repo/deploy/oracle/acceptance/agent.py" "$repo/deploy/oracle/acceptance/agent-cases.json" \
+    "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
+    "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
+    "$repo/scripts/spk-platform/grain-journey.sh" "$repo/scripts/spk-platform/grain-store.sh" \
+    "$repo/scripts/spk-platform/prepare-lifetime-route.sh" "$repo/scripts/spk-platform/agent-genesis-overlay.sh" \
+    "$repo/deploy/spk-host/install-user-world" "$repo/deploy/spk-host/controller-world.py"
+}
+
 # Capacity accounting only. The native materializer and verifier independently
 # apply their unchanged statvfs guards; this does not reserve or grant space.
 world_disk_plan() {
@@ -101,8 +116,8 @@ world_controller_prepare() {
 world_controller_birth() {
   local request_id
   request_id=$("${controller_runtime:-$BIN/grain-runtime}" tool-id)
-  if [[ ${mode:-} == continue-session ]]; then
-    [[ $request_id != $(jq -er .boundary.request_id "$continuation/prepared.json") ]] || fail 'new tool ID reused definite refusal'
+  if [[ ${mode:-} == continue-session || ${mode:-} == continue-checkpoint ]]; then
+    [[ $request_id != $(jq -er .boundary.request_id "$run/continuations/session-refusal-1/prepared.json") ]] || fail 'new tool ID reused definite refusal'
   fi
   printf '%s\n' "$request_id" >"$run/agent-lifetime/session-birth.request-id"
   jq .nextTool.arguments "$run/agent-lifetime/controller-stage.json" >"$run/agent-lifetime/session-birth.arguments.json"
@@ -401,6 +416,7 @@ world_continue_controller() {
 # the original tool was definitively refused before any session operation.
 world_continue_session() {
   local run=$1 repo=$2 fresh app target bundle
+  local resume_args=()
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
   export BIN=$run/bin
@@ -417,17 +433,26 @@ world_continue_session() {
   state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
   fresh=$(mktemp -d "$run/session-refusal-preflight.XXXXXXXX")
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  # Check the complete runtime helper list before publishing a backup boundary.
+  # This manifest is reused after preparation; missing inputs cannot leave a
+  # prepared continuation that has not yet checked its own source dependencies.
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
+  [[ ${session_resume_prepared:-0} != 1 ]] || resume_args+=("$fresh/source-input-sha256.txt")
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --session-refusal \
-    "$run" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json")
+    "$run" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json" "${resume_args[@]}")
   [[ $continuation == "$run/continuations/session-refusal-1" ]] || fail 'session continuation evidence path differs'
-  mkdir -m 700 "$continuation/bin"
   controller_runtime=$continuation/bin/grain-runtime
-  install -m 500 "$own/grain-runtime" "$controller_runtime"
-  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
-    "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent.py" \
-    "$installer" "$repo/deploy/spk-host/controller-world.py" "$controller_runtime" \
-    >"$continuation/recovery-input-sha256.txt"
+  recovery_manifest=$continuation/recovery-input-sha256.txt
+  if [[ ${session_resume_prepared:-0} == 1 ]]; then
+    recovery_manifest=$continuation/source-resume-1-input-sha256.txt
+    [[ $(sha256sum "$controller_runtime" | cut -d ' ' -f1) == $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) ]] || fail 'prepared runtime changed'
+  else
+    mkdir -m 700 "$continuation/bin"
+    install -m 500 "$own/grain-runtime" "$controller_runtime"
+  fi
+  (set -o noclobber; cat "$fresh/source-input-sha256.txt" >"$recovery_manifest")
+  sha256sum "$controller_runtime" >>"$recovery_manifest"
   preserve_existing_exit=0
   configured=1 controller_created=1 controller_staged=1
   timeout 120 sudo -n -- "$installer" controller-consent-storage "$store" "$helper" >"$continuation/consent-storage.json"
@@ -458,6 +483,107 @@ world_continue_session() {
   # Original null-operation error is archived, not ACKable. Only this new tool
   # ID may create a session; its successful native result uses normal ACK.
   world_controller_birth
+}
+
+world_phase_record() {
+  python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --phase \
+    "$run" "$continuation/phases" "$@"
+}
+
+# A checkpoint is a checked observation of an unstarted boundary, never a
+# request to replay a source phase. Each new execution gets its own directory.
+world_continue_checkpoint() {
+  local run=$1 repo=$2 fresh target bundle app
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
+  export BIN=$run/bin
+  store=$(jq -er .store "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store
+  export BROKER_SOCKET=$GRAINS_ROOT/runtime-$store/broker.sock
+  installer=$repo/deploy/spk-host/install-user-world
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  fresh=$(mktemp -d "$run/checkpoint-preflight.XXXXXXXX")
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/mini" "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
+  continuation=$(python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --begin-checkpoint \
+    "$checkpoint" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json" \
+    "$fresh/controller-status.json" "$fresh/source-input-sha256.txt")
+  [[ $continuation == "$run/continuations/checkpoint-"* ]] || fail 'checkpoint execution path differs'
+  recovery_manifest=$continuation/recovery-input-sha256.txt
+  (set -o noclobber; cat "$fresh/source-input-sha256.txt" >"$recovery_manifest")
+  controller_runtime=$run/continuations/session-refusal-1/bin/grain-runtime
+  [[ $(sha256sum "$controller_runtime" | cut -d ' ' -f1) == $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) ]] || fail 'checkpoint runtime differs'
+  preserve_existing_exit=0
+  configured=1 controller_created=1 controller_staged=1
+
+  world_phase_record public-listener started
+  timeout 120 sudo -n -- "$installer" controller-public-listener "$store" "$helper" "$own/mini" \
+    >"$continuation/public-listener.json"
+  jq -e --arg binary "$GRAINS_ROOT/controller/public-listener/mini" \
+    --arg digest "$(sha256sum "$own/mini" | cut -d ' ' -f1)" --arg socket "$run/world/sock/participant/host.sock" \
+    --slurpfile before "$fresh/controller-status.json" '
+    del(.publicListener) == $before[0] and .publicListener.binary == $binary and
+    .publicListener.binarySha256 == $digest and .publicListener.socket == $socket and
+    .publicListener.controllerUid == .controllerUid' "$continuation/public-listener.json" >/dev/null || fail 'listener registration pins differ'
+  export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
+  world_phase_record public-listener completed "$continuation/public-listener.json"
+
+  world_phase_record services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'checkpoint broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  world_phase_record services completed "$run/world/sock/operator.pid.identity.json" \
+    "$run/world/sock/participant.pid.identity.json" "$continuation/services.log"
+  for app in 9101 9201; do
+    timeout 1800 "$BIN/spk-host" grain status "$profile" "$app" >"$continuation/status-$app.json"
+    jq -e --arg app "$app" '.app == $app and .installCompleted and (.runs | length == 0)' \
+      "$continuation/status-$app.json" >/dev/null || fail 'checkpoint requires installed grains with no START'
+  done
+  world_phase_record bootstrap-target started
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-bootstrap-dispatch "$run" "$repo" \
+    "$run/agent-lifetime/controller-create.json" >"$continuation/bootstrap-target.stdout" 2>"$continuation/bootstrap-target.stderr"
+  target=$(cat "$continuation/bootstrap-target.stdout")
+  [[ $target == "$run/agent-lifetime/native-prepare-bootstrap-dispatch/controller-update/controller.json" ]] || fail 'bootstrap target differs'
+  bundle=$(dirname "$target")
+  world_phase_record bootstrap-target completed "$target"
+  world_phase_record worker-policy started
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-worker-policy "$run" "$repo" "$target" \
+    >"$continuation/worker-policy.stdout" 2>"$continuation/worker-policy.stderr"
+  python3 - "$run/agent-lifetime/native-prepare-worker-policy/worker-policy.json" "$target" <<'PYPOLICY'
+import hashlib,json,pathlib,sys
+p,t=map(pathlib.Path,sys.argv[1:]); v=json.loads(p.read_bytes()); config=json.loads(t.read_bytes())
+read=lambda f:json.loads(pathlib.Path(f).read_bytes())
+assert v['protocol']=='mini-oracle-bootstrap-worker-policy-v1' and v['workerGeneration']=='1'
+assert v['controllerConfigSha256']==hashlib.sha256(t.read_bytes()).hexdigest()
+assert v['workers']==[config[k]['subject'] for k in ('toolTask','dispatchTask')]
+o=read(pathlib.Path(v['attempt'])/'outcome.json')
+assert o['type']=='confirmed' and o['confirmation'] in ('installed','replayed')
+assert {k:o[k] for k in ('transactionId','eventId','acceptedCount','worldRoot')}==v['receipt']
+b,a=read(pathlib.Path(v['before'])/'view.json'),read(pathlib.Path(v['after'])/'view.json')
+assert b['version']=='0' and a['version']=='1' and a['previous']==b['address']
+assert b['policyId']==a['policyId']==config['task']
+PYPOLICY
+  world_phase_record worker-policy completed "$run/agent-lifetime/native-prepare-worker-policy/worker-policy.json" \
+    "$run/agent-lifetime/native-prepare-worker-policy/owner-policy-attempt/outcome.json"
+  world_phase_record bootstrap-enrollment started
+  world_controller_enroll bootstrap-dispatch "$bundle" bootstrap-dispatch
+  world_phase_record bootstrap-enrollment completed "$run/agent-lifetime/enrollment-bootstrap-dispatch/request.json" \
+    "$run/agent-lifetime/enrollment-bootstrap-dispatch/result.json" "$run/agent-lifetime/enrollment-bootstrap-dispatch/after.json"
+  world_phase_record controller-start started
+  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$continuation/controller-bootstrap-start.json"
+  world_phase_record controller-start completed "$continuation/controller-bootstrap-start.json"
+  world_phase_record session-and-grant started
+  world_controller_birth
+  jq -e '.isError == false and .operationId != null' "$run/agent-lifetime/session-birth.retained-result.json" >/dev/null
+  world_phase_record session-and-grant completed "$run/agent-lifetime/session-birth.retained-result.json" \
+    "$run/agent-lifetime/issued-grant.json" "$run/agent-lifetime/session-birth.ack.json"
 }
 
 # Run only after the world services have stopped. The planner observes physical
@@ -494,13 +620,18 @@ world_cleanup() {
         timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" \
           >"$run/agent-lifetime/controller-final-journal.json" 2>>"$run/cleanup.log" || cleanup_result=1
       fi
+      # The public listener owns its socket's ACL. Stop it before removing the
+      # controller registration and restoring its exact ancestor ACL grants.
+      "$journey" stop-services "$run/world" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
       if [[ $result == 0 && $cleanup_result == 0 ]]; then
         timeout 120 sudo -n -- "$installer" controller-remove "$store" "$helper" \
           >"$run/agent-lifetime/controller-remove.json" 2>>"$run/cleanup.log" || cleanup_result=1
       fi
       [[ $cleanup_result == 0 ]] || preserve_namespace=true
     fi
-    "$journey" stop-services "$run/world" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+    if [[ ${controller_created:-0} != 1 ]]; then
+      "$journey" stop-services "$run/world" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+    fi
     while read -r unit; do
       [[ -n $unit ]] || continue
       journalctl --user --no-pager -u "$unit" >>"$run/residents.log" 2>&1 || cleanup_result=1

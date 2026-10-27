@@ -65,8 +65,8 @@ other than as a string, or of heap identity.
   R02, `tests/objective-bend-source/ltuo/AssociationProvenance.obend`).
 
 A rewrite justified by `≈b` may be applied only where no `metadata` observer can reach the
-rewritten specification. Neither equivalence is a theorem yet: `composition_associative` is
-proved on the separate list model `Theory/ObjectiveBendExtensions.lean`, not on `Term.mix`.
+rewritten specification. Neither equivalence is a theorem yet: nothing states associativity of
+`Term.mix`.
 
 ## Resource observations
 

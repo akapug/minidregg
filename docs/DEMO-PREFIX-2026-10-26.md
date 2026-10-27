@@ -164,7 +164,7 @@ successor lane/fence (the Debian 13 floor audit PASS; now the SPK resident readi
 lane/hermes 0b8cc8bb (the real upstream Hermes agent through bwrap → bridge → gateway → broker → provider
 → v4 settle on the build box, 105 rows PASS; the v4 `leg` frame; reconcile after the record; the demo-box
 install sequence and worker root; the ask pass's completion boundary and the librarian fixture are its
-last reds). L12 web lane lane/web-frontend 43533e6d (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
+last reds). L12 web lane lane/web-frontend abf33668 (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; "Export my world" end to end on the box (a member's documents, receipts and key as one archive streamed through the gateway, deleted after download, manifest root equal to the live world; the 10 Nov notice on the front page); the Subscribe page for the GLM tier (price, allowance, window as a date; `pay subscribers week` then Join from the inbox invitation; ember's policy sentence a marked placeholder); the seven pay-page audit fixes; tour-chromium green on the box at a0f9c246; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
 the tour's doors 11 and 12; progressive `can`; "Pay with your wallet" on the paid route; the door's
 funding figure). L13 lane/app-market f68de59f+ (Hacker Slides and Simple Todos through create, install,
 share, start, enrol and page load on a live world; `HackSessionContext` served; the member's own install
@@ -335,7 +335,11 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(ember, same morning). **The app market ships a curated, agent-hackable set** (ember, same afternoon: "a
+more comprehensive selection of SPK apps than just etherpad … easy but powerful datamodels … because
+agents will be running ham beneath the human-visible html layer"): 10 to 14 apps chosen for the data
+model and API a resident can drive beneath the HTML, each proven by the lifecycle rows plus one
+beneath-HTML write; selection evidence `docs/review/2026-10-27-spk-selection/`; L13 owns it. **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
 (the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
 through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
 resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the

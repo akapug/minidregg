@@ -54,6 +54,7 @@ import Fixtures.NativeAcceptedFixtureAuthority
 import Kernel.NativeHostContext
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Compiler.NativeHostCodec
+import Theory.Sp800185Cshake256Native
 import Theory.AssertCompiled
 
 namespace Minidregg.Fixtures.NativeAcceptedFixture

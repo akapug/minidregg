@@ -352,6 +352,10 @@ pub(crate) fn main(path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
+#[path = "room_resident_injection_tests.rs"]
+mod injection_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

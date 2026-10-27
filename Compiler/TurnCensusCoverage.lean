@@ -4,7 +4,7 @@
 `Kernel.TurnCensus` writes one row per `NativeHostReplay.NativeAdmission`
 constructor in its own `Ctor` enumeration (it does not import the replay).
 Nothing tied the two: `final-pay` and C3 added four constructors while
-`every_admission_is_turn` still decided "all 33".  This module is the tie: it
+`census_shapes_admitted_at_w0` still decided "all 33".  This module is the tie: it
 fails to elaborate unless `TurnCensus.Ctor` and `NativeAdmission` have the same
 constructor names (as sets; each list duplicate-free).  A new admission constructor therefore
 cannot land without its census row, its negation and its refusal.
