@@ -175,6 +175,42 @@ its `header_up` and `transport` lines); the `tls` lines in the block are the fil
 a box that installs the certificate as files. The 8 MiB body cap is the custodian's own bound (`http_entrance.rs`); the front
 answers 413 above its 128-byte bootstrap-form bound.
 
+## 5a. The publishing origin: `https://<grain>-www.demo.dregg.online`
+
+Sandstorm apps publish a static site from the grain's `/var/www` (Hacker Slides' "Present" link,
+blogs, wikis). The grain tells the app its publishing origin through `HackSessionContext.getPublicId`
+(`native/spk-rpc`, `publishing_origin`): `publicId = <grain>-www`, `hostname = demo.dregg.online`,
+`autoUrl = https://<grain>-www.demo.dregg.online`. One fixed publishing origin per grain, beside its
+private origin, for the grain's lifetime.
+
+**Caddy: no new route.** `<grain>-www.demo.dregg.online` is one label under `demo.dregg.online`, so
+the wildcard site block of §5 already matches it, the wildcard certificate already covers it, and
+it reaches the front at `127.0.0.1:8799` with `Host` intact. Nothing else changes on the box (no new
+port, no new certificate name, no egress).
+
+**The front's handling** (`mini apps-front`, by `Host`):
+
+| request | answer |
+|---|---|
+| `GET`/`HEAD` `https://a<n>-www.…/<path>`, grain `a<n>` in the origin table | the file `<path>` under the grain's `/var/www` (`/` and a trailing `/` read `index.html`), anonymous: no cookie, no bearer, no bootstrap; `Content-Type` by extension, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` unless the file is HTML from the grain's own `www` tree, `Cache-Control: no-cache` |
+| any other method | `405`, `Allow: GET, HEAD` |
+| a path with `..`, a NUL, a dotfile segment, or that resolves through a symlink out of `/var/www` | `404` (the read is `openat2(RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS)` in the resident) |
+| a file above 64 MiB | `413` |
+| an unknown grain, or a grain whose app never wrote `/var/www` | `404 no such published site` |
+| the grain stopped | `503 grain a<n> is stopped; its owner starts it with mini apps start --grain a<n>`, `Retry-After: 30` |
+
+The files come from the grain's resident, the only process that sees its mounted `/var`: the
+resident serves a read-only `www.sock` beside its `http.sock` (GET/HEAD of `/var/www` only, no
+session, no Mini transaction, no write), and the worker's edge connector hands the front that socket
+the way it hands `http.sock`, keyed by `www <grain>`. Publishing is the app's own act (it writes
+`/var/www`); the grain's private origin and its cookies are never reachable from the `-www` origin
+(different host, `__Host-` cookies are origin-bound).
+
+**State**: `getPublicId` is served and proven (`japps --box` get-a on w3: Hacker Slides renders its
+"Present" link from it). The front's `-www` dispatch, the resident's `www.sock` and the connector's
+`www` verb are this lane's next increment; until they land the `-www` origin answers `404 no such
+grain` from the front's existing table lookup.
+
 ## 6. What a stranger sees
 
 `https://a4501.demo.dregg.online/` without a credential: `403 private grain a4501; open it from your
