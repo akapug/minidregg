@@ -66,19 +66,12 @@ structure Derived where
   spent, allowance), not a `representsCheck` verdict. `none` when the fold is lost. -/
   world : Option HostRefinesWorld.DWorld
 
-/-- The v4 checkpoint body: v3's body, the fold's semantics identity, the fold's World. -/
-structure Body4 where
-  body : Body
-  /-- The identity of the fold that produced `world` (the Host's semantics digest): a body sealed
-  by a different fold under the same Store key is refused by name. -/
-  semantics : Digest
-  /-- The fold's World at the body's height (system store via `WorldSystemCodec.systemStream`). -/
-  world : Option HostRefinesWorld.DWorld
+/-- The v4 checkpoint body is `DurableCheckpointCodec.Body`: v3's fields, the fold's World's
+system store and the fold's `semantics`; its World is `Body.world` (the system store beside the
+state's decoded cells). -/
+abbrev Body4 := Body
 
-structure Sealed4 where
-  body : Body4
-  root : Digest
-  mac : List UInt8
+abbrev Sealed4 := Sealed
 
 inductive OpenRefusal where
   | malformed
@@ -115,9 +108,9 @@ structure Derived.Honest (image : Image) (derived : Derived) : Prop where
 
 /-- A v4 body is the replay's value at `image`: height, chain, state, semantics, World. -/
 structure Body4.Honest (image : Image) (body : Body4) : Prop where
-  height : body.body.height = image.accepted.length
-  chain : body.body.chain = chainAfter (logStart image.seed) image.accepted
-  state : replaySnapshot rootBytes image = some (body.body.state.snapshot rootBytes image.accepted)
+  height : body.height = image.accepted.length
+  chain : body.chain = chainAfter (logStart image.seed) image.accepted
+  state : replaySnapshot rootBytes image = some (body.state.snapshot rootBytes image.accepted)
   semantics : body.semantics = semanticsId
   world : body.world = worldAt rootBytes image
 
@@ -312,13 +305,13 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4)
   macInjective : ∀ carried, impl.macInputDecode (impl.macInput carried) = some carried
   /-- Accept IFF decode, this key, this semantics, the recomputed root, the MAC. -/
   macGate : ∀ key bytes body, impl.open4 key bytes = .ok body ↔
-    ∃ sealed, impl.decode4 bytes = some sealed ∧ sealed.body = body ∧ body.body.keyId = key.id ∧
-      body.semantics = semanticsId ∧ sealed.root = worldRoot rootBytes body.body ∧
+    ∃ sealed, impl.decode4 bytes = some sealed ∧ sealed.body = body ∧ body.keyId = key.id ∧
+      body.semantics = semanticsId ∧ sealed.root = worldRoot rootBytes body ∧
       sealed.mac = kmac256Bytes key.bytes impl.macDomain (impl.macInput (body, sealed.root))
   /-- Teeth by name: another fold's body under this key; a wrong MAC. -/
-  macRefusals : ∀ key bytes sealed, impl.decode4 bytes = some sealed → sealed.body.body.keyId = key.id →
+  macRefusals : ∀ key bytes sealed, impl.decode4 bytes = some sealed → sealed.body.keyId = key.id →
     (sealed.body.semantics ≠ semanticsId → impl.open4 key bytes = .error .foreignSemantics) ∧
-    (sealed.body.semantics = semanticsId → sealed.root = worldRoot rootBytes sealed.body.body →
+    (sealed.body.semantics = semanticsId → sealed.root = worldRoot rootBytes sealed.body →
       sealed.mac ≠ kmac256Bytes key.bytes impl.macDomain (impl.macInput (sealed.body, sealed.root)) →
       impl.open4 key bytes = .error .badMac)
   /-- What is sealed opens, as itself: the gate is not vacuous. -/
@@ -329,11 +322,11 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → impl.Loaded4)
   suffixGate : ∀ key seed bytes suffix head state,
     impl.ffState key seed (some bytes) suffix head = .ok state →
     ∃ body, impl.open4 key bytes = .ok body ∧
-      impl.stateBase state = (body.body.height, body.body.chain) ∧
-      verifyTags key body.body.height
-        (chainPrefixesStored body.body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
+      impl.stateBase state = (body.height, body.chain) ∧
+      verifyTags key body.height
+        (chainPrefixesStored body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
       (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
-      body.body.height + suffix.length = head
+      body.height + suffix.length = head
   /-- From genesis the executing part starts at the seed's chain and verifies every entry's tag. -/
   genesisGate : ∀ key seed suffix head state,
     impl.ffState key seed none suffix head = .ok state →
