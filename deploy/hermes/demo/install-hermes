@@ -134,12 +134,15 @@ step_room() {
 }
 
 step_runtime() {
-  [ -n "${HERMES_ROOT:-}" ] && [ -x "$HERMES_ROOT/hermes-acp" ] || die "HERMES_ROOT must name a root from deploy/hermes/build-runtime-root"
+  [ -n "${HERMES_ROOT:-}" ] && [ -x "$HERMES_ROOT/hermes-acp" ] && [ -f "$HERMES_ROOT/pins.json" ] \
+    || die "HERMES_ROOT must name a root from deploy/hermes/build-runtime-root"
+  # The worker's grain-runtime must be the controller's: a root built for
+  # another candidate is rebound first (no rebuild).
+  [ "$(jq -r .grainRuntimeSha256 "$HERMES_ROOT/pins.json")" = "$(sha256sum "$GRAIN" | cut -d' ' -f1)" ] \
+    || die "HERMES_ROOT was built for another candidate: $REPO/deploy/hermes/build-runtime-root --rebind $HERMES_ROOT $CAND"
   install -d -m 0755 "$V/runtime-root"; install -d -o "$SVC" -g "$SVC" -m 0700 "$V/launcher" "$V/worker-work" \
     "$V/worker-work/.hermes" "$V/worker-work/.cache" "$V/worker-work/.config" "$V/worker-work/.local" "$V/worker-work/.local/share"
   cp -a "$HERMES_ROOT"/. "$V/runtime-root/"
-  install -m 0755 "$GRAIN" "$V/runtime-root/grain-runtime"
-  install -m 0755 "$BRIDGE" "$V/runtime-root/grain-provider-bridge"
   chown -R root:root "$V/runtime-root"; chmod -R go-w "$V/runtime-root"
   local bwrap; bwrap=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
   as_svc python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$bwrap" \
