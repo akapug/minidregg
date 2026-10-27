@@ -392,7 +392,12 @@ fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     // moved; pinned to the same observation height it is the retained pinned plan again (what the
     // consent provider accepts, `checkExactOrPinned`). Anything else is a dead plan.
     let Some(height) = &pin.pinned_at else { return Ok(false) };
-    let body = reply(&frame, 86)?;
+    // A refusal (the observation itself is stale: the Host answers NO_RECORD) is a dead plan too,
+    // never an error of this check: `plan` then retires it and observes again.
+    let Ok(body) = reply(&frame, 86) else {
+        let _ = take_host_decision();
+        return Ok(false);
+    };
     let fresh = directory.join("plan-current.bin");
     let fresh_pinned = directory.join("plan-current-pinned.bin");
     for stale in [&fresh, &fresh_pinned] {
