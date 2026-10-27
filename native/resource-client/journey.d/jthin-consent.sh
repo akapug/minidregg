@@ -55,7 +55,10 @@ say() {
   N=$((N+1)); OUT=$D/log/$N.out; ERR=$D/log/$N.err
   printf '%s\t%s\n' "${mode:-full}" "$line" >"$D/log/$N.line"
   if [ -n "$mode" ]; then
-    if env MINI_THIN_CONSENT=1 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
+    # MINI_CONSENT_RESIDENT=0: the client otherwise keeps ONE resident consent provider across shell lines
+    # (client_consent.rs), and the proxy reads THIN_PROXY_MODE once at its start; the first line's mode
+    # (pass) would then serve every later line and no capture or plant would ever happen.
+    if env MINI_THIN_CONSENT=1 MINI_CONSENT_RESIDENT=0 MINI_LOCAL_HOST="$HOST" MINI_CONSENT_HOST="$PROXY" MINI_CONSENT_CONFIG="$CONFIG" \
         THIN_PROXY_REAL="$REAL" THIN_PROXY_MODE="$mode" THIN_PROXY_LOG="$D/proxy.log" \
         THIN_PROXY_OTHER_INTENT="${OTHER_INTENT:-}" \
         "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \

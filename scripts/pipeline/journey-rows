@@ -509,11 +509,14 @@ row_hermes() {
 # reads back into RUN/g with the runner's sudo and removes the operator's root after.
 # Inputs a box may lack (the operator account with linger, its sudo rules, sudo -n, uidmap, a subuid range for the
 # operator, bwrap, the pinned SPK) are 98.
-m6grain_mirror() { # OPERATOR_RUN RUN_G: the files the row reads, as root, into the runner's copy
+# The row's three root steps (mirror the operator's run root, remove it, check root cleanup left nothing) go
+# through ONE tree script, scripts/spk-platform/m6grain-root.sh, so one targeted sudoers rule
+# (RUNNER ALL=(root) NOPASSWD: <tree>/scripts/spk-platform/m6grain-root.sh) covers them and the row probes
+# exactly that rule; no broad rule (`sudo -n true`, `rm`, `sh -c`) is ever required.
+M6_ROOT_HELPER=
+m6grain_mirror() { # OPERATOR_RUN RUN_G: the files the row reads, streamed by the helper as root, extracted by the runner
   mkdir -p "$2" || return 1
-  sudo -n sh -c 'cd "$1" && tar -cf - --ignore-failed-read result.log root-setup.log root-cleanup.log cross-world-plant \
-      binary-sha256.txt volume-helper.log cleanup-services.log broker-*.log a/evidence b/evidence 2>/dev/null' sh "$1" \
-    | tar -xf - -C "$2"
+  sudo -n "$M6_ROOT_HELPER" mirror "$1" | tar -xf - -C "$2"
 }
 row_m6grain() {
   local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk g cmd
@@ -528,7 +531,9 @@ row_m6grain() {
   product_tools jq curl loginctl sudo install od findmnt tar getent || return $?
   [ "$(getent passwd "$op_uid" | cut -d: -f1)" = "$op_name" ] || { echo "missing input: operator account $op_name with uid $op_uid (MINI_OPERATOR_UID/MINI_OPERATOR_NAME)" >&2; return 98; }
   [ "$(loginctl show-user "$op_uid" -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for operator uid $op_uid" >&2; return 98; }
-  sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
+  M6_ROOT_HELPER=$(realpath "$SRC/scripts/spk-platform/m6grain-root.sh")
+  [ -x "$M6_ROOT_HELPER" ] || { echo "missing input: $M6_ROOT_HELPER (executable)" >&2; return 98; }
+  sudo -n -l "$M6_ROOT_HELPER" >/dev/null 2>&1 || { echo "missing input: sudoers rule $(id -un) ALL=(root) NOPASSWD: $M6_ROOT_HELPER" >&2; return 98; }
   export MINI_OPERATOR_UID=$op_uid MINI_OPERATOR_NAME=$op_name
   if [ "$(id -u)" = "$op_uid" ]; then
     g=$RUN/g cmd=(bash "$d")
@@ -559,7 +564,7 @@ row_m6grain() {
     [ "$g" = "$RUN/g" ] || m6grain_mirror "$g" "$RUN/g" 2>>"$OUT/mirror.err" || rc=1
   fi
   if [ "$g" != "$RUN/g" ]; then
-    case $g in /run/user/"$op_uid"/m6g-[0-9a-f]*) sudo -n rm -rf --one-file-system -- "$g" || rc=1 ;; *) rc=1 ;; esac
+    case $g in /run/user/"$op_uid"/m6g-[0-9a-f]*) sudo -n "$M6_ROOT_HELPER" remove "$g" || rc=1 ;; *) rc=1 ;; esac
   fi
   for w in a b; do [ ! -d "$RUN/g/$w/evidence" ] || cp -r "$RUN/g/$w/evidence" "$OUT/evidence-$w"; done
   product_keep "$RUN/g/result.log" "$RUN/g/root-setup.log" "$RUN/g/root-cleanup.log" "$RUN/g/cross-world-plant" \
@@ -570,7 +575,7 @@ row_m6grain() {
   for s in $(awk '/^ROOT SETUP BEGIN store=/ {sub(/^store=/,"",$4); print $4}' "$RUN/g/root-setup.log" 2>/dev/null); do
     for w in "/etc/mini-spk-volumes/$s.json" "/etc/sudoers.d/mini-spk-$s" "/var/lib/mini-spk-worlds/$s" \
         "/run/user/$op_uid/systemd/user/mini-spk-broker@$s.service"; do
-      ! sudo -n test -e "$w" || { echo "m6grain root cleanup left $w" >&2; return 1; }
+      ! sudo -n "$M6_ROOT_HELPER" survives "$w" || { echo "m6grain root cleanup left $w" >&2; return 1; }
     done
   done
   if [ "$rc" != 0 ]; then

@@ -31,10 +31,13 @@ row() {  # row CHECK EXPECTED OBSERVED OK(0/1)
 }
 die() { echo "$T"; echo "JDISCLOSE: $*" >&2; exit 1; }
 ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
-q() {  # q WHO LINE : one shell line; RC
+Q=0
+q() {  # q WHO LINE : one shell line; RC. Every line's output is retained as raw/NNN-WHO.{line,out,err}.
   MINI_KEYCACHE_PASSPHRASE="cache-pass-$1" timeout 600 "$SH" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
     --workspace "$(ws_of "$1")" --home "$H/$1" --line "$2" >"$LAST" 2>"$LASTERR"
   RC=$?
+  Q=$((Q + 1)); local tag; tag=$(printf '%03d-%s' "$Q" "$1")
+  printf '%s\n' "$2" >"$D/raw/$tag.line"; cp "$LAST" "$D/raw/$tag.out"; cp "$LASTERR" "$D/raw/$tag.err"
 }
 refused() { grep -m1 '^refused: \|^error: ' "$LASTERR" | sed 's/; encoded refusal.*//' | cut -c1-200; }
 enc() { grep -o 'encoded refusal: [0-9a-f]*' "$LASTERR" | head -1 | cut -d' ' -f3; }
@@ -49,6 +52,7 @@ enroll() {  # enroll WHO FUND
   q sponsor "enroll seal jd-$f" || die "enroll seal $f"
   q sponsor "enroll submit jd-$f" || die "enroll submit $f: $(refused)"
   subject=$(jq -r '.subject // empty' "$LAST")
+  [ -n "$subject" ] || die "enroll submit $f printed no subject (raw/$(printf '%03d' "$Q")-sponsor.out): $(head -c 160 "$LAST") $(refused)"
   rm -f "$H/sponsor/keys/jd-$f.key"
   "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jd-$f" --holder "$subject" --funding "$2" \
     --account-predicate "$D/permit-all.json" --factory-ref factory >"$LAST" 2>"$LASTERR" || die "provision $f"
