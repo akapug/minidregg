@@ -382,7 +382,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
      budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
-       maxInputTokens:200000,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
+       maxInputTokens:131072,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
    room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"lab-hermes"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \

@@ -529,6 +529,8 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
     // 4. The controller config, decoded through the controller's own type.
     let config = spec.controller(&witness, provider_witness.as_deref());
     let typed: Config = serde_json::from_value(config.clone()).map_err(|e| format!("controller config refused by its own type: {e}"))?;
+    // The same checks `serve` runs at open, so a bad config refuses here.
+    crate::validate(&typed).map_err(|e| format!("controller config refused by the controller's validation: {e}"))?;
     let config_path = spec.root.join("controller.json");
     let bytes = serde_json::to_vec_pretty(&typed).map_err(|e| e.to_string())?;
     match fs::read(&config_path) {
