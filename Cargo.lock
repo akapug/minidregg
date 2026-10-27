@@ -804,7 +804,6 @@ name = "minidregg-credential-signature-verifier"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
- "fips204",
  "sha2",
 ]
 
@@ -860,6 +859,7 @@ dependencies = [
  "ed25519-dalek",
  "libc",
  "ring",
+ "serde",
  "serde_json",
  "sha2",
 ]

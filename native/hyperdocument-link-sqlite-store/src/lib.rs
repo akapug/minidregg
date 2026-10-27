@@ -120,6 +120,15 @@ pub enum StoreError {
     RetiredSchema(i32),
     InvalidRoot(PathBuf),
     InvalidPath,
+    /// An append that can never succeed as written (height or sequence 0, a
+    /// tag, node key or node value over 4096 bytes, more than 4096 nodes, a
+    /// duplicate node key). Not contention: retrying the same bytes refuses
+    /// the same way, so it is never reported as `Conflict`.
+    Bound(&'static str),
+    /// The disk refused a write the operation needed: full (`ENOSPC`,
+    /// `EDQUOT`, `SQLITE_FULL`) or read-only (`EROFS`, `SQLITE_READONLY`).
+    /// Distinct from `Missing` (absent) and from an opaque failure.
+    Unwritable(String),
     Sqlite {
         code: i32,
         message: String,
@@ -152,6 +161,8 @@ impl fmt::Display for StoreError {
                 )
             }
             Self::InvalidPath => formatter.write_str("store path cannot be passed to SQLite"),
+            Self::Bound(what) => write!(formatter, "append refused: {what} (a bound, not contention; the same bytes never succeed)"),
+            Self::Unwritable(what) => write!(formatter, "store disk refused a write (full or read-only): {what}"),
             Self::Sqlite { code, message } => {
                 write!(formatter, "opaque SQLite failure {code}: {message}")
             }
@@ -171,7 +182,17 @@ impl std::error::Error for StoreError {
 
 impl From<io::Error> for StoreError {
     fn from(error: io::Error) -> Self {
-        Self::Io(error)
+        match error.raw_os_error() {
+            Some(libc::ENOSPC | libc::EDQUOT | libc::EROFS) => Self::Unwritable(error.to_string()),
+            _ => Self::Io(error),
+        }
+    }
+}
+
+impl StoreError {
+    /// The disk is full or read-only.
+    pub fn is_unwritable(&self) -> bool {
+        matches!(self, Self::Unwritable(_))
     }
 }
 
@@ -193,6 +214,11 @@ impl Database {
                 CStr::from_ptr(pointer).to_string_lossy().into_owned()
             }
         };
+        let primary = if code == SQLITE_OK { fallback_code } else { code } & 0xff;
+        // SQLITE_FULL (13) and SQLITE_READONLY (8): the disk, not the data.
+        if primary == 13 || primary == 8 {
+            return StoreError::Unwritable(format!("SQLite {code}: {message}"));
+        }
         StoreError::Sqlite {
             code: if code == SQLITE_OK {
                 fallback_code
@@ -489,7 +515,34 @@ impl SqliteByteStore {
         &self.database_path
     }
 
+    /// After a read verified the retained anchor against the database, bring
+    /// the anchor up to the head it read. On a full or read-only disk the read
+    /// still answers: the anchor it verified is at or below the head (never
+    /// ahead), so a lagging anchor loses nothing, and the next write or read
+    /// with room repairs it. Any other failure refuses.
+    fn refresh_anchor(guard: &anchor::Guard, head: &anchor::Head) -> Result<(), StoreError> {
+        match guard.publish(head) {
+            Err(error) if error.is_unwritable() => Ok(()),
+            other => other,
+        }
+    }
+
+    fn schema_version(&self) -> Result<i32, StoreError> {
+        let statement = self.database.prepare(b"PRAGMA user_version\0")?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        // SAFETY: the pragma result has one integer column and is on ROW.
+        Ok(unsafe { sqlite3_column_int(statement.raw.as_ptr(), 0) })
+    }
+
     fn upgrade_schema(&self) -> Result<(), StoreError> {
+        // A current Store is opened without the write lock: reads (and every
+        // `serve` request) neither serialize behind writers nor need a
+        // writable disk. Anything else is re-read under BEGIN IMMEDIATE.
+        if self.schema_version()? == 5 {
+            return Ok(());
+        }
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
@@ -970,7 +1023,7 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(DurableRead {
             head,
             base,
@@ -1023,7 +1076,7 @@ impl SqliteByteStore {
             found.push((*space, key.clone(), version));
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(HistoryRead {
             head,
             entries,
@@ -1074,17 +1127,22 @@ impl SqliteByteStore {
         F: FnMut(PublishPhase),
     {
         Self::validate_bound(record)?;
-        if height == 0
-            || tag.len() > 4096
-            || nodes.len() > 4096
-            || nodes.iter().any(|node| node.key.len() > 4096 || node.value.len() > 4096 || node.space > i64::MAX as u64)
-        {
-            return Err(StoreError::Conflict);
+        if height == 0 {
+            return Err(StoreError::Bound("height 0"));
+        }
+        if tag.len() > 4096 {
+            return Err(StoreError::Bound("tag over 4096 bytes"));
+        }
+        if nodes.len() > 4096 {
+            return Err(StoreError::Bound("more than 4096 nodes"));
+        }
+        if nodes.iter().any(|node| node.key.len() > 4096 || node.value.len() > 4096 || node.space > i64::MAX as u64) {
+            return Err(StoreError::Bound("a node key or value over 4096 bytes, or a node space over i64"));
         }
         let mut proposed_nodes = nodes.to_vec();
         proposed_nodes.sort();
         if proposed_nodes.windows(2).any(|pair| pair[0].space == pair[1].space && pair[0].key == pair[1].key) {
-            return Err(StoreError::Conflict);
+            return Err(StoreError::Bound("duplicate node key"));
         }
         let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
@@ -1182,8 +1240,11 @@ impl SqliteByteStore {
         F: FnMut(PublishPhase),
     {
         Self::validate_bound(record)?;
-        if seq == 0 || tag.len() > 4096 {
-            return Err(StoreError::Conflict);
+        if seq == 0 {
+            return Err(StoreError::Bound("journal sequence 0"));
+        }
+        if tag.len() > 4096 {
+            return Err(StoreError::Bound("tag over 4096 bytes"));
         }
         let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
@@ -1266,7 +1327,7 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(JournalRead { head, entries })
     }
 
@@ -1322,7 +1383,7 @@ impl SqliteByteStore {
         };
         drop(statement);
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(found)
     }
 }
@@ -1980,7 +2041,7 @@ mod anchor_tests {
         ));
         assert!(matches!(
             store.durable_append(2, b"r2", b"t2", &[node(2, b"k", b"a"), node(2, b"k", b"b")]),
-            Err(StoreError::Conflict)
+            Err(StoreError::Bound(_))
         ));
         store.durable_append(2, b"r2", b"t2", &[node(2, b"path", b"v2")]).unwrap();
         let request = vec![(1, b"leaf-1".to_vec()), (2, b"path".to_vec()), (2, b"absent".to_vec())];

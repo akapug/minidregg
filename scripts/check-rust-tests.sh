@@ -132,7 +132,8 @@ armed_exact() { # armed_exact NAME ENVVAR WHAT CRATE [cargo args] -- FULL::TEST:
 }
 
 t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: participant_enrollment:: key_generation
-t grain-provider          42 grain-runtime -- provider credential publication_refusal
+t grain-provider          27 grain-runtime -- provider credential publication_refusal
+t mini-keys-credentials   16 mini-keys --lib -- credentials::
 t hermes-test-provider    15 hermes-test-provider -- tests::
 t verifier-protocol       10 credential-signature-verifier --test protocol -- protocol_
 # The crates that sat outside the workspace (unbuildable 2026-10-08..10-26, tests silently stopped):
@@ -169,6 +170,14 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory \
   anchor_tests::a_durable_read_of_a_current_anchor_writes_nothing \
   anchor_tests::durable_read_repairs_an_anchor_that_lags_the_head
+# L6 (2026-10-26): a bound violation exits 6, never conflict (4); a read needs no
+# writable disk and a refused write is typed (7); the production binary has no
+# crash or hold verb (the fixtures run from the test binary, tests/support).
+exact store-repairs          hyperdocument-link-sqlite-store --test durable_anchor -- \
+  an_append_over_a_bound_exits_six_not_conflict \
+  a_read_needs_no_writable_disk_and_a_refused_write_is_typed \
+  serve_answers_in_process_and_the_production_binary_has_no_crash_verbs \
+  killed_publisher_recovers_before_and_after_commit_and_anchor
 # TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
 # member keys sealed and never returned, tickets bound to one body and one uid,
 # echo withheld, caller hang-up stops the provider call, Discord's one channel.
@@ -179,7 +188,19 @@ exact mini-keys-broker       mini-keys --test broker -- \
   a_ticket_forwards_one_exact_body_with_the_bearer_the_caller_never_sees \
   an_upstream_that_echoes_the_bearer_is_withheld_and_a_kind_mismatch_refuses \
   a_caller_that_hangs_up_stops_the_provider_call \
-  the_mirror_posts_and_reads_its_one_channel_without_holding_the_token
+  the_mirror_posts_and_reads_its_one_channel_without_holding_the_token \
+  the_forwarded_body_is_held_to_the_grant_whatever_the_controller_claimed \
+  an_exact_retry_recovers_a_lost_reply_without_a_second_count_or_call \
+  an_owner_status_from_an_unpinned_account_or_about_another_key_is_refused \
+  a_member_account_cannot_take_the_slots_or_force_a_large_frame_and_the_host_is_pinned \
+  an_operation_that_cannot_be_audited_is_refused_and_has_no_effect \
+  single_account_is_a_test_shape_a_root_owned_config_cannot_select
+# L6 (2026-10-26): grant caps read against the forwarded body; durable tickets
+# and the forward journal; the op-144 view; the pool spend ceiling.
+exact mini-keys-grant        mini-keys --lib -- \
+  server::ticket::tests::the_forwarded_body_is_held_to_the_grant_not_to_the_claim \
+  server::ticket::tests::a_ticket_round_trips_and_an_answer_is_retained_until_swept \
+  server::native::tests::only_a_current_unrevoked_exact_view_names_an_epoch
 # TENANCY-B: no client process opens the seal key. The hosted `mini key` runs its
 # real exchange against the real broker; the Hermes gateway sends only through
 # the broker (a ticket's bearer reaches upstream, an echo is withheld, a revoke

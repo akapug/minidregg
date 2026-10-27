@@ -1676,6 +1676,7 @@ pub(crate) mod test_broker {
             fs::set_permissions(p, fs::Permissions::from_mode(mode)).unwrap();
         };
         put(&dir.join("keys/credentials.key"), &[5u8; 32], 0o600);
+        put(&dir.join("etc/host"), b"host image", 0o755);
         put(&dir.join("etc/providers.json"), json!({"type":"mini-provider-table-v2","providers":[
             {"name":"fixturepool","endpoint":endpoint,"kind":"openai-compatible","models":["operator-model"],"credential":"pool","caps":{"perCall":"1000000","perDay":"100000"}},
             {"name":"fixturehome","endpoint":endpoint,"kind":"openai-compatible","models":["operator-model"],"credential":"homelab"}]}).to_string().as_bytes(), 0o644);
@@ -1683,7 +1684,8 @@ pub(crate) mod test_broker {
         let config = json!({"type":"mini-keys-broker-v1","socket":dir.join("run/broker.sock"),"audit":dir.join("state/audit.jsonl"),
             "spool":dir.join("state/spool"),"singleAccount":true,
             "peers":[{"role":"provider","uids":[me]},{"role":"operator","uids":[me]}],
-            "credentials":{"host":dir.join("etc/host"),"hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),
+            "credentials":{"host":dir.join("etc/host"),"hostSha256":mini_keys::server::native::host_sha256(&dir.join("etc/host")).unwrap(),
+                "hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),"publicSocketUid":mini_keys::peer::euid(),
                 "providers":dir.join("etc/providers.json"),"root":dir.join("credentials"),"key":dir.join("keys/credentials.key")}});
         put(&dir.join("etc/broker.json"), config.to_string().as_bytes(), 0o644);
         let (server, listener) =

@@ -360,11 +360,12 @@ stdout, stderr and the exit status.
 | `STORE read-to ROOT OUT` | exit 0, empty stdout/stderr, image bytes in `OUT` | exit 3 = no image yet; anything else = read failed |
 | `STORE cas ROOT EXPECTED\|- POST` | exit 0, stdout `Installed` or `AlreadyPresent`, empty stderr | exit 4 with empty stdout = conflict; anything else = **uncertain** |
 
-`-` means "expect no image". The whole durable image (genesis plus every
-accepted entry) is **one** record in `ROOT/forward-link.sqlite3`, replaced by
-compare-and-swap; a record is at most 64 MiB. The helper also has test-only
-commands (`cas-crash`, `publish-crash`, `publish-hold`) that the Host never
-calls in production.
+`-` means "expect no image" (the legacy one-slot record). The durable log,
+its checkpoints, the history nodes and the fn archive journal use the
+`durable-*` and `journal-*` verbs; their files, exit codes (3 absent, 4 CAS
+conflict, 6 bound violation, 7 disk full or read-only) and the sibling anchor
+are specified in `docs/DURABLE-STORE.md`. The binary has no test-only verbs:
+the crash and hold fixtures live in the crate's tests.
 
 **Signature verifier** (`signatureBinary`): `VERIFIER verify PUBLIC FRAME SIG`
 with a 32-byte raw public key file, the frame file and a 64-byte raw signature

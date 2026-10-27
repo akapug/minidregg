@@ -29,10 +29,9 @@ mod control;
 mod cgroup_stop;
 mod systemd_manager;
 mod controller_write_scopes;
-// One source shared with `mini key` (resource-client includes it by path):
-// the write verbs are used there, the reserve-time lookups here.
-#[allow(dead_code)]
-mod credentials;
+// The provider table, grants and owners: the key broker's parsers (its sealed
+// store compiles only inside the broker).
+use mini_keys::credentials;
 mod custody_gate;
 mod dispatch_custody;
 #[cfg(test)]

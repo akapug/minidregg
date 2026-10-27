@@ -16,7 +16,7 @@
 //! whether the signing key is current before it seals, grants or lists. The
 //! namespace is the workspace's subject AND the public key of its signing key,
 //! so a workspace that only claims someone else's subject lands in its own
-//! directory (`credentials.rs`). `--pool true` is the operator's pool key (the
+//! directory (`mini_keys::credentials`). `--pool true` is the operator's pool key (the
 //! broker grants it to root only); the hosted shell never offers it. Values are
 //! never printed.
 //!
@@ -32,9 +32,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-#[path = "../../grain-runtime/src/credentials.rs"]
-#[allow(dead_code)] // shared with grain-runtime: its reserve-time lookups are used there
-mod credentials;
+use mini_keys::credentials;
 #[path = "key_service.rs"]
 mod service;
 

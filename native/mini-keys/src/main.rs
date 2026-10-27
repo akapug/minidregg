@@ -62,7 +62,8 @@ fn broker(args: &mut Args) -> Broker {
         }
         (None, None) => {
             let path = args.take("client-config").unwrap_or_else(|| CLIENT_CONFIG.to_owned());
-            // Root's file on a box (the default); a sandbox's own account's in a journey.
+            // Owned by root (a box) or by this account (a journey): a client that
+            // can rewrite its own pointer can only misdirect itself.
             Broker::load(Path::new(&path), peer::euid()).unwrap_or_else(|e| fail(e))
         }
         _ => fail("--socket and --uid go together"),
