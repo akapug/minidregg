@@ -99,7 +99,6 @@ fn file_pins(config: &Value) -> Result<Value> {
         "fnScope",
         "recipientQueryIntent",
         "ownerKey",
-        "gatewayKey",
         "recipientQueryKey",
     ] {
         let path = named_path(config, key)?;
@@ -132,13 +131,6 @@ fn checked_receipt(value: &Value) -> Result<()> {
     {
         return Err("latest Mini result is not a confirmed receipt".into());
     }
-    for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
-        decimal(value, key)?;
-    }
-    Ok(())
-}
-
-fn receipt_fields(value: &Value) -> Result<()> {
     for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(value, key)?;
     }
@@ -179,31 +171,6 @@ fn recipient_receipt(state: &Path) -> Result<Value> {
     checked_receipt(&latest)?;
     let original = original.ok_or("recipient has no confirmed original receipt")?;
     Ok(original)
-}
-
-fn selected_poll(state: &Path) -> Result<PathBuf> {
-    let name =
-        String::from_utf8(crate::fsio::read_bounded(&state.join("poll-selected"), 32)?).map_err(|e| e.to_string())?;
-    let name = name.trim();
-    if name.len() != 9
-        || !name.starts_with("poll-")
-        || !name[5..].bytes().all(|b| b.is_ascii_digit())
-    {
-        return Err("retained selected poll name is invalid".into());
-    }
-    let poll = state.join(name);
-    crate::fsio::check_private_dir(&poll)?;
-    let report = read_json(&poll.join("fn-poll.json"))?;
-    if report.get("type").and_then(Value::as_str) != Some("selected-release-fn-poll-v1")
-        || report.get("status").and_then(Value::as_str) != Some("candidate-unacknowledged")
-        || crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
-            != crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?
-        || crate::fsio::read_bounded(&poll.join("received-packet.bin"), MAX_FILE)?
-            != crate::fsio::read_bounded(&state.join("packet.bin"), MAX_FILE)?
-    {
-        return Err("fn poll did not project the exact selected owner packet".into());
-    }
-    Ok(poll)
 }
 
 fn prepared(state: &Path) -> Result<()> {
@@ -397,64 +364,6 @@ fn publish(config: &Value, state: &Path) -> Result<()> {
     Ok(())
 }
 
-fn receive(config: &Value, state: &Path) -> Result<()> {
-    prepared(state)?;
-    let post = read_json(&state.join("source-publish/fn-post-result.json"))?;
-    if !matches!(
-        post.get("status").and_then(Value::as_str),
-        Some("accepted" | "already-stored")
-    ) {
-        return Err("fn POST has no retained acceptance".into());
-    }
-    let recipient = state.join("recipient-attempt");
-    if !recipient.exists() && !state.join("poll-selected").exists() {
-        let poll = next_name(state, "poll", "")?;
-        crate::fsio::create_private_dir(&poll)?;
-        host_call(
-            config,
-            true,
-            "selected-release-fn-poll",
-            &[
-                named_path(config, "fnBinary")?.as_os_str(),
-                named_path(config, "fnScope")?.as_os_str(),
-                named_path(config, "fnControl")?.as_os_str(),
-                OsStr::new(decimal(config, "recipientCapability")?),
-                OsStr::new(decimal(config, "recipientTargetRoot")?),
-                poll.join("cursor.fncu").as_os_str(),
-                poll.join("report.fn-e").as_os_str(),
-                poll.join("source.eml").as_os_str(),
-                poll.join("received-packet.bin").as_os_str(),
-                poll.join("received-ingress.bin").as_os_str(),
-                poll.join("fn-poll.json").as_os_str(),
-            ],
-        )?;
-        if crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
-            != crate::fsio::read_bounded(&state.join("article.eml"), MAX_FILE)?
-        {
-            return Err("fn projected carrier differs from exact selected article".into());
-        }
-        let name = poll
-            .file_name()
-            .ok_or("poll path has no name")?
-            .to_string_lossy();
-        create_private(&state.join("poll-selected"), name.as_bytes())?;
-    }
-    let poll = selected_poll(state)?;
-    if recipient.exists() {
-        selected_release::recover(&recipient, None)?;
-    } else {
-        selected_release::submit(
-            &host(config)?,
-            &recipient_config(config)?,
-            &named_path(config, "recipientSocket")?,
-            &poll.join("received-ingress.bin"),
-            &recipient,
-        )?;
-    }
-    recipient_receipt(state)?;
-    Ok(())
-}
-
 fn transport_article(state: &Path) -> Result<PathBuf> {
     let transport = state.join("transport");
     let name =
@@ -591,93 +500,10 @@ fn receive_transport(config: &Value, state: &Path) -> Result<()> {
     Ok(())
 }
 
-fn cover_plan(config: &Value, state: &Path) -> Result<()> {
-    prepared(state)?;
-    let poll = selected_poll(state)?;
-    let receipt = recipient_receipt(state)?;
-    fn_frontier::plan(
-        &host(config)?,
-        &recipient_config(config)?,
-        &named_path(config, "recipientOperatorSocket")?,
-        "selected",
-        decimal(&receipt, "transactionId")?,
-        &state.join("frontier"),
-    )?;
-    if crate::fsio::read_bounded(&state.join("frontier/source.eml"), MAX_FILE)?
-        != crate::fsio::read_bounded(&poll.join("source.eml"), MAX_FILE)?
-    {
-        return Err("frontier plan source differs from selected poll".into());
-    }
-    Ok(())
-}
-
-fn cover_advance(config: &Value, state: &Path, approval: &Path) -> Result<()> {
-    prepared(state)?;
-    selected_poll(state)?;
-    recipient_receipt(state)?;
-    fn_frontier::advance(
-        &state.join("frontier"),
-        &named_path(config, "gatewayKey")?,
-        approval,
-    )
-}
-
-fn ack(config: &Value, state: &Path) -> Result<()> {
-    prepared(state)?;
-    let poll = selected_poll(state)?;
-    let receipt = recipient_receipt(state)?;
-    let frontier = read_json(&state.join("frontier/confirmed.json"))?;
-    receipt_fields(&frontier)?;
-    let output = next_name(state, "ack", ".json")?;
-    host_call(
-        config,
-        true,
-        "selected-release-fn-ack",
-        &[
-            poll.join("cursor.fncu").as_os_str(),
-            poll.join("report.fn-e").as_os_str(),
-            OsStr::new(decimal(&receipt, "transactionId")?),
-            state.join("frontier/ingress.bin").as_os_str(),
-            output.as_os_str(),
-        ],
-    )?;
-    let result = read_json(&output)?;
-    if !matches!(
-        result.get("fnAck").and_then(Value::as_str),
-        Some("durable-accepted" | "covered-by-durable-frontier")
-    ) {
-        return Err("fn cursor ACK did not confirm exact Mini coverage".into());
-    }
-    Ok(())
-}
-
-fn verify(config: &Value, state: &Path, transport_only: bool) -> Result<()> {
+fn verify_transport(config: &Value, state: &Path) -> Result<()> {
     prepared(state)?;
     let receipt = recipient_receipt(state)?;
-    if transport_only {
-        transport_article(state)?;
-    } else {
-        let _poll = selected_poll(state)?;
-        let mut acked = false;
-        for entry in fs::read_dir(state).map_err(|e| e.to_string())? {
-            let path = entry.map_err(|e| e.to_string())?.path();
-            if path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .map(|s| s.starts_with("ack-") && s.ends_with(".json"))
-                .unwrap_or(false)
-            {
-                let value = read_json(&path)?;
-                acked |= matches!(
-                    value.get("fnAck").and_then(Value::as_str),
-                    Some("durable-accepted" | "covered-by-durable-frontier")
-                );
-            }
-        }
-        if !acked {
-            return Err("no retained fn ACK over accepted Mini event13/event17".into());
-        }
-    }
+    transport_article(state)?;
     let intent = read_json(&named_path(config, "recipientQueryIntent")?)?;
     let target = decimal(config, "destinationTarget")?;
     let capability = decimal(config, "recipientCapability")?;
@@ -739,7 +565,7 @@ fn verify(config: &Value, state: &Path, transport_only: bool) -> Result<()> {
         &json!({
         "type":"minidregg-selected-exchange-verified-v1", "recipientReceipt":receipt,
         "claim":"selected public content bytes admitted at recipient; no app install implied",
-        "transportOnly":transport_only}),
+        "transportOnly":true}),
     )?;
     Ok(())
 }
@@ -766,18 +592,17 @@ fn status(state: &Path) -> Result<()> {
         "recipientAttempt":present("recipient-attempt/attempt.json"),
         "recipientConfirmedReceipt":receipt,
         "transportArticle":present("transport/retrieval.json"),
-        "frontierAttempt":present("frontier/plan-attempt.json"),
-        "frontierConfirmed":present("frontier/confirmed.json"),
         "meaning":"retained local evidence only; not a fresh authorization or fn delivery claim"
     }))
 }
 
-pub(super) fn run(
-    phase: &str,
-    contract: &Path,
-    state: &Path,
-    approval: Option<&Path>,
-) -> Result<()> {
+/// The schema-1 `fn-e` route (accepted-article event, event17 coverage, fn
+/// cursor ACK) is not served: fn's NNTP POST stores a legacy `fn-r` article,
+/// which the Host's fn-e poll refuses, and the one native run of that route
+/// was refused. `receive-transport` and `verify-transport` are the route.
+pub(super) const FN_E_REFUSED: &str = "the fn-e route (receive, cover-plan, cover-advance, ack, verify) is retired: fn stores fn-r articles, which only receive-transport and verify-transport accept";
+
+pub(super) fn run(phase: &str, contract: &Path, state: &Path) -> Result<()> {
     if SOCKET.get().is_some() {
         return Err("selected exchange uses its pinned direct Host and explicit sockets".into());
     }
@@ -789,25 +614,11 @@ pub(super) fn run(
     {
         return Err("unsupported selected exchange contract or release profile".into());
     }
-    if !matches!(
-        phase,
-        "prepare"
-            | "status"
-            | "publish"
-            | "receive"
-            | "receive-transport"
-            | "cover-plan"
-            | "cover-advance"
-            | "ack"
-            | "verify"
-            | "verify-transport"
-    ) {
-        return Err(
-            "expected prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport".into(),
-        );
+    if matches!(phase, "receive" | "cover-plan" | "cover-advance" | "ack" | "verify") {
+        return Err(FN_E_REFUSED.into());
     }
-    if approval.is_some() && phase != "cover-advance" {
-        return Err("approval applies only to cover-advance".into());
+    if !matches!(phase, "prepare" | "status" | "publish" | "receive-transport" | "verify-transport") {
+        return Err("expected prepare|status|publish|receive-transport|verify-transport".into());
     }
     if phase == "prepare" {
         if state.exists() {
@@ -829,17 +640,8 @@ pub(super) fn run(
         match phase {
             "status" => status(&state),
             "publish" => publish(&config, &state),
-            "receive" => receive(&config, &state),
             "receive-transport" => receive_transport(&config, &state),
-            "cover-plan" => cover_plan(&config, &state),
-            "cover-advance" => cover_advance(
-                &config,
-                &state,
-                approval.ok_or("cover-advance requires an exact private approval")?,
-            ),
-            "ack" => ack(&config, &state),
-            "verify" => verify(&config, &state, false),
-            "verify-transport" => verify(&config, &state, true),
+            "verify-transport" => verify_transport(&config, &state),
             _ => unreachable!("phase validated before entering state"),
         }
     }
@@ -920,7 +722,7 @@ mod tests {
             &json!({"type":FORMAT,"releaseProfile":"encrypted-v1"}),
         )
         .unwrap();
-        assert!(run("prepare", &contract, &output, None)
+        assert!(run("prepare", &contract, &output)
             .unwrap_err()
             .contains("unsupported"));
         assert!(!output.exists());
@@ -969,10 +771,28 @@ mod tests {
             &json!({"type":FORMAT,"releaseProfile":"public-peerable-v2"}),
         )
         .unwrap();
-        assert!(run("resubmit", &contract, &output, None)
+        assert!(run("resubmit", &contract, &output)
             .unwrap_err()
             .contains("expected"));
         assert!(!output.exists());
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn selected_fn_e_phases_refuse_by_name_before_touching_state() {
+        let state = scratch();
+        let contract = state.join("contract.json");
+        put_json(
+            &contract,
+            &json!({"type":FORMAT,"releaseProfile":"public-peerable-v2"}),
+        )
+        .unwrap();
+        let output = state.join("exchange");
+        fs::DirBuilder::new().mode(0o700).create(&output).unwrap();
+        for phase in ["receive", "cover-plan", "cover-advance", "ack", "verify"] {
+            assert_eq!(run(phase, &contract, &output).unwrap_err(), FN_E_REFUSED, "{phase}");
+        }
+        assert_eq!(fs::read_dir(&output).unwrap().count(), 0, "no lock or attempt state");
         fs::remove_dir_all(state).unwrap();
     }
 }

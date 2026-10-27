@@ -70,6 +70,31 @@ pub(crate) fn host_budget(request: &[u8]) -> Duration {
 /// The named refusal for a request whose body exceeds its own operation's
 /// bound, judged before the Host sees a byte of it. `None` is not an
 /// approval: `request_within_bound` and `allowed_operation` still judge it.
+/// The loud reason a public caller gets for an fn ACK (op 13/15). The Host's
+/// `runFnAckSession`/`runFnReplyAckSession` authorize nothing beyond "this Mini
+/// transaction is accepted", so a member could pre-ACK and push the operator's
+/// consumer into Held via `covered-by-durable-frontier`. Until Lean names the
+/// receiver and capability that may ACK a public fn delivery, only the
+/// owner-private socket routes these ops.
+pub(crate) const FN_ACK_OPERATOR_ONLY: &str =
+    "fn ACK (op 13/15) is operator-only: Lean has not stated who may ACK a public fn delivery";
+
+fn fn_ack_transaction(digits: &[u8]) -> bool {
+    !digits.is_empty()
+        && digits.len() <= 80
+        && digits.iter().all(u8::is_ascii_digit)
+        && (digits.len() == 1 || digits[0] != b'0')
+}
+
+/// A named refusal for an op the public route withholds on purpose, so a
+/// caller sees why rather than the generic "unavailable".
+pub(crate) fn public_route_refusal(request: &[u8]) -> Option<&'static str> {
+    match request {
+        [13 | 15, ..] => Some(FN_ACK_OPERATOR_ONLY),
+        _ => None,
+    }
+}
+
 pub(crate) fn operation_body_refusal(request: &[u8]) -> Option<&'static str> {
     match request {
         [operation, _, ..] if NO_BODY_OPS.contains(operation) => {
@@ -232,6 +257,9 @@ pub(crate) fn public_envelope(
     if let Some(reason) = operation_body_refusal(request) {
         return Err(reason);
     }
+    if let Some(reason) = public_route_refusal(request) {
+        return Err(reason);
+    }
     if !allowed_operation(request, catalog_enabled) {
         return Err("operation unavailable on selected socket");
     }
@@ -332,12 +360,6 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // Renumbered from 117-123 at the final merge (pay holds 117-120).
         [131..=137, ..] => true,
         [12 | 14] => true,
-        [13 | 15, digits @ ..] => {
-            !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
-        }
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
@@ -540,6 +562,9 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
+        // fn ACK 13/15 is operator-only (see `FN_ACK_OPERATOR_ONLY`): the Host's
+        // `runFnAckSession` checks only that the txn is accepted, not who asks.
+        [13 | 15, digits @ ..] => fn_ack_transaction(digits),
         // Event17/19 testimony and receipt-only lookups remain on the owner
         // operator socket. The public listener cannot advance a fn frontier.
         [60..=63, payload @ ..] => !payload.is_empty() && payload.len() <= 16_384,
@@ -1887,6 +1912,9 @@ fn serve_connection(
         // lifecycle clients and the separately filtered public ingress relay.
         allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
+        if let Some(reason) = public_route_refusal(&request) {
+            return refuse(&mut stream, reason);
+        }
         allowed_operation(&request, rules.catalog_enabled)
     }) {
         return refuse(&mut stream, "operation unavailable on selected socket");
@@ -1967,6 +1995,42 @@ mod tests {
         let reply = read_frame(&mut client).unwrap().unwrap();
         worker.join().unwrap();
         reply
+    }
+
+    fn public_socket_reply(request: &[u8]) -> Vec<u8> {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let (jobs, _queue) = fair_queue::<HostJob>(1);
+        let worker = thread::spawn(move || {
+            let rules = EnvelopeRules {
+                operator: None,
+                config_bytes: b"config",
+                host_sha256: &[7; 32],
+                catalog_enabled: true,
+                read_deadline: Duration::from_millis(500),
+            };
+            serve_connection(server, &rules, &jobs);
+        });
+        let envelope = [&[2u8, 6, 0, 0, 0][..], b"config", &[7; 32], request].concat();
+        write_frame(&mut client, &envelope).unwrap();
+        let reply = read_frame(&mut client).unwrap().unwrap();
+        worker.join().unwrap();
+        reply
+    }
+
+    /// A public caller asking for an fn ACK gets the named reason on the
+    /// public socket and through every byte proxy, never a queued Host call.
+    #[test]
+    fn transport_fn_ack_public_route_refuses_loudly() {
+        for ack in [13u8, 15] {
+            let reply = public_socket_reply(&[ack, b'4']);
+            assert_eq!(reply, [&[254u8][..], FN_ACK_OPERATOR_ONLY.as_bytes()].concat());
+            let envelope = [&[2u8, 6, 0, 0, 0][..], b"config", &[7; 32], &[ack, b'4']].concat();
+            assert_eq!(public_envelope(&envelope, b"config", true), Err(FN_ACK_OPERATOR_ONLY));
+            assert_eq!(public_envelope(&envelope, b"config", false), Err(FN_ACK_OPERATOR_ONLY));
+        }
+        // A malformed ACK is refused for the route too, before its shape.
+        assert_eq!(public_socket_reply(&[13]),
+            [&[254u8][..], FN_ACK_OPERATOR_ONLY.as_bytes()].concat());
     }
 
     #[test]
@@ -2953,15 +3017,19 @@ done"#;
     fn public_fn_operations_have_no_path_payload() {
         assert!(allowed_operation(&[12], false));
         assert!(!allowed_operation(&[12, b'/'], false));
-        assert!(allowed_operation(&[13, b'0'], false));
-        assert!(allowed_operation(&[13, b'1', b'2', b'3'], false));
-        assert!(!allowed_operation(&[13], false));
-        assert!(!allowed_operation(&[13, b'0', b'1'], false));
-        assert!(!allowed_operation(&[13, b'1', b'/'], false));
         assert!(allowed_operation(&[14], false));
         assert!(!allowed_operation(&[14, b'/'], false));
-        assert!(allowed_operation(&[15, b'2'], false));
-        assert!(!allowed_operation(&[15, b'0', b'2'], false));
+        // fn ACK is operator-only; the operator arm keeps the decimal shape.
+        for ack in [13u8, 15] {
+            assert!(!allowed_operation(&[ack, b'2'], false));
+            assert!(!allowed_operation(&[ack, b'2'], true));
+            assert!(allowed_operator_operation(&[ack, b'0']));
+            assert!(allowed_operator_operation(&[ack, b'1', b'2', b'3']));
+            assert!(!allowed_operator_operation(&[ack]));
+            assert!(!allowed_operator_operation(&[ack, b'0', b'1']));
+            assert!(!allowed_operator_operation(&[ack, b'1', b'/']));
+            assert!(!allowed_operator_operation(&[[ack].as_slice(), &[b'9'; 81]].concat()));
+        }
         assert!(!allowed_operation(&[16, b'R'], false));
         assert!(!allowed_operation(&[16], true));
         assert!(allowed_operation(&[16, b'R'], true));

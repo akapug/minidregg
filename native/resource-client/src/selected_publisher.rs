@@ -332,26 +332,13 @@ fn accepted_post(value: &Value, receipt: &Value, article_hash: &str) -> Result<(
     {
         return Err("retained selected fn POST result differs from source receipt".into());
     }
-    let status = value.get("status").and_then(Value::as_str);
-    let detail = value.get("detail").and_then(Value::as_str);
-    if !matches!(
-        (status, detail),
-        (Some("accepted"), Some("240 article received OK"))
-            | (
-                Some("already-stored"),
-                Some("441 posting failed; this article is already stored here")
-            )
+    if !worker::post_stored(
+        value.get("status").and_then(Value::as_str),
+        value.get("detail").and_then(Value::as_str),
     ) {
         return Err("selected fn POST has no exact accepted status line".into());
     }
     Ok(())
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum PostAction {
-    First,
-    Accepted,
-    Hold,
 }
 
 fn post_action(
@@ -359,19 +346,12 @@ fn post_action(
     result: Option<&Value>,
     receipt: &Value,
     article_hash: &str,
-) -> Result<PostAction> {
-    match (attempt, result) {
-        (false, None) => Ok(PostAction::First),
-        (true, None) => Ok(PostAction::Hold),
-        (true, Some(value)) => {
-            if accepted_post(value, receipt, article_hash).is_ok() {
-                Ok(PostAction::Accepted)
-            } else {
-                Ok(PostAction::Hold)
-            }
-        }
-        (false, Some(_)) => Err("selected fn POST result lacks preceding attempt marker".into()),
-    }
+) -> Result<worker::PostAction> {
+    worker::post_action(
+        attempt,
+        result.map(|value| accepted_post(value, receipt, article_hash).is_ok()),
+    )
+    .map_err(|error| format!("selected {error}"))
 }
 
 fn validate_post_attempt(value: &Value, receipt: &Value, article_hash: &str) -> Result<()> {
@@ -456,13 +436,13 @@ pub(super) fn publish(
         None
     };
     match post_action(attempt.exists(), result.as_ref(), &receipt, &article_hash)? {
-        PostAction::Accepted => return Ok(()),
-        PostAction::Hold => {
+        worker::PostAction::Accepted => return Ok(()),
+        worker::PostAction::Hold => {
             return Err(
                 "fn POST response unresolved; exact article retained, no automatic repost".into(),
             );
         }
-        PostAction::First => {}
+        worker::PostAction::First => {}
     }
     durable_json(
         &attempt,
@@ -473,15 +453,7 @@ pub(super) fn publish(
         Ok(value) => value,
         Err(error) => worker::FnPostOutcome::TransportUncertain(error),
     };
-    use worker::FnPostOutcome;
-    let (status, detail) = match outcome {
-        FnPostOutcome::Accepted(line) => ("accepted", line),
-        FnPostOutcome::AlreadyStored(line) => ("already-stored", line),
-        FnPostOutcome::Conflict(line) => ("conflict", line),
-        FnPostOutcome::ExplicitUncertain(line) => ("explicit-uncertain", line),
-        FnPostOutcome::Refused(line) => ("refused", line),
-        FnPostOutcome::TransportUncertain(line) => ("transport-uncertain", line),
-    };
+    let (status, detail) = worker::post_status(outcome);
     durable_json(
         &result_path,
         &json!({"type":"minidregg-selected-fn-post-v1",
@@ -595,11 +567,11 @@ mod tests {
         confirmed(&receipt).unwrap();
         assert_eq!(
             post_action(false, None, &receipt, "abc").unwrap(),
-            PostAction::First
+            worker::PostAction::First
         );
         assert_eq!(
             post_action(true, None, &receipt, "abc").unwrap(),
-            PostAction::Hold
+            worker::PostAction::Hold
         );
         assert!(post_action(false, Some(&json!({})), &receipt, "abc").is_err());
     }
@@ -613,7 +585,7 @@ mod tests {
             "status":"accepted","detail":"240 article received OK"});
         assert_eq!(
             post_action(true, Some(&accepted), &receipt, "abc").unwrap(),
-            PostAction::Accepted
+            worker::PostAction::Accepted
         );
         let uncertain = json!({"type":"minidregg-selected-fn-post-v1",
             "sourceReceipt":receipt,"articleSha256":"abc",
@@ -621,11 +593,11 @@ mod tests {
             "detail":"441 posting failed; the outcome is uncertain, do not repost"});
         assert_eq!(
             post_action(true, Some(&uncertain), &receipt, "abc").unwrap(),
-            PostAction::Hold
+            worker::PostAction::Hold
         );
         assert_eq!(
             post_action(true, Some(&accepted), &receipt, "changed").unwrap(),
-            PostAction::Hold
+            worker::PostAction::Hold
         );
         let marker = json!({"type":"minidregg-selected-fn-post-attempt-v1",
             "sourceReceipt":receipt,"articleSha256":"abc"});

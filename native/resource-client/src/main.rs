@@ -30,10 +30,6 @@ mod agent_reserve;
 #[cfg(unix)]
 mod current_birth;
 #[cfg(unix)]
-mod drain;
-#[cfg(unix)]
-mod fn_frontier;
-#[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
 mod append_proof;
@@ -41,8 +37,6 @@ mod append_proof;
 mod fleet_sign;
 #[cfg(unix)]
 mod objective_invoke;
-#[cfg(unix)]
-mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
 mod hiding;
@@ -76,8 +70,6 @@ mod proxy;
 mod public_proxy;
 #[cfg(unix)]
 mod operator_drain;
-#[cfg(unix)]
-mod publisher;
 #[cfg(unix)]
 mod scheduled_transport;
 #[path = "../../hybrid_kem.rs"]
@@ -660,33 +652,6 @@ fn session_invoke(
     transport::invoke_pinned_with_local(host, socket, config, &selected_sha, operation, payload)
 }
 
-#[cfg(unix)]
-fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
-    let pin: Value =
-        serde_json::from_slice(&fs::read(state_dir.join("pin.json")).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-    if matches!(
-        pin.get("type").and_then(Value::as_str),
-        Some("minidregg-b-consumer-worker-pin-v2" | "minidregg-a-reply-consumer-worker-pin-v2")
-    ) {
-        let sha = pin
-            .get("hostSha256")
-            .and_then(Value::as_str)
-            .ok_or("v2 worker pin lacks host image digest")?
-            .to_owned();
-        if let Some(existing) = EXPECTED_HOST_SHA.get() {
-            if existing != &sha {
-                return Err("worker host image changed within process".into());
-            }
-        } else {
-            EXPECTED_HOST_SHA
-                .set(sha)
-                .map_err(|_| "cannot pin worker host image")?;
-        }
-    }
-    Ok(())
-}
-
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
@@ -774,7 +739,7 @@ usage:
   mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
   mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
-  mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
+  mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
@@ -820,12 +785,6 @@ usage:
   mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
   mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
-  mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
-  mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
-  mini fn-namespace-lookup --state-dir PRIVATE-DIR
-  mini fn-frontier-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --kind selected|empty --transaction MINI-TX|- --state-dir NEW-PRIVATE-DIR
-  mini fn-frontier-advance --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
-  mini fn-frontier-lookup --state-dir PRIVATE-DIR
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
@@ -846,23 +805,9 @@ usage:
   mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
   mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
-  mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
-  mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
-  mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
-  mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini provider-continuity --host HOST --config CONFIG.json --socket SOCKET --guarded-attempt ATTEMPT --dir NEW-PROOF
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
-  mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
-  mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
-  mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
-  mini reply-consumer-resume-ack --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
-  mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
-  mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
-  mini reply-consumer-worker --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -2431,12 +2376,7 @@ fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok(mini_sdk::store::AttemptDir(directory.to_path_buf()).next_retry()?)
 }
 
-fn retry_with_upgrade(
-    directory: &Path,
-    mode: &str,
-    direct: bool,
-    #[cfg(unix)] upgrade: Option<&drain::HostUpgrade>,
-) -> Result<()> {
+fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
@@ -2449,7 +2389,7 @@ fn retry_with_upgrade(
     if let Some(outcome) = receipt_continuity::carry::retry_lookup(directory, mode, direct)? {
         return print_confirmed_outcome(&outcome);
     }
-    let (original_host, config, socket) = manifest_paths(directory)?;
+    let (host, config, socket) = manifest_paths(directory)?;
     if !direct && SOCKET.get().is_none() {
         if let Some(socket) = socket {
             let _ = SOCKET.set(socket);
@@ -2458,185 +2398,12 @@ fn retry_with_upgrade(
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
     let (outcome_bin, outcome_json) = next_retry(directory)?;
-    #[cfg(unix)]
-    let host = if let Some(upgrade) = upgrade {
-        if direct || original_host != upgrade.old_host {
-            return Err("upgraded retry must use the original manifest and pinned socket".into());
-        }
-        let socket = SOCKET
-            .get()
-            .ok_or("upgraded retry requires pinned socket")?;
-        if socket != &upgrade.socket
-            || fs::read(&config).map_err(|e| e.to_string())? != upgrade.config_bytes
-            || fs::read(&call).map_err(|e| e.to_string())? != upgrade.call_bytes
-        {
-            return Err("upgraded retry inputs differ from durable migration evidence".into());
-        }
-        let evidence = fs::read(&upgrade.evidence_path).map_err(|e| e.to_string())?;
-        if hex(&sha2::Sha256::digest(&evidence)) != upgrade.evidence_sha
-            || hex(&sha2::Sha256::digest(
-                fs::read(&upgrade.new_host).map_err(|e| e.to_string())?,
-            )) != upgrade.new_host_sha
-        {
-            return Err("upgraded retry migration evidence changed".into());
-        }
-        let transport_path = outcome_json.with_extension("transport.json");
-        let transport = json!({
-            "type":"minidregg-upgraded-retry-transport-v1",
-            "originalAttemptHost":utf8_path(&original_host)?,
-            "effectiveHost":utf8_path(&upgrade.new_host)?,
-            "effectiveHostSha256":upgrade.new_host_sha,
-            "upgradeEvidencePath":utf8_path(&upgrade.evidence_path)?,
-            "upgradeEvidenceSha256":upgrade.evidence_sha,
-            "callSha256":upgrade.call_sha,
-            "mode":mode,
-            "socket":utf8_path(socket)?
-        });
-        if transport_path.exists() {
-            let existing: Value =
-                serde_json::from_slice(&fs::read(&transport_path).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
-            if existing != transport {
-                return Err("upgraded retry transport record changed".into());
-            }
-        } else {
-            let mut bytes = serde_json::to_vec_pretty(&transport).map_err(|e| e.to_string())?;
-            bytes.push(b'\n');
-            create_private(&transport_path, &bytes)?;
-            sync_directory_ancestors(directory)?;
-        }
-        &upgrade.new_host
-    } else {
-        &original_host
-    };
-    #[cfg(not(unix))]
-    let host = &original_host;
+    let host = &host;
     host_files(host, &config, &[Path::new(mode), &call, &outcome_bin])?;
     let outcome = inspect(host, &config, "outcome", &outcome_bin, &outcome_json)?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, true)?;
     print_confirmed_outcome(&outcome)
-}
-
-fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
-    retry_with_upgrade(
-        directory,
-        mode,
-        direct,
-        #[cfg(unix)]
-        None,
-    )
-}
-
-#[cfg(unix)]
-#[derive(Clone, Copy)]
-struct ConsumerRoute {
-    poll_command: &'static str,
-    ack_command: &'static str,
-    poll_opcode: u8,
-    ack_opcode: u8,
-    poll_type: &'static str,
-    ack_type: &'static str,
-    reply: bool,
-}
-
-#[cfg(unix)]
-const B_CONSUMER: ConsumerRoute = ConsumerRoute {
-    poll_command: "consumer-poll",
-    ack_command: "consumer-ack",
-    poll_opcode: 12,
-    ack_opcode: 13,
-    poll_type: "fn-consumer-poll-session-v1",
-    ack_type: "fn-consumer-ack-session-v1",
-    reply: false,
-};
-
-#[cfg(unix)]
-const A_REPLY_CONSUMER: ConsumerRoute = ConsumerRoute {
-    poll_command: "reply-consumer-poll",
-    ack_command: "reply-consumer-ack",
-    poll_opcode: 14,
-    ack_opcode: 15,
-    poll_type: "fn-a-reply-poll-session-v1",
-    ack_type: "fn-a-reply-ack-session-v1",
-    reply: true,
-};
-
-#[cfg(unix)]
-fn historical_without_intent(value: &Value, route: ConsumerRoute) -> bool {
-    if route.reply {
-        matches!(
-            value.pointer("/decision/decision").and_then(Value::as_str),
-            Some("repeated" | "conflict-recorded")
-        )
-    } else {
-        matches!(
-            value
-                .pointer("/decision/decision/type")
-                .and_then(Value::as_str),
-            Some(
-                "historical-repeat"
-                    | "historical-carrier-variation-evidence"
-                    | "historical-conflict-evidence"
-            )
-        )
-    }
-}
-
-#[cfg(unix)]
-fn canonical_poll_decimal<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
-    let text = value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("fn progress lacks {field}"))?;
-    if !mini_sdk::decimal::is_canonical_max(text, 80)
-    {
-        return Err(format!("fn progress has noncanonical {field}"));
-    }
-    Ok(text)
-}
-
-#[cfg(unix)]
-fn validate_skip_decision(value: &Value, route: ConsumerRoute, intent: &[u8]) -> Result<()> {
-    let decision = value
-        .get("decision")
-        .ok_or("fn skip reply lacks decision")?;
-    let kind = decision
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or("fn skip reply lacks decision type")?;
-    let own_r = kind == "fn-a-own-r-progress-decision-v1";
-    if kind != "fn-empty-page-progress-decision-v1" && !(route.reply && own_r) {
-        return Err("fn skip decision type is unsupported for this consumer".into());
-    }
-    let fields = decision
-        .as_object()
-        .ok_or("fn skip decision is not an object")?;
-    if fields.len() != if own_r { 5 } else { 4 } {
-        return Err("fn skip decision fields differ from source schema".into());
-    }
-    let from = canonical_poll_decimal(decision, "fromPosition")?
-        .parse::<u128>()
-        .map_err(|_| "fn progress fromPosition exceeds u128")?;
-    let to = canonical_poll_decimal(decision, "toPosition")?
-        .parse::<u128>()
-        .map_err(|_| "fn progress toPosition exceeds u128")?;
-    if to > u32::MAX as u128
-        || !(1..=16).contains(
-            &to.checked_sub(from)
-                .ok_or("fn progress position reversed")?,
-        )
-    {
-        return Err("fn progress exceeds source poll scan bound".into());
-    }
-    if own_r {
-        canonical_poll_decimal(decision, "outboxTransactionId")?;
-    }
-    match decision.get("decision").and_then(Value::as_str) {
-        Some("proposed-fresh") if !intent.is_empty() => Ok(()),
-        Some("repeated") if intent.is_empty() => Ok(()),
-        _ => Err("fn progress decision and intent disagree".into()),
-    }
 }
 
 #[cfg(unix)]
@@ -2651,353 +2418,6 @@ fn private_consumer_attempt(
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, operation)?;
     Ok(retained_config)
-}
-
-#[cfg(unix)]
-fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRoute) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer poll requires --socket")?;
-    let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
-    let frame = session_invoke(host, socket, &retained_config, route.poll_opcode, &[])?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err(format!(
-            "host refused {}; complete encoded reply retained in {}",
-            route.poll_command,
-            directory.join("reply.frame").display()
-        ));
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid fn consumer host JSON; complete reply retained: {e}"))?;
-    write_new(&directory.join("decision.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some(route.poll_type) {
-        return Err("unexpected fn consumer host reply type; complete reply retained".to_owned());
-    }
-    let status = value
-        .get("status")
-        .and_then(Value::as_str)
-        .ok_or("fn consumer reply lacks status; complete reply retained")?;
-    let intent_hex = value
-        .get("intentHex")
-        .and_then(Value::as_str)
-        .ok_or("fn consumer reply lacks intentHex; complete reply retained")?;
-    let intent = decode_hex(intent_hex)?;
-    if hex(&intent) != intent_hex {
-        return Err(
-            "fn consumer intentHex is not canonical lowercase; complete reply retained".to_owned(),
-        );
-    }
-    match status {
-        "accepted-decision" => {
-            if intent.is_empty() {
-                if !historical_without_intent(&value, route) {
-                    return Err("fn consumer accepted without an intent or historical decision; complete reply retained".to_owned());
-                }
-            } else {
-                write_new(&directory.join("intent.bin"), &intent)?;
-            }
-            print_json(&value)
-        }
-        "idle"
-            if intent.is_empty()
-                && value.pointer("/decision/type").and_then(Value::as_str)
-                    == Some("fn-empty-page-idle-v1") =>
-        {
-            print_json(&value)
-        }
-        "skip-decision" => {
-            validate_skip_decision(&value, route, &intent)?;
-            if !intent.is_empty() {
-                write_new(&directory.join("intent.bin"), &intent)?;
-            }
-            print_json(&value)
-        }
-        "refused" if intent.is_empty() => {
-            print_json(&value)?;
-            Err("fn consumer refused; complete decision retained".to_owned())
-        }
-        _ => Err("inconsistent fn consumer status and intent; complete reply retained".to_owned()),
-    }
-}
-
-#[cfg(unix)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AckResult {
-    Exact,
-    Covered,
-}
-
-#[cfg(unix)]
-fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> Result<AckResult> {
-    if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
-        || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
-    {
-        return Err("fn ack reply identity mismatch; complete reply retained".into());
-    }
-    let own_r = value.get("kind").and_then(Value::as_str) == Some("own-r-skip");
-    if own_r {
-        if !route.reply || value.as_object().is_none_or(|fields| fields.len() != 9) {
-            return Err("own-R ACK reply has wrong consumer or fields".into());
-        }
-        canonical_poll_decimal(value, "outboxTransactionId")?;
-        let sequence = canonical_poll_decimal(value, "fnStoreSequence")?
-            .parse::<u32>()
-            .map_err(|_| "own-R Store sequence exceeds u32")?;
-        canonical_poll_decimal(value, "fnStoreTransactionId")?
-            .parse::<u32>()
-            .map_err(|_| "own-R Store transaction exceeds u32")?;
-        let cursor = canonical_poll_decimal(value, "fnCursorPosition")?
-            .parse::<u32>()
-            .map_err(|_| "own-R ACK cursor exceeds u32")?;
-        if sequence.checked_add(1) != Some(cursor) {
-            return Err("own-R ACK cursor differs from Store sequence".into());
-        }
-        let committed = canonical_poll_decimal(value, "fnCommittedAck")?
-            .parse::<u32>()
-            .map_err(|_| "own-R committed ACK exceeds u32")?;
-        if matches!(
-            value.get("fnAck").and_then(Value::as_str),
-            Some("durable-accepted" | "covered-by-durable-frontier")
-        ) && committed < cursor
-        {
-            return Err("own-R ACK committed frontier precedes retained cursor".into());
-        }
-    }
-    match value.get("fnAck").and_then(Value::as_str) {
-        Some("durable-accepted") => Ok(AckResult::Exact),
-        Some("covered-by-durable-frontier") => {
-            let cursor = value
-                .get("fnCursorPosition")
-                .and_then(Value::as_str)
-                .ok_or("fn coverage lacks retained cursor position")?;
-            let committed = value
-                .get("fnCommittedAck")
-                .and_then(Value::as_str)
-                .ok_or("fn coverage lacks committed ACK frontier")?;
-            let decimal = |s: &str| -> Result<u128> {
-                if !mini_sdk::decimal::is_canonical(s)
-                {
-                    return Err("fn coverage position is not canonical decimal".into());
-                }
-                s.parse::<u128>()
-                    .map_err(|_| "fn coverage position exceeds u128".into())
-            };
-            if decimal(cursor)? > decimal(committed)? {
-                return Err("fn coverage cursor exceeds committed ACK frontier".into());
-            }
-            let kind = value.get("kind").and_then(Value::as_str);
-            if !(matches!(kind, Some("empty-page-skip" | "article-prefix-coverage"))
-                || (route.reply && kind == Some("own-r-skip")))
-            {
-                return Err("fn coverage lacks supported kind".into());
-            }
-            Ok(AckResult::Covered)
-        }
-        Some("refused" | "uncertain" | "transport-fault") => {
-            Err("fn ack incomplete; complete reply retained for reconciliation".into())
-        }
-        _ => Err("fn ack reply lacks valid status; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn consumer_ack(
-    host: &Path,
-    config: &Path,
-    transaction: &str,
-    directory: &Path,
-    route: ConsumerRoute,
-) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer ack requires --socket")?;
-    if !mini_sdk::decimal::is_canonical_max(transaction, 80) {
-        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".to_owned());
-    }
-    let bytes = transaction.as_bytes();
-    let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
-    write_new(&directory.join("transaction-id.txt"), bytes)?;
-    let frame = session_invoke(host, socket, &retained_config, route.ack_opcode, bytes)?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err(format!(
-            "host refused {}; complete encoded reply retained in {}",
-            route.ack_command,
-            directory.join("reply.frame").display()
-        ));
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid fn ack host JSON; complete reply retained: {e}"))?;
-    write_new(&directory.join("ack.json"), &frame[1..])?;
-    print_json(&value)?;
-    let status = parse_ack_result(&value, route, transaction)?;
-    match status {
-        AckResult::Exact => Ok(()),
-        AckResult::Covered => Err("fn cursor is covered by a durable frontier; exact old ACK event is not proven; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_intent(value: &Value) -> Result<Option<Vec<u8>>> {
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-session-v1") {
-        return Err("unexpected origin outbox reply type; complete frame retained".into());
-    }
-    if value
-        .get("messageId")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-        || value.get("miniOrigin").is_none_or(|v| !v.is_object())
-    {
-        return Err("origin outbox reply lacks message identity or Mini origin".into());
-    }
-    let source = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks source identity")?;
-    let source_bytes = decode_hex(source)?;
-    if source_bytes.is_empty() || hex(&source_bytes) != source {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    let intent_hex = value
-        .get("intentHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks intentHex")?;
-    let intent = decode_hex(intent_hex)?;
-    if hex(&intent) != intent_hex {
-        return Err("origin outbox intentHex is not canonical lowercase".into());
-    }
-    match (
-        value.get("status").and_then(Value::as_str),
-        value.get("decision").and_then(Value::as_str),
-        intent.is_empty(),
-    ) {
-        (Some("prepared-decision"), Some("proposed-fresh"), false) => Ok(Some(intent)),
-        (Some("prepared-decision"), Some("repeated"), true) => Ok(None),
-        (Some("refused"), Some("refused"), true) => {
-            Err("origin outbox preparation refused; complete decision retained".into())
-        }
-        _ => Err("inconsistent origin outbox decision and intent; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_prepare(
-    host: &Path,
-    config: &Path,
-    carrier: &Path,
-    directory: &Path,
-) -> Result<()> {
-    const MAX_CARRIER: usize = 1_516_384;
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-prepare requires --socket")?;
-    let bytes = fsio::read_bounded(carrier, MAX_CARRIER)?;
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
-    create_private(&directory.join("carrier.bin"), &bytes)?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 16, &bytes)?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox preparation; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("decision.json"), &frame[1..])?;
-    let selected = origin_outbox_intent(&value);
-    print_json(&value)?;
-    match selected {
-        Ok(Some(intent)) => {
-            write_new(&directory.join("intent.bin"), &intent)?;
-            Ok(())
-        }
-        Ok(None) => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_export(
-    host: &Path,
-    config: &Path,
-    transaction: &str,
-    directory: &Path,
-) -> Result<()> {
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-export requires --socket")?;
-    if !mini_sdk::decimal::is_canonical_max(transaction, 80)
-    {
-        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".into());
-    }
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-export")?;
-    create_private(
-        &directory.join("transaction-id.txt"),
-        transaction.as_bytes(),
-    )?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 18, transaction.as_bytes())?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox export; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox export JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("export.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-export-v1") {
-        return Err("unexpected origin outbox export type; complete reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) == Some("refused") {
-        print_json(&value)?;
-        return Err("origin outbox export refused; complete typed reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) != Some("accepted")
-        || value.get("transactionId").and_then(Value::as_str) != Some(transaction)
-        || value
-            .get("messageId")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-    {
-        return Err("origin outbox export identity mismatch; complete reply retained".into());
-    }
-    for name in ["packageIdentity", "originCallIdentity"] {
-        let Some(text) = value.get(name).and_then(Value::as_str) else {
-            return Err(format!("origin outbox export lacks {name}"));
-        };
-        if !mini_sdk::decimal::is_canonical_max(text, 80)
-        {
-            return Err(format!("origin outbox export has noncanonical {name}"));
-        }
-    }
-    let source_hex = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks source identity")?;
-    let source = decode_hex(source_hex)?;
-    if source.is_empty() || hex(&source) != source_hex {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    for name in ["miniOrigin", "miniOutbox"] {
-        if value
-            .get(name)
-            .and_then(|receipt| receipt.get("type"))
-            .and_then(Value::as_str)
-            != Some("verified-mini-native-prefix-v1")
-        {
-            return Err(format!("origin outbox export lacks typed {name} receipt"));
-        }
-    }
-    let carrier_hex = value
-        .get("carrierHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks carrierHex")?;
-    if carrier_hex.is_empty() || carrier_hex.len() > 2 * 1_516_384 {
-        return Err("origin outbox export carrier exceeds selected profile".into());
-    }
-    let carrier = decode_hex(carrier_hex)?;
-    if carrier.is_empty() || hex(&carrier) != carrier_hex {
-        return Err("origin outbox carrier is not canonical lowercase hex".into());
-    }
-    write_new(&directory.join("carrier.bin"), &carrier)?;
-    print_json(&value)
 }
 
 #[cfg(unix)]
@@ -3228,9 +2648,8 @@ fn run(mut args: Args) -> Result<()> {
                 .ok_or("selected-exchange phase must be UTF-8")?;
             let contract = path(args.required("contract")?);
             let state = path(args.required("state-dir")?);
-            let approval = args.optional("approval").map(path);
             args.finish()?;
-            selected_exchange::run(phase, &contract, &state, approval.as_deref())
+            selected_exchange::run(phase, &contract, &state)
         }
         "serve" => {
             let host = path(args.required("host")?);
@@ -3290,110 +2709,6 @@ fn run(mut args: Args) -> Result<()> {
             let socket = SOCKET.get().ok_or("operator control requires --socket")?;
             operator_drain::command(socket, &host, &config, instance.as_deref().map(|instance| (instance, pid, timeout)))
         }
-        "consumer-poll" | "reply-consumer-poll" => {
-            let reply = args.command == OsStr::new("reply-consumer-poll");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                consumer_poll(
-                    &host,
-                    &config,
-                    &directory,
-                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("persistent host sessions require Unix sockets".to_owned())
-            }
-        }
-        "consumer-ack" | "reply-consumer-ack" => {
-            let reply = args.command == OsStr::new("reply-consumer-ack");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let transaction = args.required("mini-transaction")?;
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            let transaction = transaction
-                .to_str()
-                .ok_or("--mini-transaction must be UTF-8")?;
-            #[cfg(unix)]
-            {
-                consumer_ack(
-                    &host,
-                    &config,
-                    transaction,
-                    &directory,
-                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("persistent host sessions require Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-prepare" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let carrier = path(args.required("carrier")?);
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                origin_outbox_prepare(&host, &config, &carrier, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-prepare requires Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-export" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let transaction = args.required("mini-transaction")?;
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            let transaction = transaction
-                .to_str()
-                .ok_or("--mini-transaction must be UTF-8")?;
-            #[cfg(unix)]
-            {
-                origin_outbox_export(&host, &config, transaction, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-export requires Unix sockets".to_owned())
-            }
-        }
-        "origin-publish" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let carrier = path(args.required("carrier")?);
-            let state_dir = path(args.required("state-dir")?);
-            let post_config = path(args.required("post-config")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET.get().ok_or("origin-publish requires --socket")?;
-                publisher::publish(
-                    &host,
-                    &config,
-                    socket,
-                    &key,
-                    &carrier,
-                    &state_dir,
-                    &post_config,
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-publish requires Unix sockets".to_owned())
-            }
-        }
         "provider-continuity" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -3443,119 +2758,6 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("provider metering requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-drain-once" | "reply-consumer-drain-once" => {
-            let reply = args.command == OsStr::new("reply-consumer-drain-once");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let max_pages = args
-                .optional("max-pages")
-                .unwrap_or_else(|| OsString::from("16"));
-            args.finish()?;
-            let max_pages = max_pages
-                .to_str()
-                .ok_or("--max-pages must be UTF-8")?
-                .parse::<u32>()
-                .map_err(|_| "--max-pages must be an integer from 1 to 16".to_owned())?;
-            if !(1..=16).contains(&max_pages) {
-                return Err("--max-pages must be an integer from 1 to 16".to_owned());
-            }
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-drain-once requires --socket")?;
-                if reply {
-                    drain::run_reply(&host, &config, socket, &key, &state_dir, max_pages)
-                } else {
-                    drain::run(&host, &config, socket, &key, &state_dir, max_pages)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-drain-once requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-resume-ack" | "reply-consumer-resume-ack" => {
-            let reply = args.command == OsStr::new("reply-consumer-resume-ack");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-resume-ack requires --socket")?;
-                if reply {
-                    drain::resume_held_reply_ack(&host, &config, socket, &key, &state_dir)
-                } else {
-                    drain::resume_held_ack(&host, &config, socket, &key, &state_dir)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-resume-ack requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-host-upgrade" => {
-            let old_host = path(args.required("old-host")?);
-            let old_sha = args.required("old-sha256")?;
-            let new_host = path(args.required("new-host")?);
-            let new_sha = args.required("new-sha256")?;
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let known_outcome = path(args.required("known-outcome")?);
-            let known_sha = args.required("known-sha256")?;
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-host-upgrade requires --socket")?;
-                drain::upgrade_host(drain::UpgradeRequest {
-                    old_host: &old_host,
-                    new_host: &new_host,
-                    config: &config,
-                    socket,
-                    key: &key,
-                    state_dir: &state_dir,
-                    known_outcome: &known_outcome,
-                    old_sha: old_sha.to_str().ok_or("old SHA must be UTF-8")?,
-                    new_sha: new_sha.to_str().ok_or("new SHA must be UTF-8")?,
-                    known_sha: known_sha.to_str().ok_or("known SHA must be UTF-8")?,
-                })
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-host-upgrade requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-worker" | "reply-consumer-worker" => {
-            let reply = args.command == OsStr::new("reply-consumer-worker");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let worker_config = path(args.required("worker-config")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET.get().ok_or("consumer-worker requires --socket")?;
-                if reply {
-                    worker::run_reply(&host, &config, socket, &key, &state_dir, &worker_config)
-                } else {
-                    worker::run(&host, &config, socket, &key, &state_dir, &worker_config)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-worker requires Unix sockets".to_owned())
             }
         }
         "store" => store_run(args),
@@ -4141,75 +3343,6 @@ fn run(mut args: Args) -> Result<()> {
                 &directory,
             )
         }
-        #[cfg(unix)]
-        "fn-namespace-plan" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            let socket = SOCKET.get().ok_or("fn-namespace-plan requires --socket")?;
-            fn_namespace::plan(&host, &config, socket, &directory)
-        }
-        #[cfg(unix)]
-        "fn-namespace-register" => {
-            let directory = path(args.required("state-dir")?);
-            let key = path(args.required("key")?);
-            let approval = path(args.required("approval")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-namespace-register uses its retained operator socket".into());
-            }
-            fn_namespace::register(&directory, &key, &approval)
-        }
-        #[cfg(unix)]
-        "fn-namespace-lookup" => {
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-namespace-lookup uses its retained operator socket".into());
-            }
-            fn_namespace::lookup_original(&directory)
-        }
-        #[cfg(unix)]
-        "fn-frontier-plan" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let kind = args.required("kind")?;
-            let transaction = args.required("transaction")?;
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            let socket = SOCKET.get().ok_or("fn-frontier-plan requires --socket")?;
-            fn_frontier::plan(
-                &host,
-                &config,
-                socket,
-                kind.to_str().ok_or("fn frontier kind must be UTF-8")?,
-                transaction
-                    .to_str()
-                    .ok_or("fn frontier transaction must be UTF-8")?,
-                &directory,
-            )
-        }
-        #[cfg(unix)]
-        "fn-frontier-advance" => {
-            let directory = path(args.required("state-dir")?);
-            let key = path(args.required("key")?);
-            let approval = path(args.required("approval")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-advance uses its retained operator socket".into());
-            }
-            fn_frontier::advance(&directory, &key, &approval)
-        }
-        #[cfg(unix)]
-        "fn-frontier-lookup" => {
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-lookup uses its retained operator socket".into());
-            }
-            fn_frontier::lookup_original(&directory)
-        }
         "submit" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -4566,31 +3699,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn historical_fn_decisions_need_no_new_mini_intent() {
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": {"type": "historical-repeat"}}}),
-            B_CONSUMER,
-        ));
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": {"type": "historical-carrier-variation-evidence"}}}),
-            B_CONSUMER,
-        ));
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": "repeated"}}),
-            A_REPLY_CONSUMER,
-        ));
-        assert!(!historical_without_intent(
-            &json!({"decision": {"decision": {"type": "proposed-fresh"}}}),
-            B_CONSUMER,
-        ));
-        assert!(!historical_without_intent(
-            &json!({"decision": {"decision": "proposed-fresh"}}),
-            A_REPLY_CONSUMER,
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn continuity_reply_needs_typed_matching_verdict_and_anchor_shape() {
         let mut value = json!({"type":"minidregg-provider-continuity-v1",
             "status":"confirmed", "continuous":true, "providerResourceId":"7",
@@ -4604,119 +3712,6 @@ mod tests {
         assert!(!continuity_reply(&value).unwrap());
         value["anchor"]["transactionId"] = json!("01");
         assert!(continuity_reply(&value).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn origin_outbox_requires_exact_status_intent_pair() {
-        let mut value = json!({"type":"fn-a-origin-outbox-session-v1",
-            "status":"prepared-decision", "decision":"proposed-fresh",
-            "messageId":"<r@example.invalid>", "sourceIdentity":"ab",
-            "miniOrigin":{"type":"verified-mini-native-prefix-v1"}, "intentHex":"00"});
-        assert_eq!(origin_outbox_intent(&value).unwrap(), Some(vec![0]));
-        value["decision"] = json!("repeated");
-        assert!(origin_outbox_intent(&value).is_err());
-        value["intentHex"] = json!("");
-        assert_eq!(origin_outbox_intent(&value).unwrap(), None);
-        value["status"] = json!("refused");
-        value["decision"] = json!("refused");
-        assert!(origin_outbox_intent(&value)
-            .unwrap_err()
-            .contains("refused"));
-        value["sourceIdentity"] = json!("AB");
-        assert!(origin_outbox_intent(&value).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn ack_coverage_is_distinct_from_exact_durable_ack() {
-        let mut value = json!({"type":"fn-consumer-ack-session-v1",
-            "miniTransactionId":"123", "kind":"empty-page-skip",
-            "fnAck":"covered-by-durable-frontier",
-            "fnCursorPosition":"16", "fnCommittedAck":"23",
-            "fnStoreSequence":"", "fnStoreTransactionId":""});
-        assert_eq!(
-            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
-            AckResult::Covered
-        );
-        value["fnCursorPosition"] = json!("24");
-        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
-        value["fnCursorPosition"] = json!("16");
-        value["fnAck"] = json!("durable-accepted");
-        assert_eq!(
-            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        assert!(parse_ack_result(&value, B_CONSUMER, "124").is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_own_r_progress_is_bounded_and_never_accepted_as_b_skip() {
-        let mut value = json!({"type":"fn-a-reply-poll-session-v1",
-            "status":"skip-decision", "intentHex":"00",
-            "decision":{"type":"fn-a-own-r-progress-decision-v1",
-                "decision":"proposed-fresh", "fromPosition":"16",
-                "toPosition":"17", "outboxTransactionId":"42"}});
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
-        assert!(validate_skip_decision(&value, B_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("33");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("17");
-        value["decision"]["outboxTransactionId"] = json!("042");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["outboxTransactionId"] = json!("42");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
-        value["decision"]["outboxTransactionId"] = json!("0");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
-        value["decision"]["toPosition"] = json!("4294967296");
-        value["decision"]["fromPosition"] = json!("4294967295");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("17");
-        value["decision"]["fromPosition"] = json!("16");
-        value["decision"]["decision"] = json!("repeated");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_ok());
-        value["decision"]["decision"] = json!("refused");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_own_r_ack_requires_selected_transaction_and_durable_cursor() {
-        let mut value = json!({"type":"fn-a-reply-ack-session-v1",
-            "kind":"own-r-skip", "miniTransactionId":"123", "outboxTransactionId":"42",
-            "fnCursorPosition":"17", "fnCommittedAck":"17", "fnStoreSequence":"16",
-            "fnStoreTransactionId":"16", "fnAck":"durable-accepted"});
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        value["fnStoreSequence"] = json!("0");
-        value["fnStoreTransactionId"] = json!("0");
-        value["fnCursorPosition"] = json!("1");
-        value["fnCommittedAck"] = json!("1");
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        value["fnCursorPosition"] = json!("17");
-        value["fnStoreSequence"] = json!("16");
-        value["fnCommittedAck"] = json!("17");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "124").is_err());
-        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
-        value["fnCommittedAck"] = json!("16");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
-        value["fnCommittedAck"] = json!("18");
-        value["fnAck"] = json!("covered-by-durable-frontier");
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Covered
-        );
-        value["outboxTransactionId"] = json!("042");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
-        value["outboxTransactionId"] = json!("42");
-        value["fnStoreSequence"] = json!("15");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
     }
 
     #[test]

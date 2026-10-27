@@ -266,7 +266,6 @@ pub(super) fn client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::FromRawFd;
     #[test]
     fn bounded_frames_round_trip_and_refuse_length_before_body() {
         use std::os::unix::net::UnixStream;
@@ -298,6 +297,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn partially_saturated_pipe_stalled_reader_obeys_deadline() {
+        use std::os::fd::FromRawFd;
         let mut fds = [0; 2];
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
         let _reader = unsafe { std::fs::File::from_raw_fd(fds[0]) };

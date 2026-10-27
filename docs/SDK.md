@@ -157,6 +157,6 @@ nothing sent, and the proxy refuses an unpinned config and an operator-only oper
 ## Migration (deletion, not addition)
 
 Each consumer that moves deletes its copy: Discord `custody.rs` (done); next
-`app_document.rs`'s status machine, `job.rs`, `selected_exchange.rs`, `publisher.rs`, the
+`app_document.rs`'s status machine, `job.rs`, `selected_exchange.rs`, the
 Hermes step ledger, the provider spool; then `submit_once`/`retry`, then the client half of
 `client_consent.rs` (the ssh client half of `proxy.rs`/`key_service.rs` is done: `operator::SshPool`).

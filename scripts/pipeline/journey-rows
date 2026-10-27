@@ -815,6 +815,9 @@ row_jpay() {
   echo "JPAY1-4 and JPAY6: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
   return "$overall"
 }
+# The fn consumer worker's row (fn-r route): poll a fresh local fn node, admit
+# the selected release at the recipient, replay it through the unit's own
+# ExecStart (deploy/fn/mini-fn-receive@.service). No live fn is contacted.
 row_exchange() {
   local d=$SRC/native/resource-client/selected-exchange-journey.sh rc name
   [ -f "$d" ] || return 99
@@ -843,7 +846,7 @@ row_exchange() {
       .type=="refused" and .phase=="61646d697373696f6e"))' "$OUT/public-summary.json" >/dev/null || {
     echo "exchange summary failed local fn/admission/disclosure checks" >&2; return 1;
   }
-  echo "exchange PASS: local fn stopped; exact selected packet admitted and signed readback verified" >&2
+  echo "exchange PASS: local fn stopped; exact selected packet admitted, replayed by the fn consumer unit, signed readback verified" >&2
 }
 row_chargedfailure() {
   local d=$SRC/native/resource-client/objective-charged-failure-journey.py rc
