@@ -39,7 +39,10 @@ trap cleanup EXIT HUP INT TERM
 
 # Preserve the workroom owner/worker law. An explicitly supplied fresh agent
 # allocation adds only its tool subjects, each under the same read-or-governed
-# birth restriction. The admission kernel still checks capabilities and witnesses.
+# birth restriction. Issuer 8 may also create one allocated persistent grant:
+# the ordinary source projects its exact post root at birth/<resource>, without
+# the grain-backed flag. This is address-scoped factory permission; the lifetime
+# source/receiver still checks the grant's full shape, capabilities and witnesses.
 FACTORY_PREDICATE='{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"1"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}'
 if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
   case "$SPK_AGENT_ALLOCATION" in /*) ;; *) echo "agent allocation must be absolute" >&2; exit 2;; esac
@@ -51,14 +54,26 @@ if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
     ([.agents[].tool.subject] as $tools |
       ($tools | all(.[]; type == "string" and test("^[1-9][0-9]{0,14}$"))) and
       ($tools | unique | length) == ($tools | length) and
-      ($tools - (["7","8","9"] + [.agents[] | .controller.subject,.dispatch.subject,.provider.subject])) == $tools)
+      ($tools - (["7","8","9"] + [.agents[] | .controller.subject,.dispatch.subject,.provider.subject])) == $tools) and
+    ([.agents[].persistentGrant] as $grants |
+      ($grants | all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
+      ($grants | unique | length) == ($grants | length) and
+      ($grants - (["7","8","9","10","11","12","99","7003","7503","7901","7902","8001","8301",
+        .app,.packageManifest,.snapshotManifest] + [.humans[]? | .session,.descriptor,.ticket] +
+        [.agents[] | .session,.descriptor,.ticket] +
+        [.agents[] | [.controller,.tool,.dispatch,.provider][] | .account,.task])) == $grants)
   ' "$SPK_AGENT_ALLOCATION" >/dev/null || { echo "invalid fresh agent factory allocation" >&2; exit 2; }
   sha256sum "$SPK_AGENT_ALLOCATION" >"$STAGE/agent-factory-allocation.sha256"
   FACTORY_PREDICATE=$(jq -c --argjson base "$FACTORY_PREDICATE" '
     . as $allocation | $base | .predicates += [ $allocation.agents[].tool.subject |
       {type:"all",predicates:[{type:"eq",slot:"request/subject",value:.},
         {type:"any",predicates:[{type:"eq",slot:"request/verb",value:"1"},
-          {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}]
+          {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}] |
+    .predicates += [$allocation.agents[].persistentGrant | "birth/" + . |
+      {type:"all",predicates:[{type:"eq",slot:"request/subject",value:"8"},
+        {type:"eq",slot:"request/verb",value:"2"},
+        {type:"eq",slot:"birth/count",value:"1"},
+        {type:"eqSlots",left:.,right:.}]}]
   ' "$SPK_AGENT_ALLOCATION")
 fi
 printf '%s\n' "$FACTORY_PREDICATE" >"$STAGE/factory-predicate.json"
