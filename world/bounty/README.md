@@ -4,7 +4,7 @@ Two packages, two evidence classes.
 
 | file | what it is | evidence |
 |---|---|---|
-| `BountyBoard.obend` + `preview-cohort.json` | the lifecycle as pure transitions and an Activity whose Plans are PROPOSALS | preview: 19 rows through `tests/objective-bend-source/check-preview.ts`. No kernel holds anything. |
+| `BountyBoard.obend` + `preview-cohort.json` | the lifecycle as pure transitions and an Activity whose Plans are PROPOSALS | preview: 19 rows through `tests/objective-bend-source/check-preview.ts`. No kernel holds anything. Native: native scenario `bounty` in world-activity-admit.py (not yet run; runs in the central gate). |
 | `BountyEscrow.obend` | the same bounty as a seat contract: the reward is HELD by the seat kernel | executed: `native/resource-client/objective-bounty-native-acceptance.py` on a scratch native world, every turn a signed command (`mini seat`), journey row `bounty` |
 
 ## What is native (BountyEscrow.obend)
