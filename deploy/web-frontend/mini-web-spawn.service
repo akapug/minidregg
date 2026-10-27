@@ -24,7 +24,7 @@ RuntimeDirectoryPreserve=yes
 # Root, but only what spawning as another uid needs: setuid/setgid, the member homes, the pty.
 CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_KILL CAP_SYS_ADMIN
 ProtectSystem=strict
-ReadWritePaths=/var/lib/mini-web-spawn /run/mini-web-spawn /var/lib/mini/sessions /var/lib/mini-pubread
+ReadWritePaths=/var/lib/mini-web-spawn /run/mini-web-spawn /var/lib/mini/sessions
 ReadOnlyPaths=/var/lib/mini/store /var/lib/mini/candidate /usr/local/lib/mini
 # No ProtectHome: the member homes are under /var/lib/mini/sessions, but setpriv needs the passwd
 # database and the pty needs /dev/pts (so no PrivateDevices either).

@@ -14,7 +14,7 @@
 use std::fs;
 use std::io::Write;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -99,6 +99,7 @@ fn run() -> Result<(), String> {
         helper.reap();
         if last_sweep.elapsed() > Duration::from_secs(60) {
             helper.sweep();
+            helper.collect();
             last_sweep = std::time::Instant::now();
         }
     }
@@ -275,6 +276,59 @@ impl Helper {
                 s.shells.retain(|p| *p != pid);
                 if had_body || had_shell {
                     let _ = self.store.save(&s);
+                }
+            }
+        }
+    }
+
+    /// The publication hand-off: every member's `proposals/*/recipient-reference.json` addressed to
+    /// the public subject is copied into the public reader's `inbox/NAME.TARGET.json` (owned by
+    /// the public member, 0600). Nothing is decided here: the reference is a hint, and the public
+    /// body's own signed read publishes or refuses the document.
+    fn collect(&mut self) {
+        let Some(subject) = self.spawner.public_subject() else { return };
+        let Ok(public) = self.spawner.public() else { return };
+        let inbox = public.home.join("inbox");
+        if fs::create_dir_all(&inbox).is_err() {
+            return;
+        }
+        let _ = fs::set_permissions(&inbox, fs::Permissions::from_mode(0o700));
+        if !self.dev {
+            unsafe { libc::chown(std::ffi::CString::new(inbox.to_string_lossy().as_bytes()).unwrap().as_ptr(), public.uid, u32::MAX) };
+        }
+        for (name, home) in self.spawner.homes() {
+            if name == spawn::PUBLIC_NAME {
+                continue;
+            }
+            let Ok(proposals) = fs::read_dir(home.join("workspace/proposals")) else { continue };
+            for proposal in proposals.flatten() {
+                let reference = proposal.path().join("recipient-reference.json");
+                let Ok(meta) = fs::symlink_metadata(&reference) else { continue };
+                if !meta.is_file() || meta.len() > 65536 {
+                    continue;
+                }
+                let Ok(value) = fs::read(&reference).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).ok_or(()) else { continue };
+                let target = value["target"].as_str().unwrap_or("");
+                if value["type"] != "minidregg-delegated-reference-v1" || value["recipient"] != subject.as_str() || target.is_empty() || !target.bytes().all(|b| b.is_ascii_digit()) {
+                    continue;
+                }
+                let doc = fs::read(proposal.path().join("proposal.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                    .and_then(|p| p["delegation"]["name"].as_str().map(str::to_owned))
+                    .filter(|n| !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+                    .unwrap_or_else(|| "doc".into());
+                let dest = inbox.join(format!("{doc}.{target}.json"));
+                let bytes = fs::read(&reference).unwrap_or_default();
+                if fs::read(&dest).ok().as_deref() == Some(bytes.as_slice()) {
+                    continue;
+                }
+                let tmp = dest.with_extension("tmp");
+                if let Ok(mut file) = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp) {
+                    let _ = file.write_all(&bytes);
+                    if !self.dev {
+                        unsafe { libc::fchown(std::os::fd::AsRawFd::as_raw_fd(&file), public.uid, u32::MAX) };
+                    }
+                    let _ = fs::rename(&tmp, &dest);
+                    eprintln!("mini-web-spawn: publication {doc} ({target}) from {name} handed to the public reader");
                 }
             }
         }

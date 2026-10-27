@@ -41,6 +41,8 @@ pub struct DevConfig {
     pub wrapper: PathBuf,
     pub sessions: BTreeMap<String, (PathBuf, PathBuf)>,
     pub public: Option<(PathBuf, PathBuf)>,
+    /// The public reader's enrolled subject (authors delegate `observe` to it).
+    pub public_subject: Option<String>,
 }
 
 impl DevConfig {
@@ -72,7 +74,8 @@ impl DevConfig {
             }
         }
         let public = if v["public"].is_object() { Some(pair(&v["public"], "public")?) } else { None };
-        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public })
+        let public_subject = v["publicSubject"].as_str().map(str::to_owned).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject })
     }
 }
 
@@ -93,7 +96,8 @@ impl BoxLayout {
     pub fn socket(&self) -> PathBuf { self.p("/var/lib/mini/store/node/public/mini.sock") }
     pub fn wrapper(&self) -> PathBuf { self.p("/usr/local/lib/mini/mini-shell-ssh") }
     pub fn sessions(&self) -> PathBuf { self.p("/var/lib/mini/sessions") }
-    pub fn public_home(&self) -> PathBuf { self.p("/var/lib/mini-pubread") }
+    /// The public reader's enrolled subject, written by the operator after `mini-reenroll public`.
+    pub fn public_subject_file(&self) -> PathBuf { self.p("/etc/mini/public-subject") }
 }
 
 pub enum Layout {
@@ -103,7 +107,9 @@ pub enum Layout {
 
 pub const HOSTED_GROUP: &str = "mini-hosted";
 pub const TENANT_GROUP: &str = "mini-sessions";
-pub const PUBLIC_ACCOUNT: &str = "mini-pubread";
+/// The public reader is a hosted member like any other (`mini-s-public`, enrolled through the
+/// roster and `mini-reenroll`), so authors delegate `observe` to a real participant.
+pub const PUBLIC_NAME: &str = "public";
 
 pub struct Spawner {
     pub layout: Layout,
@@ -142,18 +148,37 @@ impl Spawner {
         }
     }
 
-    /// The public reader's body: `mini-pubread` over the `public` subject's workspace.
+    /// The public reader's body: the hosted member `public`, anonymous (no write offered).
     pub fn public(&self) -> Result<Member, String> {
         match &self.layout {
             Layout::Dev(dev) => {
                 let (workspace, home) = dev.public.clone().ok_or("the dev config has no public reader")?;
-                Ok(Member { account: "public".into(), uid: unsafe { libc::getuid() }, workspace, home, anonymous: true })
+                Ok(Member { account: PUBLIC_NAME.into(), uid: unsafe { libc::getuid() }, workspace, home, anonymous: true })
             }
-            Layout::Box(layout) => {
-                let (uid, _) = passwd(PUBLIC_ACCOUNT).ok_or_else(|| format!("no account {PUBLIC_ACCOUNT}"))?;
-                let home = layout.public_home();
-                Ok(Member { account: PUBLIC_ACCOUNT.into(), uid, workspace: home.join("workspace"), home, anonymous: true })
+            Layout::Box(_) => {
+                let mut member = self.member(PUBLIC_NAME)?;
+                member.anonymous = true;
+                Ok(member)
             }
+        }
+    }
+
+    /// The public reader's subject, when the operator has enrolled it (`/etc/mini/public-subject`,
+    /// or `publicSubject` in the dev config).
+    pub fn public_subject(&self) -> Option<String> {
+        match &self.layout {
+            Layout::Dev(dev) => dev.public_subject.clone(),
+            Layout::Box(layout) => fs::read_to_string(layout.public_subject_file()).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())),
+        }
+    }
+
+    /// Every hosted member's home (the hand-off sweep reads their published references).
+    pub fn homes(&self) -> Vec<(String, PathBuf)> {
+        match &self.layout {
+            Layout::Dev(dev) => dev.sessions.iter().map(|(n, (_, h))| (n.clone(), h.clone())).collect(),
+            Layout::Box(layout) => fs::read_dir(layout.sessions())
+                .map(|d| d.flatten().filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok().map(|n| (n, e.path()))).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -235,6 +260,9 @@ impl Spawner {
             .arg("--socket").arg(socket).arg("--host").arg(host).arg("--config").arg(config);
         if member.anonymous {
             command.arg("--anonymous");
+        }
+        if let Some(subject) = self.public_subject() {
+            command.arg("--public-subject").arg(subject);
         }
         let listener_fd = listener.as_raw_fd();
         unsafe {
@@ -336,7 +364,7 @@ mod tests {
         fs::write(&config, serde_json::json!({
             "mini": "/bin/true", "host": "/bin/true", "config": "/dev/null", "socket": "/dev/null",
             "wrapper": wrapper, "sessions": {"alice": {"workspace": dir.join("ws"), "home": dir}},
-            "public": {"workspace": dir.join("pws"), "home": dir}
+            "public": {"workspace": dir.join("pws"), "home": dir}, "publicSubject": "4242"
         }).to_string()).unwrap();
         Spawner { layout: Layout::Dev(DevConfig::load(&config).unwrap()) }
     }
@@ -355,6 +383,8 @@ mod tests {
         assert!(spawner.member("mallory").is_err());
         assert!(spawner.member("Alice").is_err());
         assert!(spawner.public().unwrap().anonymous);
+        assert_eq!(spawner.public_subject().as_deref(), Some("4242"));
+        assert_eq!(spawner.homes().len(), 1);
         let (pid, master) = spawner.shell(&member, "test", 80, 24).unwrap();
         assert!(pid > 0);
         let mut file = fs::File::from(master);
