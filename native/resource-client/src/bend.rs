@@ -249,7 +249,7 @@ impl Bend {
         meta["step"] = json!(step);
         crate::fsio::retain_json(&attempts.join(format!("{}.meta.json", out.file_name().and_then(|n| n.to_str()).unwrap_or("attempt"))), &meta)?;
         if lose {
-            std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::flow::Request::Submit.operation().to_string());
+            std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::host_operations::ACTIVITY_SUBMIT.to_string());
         }
         let outcome = activity::submit(&self.ws, turn, &out, false, None, false);
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
