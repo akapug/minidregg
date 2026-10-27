@@ -108,8 +108,19 @@ outbound 443 only, no inbound route. The box side is staged for rehearsal #2.
 branches plus L3 fence 5aaf1a32, L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market fc4e2c7d, L12
 web-frontend db7f3171, L1 lean-critical 181e44e6, coordination 179a21c2, m7 c851d8c4; built on `dregg-build`
 (`/build/candidates/45f45d15…`, 21 roles including the web gateway and its root helper; host 1,598 s,
-consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows and the composed scenario
-are running there. **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
+consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows on `dregg-build`:
+**PASS 113 / FAIL 24 / UNCONFIGURED 7 / UNJUDGED 3** (wall 6,482 s); composed scenario: rooms, churn,
+documents, restart PASS, apps/connector/residents blocked (no script yet produces a scratch world's SPK
+platform, resident and protected-document inputs; L13 is writing `composed-inputs`). The reds are
+driver-side or environment, not the product: the stranger driver and the demo set counted only the old
+refusal byte (J5 and its cascade; fixed at 9f144c2b, the rest with the L2 successor), the `--again`
+class and the unbounded loops (fixed at 2c15e48c: with those drivers seats, bounty, send, domain,
+objectrecord, upgrade and JPAY4 all PASS), chargedfailure (L2 successor), jserve timing and births/perf
+under load, m6grain/JPAY6's `sudo -n true` probe. The web journey against this Host: 24/24.
+**Rehearsal ship #2 is dispatched with this candidate** (every staged install: door, mini-keys split
+shape, Hermes controller, Discord gateway mode, the web front end, the app market's units and grants).
+**Round 3** started at integration 6236826f (custody-drivers, m7, web-frontend d14ca3c8 with
+app-market inside, the stranger-driver fix). **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
 box `dregg-ref` reproduces all 26 outputs byte for byte (the first reproducible-build verdict across two
 machines this project has had; the earlier hbox reference differed only by Ubuntu's GCC startup objects).
 Cold build on `dregg-ref`: 790 Lean modules in 35.8 min, 53 min total, on an idle box (the earlier 78.8 min
