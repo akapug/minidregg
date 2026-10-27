@@ -182,4 +182,15 @@ commit's read guards. And `platformAt deployment durable = none` → refused
 `quotedFee p.creation`). Teeth: a reader of `opened.pins` (`config.tariff`) after an install
 that changed `creation` fails it (the shape of `genesisReader_stale`).
 
+**Auditor pass 17 (lane/audit-platform): the ordinary birth is accepted as the first
+scope, on two conditions.**
+1. The claim's label says "ordinary births". The owed families stay listed above with
+   file:line.
+2. **No silent twin at the re-genesis.** `profile.template` stays in the semantics, so an
+   owed site that still reads `profile.template.ownerBudget`/`lifetime` or `config.tariff`
+   would serve the genesis value after an install, without any error. Before the one
+   digest change ships, every owed site must read the cell, or be shown to read only
+   `issuer`/`birthSlack`. A census row gates this: it refuses readers of those fields
+   outside the cell path. The census row is part of the ordinary-birth commit.
+
 - Then `Intent.credit` with ops 244–247, as in "Then, in order" item 3.
