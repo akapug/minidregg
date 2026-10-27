@@ -26,4 +26,8 @@ def noAppendOperations : List UInt8 := [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 1
 before any signing consumer sees the reply (registry `consent_plans`). -/
 def consentPlans : List UInt8 := [32, 36, 44, 48, 50, 52, 58, 66, 68, 70, 74, 78, 80, 82, 86, 92, 96, 103, 108, 113, 117, 123, 126, 140, 160, 170, 183, 201, 206, 210, 215]
 
+/-- Signing-plan operations recorded as NOT consent-checked, each with its reason in the
+registry (`consent_exempt`). -/
+def consentExemptPlans : List UInt8 := [1, 42, 56, 64, 187, 193, 194]
+
 end Minidregg.Host.HostOperations

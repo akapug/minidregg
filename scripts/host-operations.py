@@ -33,7 +33,7 @@ def unique_object(pairs):
 def load(root):
     data = json.loads((root / REGISTRY).read_text(), object_pairs_hook=unique_object)
     require(data.get("format") == "mini-host-request-operations-v1", "unknown operation registry format")
-    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "client_constants"}, "unknown registry fields")
+    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "consent_exempt", "client_constants"}, "unknown registry fields")
     ids, symbols = {}, set()
     for entry in data["operations"]:
         require(set(entry) == {"code", "symbol", "status", "routes", "owner", "purpose", "receiver", "effect"}, f"invalid operation fields: {entry}")
@@ -70,6 +70,16 @@ def load(root):
     by_symbol = {e["symbol"]: e for e in ids.values()}
     for plan in plans:
         require(plan in by_symbol and by_symbol[plan]["status"] == "active", f"consent plan is not an active operation: {plan}")
+    # Every active signing-plan operation (symbol *_PLAN, *_READY, *_PREPARE) is either consent-checked
+    # (consent_plans) or recorded as exempt WITH its reason (consent_exempt); an unlisted one refuses by name.
+    exempt = data["consent_exempt"]
+    require(isinstance(exempt, dict) and all(isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in exempt.items()), "consent_exempt must map operation symbols to a non-empty reason")
+    for symbol in exempt:
+        require(symbol in by_symbol and by_symbol[symbol]["status"] == "active", f"consent_exempt names no active operation: {symbol}")
+        require(symbol not in plans, f"consent_exempt and consent_plans both list: {symbol}")
+    for symbol, entry in by_symbol.items():
+        if entry["status"] == "active" and re.search(r"_(PLAN|READY|PREPARE)$", symbol):
+            require(symbol in plans or symbol in exempt, f"signing-plan operation neither consent-checked nor recorded exempt: {symbol}")
     bindings = set()
     for binding in data["client_constants"]:
         require(set(binding) == {"path", "constant", "operation"}, "invalid client constant binding")
@@ -280,6 +290,9 @@ def no_append(data):
     """Active operations whose receiver never appends to the durable log (effect: none)."""
     return sorted(e["code"] for e in data["operations"] if e["status"] == "active" and e["effect"] == "none")
 
+def by_symbol_codes(data):
+    return {e["symbol"]: e["code"] for e in data["operations"]}
+
 def plan_codes(data):
     by_symbol = {e["symbol"]: e["code"] for e in data["operations"]}
     return [by_symbol[p] for p in data["consent_plans"]]
@@ -303,6 +316,9 @@ def generated_lean(data):
               "/-- The operator plans a client checks against its local consent provider (frame 224)",
               "before any signing consumer sees the reply (registry `consent_plans`). -/",
               f"def consentPlans : List UInt8 := [{', '.join(map(str, plan_codes(data)))}]", "",
+              "/-- Signing-plan operations recorded as NOT consent-checked, each with its reason in the",
+              "registry (`consent_exempt`). -/",
+              f"def consentExemptPlans : List UInt8 := [{', '.join(map(str, sorted(by_symbol_codes(data)[s] for s in data['consent_exempt'])))}]", "",
               "end Minidregg.Host.HostOperations"]
     return "\n".join(lines) + "\n"
 
@@ -319,6 +335,8 @@ def generated(data):
         lines += [f"// {entry['purpose']}", f"pub const RESPONSE_{entry['symbol']}: u8 = {entry['code']};"]
     lines += ["", "// Operator plans checked against the local consent provider (frame 224) before signing."]
     lines += ["pub const CONSENT_PLANS: &[u8] = &[" + ", ".join(p for p in data["consent_plans"]) + "];"]
+    lines += ["", "// Signing-plan operations recorded as NOT consent-checked, each with its reason in the registry (consent_exempt)."]
+    lines += ["pub const CONSENT_EXEMPT_PLANS: &[u8] = &[" + ", ".join(sorted(data["consent_exempt"])) + "];"]
     lines += ["", "// Active operations whose receiver never appends to the durable log (effect: none).",
               "// A reply under RESPONSE_HOST_REFUSAL to any operation is undecided; to one of these it still only ever means undecided.",
               f"pub const NO_APPEND_OPERATIONS: &[u8] = &[{', '.join(map(str, no_append(data)))}];"]
