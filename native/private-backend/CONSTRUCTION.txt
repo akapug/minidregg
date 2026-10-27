@@ -413,3 +413,16 @@ rebuilds a basis from a retained receipt verified against the exact manifest and
 allocates nothing; reserve_new is manifest + burn_preparation + extract. Executed: a kill -9 mid-King recovers
 with one dealer event per instance, no new anchor allocation, complete exact checked triples. Cost and what
 leaks: docs/MPC-PROFILE-P2.md. The component limits above are unchanged.
+
+Research demonstration door (2026-10-27): `cargo build --release --features demo --bin
+mini-private-compute` builds a binary that runs the width-8 private adder among four holders in
+ONE process (the executed ACSS-Id + dZK + Sh2t-Id + King + LayerEngine + private_output path, driven
+through an in-memory queue) and prints the output, one curious holder's per-phase transcript and its
+frame-by-frame comparison with a constructed alternate input pair of the same sum. Label, verbatim
+and on the first line of every report: "single process, n = 4, static f = 1, no simulator, no GOD".
+It is research: no transport, no release admission, no service, never deployed as one; the
+comparison is the private_view check, not a simulator proof, and says nothing about the King's view,
+a malicious party or a coalition. `mini private-compute --left L --right R` (native/resource-client)
+runs this binary as a child process and refuses a report whose first line is not the banner; the
+feature `demo` compiles the test fixtures the path is built from into the binary and is off by
+default.

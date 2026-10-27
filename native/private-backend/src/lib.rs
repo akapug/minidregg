@@ -22,10 +22,12 @@ pub mod private_send_store;
 pub mod protocol_store;
 pub mod reconstruction;
 pub mod entropy;
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod transcript;
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 mod private_view;
+#[cfg(feature = "demo")]
+pub mod demo;
 pub mod transition_journal;
 pub mod vaba;
 

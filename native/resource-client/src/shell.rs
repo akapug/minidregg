@@ -54,6 +54,7 @@ pub(crate) struct Verb {
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "app", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "home", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "private-compute", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "whoami", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "keygen", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "key-status", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -956,6 +957,16 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             if let Some(name) = p.opt(0) { flags.push(flag("name", name)); }
             if p.has("--json") { flags.push(flag("json", "true")); }
             Plan::Client { command: "member".into(), flags, writes: vec![] }
+        }
+        "private-compute" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PRIVATE_COMPUTE, &w)?;
+            // Typed by the grammar (decimal); bounded here, before anything runs.
+            for (name, at) in [("LEFT", 0), ("RIGHT", 1)] {
+                if p.arg(at).parse::<u8>().is_err() {
+                    return Err(format!("{name} must be a decimal value 0..=255"));
+                }
+            }
+            client("private-compute", vec![flag("left", p.arg(0)), flag("right", p.arg(1))])
         }
         "whoami" => {
             crate::shell_grammar::parse(&crate::shell_grammar::WHOAMI, &w)?;
@@ -3660,6 +3671,19 @@ mod tests {
         assert_eq!(request["targets"][0]["payload"]["actions"][0],
             json!({"type":"create","key":{"type":"object","field":"3"},"value":"11033321548135836207"}));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn private_compute_takes_two_bounded_values_and_is_a_local_client_call() {
+        let s = session();
+        let (command, flags, writes) = client(plan(&s, "private-compute 173 59").unwrap());
+        assert_eq!((command.as_str(), flags, writes), ("private-compute", pairs(&[("left", "173"), ("right", "59")]), vec![]));
+        for bad in ["private-compute", "private-compute 1", "private-compute 1 2 3", "private-compute 256 1", "private-compute 1 x", "private-compute -1 2"] {
+            assert!(plan(&s, bad).is_err(), "{bad}");
+        }
+        let g = crate::shell_grammar::grammar("private-compute").unwrap();
+        assert_eq!(g.leaves[0].effect, crate::shell_grammar::Effect::Local);
+        assert!(crate::shell_grammar::operation(g).contains("RESEARCH"));
     }
 
     #[test]

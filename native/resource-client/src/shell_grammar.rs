@@ -486,7 +486,14 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
     Leaf { path: &["board", "take"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's owner field 2*TASK+3 := me)" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
+/// `private-compute`: the research-labelled in-process four-party computation (private-backend R1).
+/// A local computation: no Host call, no admission. The label is part of the operation words, so
+/// help, the web form and the page all carry it.
+pub static PRIVATE_COMPUTE: Grammar = Grammar { verb: "private-compute", leaves: &[
+    Leaf { path: &["private-compute"], args: &[arg("LEFT", Kind::Number), arg("RIGHT", Kind::Number)], flags: &[], effect: Effect::Local, about: "local: RESEARCH DEMONSTRATION, single process, n = 4, static f = 1, no simulator, no GOD: four holders in one process add LEFT and RIGHT (each 0..255), none seeing either input, and one curious holder's log is shown as the evidence (about 15 seconds; never an admission, never a service)" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&PRIVATE_COMPUTE, &BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
     &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &ATTEMPT, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 

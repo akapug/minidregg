@@ -27,7 +27,8 @@
 //! ROM-hidden frames, is byte-for-byte consistent with at least two distinct
 //! input pairs. That is not a simulator proof, and says nothing about the King's
 //! (holder 0's) richer view, a malicious party, or a coalition.
-#![cfg(test)]
+#![cfg(any(test, feature = "demo"))]
+#![cfg_attr(not(test), allow(dead_code, unused_imports))]
 use crate::{
     acss_id::{self, AcssId},
     arithmetic_reference::tests::{completed_private_inputs_with_states, share_inputs, InputParty},
@@ -176,7 +177,7 @@ fn equivocate_preparation(
     out
 }
 
-struct World {
+pub(crate) struct World {
     frames: Vec<Frame>,
     result: Vec<bool>,
     inputs: Vec<Vec<AcssId>>,
@@ -296,82 +297,139 @@ fn rom_hidden(frame: &Frame) -> Option<&'static str> {
     }
 }
 /// Compare two curious transcripts; returns per (phase, class) counts.
-fn compare(a: &[Frame], b: &[Frame]) -> BTreeMap<(String, &'static str), usize> {
-    assert_eq!(a.len(), b.len(), "curious transcript length");
+fn compare(a: &[Frame], b: &[Frame]) -> Result<ViewCounts, String> {
+    if a.len() != b.len() {
+        return Err("curious transcript length differs".into());
+    }
     let mut counts = BTreeMap::new();
     for (i, (x, y)) in a.iter().zip(b).enumerate() {
-        assert_eq!((&x.phase, x.sender), (&y.phase, y.sender), "frame {i} order");
+        if (&x.phase, x.sender) != (&y.phase, y.sender) {
+            return Err(format!("frame {i} order differs"));
+        }
         let class = if x.wire == y.wire {
             "identical"
         } else {
             let (cx, cy) = (rom_hidden(x), rom_hidden(y));
-            assert!(
-                cx.is_some() && cx == cy,
-                "frame {i} ({}, from {}) differs outside the ROM-hidden classes:\n{:?}\n{:?}",
-                x.phase,
-                x.sender,
-                x.wire,
-                y.wire
-            );
+            if !(cx.is_some() && cx == cy) {
+                return Err(format!("frame {i} ({}, from {}) differs outside the ROM-hidden classes", x.phase, x.sender));
+            }
             cx.unwrap()
         };
         *counts.entry((x.phase.clone(), class)).or_insert(0) += 1;
     }
-    counts
+    Ok(counts)
+}
+
+/// Counts of curious-holder frames per (phase, class) for one alternate world.
+pub(crate) type ViewCounts = BTreeMap<(String, &'static str), usize>;
+
+/// World A, dealt once, against which alternate input pairs are run.
+pub(crate) struct Dealt {
+    width: usize,
+    left: InputParty,
+    right: InputParty,
+    preparation: Vec<PrepDealing>,
+    output_seed: [u8; 32],
+    instance: u64,
+    network: Network,
+    a: World,
+    pub(crate) a_frames: usize,
+    pub(crate) a_result: u64,
+}
+impl Dealt {
+    /// Deal `left` (holder 0) and `right` (holder 2) as width-8 inputs under fresh
+    /// randomness from `root` and run the whole protocol on them (world A).
+    pub(crate) fn run(root: &Entropy, left: u64, right: u64, instance: u64) -> Result<Self, String> {
+        let width = 8;
+        if left >> width != 0 || right >> width != 0 {
+            return Err("inputs are 8-bit values (0..=255)".into());
+        }
+        let left_p = InputParty::new(0, left, width, &mut root.fork(b"view/left"));
+        let right_p = InputParty::new(2, right, width, &mut root.fork(b"view/right"));
+        let preparation = (0..3u16)
+            .map(|d| PrepDealing::sample(d, COUNT, false, &mut root.fork(&[b'k', d as u8])))
+            .collect::<Vec<_>>();
+        let output_seed = root.fork(b"view/output-keys").bytes32();
+        let a = run_world(&left_p, &right_p, &preparation, output_seed, instance);
+        let a_result = value(&a.result);
+        if reconstruct(&a.inputs[0], [0, 1]) != left || reconstruct(&a.inputs[1], [1, 2]) != right {
+            return Err("honest holders do not recover the dealt inputs".into());
+        }
+        if a.frames.is_empty() {
+            return Err("the curious holder saw no frames".into());
+        }
+        let source = include_bytes!("../fixtures/addition-network-8-plan.bin");
+        let network = crate::field_network::with_boolean_inputs(&Plan::decode(source).map_err(|e| e.to_string())?.network)
+            .map_err(|e| e.to_string())?;
+        let a_frames = a.frames.len();
+        Ok(Self { width, left: left_p, right: right_p, preparation, output_seed, instance, network, a, a_frames, a_result })
+    }
+    /// Frames delivered to the curious holder in world A, per phase.
+    pub(crate) fn phases(&self) -> BTreeMap<String, usize> {
+        let mut out = BTreeMap::new();
+        for f in &self.a.frames {
+            *out.entry(f.phase.clone()).or_default() += 1;
+        }
+        out
+    }
+    /// Re-run the protocol with the inputs replaced by (`l`, `r`) (the sum must be
+    /// unchanged) through the equivocation witness, and compare holder 3's two
+    /// transcripts frame by frame. `Err` names the first violated check.
+    pub(crate) fn alternate(&self, from: (u64, u64), l: u64, r: u64) -> Result<ViewCounts, String> {
+        let qualified = |l: u64, r: u64| [bits(l, self.width), bits(r, self.width)].concat();
+        if from.0 + from.1 != l + r || (l, r) == from {
+            return Err("an alternate pair has the same sum and differs".into());
+        }
+        let (dl, dr) = operand_deltas(&self.network, &qualified(from.0, from.1), &qualified(l, r));
+        if dl.len() != COUNT || !dl.iter().chain(&dr).any(|d| *d != Field(0)) {
+            return Err("alternate pair moves no King operand".into());
+        }
+        let prep_b = equivocate_preparation(&self.preparation, &dl, &dr);
+        let left_b = self.left.equivocate(l, CURIOUS);
+        let right_b = self.right.equivocate(r, CURIOUS);
+        let b = run_world(&left_b, &right_b, &prep_b, self.output_seed, self.instance);
+        // World B is genuinely a different execution: honest holders hold
+        // sharings of (l, r), and the recipient still decrypts the sum.
+        if reconstruct(&b.inputs[0], [0, 1]) != l || reconstruct(&b.inputs[1], [1, 2]) != r {
+            return Err("alternate world does not share the alternate inputs".into());
+        }
+        if accepted(&b.inputs[0][0]) == accepted(&self.a.inputs[0][0]) {
+            return Err("alternate world is not a different execution".into());
+        }
+        if value(&b.result) != self.a_result {
+            return Err("recipient output differs between the worlds".into());
+        }
+        // Holder 3's own input shares are identical: one point below threshold
+        // determines neither bit of either input.
+        for k in 0..2 {
+            if accepted(&b.inputs[k][CURIOUS as usize]) != accepted(&self.a.inputs[k][CURIOUS as usize]) {
+                return Err("curious holder input shares moved".into());
+            }
+        }
+        let counts = compare(&self.a.frames, &b.frames)?;
+        for phase in ["king-preparation-sh2t", "king", "layer-mpc", "output"] {
+            if !counts.contains_key(&(phase.to_string(), "identical")) {
+                return Err(format!("{phase} not observed"));
+            }
+            if counts.keys().any(|(p, c)| p == phase && *c != "identical") {
+                return Err(format!("{phase} frames are not all byte-identical"));
+            }
+        }
+        Ok(counts)
+    }
 }
 
 #[test]
 fn curious_holder_view_is_consistent_with_three_input_pairs_and_recipient_gets_256() {
     let root = crate::entropy::test_root();
-    let width = 8;
-    let instance = 9100;
-    let left = InputParty::new(0, 255, width, &mut root.fork(b"view/left"));
-    let right = InputParty::new(2, 1, width, &mut root.fork(b"view/right"));
-    let preparation = (0..3u16)
-        .map(|d| PrepDealing::sample(d, COUNT, false, &mut root.fork(&[b'k', d as u8])))
-        .collect::<Vec<_>>();
-    let output_seed = root.fork(b"view/output-keys").bytes32();
-    let a = run_world(&left, &right, &preparation, output_seed, instance);
-    assert_eq!(value(&a.result), 256, "recipient decryption of 255+1");
-    assert_eq!(reconstruct(&a.inputs[0], [0, 1]), 255);
-    assert_eq!(reconstruct(&a.inputs[1], [1, 2]), 1);
-    assert!(!a.frames.is_empty());
-
-    let source = include_bytes!("../fixtures/addition-network-8-plan.bin");
-    let network =
-        crate::field_network::with_boolean_inputs(&Plan::decode(source).unwrap().network).unwrap();
-    let qualified = |l: u64, r: u64| [bits(l, width), bits(r, width)].concat();
+    let dealt = Dealt::run(&root, 255, 1, 9100).unwrap();
+    assert_eq!(dealt.a_result, 256, "recipient decryption of 255+1");
     let mut seen = vec![(255u64, 1u64)];
     for (l, r) in [(1u64, 255u64), (128, 128)] {
-        let (dl, dr) = operand_deltas(&network, &qualified(255, 1), &qualified(l, r));
-        assert_eq!(dl.len(), COUNT);
-        assert!(dl.iter().chain(&dr).any(|d| *d != Field(0)));
-        let prep_b = equivocate_preparation(&preparation, &dl, &dr);
-        let left_b = left.equivocate(l, CURIOUS);
-        let right_b = right.equivocate(r, CURIOUS);
-        let b = run_world(&left_b, &right_b, &prep_b, output_seed, instance);
-        // World B is genuinely a different execution: honest holders hold
-        // sharings of (l, r), and the recipient still decrypts the sum.
-        assert_eq!(reconstruct(&b.inputs[0], [0, 1]), l);
-        assert_eq!(reconstruct(&b.inputs[1], [1, 2]), r);
-        assert_ne!(accepted(&b.inputs[0][0]), accepted(&a.inputs[0][0]));
-        assert_eq!(value(&b.result), 256);
-        // Holder 3's own input shares are identical: one point below threshold
-        // determines neither bit of either input.
-        for k in 0..2 {
-            assert_eq!(accepted(&b.inputs[k][CURIOUS as usize]), accepted(&a.inputs[k][CURIOUS as usize]));
-        }
-        let counts = compare(&a.frames, &b.frames);
-        eprintln!("curious view A=(255,1) vs B=({l},{r}): {} frames", a.frames.len());
+        let counts = dealt.alternate((255, 1), l, r).unwrap();
+        eprintln!("curious view A=(255,1) vs B=({l},{r}): {} frames", dealt.a_frames);
         for ((phase, class), n) in &counts {
             eprintln!("  {phase:24} {class:32} {n}");
-        }
-        for phase in ["king-preparation-sh2t", "king", "layer-mpc", "output"] {
-            assert!(counts.contains_key(&(phase.to_string(), "identical")), "{phase} observed");
-            assert!(
-                counts.keys().all(|(p, c)| p != phase || *c == "identical"),
-                "{phase} frames all byte-identical"
-            );
         }
         seen.push((l, r));
     }

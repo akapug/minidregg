@@ -33,8 +33,9 @@ fn emit(n: &mut Network, op: Op) -> u64 {
     n.gates.push(op);
     wire
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use crate::{
         acss_id::{self, AcssId},

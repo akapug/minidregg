@@ -420,8 +420,9 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use crate::field_network_store::{LayerStore, Store};
     use std::{
