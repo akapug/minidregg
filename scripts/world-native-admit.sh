@@ -31,6 +31,11 @@ if [ -z "$method" ]; then
   [ $# = 1 ] && [ -f "$1" ] || { echo "world-native-admit: name --method (found: $*)" >&2; exit 2; }
   method=$1
 fi
+# the candidate's binaries and this tree's genesis params must be the same commit: a driver from another
+# commit fails at genesis with "unknown/missing field" (seen 2026-10-27), which says nothing about the method
+head=$(git -C "$SRC" rev-parse HEAD 2>/dev/null)
+case $(basename "$cand") in "${head:0:8}"*|"$head"*) ;; *)
+  [ -n "${ALLOW_TREE_MISMATCH:-}" ] || { echo "world-native-admit: SRC is at ${head:0:8} but the candidate is $(basename "$cand"); use a worktree at the candidate commit (ALLOW_TREE_MISMATCH=1 only for the driver files)" >&2; exit 2; };; esac
 d=$SRC/native/resource-client/objective-native-acceptance.py
 run=${WORLD_NATIVE_RUN:-/build/lanes/wn-$domain-$$}   # short: unix socket path bound
 ev=$SRC/docs/evidence/2026-10-27-world-native/$domain
