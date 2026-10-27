@@ -12,15 +12,18 @@
 #   --candidate DIR  a /build/candidates/<sha> directory (default: newest); its bin/ is --bin
 #   other flags      passed to the driver's `world` step (--tariff-replay N --tariff-core N
 #                    --maximum KEY=N --sponsor-balance N)
+# ACTIVITY ROUTE: `--route activity [--scenario tally] --birth-input JSON --deposit N` runs
+# native/resource-client/world-activity-admit.py instead (publish, create, birth, read back, scenario turns).
 # Transcript: docs/evidence/2026-10-27-world-native/DOMAIN/ (verdicts.txt plus the driver's
 # transcript/ and results/). Linux only (the Store and Host run there); run under swarm-build.
 set -uo pipefail
 SRC=${SRC:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}
 domain=${1:?usage: world-native-admit.sh DOMAIN [--entry NAME] [--method FILE] [--candidate DIR] [world flags]}; shift
-entry=note; method=; cand=; world_flags=()
+entry=note; method=; cand=; world_flags=(); route=objective; act_flags=()
 while [ $# -gt 0 ]; do
   case $1 in
-    --entry) entry=$2; shift 2;; --method) method=$2; shift 2;; --candidate) cand=$2; shift 2;;
+    --entry) entry=$2; shift 2;;
+    --route) route=$2; shift 2;; --scenario|--birth-input|--deposit|--state-type|--seed) act_flags+=("$1" "$2"); shift 2;; --method) method=$2; shift 2;; --candidate) cand=$2; shift 2;;
     *) world_flags+=("$1" "$2"); shift 2;;
   esac
 done
@@ -47,6 +50,12 @@ step() { local name=$1; shift; local out rc
   # the driver reports a refused invocation as a result row, exit 0: a refusal is not an admission
   if [ $rc = 0 ] && printf '%s' "$out" | grep -q '"refused": true'; then echo "$name REFUSED (row above)" | tee -a "$v"; return 1; fi
   return $rc; }
+if [ "$route" = activity ]; then
+  out=$(python3 "$SRC/native/resource-client/world-activity-admit.py" --bin "$bin" --root "$run" --method "$method" --entry "$entry" "${act_flags[@]}" 2>&1); rc=$?
+  printf '%s\n' "$out" | cut -c1-600 | tee -a "$v"
+  mkdir -p "$ev"; cp "$run/results.json" "$ev/" 2>/dev/null
+  echo "overall rc=$rc" | tee -a "$v"; exit $rc
+fi
 rc=0
 step world world --bin "$bin" --root "$run" "${world_flags[@]}" \
  && step publish publish --root "$run" --method "$method" --entry "$entry" \

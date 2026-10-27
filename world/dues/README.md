@@ -2,14 +2,7 @@
 
 `StandingDues.obend` + `preview-cohort.json` (49 rows). Evidence class: **executed in the
 effect-free preview** (`tests/objective-bend-source/check-preview.ts`); **not admitted natively**.
-Native attempt 2026-10-27, candidate 3315a908, `scripts/world-native-admit.sh dues`
-(`docs/evidence/2026-10-27-world-native/`): the Host's front end accepts the module (entry `dues`), but
-(1) the whole file's publication proposal is 267,239 bytes against `mini workspace propose`'s 262,144 bound;
-(2) the lifecycle prefix (through `dues`, core 58,810 B) publishes but its price 1.69M exceeds the free
-1,000,000 steps per day (`compute funding refused`); (3) at a scratch tariff that fits, the Host refuses
-`Reject.objectiveInput`: the native entry contract is `(hostInput: Input) -> Result{plan, result}`
-(`world/NativeReceipt.obend`) and `dues(terms, deposit)` is neither. The native control
-(`NativeReceipt`) is admitted on the same candidate.
+Native: needs the activity kernel's `pay` Plan and event Response (the kernel performs only `await` Plans); Phase 3. Attempts: `docs/evidence/2026-10-27-world-native/`.
 
 ## What it does
 A payer owes a room `amount` every `period` heights from `start`, for `periods` periods.

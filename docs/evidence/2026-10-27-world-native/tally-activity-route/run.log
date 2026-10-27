@@ -1,0 +1,18 @@
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "3287283741324084146785542352039386611559744544232173377277064771004290656842", "checkpointBytes": "2093", "checkpointDecodes": true, "checkpointDigest": "32079042333228339576022778682700317947726049113561106441720920175589292884166", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "9038", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap
+born-awaiting-total-0                        check     ok {"state": {"fields": [{"name": "total", "value": {"tag": "natural", "value": "0"}}], "tag": "record"}, "phase": {"await": {"deadline": "17", "id": "104853379671
+stranger-resolve-refused                     refused   refused operation-rejected eceiver.Reject.kernel (Minidregg.Kernel.ObjectiveActivity.Refusal.slot (Minidregg.Kernel.AnswerSlot.Refusal.notDecider))
+resolve-5                                    installed confirmed  
+deliver-5                                    installed confirmed  
+{"round": 1, "total": 5, "generation": "1", "height": "16"}
+resolve-7                                    installed confirmed  
+deliver-7                                    installed confirmed  
+{"round": 2, "total": 12, "generation": "2", "height": "18"}
+replies-add-never-overwrite                  check     ok {"total": 12, "generation": "2"}
+{"rows": 11, "failed": []}
+RUN /build/lanes/wa7-203ed84c-2750003
+ALLDONE
+swarm-build: rc=0 wall_s=25 cgroup_peak_rss_bytes=593051648 (565 MiB)
