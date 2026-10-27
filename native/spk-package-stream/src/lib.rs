@@ -115,6 +115,8 @@ pub struct VerifiedPackage {
     pub public_key: [u8; 32],
     pub manifest_bytes: Vec<u8>,
     pub bridge_config_bytes: Option<Vec<u8>>,
+    /// Exact optional signed public-data declaration; semantic validation is host-owned.
+    pub data_config_bytes: Option<Vec<u8>>,
     pub manifest: sandstorm_package::SpkManifest,
 }
 impl VerifiedPackage {
@@ -310,6 +312,7 @@ pub fn verify(path: &Path, scratch: &Path, limits: Limits) -> io::Result<Verifie
     let manifest_bytes = member("sandstorm-manifest", MAX_MANIFEST)?
         .ok_or_else(|| invalid("missing signed manifest"))?;
     let bridge_config_bytes = member("sandstorm-http-bridge-config", MAX_CONFIG)?;
+    let data_config_bytes = member("minidregg-data.json", 4096)?;
     // Reuse Bread's manifest decoder and intrinsic signing-key App ID derivation.
     // This tiny projection contains only already-verified metadata, never archive data.
     let projection = sandstorm_package::Spk {
@@ -331,6 +334,7 @@ pub fn verify(path: &Path, scratch: &Path, limits: Limits) -> io::Result<Verifie
         public_key,
         manifest_bytes,
         bridge_config_bytes,
+        data_config_bytes,
         manifest,
     })
 }
@@ -718,6 +722,25 @@ mod tests {
         };
         assert!(unpack(&fixture(link), Limits::DEFAULT).is_ok());
     }
+    #[test]
+    fn signed_public_data_member_is_bounded_and_retained_from_verified_archive() {
+        let declaration = br#"{"schema":"minidregg-public-data-v1","inventory_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
+        let first = fixture(Member::regular("minidregg-data.json", declaration.to_vec()));
+        let parsed = unpack(&first, Limits::DEFAULT).unwrap();
+        assert_eq!(parsed.data_config_bytes.as_deref(), Some(declaration.as_slice()));
+        let mut changed = declaration.to_vec();
+        let last = changed.len()-3;
+        changed[last] = b'b';
+        let second = unpack(&fixture(Member::regular("minidregg-data.json", changed)), Limits::DEFAULT).unwrap();
+        assert_ne!(parsed.raw_sha256, second.raw_sha256);
+        for bytes in [Vec::new(), vec![b'x';4097]] {
+            assert!(unpack(&fixture(Member::regular("minidregg-data.json", bytes)), Limits::DEFAULT).is_err());
+        }
+        let link = Member { name: "minidregg-data.json".into(), content: FileContent::Symlink("inside".into()), mtime_ns: 0 };
+        assert!(unpack(&fixture(link), Limits::DEFAULT).is_err());
+        assert!(unpack(&fixture(Member::regular("ordinary", b"payload".to_vec())), Limits::DEFAULT).unwrap().data_config_bytes.is_none());
+    }
+
     #[test]
     fn sparse_large_input_is_rejected_before_allocation_or_spooling() {
         let dir = tempfile::tempdir().unwrap();

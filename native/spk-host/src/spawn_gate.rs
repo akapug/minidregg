@@ -8,7 +8,7 @@
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
-    VAR_FD,
+    VAR_FD, PUBLIC_DATA_FD,
 };
 use sha2::{Digest, Sha256};
 use std::ffi::{CString, OsStr};
@@ -37,6 +37,7 @@ pub(crate) struct AppFds {
     pub persistent_var: RawFd,
     pub seccomp: RawFd,
     pub output: RawFd,
+    pub public_data: Option<RawFd>,
 }
 
 #[derive(Debug)]
@@ -78,7 +79,11 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
         return Err(invalid("invalid or oversized bubblewrap arguments"));
     }
     if let Some(fds) = spec.fds {
-        let sources = [fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        let mut sources = vec![fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        sources.extend(fds.public_data);
+        if crate::sandbox::has_public_data_args(&spec.args) != fds.public_data.is_some() {
+            return Err(invalid("public data mount and descriptor differ"));
+        }
         let distinct = sources
             .iter()
             .enumerate()
@@ -299,6 +304,11 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
                 fail(write_fd);
             }
         }
+        if let Some(source) = fds.public_data {
+            if libc::dup2(source, PUBLIC_DATA_FD) != PUBLIC_DATA_FD || libc::fcntl(PUBLIC_DATA_FD, libc::F_SETFD, 0) != 0 {
+                fail(write_fd);
+            }
+        }
         for target in [RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD] {
             if libc::fcntl(target, libc::F_SETFD, 0) != 0 {
                 fail(write_fd);
@@ -446,6 +456,9 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     if spec.fds.is_some() {
         keep.extend([RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD].map(|fd| fd as u32));
     }
+    if spec.fds.is_some_and(|fds| fds.public_data.is_some()) {
+        keep.push(PUBLIC_DATA_FD as u32);
+    }
     keep.sort_unstable();
     keep.dedup();
     let pid = unsafe { libc::fork() };
@@ -554,6 +567,31 @@ pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_data_fd_must_match_fixed_mount_arguments() {
+        let opened: Vec<_> = (0..6).map(|_| {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            crate::sandbox::inherited_fd(file.as_raw_fd()).unwrap()
+        }).collect();
+        let sandbox = crate::sandbox::SandboxSpec {
+            bwrap: "/usr/bin/bwrap".into(), image_root: "/image".into(), persistent_var: "/var-test".into(),
+            persistent_var_max_bytes: 1024, argv: vec!["/app".into()], environ: vec![], app_output: "/private/output".into(),
+        };
+        let mut spec = SpawnSpec {
+            program: sandbox.bwrap.clone(), sha256: "0".repeat(64),
+            args: crate::sandbox::bwrap_args_with_public_data(&sandbox, true).unwrap(), app_uid: 1001, app_gid: 1001,
+            fds: Some(AppFds {rpc:opened[0].as_raw_fd(),image:opened[1].as_raw_fd(),persistent_var:opened[2].as_raw_fd(),
+                seccomp:opened[3].as_raw_fd(),output:opened[4].as_raw_fd(),public_data:None}),
+        };
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = Some(opened[5].as_raw_fd());
+        validate(&spec, false).unwrap();
+        spec.args = crate::sandbox::bwrap_args(&sandbox).unwrap();
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = None;
+        validate(&spec, false).unwrap();
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 

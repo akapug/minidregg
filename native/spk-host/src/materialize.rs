@@ -40,7 +40,24 @@ pub struct InstalledPackage {
     /// The bridge-only descriptor decoder consumes these, never a later image
     /// path or a second package parse.
     pub signed_bridge_config: Option<Vec<u8>>,
+    /// Same-parse signed declaration. Never reread it from the extracted image.
+    pub signed_data_config: Option<Vec<u8>>,
     pub manifest: SpkManifest,
+}
+
+/// Resolve only the immutable PUBLIC registry next to the protected packages
+/// namespace. Neither the signed declaration nor any request supplies a host path.
+pub(crate) fn open_signed_public_data(package: &InstalledPackage, app_uid: u32)
+    -> io::Result<Option<crate::shared_data::SharedDataHandle>> {
+    let Some(bytes) = package.signed_data_config.as_deref() else { return Ok(None); };
+    let requirement = crate::shared_data::parse_signed_attachment(bytes)?;
+    let packages = package.directory.parent().ok_or_else(|| invalid("package namespace absent"))?;
+    if packages.file_name().and_then(|name| name.to_str()) != Some("packages") {
+        return Err(invalid("public data requires the protected packages namespace"));
+    }
+    let root = packages.parent().ok_or_else(|| invalid("SPK namespace absent"))?;
+    let store = root.join("public-data");
+    crate::shared_data::open_published(&store, &requirement, app_uid).map(Some)
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -120,13 +137,16 @@ fn publish_no_replace(stage: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> InstalledPackage {
+fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> io::Result<InstalledPackage> {
+    if let Some(bytes) = &spk.data_config_bytes {
+        crate::shared_data::parse_signed_attachment(bytes)?;
+    }
     let raw_sha256 = spk
         .raw_sha256
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    InstalledPackage {
+    Ok(InstalledPackage {
         directory,
         raw_sha256,
         raw_sha256_bytes: spk.raw_sha256,
@@ -137,8 +157,9 @@ fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> InstalledPack
             .as_ref()
             .map(|bytes| Sha256::digest(bytes).into()),
         signed_bridge_config: spk.bridge_config_bytes.clone(),
+        signed_data_config: spk.data_config_bytes.clone(),
         manifest: spk.manifest.clone(),
-    }
+    })
 }
 
 /// Parse one signed SPK without publishing an image, using the standard profile.
@@ -160,7 +181,7 @@ pub fn qualify_bridge_spk_with_profile(
         .parent()
         .ok_or_else(|| invalid("package parent absent"))?;
     let spk = stream::verify_in_private_temp_at(&input, parent, profile.limits())?;
-    let verified = verified_identity(&spk, PathBuf::new());
+    let verified = verified_identity(&spk, PathBuf::new())?;
     let member = verified
         .signed_bridge_config
         .as_deref()
@@ -232,7 +253,7 @@ pub fn materialize_spk_with_profile(
         limits,
     )?;
     let spk = stream::verify(package, store, limits)?;
-    let mut verified = verified_identity(&spk, PathBuf::new());
+    let mut verified = verified_identity(&spk, PathBuf::new())?;
     let store_metadata = fs::symlink_metadata(store)?;
     if !store_metadata.is_dir() || store_metadata.file_type().is_symlink() {
         return Err(invalid("package store is not a real directory"));
@@ -331,7 +352,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
         .parent()
         .ok_or_else(|| invalid("image store parent absent"))?;
     let spk = stream::verify_in_private_temp_at(&package_path, store, profile.limits())?;
-    let verified = verified_identity(&spk, image_dir.to_owned());
+    let verified = verified_identity(&spk, image_dir.to_owned())?;
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())
     {
@@ -421,6 +442,7 @@ mod tests {
             .manifest_json(r#"{"app_id":"ignored","app_title":"test","app_version":1,"continue_command":{"argv":["/app"]}}"#)
             .file(sandstorm_package::File::executable("app", b"fixture".to_vec()))
             .file(sandstorm_package::File::regular("import-policy.json", b"untrusted policy".to_vec()))
+            .file(sandstorm_package::File::regular("minidregg-data.json", br#"{"schema":"minidregg-public-data-v1","inventory_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#.to_vec()))
             .pack(&ed25519_dalek::SigningKey::from_bytes(&[9;32]));
         fs::write(&package, &bytes).unwrap();
         let app_uid = unsafe { libc::geteuid() }.wrapping_add(1);
@@ -449,6 +471,10 @@ mod tests {
         );
         let reopened = verify_installed_spk(&installed.directory, app_uid).unwrap();
         assert_eq!(reopened.raw_sha256_bytes, installed.raw_sha256_bytes);
+        assert_eq!(reopened.signed_data_config, installed.signed_data_config);
+        assert!(reopened.signed_data_config.is_some());
+        // A declaration cannot turn an arbitrary materialization directory into a data registry.
+        assert!(open_signed_public_data(&reopened, app_uid).is_err());
         assert_eq!(
             reopened.signed_manifest_sha256,
             installed.signed_manifest_sha256

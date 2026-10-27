@@ -306,11 +306,9 @@ pub(crate) fn launch(spec: &SpawnSpec) -> io::Result<Option<BoundedChild>> {
     let f = spec
         .fds
         .ok_or_else(|| refused("admitted launch descriptors absent"))?;
-    send_rights(
-        &client.stream,
-        1,
-        &[f.rpc, f.image, f.persistent_var, f.seccomp, f.output],
-    )?;
+    let mut descriptors = vec![f.rpc, f.image, f.persistent_var, f.seccomp, f.output];
+    descriptors.extend(f.public_data);
+    send_rights(&client.stream, 1, &descriptors)?;
     send_frame(
         &mut client.stream,
         &Launch {
@@ -351,9 +349,9 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
     stream.set_write_timeout(Some(TIMEOUT))?;
     let (tag, fds) = receive_rights(&stream)?;
     stream.set_read_timeout(Some(TIMEOUT))?;
-    if tag != 1 || fds.len() != 5 {
+    if tag != 1 || !matches!(fds.len(), 5 | 6) {
         return Err(refused(
-            "one launch with exactly five admitted descriptors required",
+            "one launch with five descriptors and optional public-data descriptor required",
         ));
     }
     let wire: Launch = receive_frame(&mut stream)?;
@@ -371,6 +369,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
         persistent_var: owned[2].as_raw_fd(),
         seccomp: owned[3].as_raw_fd(),
         output: owned[4].as_raw_fd(),
+        public_data: owned.get(5).map(AsRawFd::as_raw_fd),
     };
     let spec = SpawnSpec {
         program: wire.program,
@@ -513,6 +512,34 @@ pub fn run(path: &Path) -> io::Result<()> {
         }
     }
     result
+}
+
+/// Root-only mount audit setup. Exercise the production descriptor receiver and
+/// app-identity worker without pretending to construct a Mini admission receipt.
+/// This hook is absent from production binaries and has no request entrypoint.
+#[cfg(test)]
+pub(crate) fn initialize_mount_audit_worker(app_uid: u32, app_gid: u32) -> io::Result<libc::pid_t> {
+    if unsafe { libc::geteuid() } != 0 || app_uid == 0 || app_gid == 0 || LAUNCH.get().is_some() {
+        return Err(refused("mount audit needs root and one fresh app worker"));
+    }
+    let (parent, child) = UnixStream::pair()?;
+    let app = Identity { uid: app_uid, gid: app_gid };
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 {
+        drop(parent);
+        let status = match worker(child, app) {
+            Ok(()) => 0,
+            Err(error) => { eprintln!("mount audit app worker: {error}"); 1 }
+        };
+        unsafe { libc::_exit(status) }
+    }
+    drop(child);
+    parent.set_read_timeout(Some(TIMEOUT))?;
+    parent.set_write_timeout(Some(TIMEOUT))?;
+    LAUNCH.set(Mutex::new(Some(Client { stream: parent, start: String::new(), pid: 0, worker: pid })))
+        .map_err(|_| refused("mount audit worker already initialized"))?;
+    Ok(pid)
 }
 
 #[cfg(test)]
