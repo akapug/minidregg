@@ -418,6 +418,59 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
 mod tests {
     use super::*;
 
+
+    fn registry() -> crate::volume_helper::Registry {
+        serde_json::from_value(serde_json::json!({
+            "protocol":"mini-spk-volume-registry-v1","store":"ab".repeat(8),"deploymentId":"cd".repeat(32),
+            "hostId":"ef".repeat(32),"grainsRoot":format!("/var/lib/mini-spk-worlds/{}","ab".repeat(8)),
+            "operatorUid":1000,"operatorGid":1001,"appUids":[100000,100001],
+            "helper":"/usr/local/libexec/mini-spk-volume-helper","helperSha256":"12".repeat(32)
+        })).unwrap()
+    }
+    fn receipt() -> serde_json::Value {
+        serde_json::json!({"protocol":"mini-spk-controller-namespace-v1","store":"ab".repeat(8),
+            "deploymentId":"cd".repeat(32),"hostId":"ef".repeat(32),"operatorUid":1000,"operatorGid":1001,
+            "controllerUid":100032,"controllerGid":100033,"account":format!("mini-c-{}","ab".repeat(8))})
+    }
+    #[test]
+    fn controller_receipt_binds_world_operator_and_independent_ids() {
+        let good:ControllerReceipt=serde_json::from_value(receipt()).unwrap();
+        assert_eq!(receipt_identity(&good,&registry()).unwrap(),ControllerIdentity{uid:100032,gid:100033});
+        for (field,value) in [("store",serde_json::json!("ff".repeat(8))),
+            ("deploymentId",serde_json::json!("00".repeat(32))),("hostId",serde_json::json!("00".repeat(32))),
+            ("operatorUid",serde_json::json!(1001)),("operatorGid",serde_json::json!(1000)),
+            ("controllerUid",serde_json::json!(100000)),("controllerGid",serde_json::json!(100001)),
+            ("controllerUid",serde_json::json!(65534)),("controllerGid",serde_json::json!(u32::MAX)),
+            ("controllerUid",serde_json::json!(1000)),("account",serde_json::json!("another-controller"))] {
+            let mut bad=receipt(); bad[field]=value;
+            let parsed:ControllerReceipt=serde_json::from_value(bad).unwrap();
+            assert!(receipt_identity(&parsed,&registry()).is_err(),"{field}");
+        }
+    }
+    #[test]
+    fn controller_receipt_is_strict_and_never_infers_optional_mapping() {
+        let mut bad=receipt(); bad["extra"]=serde_json::json!(true);
+        assert!(serde_json::from_value::<ControllerReceipt>(bad).is_err());
+        let mut bad=receipt(); bad.as_object_mut().unwrap().remove("controllerGid");
+        assert!(serde_json::from_value::<ControllerReceipt>(bad).is_err());
+        let encoded=serde_json::to_string(&receipt()).unwrap();
+        let duplicate=encoded.replacen('{',"{\"controllerUid\":100040,",1);
+        assert!(serde_json::from_str::<ControllerReceipt>(&duplicate).is_err());
+    }
+    #[test]
+    fn controller_mapping_accepts_only_exact_two_or_three_single_ids() {
+        let two="1000 1000 1\n100000 100000 1\n";
+        let three=format!("{two}100032 100032 1\n");
+        assert!(exact_map(two,1000,100000,None));
+        assert!(!exact_map(two,1000,100000,Some(100032)));
+        assert!(exact_map(&three,1000,100000,Some(100032)));
+        assert!(!exact_map(&three,1000,100000,None));
+        assert!(!exact_map(&format!("{three}999 999 1\n"),1000,100000,Some(100032)));
+        assert!(!exact_map("1000 1000 1 garbage\n100000 100000 1\n",1000,100000,None));
+        assert!(!exact_map("1000 1000 1\n100000 100000 2\n",1000,100000,None));
+        assert!(!exact_map(&three,1000,100000,Some(100033)));
+    }
+
     /// The libtest harness runs every test on a spawned thread, so this process
     /// has at least two. `enter` must refuse by name here, before it looks for
     /// bwrap or the mapping helpers: the kernel's own answer is a bare EINVAL.

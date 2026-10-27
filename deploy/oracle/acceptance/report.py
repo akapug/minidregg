@@ -311,6 +311,19 @@ def main():
                 initial['operationId'] != restarted['operationId']
                 and (first_agent / f'{name}.request-id').read_text() !=
                     (restarted_agent / f'{name}.request-id').read_text())
+    authority = read(run / 'agent-lifetime/authority/report.json')
+    require('actual_lifetime_positive_and_wrong_indices_qualified',
+            authority.get('protocol') == 'mini-oracle-agent-authority-probe-v1'
+            and authority.get('passed') is True
+            and authority.get('positiveReserveReceipt', {}).get('eventId')
+            and authority.get('wrong-event22-index', {}).get('passed') is True
+            and authority.get('wrong-event27-index', {}).get('passed') is True
+            and authority.get('revocationTested') is False
+            and authority.get('unsubmittedStalePlanTested') is False
+            and authority.get('hostSha256') == op155['a']['host_sha256']
+            and authority.get('configSha256') == op155['a']['config_sha256']
+            and authority.get('applicationAttemptSha256') == sha(
+                first_agent / 'discover-core-query.lifetime-attempt.json'))
     report = {'schema': 'mini-oracle-shared-data-acceptance-v1', 'passed': True,
               'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch, agent lifetime tools, '
                        'source STOP/restart/reconciliation and sandbox. '
@@ -325,7 +338,7 @@ def main():
               'native_completion_receipts': native_receipts,
               'native_stop_receipts': stop_receipts,
               'stop_inspection': op155, 'operator_identity': operator_identities[0],
-              'agent_lifetime': agent_stages,
+              'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}

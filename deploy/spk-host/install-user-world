@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 65536):
             raise ValueError('controller setup companion custody refused')
         code = source.read(65537)
-    if hashlib.sha256(code).hexdigest() != 'f1a25fde160e67d49fc2812270ef01d04ec6995484ce17e776c450320dbd50c1':
+    if hashlib.sha256(code).hexdigest() != '5e6f67f1d555bb531118cf10affd309e272a28ae6bd25a3c9dbb7de40b559edf':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))
@@ -117,15 +117,11 @@ fi
 entry=$(getent passwd "$op_uid")
 op_user=${entry%%:*}
 op_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
-for source in /etc/subuid /etc/subgid; do
-  awk -F: -v user="$op_user" -v uid="$start" -v count="$count" '$1==user && uid>=$2 && uid+count<=$2+$3 {found=1} END {exit !found}' "$source" || { echo 'root setup range outside subuid/subgid allocation' >&2; exit 1; }
-done
-for registered in "$registry_dir"/*.json; do
-  [[ -e $registered ]] || continue
-  if jq -e --argjson first "$start" --argjson end "$((start+count))" '.appUids | any(. >= $first and . < $end)' "$registered" >/dev/null; then
-    echo 'root setup refuses subuid collision with another world' >&2; exit 1
-  fi
-done
+
+# One fail-closed allocator checks every root registry and permanent controller
+# reservation while inheriting this exact held global lock (fd8).
+"$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count"
+
 [[ -f $source_helper && ! -L $source_helper && -x $source_helper ]] || usage
 created_helper=0
 granted=() granted_operator=0

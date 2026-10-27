@@ -20,6 +20,7 @@ import time
 OP = 155
 MAX_FRAME = 12_102_760
 MAX_JSON = 2 * 1024 * 1024
+ROUTE_REFUSAL = b"\xfeoperation unavailable on selected socket"
 
 
 def digest(raw):
@@ -29,6 +30,18 @@ def digest(raw):
 def file_digest(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").digest()
+
+
+def require_refusal(label, reply):
+    if label in ("malformed-pair", "public-denied"):
+        # Transport checks pair framing and socket routing before Lean. Busy,
+        # peer/config mismatch and all other transport errors fail here.
+        if reply != ROUTE_REFUSAL:
+            raise RuntimeError(label + " did not return the exact transport routing refusal")
+        return "transport-routing"
+    if reply[:1] != b"\xff":
+        raise RuntimeError(label + " did not return a source refusal")
+    return "source"
 
 
 def receive(sock, count):
@@ -89,6 +102,8 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--mismatched-committed", type=Path,
                         help="a different canonical claim; required on the post-append qualification pass")
+    parser.add_argument("--resident-only", action="store_true",
+                        help="check the resident and refusals without claiming cold equivalence")
     parser.add_argument("--deadline", type=float, default=1200)
     args = parser.parse_args()
     if not 0 < args.deadline <= 1800:
@@ -106,11 +121,14 @@ def main():
         raise RuntimeError("mismatched claim must be different, nonempty and within bounds")
     binding = b"\x02" + struct.pack("<I", len(config)) + config + host_sha
     report = {"schema": "mini-stop-inspection-probe-v1", "passed": False,
-              "scope": "Read-only cold/served comparison, no lifecycle operation",
+              "scope": ("Read-only resident/refusal controls; no cold equivalence"
+                        if args.resident_only else "Read-only cold/served comparison, no lifecycle operation"),
+              "mode": "resident-only" if args.resident_only else "cold-and-resident",
               "host_sha256": host_sha.hex(), "config_sha256": digest(config),
               "plan_sha256": digest(plan), "committed_sha256": digest(committed),
               "canonical_wrong_claim_checked": False,
               "served_checks_passed": False, "cold_comparison": "pending",
+              "refusal_boundaries": {},
               "measurements": {}}
 
     def save_report():
@@ -154,14 +172,13 @@ def main():
                                ("malformed-pair", b"\xff\xff\xff\xff")):
             reply = measured(label, lambda: served(payload))
             (args.out / (label + ".bin")).write_bytes(reply)
-            if not reply or reply[0] != 255:
-                raise RuntimeError(label + " did not return explicit refusal")
+            report["refusal_boundaries"][label] = require_refusal(label, reply)
         if mismatched is not None:
             wrong_pair = struct.pack("<I", len(plan)) + plan + mismatched
             reply = measured("mismatched-committed", lambda: served(wrong_pair))
             (args.out / "mismatched-committed.bin").write_bytes(reply)
-            if not reply or reply[0] != 255:
-                raise RuntimeError("mismatched canonical claim did not return explicit refusal")
+            report["refusal_boundaries"]["mismatched-committed"] = require_refusal(
+                "mismatched-committed", reply)
             report["canonical_wrong_claim_checked"] = True
             report["mismatched_committed_sha256"] = digest(mismatched)
         # A valid config/image envelope is essential: malformed-envelope denial
@@ -169,19 +186,21 @@ def main():
         reply = measured("public-denied", lambda: exchange(
             args.public_socket, binding + bytes([OP]) + pair, args.deadline))
         (args.out / "public-denied.bin").write_bytes(reply)
-        if not reply or reply[0] != 255:
-            raise RuntimeError("public socket accepted STOP inspection")
+        report["refusal_boundaries"]["public-denied"] = require_refusal("public-denied", reply)
         reply = measured("served-after-refusals", lambda: served(pair))
         (args.out / "served-after-refusals.bin").write_bytes(reply)
         if reply != first:
             raise RuntimeError("valid inspection changed after refused requests")
         report["served_checks_passed"] = True
-        report["cold_comparison"] = "running"
-        save_report()
-        original = measured("cold", lambda: cold(args, args.out / "cold.json"))
-        if first != bytes([OP]) + original:
-            raise RuntimeError("resident inspection differs from cold inspection bytes")
-        report["cold_comparison"] = "passed"
+        if args.resident_only:
+            report["cold_comparison"] = "not-performed"
+        else:
+            report["cold_comparison"] = "running"
+            save_report()
+            original = measured("cold", lambda: cold(args, args.out / "cold.json"))
+            if first != bytes([OP]) + original:
+                raise RuntimeError("resident inspection differs from cold inspection bytes")
+            report["cold_comparison"] = "passed"
         if file_digest(args.host) != host_sha:
             raise RuntimeError("Host image changed during comparison")
         if args.config.read_bytes() != config:

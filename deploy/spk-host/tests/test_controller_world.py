@@ -11,6 +11,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('controller_world', Path(__file__).parents[1] / 'controller-world.py')
@@ -155,6 +156,123 @@ class ControllerWorldTests(unittest.TestCase):
         p = self.file('empty', b'')
         with self.assertRaises(ValueError): c.read_file(p, self.uid, 100)
         self.assertEqual(c.read_file(p, self.uid, 100, allow_empty=True), b'')
+
+    def registry_value(self, store='ab'*8):
+        return {'protocol':'mini-spk-volume-registry-v1','store':store,'deploymentId':'cd'*32,'hostId':'ef'*32,
+                'grainsRoot':str(c.WORLDS/store),'operatorUid':1000,'operatorGid':1000,'appUids':[100000,100001],
+                'helper':'/usr/local/libexec/mini-spk-volume-helper','helperSha256':'12'*32}
+
+    def reservation_value(self, store='ab'*8):
+        return {'protocol':'mini-spk-controller-namespace-v1','store':store,'deploymentId':'cd'*32,'hostId':'ef'*32,
+                'operatorUid':1000,'operatorGid':1000,'controllerUid':100032,'controllerGid':100032,'account':'mini-c-'+store}
+
+    def test_subordinate_intersection_excludes_other_principals_and_numeric_aliases(self):
+        raw = b'operator:100000:16\n1000:100016:16\nother:100004:2\n9999:100020:2\n'
+        def passwd(name):
+            if name == 'operator': return SimpleNamespace(pw_uid=1000)
+            if name == 'other': return SimpleNamespace(pw_uid=2000)
+            raise KeyError(name)
+        with patch.object(c, 'read_file', return_value=raw), patch.object(c.pwd, 'getpwnam', side_effect=passwd):
+            own, foreign = c.subordinate_ranges(Path('/etc/subuid'), 1000)
+        self.assertEqual(own, [(100000,100032)])
+        self.assertEqual(foreign, [(100004,100006),(100020,100022)])
+        self.assertEqual(c.intersection(own,[(100008,100024)]),[(100008,100024)])
+        self.assertFalse(c.in_ranges(100032,own))
+
+    def test_subordinate_malformed_and_overflow_rows_fail_closed(self):
+        for raw in [b'1000:1:0', b'1000:4294967294:2', b'1000:100000:no', b'1000:100000:1:extra']:
+            with self.subTest(raw=raw), patch.object(c,'read_file',return_value=raw), self.assertRaises(ValueError):
+                c.subordinate_ranges(Path('/etc/subuid'),1000)
+
+    def test_allocator_skips_app_tombstone_foreign_and_nss_ids(self):
+        with patch.object(c,'occupied_ids',return_value={100000,100001}), \
+             patch.object(c,'delegated',return_value=([(100000,100008)],[(100002,100004)])), \
+             patch.object(c,'nss_ids',return_value={100004}) as snapshot, patch.object(c,'delegation_owners',return_value=(set(),set())), \
+             patch.object(c,'nss_free',side_effect=lambda identity, used: identity not in used):
+            self.assertEqual(c.allocate_identity(1000,"mini-c-"+"ab"*8),100005)
+            snapshot.assert_called_once_with()
+        with patch.object(c,'occupied_ids',return_value={100000,100001}), \
+             patch.object(c,'delegated',return_value=([(100000,100002)],[])), patch.object(c,'nss_ids',return_value=set()),patch.object(c,'delegation_owners',return_value=(set(),set())):
+            with self.assertRaises(ValueError): c.allocate_identity(1000,"mini-c-"+"ab"*8)
+
+    def test_controller_cannot_inherit_stale_subordinate_grants(self):
+        with patch.object(c,'occupied_ids',return_value=set()),patch.object(c,'delegated',return_value=([(100000,100004)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True), \
+             patch.object(c,'delegation_owners',return_value=({'mini-c-'+ 'ab'*8},set())):
+            with self.assertRaisesRegex(ValueError,'already has subordinate grants'): c.allocate_identity(1000,'mini-c-'+'ab'*8)
+        with patch.object(c,'occupied_ids',return_value=set()),patch.object(c,'delegated',return_value=([(100000,100004)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True), \
+             patch.object(c,'delegation_owners',return_value=(set(),{100000,100001})):
+            self.assertEqual(c.allocate_identity(1000,'mini-c-'+'ab'*8),100002)
+
+    def test_root_identity_schema_duplicates_and_alias_shapes_refuse(self):
+        c.namespace_record(self.reservation_value())
+        for key,value in [('controllerUid',65534),('controllerGid',2**32-1),('operatorUid',True),('account','another')]:
+            r=self.reservation_value();r[key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):c.namespace_record(r)
+        with self.assertRaises(ValueError):c.strict_json(b'{"controllerUid":100032,"controllerUid":100033}')
+
+    def test_permanent_reservation_survives_world_removal_and_blocks_app_allocation(self):
+        root=self.root; registry=root/'registry'; reservations=root/'reservations'; history=root/'history'
+        for p in (registry,reservations,history):p.mkdir(mode=0o700)
+        with patch.object(c,'REGISTRY',registry),patch.object(c,'RESERVATIONS',reservations),patch.object(c,'HISTORY',history):
+            world=registry/('ab'*8+'.json');reservation=reservations/('ab'*8+'.json')
+            world.write_text(json.dumps(self.registry_value()));reservation.write_text(json.dumps(self.reservation_value()))
+            def listing(directory):return sorted(directory.glob('*.json'))
+            with patch.object(c,'bounded_json_paths',side_effect=listing),patch.object(c,'read_file',side_effect=lambda p,*a,**k:p.read_bytes()):
+                self.assertIn(100032,c.occupied_ids())
+                world.unlink() # Tombstone remains authoritative after ordinary world cleanup.
+                self.assertIn(100032,c.occupied_ids())
+                reservation.write_text('{"protocol":"broken"}')
+                with self.assertRaises(ValueError):c.occupied_ids()
+        with patch.object(c,'occupied_ids',return_value={100032}),patch.object(c,'delegated',return_value=([(100000,165536)],[])), \
+             patch.object(c,'nss_ids',return_value=set()),patch.object(c,'nss_free',return_value=True),patch.dict(c.os.environ,{'SUDO_UID':'1000'}):
+            with self.assertRaises(ValueError):c.check_app_allocation('cd'*8,'/usr/local/libexec/mini-spk-volume-helper','1000','100032','2')
+
+    def test_pending_allocation_without_reservation_refuses(self):
+        registry=self.root/'registry';registry.mkdir();worlds=self.root/'worlds';worlds.mkdir()
+        controller=worlds/('ab'*8)/'controller';controller.mkdir(parents=True)
+        with patch.object(c,'REGISTRY',registry),patch.object(c,'WORLDS',worlds):
+            record=registry/('ab'*8+'.json');record.write_text(json.dumps(self.registry_value()))
+            with patch.object(c,'bounded_json_paths',side_effect=lambda directory:[record] if directory==registry else []), \
+                 patch.object(c,'read_file',side_effect=lambda p,*a,**k:p.read_bytes()),patch.object(c,'ancestry'):
+                with self.assertRaisesRegex(ValueError,'lacks permanent'):c.occupied_ids()
+
+    def test_reservation_is_durable_before_account_creation_failure(self):
+        base=self.root/'controller';reservations=self.root/'reservations';events=[]
+        registry=self.registry_value()
+        def write(path,data,uid=0,gid=0,mode=0o600):
+            path.write_bytes(data);path.chmod(mode)
+            if path.parent==reservations:events.append('reserved')
+        def directory(path,uid=0,gid=0,mode=0o700):path.mkdir(mode=mode)
+        def command(args,**kwargs):
+            events.append(Path(args[0]).name)
+            if args[0]=='/usr/sbin/useradd':raise ValueError('injected account creation failure')
+        with patch.object(c,'store_context',return_value=(registry,base)),patch.object(c,'RESERVATIONS',reservations), \
+             patch.object(c,'HISTORY',self.root/'history'),patch.object(c,'allocate_identity',return_value=100032), \
+             patch.object(c.pwd,'getpwall',return_value=[]),patch.object(c.grp,'getgrall',return_value=[]), \
+             patch.object(c,'mkdir',side_effect=directory),patch.object(c,'write_new',side_effect=write), \
+             patch.object(c,'ancestry'),patch.object(c,'run',side_effect=command):
+            with self.assertRaisesRegex(ValueError,'injected'):c.create('ab'*8,registry['helper'])
+        self.assertEqual(events,['reserved','groupadd','useradd'])
+        self.assertTrue((reservations/('ab'*8+'.json')).exists())
+        self.assertTrue((base/'pending.json').exists())
+        self.assertFalse((base/'namespace.json').exists())
+
+    def test_exact_reserve_export_has_eight_files_and_no_custody(self):
+        r=self.record();prefix='agent-lifetime-reserve-0000000000000042'
+        (self.root/'state').mkdir(mode=0o700)
+        path=self.root/'state'/prefix;path.mkdir(mode=0o700)
+        names=('source.json','pin.json','request.bin','plan.bin','plan.frame','call.bin','receipt.json','submit-marker.json')
+        for n in names:
+            p=path/n;p.write_bytes(n.encode());p.chmod(0o600)
+        (path/'not-exported.key').write_bytes(b'not evidence')
+        with patch.object(c,'load',return_value=({},self.root,r)):
+            result=c.reserve_export(r['store'],'/unused','42')
+            for bad in ['-1','00','../42',str(2**64)]:
+                with self.assertRaises(ValueError):c.reserve_export(r['store'],'/unused',bad)
+        self.assertEqual(set(result['files']),{prefix+'/'+n for n in names})
+        for n in names:self.assertEqual(result['files'][prefix+'/'+n]['sha256'],hashlib.sha256(n.encode()).hexdigest())
 
 
 if __name__ == '__main__':
