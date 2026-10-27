@@ -117,3 +117,31 @@ inventory and evidence hashes are in `receipt-2026-10-27.json`. Including the cu
 Oracle code and unstripped bridge leaves the decoded runtime below Mini's
 768 MiB limit. The final signed SPK's exact compressed size and member inventory
 remain the package lane's checks. No large knowledge store is embedded here.
+
+## WordNet with separately mounted data
+
+The actual r3 process in Store `bc2f3be5892aafea` logged NLTK 3.9.4
+`Unauthorized path` warnings for WordNet. Its logical corpus path resolves
+through the package symlink into `/opt/oracle-data/root/nltk_data`, outside the
+logical root in `NLTK_DATA`. This dependency defaults to warning-only
+`ENFORCE=False`; it continues opening the corpus.
+
+An isolated read-only reproduction used the packaged dependency sources, the
+actual corpus ZIP, and the same symlink paths:
+
+| Configuration | WordNet lookup | Unauthorized warnings |
+| --- | --- | --- |
+| Current logical root, default enforcement | Loaded WordNet 3.0; seven dog noun senses, definition and `dogs → dog` work | 30 |
+| Same paths, forced enforcement | LookupError | 0; access is rejected |
+| Logical root plus exact mounted corpus root, forced enforcement | Identical successful lookup results | 0 |
+
+For the next shared-data package, add the fixed environment entry
+`NLTK_DATA=/opt/oracle-data/root/nltk_data` to both signed startup commands.
+`oracle7.py` already prepends `/opt/oracle/root/nltk_data`. Keep the dependency's
+existing enforcement setting; do not suppress warnings or authorize all of
+`/opt`. The current warning does not block this lookup, so it does not require a
+separate dependency rebuild. The v3 artifact and retained Store were unchanged.
+
+`wordnet-path-2026-10-27.json` retains compact results, source/corpus hashes,
+probe hashes and the actual log location. This establishes dependency behavior,
+not the correctness of every Oracle route that consumes WordNet.

@@ -75,6 +75,9 @@ class StageTests(unittest.TestCase):
                                          input=(self.args.target / "image/sandstorm-http-bridge-config").read_bytes())
         self.assertIn(b'apiPath = "/"', decoded)
         self.assertIn(b'name = "query"', decoded)
+        manifest = subprocess.check_output([str(self.args.capnp), "decode", str(schema), "Manifest"],
+                                          input=(self.args.target / "image/sandstorm-manifest").read_bytes())
+        self.assertNotIn(b'NLTK_DATA', manifest)
         subprocess.run([str(self.args.capnp), "eval", str(self.args.target / "sandstorm-pkgdef.capnp"), "pkgdef"],
                        check=True, stdout=subprocess.DEVNULL)
         (self.appliance / "adapter/serve.py").write_text("changed")
@@ -127,6 +130,10 @@ class StageTests(unittest.TestCase):
         self.assertEqual(staged["expected_package_entries"]["opt/oracle/root/store.sqlite3"],
                          {"kind": "symlink", "target": "/opt/oracle-data/root/store.sqlite3"})
         self.assertEqual(staged["expected_package_entries"]["opt/oracle-data"], {"kind": "directory"})
+        manifest = subprocess.check_output([str(self.args.capnp), "decode", str(stage.REPO / "native/spk-rpc/schema/package.capnp"), "Manifest"],
+                                          input=(self.args.target / "image/sandstorm-manifest").read_bytes())
+        self.assertEqual(manifest.count(b'key = "NLTK_DATA"'), 2)
+        self.assertEqual(manifest.count(b'value = "/opt/oracle-data/root/nltk_data"'), 2)
         self.assertEqual(json.loads((self.args.target / "image/minidregg-data.json").read_text()),
                          {"schema": "minidregg-public-data-v1", "inventory_sha256": self.args.data_sha256})
         self.assertEqual(data.read_bytes(), b"immutable data")

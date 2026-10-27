@@ -324,6 +324,8 @@ def build(args):
           (key = "PYTHONDONTWRITEBYTECODE", value = "1"),
           (key = "PYTHONIOENCODING", value = "utf-8"),
           (key = "LANG", value = "C.UTF-8")])'''
+        if external:
+            command = command.replace('environ = [', 'environ = [(key = "NLTK_DATA", value = "/opt/oracle-data/root/nltk_data"), ')
         manifest = f'''(appTitle = (defaultText = "Oracle7"), appVersion = {args.version},
           appMarketingVersion = (defaultText = "4.9 repaired appliance"),
           actions = [(input = (none = void), nounPhrase = (defaultText = "Oracle7 workspace"), command = {command})],
