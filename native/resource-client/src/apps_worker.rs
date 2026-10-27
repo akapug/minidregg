@@ -604,6 +604,20 @@ impl Worker {
     }
 }
 
+/// The owner's role basis for one grain: the world's basis (`allAccess` on the
+/// box) when the signed bridge declares no roles, role 0 when it does, as the
+/// journey's `basis()` picks it. A bridge that declares roles (the oracle: role 0
+/// `Researcher`, permission `query`) refuses a session whose permissions are not
+/// exactly its declared one, so `allAccess` would be refused at enrolment.
+fn role_basis(world: &Value, schema: &Value) -> Value {
+    let declares_roles = schema.get("roles").and_then(Value::as_array).is_some_and(|r| !r.is_empty());
+    if declares_roles && world.get("type").and_then(Value::as_str) == Some("allAccess") {
+        json!({"type":"role","id":"0"})
+    } else {
+        world.clone()
+    }
+}
+
 fn route_json(bound: &RouteBound, member: &str) -> Value {
     json!({"member":member,"directory":bound.directory,"socket":bound.socket,
         "browserTokenSha256":bound.browser_token_sha256,"bootstrapTokenSha256":bound.bootstrap_token_sha256,
@@ -1061,7 +1075,7 @@ impl World for ProcessWorld {
                     "schemaRoot":schema["root"],"schemaVersion":schema["version"]},
                 "participant":{"session":session.to_string(),"descriptorResource":(session + 1).to_string(),"kind":"web","subject":m,"origin":{"type":"human"},
                     "sessionCapability":cap.to_string(),"appObserveCapability":appcap,"ticketObserveCapability":(tcap + 2).to_string()},
-                "ceiling":{"basis":self.role_basis,"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
+                "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
                 "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
                 "payer":m,"funding":[],"sourceCapabilities":["42"],

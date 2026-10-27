@@ -57,6 +57,42 @@ pub(crate) struct Entry {
     pub code_link: String,
     pub created_at: String,
     pub open_source: bool,
+    /// Operator-pinned entries only (`index-check --local`): the whole raw
+    /// SHA-256 of the package, the URL it is fetched from when it is not
+    /// adopted from a box-local file, and the class the operator sized it to.
+    pub pinned: Option<Pinned>,
+}
+
+/// What an operator-pinned entry carries beyond the index's claims. The
+/// package identity is still the signed package's; the pin only says which
+/// exact bytes the fetcher may put in the quarantine under this packageId.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Pinned {
+    pub sha256: String,
+    pub package_url: Option<String>,
+    pub class: Option<String>,
+}
+
+fn parse_pinned(value: &Value, package_id: &str) -> Result<Option<Pinned>> {
+    let sha256 = match value.get("sha256") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(text)) if text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) => text.clone(),
+        _ => return Err("pinned sha256 is not 64 lowercase hex digits".into()),
+    };
+    if !sha256.starts_with(package_id) {
+        return Err(format!("pinned sha256 {sha256} does not start with packageId {package_id}"));
+    }
+    let package_url = match value.get("packageUrl") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(url)) if url.starts_with("https://") && url.len() <= MAX_TEXT && !url.bytes().any(|b| b <= 0x20 || b == b'"') => Some(url.clone()),
+        _ => return Err("pinned packageUrl must be a bounded https URL".into()),
+    };
+    let class = match value.get("class") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(c)) if matches!(c.as_str(), "S" | "M" | "L") => Some(c.clone()),
+        _ => return Err("pinned class is S, M or L".into()),
+    };
+    Ok(Some(Pinned { sha256, package_url, class }))
 }
 
 /// A Sandstorm appId: 52 base32 digits (`sandstorm_package::spk::base32`).
@@ -115,6 +151,7 @@ fn parse_entry(value: &Value) -> Result<Entry> {
             }
         }
     }
+    let pinned = parse_pinned(value, &package_id)?;
     Ok(Entry {
         app_id,
         package_id,
@@ -129,6 +166,7 @@ fn parse_entry(value: &Value) -> Result<Entry> {
         code_link: bounded_text(value, "codeLink", false)?,
         created_at: bounded_text(value, "createdAt", false)?,
         open_source: value.get("isOpenSource").and_then(Value::as_bool).unwrap_or(false),
+        pinned,
     })
 }
 
@@ -156,13 +194,42 @@ pub(crate) fn parse_index(bytes: &[u8]) -> Result<Vec<Entry>> {
     Ok(entries)
 }
 
-/// The exact known fields, re-serialised: what `index-check` writes.
+/// The exact known fields, re-serialised: what `index-check` writes. A pinned
+/// entry carries its pin (`sha256`, `packageUrl`, `class`) so the fetcher and
+/// the catalogue read it from the one index file.
 pub(crate) fn render_index(entries: &[Entry]) -> Value {
-    json!({"format":"mini-market-index-v1","source":INDEX_URL,"apps":entries.iter().map(|e| json!({
+    json!({"format":"mini-market-index-v1","source":INDEX_URL,"pinned":entries.iter().filter(|e| e.pinned.is_some()).count(),
+        "apps":entries.iter().map(|e| {
+        let mut app = json!({
         "appId":e.app_id,"packageId":e.package_id,"name":e.name,"version":e.version,
         "versionNumber":e.version_number,"author":{"name":e.author},"upstreamAuthor":e.upstream_author,
         "shortDescription":e.short_description,"categories":e.categories,"webLink":e.web_link,
-        "codeLink":e.code_link,"createdAt":e.created_at,"isOpenSource":e.open_source})).collect::<Vec<_>>()})
+        "codeLink":e.code_link,"createdAt":e.created_at,"isOpenSource":e.open_source});
+        if let Some(pin) = &e.pinned {
+            app["sha256"] = json!(pin.sha256);
+            if let Some(url) = &pin.package_url { app["packageUrl"] = json!(url); }
+            if let Some(class) = &pin.class { app["class"] = json!(class); }
+        }
+        app
+    }).collect::<Vec<_>>()})
+}
+
+/// `index-check --local`: the operator's pinned entries, merged after the
+/// upstream index. Every local entry carries a `sha256`; a packageId the
+/// upstream index already names is refused (the pin would shadow a public
+/// package), so the one catalogue file never shows two sources for one id.
+pub(crate) fn merge_local(upstream: Vec<Entry>, local: Vec<Entry>) -> Result<Vec<Entry>> {
+    let mut entries = upstream;
+    for entry in local {
+        if entry.pinned.is_none() {
+            return Err(format!("local entry {} ({}) carries no sha256 pin", entry.name, entry.package_id));
+        }
+        if let Some(first) = entries.iter().find(|e| e.package_id == entry.package_id) {
+            return Err(format!("local entry {} collides with the index's {} ({})", entry.package_id, first.name, first.app_id));
+        }
+        entries.push(entry);
+    }
+    Ok(entries)
 }
 
 pub(crate) fn load_index(path: &Path) -> Result<Vec<Entry>> {
@@ -252,12 +319,23 @@ fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
         "appId":entry.app_id,"packageId":entry.package_id,"name":entry.name,"version":entry.version,
         "versionNumber":entry.version_number,"publisher":entry.author,"upstreamAuthor":entry.upstream_author,
         "shortDescription":entry.short_description,"categories":entry.categories,"webLink":entry.web_link,
-        "codeLink":entry.code_link,"packageUrl":format!("{PACKAGE_URL}{}",entry.package_id),
+        "codeLink":entry.code_link,"packageUrl":package_url(entry),
         "verdict":{"state":verdict.state,"reason":verdict.reason,"rawBytes":verdict.raw_bytes,
             "signedAppId":verdict.signed_app_id,"running":verdict.running},
-        "suggestedClass":suggested_class(verdict.raw_bytes),
+        "suggestedClass":entry.pinned.as_ref().and_then(|p| p.class.as_deref()).unwrap_or_else(|| suggested_class(verdict.raw_bytes)),
+        "pinned":entry.pinned.as_ref().map(|p| json!({"sha256":p.sha256,"packageUrl":p.package_url,"class":p.class})),
         "claims":"name, version, publisher and links are the index's claims; identity is the signed package's"
     })
+}
+
+/// Where the fetcher takes the package from: the pin's URL, the market's
+/// package URL, or (a pin without a URL) a box-local file the operator adopts.
+fn package_url(entry: &Entry) -> String {
+    match &entry.pinned {
+        Some(Pinned { package_url: Some(url), .. }) => url.clone(),
+        Some(_) => format!("file: adopted by the operator (mini-market-fetch adopt {} SHA256 FILE)", entry.package_id),
+        None => format!("{PACKAGE_URL}{}", entry.package_id),
+    }
 }
 
 fn verdict_line(verdict: &Verdict) -> String {
@@ -520,14 +598,17 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
             }
             println!("{} {} (index claim; the signed manifest decides)", entry.name, entry.version);
             println!("  appId      {}", entry.app_id);
-            println!("  packageId  {}  ({}{})", entry.package_id, PACKAGE_URL, entry.package_id);
+            println!("  packageId  {}  ({})", entry.package_id, package_url(entry));
             println!("  publisher  {}  upstream {}", entry.author, entry.upstream_author);
             println!("  about      {}", entry.short_description);
             println!("  categories {}", entry.categories.join(", "));
             println!("  links      {}  {}", entry.web_link, entry.code_link);
             println!("  verdict    {}", verdict_line(&v));
             println!("  size       {}", v.raw_bytes.map_or("not fetched here".to_owned(), |b| format!("{b} bytes raw")));
-            println!("  class      {}", suggested_class(v.raw_bytes));
+            match &entry.pinned {
+                Some(pin) => println!("  class      {}  (operator-pinned; sha256 {})", pin.class.as_deref().unwrap_or(suggested_class(v.raw_bytes)), pin.sha256),
+                None => println!("  class      {}", suggested_class(v.raw_bytes)),
+            }
             println!("  refusals an install can meet: unknownApp, sizeOverProfile, unverifiedSignature, appIdMismatch, unsupportedBridge, funding, classRefused");
             Ok(())
         }
@@ -551,16 +632,22 @@ fn truncate(text: &str, width: usize) -> String {
 fn index_check(mut args: Args) -> Result<()> {
     let input = absolute(&path(args.required("in")?))?;
     let output = absolute(&path(args.required("out")?))?;
+    let local = args.optional("local").map(|v| absolute(&path(v))).transpose()?;
     args.finish()?;
     let bytes = crate::fsio::read_bounded(&input, MAX_INDEX)?;
-    let entries = parse_index(&bytes)?;
+    let mut entries = parse_index(&bytes)?;
+    if let Some(local) = local {
+        let pinned = parse_index(&crate::fsio::read_bounded(&local, MAX_INDEX)?)
+            .map_err(|e| format!("local index {}: {e}", local.display()))?;
+        entries = merge_local(entries, pinned)?;
+    }
     let rendered = render_index(&entries);
     let mut text = serde_json::to_vec_pretty(&rendered).map_err(|e| e.to_string())?;
     text.push(b'\n');
     let temp = output.with_extension("json.new");
     fs::write(&temp, &text).map_err(|e| format!("cannot write {}: {e}", temp.display()))?;
     fs::rename(&temp, &output).map_err(|e| format!("cannot publish {}: {e}", output.display()))?;
-    println!("index-check: {} apps, {} bytes -> {}", entries.len(), text.len(), output.display());
+    println!("index-check: {} apps ({} pinned), {} bytes -> {}", entries.len(), entries.iter().filter(|e| e.pinned.is_some()).count(), text.len(), output.display());
     Ok(())
 }
 
@@ -1209,6 +1296,39 @@ mod tests {
         assert_eq!(rendered["format"], "mini-market-index-v1");
         // The index's author pictures and usernames are not carried: data we do not show.
         assert!(rendered["apps"][0]["author"].get("picture").is_none());
+    }
+
+    #[test]
+    fn apps_index_check_merges_operator_pinned_entries_and_refuses_collisions() {
+        let upstream = fixture();
+        let oracle = json!({"apps":[{
+            "appId":"ephaf4h4cx8f9s36hmukm4yzkznyhqjhvj8efp3at9cru2zn10mh","packageId":"bded240f916b93d51ad5e90ffc12d8a8",
+            "name":"veri7vn oracle","version":"4","versionNumber":4,"author":{"name":"ember"},
+            "sha256":"bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0","class":"L"}]});
+        let local = parse_index(&serde_json::to_vec(&oracle).unwrap()).unwrap();
+        let pin = local[0].pinned.clone().unwrap();
+        assert_eq!((pin.class.as_deref(), pin.package_url), (Some("L"), None));
+        let merged = merge_local(upstream.clone(), local.clone()).unwrap();
+        assert_eq!(merged.len(), 99);
+        let rendered = render_index(&merged);
+        assert_eq!(rendered["pinned"], 1);
+        let again = parse_index(&serde_json::to_vec(&rendered).unwrap()).unwrap();
+        assert_eq!(again, merged, "the pin survives the round trip");
+        let shown = entry_json(&merged[98], &verdict(Path::new("/nonexistent"), Path::new("/nonexistent"), "bded240f916b93d51ad5e90ffc12d8a8"));
+        assert_eq!(shown["suggestedClass"], "L");
+        assert!(shown["packageUrl"].as_str().unwrap().starts_with("file: adopted"));
+        // A pin whose sha256 does not start with its packageId, or without a pin at all, refuses.
+        let mut bad = oracle.clone();
+        bad["apps"][0]["sha256"] = json!("0000000000000000000000000000000000000000000000000000000000000000");
+        assert!(parse_index(&serde_json::to_vec(&bad).unwrap()).unwrap_err().contains("does not start with packageId"));
+        let unpinned = parse_index(&serde_json::to_vec(&json!({"apps":[serde_json::from_slice::<Value>(FIXTURE).unwrap()["apps"][0]]})).unwrap()).unwrap();
+        assert!(merge_local(upstream.clone(), unpinned).unwrap_err().contains("no sha256 pin"));
+        // A pinned packageId the upstream index already names is refused by name.
+        let mut shadow = oracle;
+        shadow["apps"][0]["packageId"] = json!("5830d70137cdae158118884da8790870");
+        shadow["apps"][0]["sha256"] = json!("5830d70137cdae158118884da879087000000000000000000000000000000000");
+        let shadow = parse_index(&serde_json::to_vec(&shadow).unwrap()).unwrap();
+        assert!(merge_local(upstream, shadow).unwrap_err().contains("collides"));
     }
 
     #[test]
