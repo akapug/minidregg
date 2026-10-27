@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure births jserve perf)
+JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf)
 # growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
 # it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
 # kernel (journey.sh JOURNEY_SET=kernel without G: the steps no public surface needs) is nightly too.
@@ -884,6 +884,20 @@ row_chargedfailure() {
   product_exec chargedfailure python3 "$d" --bin "$BIN" --root "$RUN/c"; rc=$?
   product_keep "$RUN/c/results.json" "$RUN/c/timings.tsv" "$RUN/c/transcript"
   [ ! -s "$RUN/c/groups.tsv" ] || cp "$RUN/c/groups.tsv" "$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/results.json" "$OUT/subrows.tsv" || return 1
+  jq -e '.allPass==true and (.rows|length)>0' "$OUT/results.json" >/dev/null
+}
+# `bend` through the shell: a member authors world/activity/Tally.obend, publishes it, runs it on an object of
+# theirs, and reads the Host's decided outcome back through the public view; a malformed source is refused by
+# the Host's front end, by name, with nothing submitted (native/resource-client/bend-journey.py).
+row_jbend() {
+  local d=$SRC/native/resource-client/bend-journey.py rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec jbend python3 "$d" --bin "$BIN" --root "$RUN/b"; rc=$?
+  product_keep "$RUN/b/results.json" "$RUN/b/transcript"
+  [ ! -s "$RUN/b/groups.tsv" ] || cp "$RUN/b/groups.tsv" "$OUT/subrows.tsv"
   [ "$rc" = 0 ] || return "$rc"
   product_evidence "$OUT/results.json" "$OUT/subrows.tsv" || return 1
   jq -e '.allPass==true and (.rows|length)>0' "$OUT/results.json" >/dev/null
