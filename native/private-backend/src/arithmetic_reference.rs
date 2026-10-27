@@ -11,7 +11,7 @@ pub(crate) mod tests {
         acss_id::{self, AcssId},
         codec::Generation,
         entropy::Entropy,
-        field_network::{binding, Engine, InputRef, Send, TripleManifest},
+        field_network::{Engine, InputRef, Send, TripleManifest},
         field_network_layers::LayerEngine,
         reconstruction::Field,
         transcript::{Tap, Wire},
@@ -148,7 +148,7 @@ pub(crate) mod tests {
         stocks: &[Vec<CheckedTriples>],
         label: &str,
         tap: &mut Tap,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         let (engines, anchors, _) =
             completed_private_inputs_with_states(parties, network, source_binding, g, stocks, label, tap);
         (engines, anchors)
@@ -165,7 +165,7 @@ pub(crate) mod tests {
         tap: &mut Tap,
     ) -> (
         Vec<LayerEngine>,
-        Vec<triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<Vec<AcssId>>,
     ) {
         let input_count = network.input_count as usize;
@@ -200,11 +200,8 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(rows.len(), count);
             let single = checked.len() == 1;
-            let binding_bytes = if single {
-                binding(&TripleManifest::from_checked(checked[0]), &refs, source_binding).unwrap()
-            } else {
-                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap()
-            };
+            let binding_bytes =
+                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap();
             let plan = crate::circuit_batch::Plan {
                 generation: g.clone(),
                 network: network.clone(),
@@ -253,7 +250,7 @@ pub(crate) mod tests {
         left: u8,
         right: u8,
         instance: u64,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         // The Lean-emitted two-bit addition plan with its counted Boolean
         // input qualification: the one addition network.
         let bytes = include_bytes!("../fixtures/addition-network-2-plan.bin");
@@ -267,7 +264,7 @@ pub(crate) mod tests {
         instance: u64,
         network: Network,
         source_binding: &[u8],
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         completed_word_network(left as u64, right as u64, instance, network, source_binding)
     }
     pub(crate) fn completed_word_network(
@@ -276,7 +273,7 @@ pub(crate) mod tests {
         instance: u64,
         network: Network,
         source_binding: &[u8],
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         completed_word_network_generation(left, right, instance, network, source_binding, None)
     }
     /// Two input parties: holder 0 privately deals `left`, holder 2 privately
@@ -289,7 +286,7 @@ pub(crate) mod tests {
         network: Network,
         source_binding: &[u8],
         generation: Option<&Generation>,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         let input_count = network.input_count as usize;
         // Two parties, each an even-count ACSS instance of width bits.
         assert!(input_count > 0 && input_count % 4 == 0);
@@ -332,7 +329,7 @@ pub(crate) mod tests {
         network: Network,
         source_binding: &[u8],
         g: &Generation,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         assert!(!bits.is_empty() && bits.len() <= 256);
         assert_eq!(network.input_count as usize, bits.len());
         let count = network

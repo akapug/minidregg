@@ -4,8 +4,8 @@
 //! Full public plan is burned before any accepted input/triple getter. This is
 //! not Native Qualified, source admission, GOD/fault elimination or output release.
 use crate::{
-    acss_id::{self, AcssId, LocalSharing},
-    asks::{Bracha, PhaseMessage},
+    acss_id::{AcssId, LocalSharing},
+    asks::PhaseMessage,
     circuit_batch::{Network, Op, Plan},
     codec::{bad, bytes, Correlation, Generation, Nat},
     consensus_wire::Cursor,
@@ -98,26 +98,6 @@ impl TripleManifest {
         })
     }
 }
-/// Source program/capacity binding must separately be approved by the native
-/// receiver. This codec binds actual public input provenance/inventory; it does
-/// not turn caller source_binding bytes into source authority.
-pub fn binding(
-    manifest: &TripleManifest,
-    inputs: &[InputRef],
-    source_binding: &[u8],
-) -> Result<Vec<u8>> {
-    if source_binding.is_empty() {
-        return Err(bad("missing program/input source binding"));
-    }
-    let mut b = b"DREGG.PRIVATE.FIELD.NETWORK.BINDING\x01".to_vec();
-    bytes(&manifest.encode(), &mut b);
-    Nat::new(inputs.len() as u64).put(&mut b);
-    for i in inputs {
-        bytes(&i.public_bytes(), &mut b);
-    }
-    bytes(source_binding, &mut b);
-    Ok(b)
-}
 /// Public preflight for independently prepared inventories. Source admission
 /// must authorize this exact set; this function supplies no enrollment grant.
 fn catalog<'a>(
@@ -147,6 +127,10 @@ fn catalog<'a>(
     }
     Ok(by_pool)
 }
+/// Source program/capacity binding must separately be approved by the native
+/// receiver. This codec binds actual public input provenance/inventory; it does
+/// not turn caller source_binding bytes into source authority.
+///
 /// Versioned exact multi-inventory binding. Inventories are ordered by their
 /// canonical pool IDs; caller order cannot change the common Plan. Each entry
 /// also retains the actual original seed reservations, excluding relabeling
@@ -314,35 +298,6 @@ pub struct Engine {
     f: usize,
     wires: Vec<Field>,
     triples: Vec<(Field, Field, Field)>,
-    triple_cursor: usize,
-    next: usize,
-    started: bool,
-    opening_sent: bool,
-    openings: BTreeMap<(usize, u16), Bracha>,
-    bits: Vec<Bracha>,
-    bits_sent: bool,
-    bit_positions: Vec<usize>,
-    output: Option<BooleanSharedOutput>,
-    failure: Option<BitnessFailure>,
-}
-#[derive(Clone)]
-pub struct BooleanSharedOutput {
-    context: [u8; 32],
-    holder: u16,
-    values: Vec<Field>,
-}
-impl BooleanSharedOutput {
-    pub fn context(&self) -> [u8; 32] {
-        self.context
-    }
-    pub fn holder(&self) -> u16 {
-        self.holder
-    }
-    /// Recipient-local output shares only. This is NOT authority to reveal them
-    /// to a controller/audience or to activate a private successor.
-    pub fn shares(&self) -> &[Field] {
-        &self.values
-    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BitnessFailure {
@@ -364,7 +319,7 @@ impl Engine {
         if plan.generation != manifest.generation {
             return Err(bad("single-inventory exact consumer generation"));
         }
-        let expected = binding(&manifest, &inputs, source_binding)?;
+        let expected = binding_many(&[checked], &inputs, source_binding)?;
         Self::reserve_inner(plan, &[checked], inputs, &expected, anchor, local)
     }
     /// Burns every selected row from every stock in one durable batch before
@@ -397,7 +352,7 @@ impl Engine {
         {
             return Err(bad("exact unrolled plan/input/triple binding"));
         }
-        let bit_positions = bit_prefix(&plan.network)?;
+        bit_prefix(&plan.network)?;
         let me = checked[0].holder();
         let (n, f) = checked[0].roster();
         if checked
@@ -481,16 +436,6 @@ impl Engine {
             f,
             wires,
             triples,
-            triple_cursor: 0,
-            next: 0,
-            started: false,
-            opening_sent: false,
-            openings: BTreeMap::new(),
-            bits: (0..n).map(|i| Bracha::new(n, f, Some(i as u16))).collect(),
-            bits_sent: false,
-            bit_positions,
-            output: None,
-            failure: None,
         })
     }
     pub(crate) fn pristine_material(&self) -> Result<(&[Field], &[(Field, Field, Field)])> {
@@ -509,189 +454,12 @@ impl Engine {
     pub fn plan(&self) -> &Plan {
         &self.plan
     }
-    pub fn output(&self) -> Option<&BooleanSharedOutput> {
-        self.output.as_ref()
-    }
-    pub fn failure(&self) -> Option<&BitnessFailure> {
-        self.failure.as_ref()
-    }
-    fn all(&self, body: Body) -> Vec<Send> {
-        (0..self.n)
-            .map(|i| Send {
-                to: i as u16,
-                message: Message {
-                    context: self.context,
-                    body: body.clone(),
-                },
-            })
-            .collect()
-    }
-    pub fn start(&mut self) -> Result<Vec<Send>> {
-        if self.started {
-            return Ok(vec![]);
-        }
-        self.started = true;
-        self.progress()
-    }
-    /// Sender MUST be independently end-to-end authenticated. A mix slot or
-    /// decoded source receipt is not sufficient. Future valid DAG messages are
-    /// bounded/retained; unopened wire values never select a new public gate.
-    pub fn receive(&mut self, sender: u16, m: Message) -> Result<Vec<Send>> {
-        if sender as usize >= self.n || m.context != self.context {
-            return Err(bad("field opening sender/context"));
-        }
-        let mut out = vec![];
-        match m.body {
-            Body::Opening {
-                gate,
-                holder,
-                phase,
-            } => {
-                if holder as usize >= self.n
-                    || !matches!(self.plan.network.gates.get(gate), Some(Op::And(..)))
-                {
-                    return Err(bad("field opening gate/holder"));
-                }
-                fields(values(&phase), 2)?;
-                let ps = self
-                    .openings
-                    .entry((gate, holder))
-                    .or_insert_with(|| Bracha::new(self.n, self.f, Some(holder)))
-                    .receive(sender, phase);
-                for phase in ps {
-                    out.extend(self.all(Body::Opening {
-                        gate,
-                        holder,
-                        phase,
-                    }));
-                }
-            }
-            Body::Bits { holder, phase } => {
-                if holder as usize >= self.n {
-                    return Err(bad("input bit check holder"));
-                }
-                fields(values(&phase), self.bit_positions.len())?;
-                for phase in self.bits[holder as usize].receive(sender, phase) {
-                    out.extend(self.all(Body::Bits { holder, phase }));
-                }
-            }
-        }
-        out.extend(self.progress()?);
-        Ok(out)
-    }
-    fn progress(&mut self) -> Result<Vec<Send>> {
-        let mut out = vec![];
-        if !self.started {
-            return Ok(out);
-        }
-        while self.next < self.plan.network.gates.len() {
-            let gate = self.next;
-            match self.plan.network.gates[gate].clone() {
-                Op::Constant(v) => self.wires.push(Field(v as u128)),
-                Op::Xor(a, b) => self
-                    .wires
-                    .push(self.wires[a as usize].add(self.wires[b as usize])),
-                Op::And(a, b) => {
-                    let (ta, tb, tc) = self.triples[self.triple_cursor];
-                    if !self.opening_sent {
-                        let de = vec![
-                            self.wires[a as usize].add(ta),
-                            self.wires[b as usize].add(tb),
-                        ];
-                        out.extend(self.all(Body::Opening {
-                            gate,
-                            holder: self.me,
-                            phase: PhaseMessage::Init(field_bytes(&de)),
-                        }));
-                        self.opening_sent = true;
-                    }
-                    let mut points = BTreeMap::new();
-                    for holder in 0..self.n as u16 {
-                        if let Some(raw) = self
-                            .openings
-                            .get(&(gate, holder))
-                            .and_then(|r| r.output.as_ref())
-                        {
-                            points.insert(holder, fields(raw, 2)?);
-                        }
-                    }
-                    // Grow across the FULL authenticated roster until one degree-f
-                    // polynomial has n-f matching points. Never first-threshold.
-                    let Some((polys, _)) =
-                        acss_id::correct_polynomials(&points, self.f, self.n - self.f, 2)?
-                    else {
-                        return Ok(out);
-                    };
-                    let d = polys[0][0];
-                    let e = polys[1][0];
-                    self.wires
-                        .push(tc.add(d.mul(tb)).add(e.mul(ta)).add(d.mul(e)));
-                    self.triple_cursor += 1;
-                    self.opening_sent = false;
-                }
-            }
-            self.next += 1;
-        }
-        // Evaluate EVERY public gate before validation/refusal. The counted
-        // prefix shares x*(x+1) open as zero for qualified Boolean inputs.
-        if !self.bits_sent {
-            let v = self
-                .bit_positions
-                .iter()
-                .map(|gate| self.wires[self.plan.network.input_count as usize + *gate])
-                .collect::<Vec<_>>();
-            out.extend(self.all(Body::Bits {
-                holder: self.me,
-                phase: PhaseMessage::Init(field_bytes(&v)),
-            }));
-            self.bits_sent = true;
-        }
-        if self.output.is_none() && self.failure.is_none() {
-            let mut points = BTreeMap::new();
-            for (h, r) in self.bits.iter().enumerate() {
-                if let Some(raw) = &r.output {
-                    points.insert(h as u16, fields(raw, self.bit_positions.len())?);
-                }
-            }
-            if let Some((p, _)) = acss_id::correct_polynomials(
-                &points,
-                self.f,
-                self.n - self.f,
-                self.bit_positions.len(),
-            )? {
-                let opened_checks = p.iter().map(|p| p[0]).collect::<Vec<_>>();
-                if opened_checks.iter().all(|v| *v == Field(0)) {
-                    self.output = Some(BooleanSharedOutput {
-                        context: self.context,
-                        holder: self.me,
-                        values: self
-                            .plan
-                            .network
-                            .outputs
-                            .iter()
-                            .map(|i| self.wires[*i as usize])
-                            .collect(),
-                    });
-                } else {
-                    self.failure = Some(BitnessFailure { opened_checks });
-                }
-            }
-        }
-        Ok(out)
-    }
 }
 impl Engine {
     /// Private original initialization only. This snapshot is not a proof of
     /// reachability, Native authority or an affine recovery/admission resource.
     pub(crate) fn initial_bytes(&self) -> Result<Vec<u8>> {
-        if self.started
-            || self.next != 0
-            || self.wires.len() != self.plan.network.input_count as usize
-            || !self.openings.is_empty()
-            || self.bits_sent
-            || self.output.is_some()
-            || self.failure.is_some()
-        {
+        if self.wires.len() != self.plan.network.input_count as usize {
             return Err(bad("field original initialization only"));
         }
         let mut b = b"DREGG.PRIVATE.FIELD.INITIAL\x01".to_vec();
@@ -774,7 +542,7 @@ impl Engine {
         {
             return Err(bad("field full-plan retained anchor/readback"));
         }
-        let bit_positions = bit_prefix(&plan.network)?;
+        bit_prefix(&plan.network)?;
         let triples = ts.chunks_exact(3).map(|v| (v[0], v[1], v[2])).collect();
         let mut ctx = b"DREGG.PRIVATE.FIELD.NETWORK\x01".to_vec();
         bytes(&plan.encode(), &mut ctx);
@@ -787,16 +555,6 @@ impl Engine {
             f,
             wires,
             triples,
-            triple_cursor: 0,
-            next: 0,
-            started: false,
-            opening_sent: false,
-            openings: BTreeMap::new(),
-            bits: (0..n).map(|i| Bracha::new(n, f, Some(i as u16))).collect(),
-            bits_sent: false,
-            bit_positions,
-            output: None,
-            failure: None,
         };
         if engine.initial_bytes()? != b {
             return Err(bad("field original initial canonical"));
@@ -947,8 +705,8 @@ pub(crate) mod tests {
                 outputs: vec![7],
             },
             public_ticks: 1,
-            binding_bytes: binding(
-                &manifest,
+            binding_bytes: binding_many(
+                &[checked],
                 inputs,
                 b"public source-program/input schema fixture",
             )
@@ -963,7 +721,7 @@ pub(crate) mod tests {
         y: Field,
     ) -> (
         Vec<Engine>,
-        Vec<super::super::triple_king::tests::AnchorFixture>,
+        Vec<super::super::custody::AnchorHandle>,
     ) {
         let checked = triple_king::tests::checked_for_consumer(3);
         let input = inputs(x, y);
@@ -1009,80 +767,8 @@ pub(crate) mod tests {
         }
         (engines, anchors)
     }
-    fn start(ns: &mut [Engine]) -> VecDeque<(u16, Send)> {
-        let mut q = VecDeque::new();
-        for n in ns {
-            q.extend(n.start().unwrap().into_iter().map(|p| (n.me, p)));
-        }
-        q
-    }
-    fn drive(
-        ns: &mut [Engine],
-        q: &mut VecDeque<(u16, Send)>,
-        corrupt: bool,
-        hold: bool,
-    ) -> VecDeque<(u16, Send)> {
-        let mut held = VecDeque::new();
-        let mut steps = 0;
-        while let Some((sender, mut p)) = q.pop_front() {
-            steps += 1;
-            assert!(steps < 200000);
-            if hold
-                && matches!(
-                    &p.message.body,
-                    Body::Opening {
-                        gate: 2,
-                        holder: 2,
-                        phase: PhaseMessage::Init(_)
-                    }
-                )
-            {
-                held.push_back((sender, p));
-                continue;
-            }
-            if corrupt && sender == 3 {
-                if let Body::Opening {
-                    holder: 3,
-                    phase: PhaseMessage::Init(raw),
-                    ..
-                } = &mut p.message.body
-                {
-                    raw[0] ^= 1;
-                }
-            }
-            let raw = encode_message(&p.message);
-            let m = decode_message(&raw).unwrap();
-            assert_eq!(m, p.message);
-            let to = p.to;
-            q.extend(
-                ns[to as usize]
-                    .receive(sender, m)
-                    .unwrap()
-                    .into_iter()
-                    .map(|p| (to, p)),
-            );
-        }
-        held
-    }
-    fn output(ns: &[Engine]) -> Field {
-        let ps = ns
-            .iter()
-            .take(3)
-            .map(|n| (n.me, n.output().unwrap().shares().to_vec()))
-            .collect::<Vec<_>>();
-        let p = acss_id::polynomial(&ps[..2], 1).unwrap();
-        for (holder, v) in ps {
-            assert_eq!(
-                v[0],
-                p[0].iter().rev().fold(Field(0), |sum, c| sum
-                    .mul(Field(holder as u128 + 1))
-                    .add(*c))
-            );
-        }
-        p[0][0]
-    }
     #[test]
-    fn independent_checked_inventories_execute_and_leave_unselected_tails_unused() {
+    fn independent_checked_inventories_burn_selected_rows_and_leave_unselected_tails_unused() {
         let a = triple_king::tests::checked_inventory(2, 31);
         let b = triple_king::tests::checked_inventory(2, 32);
         let input = inputs(Field(1), Field(1));
@@ -1142,12 +828,6 @@ pub(crate) mod tests {
             ns.push(engine);
             anchors.push(anchor);
         }
-        let mut q = start(&mut ns);
-        drive(&mut ns, &mut q, false, false);
-        assert_eq!(output(&ns), Field(1));
-        assert!(ns
-            .iter()
-            .all(|n| n.triple_cursor == 3 && n.output().is_some()));
         // Reusing a typed post-burn stock still repeats its original seed identities.
         assert!(binding_many(&[&a[0], &a[0]], &input[0], source).is_err());
     }
@@ -1208,61 +888,5 @@ pub(crate) mod tests {
         assert!(
             Engine::reserve_many(p, &stocks, input, source, &sock, &root.join("retry")).is_err()
         );
-    }
-    #[test]
-    fn actual_checked_triples_and_acss_bits_execute_common_and_xor_network() {
-        for (x, y) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
-            let (mut ns, _anchors) = engine_nodes(Field(x), Field(y));
-            let mut q = start(&mut ns);
-            drive(&mut ns, &mut q, false, false);
-            assert!(ns
-                .iter()
-                .all(|n| n.output().is_some() && n.failure().is_none()));
-            assert_eq!(output(&ns), Field(x & y));
-            assert!(ns.iter().all(|n| n.next == 6 && n.triple_cursor == 3));
-        }
-    }
-    #[test]
-    fn first_three_openings_with_one_bad_point_wait_for_late_honest_support() {
-        let (mut ns, _anchors) = engine_nodes(Field(1), Field(1));
-        let mut q = start(&mut ns);
-        let mut held = drive(&mut ns, &mut q, true, true);
-        assert!(!held.is_empty());
-        for n in &ns[..3] {
-            assert_eq!(n.next, 2, "cannot trust first n-f arrivals");
-            assert!(n.output().is_none());
-            let mut points = BTreeMap::new();
-            for h in [0, 1, 3] {
-                let b = n.openings[&(2, h)].output.as_ref().unwrap();
-                points.insert(h, fields(b, 2).unwrap());
-            }
-            assert!(acss_id::correct_polynomials(&points, 1, 3, 2)
-                .unwrap()
-                .is_none());
-        }
-        drive(&mut ns, &mut held, true, false);
-        for n in &ns[..3] {
-            assert!(n.output().is_some());
-            assert!(n.failure().is_none());
-        }
-        assert_eq!(output(&ns), Field(1));
-    }
-    #[test]
-    fn non_boolean_input_refuses_output_after_all_counted_gates_and_rows_consumed() {
-        let (mut ns, _anchors) = engine_nodes(Field(2), Field(1));
-        let mut q = start(&mut ns);
-        drive(&mut ns, &mut q, false, false);
-        for n in &ns {
-            assert!(n.output().is_none());
-            assert_eq!(
-                n.failure().unwrap().opened_checks,
-                vec![Field(2).mul(Field(3)), Field(0)]
-            );
-            assert_eq!(n.next, 6);
-            assert_eq!(n.triple_cursor, 3);
-        }
-        // Validation failure publicly opens x*(x+1) in this reference profile;
-        // honest admitted input is Boolean. This is not privacy for arbitrary
-        // invalid honest secrets or a native application refusal/release token.
     }
 }

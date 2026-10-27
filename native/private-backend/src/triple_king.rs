@@ -1200,13 +1200,7 @@ pub(crate) mod tests {
     use std::{
         collections::VecDeque,
         fs,
-        os::unix::net::UnixListener,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
     fn generation(tag: u64) -> Generation {
         Generation {
@@ -1228,70 +1222,6 @@ pub(crate) mod tests {
         ));
         fs::create_dir(&p).unwrap();
         p
-    }
-    pub(crate) struct AnchorFixture {
-        sock: std::path::PathBuf,
-        stop: Arc<AtomicBool>,
-        task: Option<thread::JoinHandle<Journal>>,
-    }
-    impl AnchorFixture {
-        /// Serve the anchor authority kept under `root`. A socket file left by a
-        /// killed predecessor is removed first; the authority log is what persists.
-        pub(crate) fn new(root: &Path) -> Self {
-            let sock = root.join("anchor.sock");
-            let _ = fs::remove_file(&sock);
-            let listener = UnixListener::bind(&sock).unwrap();
-            listener.set_nonblocking(true).unwrap();
-            let stop = Arc::new(AtomicBool::new(false));
-            let halt = stop.clone();
-            let authority = root.join("authority");
-            let task = thread::spawn(move || {
-                let mut a = custody::Anchor::open(&authority).unwrap();
-                while !halt.load(Ordering::SeqCst) {
-                    match listener.accept() {
-                        Ok((mut s, _)) => {
-                            // BSD sockets inherit the listener's nonblocking flag.
-                            s.set_nonblocking(false).unwrap();
-                            let b = custody::read_packet(&mut s).unwrap();
-                            let out = a.handle(&b);
-                            let mut reply = vec![];
-                            match out {
-                                Ok(b) => {
-                                    reply.push(0);
-                                    reply.extend(b)
-                                }
-                                Err(e) => {
-                                    reply.push(1);
-                                    reply.extend(e.to_string().as_bytes())
-                                }
-                            }
-                            custody::write_packet(&mut s, &reply).unwrap();
-                        }
-                        Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(1))
-                        }
-                        Err(e) => panic!("{e}"),
-                    }
-                }
-                a.journal().clone()
-            });
-            Self {
-                sock,
-                stop,
-                task: Some(task),
-            }
-        }
-    }
-    impl AnchorFixture {
-        pub(crate) fn socket(&self) -> &Path {
-            &self.sock
-        }
-    }
-    impl Drop for AnchorFixture {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
-            self.task.take().unwrap().join().unwrap();
-        }
     }
     fn prepared() -> Vec<Vec<PreparedSource>> {
         prepared_with_zero_fault(None)
@@ -1441,7 +1371,7 @@ pub(crate) mod tests {
     }
     fn kings() -> (
         Vec<TripleKing>,
-        Vec<AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<Vec<PreparedSource>>,
     ) {
         let material = prepared();
@@ -1449,14 +1379,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&i.to_string());
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 &generation(300),
                 0,
                 1,
                 0,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1537,11 +1467,11 @@ pub(crate) mod tests {
             1,
             0,
             material[0].clone(),
-            &anchors[0].sock,
+            anchors[0].socket(),
             &p.join("burn")
         )
         .is_err());
-        let j = Journal::decode(&custody::rpc(&anchors[0].sock, &[0]).unwrap()).unwrap();
+        let j = Journal::decode(&custody::rpc(anchors[0].socket(), &[0]).unwrap()).unwrap();
         assert_eq!(j.spent.len(), 6);
     }
     #[test]
@@ -1652,14 +1582,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&format!("nonzero-{i}"));
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 &generation(500),
                 3,
                 1,
                 12,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1713,20 +1643,20 @@ pub(crate) mod tests {
             })
             .collect::<Vec<_>>();
         let r = root("incomplete");
-        let a = AnchorFixture::new(&r);
+        let a = crate::custody::AnchorHandle::new(&r);
         let e = PreparedBasis::reserve_new(
             &generation(403),
             0,
             1,
             0,
             sources.clone(),
-            &a.sock,
+            a.socket(),
             &r.join("burn"),
         )
         .err()
         .unwrap();
         assert_eq!(e.kind(), ErrorKind::WouldBlock);
-        let j = Journal::decode(&custody::rpc(&a.sock, &[0]).unwrap()).unwrap();
+        let j = Journal::decode(&custody::rpc(a.socket(), &[0]).unwrap()).unwrap();
         assert_eq!(j.spent.len(), 6);
         assert!(r.join("burn").exists());
         assert!(PreparedBasis::reserve_new(
@@ -1735,7 +1665,7 @@ pub(crate) mod tests {
             1,
             0,
             sources,
-            &a.sock,
+            a.socket(),
             &r.join("burn2")
         )
         .is_err());
@@ -1765,14 +1695,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&format!("consumer-{i}"));
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 consumer,
                 0,
                 count,
                 0,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1805,10 +1735,10 @@ pub(crate) mod tests {
 
     pub(crate) fn evaluator_anchor(
         label: &str,
-    ) -> (AnchorFixture, std::path::PathBuf, std::path::PathBuf) {
+    ) -> (crate::custody::AnchorHandle, std::path::PathBuf, std::path::PathBuf) {
         let r = root(label);
-        let a = AnchorFixture::new(&r);
-        let sock = a.sock.clone();
+        let a = crate::custody::AnchorHandle::new(&r);
+        let sock = a.socket().to_path_buf();
         (a, sock, r)
     }
 }
