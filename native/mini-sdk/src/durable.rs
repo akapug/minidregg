@@ -23,6 +23,10 @@
 //! expose a partial file. The opting-in process must reach a barrier before anything outside it may
 //! depend on those names (a request to a service, its exit).
 //!
+//! Caches (`crate::phase`): inside a thread's cache scope a file is still staged and linked
+//! complete, but neither it nor its name is synced; the attempt's seal record is the durable copy
+//! and readers repair the cache from it. Everything outside a scope is unchanged.
+//!
 //! The `*_with` forms take a [`Stage`] observer called at each crash boundary. An observer error
 //! models the process dying at that point: it propagates at once and nothing is cleaned up, so a
 //! test sees exactly the bytes a crash leaves behind.
@@ -78,7 +82,23 @@ pub fn sync_dir(directory: &Path) -> io::Result<()> {
 }
 
 fn fsync_dir(directory: &Path) -> io::Result<()> {
-    File::open(directory)?.sync_all()
+    sync_file(&File::open(directory)?)
+}
+
+thread_local! {
+    static FSYNCS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `fsync` one open file or directory, counted ([`fsyncs`]).
+pub fn sync_file(file: &File) -> io::Result<()> {
+    FSYNCS.with(|n| n.set(n.get() + 1));
+    file.sync_all()
+}
+
+/// How many `fsync`s this thread has issued through this module (files and directories): one
+/// signed write runs on one thread, so this is its count.
+pub fn fsyncs() -> u64 {
+    FSYNCS.with(|n| n.get())
 }
 
 static DEFER: AtomicBool = AtomicBool::new(false);
@@ -102,7 +122,7 @@ pub fn deferring_directory_syncs() -> bool {
 pub fn flush_directory_syncs() -> io::Result<()> {
     let mut pending = PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     while let Some((_, _, directory)) = pending.last() {
-        directory.sync_all()?;
+        sync_file(directory)?;
         pending.pop();
     }
     Ok(())
@@ -110,6 +130,11 @@ pub fn flush_directory_syncs() -> io::Result<()> {
 
 /// Make the name just committed at `path` durable: now, or at the next barrier when deferring.
 fn commit_name(path: &Path) -> io::Result<()> {
+    // A cache's name is made durable with its directory at the seal (`crate::phase`): the record
+    // names it, and a reader recreates it if a crash lost it.
+    if crate::phase::is_cache(path) {
+        return Ok(());
+    }
     if !deferring_directory_syncs() {
         return fsync_dir(parent_of(path)?);
     }
@@ -222,7 +247,12 @@ fn staged(
             observe(Stage::MidWrite).map_err(Crash::Observer)?;
         }
         observe(Stage::BeforeFileSync).map_err(Crash::Observer)?;
-        file.sync_all().map_err(Crash::Io)?;
+        // A cache of an attempt's seal record (`crate::phase`, invariant 2) is staged and linked
+        // without its own fsync: the record, written before anything can depend on it, is the
+        // durable copy, and readers repair the cache from it.
+        if !crate::phase::is_cache(path) {
+            sync_file(&file).map_err(Crash::Io)?;
+        }
         observe(Stage::BeforeCommit).map_err(Crash::Observer)
     };
     match write() {
@@ -336,7 +366,7 @@ pub fn retain_exact(path: &Path, bytes: &[u8], perm: Perm) -> Result<Retained, R
             if held != bytes {
                 return Err(RetainError::Differs);
             }
-            file.sync_all().map_err(RetainError::Io)?;
+            sync_file(&file).map_err(RetainError::Io)?;
             commit_name(path).map_err(RetainError::Io)?;
             Ok(Retained::Matched)
         }

@@ -1464,7 +1464,7 @@ fn create_dir(path: &Path) -> Result<()> {
 /// external submit must never precede a durable exact call and its pathname.
 fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
     File::open(call)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| mini_sdk::durable::sync_file(&file))
         .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
     sync_directory_ancestors(directory)
 }
@@ -1960,6 +1960,9 @@ fn submit_once(
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
+    // Until the seal every file of this attempt is a cache of its seal record: staged and linked
+    // without its own fsync (`mini_sdk::phase`). The seal ends the scope; so does any early return.
+    let _caches = mini_sdk::phase::CacheScope::enter(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {

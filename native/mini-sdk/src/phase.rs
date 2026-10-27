@@ -61,6 +61,12 @@ impl CacheScope {
         SCOPE.with(|s| *s.borrow_mut() = Some(dir));
         Ok(CacheScope(()))
     }
+
+    /// End this thread's cache scope now (the seal does, so nothing written after it, the
+    /// answer files included, is a cache). Idempotent; dropping the guard does the same.
+    pub fn end() {
+        SCOPE.with(|s| *s.borrow_mut() = None);
+    }
 }
 
 impl Drop for CacheScope {
@@ -69,8 +75,12 @@ impl Drop for CacheScope {
     }
 }
 
-/// Whether `path` is written as a cache (its parent is this thread's cache scope).
+/// Whether `path` is written as a cache (its parent is this thread's cache scope; the record
+/// itself never is).
 pub(crate) fn is_cache(path: &Path) -> bool {
+    if path.file_name().and_then(|n| n.to_str()) == Some(RECORD) {
+        return false;
+    }
     SCOPE.with(|s| {
         s.borrow().as_ref().is_some_and(|dir| {
             std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf)).as_deref() == Some(dir.as_path())
@@ -108,8 +118,11 @@ pub fn seal(dir: &Path) -> Result<()> {
     record.extend(serde_json::to_vec(&json!({"files": index})).map_err(|e| Error(e.to_string()))?);
     record.push(b'\n');
     record.extend(payload);
-    durable::create_new(&dir.join(RECORD), &record, Perm::Private)
-        .map_err(|e| Error(format!("cannot seal {}: {e}", dir.display())))
+    let sealed = durable::create_new(&dir.join(RECORD), &record, Perm::Private)
+        .map_err(|e| Error(format!("cannot seal {}: {e}", dir.display())));
+    // From the seal on nothing is a cache: the answer files keep their own fsync (invariant 4).
+    CacheScope::end();
+    sealed
 }
 
 /// A file's bytes, no repair (for building the record).
@@ -262,6 +275,26 @@ mod tests {
         assert_eq!(crate::fsread::read_regular(&dir.join("intent.bin"), 0, 100).unwrap(), b"INTENT");
         // An unnamed file that is missing stays missing.
         assert!(crate::fsread::read_regular(&dir.join("outcome.json"), 0, 100).unwrap_err().is_not_found());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Inside a cache scope a file is staged and linked complete (a live reader never sees part of
+    /// it) with no fsync of its own; the record is fsynced; after the seal nothing is a cache.
+    #[test]
+    fn caches_skip_their_fsync_until_the_seal_and_the_record_never_does() {
+        let dir = scratch("scope");
+        let scope = CacheScope::enter(&dir).unwrap();
+        let before = durable::fsyncs();
+        durable::create_new(&dir.join("plan.bin"), b"PLAN", Perm::Umask).unwrap();
+        durable::create_new(&dir.join("call.bin"), b"CALL", Perm::Umask).unwrap();
+        assert_eq!(durable::fsyncs(), before, "caches issue no fsync");
+        assert_eq!(fs::read(dir.join("call.bin")).unwrap(), b"CALL");
+        seal(&dir).unwrap();
+        let sealed = durable::fsyncs();
+        assert!(sealed > before, "the record is fsynced");
+        durable::create_new(&dir.join("outcome.json"), b"{}", Perm::Umask).unwrap();
+        assert!(durable::fsyncs() > sealed, "the seal ended the scope: answers are synced");
+        drop(scope);
         let _ = fs::remove_dir_all(dir);
     }
 

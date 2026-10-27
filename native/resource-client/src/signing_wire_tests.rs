@@ -122,6 +122,7 @@ fn signing_wire_worker() {
         submit(&host, &dir.join("config.json"), &dir.join("intent.json"), OsStr::new("intent"),
             &dir.join("mini.key"), &dir.join("attempt"), false)
     };
+    fs::write(dir.join("fsyncs"), mini_sdk::durable::fsyncs().to_string()).unwrap();
     let mut log = fs::OpenOptions::new().append(true).open(dir.join("wire")).unwrap();
     writeln!(log, "result {result:?}").unwrap();
     log.write_all(custody_listing(&dir.join("attempt")).as_bytes()).unwrap();
@@ -163,6 +164,13 @@ fn pinned(golden: &str, dry_run: bool) {
         .output().unwrap();
     assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     let wire = fs::read_to_string(dir.join("wire")).unwrap();
+    let fsyncs: u64 = fs::read_to_string(dir.join("fsyncs")).unwrap().parse().unwrap();
+    eprintln!("{golden}: {fsyncs} fsyncs");
+    if !dry_run {
+        // One signed write: the seal record, its directory and ancestors, and the two answer files
+        // (`mini_sdk::phase`); every other file of the attempt is a cache of the record.
+        assert!(fsyncs <= 16, "a signed write issued {fsyncs} fsyncs");
+    }
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join(golden);
     if std::env::var_os("MINI_WIRE_REGEN").is_some() {
         fs::write(&golden, &wire).unwrap();

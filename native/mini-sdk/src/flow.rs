@@ -155,7 +155,7 @@ pub fn signature_list(signer: &dyn Signer, headers: &[Vec<u8>]) -> Result<Value>
 /// precede the durable exact bytes and their pathname.
 pub fn sync_retained(directory: &Path, file: &Path) -> Result<()> {
     std::fs::File::open(file)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| durable::sync_file(&f))
         .map_err(|e| Error(format!("cannot sync exact call {}: {e}", file.display())))?;
     durable::sync_ancestors(directory).map_err(|e| Error(format!("cannot sync directory {}: {e}", directory.display())))
 }
@@ -224,7 +224,12 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
         // now a cache of it (`crate::phase`). Synced, with its directory and ancestors, before
         // anything can transmit the call.
         crate::phase::seal(self.dir)?;
-        sync_retained(self.dir, &self.path(crate::phase::RECORD))?;
+        // The record is fsynced and its name committed in `self.dir` by `seal`; what remains is
+        // every ancestor, so the attempt directory itself is durable before transmission.
+        let absolute = std::path::absolute(self.dir).map_err(|e| Error(e.to_string()))?;
+        if let Some(parent) = absolute.parent() {
+            durable::sync_ancestors(parent).map_err(|e| Error(format!("cannot sync directory {}: {e}", parent.display())))?;
+        }
         Ok(call)
     }
 
