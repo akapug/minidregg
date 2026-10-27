@@ -48,6 +48,10 @@
 # Exit: the watcher's 2 stops before observation; any pending recovery record stays retained;
 # otherwise `mini pay observe`'s status: 0 settled or waiting, 3 a record was quarantined or
 # the Host refused, 4 undecided (the next tick looks it up).
+#
+# Operator verb, when `mini pay observe` cannot settle a pending tick (every later payment waits
+# behind it): `mini-pay-watcher --quarantine-tick ID REASON...` moves it whole to
+# STATE/tick/quarantine/ID.json; the next tick lists and emits its unreceipted transfers again.
 set -eu
 umask 077
 
@@ -63,6 +67,12 @@ TICK=$PAY_STATE/tick
 mkdir -p "$TICK"
 exec 9>"$PAY_STATE/.service.lock"
 flock -n 9 || { echo 'mini-pay-watcher: another tick is active' >&2; exit 2; }
+if [ "${1:-}" = --quarantine-tick ]; then
+  [ $# -ge 3 ] || { echo 'mini-pay-watcher: --quarantine-tick ID REASON...' >&2; exit 64; }
+  id=$2; shift 2
+  [ -f "$PAY_STATE/watcher.json" ] || { echo 'mini-pay-watcher: no watcher.json yet: nothing to quarantine' >&2; exit 2; }
+  exec "$PAY_WATCHER" --config "$PAY_STATE/watcher.json" --out "$TICK" --quarantine-tick "$id" --reason "$*"
+fi
 if [ -n "${PAY_ENROL_CAPABILITY:-}" ] || [ -n "${PAY_OPERATOR_SOCKET:-}" ]; then
   : "${PAY_ENROL_CAPABILITY:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"
   : "${PAY_OPERATOR_SOCKET:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"

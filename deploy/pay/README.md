@@ -165,6 +165,11 @@ tariff before any enrollment can be decided; it is not an operating source of th
    observer decision stays in `tick/pending.json`; it is retained before the cursor advances.
    Existing `journal/YYYY-MM-DD.jsonl` files are historical and remain untouched.
 
+   A pending tick the observer can never settle stalls every later payment. After reading why
+   (`tick/pending.json`, the observer workspace's last attempt), move it aside with
+   `mini-pay-watcher --quarantine-tick ID REASON...`: it lands whole in `tick/quarantine/ID.json`
+   and the next tick re-reads its unreceipted transfers at a fresh tip (native/pay-watcher/README.md).
+
    To inspect retained events (including an unresolved pending tick):
 
    ```sh
