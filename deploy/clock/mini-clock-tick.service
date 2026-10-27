@@ -8,7 +8,8 @@
 # nothing but tick (the factory law refuses it every birth, enrollment and install).
 #
 # Genesis fixes .clock.maxStepSeconds in the one clock cell and seeds now from
-# the mandatory .clock.genesisNow param (replace the example's zero placeholder).
+# the mandatory .clock.genesisNow param (the example carries null; `deploy/candidate/params.sh
+# fill-genesis` fills it at genesis time, and 0 is refused).
 # After downtime mini clock catches up with successive proposals of at most the
 # loaded bound; Lean alone admits each step and refuses clockStepExceeded.
 # The Host refuses a tick that does not advance the clock, so a delayed or doubled run
