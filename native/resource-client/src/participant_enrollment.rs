@@ -271,10 +271,10 @@ pub(crate) fn staged_invoke(
         if operation == 86 || operation == 92 {
             let current =
                 session_invoke(host, socket, config, operation, payload).map_err(|error| {
-                    format!("retained enrollment plan is stale; start a new request with a new --name label: {error}")
+                    format!("retained enrollment plan is stale against the moved source: {error}; `--action plan` with this exact --dir plans the same request again")
                 })?;
             if current != retained {
-                return Err("retained enrollment plan differs from current source image; start a new request with a new --name label".into());
+                return Err("retained enrollment plan differs from the current source image; `--action plan` with this exact --dir plans the same request again".into());
             }
         }
         retained
@@ -340,6 +340,19 @@ fn plan_custody(subject: &str, key_id: &str, public_key: &str, plan_view: &Value
     json!({"type":"minidregg-participant-enrollment-plan-custody-v1",
         "subject":subject,"keyId":key_id,
         "publicKey":public_key,"plan":plan_view,"authority":"candidate-only"})
+}
+
+/// Whether a retained plan is still the Host's plan over the current source: the Host plans the
+/// retained observation and command again (op 86) and answers the exact retained frame. A moved
+/// source (any commit since the observation) answers a refusal or another plan: the retained plan
+/// could not be sealed (the consent provider prepares the same plan over its admitted source and
+/// refuses) and is dead.
+fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
+    let retained = bounded(&directory.join("plan.frame"), transport::HOST_MAX_FRAME)?;
+    let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
+    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &pair(&observation, &pin.command)?);
+    let _ = take_host_decision();
+    Ok(matches!(current, Ok(frame) if frame == retained))
 }
 
 /// The next free `replanned/NN` of a directory.
@@ -848,7 +861,7 @@ fn plan(mut args: Args) -> Result<()> {
             "enrollment may have been submitted; use --action lookup with this exact --dir".into(),
         );
     }
-    if directory.join("seal.json").exists() || directory.join("ingress.bin").exists() {
+    if (directory.join("seal.json").exists() || directory.join("ingress.bin").exists()) && !directory.join("pin.json").exists() {
         return Err(
             "enrollment already sealed; use --action submit or lookup with this exact --dir".into(),
         );
@@ -883,22 +896,44 @@ fn plan(mut args: Args) -> Result<()> {
     }
     let request = retained_request(&directory, &expected_request)?;
     if directory.join("pin.json").exists() {
-        // Exact resumption. A validated plan is retained here and holds this name's namespace
-        // reservation; planning again would either go stale against it or strand that reservation
-        // behind a second request. The same custody is printed and the next step is named.
+        // A validated plan is retained here and holds this name's namespace reservation. While it is
+        // still the Host's plan over the current source it is RESUMED, never planned again (a second
+        // request would strand that reservation): the same custody is printed and the next step
+        // named. Once the source has moved under it (a tick, a certify: any commit stales the
+        // signed observation it was planned over, and the consent provider refuses to sign it), the
+        // plan is definitely dead and nothing of it was submitted, so it retires under replanned/NN,
+        // its binding is released, and the SAME request (nonce, reservation, identity) is planned
+        // again below. A home-identity member then signs possession over the new plan.
         let pin = load_pin(&directory)?;
         let plan_view = json_private(&directory.join("plan.json"))?;
         validate_plan(&plan_view, &pin.command, &pin.plan)?;
-        let next = if pin.new_key.is_some() {
-            "`--action seal`, then `--action submit`"
-        } else {
-            "`--action offer` (the member signs possession with `mini join --sponsor-plan`), `--action seal --possession-signature`, then `--action submit`"
-        };
+        if retained_plan_is_current(&directory, &pin)? {
+            if directory.join("seal.json").exists() || directory.join("ingress.bin").exists() {
+                return Err("enrollment already sealed; use --action submit or lookup with this exact --dir".into());
+            }
+            let next = if pin.new_key.is_some() {
+                "`--action seal`, then `--action submit`"
+            } else {
+                "`--action offer` (the member signs possession with `mini join --sponsor-plan`), `--action seal --possession-signature`, then `--action submit`"
+            };
+            eprintln!(
+                "mini: enroll plan: a validated plan is retained at {}; nothing is planned again. Continue with {next}, all with this exact --dir",
+                directory.display()
+            );
+            return print_json(&plan_custody(&pin.subject, &pin.key_id, &pin.public_key, &plan_view));
+        }
+        participant_namespace::release_attempt(&pin.reservation, &directory)?;
+        let number = next_retirement(&directory)?;
+        let retired = crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])?;
         eprintln!(
-            "mini: enroll plan: a validated plan is retained at {}; nothing is planned again. Continue with {next}, all with this exact --dir",
-            directory.display()
+            "mini: enroll plan: the retained plan is stale against the moved source (a tick or certify since it was planned; nothing of it was submitted); it is retired at {} and the same request is planned again",
+            retired.display()
         );
-        return print_json(&plan_custody(&pin.subject, &pin.key_id, &pin.public_key, &plan_view));
+    } else if directory.join("plan.frame").exists() {
+        // A plan that never validated (no pin.json: the process ended between the Host's plan and
+        // the binding) reserved nothing and binds nothing; it retires and the request is planned again.
+        let number = next_retirement(&directory)?;
+        crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])?;
     }
     let roles = enrollment_roles(home);
     let request_bytes = private_bytes(&directory.join("request.json"), 256 * 1024)?;
@@ -1613,7 +1648,9 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     }
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
     crate::client_consent::operator_plan(&pin.host, &pin.config, 86,
-        &pair(&observation, &pin.command)?, &pin.plan)?;
+        &pair(&observation, &pin.command)?, &pin.plan).map_err(|error| format!(
+            "{error}; a plan the source has moved under (a tick or certify since it was planned) is not signed: `mini enroll --action plan` with this exact --dir retires it and plans the same request again (a home-identity member then signs possession over the new plan)"
+        ))?;
     let sponsor_header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
     let possession_header = decode_hex(field(&plan_view, "possessionHeader")?)?;
     let sponsor = key(&pin.sponsor_key)?;
