@@ -142,10 +142,6 @@ import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touc
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
 import Kernel.WorldRootCache -- C2: the world root kept (RootCache = AuthTrie.Cache): one walk per write, RootsExact a Prop, no injectivity flag or fallback rebuild; cache = spec root, honest openings verify, stale cache refuted
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep

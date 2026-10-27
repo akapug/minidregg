@@ -27,10 +27,6 @@ import Host
 -- Kernel and policy modules `Minidregg` roots beside the per-directory roots
 -- (none imports Selvage or Assurance; the arithmetization and zkML roots stay research):
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep

@@ -31,10 +31,6 @@ import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
