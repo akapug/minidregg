@@ -111,7 +111,6 @@ textarea,input[type=text]{width:100%;box-sizing:border-box}.warn{border-left:4px
 /// own payment script; nothing is fetched from anywhere else.
 fn asset(path: &str) -> Option<(&'static [u8], &'static str)> {
     Some(match path {
-        "/join/assets/web3.js" => (include_bytes!("../../assets/vendor/web3.js"), "application/javascript; charset=utf-8"),
         "/join/assets/solpay.js" => (include_bytes!("../../assets/solpay.js"), "application/javascript; charset=utf-8"),
         "/join/assets/wallet.js" => (include_bytes!("../../assets/vendor/wallet.js"), "application/javascript; charset=utf-8"),
         "/join/assets/pay.js" => (include_bytes!("../../assets/pay.js"), "application/javascript; charset=utf-8"),
@@ -585,6 +584,7 @@ mod tests {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+        assert!(asset("/join/assets/web3.js").is_none(), "no SDK bundle is served");
     }
 
     #[test]
@@ -623,7 +623,7 @@ mod tests {
     fn vendored_assets_match_their_pins() {
         use sha2::Digest;
         let table = include_str!("../../assets/vendor/VENDOR.md");
-        for (file, bytes) in [("web3.js", &include_bytes!("../../assets/vendor/web3.js")[..]), ("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..]), ("solpay.js", &include_bytes!("../../assets/solpay.js")[..])] {
+        for (file, bytes) in [("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..]), ("solpay.js", &include_bytes!("../../assets/solpay.js")[..])] {
             let digest = format!("{:x}", sha2::Sha256::digest(bytes));
             assert!(table.contains(&digest), "{file}: sha256 {digest} is not in VENDOR.md");
         }
