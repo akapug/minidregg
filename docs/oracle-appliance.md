@@ -26,7 +26,7 @@ configuration and request examples.
 ## Runtime, data and state
 
 - **Signed runtime SPK:** Linux Python environment, Oracle code, selected kernels,
-  providers, launcher and the Mini bridge. The v5 package is about 97 MB compressed.
+  providers, launcher and the Mini bridge. The new v6 package is about 97 MB compressed.
 - **Shared public data:** 26 files, about 15 GB, published once by the operator.
   The runtime's signed declaration binds their inventory digest. Mini mounts the
   matching revision read-only at `/opt/oracle-data`; the app cannot choose a host
@@ -64,8 +64,12 @@ explicitly rather than silently answering without the earlier context.
 
 The new browser page offers questions, operation discovery and direct calls
 through the same routes agents use. It retains exact request bytes for manual
-retry and makes conversation resets explicit. These hosting changes are being
-qualified for the next package; they do not change the retained v5 deployment.
+retry and makes conversation resets explicit. These changes are signed in
+[version 6](../deploy/oracle/runtime-v6.md), whose complete archive and signature
+passed independent verification. A real Linux Engine/bridge run also passed
+tenant separation and exact replay through restart. Mini receiving and the
+full agent lifecycle still need qualification. Version 6 requires a fresh grain;
+it refuses a legacy shared journal rather than guessing its tenant owner.
 See the [bridge contract](oracle-appliance-bridge.md) for the identity boundary.
 
 ## Checked state — 27 October 2026
@@ -85,11 +89,12 @@ and request are retained. Agent discovery/calls and the complete restart journey
 still need to pass. Do not resend that uncertain request as a new operation.
 The [v5 evidence](evidence/oracle-u3-acceptance-2026-10-27.json) holds exact state.
 
-The separate, newer veri7vn U5 v2 candidate has 351 direct operations. Its focused
+The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or
 clarifications, seven valid tasks still incomplete, and no wrong answers. It
 includes conversation, geometry and transfer-time repairs beyond installed v5;
-it has not yet been signed and received as the next Mini package. Versioned
+that composition is now included in signed v6 with the newer tenant adapter,
+but has not yet completed the new Mini receiving journey. Versioned
 operation counts are not specialist-panel scores or proof of every answer.
 
 Repeated STOP-history inspection on a retained Store fell from roughly 425 s to
