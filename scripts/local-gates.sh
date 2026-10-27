@@ -88,7 +88,7 @@ only=${LOCAL_GATES_ONLY:-}
 
 g_host-operations() { python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py; }
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
-g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
+g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; bash scripts/build-mini-kernels.sh >/dev/null && echo "lake build $lib_targets$exe_targets" && "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
 g_fn-wire()       { bash scripts/check-fn-wire.sh; }
 g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }

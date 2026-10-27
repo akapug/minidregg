@@ -1578,6 +1578,14 @@ elif [[ "$build_umbrella" == 0 ]]; then
     stem=${module//./\/}
     mkdir -p ".lake/build/lib/lean/$(dirname "$stem")" ".lake/build/ir/$(dirname "$stem")"
   done < <(sed 's/^+//; s/:leanArts$//' "$lake_targets")
+  # HOT-PATH 2d: every lean this build runs loads .lake/native/libmini_kernels_lean.so (the
+  # lakefile's --load-dynlib), so the kernel library exists BEFORE the first lake build: the Rust
+  # kernels, the Lean shim and the seam closure's objects (scripts/build-mini-kernels.sh, two stages).
+  scripts/build-mini-kernels.sh > "$output_dir/mini-kernels.log" 2>&1 || {
+    printf 'build-native-host: native/mini-kernels did not build; see %s\n' "$output_dir/mini-kernels.log" >&2
+    exit 65
+  }
+  cp .lake/native/SHA256SUMS "$output_dir/mini-kernels-sha256.txt"
   if [[ -s "$lake_targets" ]]; then
     lake_target_args=()
     while IFS= read -r target; do lake_target_args+=("$target"); done < "$lake_targets"
@@ -1915,14 +1923,12 @@ while IFS= read -r module; do
 done < "$source_modules"
 cat "$output_dir/package-objects.txt" >> "$response"
 # HOT-PATH 2d: the Rust kernels the compiled hashes call through @[extern] (native/mini-kernels)
-# are link inputs of every Lean executable. Build them here, from this snapshot's sources, and
-# record their hashes beside the objects'.
-scripts/build-mini-kernels.sh > "$output_dir/mini-kernels.log" 2>&1 || {
-  printf 'build-native-host: native/mini-kernels did not build; see %s\n' "$output_dir/mini-kernels.log" >&2
+# are link inputs of every Lean executable (built above, before the Lean closure).
+[[ -f .lake/native/link-inputs.txt ]] || {
+  printf 'build-native-host: .lake/native/link-inputs.txt missing (scripts/build-mini-kernels.sh did not run)\n' >&2
   exit 65
 }
 cat .lake/native/link-inputs.txt >> "$response"
-cp .lake/native/SHA256SUMS "$output_dir/mini-kernels-sha256.txt"
 
 # Recheck immediately before linking in case another process created the path.
 if [[ -e "$binary" || -L "$binary" ]]; then
