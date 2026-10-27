@@ -502,11 +502,6 @@ check hermes "the registry lists exactly Hermes's task for lab" "$HS $PARENT_T $
 # summon. Preserve the first failed row rather than cascading into empty state.
 [ "$FAILED" = 0 ] || finish
 ok summon alice "summon lab as librarian --budget $BUDGET"
-# The room names the purse Hermes's model calls are paid from (a reader
-# shows its route by that purse's tariff model).
-ok summon alice "tariff lab set hermes/provider $PURSE_T"
-ok summon bob "tariff lab"
-checkp summon "the room shows hermes/provider $PURSE_T" grep -q "hermes/provider *$PURSE_T" "$OUT"
 cp "$OUT" "$SD/summon.out"
 [ "$RC" = 0 ] || finish
 OUTBOX=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)
@@ -522,6 +517,11 @@ require_nat summon "alice's balance after summon" "$A1"
 N=$((N + 1)); WALL=-
 record summon check "alice paid the budget and the births (signed reads before/after)" "A0 - A1 >= $BUDGET" "$A0 - $A1 = $((A0 - A1))" \
   "$([ $((A0 - A1)) -ge "$BUDGET" ] && echo ok || echo FAIL)" "births: till, account, Hermes's stream, digest, program, and their fees"
+# The room names the purse Hermes's model calls are paid from (a reader
+# shows its route by that purse's tariff model).
+ok summon alice "tariff lab set hermes/provider $PURSE_T"
+ok summon bob "tariff lab"
+checkp summon "the room shows hermes/provider $PURSE_T" grep -q "hermes/provider *$PURSE_T" "$OUT"
 ok summon alice "room status lab"
 checkp summon "room status names Hermes and its budget account" grep -q "hermes: $HS, budget account $ACCOUNT_T" "$OUT"
 ok summon alice "tariff lab"
