@@ -318,7 +318,9 @@ impl Spec {
 }
 
 fn run(command: &mut Command, what: &str) -> Result<Vec<u8>> {
-    let output = command.stdin(Stdio::null()).output().map_err(|e| format!("{what}: {e}"))?;
+    // A timeout is a lost reply: the signed step is then resolved by lookup.
+    let output = deadline::output(command.stdin(Stdio::null()), deadline::NATIVE_CALL)
+        .map_err(|e| deadline::describe(what, e))?;
     if !output.status.success() {
         return Err(format!("{what} exited {}: {}", output.status, String::from_utf8_lossy(&output.stderr).trim()));
     }
