@@ -14,12 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The provider table, the per-member sealed credential store and its seal key:
-/// one source shared with grain-runtime's tests and the `mini key` client's
-/// catalogue, executed for custody only here.
-#[path = "../../../grain-runtime/src/credentials.rs"]
-#[allow(dead_code)]
-pub mod credentials;
+pub use crate::credentials;
 
 pub mod discord;
 pub mod member;

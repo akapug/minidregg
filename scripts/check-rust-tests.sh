@@ -130,7 +130,8 @@ armed_exact() { # armed_exact NAME ENVVAR WHAT CRATE [cargo args] -- FULL::TEST:
 }
 
 t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: participant_enrollment:: key_generation
-t grain-provider          42 grain-runtime -- provider credential publication_refusal
+t grain-provider          27 grain-runtime -- provider credential publication_refusal
+t mini-keys-credentials   15 mini-keys --lib -- credentials::
 t hermes-test-provider    15 hermes-test-provider -- tests::
 t verifier-protocol       10 credential-signature-verifier --test protocol -- protocol_
 

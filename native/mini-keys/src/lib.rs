@@ -24,9 +24,12 @@
 //! outcome, named refusal; digests, never secrets).
 //!
 //! The crate's default feature `server` is the broker; clients depend on it
-//! with `default-features = false` and get [`wire`], [`peer`] and [`client`].
+//! with `default-features = false` and get [`wire`], [`peer`], [`client`] and
+//! the credential parsers in [`credentials`] (the sealed store itself needs
+//! `server`).
 
 pub mod client;
+pub mod credentials;
 pub mod peer;
 pub mod wire;
 
