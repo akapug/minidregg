@@ -13,7 +13,7 @@
 //!   journeys' direct face over one workspace: reads plus the document editor and
 //!   creation POST forms, which use the native client's pinned diff and durable
 //!   attempt and sign under the workspace key. It binds 127.0.0.1 only, accepts
-//!   only `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard),
+//!   only `Host: 127.0.0.1:8080` / `localhost:PORT` (the DNS-rebinding guard),
 //!   refuses a foreign `Origin`, and every path sits under a per-launch secret.
 //! - **Body** (`--body`, `web/body.rs`): the same renders as stage fragments plus
 //!   every verb action, for the web gateway (docs/WEB-FRONTEND-2026-10-27.md),
@@ -1350,13 +1350,74 @@ moved 1002: after the start -> after 1001
         }
     }
 
+    /// Every file under `root` with its length: what a read must leave alone.
+    fn tree(root: &std::path::Path) -> BTreeSet<(PathBuf, u64)> {
+        let mut found = BTreeSet::new();
+        let mut pending = vec![root.to_owned()];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let meta = entry.metadata().unwrap();
+                if meta.is_dir() { pending.push(entry.path()) } else { found.insert((entry.path(), meta.len())); }
+            }
+        }
+        found
+    }
+
+    /// One request through the real `serve` over loopback; returns the raw reply.
+    fn exchange(site: &Arc<Site>, raw: &str) -> String {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served = site.clone();
+        let worker = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = served.serve(stream, Instant::now() + Duration::from_secs(5));
+        });
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(raw.as_bytes()).unwrap();
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        worker.join().unwrap();
+        String::from_utf8_lossy(&reply).into_owned()
+    }
+
     #[test]
     fn get_router_calls_no_submit_path() {
-        let source = include_str!("web.rs");
-        let router = &source[source.find("fn route(").unwrap()..source.find("fn names(").unwrap()];
-        for word in ["POST", "PUT", "DELETE", "PATCH", "propose", "submit"] {
-            assert!(!router.contains(word), "{word}");
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-web-get-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(root.join("refs")).unwrap();
+        let site = Arc::new(Site {
+            mutations: Mutex::new(()),
+            home: None,
+            root: root.clone(),
+            workspace: Value::Null,
+            subject: "7".into(),
+            token: "s3cret".into(),
+            front: Front::loopback(8080, false),
+            base: "/s3cret".into(),
+            face: Face::Server,
+            shell: None,
+        });
+        let before = tree(&root);
+        for target in ["/", "/doc/paper", "/doc/paper/history", "/doc/paper/inspect", "/doc/paper/diff/1/2",
+            "/at/5/doc/paper", "/object/o", "/object/o/behavior", "/board/b", "/room/r", "/room/r/resident",
+            "/stream/s", "/search?q=x", "/nowhere"] {
+            let reply = exchange(&site, &format!("GET /s3cret{target} HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n"));
+            assert!(reply.starts_with("HTTP/1.1 "), "{target}: {reply}");
+            for refused in ["405", "421", "403"] {
+                assert!(!reply.starts_with(&format!("HTTP/1.1 {refused}")), "{target}: gate refused a read");
+            }
+            assert_eq!(tree(&root), before, "GET {target} changed the workspace");
         }
+        // The same read-only addresses refuse a POST instead of submitting.
+        for target in ["/doc/paper", "/doc/paper/history", "/room/r", "/board/b"] {
+            let reply = exchange(&site, &format!(
+                "POST /s3cret{target} HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nContent-Length: 0\r\n\r\n"));
+            assert!(reply.starts_with("HTTP/1.1 405"), "POST {target}: {reply}");
+            assert_eq!(tree(&root), before, "POST {target} changed the workspace");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
