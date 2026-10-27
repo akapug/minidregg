@@ -348,8 +348,29 @@ world_continue_controller() {
   controller_create_verb=controller-resume-create
 }
 
+# Run only after the world services have stopped. The planner observes physical
+# state; all unmount/destroy effects still go through native volume custody.
+world_cleanup_volumes() {
+  local preserve=$1 evidence=$2 request action status_request
+  mkdir -m 700 "$evidence" || return
+  status_request=$(jq -cer --arg root "$GRAINS_ROOT"     '{verb:"volumes-status",store:.store,deploymentId:.deploymentId,volumesRoot:($root+"/volumes")}'     "/etc/mini-spk-volumes/$store.json") || return
+  timeout 120 sudo -n -- "$helper" "$status_request" >"$evidence/status.json" || return
+  python3 -B "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$GRAINS_ROOT"     "$evidence/status.json" >"$evidence/plan.json" || return
+  while IFS= read -r request; do
+    action=$(jq -er .action <<<"$request") || return
+    if [[ $action == unmount ]]; then
+      timeout 120 sudo -n -- "$helper" "$(jq -c .request <<<"$request")" || return
+    elif [[ $action != already-unmounted ]]; then
+      return 1
+    fi
+    if [[ $preserve == false ]]; then
+      timeout 120 sudo -n -- "$helper" "$(jq -c '.request | .verb="destroy"' <<<"$request")" || return
+    fi
+  done < <(jq -c '.volumes[]' "$evidence/plan.json")
+}
+
 world_cleanup() {
-  local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false exit_path
+  local result=${1:-$?} cleanup_result=0 unit preserve_namespace=false exit_path volume_evidence
   trap - EXIT INT TERM
   if [[ ${configured:-0} == 1 ]]; then
     if [[ ${controller_created:-0} == 1 ]]; then
@@ -380,14 +401,12 @@ world_cleanup() {
     # A failed journey keeps its own stopped namespace and state volumes for
     # diagnosis/recovery. Never erase an uncertain admitted operation's journal.
     [[ $result == 0 ]] || preserve_namespace=true
-    for request in "$GRAINS_ROOT/broker"/volume-*.json; do
-      [[ -f $request ]] || continue
-      verbs=unmount
-      [[ $preserve_namespace == true ]] || verbs='unmount destroy'
-      for verb in $verbs; do
-        sudo -n -- "$helper" "$(jq -c --arg verb "$verb" '.verb=$verb' "$request")" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
-      done
-    done
+    if [[ $cleanup_result == 0 ]]; then
+      volume_evidence=$(mktemp -d "${continuation:-$run}/volume-cleanup.XXXXXXXX")
+      # The helper owns this new child; mktemp protects the unique parent.
+      world_cleanup_volumes "$preserve_namespace" "$volume_evidence/observations"         >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+    fi
+    [[ $cleanup_result == 0 ]] || preserve_namespace=true
     # This registry is uniquely created by this run. A failed unmount prevents
     # installer removal; preserve the entire namespace for diagnosis in that case.
     if [[ $preserve_namespace == false ]]; then
