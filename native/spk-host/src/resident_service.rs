@@ -1273,7 +1273,8 @@ impl ResidentConfig {
 /// This is the systemd ExecStart body for a fresh native START claim. The
 /// stopped unit is installed from operator-reviewed pins; HTTP has no path to
 /// choose a package, task UID, Mini signer, command, or app generation.
-/// The resident never runs as root. Its unit (rendered by the root broker)
+/// The resident never runs as root. Its user unit (rendered by the operator's
+/// per-world broker)
 /// names the app UID/GID, grains root and Store. The trusted bootstrap has
 /// already dropped both parsers to zero capabilities before this config is
 /// read; its app identity must agree with the native source-bound launch.

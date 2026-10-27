@@ -1,8 +1,9 @@
 //! Bounded Unix-only HTTP entrance for one participant credential custodian.
 //!
 //! Transport tokens authenticate use of that custodian; they are not Mini
-//! resource authority. The current public binary serves an unavailable
-//! response; the resident signer/permit path is staged separately.
+//! resource authority. The resident serves every route of its grain through
+//! `serve_dynamic_with_aux`; each request is authored, signed and admitted by
+//! Mini before fd 3 delivery (`dispatch_delivery`).
 
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
@@ -44,7 +45,6 @@ pub(crate) enum Method {
 }
 
 impl Method {
-    #[allow(dead_code)] // Consumed by the reviewed resident Mini HTTP caller.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
@@ -77,7 +77,6 @@ impl Method {
 pub(crate) struct ReceivedRequest {
     response_stream: Option<UnixStream>,
     pub method: Method,
-    #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
     pub path_and_query: String,
     pub ordinary_headers: Vec<(String, String)>,
     /// `x-mini-export-capture`: entrance-level capture intent. It is kept
@@ -108,17 +107,13 @@ pub(crate) enum EntranceKind {
 pub(crate) struct CustodianPolicy {
     /// The one participant's configured HTTPS origin. It is not HTTP input.
     pub expected_host: String,
-    #[allow(dead_code)] // Becomes Mini authoring input only after its native route exists.
     pub fixed_app: String,
-    #[allow(dead_code)]
     pub fixed_subject: String,
-    #[allow(dead_code)]
     pub fixed_session: String,
     /// Bound to the Mini session, never inferred from the bearer or cookie.
     pub fixed_session_kind: EntranceKind,
     pub export_capture: bool,
     pub export_capture_path: Option<String>,
-    #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
     pub bootstrap_token_sha256: [u8; 32],

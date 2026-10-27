@@ -807,10 +807,8 @@ impl ChildHandle for BoundedChild {
     }
 }
 
-// The mutators are intentionally unreachable from the public binary until
-// native verified BEGIN admission is wired. Keep the physical state machine
-// separately testable without exposing an operator-minted launch command.
-#[allow(dead_code)]
+// The physical state machine's mutators. They are reached only through the
+// resident's source-bound START/STOP and dispatch paths, never a CLI verb.
 impl Journal {
     /// Read-only recovery evidence for the exact claimed START whose spawn
     /// failed before producing a child. This does not clear a manager failure,
@@ -944,10 +942,6 @@ impl Journal {
                 &crate::broker::Request::Stop { unit: unit.to_owned() }).map(|_| ());
         }
         stop_unit(unit)
-    }
-
-    pub(crate) fn directory(&self) -> &Path {
-        &self.directory
     }
 
     fn with_lock<T>(&self, f: impl FnOnce(&Self) -> io::Result<T>) -> io::Result<T> {
@@ -1702,7 +1696,10 @@ impl Journal {
     }
 
     /// Tombstone first; only then call the unit manager. An uncertain manager
-    /// response retains Fenced and requires another exact-unit audit.
+    /// response retains Fenced and requires another exact-unit audit. The
+    /// production STOP takes `fence_and_stop_manager_checked`; this unchecked
+    /// form remains as the tests' model of the tombstone ordering.
+    #[cfg(test)]
     pub(crate) fn fence_and_stop(
         &self,
         stop: impl FnOnce(&str) -> io::Result<()>,
