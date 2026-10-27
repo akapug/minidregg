@@ -26,19 +26,23 @@ if [ "${FIXTURE_AUTHORITY_SELFTEST:-1}" = 1 ]; then
   self=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
   st=$(mktemp -d); trap 'rm -rf "$st"' EXIT
   (
+    # `sed -i` differs between GNU and BSD sed (BSD reads the script as the backup suffix and edits nothing,
+    # so the control commit was empty and the gate looked green): edit through a temp file instead.
+    sedi() { local e=$1 f=$2; sed "$e" "$f" > "$f.new" && mv "$f.new" "$f"; }
     set -e; cd "$st"; git init -q .; git config user.email st@local; git config user.name selftest
     mkdir -p scripts/pipeline A B
     printf 'B/FooFixtureData.lean | gen.sh | B/FooAuthority.lean | checked\n' > scripts/pipeline/fixture-authorities.txt
     printf 'key1 = 1\nkey2 = 2\nkey3 = 3\nkey4 = 4\n' > A/FooAuthority.lean
     git add -A; git commit -qm base; base=$(git rev-parse HEAD)
-    git mv A/FooAuthority.lean B/FooAuthority.lean; sed -i 's/key4 = 4/key4 = 5/' B/FooAuthority.lean
+    git mv A/FooAuthority.lean B/FooAuthority.lean; sedi 's/key4 = 4/key4 = 5/' B/FooAuthority.lean
     git add -A; git commit -qm "rename and edit, no trailer"
     if FIXTURE_AUTHORITY_SELFTEST=0 bash "$self" "$base..HEAD" >out 2>&1; then echo "self-test FAIL: a rename that edits the authority without a trailer passed"; exit 1; fi
     grep -q "without an Authority-Change: trailer" out || { echo "self-test FAIL: rename+edit red for the wrong reason: $(cat out)"; exit 1; }
-    git reset -q --hard "$base"; sed -i 's/key4 = 4/key4 = 5/' A/FooAuthority.lean
-    sed -i 's#B/FooAuthority.lean#A/FooAuthority.lean#' scripts/pipeline/fixture-authorities.txt
+    git reset -q --hard "$base"; sedi 's/key4 = 4/key4 = 5/' A/FooAuthority.lean
+    sedi 's#B/FooAuthority.lean#A/FooAuthority.lean#' scripts/pipeline/fixture-authorities.txt
     git commit -qam "plain edit, no trailer"
     if FIXTURE_AUTHORITY_SELFTEST=0 bash "$self" "$base..HEAD" >out 2>&1; then echo "self-test FAIL: a plain authority edit without a trailer passed (control)"; exit 1; fi
+    grep -q "without an Authority-Change: trailer" out || { echo "self-test FAIL: the control went red for the wrong reason: $(cat out)"; exit 1; }
     git reset -q --hard "$base"; git mv A/FooAuthority.lean B/FooAuthority.lean
     git commit -qm "move the authority" -m "Authority-Change: path only"
     FIXTURE_AUTHORITY_SELFTEST=0 bash "$self" "$base..HEAD" >out 2>&1 || { echo "self-test FAIL: an exact rename with the trailer went red: $(cat out)"; exit 1; }
