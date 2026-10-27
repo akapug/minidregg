@@ -172,10 +172,10 @@ check fresh-compute-subject jq -e --arg subject "$NEWCOMER_SUBJECT" \
 # Only replace the invalid fresh tariff, via signed factory-management control.
 # PayBookReceiver.bookPatch [] appends no rows and preserves the existing book.
 if ! jq -e '.computeQuote.creditAsset != null' "$D/initial.json" >/dev/null; then
-  ok_external current-pay-view python3 - "$CONFIG" "$SOCKET" "$D/pay-view.bin" <<'PAYVIEW'
-import socket,struct,sys
+  ok_external current-pay-view python3 - "$CONFIG" "$SOCKET" "$D/pay-view.bin" "$HOST" <<'PAYVIEW'
+import hashlib,socket,struct,sys
 config=open(sys.argv[1],"rb").read()
-body=b"\x01"+struct.pack("<I",len(config))+config+bytes([107])
+body=b"\x02"+struct.pack("<I",len(config))+config+hashlib.sha256(open(sys.argv[4],"rb").read()).digest()+bytes([107])  # v2: the Host image pin
 with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
     s.connect(sys.argv[2]); s.sendall(struct.pack("<I",len(body))+body)
     def exact(n):

@@ -38,7 +38,7 @@ fn operator(dir: &PathBuf, alias: &str, host: &str, identity: &str, remote_mode:
     ssh.command = vec!["ssh".into()]; // the real client, not $MINI_SSH
     ssh.config = Some(config);
     ssh.connect_timeout = Duration::from_secs(20);
-    Operator::new(Route::Ssh(ssh), &dir.join("host.config"), None).unwrap()
+    Operator::new(Route::Ssh(ssh), &dir.join("host.config"), [0; 32]).unwrap()
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn real_ssh_carries_the_operator_frames_and_reuses_one_session() {
     assert_eq!(op.call(mini_sdk::host_operations::SUBMIT, b"second"), Ok(Reply::Answer(b"ok".to_vec())));
     // The remote process saw exactly the two request frames, in order, byte for byte.
     let seen = std::fs::read(&req).expect("the remote stand-in wrote the requests it received");
-    assert_eq!(seen, [request(b"{}", None, mini_sdk::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", None, mini_sdk::host_operations::SUBMIT, b"second").unwrap()].concat());
+    assert_eq!(seen, [request(b"{}", &[0; 32], mini_sdk::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", &[0; 32], mini_sdk::host_operations::SUBMIT, b"second").unwrap()].concat());
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn real_ssh_refuses_an_unknown_host_key_by_name_with_nothing_sent() {
     let mut ssh = Ssh::new("mini-sdk-unknown").unwrap();
     ssh.command = vec!["ssh".into()];
     ssh.config = Some(script);
-    let op = Operator::new(Route::Ssh(ssh), &dir.join("host.config"), None).unwrap();
+    let op = Operator::new(Route::Ssh(ssh), &dir.join("host.config"), [0; 32]).unwrap();
     match op.call(mini_sdk::host_operations::SUBMIT, b"call") {
         Err(Failure::Unsent(said)) => assert!(said.contains("host key verification failed"), "{said}"),
         other => panic!("expected a named certainly-unsent refusal, got {other:?}"),

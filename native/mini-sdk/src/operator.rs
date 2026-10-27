@@ -360,13 +360,14 @@ pub fn open_stream(ssh: &Ssh) -> std::result::Result<SshStream, Failure> {
 pub struct Operator {
     pub route: Route,
     config: Vec<u8>,
-    host_sha256: Option<[u8; 32]>,
+    host_sha256: [u8; 32],
     pub read_deadline: Duration,
     channel: Option<SshChannel>,
 }
 
 /// Build the request frame body (without the outer length prefix).
-pub fn request(config: &[u8], host_sha256: Option<&[u8; 32]>, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+/// Envelope v2 only: the Host image pin is mandatory (the service refuses v1 by name).
+pub fn request(config: &[u8], host_sha256: &[u8; 32], operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     if config.len() > MAX_CONFIG {
         return Err("host config exceeds socket pin bound".into());
     }
@@ -374,12 +375,10 @@ pub fn request(config: &[u8], host_sha256: Option<&[u8; 32]>, operation: u8, pay
         return Err("host request exceeds frame bound before transmission".into());
     }
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
-    frame.push(if host_sha256.is_some() { 2 } else { 1 });
+    frame.push(2);
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
     frame.extend_from_slice(config);
-    if let Some(sha) = host_sha256 {
-        frame.extend_from_slice(sha);
-    }
+    frame.extend_from_slice(host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
     Ok(frame)
@@ -401,9 +400,9 @@ fn read_frame<R: Read>(stream: &mut R) -> std::io::Result<Vec<u8>> {
 }
 
 impl Operator {
-    /// `config` is the deployment config file the socket pins; `host_sha256`, when given,
-    /// requires the image serving the socket to be exactly that Host (version 2).
-    pub fn new(route: Route, config: &Path, host_sha256: Option<[u8; 32]>) -> Result<Self> {
+    /// `config` is the deployment config file the socket pins; `host_sha256` requires the image
+    /// serving the socket to be exactly that Host (envelope v2; v1 is retired).
+    pub fn new(route: Route, config: &Path, host_sha256: [u8; 32]) -> Result<Self> {
         let config = std::fs::read(config).map_err(|e| format!("host config {}: {e}", config.display()))?;
         let channel = match &route {
             Route::Ssh(ssh) => Some(SshChannel::new(ssh.clone())),
@@ -413,7 +412,7 @@ impl Operator {
     }
 
     pub fn call(&self, operation: u8, payload: &[u8]) -> std::result::Result<Reply, Failure> {
-        let frame = request(&self.config, self.host_sha256.as_ref(), operation, payload)
+        let frame = request(&self.config, &self.host_sha256, operation, payload)
             .map_err(|e| Failure::Unsent(e.0))?;
         // The lost-reply switch (`submit ID --lose-reply-once`; DEMO-EXPERIENCE A11): a client-side
         // fault, armed once by the client's own environment, that writes the exact call and then
@@ -615,11 +614,9 @@ mod tests {
 
     #[test]
     fn request_frames_are_transport_rs_frames() {
-        let v1 = request(b"cfg", None, crate::host_operations::LOOKUP, b"call").unwrap();
-        assert_eq!(v1, [&[1u8][..], &3u32.to_le_bytes(), b"cfg", &[3], b"call"].concat());
-        let v2 = request(b"cfg", Some(&[7; 32]), crate::host_operations::SUBMIT, b"c").unwrap();
+        let v2 = request(b"cfg", &[7; 32], crate::host_operations::SUBMIT, b"c").unwrap();
         assert_eq!(v2, [&[2u8][..], &3u32.to_le_bytes(), b"cfg", &[7; 32], &[2], b"c"].concat());
-        assert!(request(&vec![0; MAX_CONFIG + 1], None, crate::host_operations::SUBMIT, b"").is_err());
+        assert!(request(&vec![0; MAX_CONFIG + 1], &[0; 32], crate::host_operations::SUBMIT, b"").is_err());
     }
 
     #[test]
@@ -638,7 +635,7 @@ mod tests {
         std::fs::write(dir.join("config.json"), b"{}").unwrap();
         let sock = dir.join("world.sock");
         let _ = std::fs::remove_file(&sock);
-        let op = Operator::new(Route::Unix(sock.clone()), &dir.join("config.json"), None).unwrap();
+        let op = Operator::new(Route::Unix(sock.clone()), &dir.join("config.json"), [0; 32]).unwrap();
         assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Unsent(_))));
         let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
         let server = std::thread::spawn(move || {
@@ -651,7 +648,7 @@ mod tests {
         });
         assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         let seen = server.join().unwrap();
-        assert_eq!(seen, request(b"{}", None, crate::host_operations::SUBMIT, b"call").unwrap());
+        assert_eq!(seen, request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"call").unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -666,7 +663,7 @@ mod tests {
         ssh.command = vec![sh.into(), script.into()];
         ssh.connect_timeout = Duration::from_secs(2);
         ssh.write_deadline = Duration::from_secs(5);
-        let mut op = Operator::new(Route::Ssh(ssh), &dir.join("config.json"), None).unwrap();
+        let mut op = Operator::new(Route::Ssh(ssh), &dir.join("config.json"), [0; 32]).unwrap();
         op.read_deadline = Duration::from_secs(2);
         let req = std::env::temp_dir().join(format!("mini-sdk-ssh-{dest}.req"));
         let _ = std::fs::remove_file(&req);
@@ -732,7 +729,7 @@ mod tests {
         // Both requests arrived, byte-for-byte the frames the unix socket would carry, length-prefixed
         // by the transport (the stand-in strips the length), over ONE session.
         let seen = std::fs::read(&req).unwrap();
-        let expect = [request(b"{}", None, crate::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"second").unwrap()].concat();
+        let expect = [request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"second").unwrap()].concat();
         assert_eq!(seen, expect);
         assert!(op.channel.as_ref().unwrap().is_open(), "the session is kept for the next request");
     }
@@ -751,7 +748,7 @@ mod tests {
         assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         assert!(!op.channel.as_ref().unwrap().is_open(), "the dead session is closed");
         // The stand-in saw the request exactly once: the SDK did not resend it on a new session.
-        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"call").unwrap());
+        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"call").unwrap());
         // A later, explicit call opens a NEW session (and is itself a new request).
         assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
     }
@@ -843,7 +840,7 @@ mod tests {
         assert_eq!(op.call(crate::host_operations::SUBMIT, b"one"), Ok(Reply::Answer(b"ok".to_vec())));
         std::thread::sleep(Duration::from_millis(300)); // the stand-in has exited; its pipe is closed
         assert_eq!(op.call(crate::host_operations::SUBMIT, b"two"), Ok(Reply::Answer(b"ok".to_vec())), "a fresh session served the second request");
-        let expect = [request(b"{}", None, crate::host_operations::SUBMIT, b"one").unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"two").unwrap()].concat();
+        let expect = [request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"one").unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"two").unwrap()].concat();
         assert_eq!(std::fs::read(&req).unwrap(), expect, "each request was written exactly once");
     }
 }

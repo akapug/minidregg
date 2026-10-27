@@ -43,7 +43,7 @@ stop() { if [ -s "$W/public/server.pid" ]; then kill "$(cat "$W/public/server.pi
 trap stop EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
-import json, os, re, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, socket, struct, subprocess, sys, time
 def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
     r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
     if r.returncode: raise OSError(r.stderr.strip() or "no answer")
@@ -61,10 +61,11 @@ def row(name, ok, detail):
     print(f"{'PASS' if ok else 'FAIL'}\t{name}\t{detail}", file=sys.stderr)
 
 cfg = open(CONFIG, "rb").read()
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 def frame(b): return struct.pack("<I", len(b)) + b
 def op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    s.sendall(frame(bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload))
+    s.sendall(frame(bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload))
     def exact(n):
         out = b""
         while len(out) < n:

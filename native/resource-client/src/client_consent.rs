@@ -382,7 +382,7 @@ mod tests {
     #[ignore = "worker for remote_signing_plan_with_one_changed_byte_is_refused_before_signing"]
     fn remote_plan_stub_worker() {
         let config = PathBuf::from(std::env::var_os("MINI_REMOTE_CONSENT_STUB_CONFIG").expect("stub config"));
-        match crate::transport::invoke(Path::new("ssh:plan-stub"), &config, STUB_OPERATION, b"retained request") {
+        match crate::transport::invoke_pinned(Path::new("ssh:plan-stub"), &config, &"00".repeat(32), STUB_OPERATION, b"retained request") {
             Ok(reply) => println!("REMOTE-PLAN-ACCEPTED {}", hex(&reply)),
             Err(error) => println!("REMOTE-PLAN-REFUSED {error}"),
         }

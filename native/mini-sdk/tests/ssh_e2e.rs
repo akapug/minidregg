@@ -27,8 +27,18 @@ fn ssh_route(config_var: &str) -> Route {
     Route::Ssh(ssh)
 }
 
+/// The Host image the box serves (envelope v2 pins it): MINI_SDK_E2E_HOST_SHA256, 64 hex digits.
+fn host_pin() -> [u8; 32] {
+    let hex = env("MINI_SDK_E2E_HOST_SHA256");
+    let mut pin = [0u8; 32];
+    for (i, byte) in pin.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("MINI_SDK_E2E_HOST_SHA256 is 64 hex digits");
+    }
+    pin
+}
+
 fn operator(route: Route) -> Operator {
-    Operator::new(route, Path::new(&env("MINI_SDK_E2E_CONFIG")), None).unwrap()
+    Operator::new(route, Path::new(&env("MINI_SDK_E2E_CONFIG")), host_pin()).unwrap()
 }
 
 fn accepted_logins() -> usize {
@@ -109,7 +119,7 @@ fn the_proxy_refuses_a_config_it_does_not_pin_and_an_operator_only_operation() {
     let dir = std::env::temp_dir().join(format!("mini-sdk-e2e-cfg-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("other.config"), br#"{"domain":"1"}"#).unwrap();
-    let wrong = Operator::new(ssh_route("MINI_SDK_E2E_SSH_CONFIG_GOOD"), &dir.join("other.config"), None).unwrap();
+    let wrong = Operator::new(ssh_route("MINI_SDK_E2E_SSH_CONFIG_GOOD"), &dir.join("other.config"), host_pin()).unwrap();
     let said = unsent(wrong.call(mini_sdk::host_operations::DESCRIBE, b""));
     let _ = std::fs::remove_dir_all(&dir);
     assert!(said.contains("socket rejected request") && said.contains("config pin mismatch"), "{said}");
