@@ -1,9 +1,9 @@
 # Platform cell: state (2026-10-27, third handoff)
 
 `lane/lean-critical` = the commit adding this file (worktree
-`/Users/ember/dev/minidregg-lanes/lean-critical`). Lanes do not build or validate
-(COORDINATION §4, c44b7d5be): reason each change through, push, and fix forward the reds
-the integrator sends with file:line. Merge origin/main before each push.
+`/Users/ember/dev/minidregg-lanes/lean-critical`). Lanes build and elaborate in a warm,
+incremental tree on a box (baef327e4): dregg-ref, never the Mac, never a cold build. Fix
+forward the reds the integrator sends with file:line. Merge origin/main before each push.
 
 ## Done (L1)
 
@@ -36,202 +36,142 @@ the integrator sends with file:line. Merge origin/main before each push.
   the Host loads came from genesis and install patches (the writers are proved; the induction
   over the replayed log is not stated yet).
 
-## L1c (lane/lean-audit-c) owns
+## L1c (lane/lean-audit-c): state
 
-Audit (c) (design below), then births priced from the cell (read `recordOf` of the loaded cell
-in place of `config.tariff`, `grainBirthTariff`, `completionCustodianKey`, template budget and
-lifetime; the cell in the birth's read guards; `BirthsReadCurrent`, `BirthQuoteCurrent`), then
-`Intent.credit` in `DurableCommitProtocol` with ops 244–247.
+L1c owns audit (c), births priced from the platform cell, then `Intent.credit` with ops
+244–247. Everything below was pushed before the build rule changed and none of it has been
+elaborated: the first warm build on dregg-ref covers all of it.
 
-## Audit (c) design (for lane/lean-audit-c, L1c)
+### Audit (c): landed, poles owed
 
-Today `law.admit … = none` in `Pending.admitBranch` (Kernel/ResourceBirthPolicyController.lean,
-the `| none => .error .policyRejected` arm at about line 1630) also covers the address,
-membership and request-binding failures of `ComposedPolicyAdmission.admitWithCheck`, and the
-compiled-law range and cast checks. So `.policyRejected` does not mean the law refused, and
-`PlanPassNotLawRefused` is false as stated. The design:
-
-1. `admitBranch` runs `ComposedPolicyAdmission.bind config wanted.2 evidence law membership
-   epoch revision` first (Compiler/ComposedPolicyAdmission.lean, `bind`, `Bound`). On `none`
-   it refuses with a new `Reject.policyBinding`. It then checks the compiled law's verdicts
-   on the branch step, each refusal named by a new constructor: `supported` →
-   `.policyUnsupported`, `inputsInRange` → `.policyInputRange`, `castInjOn` →
-   `.policyCastAlias`. Only then does `law.admit` run, and its `none` (`.policyRejected`)
-   is the law's verdict alone. The authorization term is unchanged (still `law.admit`).
-2. `Pending.factoryVerdict` becomes supported ∧ inputsInRange ∧ castInjOn ∧ eval, read off
-   `(pending.branchConfig .factory).resolve?` on `pending.branchStep .factory`. Note
-   `(branchConfig b).step = branchStep b` holds by definition (`PhysicalLawResolution.config`).
-3. `PlanRefusalSound`: a verdict of `some false` makes `BranchAccepted pending .factory`
-   empty. This follows from `BranchAccepted.law_admits_step` (about line 1658) and the uniqueness of
-   `loadTarget`'s `.ok` graph against `PreparedLaw.graphExact`. For the range and cast cases,
-   acceptance implies `compiledLawAccepts`, hence both checks.
-4. `PlanPassNotLawRefused`: a verdict of `some true` means `admitBranch .factory` never answers
-   `.policyRejected`. Past `bind`, `Bound.verifies_iff_eval` (ComposedPolicyAdmission.lean,
-   with `PreparedLaw.verifies_iff_eval`, `lower_complete`) turns the verdict into
-   `config.verifies … law.witness = true`, and `Bound.admit_of_verifies` gives `some`.
-   State the converse too: `.policyRejected` implies a plan verdict of `some false`.
-5. `NativeHost.birthRefusal` (Kernel/NativeHost.lean, about line 839) names the range and cast
-   refusals as `invokeRefusal` does (`PreparedPolicyLeg.rangeRefusal`/`castRefusal` in
-   Kernel/PreparedInvocationDiagnostics.lean, through `ComposedLawDiagnostics.publicRefusal`).
-   It also surfaces a `prepareDraft`/`preparePending` error as a named refusal instead of
-   `.toOption` passing silently.
-6. The keystones and `factoryVerdict_congr` sit at the end of ResourceBirthPolicyController.lean
-   (`Pending.factoryVerdict`, `PlanRefusalSound`, `PlanPassNotLawRefused`); extend them there.
-   Refusals reach the Host as `repr reason` text, and the new constructors only change that
-   text. The birth Reject has no exhaustive match outside its file (GrainResourceBirthAdmission
-   wraps it as `metadata reason`).
-
-## L1c state (lane/lean-audit-c)
-
-Audit (c) is pushed, not built. Under ember's no-build rule the integrator elaborates it and
-routes any reds here.
+`.policyRejected` now means the law refused, and nothing else.
 - `Kernel/ResourceBirthPolicyController.lean`:
-  - New `Reject` constructors: `policyBinding`, `policyUnsupported`, `policyInputRange`,
-    `policyCastAlias`. They are not admission constructors, so the census and
-    host-operations.json are unaffected.
-  - `planVerdict` (supported, range, cast, eval) and `Pending.judgeBranch`: epoch and
-    revision, resolve, `bind` (refused as `policyBinding`), the three compiler verdicts, then
-    `law.admit` (refused as `policyRejected`, the law's verdict alone).
-    `Pending.admitBranch` now calls `judgeBranch`, and its refusal order is otherwise unchanged.
-  - Proved: `admit_some_of_bind`, `planVerdict_of_verifies`, `BranchAccepted.planVerdict_true`,
-    `Pending.judgeBranch_policyRejected`, `Pending.admitBranch_policyRejected`, and the
-    keystones `planRefusalSound`, `planPassNotLawRefused`, plus the new converse
-    `lawRefusalDisclosed` (`policyRejected` → verdict `some false`).
-  - Also new: `Pending.factoryRefusal` with `factoryRefusal_eq_none_iff`. `factoryVerdict`
-    is now `resolve?.map planVerdict`. `factoryVerdict_congr` was re-proved.
-- `Kernel/NativeHost.lean` `birthRefusal` (body only):
-  - It names a noncanonical draft, a `prepareDraft` error and a `preparePending` error, and
-    an unresolved factory law.
-  - It judges through `Pending.factoryRefusal`, so range, cast and unsupported refusals are
-    disclosed like a law refusal (`publicRefusal`, as `invokeRefusal` does).
-- Audit pass 16 (lane/audit-platform 90ec46ab), two items owed:
-  - **Poles: owed as Lean witnesses.** A concrete `Pending` with an accepted factory branch
-    needs a signed, loaded image, and the `WindowExample` descriptor is template-level only.
-    For now `scripts/kn2/neutral-birth.lean` checks both poles on the deployed path: the
-    control and the `birth/<id> = root` law have a plan that passes and they commit; the
-    `root + 1` law has a plan that refuses and is refused `Reject.policyRejected`.
-  - **Disclosure: checked.** The `preparePending` refusals carry no payload. Of the
-    `PreparationReject` refusals, only `room` does: the requester's own room id and the
-    room gate's refusal, which is already grant-filtered (`birthRefusedOutsideGrant`,
-    FIX-DISCLOSE). `NativeHost.prepareLoaded` already printed `birth preparation: {repr
-    reason}` on the same authorized plan channel, so nothing new is disclosed.
-- Not touched: `GrainResourceBirthAdmission.Pending.admitBranch` has the same conflation
-  (`law.admit = none` → `policyRejected`). It is outside audit (c) and is a follow-up.
-- **Owed (pass 16 addendum): the keystone poles at declaration level.** The keystones are
-  not done until these exist:
-  - satisfiable: a concrete loaded, signed `Pending` with `factoryVerdict = some true` and
-    an inhabited `BranchAccepted … .factory`;
-  - teeth: a law that evaluates false, giving `some false` and admission
-    `.error .policyRejected`.
-  They wait for elaboration. Until then the executed witness is
-  `scripts/kn2/neutral-birth.lean`.
-- **Owed: the Grain `admitBranch` binding gap** (see above).
+  - `Pending.judgeBranch` refuses, in order: binding (`policyBinding`), the three compiler
+    verdicts (`policyUnsupported`, `policyInputRange`, `policyCastAlias`), then `law.admit`
+    (`policyRejected`). `admitBranch` calls it.
+  - The keystones are `planRefusalSound`, `planPassNotLawRefused` and the converse
+    `lawRefusalDisclosed` (`policyRejected` → verdict `some false`). Also `planVerdict`,
+    `Pending.factoryRefusal` with `factoryRefusal_eq_none_iff`, and `factoryVerdict_congr`.
+- `Kernel/NativeHost.lean` `birthRefusal` names a noncanonical draft, a `prepareDraft` or
+  `preparePending` error, and an unresolved law. It judges through `factoryRefusal`.
+- Pass 16 accepted the disclosure. The poles stay owed (item 7 below); until then the
+  executed witness is `scripts/kn2/neutral-birth.lean`.
+- `GrainResourceBirthAdmission.Pending.admitBranch` still conflates binding with refusal
+  (`law.admit = none` → `policyRejected`). It is outside audit (c) and owed as a follow-up.
 
-### Births priced from the cell: design and statement (sent to the auditor, nothing coded)
+### Births priced from the cell: landed
 
-Main already carries the genesis seed (147d3861 / bc88a5ab: `platformCell` in `baseCells`,
-`platform_seeded`).
+Pass 17 accepted ordinary births as the first scope, on two conditions: the label says
+"ordinary births", and there is no silent twin at the re-genesis.
 
-**The surface is wider than the ordinary birth.** The cell's fields are read today from
-`NativeHost.Config` or the profile at these sites:
-- `FactoryPins.tariff` (`NativeHostContext.validateChecks`, `tariff := config.tariff`) is
-  read by `Checked.feeBound`.
-- `profile.template.{ownerBudget, lifetime}` is read by `RootGrantShape`/`checkTemplateAt`
-  (RBPC :384, :520, `Pending.templateBound`), by
-  `GrainResourceBirthAdmission.preparePending`, `ApplicationGrainBirth` (:90–132),
-  `ApplicationShareIssueSource` (:189–194), `ApplicationAgentLifetimeGrantSource`
-  (:250–255), `ParticipantFactoryProvisioning`, and `PayEnrolV2Receiver` (:77).
-- `config.grainBirthTariffValue` is read by `NativeHostGrainBirth` :48,
-  `ApplicationShareIssueGrainAdmission` :99, `ApplicationShareIssueGrainReceiver` :178,
-  and `NativeHost` :3214.
-- `config.completionCustodianKey` is read by the four `Application*Completion*Admission`
-  `keyPinned` fields. These are not births.
+| sha | what |
+|---|---|
+| f2010f574 | `ResourceBirthReceiver.pricedAt` (refuses `platformUnavailable` / `platformStale`), `platformGuards` in `readGuards`, `pricedAt_ok`, `pricedAt_stale`, `readGuards_platform` (still carries an `unwritten` premise; item 6). The census `scripts/check-platform-field-readers.py` is wired into merge-gate-checks; `--ship` refuses while any row is `owed` |
+| 87bdba019 (item 1) | `NativeHostContext.validateChecks` pins the record's creation tariff (`platformRecordIn`, `pinnedTariff`) in both the full and the served shape; `validateCore_map` takes one shared platform argument; `platformRecordIn_load`. Without a record the config tariff stands in, and `pricedAt` refuses every birth on that image |
+| 3d78d5a5a (item 2) | `templateAt`, `platformRecordAt`, `birthTemplate`. `Pending` records `template` with `templateExact`, and `templateBound` checks against it for all three methods. `preparePending` refuses `platformUnavailable` (birth `Reject`). `checkTemplate` is deleted. The `AcceptedBirth.indexed` / `reserve_shape` statements and the TokenCensus row change with it |
+| a9b916cbf | `Json.birthCurrent` and `CurrentResourceBirthAuthoring` quote the fee and the root grants' budget and window from the opened image's record. Offline authoring keeps genesis |
 
-**The template cannot be swapped inside the profile.** `Profile.compilerProfile` and so
-`Profile.semantics` hash `profile.template` (`CanonicalRuntimeProfileCore` :133). So the
-cell's owner budget and lifetime must enter as an explicit template beside the profile:
-`templateAt profile.template p := { profile.template with ownerBudget := p.ownerBudget,
-lifetime := p.lifetime }`. This changes the type of `Pending.templateBound`, and through it
-`AcceptedBirth.indexed` and the TokenCensus row text.
+The census has 87 rows owed. The owed families are the share issue, the agent lifetime
+grant, the grain births, participant provisioning, PayEnrolV2, and the four completion
+`keyPinned` fields. The share issue and the lifetime grant still check
+`pins.tariff = config.tariff`, so after a tariff-changing install they refuse. They never
+stay silently stale.
 
-**Design (ordinary birth first, in one commit; the rest follow by family).**
-1. New `Kernel/PlatformBirthTerms.lean` (L1c's file):
-   - `platformAt deployment durable := (PlatformCellDomain.load deployment
-     durable.snapshot).bind (recordOf ·.cell.logical)`;
-   - `pinsAt pins p := { pins with tariff := p.creation }`;
-   - `templateAt`;
-   - `deployedView deployment : PlatformCell.BirthView (Durable × Height)`.
-2. `ResourceBirthReceiver.receiveLoaded` loads the platform from the durable image it
-   commits against. A missing or undecodable cell refuses with a new `platformUnavailable`.
-   It admits with `pinsAt pins p` and `templateAt profile.template p`, and adds
-   `Loaded.readGuard` to the commit's read guards.
-3. `preparePending` takes the template explicitly (ordinary and reserve), and `Pending`
-   records it. The Host plan (`prepareLoaded`, `birthRefusal`) reads the same
-   `platformAt` on `opened.durable`.
+### Item 3: the deployed keystone (statement for the auditor; nothing coded)
 
-**Keystone statement (deployed, owed):** `ReceiverReadsCurrent deployment profile pins`.
-For every `durable height bytes` with `receiveLoaded … durable height bytes` admitting
-`accepted`, there is `p` with
-`platformAt deployment durable = some p`,
-`accepted.pins.tariff = p.creation`,
-`accepted.template = templateAt profile.template p`,
-and `(cellIdOf deployment, durable.snapshot.model.roots (cellIdOf deployment))` among the
-commit's read guards. And `platformAt deployment durable = none` → refused
-`platformUnavailable`. With `deployedView`, this instantiates `PlatformCell.BirthsReadCurrent`
-(terms = `termsAt p height`, guards ∋ the cell) and `BirthQuoteCurrent` (fee bound by
-`quotedFee p.creation`). Teeth: a reader of `opened.pins` (`config.tariff`) after an install
-that changed `creation` fails it (the shape of `genesisReader_stale`).
+**One change makes the statement unconditional: pricing moves into `Pending`.** Today
+`pricedAt` runs in `receiveLoaded` (IO) before admission. A theorem over `AcceptedBirth`
+therefore cannot see it, and a keystone over the IO receiver would have to assume it. The
+design:
+- `Pending` carries `record : PlatformCellLayout.Platform`,
+  `recordExact : platformRecordAt deployment durable = some record` and
+  `priced : pins.tariff = record.creation`.
+- `Pending.template` becomes `templateAt profile.template pending.record` (a def, not a
+  field). `templateExact` follows from it.
+- `preparePending` refuses a missing record with `platformUnavailable` (as today) and a
+  different tariff with a new birth `Reject.platformStale`.
+- `ResourceBirthReceiver.pricedAt` and the receiver's `platformUnavailable`/`platformStale`
+  constructors are deleted. They are the twin; the birth `Reject` reaches the Host as
+  `.admission reason`.
 
-**Auditor pass 17 (lane/audit-platform): the ordinary birth is accepted as the first
-scope, on two conditions.**
-1. The claim's label says "ordinary births". The owed families stay listed above with
-   file:line.
-2. **No silent twin at the re-genesis.** `profile.template` stays in the semantics, so an
-   owed site that still reads `profile.template.ownerBudget`/`lifetime` or `config.tariff`
-   would serve the genesis value after an install, without any error. Before the one
-   digest change ships, every owed site must read the cell, or be shown to read only
-   `issuer`/`birthSlack`. A census row gates this: it refuses readers of those fields
-   outside the cell path. The census row is part of the ordinary-birth commit.
+**Keystone (`Kernel/ResourceBirthReceiver.lean`).**
 
-**Landed (ordinary births, creation tariff; pushed unbuilt):**
-- `Kernel/ResourceBirthReceiver.lean`:
-  - `pricedAt deployment pins durable` checks that the platform record loads from the
-    image the birth commits against and that `pins.tariff = record.creation`. Otherwise it
-    refuses with new `Reject.platformUnavailable` or `Reject.platformStale`.
-    `receiveLoaded` runs it before admission.
-  - `platformGuards` puts the platform cell's root into every ordinary birth's
-    `readGuards`. The replay recomputes the same `intent`, so it agrees.
-  - Theorems: `pricedAt_ok`, `pricedAt_stale` (teeth), `platformGuards_exact`,
-    `readGuards_platform`.
-- `scripts/check-platform-field-readers.py` with `scripts/platform-field-readers.json`:
-  - It refuses any new reader of `template.ownerBudget`/`lifetime`, `config.tariff`,
-    `grainBirthTariffValue` or `config.completionCustodianKey` outside the cell path.
-  - `--ship` refuses while any `owed` row remains (73 today). The seed is `genesis` and the
-    template encoding is `encoding`.
-  - It is wired into `scripts/pipeline/merge-gate-checks.sh`.
-- **Liveness until the next step:** `opened.pins` still carries `config.tariff`. That equals
-  the genesis record's creation tariff (`NativeHostGenesis.genesisRecord`), so births pass
-  until the first install that changes it, then refuse `platformStale`. Loud, never stale.
+```lean
+/-- Births admitted by the resource-birth receiver (ordinary, reserve and lifetime-grant
+methods) read the platform record of the image they commit against. -/
+def ReceiverReadsCurrent (profile) (deployment) : Prop :=
+  ∀ pins durable height (accepted : AcceptedBirth profile deployment pins durable height),
+    ∃ record, platformRecordAt deployment durable = some record ∧
+      pins.tariff = record.creation ∧
+      accepted.descriptor.FeeBound record.creation ∧
+      accepted.pending.template = templateAt profile.template record ∧
+      (⟨⟨PlatformCellDomain.cellIdOf deployment⟩,
+        durable.snapshot.model.roots ⟨PlatformCellDomain.cellIdOf deployment⟩⟩ : ReadGuard)
+        ∈ (intent accepted).readGuards
 
-**Next, in order (the ordinary-birth claim is incomplete until 1–3 land):**
-1. `opened.pins.tariff` from the cell: `NativeHostContext.validateChecks` reads the record
-   through `PlatformCellDomain.load` on the opened image, in both the full and the served
-   shape (`validateCore_map` in NativeHostServed must keep agreeing). Then `pricedAt`
-   passes after installs.
-2. The template's owner budget and lifetime from the record:
-   - `templateAt profile.template record` replaces `profile.template` in
-     `checkTemplate`/`preparePending`/`Pending.templateBound` (RBPC :520–533, :1328–1341);
-   - the `AcceptedBirth.indexed` text and the TokenCensus row change with it;
-   - the Host plan (`prepareLoaded`) and the client quote (`Host/Json.lean`) read the same
-     record.
-3. The deployed keystone `ReceiverReadsCurrent` for ordinary births, from `pricedAt_ok` and
-   `readGuards_platform` plus item 2, instantiating `PlatformCell.BirthsReadCurrent`
-   and `BirthQuoteCurrent`.
+theorem receiverReadsCurrent : ReceiverReadsCurrent profile deployment
+theorem unpriced_empty (missing : platformRecordAt deployment durable = none) :
+    IsEmpty (AcceptedBirth profile deployment pins durable height)
+```
+
+- The guard conjunct is unconditional. Its proof is item 6.
+- `receiveLoaded` commits exactly `intent accepted` for the `accepted` that
+  `admitDecodedNative` returns. That is code structure in IO; the theorem covers every value
+  the receiver can commit.
+
+**Relation to `PlatformCell.BirthsReadCurrent` / `BirthQuoteCurrent`.** A literal
+instantiation over `Store := Durable × Height` would be vacuous: the only `terms` function
+of the store alone is `currentReader`, which is proved by `rfl`. The deployed content is
+per admitted birth instead:
+- `some p` branch: `p.creation` through `priced` and `FeeBound`. `p.ownerBudget` and the
+  window `[height, height + p.lifetime]` come through `template` and `RootGrantShape`
+  (`maxCost = ownerBudget`, `notAfter = notBefore + lifetime`, `BirthWindow`). The guard
+  is the platform cell.
+- `none` branch: `unpriced_empty`.
+- `grainBirth` and `completionCustodianKey` are not read by this family. They belong to the
+  owed census rows and are not claimed here.
+
+**Satisfiable.** It needs a concrete loaded, signed `AcceptedBirth`, which is the same
+missing object as item 7. The interim executed witness is `scripts/kn2/neutral-birth.lean`,
+whose control birth commits at the record's tariff. The premise `platformRecordAt = some`
+is inhabited on the deployed genesis by `platform_seeded`.
+
+**Teeth.**
+- `preparePending_stale`: a record with `pins.tariff ≠ record.creation` gives
+  `.error .platformStale`. Hence `IsEmpty (AcceptedBirth …)` for pins built from
+  `config.tariff` after an install that changed `creation`; that is the deployed
+  `genesisReader_stale`.
+- A guard list without the platform cell (the pre-f2010f574 `readGuards`) fails the last
+  conjunct on any image whose record loads.
+
+**Label.** "Births through the resource-birth receiver read the current platform record:
+creation tariff, owner budget, lifetime, and the cell's read guard. Owed: share issue,
+lifetime-grant source, grain births, provisioning, PayEnrolV2, completion keys (87 census
+rows)."
+
+### Item 6: `readGuards_platform` unconditional (in progress)
+
+`readGuards_platform`'s `unwritten` premise is discharged from the birth's own write list
+rather than from `platform_written_only_by_install`. The birth receiver never forms
+`ReceivingLaw.LawfulBy`, so a bridge to the family discipline would first have to make the
+receiver judge its writes that way. `prepared.writes = planWrites …` consists of:
+- `allocationWrites`: fresh, `expectedPre = freshRoot`, at ids that `ResourceBirth.allocate`
+  requires absent;
+- the factory cell (`.declaredObject`);
+- the resource book (`.resourceBook`);
+- the authority writes (the credential-authority cell).
+
+The platform cell is present (`load = some`) and of kind `.platform`. So each write differs
+from it, either by absence in the loaded directory or by its observed kind. The lemma is
+`platform_unwritten (prepared) (found : PlatformCellDomain.load … = some loaded) :
+cellIdOf deployment ∉ prepared.writes.map DataWrite.cellId`.
+
+### Next, in order
+
+3. Pricing into `Pending`, then `receiverReadsCurrent`, `unpriced_empty` and
+   `preparePending_stale`, once the auditor answers the statement above.
 4. The owed families, one per commit, each deleting its census rows.
 5. `Intent.credit` with ops 244–247.
-6. (Pass 17 addendum) Make `readGuards_platform` unconditional: discharge its `unwritten`
-   premise from `PlatformInstallReceiver.platform_written_only_by_install`. The `.platform`
-   kind is kernelOnly to `.platformInstall`, and the ordinary birth family is not that
-   family. This needs a bridge from the birth's `prepared.writes` cell ids to the family
-   write discipline, and the bridge is not stated yet.
-7. Audit (c)'s Lean poles (satisfiable and teeth on a concrete loaded, signed `Pending`).
+6. `platform_unwritten` (above), then `readGuards_platform` without its premise.
+7. Audit (c)'s Lean poles and item 3's satisfiable pole: one concrete loaded, signed
+   `Pending`/`AcceptedBirth`.
