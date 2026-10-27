@@ -229,3 +229,9 @@ scope, on two conditions.**
    and `BirthQuoteCurrent`.
 4. The owed families, one per commit, each deleting its census rows.
 5. `Intent.credit` with ops 244–247.
+6. (Pass 17 addendum) Make `readGuards_platform` unconditional: discharge its `unwritten`
+   premise from `PlatformInstallReceiver.platform_written_only_by_install`. The `.platform`
+   kind is kernelOnly to `.platformInstall`, and the ordinary birth family is not that
+   family. This needs a bridge from the birth's `prepared.writes` cell ids to the family
+   write discipline, and the bridge is not stated yet.
+7. Audit (c)'s Lean poles (satisfiable and teeth on a concrete loaded, signed `Pending`).
