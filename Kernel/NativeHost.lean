@@ -38,9 +38,19 @@ checkpoint is materialized and only the records after it are replayed through
 the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
 signed ingress is re-admitted here; `audit` does that. -/
 def openExisting (config : Config) : IO (Except String (Opened config)) := do
+  -- Operator measurement control (as `DurableReceiverIO.loadChained`): MINI_OPEN_TIMING=1 prints
+  -- the load's and the validation's elapsed time to stderr.
+  let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
+  let started ← IO.monoMsNow
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
-  | .ok durable => return validateLoaded config durable
+  | .ok durable =>
+      if timing then IO.eprintln s!"full open load: {(← IO.monoMsNow) - started} ms"
+      match validateLoaded config durable with
+      | .error detail => return .error detail
+      | .ok opened =>
+          if timing then IO.eprintln s!"full open validate: {(← IO.monoMsNow) - started} ms"
+          return .ok opened
 
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
