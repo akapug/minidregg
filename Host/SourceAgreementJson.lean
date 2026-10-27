@@ -1407,24 +1407,34 @@ private def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Mini
         subjects.map (fun subject => grainWorkerClause subject generation)]
 
 private def grainWorker (path : String)
-    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
-  match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration" with
-  | none, none, none => pure none
-  | some subject, none, some generation =>
-      pure (some ([← nat (path ++ ".workerSubject") subject],
-        ← int (path ++ ".workerGeneration") generation))
-  | none, some subjects, some generation =>
+    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option AgentGrain.GrainWitness) := do
+  match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration",
+      obj.get? "holderWitnessGeneration" with
+  | none, none, none, none => pure none
+  | some subject, none, some generation, none =>
+      pure (some (AgentGrain.GrainWitness.workers [← nat (path ++ ".workerSubject") subject]
+        (← int (path ++ ".workerGeneration") generation)))
+  | none, some subjects, some generation, none =>
       let values ← list (path ++ ".workerSubjects") nat subjects
       unless 1 ≤ values.length ∧ values.length ≤ 4 do
         failAt (path ++ ".workerSubjects") "expected 1 through 4 subjects"
       unless values.Nodup do
         failAt (path ++ ".workerSubjects") "subjects must be distinct"
-      pure (some (values, ← int (path ++ ".workerGeneration") generation))
-  | _, _, _ => failAt path "workerSubject or workerSubjects and workerGeneration must be supplied exclusively"
+      pure (some (AgentGrain.GrainWitness.workers values (← int (path ++ ".workerGeneration") generation)))
+  | none, none, none, some generation =>
+      pure (some (AgentGrain.GrainWitness.holders (← int (path ++ ".holderWitnessGeneration") generation)))
+  | _, _, _, _ =>
+      failAt path "workerSubject or workerSubjects with workerGeneration, or holderWitnessGeneration, exclusively"
+
+private def grainTaskPolicy (owner : Nat) : Option AgentGrain.GrainWitness → Minidregg.Pred.Pred
+  | none => grainPolicy owner none
+  | some (.workers subjects generation) => grainPolicy owner (some (subjects, generation))
+  | some (.holders generation) => AgentGrain.holderPolicy owner generation
 
 private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) : List String :=
   if (obj.get? "workerSubject").isSome then ["workerSubject", "workerGeneration"]
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
+  else if (obj.get? "holderWitnessGeneration").isSome then ["holderWitnessGeneration"]
   else []
 
 private def factoryTemplate (path : String) (json : Lean.Json) :
@@ -1549,8 +1559,8 @@ private def birthParts (path : String)
   let schedule := if storage = "grain" then providerRoutes.lookup target else none
   let rulePredicate ← if storage = "grain" then
       pure <| match schedule with
-        | some routes => ProviderRoute.policy routes (grainPolicy owner.value worker)
-        | none => grainPolicy owner.value worker
+        | some routes => ProviderRoute.policy routes (grainTaskPolicy owner.value worker)
+        | none => grainTaskPolicy owner.value worker
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
