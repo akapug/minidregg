@@ -226,6 +226,9 @@ impl Store {
     pub fn state(&self) -> &Dzk {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, event: &[u8]) -> Result<Vec<Send>> {
         let b = self.journal.append(event)?;
         parse_outbox(&b, self.state().profile.n)
@@ -343,7 +346,15 @@ mod tests {
             .unwrap()
             .write_all(&[7])
             .unwrap();
-        assert!(Store::open(&path, 0, 0, 4, 1, &g(), 1, 1).is_err());
+        // A trailing partial length word is a crash tear after the last complete
+        // record (transition_journal, fa84160e): dropped, reported, and every
+        // published record and the exact dealing survive.
+        let before = std::fs::metadata(&path).unwrap().len();
+        let mut store = Store::open(&path, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+        assert_eq!(store.torn_tail().unwrap().dropped, vec![7]);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), before - 1);
+        assert_eq!(store.replay_outboxes().unwrap(), first);
+        assert_eq!(store.dealer(&polynomials).unwrap(), first);
     }
     use std::io::Write;
     #[test]

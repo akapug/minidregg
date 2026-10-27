@@ -527,10 +527,13 @@ exact private-transition-wal private-backend --lib -- \
   transition_journal::tests::invalid_event_has_no_effect_or_outbox \
   transition_journal::tests::interior_length_damage_is_refused_never_truncated \
   transition_journal::tests::final_torn_record_is_reported_and_recovery_resumes_from_last_complete_record
-# The Sh2t dealer WAL: a torn dealer tail re-derives the same deal, or published nothing
+# The dealer WALs: a torn dealer tail re-derives the same deal or published nothing; the dZK
+# store drops a partial trailing length word and keeps every published record
 exact private-dealer-wal     private-backend --lib -- \
   sh2t_id_store::tests::retained_full_dealer_randomness_exact_outbox_changed_input_identity_and_tear \
-  sh2t_id_store::tests::torn_commit_record_published_nothing_so_a_fresh_deal_is_safe
+  sh2t_id_store::tests::torn_commit_record_published_nothing_so_a_fresh_deal_is_safe \
+  dzk_store::tests::store_retains_proof_randomness_and_outboxes_and_refuses_changed_identity \
+  dzk_store::tests::canonical_wire_and_durable_recipient_transfer_replay
 # W16 MPC: the King composite store recovers a kill -9 mid-King with one dealer event per
 # instance and no new anchor allocation; the curious-holder transcript check and its falsifier
 exact private-king-store private-backend --lib -- \
