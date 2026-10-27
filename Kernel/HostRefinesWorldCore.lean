@@ -34,7 +34,7 @@ produces on the turn `Turn.ofIntent` derives from the admitted intent.
 
 ## THE LIST
 
-Empty.  `TurnCensus.every_admission_is_turn` decides it for all 48 shapes and
+Empty.  `TurnCensus.census_shapes_admitted_at_w0` decides it for all 48 shapes and
 `TurnCensus.theList_empty`; `TurnCensus.theListWithoutRomBirth_eq` is the pole
 (without ROM birth the list is exactly the six source-creating receivers).
 

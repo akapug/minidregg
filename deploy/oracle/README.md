@@ -1,5 +1,9 @@
 # Oracle7 package preparation
 
+For capabilities, architecture and current integration status, start with the
+[appliance overview](../../docs/oracle-appliance.md). This directory documents
+the operator's packaging tools and versioned inputs.
+
 This directory builds a signed Linux runtime SPK and the exact inventory for
 its separately published shared public data. The fixed launcher, source-map
 stager, canonical SPK signer and independent post-pack verifier preserve the
@@ -20,12 +24,21 @@ providers and Pillow, plus the repaired source and date metadata. The
 The host must also include the native status-header serialization fix recorded
 in the receipt.
 
-The [actual receiving run](../../docs/oracle-shared-data-2026-10-27.md) reached
+[Version 6](runtime-v6.md) adds the tenant pool and browser interface, incorporating
+the newer U6-v2 source composition. Its [receipt](runtime-v6-receipt.json) records
+independent signature and exact-member verification. Use a fresh grain: it
+requires the host's source-session identity projection and refuses legacy shared
+journals. The v5 artifacts and retained recovery run remain separate.
+
+The [earlier v4 receiving run](../../docs/oracle-shared-data-2026-10-27.md) reached
 admitted Oracle queries in two grains, shared read-only data, and separate
 conversation state. Full acceptance is incomplete: the wrong-inventory fixture
 failed for its directory mode, and cleanup exposed an already-stopped resident
 recovery limitation. The dated record preserves those failures and the remaining
 restart checks; component tests and packaging receipts do not replace that run.
+The newer v5 controller/agent journey has separate
+[retained evidence](../../docs/evidence/oracle-u3-acceptance-2026-10-27.json);
+the overview distinguishes it from subsequent unsigned Oracle candidates.
 
 ## Exact inputs
 

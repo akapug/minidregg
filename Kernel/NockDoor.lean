@@ -282,9 +282,6 @@ theorem door_load_deterministic {program : Program} {view : View} {state state' 
   exact Kernel.Door.door_load_deterministic (E := Evaluator.nock) (d := nockDoor) loaded
     ⟨trap, stored, cued, hl, step'⟩
 
--- Concrete counter fixtures and kernel-decided poles are checked in
--- `Assurance.NockDoorAudit`, required by both Deployed and Assurance.
-
 /-- info: 'Minidregg.Kernel.NockDoor.door_poke_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms door_poke_sound
 /-- info: 'Minidregg.Kernel.NockDoor.door_state_stale_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/

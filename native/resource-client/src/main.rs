@@ -852,9 +852,10 @@ usage:
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
-  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
+                         --controller-uid: exact controller traversal/socket ACLs, retained across restart
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock [--peer-uid UID]...
                          admitted peers: this service's uid plus each --peer-uid (never a session uid)
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
@@ -2795,9 +2796,12 @@ fn run(mut args: Args) -> Result<()> {
                 .optional("socket-gid")
                 .map(|gid| gid.to_str().and_then(|gid| gid.parse::<u32>().ok()).ok_or("--socket-gid is a decimal gid"))
                 .transpose()?;
+            let controller = args.optional("controller-uid")
+                .map(|uid| uid.to_str().and_then(|uid| uid.parse::<u32>().ok()).ok_or("--controller-uid is a decimal UID"))
+                .transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
-            public_proxy::serve(socket, &upstream, &config, group)
+            public_proxy::serve(socket, &upstream, &config, group, controller)
         }
         #[cfg(target_os = "linux")]
         "serve-agent-operator-proxy" => {

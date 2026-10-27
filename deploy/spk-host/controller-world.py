@@ -1366,6 +1366,135 @@ def preserve_consent_state(base, r):
                                                for name, content in data.items()}}
 
 
+def listener_pin(r):
+    return f'MINI-PUBLIC-CONTROLLER/v1\n{r["uid"]}\n'.encode()
+
+
+@contextlib.contextmanager
+def stopped_public_listener(stage, r):
+    public = canonical(stage['publicSocket'])
+    ancestry(public.parent, {0, r['operatorUid']})
+    path = public.with_suffix('.lock')
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        m = os.fstat(fd)
+        require(stat.S_ISREG(m.st_mode) and m.st_uid == r['operatorUid'] and m.st_nlink == 1
+                and stat.S_IMODE(m.st_mode) == 0o600, 'public listener lock custody refused')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        require(fingerprint(m) == fingerprint(path.lstat()), 'public listener lock replaced')
+        require(not public.exists() and not public.is_symlink(), 'public listener must be stopped with its socket absent')
+        yield public
+    finally:
+        os.close(fd)
+
+
+def public_acl_receipts(base, stage, r, public):
+    entries = []
+    for path in sorted(base.glob('acl-[0-9][0-9][0-9].json')):
+        require(len(entries) < 64, 'public ACL receipt count exceeds bound')
+        raw = read_file(path, 0, 16384, required_mode=0o600)
+        intent = strict_json(raw)
+        after = read_file(path.with_suffix('.after.json'), 0, 16384, required_mode=0o600)
+        entry = strict_json(after)
+        require({k: entry[k] for k in intent} == intent and entry in stage['acl'], 'public ACL receipt differs from stage')
+        target = canonical(intent['path'])
+        require(target == public or target in public.parents, 'public ACL target outside registered ancestry')
+        if target != public:
+            m = metadata(target)
+            require(stat.S_ISDIR(m.st_mode) and m.st_uid in (0, r['operatorUid'])
+                    and (m.st_dev, m.st_ino) == (intent['dev'], intent['ino'])
+                    and acl_text(target) == entry['after'], 'public ancestor ACL or identity changed')
+        entries.append({'receipt': path.name, 'sha256': sha(raw), 'afterSha256': sha(after), 'path': str(target)})
+    require(len(entries) == len(stage['acl']) and sum(e['path'] == str(public) for e in entries) == 1,
+            'public ACL receipt set differs')
+    return entries
+
+
+def public_listener_record(base, stage, r, public):
+    raw = read_file(base / 'public-listener.json', 0, 16384, required_mode=0o600)
+    value = strict_json(raw)
+    require(set(value) == {'protocol', 'store', 'socket', 'controllerUid', 'operatorUid', 'binary',
+                          'binarySha256', 'parentIdentity', 'aclReceipts', 'pinSha256'}
+            and value['protocol'] == 'mini-spk-controller-public-listener-v1' and value['store'] == r['store']
+            and value['socket'] == str(public) and value['controllerUid'] == r['uid']
+            and value['operatorUid'] == r['operatorUid'] and value['binary'] == str(base / 'public-listener/mini')
+            and value['pinSha256'] == sha(listener_pin(r)), 'public listener registration differs')
+    m = metadata(public.parent, r['operatorUid'], 0o710)
+    require(value['parentIdentity'] == [m.st_dev, m.st_ino]
+            and value['aclReceipts'] == public_acl_receipts(base, stage, r, public), 'public listener custody differs')
+    require(sha(read_file(base / 'public-listener/mini', 0, 256 * 1024 * 1024, True,
+                          required_mode=0o555)) == value['binarySha256'], 'registered public listener binary changed')
+    require(read_file(public.with_suffix('.controller'), r['operatorUid'], 128, required_mode=0o600)
+            == listener_pin(r), 'public listener controller pin changed')
+    return value
+
+
+def controller_status(store, helper):
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    stopped_controller_units(r)
+    raw = read_file(base / 'stage.json', 0, 65536, required_mode=0o600)
+    require(strict_json(raw) == stage, 'stage changed during observation')
+    home = Path(r['home'])
+    config = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    require(read_file(base / 'configs' / (sha(config) + '.json'), 0, 524288, required_mode=0o600) == config,
+            'controller configuration is not an exact retained revision')
+    runtime = read_file(home / 'bin/grain-runtime', r['uid'], 256 * 1024 * 1024, True, required_mode=0o500)
+    require(sha(runtime) == stage['binaries']['grain-runtime'], 'controller runtime copy differs')
+    result = {'store': store, 'controllerUid': r['uid'], 'stageSha256': sha(raw),
+              'runtimeSha256': sha(runtime), 'controllerConfigSha256': sha(config),
+              'stopped': True, 'stoppedUnits': list(r['units']), 'consent': stage.get('consent')}
+    if (base / 'public-listener.json').exists() or (base / 'public-listener.json').is_symlink():
+        with stopped_public_listener(stage, r) as public:
+            result['publicListener'] = public_listener_record(base, stage, r, public)
+    return result
+
+
+def register_public_listener(store, helper, binary_arg):
+    registry, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    stopped_controller_units(r)
+    source = canonical(binary_arg)
+    data = read_file(source, r['operatorUid'], 256 * 1024 * 1024, True)
+    with stopped_public_listener(stage, r) as public:
+        receipts = public_acl_receipts(base, stage, r, public)
+        m = metadata(public.parent, r['operatorUid'], 0o710)
+        require(acl_text(public.parent).splitlines() ==
+                ['user::rwx', f'user:{r["uid"]}:--x', 'group::---', 'mask::--x', 'other::---', ''],
+                'public parent must have only exact controller traversal ACL')
+        value = {'protocol': 'mini-spk-controller-public-listener-v1', 'store': store,
+                 'socket': str(public), 'controllerUid': r['uid'], 'operatorUid': r['operatorUid'],
+                 'binary': str(base / 'public-listener/mini'), 'binarySha256': sha(data),
+                 'parentIdentity': [m.st_dev, m.st_ino], 'aclReceipts': receipts, 'pinSha256': sha(listener_pin(r))}
+        # Publish the immutable intent first. Explicit retries accept only the
+        # same binary and policy after interruption; never adopt a new socket.
+        publish_exact(base / 'public-listener.json', encoded(value), bound=16384)
+        destination = base / 'public-listener'
+        if not destination.exists(): mkdir(destination, mode=0o755)
+        metadata(destination, 0, 0o755)
+        publish_exact(destination / 'mini', data, mode=0o555, bound=256 * 1024 * 1024)
+        publish_exact(public.with_suffix('.controller'), listener_pin(r), r['operatorUid'], registry['operatorGid'])
+        public_listener_record(base, stage, r, public)
+    return controller_status(store, helper)
+
+
+@contextlib.contextmanager
+def public_listener_teardown(base, stage, r):
+    if not (base / 'public-listener.json').exists() and not (base / 'public-listener.json').is_symlink():
+        yield None
+        return
+    with stopped_public_listener(stage, r) as public:
+        record = public_listener_record(base, stage, r, public)
+        # Hold the same native lock until ancestor ACLs are restored and the
+        # explicit controller pin is gone. No listener can bind in between.
+        yield record
+        pin = public.with_suffix('.controller')
+        require(read_file(pin, r['operatorUid'], 128, required_mode=0o600) == listener_pin(r),
+                'public listener pin changed during teardown')
+        pin.unlink()
+        sync_directory(pin.parent)
+
+
 def remove(store, helper):
     _, base, r = load(store, helper)
     stage = checked_units(base, r, partial=True)
@@ -1374,18 +1503,22 @@ def remove(store, helper):
         mkdir(HISTORY)
     ancestry(HISTORY, {0})
     consent_archive = preserve_consent_state(base, r)
-    # Only restore ACLs on the exact recorded objects and exact unchanged ACL.
-    for path in sorted(base.glob('acl-[0-9][0-9][0-9].json'), reverse=True):
-        intent = json.loads(read_file(path, 0, 16384))
-        target = canonical(intent['path']); m = metadata(target)
-        require((m.st_dev, m.st_ino) == (intent['dev'], intent['ino']), 'public ACL object replaced; cleanup refused')
-        after_path = path.with_suffix('.after.json')
-        if after_path.exists():
-            entry = json.loads(read_file(after_path, 0, 16384))
-            require(entry['before'] == intent['before'] and acl_text(target) == entry['after'], 'public ACL changed; cleanup refused')
-            run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {target}\n' + intent['before']).encode())
-        else:
-            require(acl_text(target) == intent['before'], 'incomplete ACL mutation; preserve intent receipt for operator repair')
+    with public_listener_teardown(base, stage, r) as listener:
+        # Only restore ACLs on the exact recorded objects and exact unchanged ACL.
+        for path in sorted(base.glob('acl-[0-9][0-9][0-9].json'), reverse=True):
+            intent = json.loads(read_file(path, 0, 16384))
+            target = canonical(intent['path'])
+            if listener is not None and str(target) == listener['socket']:
+                continue  # Original absent socket identity remains in the registration history.
+            m = metadata(target)
+            require((m.st_dev, m.st_ino) == (intent['dev'], intent['ino']), 'public ACL object replaced; cleanup refused')
+            after_path = path.with_suffix('.after.json')
+            if after_path.exists():
+                entry = json.loads(read_file(after_path, 0, 16384))
+                require(entry['before'] == intent['before'] and acl_text(target) == entry['after'], 'public ACL changed; cleanup refused')
+                run(['/usr/bin/setfacl', '--restore=-'], input=(f'# file: {target}\n' + intent['before']).encode())
+            else:
+                require(acl_text(target) == intent['before'], 'incomplete ACL mutation; preserve intent receipt for operator repair')
     mounts = Path('/proc/self/mountinfo').read_text().splitlines()
     require(not any(line.split()[4].startswith(str(base) + '/') or line.split()[4] == str(base) for line in mounts), 'controller subtree has mounts')
     for n in r['units']:
@@ -1404,7 +1537,7 @@ def remove(store, helper):
     if not HISTORY.exists():
         mkdir(HISTORY)
     ancestry(HISTORY, {0})
-    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True, 'consentArchive': consent_archive}))
+    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True, 'consentArchive': consent_archive, 'publicListener': listener}))
     shutil.rmtree(base)
     return {'store': store, 'removedController': r['name'], 'receipt': str(HISTORY / (store + '.json'))}
 
@@ -1436,7 +1569,7 @@ def main(args):
                     and stat.S_IMODE(m.st_mode) == 0o600, 'controller lifecycle lock custody refused')
             shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack',
                                 'controller-journal', 'controller-export', 'controller-reserve-export',
-                                'controller-service-logs')
+                                'controller-service-logs', 'controller-status')
             # Lock order is global allocator, then controller. Never wait on a
             # controller while holding the allocator: an active call gets a
             # visible busy refusal, not account/config deletion underneath it.
@@ -1453,6 +1586,8 @@ def main(args):
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
+        elif action == 'controller-status' and not extra: result = controller_status(store, helper)
+        elif action == 'controller-public-listener' and len(extra) == 1: result = register_public_listener(store, helper, extra[0])
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:

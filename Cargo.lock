@@ -955,6 +955,7 @@ dependencies = [
  "libc",
  "minidregg-spk-rpc",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
 ]

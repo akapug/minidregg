@@ -222,5 +222,24 @@
     "testonly_adversary_sha256": "8d2ea1f2a17aa228aab9684114390b58c510405f4b40abd5e8cfaac87ec3611e",
     "cross_host_cohort": "/build/lanes/oracle-u3/rust-bin-enrollment-final",
     "cross_host_manifest_sha256": "ceb4ce7e2586e20948c489fcc04f55e50970603e78be45c5fbd44b578a8d3e79"
+  },
+  "public_proxy_restart": {
+    "status": "15 tests, optimized build, distinct-UID restart fixture and cross-host CLI smoke passed",
+    "source": "/othersys/lanes/oracle-u3-public-restart-src",
+    "patch_sha256": "25fbc88e569ad24ebd6b5b0b5ef27f252c6e4bce0d62aa6f6ba5e2a1d4d206e0",
+    "main_sha256": "f811f451cb93ae957ad948b56c9d3eaf02aed0a91a713c3e9b2703bb68239170",
+    "public_proxy_sha256": "f3c9b5f9f6b0a6a0593c5eed12ce5bfe8c440ee54500bdc0ad4c5fa236b4fb38",
+    "source_manifest_sha256": "5f0e28ee3972f374287d08e8ce0f6366642f014387a503722cf89656e09d487b",
+    "source_manifest_scope": "native source excluding patch-generated .orig backups, plus Cargo and protocol inputs",
+    "mini_sha256": "ac7323a9c56b901903a7cef54c359f0cffeee62051deed23323aa81d419c7334",
+    "test_log_sha256": "264c55680197359a94928b416d4858ab9e979ab400f1c953cec65852b74ca656",
+    "physical_report": "/othersys/lanes/oracle-u3-public-restart-physical/report.json",
+    "physical_report_sha256": "2f23724fed31cccc229fbef74c3a047d9ead642364d2c25e12a0bc12d80505a1",
+    "physical_scope": "real ordinary mini proxy, distinct controller UID, named ACLs, restart and refusal cases with fake upstream; not Mini admission",
+    "physical_script_sha256": "ce2901c1cc74b72677dc62c2f1ca9c9771eb729d4451f3f1be2dddc8ec633ca8",
+    "cross_host_cohort": "/build/lanes/oracle-u3/rust-bin-public-restart",
+    "cross_host_manifest_sha256": "a1487fe99b67fb09782ab7ee556eddce833cc34a8d2c9739cf174c3444bf0e2a",
+    "cross_host_help_sha256": "fb2cc3f2634f7407612a1e7bce9b96290af2e137532f85296625af5a44729fc4",
+    "previous_runtime_sha256": "19ba92fa97e048f5a63d4bf09b5c086ceaa28cade676b99e691bdc2837f708a4"
   }
 }

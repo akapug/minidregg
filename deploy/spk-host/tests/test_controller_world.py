@@ -579,6 +579,114 @@ class ControllerWorldTests(unittest.TestCase):
              patch.object(c,'read_file',side_effect=read),patch.object(c,'write_new',side_effect=write),patch.object(c,'publish_exact',side_effect=publish),patch.object(c,'run'):
             yield base,r,units,stage_raw,files[unit]
 
+    @c.contextlib.contextmanager
+    def public_listener_fixture(self, suffix=''):
+        with self.storage_upgrade_fixture(suffix) as (base,r,units,raw,service):
+            parent=self.root/('participant'+suffix);parent.mkdir(mode=0o710)
+            public=parent/'host.sock';(parent/'host.lock').write_bytes(b'');(parent/'host.lock').chmod(0o600)
+            newbin=self.file('new-mini'+suffix,b'qualified public mini',0o700)
+            stage=json.loads(raw);stage['publicSocket']=str(public);stage['acl']=[]
+            after='user::rwx\nuser:'+str(r['uid'])+':--x\ngroup::---\nmask::--x\nother::---\n\n'
+            before='user::rwx\ngroup::---\nother::---\n\n'
+            for i,target in enumerate((parent,public),1):
+                m=parent.stat();intent={'path':str(target),'dev':m.st_dev,'ino':m.st_ino if target==parent else 999,'before':before}
+                entry={**intent,'after':after}
+                c.publish_exact(base/f'acl-{i:03}.json',c.encoded(intent))
+                c.publish_exact(base/f'acl-{i:03}.after.json',c.encoded(entry));stage['acl'].append(entry)
+            (base/'stage.json').write_bytes(c.encoded(stage))
+            config=b'{"fixed":"controller"}'
+            (base/'home/controller.json').write_bytes(config);(base/'home/controller.json').chmod(0o600)
+            c.publish_exact(base/'configs'/(c.sha(config)+'.json'),config)
+            (base/'home/bin').mkdir(mode=0o700)
+            runtime=base/'home/bin/grain-runtime';runtime.write_bytes((base/'bin/grain-runtime').read_bytes());runtime.chmod(0o500)
+            original_metadata=c.metadata
+            def metadata(path,owner=None,mode=None):
+                return original_metadata(path,self.uid if owner==0 else owner,mode)
+            def mkdir(path,uid=0,gid=0,mode=0o700):
+                path.mkdir(mode=mode);path.chmod(mode)
+            with patch.object(c,'load',return_value=({'operatorGid':self.gid},base,r)), \
+                 patch.object(c,'metadata',side_effect=metadata),patch.object(c,'mkdir',side_effect=mkdir), \
+                 patch.object(c,'acl_text',return_value=after):
+                yield base,r,stage,public,newbin,after
+
+    def test_public_listener_register_is_separate_exact_and_restart_safe(self):
+        with self.public_listener_fixture() as (base,r,stage,public,binary,after):
+            old=(base/'stage.json').read_bytes();client=(base/'bin/mini').read_bytes()
+            status=c.register_public_listener(r['store'],'helper',str(binary))
+            self.assertTrue(status['stopped']);self.assertEqual(status['stageSha256'],c.sha(old))
+            self.assertEqual(status['consent'],stage['consent'])
+            self.assertEqual(status['publicListener']['binarySha256'],c.sha(binary.read_bytes()))
+            self.assertEqual(public.with_suffix('.controller').read_bytes(),c.listener_pin(r))
+            self.assertEqual((base/'stage.json').read_bytes(),old);self.assertEqual((base/'bin/mini').read_bytes(),client)
+            self.assertEqual(c.register_public_listener(r['store'],'helper',str(binary)),status)
+            binary.write_bytes(b'other binary')
+            with self.assertRaises(ValueError):c.register_public_listener(r['store'],'helper',str(binary))
+
+    def test_public_listener_refuses_busy_lock_live_socket_and_changed_custody(self):
+        with self.public_listener_fixture() as (base,r,stage,public,binary,after):
+            with open(public.with_suffix('.lock'),'rb') as lock:
+                fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                with self.assertRaises(BlockingIOError):c.register_public_listener(r['store'],'helper',str(binary))
+            public.write_bytes(b'not an owned socket')
+            with self.assertRaises(ValueError):c.register_public_listener(r['store'],'helper',str(binary))
+            public.unlink()
+            with patch.object(c,'acl_text',return_value=after.replace('--x','rwx')):
+                with self.assertRaises(ValueError):c.register_public_listener(r['store'],'helper',str(binary))
+            c.register_public_listener(r['store'],'helper',str(binary))
+            pin=public.with_suffix('.controller');pin.write_bytes(b'MINI-PUBLIC-CONTROLLER/v1\n999\n')
+            with self.assertRaises(ValueError):c.controller_status(r['store'],'helper')
+            pin.write_bytes(c.listener_pin(r));target=base/'public-listener/mini';target.chmod(0o755);target.write_bytes(b'foreign')
+            with self.assertRaises(ValueError):c.controller_status(r['store'],'helper')
+
+    def test_public_listener_registration_resumes_exact_interrupted_publication(self):
+        for fail_at in range(1,4):
+            with self.subTest(fail_at=fail_at),self.public_listener_fixture(str(fail_at)) as (base,r,stage,public,binary,after):
+                original=c.publish_exact;count=[0]
+                def crash(*args,**kwargs):
+                    original(*args,**kwargs);count[0]+=1
+                    if count[0]==fail_at:raise OSError('simulated publication interruption')
+                with patch.object(c,'publish_exact',side_effect=crash),self.assertRaises(OSError):
+                    c.register_public_listener(r['store'],'helper',str(binary))
+                self.assertEqual(c.register_public_listener(r['store'],'helper',str(binary))['publicListener']['controllerUid'],r['uid'])
+
+    def test_public_listener_teardown_holds_native_lock_and_never_adopts_socket(self):
+        with self.public_listener_fixture() as (base,r,stage,public,binary,after):
+            c.register_public_listener(r['store'],'helper',str(binary))
+            with self.assertRaisesRegex(RuntimeError,'retained'):
+                with c.public_listener_teardown(base,stage,r):raise RuntimeError('retained')
+            self.assertTrue(public.with_suffix('.controller').exists())
+            public.write_bytes(b'new inode')
+            with self.assertRaises(ValueError):
+                with c.public_listener_teardown(base,stage,r):pass
+            self.assertEqual(public.read_bytes(),b'new inode');public.unlink()
+            with c.public_listener_teardown(base,stage,r) as record:
+                self.assertEqual(record['socket'],str(public))
+                with open(public.with_suffix('.lock'),'rb') as lock:
+                    with self.assertRaises(BlockingIOError):fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                public.parent.chmod(0o700) # Model the exact recorded ancestor ACL restoration.
+            self.assertFalse(public.with_suffix('.controller').exists())
+            self.assertTrue((base/'public-listener.json').exists())
+
+    def test_registered_remove_restores_ancestors_without_touching_replacement_socket(self):
+        with self.public_listener_fixture() as (base,r,stage,public,binary,after):
+            c.register_public_listener(r['store'],'helper',str(binary))
+            r['name']='mini-c-'+r['store']
+            history=self.root/'history';history.mkdir(mode=0o700)
+            original_ancestry=c.ancestry
+            def ancestry(path,owners):return original_ancestry(path,owners|{self.uid})
+            with patch.object(c,'HISTORY',history),patch.object(c,'service'), \
+                 patch.object(c,'preserve_consent_state',return_value={'retained':True}),patch.object(Path,'read_text',return_value=''), \
+                 patch.object(c,'ancestry',side_effect=ancestry),patch.object(c.grp,'getgrnam',side_effect=KeyError), \
+                 patch.object(c,'run') as run:
+                result=c.remove(r['store'],'helper')
+            self.assertFalse(public.with_suffix('.controller').exists());self.assertFalse(base.exists())
+            restores=[call for call in run.call_args_list if '--restore=-' in call.args[0]]
+            self.assertEqual(len(restores),1)
+            self.assertEqual(restores[0].kwargs['input'].decode().splitlines()[0],'# file: '+str(public.parent))
+            retained=json.loads(Path(result['receipt']).read_bytes())
+            self.assertEqual(retained['publicListener']['socket'],str(public))
+            self.assertEqual(retained['stage']['acl'],stage['acl'])
+
     def test_storage_upgrade_retries_only_exact_old_new_publication_states(self):
         with self.storage_upgrade_fixture() as (base,r,units,old_stage,old_unit):
             original=c.replace_root_record; calls=[]

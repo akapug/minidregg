@@ -2,8 +2,6 @@
 excluded from the default qualification gate. Executable roots are listed
 separately in protocol/lean-build-surfaces.json to avoid main collisions. -/
 import Assurance.BendArithmeticQualification
-import Assurance.BoundedNockChecks
-import Assurance.BoundedNockNetworkChecks
 import Assurance.BoundedNockRefinement
 import Assurance.ObjectiveBendCommittedSource
 import Assurance.ObjectiveBendProofSource
@@ -14,9 +12,7 @@ import Assurance.ObjectiveZkLiteralInstance
 import Assurance.ObjectiveZkRefinementAudit
 import Assurance.ObjectiveZkStepTariff
 import Assurance.ObjectiveZkTraceDisclosure
-import Assurance.ObliviousNetworkChecks
 import Assurance.ResourceMoneyOperationDomainAudit
-import Assurance.ResourceMoneyReceiverAudit
 import Compiler.BendCommitmentFrame
 import Compiler.BendCommitmentFrameChecks
 import Compiler.BendCommittedNetwork
@@ -28,7 +24,6 @@ import Compiler.BendCommittedUnroll
 import Compiler.BendProofBytes
 import Compiler.BendProofCshake
 import Compiler.BendProofCshakeBounded
-import Compiler.BendProofCshakeBoundedChecks
 import Compiler.BendProofCshakeChecks
 import Compiler.BendProofKeccak
 import Compiler.BendProofKeccakChecks

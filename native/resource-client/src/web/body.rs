@@ -792,7 +792,23 @@ pub(super) fn act_as(site: &Site, title: &str, lines: Vec<String>, id: &str, nex
     }
     let refs: Vec<(&str, &str)> = links.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     let status = match ending.code { 0 => 200, 3 => 403, 4 => 202, _ => 400 };
-    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_of(&ending, &refs, transition)) }
+    // Only `can --any`'s own ending may offer its composed line as a one-click submit: any other
+    // verb's stdout can carry a stranger's words (a document, a room, an app's claims), and a
+    // `paste:` line planted there must stay text, never become a button that runs as this member.
+    let paste = if lines.len() == 1 && asks_can_any(&lines[0]) { paste_form(&ending) } else { String::new() };
+    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_parts(&ending, &refs, transition, &paste)) }
+}
+
+/// The line is the shell's `can … --any …` (the one verb that composes a line to paste).
+fn asks_can_any(line: &str) -> bool {
+    crate::shell::words(line).is_ok_and(|w| w.first().map(String::as_str) == Some("can") && w.iter().any(|x| x == "--any"))
+}
+
+/// `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
+fn paste_form(ending: &Ending) -> String {
+    ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
+        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
+    }).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- the shell as the runner
@@ -975,6 +991,10 @@ fn verb_detached(site: &Site, line: &str) -> bool {
 /// proposal and its `submit`), the same binary and subcommand the ssh login runs.
 pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
+    #[cfg(test)]
+    if let Some(ending) = redteam::FAKE_SHELL.with(|fake| fake.borrow().as_ref().map(|answer| answer(lines))) {
+        return Some(ending);
+    }
     let exe = std::env::current_exe().ok()?;
     let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
     if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
@@ -1097,10 +1117,14 @@ fn answered(ending: &Ending, next: &[(&str, &str)]) -> String {
 }
 
 pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: bool) -> String {
+    outcome_parts(ending, next, transition, "")
+}
+
+fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste: &str) -> String {
     let (class, headline) = ending.class(transition);
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     if class == "undecided" {
         if let Some(id) = ending.stderr.split("lookup ").nth(1).and_then(|r| r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).next()).filter(|s| !s.is_empty()) {
@@ -1108,12 +1132,8 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         }
     }
     let detail = ending.text();
-    // `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
-    let paste = ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
-        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
-    }).unwrap_or_default();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -1171,7 +1191,7 @@ fn purse_meter(site: &Site, live: bool) -> String {
             let scale = balance.max(1000);
             format!(
                 "<section class=\"purse\"{}><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
-                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
+                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\" aria-label=\"Purse balance: {balance} credits\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
                 if live { " data-live=\"15000\"" } else { "" },
                 scale / 10,
@@ -1195,13 +1215,13 @@ fn purse(site: &Site) -> Page {
 fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> Page {
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     Page {
         status: if class == "refused" { 403 } else { 200 },
         title: title.to_owned(),
         stamp: Stamp::None,
-        body: format!("<div class=\"outcome {class}\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
+        body: format!("<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
     }
 }
 
@@ -1257,6 +1277,10 @@ pub(super) fn quote(word: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "body/redteam.rs"]
+mod redteam;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn only_reads_and_local_lines_may_be_stopped_at_the_deadline() {
@@ -1277,6 +1301,34 @@ mod tests {
             let words = crate::shell::words(&line).unwrap();
             assert_eq!(words, vec!["say".to_owned(), word.to_owned()], "{line}");
         }
+    }
+
+    /// The one outcome partial is a live region for every class: the line a form post
+    /// produces (admitted, refused with its clause, undecided with its retry) must reach
+    /// assistive tech, and the word — never the colour alone — carries the outcome.
+    #[test]
+    fn web_outcome_partial_is_a_live_region() {
+        for (code, transition, class, word) in [
+            (0, true, "admitted", "Admitted"),
+            (0, false, "answered", "Answered"),
+            (3, true, "refused", "refused"),
+            (4, true, "undecided", "undecided"),
+            (2, false, "error", "Usage"),
+        ] {
+            let ending = Ending { code, stdout: "done\n".into(), stderr: String::new() };
+            let html = outcome_of(&ending, &[("next", "/x")], transition);
+            assert!(
+                html.contains(&format!("class=\"outcome {class}\" role=\"status\"")) && html.contains("aria-live=\"polite\"") && html.contains("aria-atomic=\"true\""),
+                "{class}: {html}"
+            );
+            assert!(html.contains(word), "{class} carries its word: {html}");
+        }
+        // The partial the gateway renders for the anonymous POST refusal, same shape.
+        let page = outcome_page("Refused", "refused", "This body is the public reader", ANONYMOUS, &[]);
+        assert!(page.body.contains("role=\"status\"") && page.body.contains("aria-live=\"polite\""));
+        // A refusal's clause is highlighted, and the word stays beside it.
+        let refused = outcome_of(&Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n".into() }, &[], true);
+        assert!(refused.contains("refused") && refused.contains("mark class=\"clause\""), "{refused}");
     }
 
     #[test]

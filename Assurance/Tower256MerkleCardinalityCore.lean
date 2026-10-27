@@ -39,6 +39,7 @@ open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Compiler.Tower256AdditiveFriController
 open Minidregg.Compiler.Tower256CshakeMerkleController
 open Minidregg.Selvage
+open Minidregg.Theory.BinaryCubeAddress
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 

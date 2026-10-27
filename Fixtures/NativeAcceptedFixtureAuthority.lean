@@ -57,11 +57,13 @@ first.created.requestedByte = 7
 first.created.atom = inlineObject=true payload=[7]
 # the charge is the request's capacity: the driver's ENVELOPE, with proofWork = price(tariff, ENVELOPE)
 # = base 1 + sourceTicks-tariff 1 * ENVELOPE.sourceTicks 100000 (world: --tariff-base/--tariff-tick
-# unset, so both 1; every other tariff key 0)
+# unset, so both 1; every other tariff key 0). The exception is storageBytes: the measured retained
+# bytes (legs + born images + the event's canonical bytes, DeployedCharge.storageCharge); the signed
+# capacity is only its ceiling (7877e6e7).
 first.charge.incidences = 8
 first.charge.turnBytes = 2000000
 first.charge.memoryTouches = 1000000
-first.charge.storageBytes = 2000000
+first.charge.storageBytes = 3969
 first.charge.witnessBytes = 2000000
 first.charge.proofWork = 321290
 first.charge.feeDebit = 0

@@ -92,6 +92,7 @@
     for (const el of root.querySelectorAll("[data-load]:not([data-loaded])")) {
       el.dataset.loaded = "1";
       const slot = el.querySelector(".fill") || el;
+      if (!sameOrigin(el.dataset.load)) continue;
       try {
         const response = await fetch(el.dataset.load, { headers: { "X-Mini-Fragment": "1" }, credentials: "same-origin" });
         slot.innerHTML = await response.text();
@@ -154,7 +155,9 @@
   function restore() {
     if (!location.hash || location.hash.length < 2) return;
     for (const raw of location.hash.slice(1).split("|")) {
-      const path = decodeURIComponent(raw);
+      // The hash is anyone's link: only a same-origin path opens a pane.
+      let path = "";
+      try { const u = sameOrigin(decodeURIComponent(raw)); path = u ? u.pathname + u.search : ""; } catch (e) {}
       if (path && !paneFor(path)) { const pane = newPane(path); load(pane, path); }
     }
   }
@@ -191,13 +194,29 @@
     const state = { term, fit, ws: null, closed: false, tries: 0 };
     terminals.set(pane, state);
     const encoder = new TextEncoder();
+    // A text mirror of what the terminal wrote (the xterm canvas has no text
+    // alternative): the last few KB, escape sequences stripped, readable on
+    // demand — never live-announced, it would be noise.
+    const mirror = document.createElement("pre");
+    mirror.className = "term-mirror vh";
+    mirror.setAttribute("aria-label", "Recent terminal output");
+    mirror.tabIndex = 0;
+    host.appendChild(mirror);
+    const reflect = (u) => {
+      const text = new TextDecoder().decode(u)
+        .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1b\][^\x07]*\x07/g, "")
+        .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+      if (!text) return;
+      mirror.textContent = (mirror.textContent + text).slice(-4096);
+    };
     const connect = () => {
       if (state.closed) return;
       const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + host.dataset.ws);
       ws.binaryType = "arraybuffer";
       state.ws = ws;
       ws.addEventListener("open", () => { state.tries = 0; fit.fit(); ws.send(JSON.stringify({ resize: [term.cols, term.rows] })); term.focus(); });
-      ws.addEventListener("message", (e) => term.write(new Uint8Array(e.data)));
+      ws.addEventListener("message", (e) => { const u = new Uint8Array(e.data); term.write(u); reflect(u); });
       ws.addEventListener("close", (e) => {
         state.ws = null;
         if (state.closed) return;

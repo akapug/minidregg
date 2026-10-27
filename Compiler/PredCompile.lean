@@ -1768,14 +1768,16 @@ theorem lower_hashEq_binds (profile : CompilerProfile) (hprofile : profile.Admis
       Minidregg.Pred.HashEqDigest.deployed o))
     (A : List ℕ → ℕ → F) (h : systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c))) :
     Minidregg.Pred.hashEqOpening new v b c = some o ∨
-      Minidregg.Theory.HashBytes.Collision Minidregg.Pred.HashEqDigest.deployed := by
+      ∃ o', Minidregg.Pred.hashEqOpening new v b c = some o' ∧
+        Minidregg.Theory.HashBytes.CollisionAmong Minidregg.Pred.HashEqDigest.deployed
+          (fun x => x = o.preimage ∨ x = o'.preimage) := by
   obtain ⟨o', ho', hc'⟩ := (lower_hashEq_correct profile hprofile hinj).mp ⟨A, h⟩
   rw [hcommit] at hc'
   have hadm' := (Minidregg.Pred.hashEqOpening_eq_some.mp ho').2.2.2.2.2.2
   rcases Minidregg.Pred.HashEqDigest.binds_or_collides _ hadm hadm' (Option.some.inj hc') with
     heq | hcol
   · exact .inl (heq ▸ ho')
-  · exact .inr hcol
+  · exact .inr ⟨o', ho', hcol⟩
 
 end DecEqF
 

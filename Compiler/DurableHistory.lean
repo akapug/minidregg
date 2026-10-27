@@ -254,7 +254,9 @@ theorem verifyAt_sound (leaves : Nat → Digest) {frontier : List (Nat × Digest
     (honest : Honest nodeDigest leaves n frontier)
     {entry : RawEntry} {nodes : List RawNode} {read : Verified frontier n height}
     (ok : verifyAt frontier n height entry nodes = .ok read) :
-    leafDigest height read.record read.chain read.root = leaves height ∨ NodeCollision nodeDigest := by
+    leafDigest height read.record read.chain read.root = leaves height ∨
+      ∃ k e d, LogAccumulator.locate height n frontier = some (k, e, d) ∧
+        LogAccumulator.NodeCollisionBelow nodeDigest leaves k e := by
   have within : 1 ≤ height ∧ height ≤ n := by
     unfold verifyAt at ok
     split at ok

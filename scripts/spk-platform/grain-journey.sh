@@ -118,22 +118,55 @@ confirmed() {
 service_up() {
   name=$1 socket=$2 mode=$3
   pidfile=$RUN/sock/$name.pid
+  service_binary=$MINI controller_uid=
+  if [ "$mode" = serve-public-proxy ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+    # Only the fixed installer registration selects a distinct public listener.
+    # The ordinary clients and the private operator service keep their pins.
+    jq -e --arg socket "$socket" --arg root "$GRAINS_ROOT/controller/public-listener/mini" \
+      --argjson operator "$(id -u)" '
+      .publicListener.socket == $socket and .publicListener.binary == $root and
+      .publicListener.operatorUid == $operator and
+      (.publicListener.controllerUid | type == "number" and . > 0 and floor == .) and
+      (.publicListener.binarySha256 | test("^[0-9a-f]{64}$"))' "$SPK_PUBLIC_LISTENER_RECEIPT" >/dev/null ||
+      fail 'public listener registration differs'
+    service_binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+    controller_uid=$(jq -er .publicListener.controllerUid "$SPK_PUBLIC_LISTENER_RECEIPT")
+    [ -f "$service_binary" ] && [ ! -L "$service_binary" ] &&
+      [ "$(stat -c '%u:%h' "$service_binary")" = 0:1 ] &&
+      [ "$(sha "$service_binary")" = "$(jq -er .publicListener.binarySha256 "$SPK_PUBLIC_LISTENER_RECEIPT")" ] ||
+      fail 'public listener registered binary differs'
+  fi
+  service_pin=$(printf '%s\n' "$mode" "$service_binary" "$(sha "$service_binary")" "$controller_uid" | sha256sum | cut -d ' ' -f 1)
   if [ -S "$socket" ] && [ -s "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     # Do not accept the old independent public native session as this proxy.
     [ -s "$pidfile.mode" ] && [ "$(cat "$pidfile.mode")" = "$mode" ] ||
       fail "$name service mode differs; retain this fixture and use a fresh one"
+    [ -s "$pidfile.pin" ] && [ "$(cat "$pidfile.pin")" = "$service_pin" ] || fail "$name live service pin differs"
+    service_identity check "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary" ||
+      fail "$name live process/socket identity differs"
     return 0
   fi
   mkdir -p -m 700 "${socket%/*}"
   rm -f "$socket"
+  if [ -f "$pidfile.identity.json" ]; then
+    archived_identity=$pidfile.identity.$(sha "$pidfile.identity.json").json
+    if [ -e "$archived_identity" ]; then
+      cmp "$pidfile.identity.json" "$archived_identity" || fail 'prior service identity archive differs'
+      rm "$pidfile.identity.json"
+    else
+      mv "$pidfile.identity.json" "$archived_identity"
+    fi
+  fi
   case "$mode" in
     serve-operator)
       set -- "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$socket" ;;
     serve-public-proxy)
-      set -- "$MINI" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG" ;;
+      set -- "$service_binary" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG"
+      [ -z "$controller_uid" ] || set -- "$@" --controller-uid "$controller_uid" ;;
     *) fail "unsupported fixture service mode $mode" ;;
   esac
   printf '%s\n' "$mode" >"$pidfile.mode"
+  printf '%s\n' "$service_pin" >"$pidfile.pin"
   setsid "$@" >"$RUN/sock/$name.log" 2>&1 </dev/null &
   echo "$!" >"$pidfile"
   tick=0
@@ -142,6 +175,43 @@ service_up() {
     tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "$name socket timeout"
     sleep 0.5
   done
+  service_identity capture "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary"
+}
+
+service_identity() {
+  python3 - "$@" <<'PYSERVICE'
+import hashlib,json,os,pathlib,signal,stat,sys
+action,record,pid,socket,binary=sys.argv[1:]
+p=pathlib.Path('/proc')/pid; s=pathlib.Path(socket); record=pathlib.Path(record)
+def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+if action in ('capture','check','stop'):
+    pidfd=None
+    if action=='stop':
+        try: pidfd=os.pidfd_open(int(pid))
+        except ProcessLookupError: raise SystemExit(0)
+    fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+    sm=s.lstat()
+    assert p.stat().st_uid == os.getuid() and stat.S_ISSOCK(sm.st_mode) and sm.st_uid == os.getuid()
+    value={'pid':int(pid),'startTicks':fields[19], 'executableSha256':digest(p/'exe'),
+           'socket':str(s),'socketDevice':sm.st_dev,'socketInode':sm.st_ino}
+    assert value['executableSha256']==digest(pathlib.Path(binary))
+    if action=='capture': record.write_text(json.dumps(value,sort_keys=True)+'\n')
+    else: assert value==json.loads(record.read_bytes())
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd,signal.SIGTERM)
+        os.close(pidfd)
+else:
+    value=json.loads(record.read_bytes())
+    assert value['pid']==int(pid) and value['socket']==str(s)
+    if p.exists():
+        fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+        assert fields[19]!=value['startTicks'] or fields[0]=='Z', 'recorded service remains alive'
+    if s.exists():
+        sm=s.lstat()
+        assert stat.S_ISSOCK(sm.st_mode) and sm.st_uid==os.getuid()
+        assert (sm.st_dev,sm.st_ino)==(value['socketDevice'],value['socketInode']), 'socket replacement refused'
+        s.unlink()
+PYSERVICE
 }
 
 services() {
@@ -157,7 +227,25 @@ stop_services() {
   for name in participant operator; do
     pidfile=$RUN/sock/$name.pid
     [ -s "$pidfile" ] || continue
-    kill "$(cat "$pidfile")" 2>/dev/null || :
+    if [ -f "$pidfile.identity.json" ]; then
+      binary=$MINI
+      if [ "$name" = participant ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+        binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+      fi
+      if kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        service_identity stop "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$binary" ||
+          fail "$name stop identity differs"
+      fi
+    else
+      kill "$(cat "$pidfile")" 2>/dev/null || :
+    fi
+    if [ -f "$pidfile.identity.json" ]; then
+      tick=0
+      until service_identity remove-stale "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$MINI" 2>/dev/null; do
+        tick=$((tick+1)); [ "$tick" -lt 100 ] || fail "$name stop/owned socket cleanup timeout"
+        sleep .1
+      done
+    fi
     rm -f "$pidfile"
   done
 }

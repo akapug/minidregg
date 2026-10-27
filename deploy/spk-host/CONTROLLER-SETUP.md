@@ -314,3 +314,44 @@ through a bounded (96 KiB) no-follow descriptor. Deploy both files together. The
 operator-writable source entrypoint remains explicitly trusted root setup; this
 pin prevents ambient sibling substitution and read/execute races, rather than
 pretending to isolate root from an operator authorized to replace that entrypoint.
+
+`controller-status STORE HELPER` observes a stopped controller without starting
+it. It validates the registered units, both runtime copies, retained controller
+configuration and consent settings, then returns `stageSha256`,
+`runtimeSha256`, `controllerConfigSha256`, the exact stage `consent` object,
+`stopped: true` and `stoppedUnits`. If a public listener is registered, that
+listener must also be stopped; the result includes its verified registration.
+This is an observation under the installer lock, not a promise that another
+operator process will never start a service afterward.
+
+`controller-public-listener STORE HELPER OPERATOR_BINARY` registers the qualified
+public-proxy Mini independently of the controller's Mini and runtime. Stop the
+controller and its helper units, then stop the participant public proxy and
+wait for its owned socket to disappear. Registration holds the same native
+`host.lock` flock, verifies the original root-recorded ancestor ACLs, and
+requires an absent public socket. It retains the original socket identity as
+history; it never adopts a replacement socket. The exact input binary is copied
+to root-owned `controller/public-listener/mini` with mode 0555. The immutable
+registration selects the controller UID and precreates the operator-private
+`host.controller` pin (`MINI-PUBLIC-CONTROLLER/v1`, decimal UID, final newline).
+A bounded interrupted copy can be resumed only with the same exact input.
+
+Use the returned `publicListener.binary`, `socket` and `controllerUid` to run
+`mini serve-public-proxy --socket SOCKET --upstream PRIVATE_SOCKET --config CONFIG
+--controller-uid UID`. The qualified native listener validates the execute-only
+controller ACL on its parent and recreates the write-only socket ACL on every
+bind. It retains the public envelope filter; its private upstream and Store gain
+no controller ACL. Existing private startup remains the default when no
+controller has been explicitly pinned. The controller's client binaries and
+source-admission state do not change when its public listener is upgraded.
+
+For a registered listener, controller removal requires that public service to
+be stopped and its socket absent. Under the same native lock, removal validates
+the exact registration, binary, UID pin, ancestor inodes and ACLs; it restores
+only recorded ancestor ACLs and removes only the exact UID pin. The old socket
+receipt and new listener registration remain in the root cleanup history.
+A changed pin, replaced ancestor, unexpected socket or interrupted ACL teardown
+fails closed and retains the remaining records for operator repair. The public
+service's mode/config/lock files are retained. It can return to ordinary private
+startup after successful controller teardown; removal is not a live listener
+reconfiguration operation.
