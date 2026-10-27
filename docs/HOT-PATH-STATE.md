@@ -72,18 +72,22 @@ sites in 8 files (`rg 'sealAt |sealCheckpoint |bodyStream|body\.state'`). Local 
   `/build/lanes/hot-path-codec-perf-before.pid`, output `/build/lanes/hot-path-codec-perf/`; ~250/840 births at 16:10Z
   (the World fold also makes every birth slower as the Store grows).
 
-## Next
+## Next (successor: start here)
 
-0. When the coordinator ends nanodregg's dregg-ref window: `uptime` (< 8), start
-   `/build/lanes/hot-path-compact-build.sh` (one background wait on its PID file); copy `out/bin` to dregg-build;
-   time + sample one describe of `/build/lanes/hpc-laps/cand-n1/snap` with it and with the candidate (paired).
+Ruling (ember, 2026-10-27): §2(h) is the PRIMARY fix: snapshots fast-forwarded, replay only as `store audit`.
+Statements drafted in `docs/HOT-PATH-2026-10-27.md` §2(h), items 1-5 (lines listed in the report), sent to the
+coordinator for the statements auditor. Order:
+1. After the audit verdict: elaborate items 1-5 as `Prop`s in `Compiler/DurableFastForwardSpec.lean` on a branch from
+   integration (the local `lane/hot-path-world-checkpoint`, integration 006cd214 + the compaction, can be reused;
+   seed its `.lake/build` with `cp -Rc` from the integration worktree, never hardlinks), then build v4: `Body` + `system`
+   + six indexes (`bodyStream`, frame v4 tag in `PersistedCodecTags`), the three sealers (full `storeCheckpoint`, LIGHT
+   `DurableServed.lean:1059` which must now hold and advance the World per append, `checkpointDifferential`), the
+   fast-forward open in `loadChained`, `store audit` = genesis replay + v4 byte comparison. Epoch bump rides L1's one
+   re-genesis (coordinator schedules). Build on the Mac (warm clone) or dregg-ref when the coordinator gives a slot.
+2. The paired compaction measurement on dregg-ref (staged script) when nano's window ends, then the `TurnOfIntent`
+   written-keys statement (second item) to the coordinator as file:line.
+3. Shell start / `can` growth on a fresh ~500-record world born under this tree (dregg-build, Linux binaries from a
+   dregg-ref build of this tree); the Mac cannot host it (system file table shared, ENFILE at 50 births).
 
-1. Host at a20dad89 built → profile-open the same 483-record snapshot with it (AFTER), and the candidate again
-   (paired control); push the numbers into §2(h).
-2. When the BEFORE run is DONE: its reopen row (BEFORE at ~1.7k), then the a20dad89 Host on a snapshot of that Store
-   (AFTER at ~1.7k); propose slope before/after from the births' `create` samples.
-3. Coordinator's queue, measured on dregg-build's `wf-jrun3` world before/after: `mini shell` start (51 s) and
-   `can jwf162708` (6 min first verdict, then ~10 s per verb; op 130 runs on `sessionCurrent`, the cost is inside
-   `DryRun.dryRunLoaded`): sample each, fix at the cause, push per item.
-
-Standing: never kill by pattern; stop only by PID files; filtered tests; never the demo box; named-file commits.
+Standing: never kill by pattern; stop only by PID files; filtered tests; never the demo box; named-file commits; on the
+box no Lean closure builds except the integrator's cut and the nightly; dregg-ref one closure at a time, `uptime` < 8.
