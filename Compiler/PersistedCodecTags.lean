@@ -229,7 +229,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev certify_args_v1 : String := "DREGG.CERTIFY.ARGS/v1"
 @[persisted_codec_tag] abbrev pay_soltx_nullifier_v1 : String := "DREGG.PAY.SOLTX.NULLIFIER/v1"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_source_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-SOURCE/v1"
-@[persisted_codec_tag] abbrev objective_activity_record_v8 : String := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8"
+@[persisted_codec_tag] abbrev objective_activity_record_v9 : String := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v9"
 @[persisted_codec_tag] abbrev application_lifecycle_begin_ingress_v2 : String := "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v2"
 @[persisted_codec_tag] abbrev application_retry_create_begin_ingress_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-BEGIN-INGRESS/v4"
 @[persisted_codec_tag] abbrev seat_args_v1 : String := "DREGG.SEAT.ARGS/v1"
