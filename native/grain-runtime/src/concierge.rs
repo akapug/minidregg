@@ -40,7 +40,13 @@
 //! `refunded`; a Host refusal is a final `refund-failed`; typed contention, or
 //! no submit marker once the sending child was reaped, starts a new record
 //! generation; anything else stays `refund-undecided` and is looked up again
-//! on the next pass. A journal written under the old `ledger:HEIGHT` key is
+//! on the next pass. A pass that died while its refund child ran is re-driven
+//! on the next tick: every pass holds `JOURNAL.lock` and each child inherits
+//! it, so taking the lock proves the old pass and its children exited, and
+//! the begun generation's record is looked up (no submit marker: a new
+//! generation is sent; a crash after submit is found by the lookup, never paid
+//! twice). After eight generations a refund is named `refund-stalled` and the
+//! payment stays in the till. A journal written under the old `ledger:HEIGHT` key is
 //! refused at load (re-genesis; no migration).
 use crate::Result;
 use serde::Deserialize;
@@ -370,12 +376,75 @@ impl Journal {
 
 struct Runner<'a> {
     config: &'a Config,
+    /// The pass lock's descriptor, inherited by every child: the lock stays
+    /// held until the pass AND every client it started have exited.
+    lock: Option<std::os::unix::io::RawFd>,
+}
+
+/// One concierge pass at a time, held across its children. `flock` belongs
+/// to the open file description, which each `mini` child inherits (its
+/// close-on-exec flag is cleared for it), so a later pass that takes the lock
+/// knows the previous pass and every refund child it started have exited:
+/// a begun refund whose submitter was never seen to stop is then proven
+/// stopped, and exact lookup of its record decides it.
+pub(crate) struct PassLock(fs::File);
+
+pub(crate) fn lock_pass(config: &Config) -> Result<PassLock> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    let path = config.journal.with_extension("lock");
+    let file = OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err(format!(
+            "{} is held: a previous concierge pass or a refund child it started is still running; the next tick retries",
+            path.display()));
+    }
+    Ok(PassLock(file))
+}
+
+impl PassLock {
+    fn fd(&self) -> std::os::unix::io::RawFd {
+        use std::os::unix::io::AsRawFd;
+        self.0.as_raw_fd()
+    }
+}
+
+/// The child keeps the pass lock: clear close-on-exec on its descriptor.
+fn inherit_lock(command: &mut Command, fd: std::os::unix::io::RawFd) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fcntl(fd, libc::F_SETFD, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Holding the pass lock proves every earlier submitter exited: mark each
+/// begun refund generation whose stop was never journaled.
+fn prove_previous_submitters_stopped(journal: &mut Journal, _lock: &PassLock) -> Result<()> {
+    let unproven: Vec<(String, u64)> = journal.refunding.iter()
+        .filter(|(_, open)| !open.submitter_stopped)
+        .map(|(key, open)| (key.clone(), open.generation)).collect();
+    for (key, generation) in unproven {
+        journal.append(json!({"key":key,"decision":"refund-submitter-stopped","generation":generation,
+            "basis":"pass lock taken: the previous pass and every child holding its lock have exited"}))?;
+    }
+    Ok(())
 }
 
 impl Runner<'_> {
     /// Run the pinned client; stdout parsed as the LAST JSON value it printed.
     fn mini(&self, args: &[&str]) -> Result<(Value, String)> {
-        let output = crate::deadline::output(Command::new(&self.config.mini).args(args), crate::deadline::NATIVE_CALL)
+        let mut command = Command::new(&self.config.mini);
+        command.args(args);
+        if let Some(fd) = self.lock {
+            inherit_lock(&mut command, fd);
+        }
+        let output = crate::deadline::output(&mut command, crate::deadline::NATIVE_CALL)
             .map_err(|e| crate::deadline::describe(&self.config.mini.display().to_string(), e))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -427,7 +496,8 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
     if program.kind != "minidregg-concierge-program-v1" {
         return Err("unknown concierge program version".into());
     }
-    let run = Runner { config };
+    let lock = lock_pass(config)?;
+    let run = Runner { config, lock: Some(lock.fd()) };
     let dir = run.dir();
     let inbox = config.inbox.display().to_string();
     let outbox = config.outbox.display().to_string();
@@ -439,6 +509,7 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
         return Err("the program names another concierge subject than this workspace".into());
     }
     let mut journal = Journal::open(&config.journal)?;
+    prove_previous_submitters_stopped(&mut journal, &lock)?;
     let (room, _) = run.mini(&["credit", "--action", "room", "--dir", &dir, "--room", &program.refs.room])?;
     if string(&room, "room")? != program.room {
         return Err("the room reference names another room than the program".into());
@@ -739,6 +810,9 @@ pub(crate) fn classify_refund(recovery: &Value, submitter_stopped: bool) -> Refu
 /// How many fresh generations one pass may send after decided no-effect
 /// outcomes (contention) before it leaves the refund open for the next pass.
 const REFUND_GENERATIONS_PER_PASS: u64 = 3;
+/// How many generations a refund gets in all before the concierge stops
+/// driving it and names it `refund-stalled` (the payment stays in the till).
+const REFUND_GENERATIONS_MAX: u64 = 8;
 
 /// Drive one begun refund to a decision. Each generation is sent at most
 /// once under its own operation record; after any send the child is reaped
@@ -759,6 +833,14 @@ fn drive_refund(
     loop {
         let record = refund_record(records, &transaction, open.generation);
         let record_text = record.display().to_string();
+        if !record.exists() && open.generation >= REFUND_GENERATIONS_MAX {
+            let line = json!({"key":key,"decision":"refund-stalled","height":height,"reason":open.reason,
+                "entry":open.entry,"subject":open.subject,"refund":open.refund,"generation":open.generation,
+                "notice":format!("the refund of {} to {} was not admitted in {REFUND_GENERATIONS_MAX} generations; the payment stays in the till for the operator",
+                    open.refund.get("amount").and_then(Value::as_str).unwrap_or("?"), open.refund.get("to").and_then(Value::as_str).unwrap_or("?"))});
+            journal.append(line.clone())?;
+            return Ok(line);
+        }
         if !record.exists() {
             if sent_this_pass >= REFUND_GENERATIONS_PER_PASS {
                 return Err(format!("refund {key}: {sent_this_pass} generations decided without effect this pass; retried next pass"));
@@ -1111,7 +1193,7 @@ mod tests {
         let program = Program { kind: "minidregg-concierge-program-v1".into(), room: "9".into(), concierge: "5".into(),
             till: "12".into(), topic: "renew".into(), member_verbs: vec![],
             refs: ProgramRefs { room: "lab".into(), till: "lab-till".into() } };
-        let run = Runner { config: &config };
+        let run = Runner { config: &config, lock: None };
         let mut journal = Journal::open(&config.journal).unwrap();
         let key = ledger_key("9001");
         journal.append(json!({"key":key,"decision":"deciding","height":"40","subject":"77","reason":"underpaid",
@@ -1130,6 +1212,101 @@ mod tests {
         let calls = fs::read_to_string(&log).unwrap();
         assert_eq!(calls.lines().filter(|l| l.contains("lookup-operation")).count(), 2);
         assert!(!calls.contains("--action refund"), "a begun refund must never be sent again: {calls}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// O43: the concierge pass died while its refund child ran. The child
+    /// sealed generation 0 (its record exists) and is killed before submit.
+    /// While it lives it holds the pass lock, so the next tick waits; once it
+    /// is gone the next tick takes the lock, proves the old submitter stopped,
+    /// looks the record up (never submitted), sends generation 1, and exactly
+    /// one refund is admitted.
+    #[test]
+    fn a_refund_child_killed_between_seal_and_submit_is_redriven_on_the_next_tick() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("redrive");
+        let log = dir.join("calls.log");
+        let records = dir.join("refund-operations");
+        fs::create_dir(&records).unwrap();
+        fs::set_permissions(&records, fs::Permissions::from_mode(0o700)).unwrap();
+        let admitted = dir.join("admitted");
+        let fake = dir.join("mini");
+        // refund: writes its operation record (the seal), and generation 0
+        // then waits to be killed before it submits; generation 1 submits.
+        // lookup-operation: generation 0's record has no submit marker.
+        fs::write(&fake, format!("#!/bin/sh\necho \"$*\" >>{log}\ncase \"$*\" in\n\
+*--action\\ refund*) rec=$(echo \"$*\" | sed 's/.*--operation-record //'); echo '{{}}' >\"$rec\";\n\
+  case \"$rec\" in *-g0.json) sleep 30; exit 1 ;; esac; echo admitted >>{admitted}; echo '{{\"transaction\":\"7\"}}' ;;\n\
+*lookup-operation*) echo '{{\"status\":\"not-submitted\",\"outcome\":null}}' ;;\n\
+*) exit 9 ;;\nesac\n", log = log.display(), admitted = admitted.display())).unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let config = Config { mini: fake.clone(), workspace: dir.join("ws"), program: dir.join("program.json"),
+            inbox: dir.join("inbox"), outbox: dir.join("outbox"), journal: dir.join("journal.jsonl"), roster: None };
+        let program = Program { kind: "minidregg-concierge-program-v1".into(), room: "9".into(), concierge: "5".into(),
+            till: "12".into(), topic: "renew".into(), member_verbs: vec![],
+            refs: ProgramRefs { room: "lab".into(), till: "lab-till".into() } };
+        let key = ledger_key("9002");
+        // The dying pass: it took the lock, journaled the refund as begun and
+        // started generation 0's child, then died (its lock descriptor closes).
+        let first = lock_pass(&config).unwrap();
+        let mut journal = Journal::open(&config.journal).unwrap();
+        journal.append(json!({"key":key,"decision":"deciding","height":"41","subject":"78","reason":"underpaid",
+            "refund":{"to":"6","amount":"40","asset":"0","memo":refund_memo("9","9002","underpaid")},"generation":0})).unwrap();
+        let record0 = refund_record(&records, "9002", 0);
+        let mut child = Command::new(&fake);
+        child.args(["credit", "--action", "refund", "--operation-record", &record0.display().to_string()]);
+        inherit_lock(&mut child, first.fd());
+        {
+            use std::os::unix::process::CommandExt;
+            child.process_group(0);
+        }
+        let mut child = child.spawn().unwrap();
+        for _ in 0..200 { if record0.exists() { break } std::thread::sleep(Duration::from_millis(10)); }
+        assert!(record0.exists(), "generation 0 sealed its record");
+        drop(first);
+        drop(journal);
+        // The next tick while the killed-to-be child lives: the lock is held.
+        assert!(lock_pass(&config).is_err(), "a live refund child keeps the pass lock");
+        // Killed before submit, with every descendant that holds the lock
+        // (the `sleep` inside it would otherwise keep the lock, rightly).
+        unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL); }
+        child.wait().unwrap();
+        // The next tick: lock, prove, look up, re-drive.
+        let lock = lock_pass(&config).unwrap();
+        let run = Runner { config: &config, lock: Some(lock.fd()) };
+        let mut journal = Journal::open(&config.journal).unwrap();
+        assert!(!journal.refunding[&key].submitter_stopped);
+        prove_previous_submitters_stopped(&mut journal, &lock).unwrap();
+        let open = journal.refunding[&key].clone();
+        let line = drive_refund(&run, "/ws", &program, &records, &mut journal, &key, open).unwrap();
+        assert_eq!(line["decision"], "refunded");
+        assert_eq!(line["generation"], 1);
+        assert_eq!(fs::read_to_string(&admitted).unwrap().lines().count(), 1, "exactly one refund admitted");
+        let calls = fs::read_to_string(&log).unwrap();
+        assert_eq!(calls.lines().filter(|l| l.contains("lookup-operation")).count(), 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refund_that_never_lands_is_named_stalled_after_its_generations() {
+        let dir = scratch("stalled");
+        let records = dir.join("refund-operations");
+        fs::create_dir(&records).unwrap();
+        let config = Config { mini: "/nonexistent".into(), workspace: dir.join("ws"), program: dir.join("program.json"),
+            inbox: dir.join("inbox"), outbox: dir.join("outbox"), journal: dir.join("journal.jsonl"), roster: None };
+        let program = Program { kind: "minidregg-concierge-program-v1".into(), room: "9".into(), concierge: "5".into(),
+            till: "12".into(), topic: "renew".into(), member_verbs: vec![],
+            refs: ProgramRefs { room: "lab".into(), till: "lab-till".into() } };
+        let key = ledger_key("9003");
+        let mut journal = Journal::open(&config.journal).unwrap();
+        journal.append(json!({"key":key,"decision":"deciding","height":"42","subject":"79","reason":"underpaid",
+            "refund":{"to":"6","amount":"40","asset":"0","memo":"m"},"generation":REFUND_GENERATIONS_MAX})).unwrap();
+        let open = journal.refunding[&key].clone();
+        let run = Runner { config: &config, lock: None };
+        let line = drive_refund(&run, "/ws", &program, &records, &mut journal, &key, open).unwrap();
+        assert_eq!(line["decision"], "refund-stalled");
+        assert!(line["notice"].as_str().unwrap().contains("stays in the till"));
+        assert!(journal.decided.contains(&key));
         fs::remove_dir_all(&dir).unwrap();
     }
 
