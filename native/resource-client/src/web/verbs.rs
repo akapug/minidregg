@@ -22,6 +22,8 @@ pub(super) enum Kind {
     /// `a|b|c` of literals: a select.
     Choice(Vec<String>),
     Word,
+    /// Free text given inline at the end of the line (chat, narrate): one line, as typed.
+    Rest,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +101,7 @@ fn leaf_alt(leaf: &crate::shell_grammar::Leaf) -> Alt {
         G::Subject | G::Word => Kind::Word,
         G::Number => Kind::Number,
         G::TextOrFile | G::File | G::FileOrStdin | G::Law => Kind::Text,
+        G::Rest => Kind::Rest,
         G::Choice(options) => Kind::Choice(options.iter().map(|o| o.to_string()).collect()),
     };
     let mut tokens: Vec<Tok> = leaf.path.iter().map(|w| Tok::Lit(w.to_string())).collect();
@@ -347,6 +350,7 @@ fn input(field: &str, label: &str, optional: bool, kind: &Kind) -> String {
         Kind::Id => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
         Kind::Number => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
         Kind::Word => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\"{req}>"),
+        Kind::Rest => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
     }
 }
 
@@ -381,6 +385,13 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
                     id = value.clone();
                 }
                 match kind {
+                    // Free text rides on the line as typed (the verb takes the rest of the line).
+                    Kind::Rest => {
+                        if value.contains('\n') {
+                            return simple(400, name, &format!("{label} is one line"));
+                        }
+                        words.push(value);
+                    }
                     Kind::Text if !(value.starts_with('@') && !value.contains('\n')) => {
                         files += 1;
                         let stamp = if id.is_empty() { super::body::fresh_id() } else { id.clone() };
