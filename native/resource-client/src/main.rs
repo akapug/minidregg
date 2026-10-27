@@ -785,7 +785,18 @@ usage:
     one attempt chain per request: a rerun reports the retained attempt and authors nothing new
   mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
-  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
+  mini fleet-sign join|send|transfer|receipt|incoming|retry [--profile P] ...   (dregg-client-sign's verbs on Mini, plus `incoming` for the helm adapter; `mini fleet-sign --help`)
+  mini member --dir WORKSPACE [--name REF] [--home H] [--json true|false] [--action workspace|app-status]   (what `home` prints: your resources and exact recovery actions)
+  mini clock --action init ... | view|tick --workspace WORKSPACE [--capability CAP]
+  mini checkpoint --action view|certify --workspace WORKSPACE [--control CAP --min-tail N]
+  mini activity --action submit|quote|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini seat --action submit|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini hermes-handoff --action registration|activation|registry|dispatch [action options]   (Hermes's task registrations and dispatch bundles)
+  mini story-law --table TABLE.txt [--player SUBJECT]   (the story law a table of rooms and ways compiles to, printed; installs nothing)
+  mini mix --action registrar-key|native-key|key|seal|batch|scan --state DIR [action options]   (the post-quantum mailbox mix)
+  mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
+  mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
+  mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -892,17 +903,22 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Self> {
-        let mut raw = env::args_os().skip(1);
+        Self::parse_from(env::args_os().skip(1))
+    }
+
+    fn parse_from(raw: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let mut raw = raw.into_iter();
         let mut values = Vec::new();
-        let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        let no_command = || format!("no command given\n\n{USAGE}");
+        let mut command = raw.next().ok_or_else(no_command)?;
         if command == OsStr::new("--verify-host") {
             VERIFY_HOST.store(true, Ordering::Relaxed);
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());
@@ -3706,6 +3722,37 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mini_with_no_command_ends_non_zero_and_help_still_ends_zero() {
+        let no_command = Args::parse_from(Vec::<OsString>::new()).err().expect("no command is an error");
+        assert_ne!(no_command, USAGE);
+        assert!(no_command.starts_with("no command given"));
+        assert_ne!(main_ending(Err(no_command), 0).code, 0);
+        let help = Args::parse_from([OsString::from("--help")]).err().expect("--help prints usage");
+        assert_eq!(main_ending(Err(help), 0).code, 0);
+    }
+
+    #[test]
+    fn every_command_the_dispatcher_runs_is_named_in_usage() {
+        let source = include_str!("main.rs");
+        let body = &source[source.find("\nfn run(").expect("fn run")..source.find("\nfn main()").expect("fn main")];
+        let mut hidden = Vec::new();
+        for line in body.lines() {
+            let Some(rest) = line.strip_prefix("        \"") else { continue };
+            let Some((names, _)) = rest.split_once(" =>") else { continue };
+            let names = names.split_once(" if ").map_or(names, |(names, _)| names);
+            for name in names.split(" | ").map(|n| n.trim_matches('"')) {
+                if !name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+                    && !USAGE.contains(&format!("mini {name} ")) && !USAGE.contains(&format!("mini {name}|"))
+                    && !USAGE.contains(&format!("mini --verify-host {name} "))
+                {
+                    hidden.push(name.to_owned());
+                }
+            }
+        }
+        assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
 
     #[test]
     fn store_audit_argv_is_the_host_arm_and_optional_receipts() {

@@ -19,6 +19,7 @@ controller-tool STORE HELPER REQUEST_ID TOOL ARGUMENTS_JSON
 controller-tool-result STORE HELPER REQUEST_ID
 controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
+controller-service-logs STORE HELPER
 controller-export STORE HELPER
 controller-reserve-export STORE HELPER DISPATCH_ATTEMPT_ID
 controller-remove STORE HELPER
@@ -185,6 +186,17 @@ exclusive lock, so cleanup cannot race a new command after a process census. Too
 fixed runtime and native control socket. A call has a 20-minute deadline and
 16 MiB combined output bound; failure after sending still requires exact
 request recovery, never an automatic resend. No general command runner exists.
+
+`controller-service-logs` returns private bounded system journals for only the
+fixed service units in the checked root receipt/stage. It validates the actual
+manager unit, owner and fragment, selects its observed invocation when present,
+and otherwise labels the result as recent history for that fixed unit. Each
+service is limited to 256 records, 1 MiB of output and 20 seconds. Exact bytes are
+returned as base64 with hashes, never interpreted as commands or admission.
+Callers cannot supply a unit, invocation, path or journal expression. The
+read-only verb uses the shared lifecycle lock and is useful after a failed
+startup when the controller's private state journal cannot explain systemd
+stderr. Save its output as private evidence, not public chat/log prose.
 
 `controller-journal` returns only the native controller journal. `controller-export`
 returns bounded state evidence (at most 512 regular files / 32 MiB, with hashes

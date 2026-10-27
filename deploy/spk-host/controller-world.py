@@ -928,6 +928,64 @@ def reserve_export(store, helper, attempt_text):
     return {'protocol': 'mini-spk-controller-evidence-v1', 'store': store, 'files': files}
 
 
+def bounded_service_journal(unit, invocation):
+    args = ['/usr/bin/journalctl', '--quiet', '--no-pager', '--lines=256',
+            '--output=short-iso-precise', '--unit=' + unit]
+    if invocation:
+        require(re.fullmatch('[0-9a-f]{32}', invocation) is not None, 'service invocation identity malformed')
+        args.append('_SYSTEMD_INVOCATION_ID=' + invocation)
+    proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, env=ENV, start_new_session=True)
+    output = bytearray(); deadline = time.monotonic() + 20
+    try:
+        with selectors.DefaultSelector() as ready:
+            ready.register(proc.stdout, selectors.EVENT_READ)
+            while ready.get_map():
+                require(time.monotonic() < deadline, 'service journal read exceeded deadline')
+                for key, _ in ready.select(min(1, max(0, deadline - time.monotonic()))):
+                    chunk = os.read(key.fileobj.fileno(), 65536)
+                    if not chunk:
+                        ready.unregister(key.fileobj)
+                    else:
+                        output.extend(chunk)
+                        require(len(output) <= 1024 * 1024, 'service journal output exceeds 1 MiB bound')
+        require(proc.wait(timeout=max(.1, deadline - time.monotonic())) == 0, 'service journal query failed')
+        return bytes(output)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=10)
+        proc.stdout.close()
+
+
+def service_logs(store, helper):
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r, partial=True)
+    result = []
+    # Names come exclusively from the checked root receipt/stage. No caller
+    # unit, invocation, path, executable, or journal expression is accepted.
+    for unit in r['units']:
+        if not unit.endswith('.service') or unit not in stage['units']:
+            continue
+        observed = manager_properties(unit)
+        require(observed.get('LoadState') == 'loaded'
+                and observed.get('FragmentPath') == str(UNITS / unit) and observed.get('Transient') == 'no',
+                'service journal manager identity differs')
+        expected = r['uid'] if unit == r['units'][0] else r['operatorUid']
+        require(observed.get('User') == str(expected), 'service journal unit user differs')
+        invocation = observed.get('InvocationID', '')
+        raw = bounded_service_journal(unit, invocation)
+        after = manager_properties(unit)
+        require(after.get('InvocationID', '') == invocation and after.get('FragmentPath') == observed['FragmentPath'],
+                'service invocation changed while reading journal')
+        result.append({'unit': unit, 'invocationId': invocation or None,
+                       'selection': 'observed-invocation' if invocation else 'fixed-unit-recent-history',
+                       'sha256': sha(raw), 'bytes': len(raw), 'base64': base64.b64encode(raw).decode()})
+    return {'protocol': 'mini-spk-controller-service-logs-v1', 'store': store,
+            'maximumLinesPerService': 256, 'maximumBytesPerService': 1024 * 1024,
+            'services': result, 'privateEvidence': True}
+
+
 def preserve_consent_state(base, r):
     if not has_consent(r):
         return None
@@ -1029,7 +1087,8 @@ def main(args):
             require(stat.S_ISREG(m.st_mode) and m.st_uid == 0 and m.st_nlink == 1
                     and stat.S_IMODE(m.st_mode) == 0o600, 'controller lifecycle lock custody refused')
             shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack',
-                                'controller-journal', 'controller-export', 'controller-reserve-export')
+                                'controller-journal', 'controller-export', 'controller-reserve-export',
+                                'controller-service-logs')
             # Lock order is global allocator, then controller. Never wait on a
             # controller while holding the allocator: an active call gets a
             # visible busy refusal, not account/config deletion underneath it.
@@ -1045,6 +1104,7 @@ def main(args):
             return tool(store, helper, action[11:], extra[0], extra[1:])
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
+        elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
         elif action == 'controller-journal' and not extra:
             _, base, r = load(store, helper)
             result = json.loads(read_file(Path(r['home']) / 'state/journal.json', r['uid'], 8 * 1024 * 1024))

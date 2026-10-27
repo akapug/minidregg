@@ -9,6 +9,8 @@ import re
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -477,6 +479,42 @@ class ControllerWorldTests(unittest.TestCase):
                 with self.assertRaises(ValueError):c.reserve_export(r['store'],'/unused',bad)
         self.assertEqual(set(result['files']),{prefix+'/'+n for n in names})
         for n in names:self.assertEqual(result['files'][prefix+'/'+n]['sha256'],hashlib.sha256(n.encode()).hexdigest())
+
+    def test_service_logs_use_only_recorded_services_and_observed_invocations(self):
+        r = self.consent_record(); r['uid'] = 100032; r['operatorUid'] = 1000
+        stage = {'units':{n:'recorded' for n in r['units']}}
+        def observed(unit):
+            return {'LoadState':'loaded','FragmentPath':str(c.UNITS/unit),'Transient':'no',
+                    'User':str(r['uid'] if unit == r['units'][0] else r['operatorUid']),
+                    'InvocationID':'ab'*16 if unit == r['units'][0] else ''}
+        with patch.object(c,'load',return_value=({},self.root,r)), patch.object(c,'checked_units',return_value=stage), \
+                patch.object(c,'manager_properties',side_effect=observed), patch.object(c,'bounded_service_journal',return_value=b'private journal\n') as journal:
+            result=c.service_logs(r['store'],'/unused')
+        self.assertEqual([row['unit'] for row in result['services']], [n for n in r['units'] if n.endswith('.service')])
+        self.assertEqual(journal.call_args_list[0].args,(r['units'][0],'ab'*16))
+        self.assertEqual(result['services'][0]['selection'],'observed-invocation')
+        self.assertEqual(result['services'][1]['selection'],'fixed-unit-recent-history')
+        self.assertTrue(result['privateEvidence'])
+        with patch.object(c,'load',return_value=({},self.root,r)), patch.object(c,'checked_units',return_value=stage), \
+                patch.object(c,'manager_properties',return_value={**observed(r['units'][0]),'User':'0'}), \
+                patch.object(c,'bounded_service_journal') as journal:
+            with self.assertRaises(ValueError):c.service_logs(r['store'],'/unused')
+            journal.assert_not_called()
+
+    def test_service_journal_output_bound_and_owned_child_reap(self):
+        spawn=subprocess.Popen; children=[]; calls=[]
+        def child(args,**kwargs):
+            calls.append(args)
+            process=spawn([sys.executable,'-c','import sys; sys.stdout.buffer.write(b"x" * 1048577)'],**kwargs)
+            children.append(process);return process
+        with patch.object(c.subprocess,'Popen',side_effect=child):
+            with self.assertRaisesRegex(ValueError,'1 MiB'):c.bounded_service_journal('fixed.service','ab'*16)
+        self.assertTrue(all(process.poll() is not None for process in children))
+        self.assertEqual(calls[0],['/usr/bin/journalctl','--quiet','--no-pager','--lines=256',
+                                  '--output=short-iso-precise','--unit=fixed.service','_SYSTEMD_INVOCATION_ID='+'ab'*16])
+        with patch.object(c.subprocess,'Popen') as start:
+            with self.assertRaises(ValueError):c.bounded_service_journal('fixed.service','bad invocation')
+            start.assert_not_called()
 
 
 if __name__ == '__main__':
