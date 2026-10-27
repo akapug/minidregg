@@ -1295,26 +1295,6 @@ impl PrivateHttpEntrance {
             policy,
         })
     }
-
-    pub fn serve_unavailable(&self) -> io::Result<()> {
-        self.serve_resident(|request, _, _| Ok(unavailable_response(request.method)))
-    }
-
-    /// The caller owns the sole resident RpcDriver and fixed participant
-    /// signer. This entrance authenticates transport before invoking it; the
-    /// callback must still obtain a fresh Mini permit for every request.
-    pub(crate) fn serve_resident(
-        &self,
-        mut dispatch: impl FnMut(ReceivedRequest, EntranceKind, &CustodianPolicy) -> io::Result<Vec<u8>>,
-    ) -> io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept()?;
-            if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
-                let _ =
-                    handle_stream_with(stream, &self.policy, self.socket.parent(), &mut dispatch);
-            }
-        }
-    }
 }
 
 fn poll_entrances(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<bool> {

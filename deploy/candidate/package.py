@@ -66,7 +66,6 @@ ROLES = {
     "spkHost": "spk-host",
     "spkBrowserProxy": "spk-browser-proxy",
     "spkBroker": "mini-spk-broker",
-    "spkHostd": "spk-hostd",
     "spkVolumeHelper": "mini-spk-volume-helper",
     "discord": "mini-discord",
     "payWatcher": "pay-watcher",
@@ -79,12 +78,12 @@ ROLES = {
 }
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
-# copy silently lacked mini-keys, mini-spk-broker and spk-hostd. host and consent are Lean roles.
+# copy silently lacked mini-keys and mini-spk-broker. host and consent are Lean roles.
 RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-store"),
               ("verifier", "credential-signature-verifier"), ("grainRuntime", "grain-runtime"),
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
-              ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
+              ("spkVolumeHelper", "spk-host"),
               ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
               ("keys", "mini-keys"),
               ("testProvider", "hermes-test-provider"), ("launchGate", "launch-gate"))

@@ -47,8 +47,6 @@ pub mod dispatch_native;
 #[cfg(target_os = "linux")]
 mod dispatch_web_input;
 #[cfg(target_os = "linux")]
-pub mod endpoint;
-#[cfg(target_os = "linux")]
 pub mod hostd;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
