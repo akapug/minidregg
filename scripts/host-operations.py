@@ -33,7 +33,7 @@ def unique_object(pairs):
 def load(root):
     data = json.loads((root / REGISTRY).read_text(), object_pairs_hook=unique_object)
     require(data.get("format") == "mini-host-request-operations-v1", "unknown operation registry format")
-    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "consent_exempt", "client_constants", "consent_frames", "ordinary_headers"}, "unknown registry fields")
+    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "consent_exempt", "client_constants", "consent_frames", "ordinary_headers", "dav_methods", "dav_headers"}, "unknown registry fields")
     ids, symbols = {}, set()
     for entry in data["operations"]:
         require(set(entry) == {"code", "symbol", "status", "routes", "owner", "purpose", "receiver", "effect"}, f"invalid operation fields: {entry}")
@@ -97,6 +97,11 @@ def load(root):
     # Lean's ordinaryHeaderName (Kernel/ApplicationDispatchAdmission.lean), emitted for every Rust reader.
     headers = data["ordinary_headers"]
     require(isinstance(headers, list) and headers and all(isinstance(h, str) and re.fullmatch(r"[a-z0-9-]+", h) for h in headers) and len(set(headers)) == len(headers), "ordinary_headers must be distinct lowercase header names")
+    # Lean's davMethod and davHeaderName: the WebDAV/CalDAV calls and their parameter headers.
+    for field, pattern in (("dav_methods", r"[A-Z]+"), ("dav_headers", r"[a-z0-9-]+")):
+        names = data[field]
+        require(isinstance(names, list) and names and all(isinstance(n, str) and re.fullmatch(pattern, n) for n in names) and len(set(names)) == len(names), f"{field} must be distinct names")
+    require(not set(data["dav_headers"]) & set(headers), "dav_headers must not be ordinary headers")
     bindings = set()
     for binding in data["client_constants"]:
         require(set(binding) == {"path", "constant", "operation"}, "invalid client constant binding")
@@ -348,6 +353,9 @@ def generated_lean(data):
     lines += [f"def consentFrames : List UInt8 := [{', '.join(str(e['code']) for e in data['consent_frames'])}]", "",
               "/-- `Kernel.ApplicationDispatchAdmission.ordinaryHeaderName`'s names (registry `ordinary_headers`). -/",
               "def ordinaryHeaderNames : List String := [" + ", ".join(json.dumps(h) for h in data["ordinary_headers"]) + "]", "",
+              "/-- `Kernel.ApplicationDispatchAdmission.davMethod`'s and `davHeaderName`'s names. -/",
+              "def davMethodNames : List String := [" + ", ".join(json.dumps(h) for h in data["dav_methods"]) + "]",
+              "def davHeaderNames : List String := [" + ", ".join(json.dumps(h) for h in data["dav_headers"]) + "]", "",
               "end Minidregg.Host.HostOperations"]
     return "\n".join(lines) + "\n"
 
@@ -375,7 +383,13 @@ def generated(data):
     lines += ["pub const CONSENT_FRAMES: &[u8] = &[" + ", ".join(e["symbol"] for e in data["consent_frames"]) + "];"]
     lines += ["", "// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.",
               "pub const ORDINARY_HEADER_NAMES: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["ordinary_headers"]) + "];",
-              "pub fn ordinary_header_name(name: &str) -> bool {", "    ORDINARY_HEADER_NAMES.contains(&name)", "}"]
+              "pub fn ordinary_header_name(name: &str) -> bool {", "    ORDINARY_HEADER_NAMES.contains(&name)", "}",
+              "", "// Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.",
+              "pub const DAV_METHODS: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["dav_methods"]) + "];",
+              "pub fn dav_method(name: &str) -> bool {", "    DAV_METHODS.contains(&name)", "}",
+              "// Kernel/ApplicationDispatchAdmission.lean davHeaderName: signed, admitted on a DAV method only.",
+              "pub const DAV_HEADER_NAMES: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["dav_headers"]) + "];",
+              "pub fn dav_header_name(name: &str) -> bool {", "    DAV_HEADER_NAMES.contains(&name)", "}"]
     return "\n".join(lines) + "\n"
 
 # The Rust crates that speak the Host wire (each can name the generated constants).
@@ -479,6 +493,12 @@ def lean_ordinary_headers(root):
     require(m, "Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: shape not recognised")
     return re.findall(r'"([^"]*)"', m[1])
 
+def lean_string_list(root, definition):
+    source = (root / "Kernel/ApplicationDispatchAdmission.lean").read_text()
+    m = re.search(r"def " + definition + r"\b.*?:=\s*\(\[(.*?)\]\s*:\s*List String\)", source, re.S)
+    require(m, f"Kernel/ApplicationDispatchAdmission.lean {definition}: shape not recognised")
+    return re.findall(r'"([^"]*)"', m[1])
+
 def lean_consent_frames(root):
     """The frame numbers Host/ClientConsentCore.lean dispatches on (match arms, comparisons, ranges)."""
     source = masked((root / "Host/ClientConsentCore.lean").read_text(), "lean")
@@ -511,6 +531,8 @@ def check(root, check_generated=True):
         values = selector_codes(matches[0], symbols)
         require(values == [symbols[binding["operation"]]], f"client constant drift: {binding['path']}:{binding['constant']} expected {binding['operation']}")
     require(lean_ordinary_headers(root) == data["ordinary_headers"], "ordinary_headers differ from Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName (order included)")
+    require(lean_string_list(root, "davMethod") == data["dav_methods"], "dav_methods differ from Kernel/ApplicationDispatchAdmission.lean davMethod (order included)")
+    require(lean_string_list(root, "davHeaderName") == data["dav_headers"], "dav_headers differ from Kernel/ApplicationDispatchAdmission.lean davHeaderName (order included)")
     frames = {e["code"] for e in data["consent_frames"]}
     served = lean_consent_frames(root)
     require(served == frames, f"consent frames: Host/ClientConsentCore.lean serves unregistered {sorted(served - frames)}; registered but not served {sorted(frames - served)}")

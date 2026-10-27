@@ -15,6 +15,48 @@ pub enum Method {
     Put,
     Patch,
     Delete,
+    /// The WebDAV/CalDAV calls (`web-session.capnp` @7..@16, `acl` excepted); each takes its typed
+    /// parameters from `WebRequest::dav`.
+    Propfind,
+    Proppatch,
+    Mkcol,
+    Copy,
+    Move,
+    Lock,
+    Unlock,
+    Report,
+    Options,
+}
+
+impl Method {
+    /// A call whose WebSession method has no content parameter.
+    pub fn bodyless(self) -> bool {
+        matches!(self, Self::Get | Self::Head | Self::Delete | Self::Copy | Self::Move | Self::Unlock | Self::Options)
+    }
+    /// A call whose content is `xmlContent :Text`.
+    pub fn xml_text(self) -> bool {
+        matches!(self, Self::Propfind | Self::Proppatch | Self::Lock)
+    }
+}
+
+/// `PropfindDepth`, and for COPY and LOCK the `shallow` flag (`Zero` is shallow).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Depth {
+    Zero,
+    One,
+    #[default]
+    Infinity,
+}
+
+/// The typed DAV parameters, projected from the signed `depth`, `destination`, `overwrite` and
+/// `lock-token` headers. Empty on every non-DAV call.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DavArgs {
+    pub depth: Option<Depth>,
+    /// Relative Sandstorm path of the destination (copy, move).
+    pub destination: Option<String>,
+    pub no_overwrite: bool,
+    pub lock_token: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +126,7 @@ pub struct WebRequest {
     pub path_and_query: String,
     pub context: RequestContext,
     pub body: Option<Body>,
+    pub dav: DavArgs,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,13 +213,37 @@ fn validate(request: &WebRequest, max_response: usize) -> capnp::Result<()> {
         return Err(error("response bound exceeds transport maximum"));
     }
     match request.method {
-        Method::Post | Method::Put | Method::Patch if request.body.is_none() => {
+        Method::Post | Method::Put | Method::Patch | Method::Proppatch if request.body.is_none() => {
             return Err(error("method requires typed body"))
         }
-        Method::Get | Method::Head | Method::Delete if request.body.is_some() => {
+        m if m.bodyless() && request.body.is_some() => {
             return Err(error("method does not carry a body"))
         }
+        m if m.xml_text()
+            && request.body.as_ref().is_some_and(|b| std::str::from_utf8(&b.bytes).map_or(true, |t| t.contains('\0'))) =>
+        {
+            return Err(error("DAV xmlContent is not text"))
+        }
         _ => {}
+    }
+    let dav = &request.dav;
+    match request.method {
+        Method::Copy | Method::Move => {
+            let destination = dav.destination.as_deref().ok_or_else(|| error("COPY/MOVE requires a destination"))?;
+            if destination.starts_with('/') || destination.contains('#') {
+                return Err(error("DAV destination must be relative without fragment"));
+            }
+            bounded(destination, MAX_PATH)?;
+        }
+        Method::Unlock => bounded(dav.lock_token.as_deref().ok_or_else(|| error("UNLOCK requires a lock token"))?, MAX_FIELD)?,
+        _ => {}
+    }
+    if (dav.destination.is_some() && !matches!(request.method, Method::Copy | Method::Move))
+        || (dav.lock_token.is_some() && request.method != Method::Unlock)
+        || (dav.no_overwrite && !matches!(request.method, Method::Copy | Method::Move))
+        || (dav.depth.is_some() && !matches!(request.method, Method::Propfind | Method::Copy | Method::Lock | Method::Report))
+    {
+        return Err(error("DAV parameter on a call that does not take it"));
     }
     if let Some(body) = &request.body {
         bounded(&body.mime_type, 256)?;
@@ -522,6 +589,52 @@ fn error_body(
     }
 }
 
+fn xml(request: &WebRequest) -> capnp::Result<&str> {
+    match &request.body {
+        None => Ok(""),
+        Some(body) => std::str::from_utf8(&body.bytes).map_err(|_| error("DAV xmlContent is not text")),
+    }
+}
+
+/// `options` answers `Options`, not a `Response`: an empty 200 whose one header is the DAV
+/// compliance classes the app declared (`DAV: 1, 2, 3`, extensions after them).
+fn options_response(reply: web::web_session::options::Reader<'_>) -> capnp::Result<WebResponse> {
+    let mut classes: Vec<String> = [(reply.get_dav_class1(), "1"), (reply.get_dav_class2(), "2"), (reply.get_dav_class3(), "3")]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, class)| class.to_owned())
+        .collect();
+    let extensions = reply.get_dav_extensions()?;
+    if extensions.len() as usize > MAX_FIELDS {
+        return Err(error("too many DAV extensions"));
+    }
+    for extension in extensions.iter() {
+        let extension = text(Ok(extension?))?;
+        bounded(&extension, 256)?;
+        if extension.contains([',', ' ']) || extension.is_empty() {
+            return Err(error("DAV extension is not a token"));
+        }
+        classes.push(extension);
+    }
+    let mut headers = Vec::new();
+    if !classes.is_empty() {
+        headers.push(Header { name: "dav".into(), value: classes.join(", ") });
+    }
+    Ok(WebResponse {
+        result: WebResult::Content {
+            status: 200,
+            mime_type: String::new(),
+            encoding: String::new(),
+            language: String::new(),
+            etag: None,
+            body: Vec::new(),
+            download_name: None,
+        },
+        headers,
+        set_cookies: Vec::new(),
+    })
+}
+
 /// Dispatches one already-authorized operation over the actual Sandstorm WebSession RPC.
 /// Timeout is a transport bound; after it fires, delivery may be uncertain.
 pub async fn dispatch_web(
@@ -589,8 +702,99 @@ pub async fn dispatch_web(
                 content.set_mime_type(&body.mime_type);
                 content.set_encoding(&body.encoding);
                 content.set_content(&body.bytes);
-                fill_context(p.init_context(), &request.context, stream);
+                fill_context(p.init_context(), &request.context, stream.clone());
                 parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Propfind => {
+                let mut call = session.propfind_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_xml_content(xml(request)?);
+                p.set_depth(match request.dav.depth.unwrap_or_default() {
+                    Depth::Zero => web::web_session::PropfindDepth::Zero,
+                    Depth::One => web::web_session::PropfindDepth::One,
+                    Depth::Infinity => web::web_session::PropfindDepth::Infinity,
+                });
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Proppatch => {
+                let mut call = session.proppatch_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_xml_content(xml(request)?);
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Lock => {
+                let mut call = session.lock_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_xml_content(xml(request)?);
+                p.set_shallow(request.dav.depth == Some(Depth::Zero));
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Mkcol => {
+                let mut call = session.mkcol_request();
+                let mut p = call.get();
+                p.set_path(path);
+                if let Some(body) = &request.body {
+                    let mut content = p.reborrow().init_content();
+                    content.set_mime_type(&body.mime_type);
+                    content.set_encoding(&body.encoding);
+                    content.set_content(&body.bytes);
+                }
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Report => {
+                let mut call = session.report_request();
+                let mut p = call.get();
+                p.set_path(path);
+                if let Some(body) = &request.body {
+                    let mut content = p.reborrow().init_content();
+                    content.set_mime_type(&body.mime_type);
+                    content.set_encoding(&body.encoding);
+                    content.set_content(&body.bytes);
+                }
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Copy => {
+                let mut call = session.copy_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_destination(request.dav.destination.as_deref().expect("validated"));
+                p.set_no_overwrite(request.dav.no_overwrite);
+                p.set_shallow(request.dav.depth == Some(Depth::Zero));
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Move => {
+                let mut call = session.move_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_destination(request.dav.destination.as_deref().expect("validated"));
+                p.set_no_overwrite(request.dav.no_overwrite);
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Unlock => {
+                let mut call = session.unlock_request();
+                let mut p = call.get();
+                p.set_path(path);
+                p.set_lock_token(request.dav.lock_token.as_deref().expect("validated"));
+                fill_context(p.init_context(), &request.context, stream.clone());
+                parse_response(call.send().promise.await?.get()?, &state, max_response)?
+            }
+            Method::Options => {
+                let mut call = session.options_request();
+                let mut p = call.get();
+                p.set_path(path);
+                fill_context(p.init_context(), &request.context, stream.clone());
+                let reply = call.send().promise.await?;
+                (options_response(reply.get()?)?, None)
             }
         };
         if stream_handle.is_some() {
@@ -701,6 +905,7 @@ pub async fn open_web_socket(
             path_and_query: open.path_and_query.clone(),
             context: open.context.clone(),
             body: None,
+            dav: Default::default(),
         },
         0,
     )?;
