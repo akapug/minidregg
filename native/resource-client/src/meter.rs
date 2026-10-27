@@ -286,7 +286,9 @@ mod tests {
         assert!(selected_provider(br#"{"version":"4","providerResourceId":"07950","route":"pool","leg":"complete"}"#).is_err());
         assert!(selected_provider(br#"{"version":"4","providerResourceId":"7950","route":"none","leg":"complete"}"#).is_err());
         assert!(selected_provider(br#"{"version":"2","providerResourceId":"7950"}"#).is_err());
-        assert!(selected_provider(br#"{"version":"3","providerResourceId":"7950","route":"pool","status":"200","contentType":"application/json","reserve":"8"}"#).is_err());
+        let v3 = selected_provider(br#"{"version":"3","providerResourceId":"7950","route":"pool","status":"200","contentType":"application/json","reserve":"8"}"#);
+        assert!(v3.as_ref().err().is_some_and(|e| e.contains("unknown metering metadata version") && e.contains("v4")),
+            "a v3 frame is refused by name: {:?}", v3.err());
         assert!(selected_provider(br#"{"version":"4","providerResourceId":"7950","route":"pool","leg":"gone"}"#).is_err());
         assert!(selected_provider(br#"{"status":"200"}"#).is_err());
     }

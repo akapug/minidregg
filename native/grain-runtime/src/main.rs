@@ -14189,28 +14189,36 @@ impl Runtime {
         // The record is written whatever the result; a write failure is
         // reported with the prompt's own outcome and never replaces it.
         let recorded = self.record_prompt_outcome(invocation);
-        // A failed prompt pushes its note and trips the breaker, whose
-        // automatic reconcile runs before this record exists (R11 derives the
-        // note only from the record), so the note would stay for an operator.
-        // Now that the record is durable, derive what it proves.
-        if recorded.is_ok()
-            && !self.journal.unresolved_external.is_empty()
-            && self.child.is_none()
-            && self.journal.child.is_none()
-            && self.journal.connection == Connection::Detached
-        {
-            if let Err(error) = self.automatic_reconcile() {
-                let decision = self.journal.next_operation_id;
-                self.journal.reconciliation_log.push(json!({
-                    "decisionId":decision.to_string(),"action":"post-record-reconcile",
-                    "automatic":true,"result":error}));
-                let _ = self.save();
-            }
+        if recorded.is_ok() {
+            self.reconcile_after_prompt_record();
         }
         match (result, recorded) {
             (result, Ok(())) => result,
             (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
             (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
+        }
+    }
+
+    /// A failed prompt pushes its note and trips the breaker, whose automatic
+    /// reconcile runs before the prompt's outcome record exists (R11 derives
+    /// the note only from that record), so the note would wait for an
+    /// operator. Once the record is durable, derive what it proves, for a
+    /// detached task with no child; a refusal is logged like the
+    /// post-disconnect one.
+    fn reconcile_after_prompt_record(&mut self) {
+        if self.journal.unresolved_external.is_empty()
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.connection != Connection::Detached
+        {
+            return;
+        }
+        if let Err(error) = self.automatic_reconcile() {
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                "automatic":true,"result":error}));
+            let _ = self.save();
         }
     }
 
