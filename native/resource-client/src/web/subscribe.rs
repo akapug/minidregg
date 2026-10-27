@@ -12,6 +12,8 @@ use super::*;
 pub(super) const ROOM: &str = "subscribers";
 const ROW: &str = "zai-glm";
 const PROVIDERS: &str = "/etc/mini/providers.json";
+/// ember's retention and provider sentence (one file, read by the door and this body alike).
+pub(super) const RETENTION: &str = include_str!("../../../../deploy/policy/RETENTION.txt");
 
 /// What the tier buys, from the provider table: (model, calls a day, calls until the weekly reset).
 pub(super) fn offer(table: &Value) -> Option<(String, u64, u64)> {
@@ -66,7 +68,7 @@ fn now() -> u64 {
 pub(super) fn page(site: &Site, said: Option<String>) -> Page {
     let mut body = String::new();
     body.push_str(&format!("<section><h2>What it buys</h2><p>{}</p>", summary().unwrap_or_else(|| "This box's provider table has no subscriber route.".to_owned())));
-    body.push_str("<p class=\"policy\" data-owner=\"ember\">[POLICY: ember's sentence on what the Z.AI coding plan's terms permit goes here.]</p></section>\n");
+    body.push_str(&format!("<p class=\"policy\">{}</p></section>\n", escape(RETENTION.trim_end())));
     if let Some(said) = said {
         body.push_str(&said);
     }

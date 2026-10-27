@@ -686,6 +686,22 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
         }
+        ["export", "consent"] => {
+            // The member's own turns on their own fact: a write from the value read now (the
+            // compare-and-write refuses if it changed meanwhile), or the cell's birth if absent.
+            let want = if form.get("choice").map(String::as_str) == Some("cc0") { 1 } else { 0 };
+            let id = fresh_id();
+            let lines = match research_consent(site) {
+                Some(now) if now == want => {
+                    return export_page(site, Some(format!("Your world already records that choice (field 1 = {want}).")));
+                }
+                Some(now) => vec![format!("invoke {id} research-consent write 1 {want} {now}"), format!("submit {id}")],
+                None => vec!["create research-consent declared open".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
+            };
+            let mut page = act(site, "Research consent", lines, &id, &[("export", "/export")]);
+            page.title = "Research consent".into();
+            page
+        }
         ["subscribe", "pay"] => super::subscribe::pay(site),
         ["subscribe", "join"] => super::subscribe::join(site),
         ["export"] => {
@@ -897,6 +913,14 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// The member's research-consent fact: field 1 of their `research-consent` cell (1 = CC0, 0 =
+/// none), by a signed read; None when the cell is not in this workspace or not readable.
+fn research_consent(site: &Site) -> Option<i128> {
+    let reference = site.reference("research-consent").ok()?;
+    let (view, _, _) = site.read(&reference, "resource").ok()?;
+    view["cell"]["entries"].as_array()?.iter().find(|e| e["key"]["field"] == "1")?["value"].as_str()?.parse().ok()
+}
+
 /// A finished export's file under HOME/exports, by its name (letters, digits, '-').
 fn export_file(site: &Site, name: &str) -> Option<PathBuf> {
     let shell = site.shell.as_ref()?;
@@ -914,6 +938,19 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
     if let Some(said) = said {
         body.push_str(&format!("<p class=\"note\">{said}</p>\n"));
     }
+    body.push_str(&format!("<section><h2>What is kept</h2><p class=\"policy\">{}</p>", escape(super::subscribe::RETENTION.trim_end())));
+    let current = research_consent(site);
+    let shown = match current {
+        Some(1) => "contributed for research (CC0)".to_owned(),
+        Some(0) => "not contributed".to_owned(),
+        Some(other) => format!("an unknown value ({other})"),
+        None => "not recorded in your world".to_owned(),
+    };
+    body.push_str(&format!(
+        "<p>Your choice, as your world records it (<code>research-consent</code>, field 1): <strong>{shown}</strong>.</p>\
+         <form method=\"post\" action=\"/export/consent\"><label><input type=\"checkbox\" name=\"choice\" value=\"cc0\"{}> contribute my data for research (CC0; kept private until reviewed)</label> <button>Record my choice</button></form></section>\n",
+        if current == Some(1) { " checked" } else { "" }
+    ));
     let mut ready = Vec::new();
     let mut preparing = Vec::new();
     let mut failed = Vec::new();

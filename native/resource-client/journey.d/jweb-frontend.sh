@@ -91,7 +91,13 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"
       "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$NAME" --holder "$subject" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err" || return 1
       install -m 0600 "$SPONSOR_WS/provisions/$NAME/birth-context.json" "$M/home/provision/birth-context.json" || return 1
-      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null
+      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null || return 1
+      # The door's last enrolment step for a stranger who ticked "contribute my data for research":
+      # the member's research-consent fact, as the member (door::research_consent_lines(true)).
+      for l in "create research-consent declared open" "invoke research-consent-0 research-consent create 1 1" "submit research-consent-0"; do
+        mline "$M/home/workspace" "$M/home" "$l" >/dev/null || return 1
+      done
+      : >"$M/provisioned-this-run"
     }
     # A member an earlier run of this step provisioned (the box keeps its world) is reused.
     [ -f "$M/home/workspace/workspace.json" ] || provision_jwf || true
@@ -192,10 +198,26 @@ row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && ech
 # The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
 # point and not as a proof (A10's inclusion opening is pending).
 row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# Research consent (ember's ruling): the door wrote the member's fact at enrolment (ticked: CC0);
+# /export shows it with the sentence; the member flips it there (a write on their own cell); the
+# export's manifest carries the value the world holds.
+page=$(req GET /export)
+if [ -f "${M:-/nonexistent}/provisioned-this-run" ]; then
+  row consent-enrol "$(grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
+else
+  row consent-enrol "$(grep -qE 'field 1\): <strong>(contributed for research \(CC0\)|not contributed)' <<<"$page" && echo 1 || echo 0)" "reused member: $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
+fi
+rm -f "${M:-/nonexistent}/provisioned-this-run"
+if grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page"; then CWANT=none; CARGS=(); else CWANT=cc0; CARGS=(--data-urlencode "choice=cc0"); fi
+page=$(req POST /export/consent --data-urlencode "csrf=$CSRF" "${CARGS[@]}")
+cflip=$(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)
+page=$(req GET /export)
+want_text=$([ "$CWANT" = cc0 ] && echo 'contributed for research (CC0)' || echo 'not contributed')
+row consent-flip "$(grep -q "field 1): <strong>$want_text" <<<"$page" && echo 1 || echo 0)" "to $CWANT: $cflip"
 # The subscriber tier's page: what it buys (from the provider table, when the box has the row),
 # the policy line marked for ember, the price and window from the room, the two forms.
 page=$(req GET /subscribe)
-row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'data-owner="ember"' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
+row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
 # Export my world (the 11 November shutdown): start, wait until it is ready, read the document page
 # (its stamp carries the read's height and world root), download (streamed through the gateway,
 # then deleted on the box), untar: the document's text and the manifest's root are the live world's.
@@ -225,6 +247,7 @@ rm -rf "$R/export"; mkdir -p "$R/export"; tar -xf "$R/export.tar" -C "$R/export"
 XM="$R/export/mini-export/manifest.json"
 row export-document "$([ -f "$XM" ] && grep -qF "$TEXT" "$R/export/mini-export/documents/$DOC.txt" 2>/dev/null && echo 1 || echo 0)" "$(head -c 200 "$R/export.err") documents=$(jq '.documents|length' "$XM" 2>/dev/null) attempts=$(jq '.attempts|length' "$XM" 2>/dev/null)"
 XH=$(jq -r '.height // ""' "$XM" 2>/dev/null); XW=$(jq -r '.worldRoot // ""' "$XM" 2>/dev/null)
+row export-consent "$([ "$(jq -r '.researchConsent // ""' "$XM" 2>/dev/null)" = "$CWANT" ] && echo 1 || echo 0)" "manifest $(jq -r '.researchConsent // "absent"' "$XM" 2>/dev/null), the world $CWANT"
 row export-root "$([ -n "$XW" ] && [ "$XW" = "$LIVE_W" ] && [ "$XH" = "$LIVE_H" ] && echo 1 || echo 0)" "manifest height $XH root $(cut -c1-16 <<<"$XW") | live height $LIVE_H root $(cut -c1-16 <<<"$LIVE_W")"
 # The private-room shape of `room invite` (parity's one world leaf): this member founds a private
 # room; the sponsor, as invitee, signs its key declaration into HOME/requests/decl.json.
