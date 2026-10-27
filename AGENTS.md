@@ -24,8 +24,12 @@ asserting that older architecture or status text is current.
 - Preserve admitted-history, current-authority, exact-preimage and uncertain-reply
   semantics when optimizing. General proofs and actual receiving-path evidence
   are separate obligations; a source check does not establish deployment.
-- Reds are named in a run's output, never kept in a ledger. Performance is published,
-  never a gate.
+- Reds are named in a run's output, never kept in a ledger, and no lane runs a "was it
+  red before me" baseline. Performance is published, never a gate. The gate is the tour
+  (`jtour` plus the composed scenario); standing rows are the nightly's (COORDINATION §6).
+- Per-lane `CARGO_TARGET_DIR`, scratch subdirectory and PID file for every started
+  process; no foreground waits (`box-wait` in one background call); REPL-first Lean;
+  no whole-file `Read` over 2,000 lines (COORDINATION §3).
 - Report in ≤ 20 lines: branch tip, what was verified and where, reds by name, one
   BATCH FOR THE PARENT for what could not run where you are. Decisions by default,
   recorded; only money, dates and credentials go to ember.

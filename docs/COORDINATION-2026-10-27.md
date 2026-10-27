@@ -39,7 +39,7 @@ FOLD rows marked ✓ are executed in this document's commit series; the Lean axi
 
 | instrument | protects | cost per landing (Oct) | verdict |
 |---|---|---|---|
-| the demo journey rows (`scripts/pipeline/journey-rows`, `required-rows` names; J0–J8, m3/m4, hermes, jpay, exchange, hostupgrade…) | the opening contract's part 1, on a fresh Store | one standing run (~15 min) | **KEEP**: the only gate the public feels |
+| the demo journey rows (`scripts/pipeline/journey-rows`, `required-rows` names; J0–J8, m3/m4, hermes, jpay, exchange, hostupgrade…) | the opening contract's part 1, on a fresh Store | one standing run (~15 min), the nightly's | **KEEP** as the nightly's rows; a candidate's gate is the tour (§6) |
 | `jdeploy3` + `ship.sh --rehearsal` (dregg-infra) | the candidate that ships ran its journey, world and composed scenario; reds named | one run per candidate | **KEEP**; growth/perf/births rows non-blocking (plan §1.4) |
 | the workspace membership gate (L9) | every crate builds or is excluded by name; ran-from-passed | seconds | **KEEP** |
 | `lake build` umbrella / `build-native-host.sh` | the tree elaborates; the Host links | the build itself | **KEEP** (it is the work) |
@@ -64,30 +64,65 @@ FOLD rows marked ✓ are executed in this document's commit series; the Lean axi
 | `instruments.tsv` (which self-tests run when) | a changed instrument re-proves itself | none | **KEEP**, shrunk to the instruments that remain |
 
 What a landing costs now, per the gate scripts after this commit series: the umbrella (warm,
-minutes), the demo journey's standing run, and the cheap end-to-end checks. No per-landing pin
+minutes) and the cheap end-to-end checks; the tour and the standing rows belong to the candidate and the nightly (§6). No per-landing pin
 regeneration, no decisions ledger, no census of the research tree, no accepted-red list.
 
 ## 3. How a lane works
 
 - **One worktree per lane, on a `lane/<name>` branch**, under `/Users/ember/dev/minidregg-lanes/<name>`
   (or `/build/lanes/<name>` on the build box). Never the main worktree; never `git stash`; named-file
-  commits with prose messages via `git commit -F <own-file>` (the shared scratchpad is shared:
-  name message files uniquely).
+  commits with prose messages via `git commit -F <own-file>`.
 - **The brief carries**: the system framing (what the lane changes and why it is on the critical
   path), the exact report sections, `path:line` pointers to every file it touches, the deliverable,
-  the verification it must run and where (§5), and the deletions it owns (plan rules 1–2).
+  the verification it must run and where (§5), the deletions it owns (plan rules 1–2), the current
+  `/build/CANDIDATE-*.md` and the standing world (below), and the isolation lines (below), the
+  last quoted verbatim.
 - **Think ahead; run a check once per coherent batch.** A lane does not rerun a build to see what
   changed; it reads the first run, plans the whole fix, applies it, and runs again. One build per
   batch, filtered tests only (`-E 'test(<pattern>)'`), never an unfiltered suite.
+- **Lean is REPL-first.** Each edit is checked with `lean-ask check <File.lean>` on the box (`--reload`
+  after a fetch or rebase; never a bare `lake env lean` then: it reads stale import oleans) or, on the
+  Mac, `lake env lean <file>` when its `.lake` is warm (§5). The Host closure builds once per batch,
+  not per edit.
 - **Linux checks run where Linux is**: `ssh dregg-build`, a worktree under `/build/lanes/<lane>`,
   `cargo nextest run -p <crate> -E '...'`, `lake env lean <file>`, every build under `swarm-build`.
   There is no more "owed to hbox": a lane that cannot run something on the Mac runs it there
   itself. What truly cannot run anywhere the lane reaches (a demo-box drill, a mainnet pay) goes in
   the lane's **BATCH FOR THE PARENT**, one list at the end of the report, not a message per item.
+- **A lane runs its own rows.** Its brief names the current candidate (`/build/CANDIDATE-*.md`) and
+  the standing world (`world-up.sh` / the world template); the lane re-runs the rows it owns against
+  that candidate and world itself and reads the result, rather than handing a tip to the integrator
+  and waiting for a relay (nine such round trips cost about 57 min each).
+- **Box runs never hold a turn.** Start the job detached on the box with a PID file
+  (`nohup JOB > job.log 2>&1 < /dev/null & echo $! > job.pid`), then make ONE background call,
+  `scripts/pipeline/box-wait --pid /build/lanes/<lane>/job.pid --show <log> --cmd '<verdict lines>'`
+  (Claude Code: `run_in_background`), and do the next batch meanwhile; its completion is the wake-up.
+  The wait runs on the box inside one ssh session, reconnects if the session drops, and reads the PID
+  without ever signalling it. No PID file, no wait (it exits 2 and says so). Never a foreground
+  `for i in $(seq …); do sleep …` loop: the 10-minute cap re-woke a full context 63 times.
+- **One journey run reports every red, and one red step reruns alone.** The standing rows run
+  `journey.sh` with `JOURNEY_KEEP_GOING=1`: a step whose dependency failed still runs and its detail
+  names the failed dependency (a failed J0 still blocks: no world, nothing to run). To rerun one step,
+  `journey.sh --only STEP [--only STEP2] MANIFEST NEW_ROOT` runs it and exactly its dependency closure
+  (read from the script's own `run_step` lines), in minutes rather than the whole journey's hours.
+- **Reader discipline.** No whole-file `Read` over 2,000 lines (read ranges, or `rg` first); notes
+  are written to the lane's scratch directory as it goes, not held in context; a synthesis over many
+  documents runs in a fresh lane over the notes' summary sections, never in the lane that read them.
+- **Isolation, quoted in every brief:**
+  - `export CARGO_TARGET_DIR=<the lane's own directory>` (`$DEST/rust-target` on the box); never
+    another lane's or the shared one (three lanes hit another's stale build).
+  - Scratch files live in `<lane dir>/scratch/` (commit-message files uniquely named, e.g. `<lane>-msg-<n>.txt`); never
+    a bare name in the shared scratchpad (a lane overwrote another's `msg1.txt`).
+  - Every process a lane starts gets a PID file (`… & echo $! > <lane dir>/<job>.pid`); it is stopped
+    by that PID and nothing else. No `pkill -f <anything>`, no `pkill -x <bare word>`, no `killall`,
+    no `kill -u`. No PID file, no kill: tell the parent.
+  - No "was it red before me" runs. A red is named in the run's output; the lane fixes what its
+    change touches and does not stash, revert or re-run a baseline to learn the history of the tree.
 - **Decisions are taken by default and recorded**, in the report, in system terms; questions are
   batched into the same list. Only money, dates and credentials go to ember (§4).
 - **Finish fast, push, report in ≤ 20 lines**: what landed (branch tip), what was verified and
-  where, the reds by name, the batch for the parent.
+  where, the reds by name, the batch for the parent. A lane reports on events (a batch done, a red,
+  a block, a handoff), never step by step.
 
 ## 4. How the orchestrator works
 
@@ -96,15 +131,27 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Veterans are resumed, never respawned.** The agent that diagnosed a failure fixes it; a
   successor is spawned only when context is the problem, and then from the predecessor's own
   continuation file.
+- **Distill at 400k, not at death.** The token curve bends there (58 % of tokens were spent above
+  it; four lanes died of context). `cv distill --keep-last 10` for code lanes, `--keep-last 14` for
+  box and infra lanes (their last calls carry live PIDs and candidate paths). Hub lanes rotate per
+  task cluster whatever their size.
+- **Before any swarm, the permission allowlist is in place**: write-side heredocs and `git`/`ssh`
+  in lane worktrees, applied once with `fewer-permission-prompts` (one unanswered prompt held a lane
+  164 min; the class cost about 3.2 lane-hours).
+- **Phase transitions are pre-authorised.** When a phase completes and the next has a default, the
+  root launches it and tells ember afterwards; it does not end its turn to wait (one such wait idled
+  the fleet 2 h 58 min). Only money, dates and credentials stop it.
 - **A multi-model council reads any ruling before it reaches ember**, as the plan's council did
   (`docs/review/2026-10-26-council/`). Engineering decisions are the orchestrator's after that
   synthesis; **only money, dates and credentials go to ember**, stated in system terms with the
   default that applies while she is away.
-- **One integrator** merges lane branches in dependency order (Lean interfaces first, plan Phase 1)
-  and runs the whole-tree build ONCE on `dregg-build`; per-file green hides a red umbrella.
+- **Integration is a fixed cut, every 60–90 minutes.** One integrator merges `lane/*` in dependency
+  order (Lean interfaces first, plan Phase 1) and reads the branches itself at the cut: lanes send
+  no tip messages and the root relays none. It builds the whole tree ONCE on `dregg-build` (per-file
+  green hides a red umbrella), merges to main after the cut with reds named, and sends ONE report
+  per cut. Work found in the shared worktree is committed as found; the next cut fixes forward.
 - **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
-  the opening waits for the §1 contract and nothing else. The gate is never relaxed and never grown
-  ahead of the surfaces.
+  the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
 
 ## 5. Boxes
@@ -131,15 +178,21 @@ never a delete.
 
 - **Definition of done** = the public-opening contract holds on a rehearsal candidate (plan §1).
   Nothing else is "done" in a way the project reports upward.
-- **Rehearsal ships** every few days from the integrated tip, reds named.
+- **The gate is the tour.** A rehearsal or the opening is judged by `jtour` (the web journey's rows
+  driven against the candidate's own Host) plus the composed scenario, and by nothing else. The
+  standing rows are the nightly's: they name their reds in the morning report and never name a
+  candidate's (plan §1; ember, 2026-10-27: no row burndown). When a brief says "fix the rows", ask
+  what a stranger would touch.
+- **Integration cuts** every 60–90 minutes (§4); **rehearsal ships** every few days from the
+  integrated tip, reds named.
 - **The nightly** is the only scheduled run: the kernel journey (L9's split of the journey into a
   demo journey inside the gate and a nightly kernel journey), the timing rows (`growth` at 1000,
   `births` at 1000, the 10k soak when designed) on `dregg-build`'s SSD or the demo box, and the
   censuses folded out of the landing gate: `lake build TokenCensus TokenCensus.Fixtures`,
   `bash scripts/check-scripts-elab.sh`, `bash scripts/check-char2-vacuity.sh`. Its reds are named
   in the morning report; it blocks nothing.
-- **No per-landing ceremony**: a landing is the umbrella green (or its reds named), the standing
-  run with no new red against main's baseline, and the cheap checks of §2.
+- **No per-landing ceremony**: a landing is the umbrella green (or its reds named) and the cheap
+  checks of §2. No baseline comparison, no ledger of accepted reds.
 
 ## 7. What this replaces
 
