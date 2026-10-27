@@ -59,7 +59,7 @@ def planCodec : LawfulCodec Plan :=
   NativeHostCodec.framed "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-PLAN/v2".toUTF8.toList
     planStream
 
-/-- Derive the ordinary birth draft, its source-generated authority shards,
+/-- Derive the source-bound lifetime-grant birth draft, its source-generated authority shards,
 and the independent app `.delegateObject` signing header from one verified
 loaded image. A plan is not an accepted issue or a permission to dispatch. -/
 def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}
@@ -94,8 +94,10 @@ def prepareLoaded {config : NativeHost.Config} {target : NativeHost.Durable}
   if CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor !=
       CanonicalCellRegistry.sourceEncoding.codec.encode expected then
     throw "agent lifetime grant finalized birth differs from source"
-  let .ok _pending := ResourceBirthPolicyController.Concrete.preparePending
-    prepared.prepared height | throw "agent lifetime grant birth pending refused"
+  match ResourceBirthPolicyController.Concrete.preparePending
+      prepared.prepared height .lifetimeGrant with
+  | .error reason => throw s!"agent lifetime grant birth pending refused: {reprStr reason}"
+  | .ok _ => pure ()
   if sourceCapabilities.length != prepared.descriptor.resourceBatch.operations.length then
     throw "agent lifetime grant birth source capability count mismatch"
   let birthSlot := fun (role index : Nat)
@@ -139,6 +141,21 @@ def prepareRequestLoaded {config : NativeHost.Config} {target : NativeHost.Durab
   prepareLoaded verified request.spec request.payer request.funding
     request.sourceCapabilities
 
+/-- Change only the inner receiving method frame. The descriptor and every
+already assembled credential envelope remain the exact same values. -/
+def frameBirth (ordinaryBytes : List UInt8) : Except String (List UInt8) := do
+  let some ordinary := ResourceBirthPolicyController.Concrete.ingressCodec.decode ordinaryBytes
+    | throw "noncanonical agent lifetime grant birth assembly"
+  pure (ResourceBirthPolicyController.Concrete.lifetimeGrantIngressCodec.encode ordinary)
+
+theorem frameBirth_preserves_signed_payload
+    (birth : ResourceBirthPolicyController.Concrete.Ingress) :
+    frameBirth (ResourceBirthPolicyController.Concrete.ingressCodec.encode birth) =
+      .ok (ResourceBirthPolicyController.Concrete.lifetimeGrantIngressCodec.encode birth) := by
+  unfold frameBirth
+  rw [ResourceBirthPolicyController.Concrete.ingressCodec.decode_encode]
+  rfl
+
 /-- Signature order is exactly the returned birth slots followed by the app
 slot. Neither detached signatures nor a caller-supplied plan establish native
 admission; `ApplicationAgentLifetimeGrantReceiver` re-verifies at the current image. -/
@@ -151,6 +168,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) : Except String (Lis
   let birthIngress ← match signed with
     | .birth bytes => pure bytes
     | _ => throw "agent lifetime grant plan is not a birth"
+  let birthIngress ← frameBirth birthIngress
   let some signature := signatures[plan.birth.slots.length]?
     | throw "missing app delegation signature"
   if signature.length != 64 then
