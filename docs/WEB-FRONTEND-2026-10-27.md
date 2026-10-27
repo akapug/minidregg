@@ -187,7 +187,7 @@ member's own workspace, a declared cell under the open law, **field 1 = 1 for CC
 for research) **and 0 for none**. The door's form carries the sentence (`deploy/policy/RETENTION.txt`,
 the one copy the door and the body read) and an unchecked "contribute my data for research (CC0;
 kept private until reviewed)"; the processor writes the fact at enrolment as the member's own turns
-(`create research-consent declared open`, `invoke research-consent-0 research-consent create 1 V`,
+(`create research-consent declared open 1`, `invoke research-consent-0 research-consent create 1 V`,
 `submit research-consent-0`; a retried tick resumes) and the status carries `researchConsent`
 (`0bf68599`). `/export` shows the value by a signed read, with the sentence, and records a change as
 a compare-and-write on field 1; `/subscribe` carries the sentence; the export manifest carries

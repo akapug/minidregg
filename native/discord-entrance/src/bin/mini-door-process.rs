@@ -1126,7 +1126,7 @@ mod tests {
         assert_eq!(s["phase"], "enrolled", "{s}");
         assert!(s["login"].is_null(), "no ssh login line: {s}");
         assert_eq!(s["webOnly"], true);
-        assert!(w.ops.calls.borrow().iter().any(|c| c.contains("create research-consent declared open")), "{:?}", w.ops.calls.borrow());
+        assert!(w.ops.calls.borrow().iter().any(|c| c.contains("create research-consent declared open 1")), "{:?}", w.ops.calls.borrow());
         assert!(w.ops.calls.borrow().iter().any(|c| c.contains("invoke research-consent-0 research-consent create 1 1")), "bea ticked the box: field 1 = 1 (CC0)");
         assert!(w.ops.calls.borrow().iter().any(|c| c.contains("submit research-consent-0")));
         assert_eq!(s["funding"], w.cfg.funding.to_string(), "the status names what the box funded");
@@ -1164,7 +1164,7 @@ mod tests {
         // Enrolment ends with the member's research-consent fact, as the member: alice did not tick
         // the box, so field 1 = 0 (none); the status says so.
         assert_eq!(*w.ops.calls.borrow(), ["render", "alice: keygen mini.key", "reenroll alice 1000", "alice: init mini.key 4100",
-            "alice: create research-consent declared open", "alice: invoke research-consent-0 research-consent create 1 0", "alice: submit research-consent-0"]);
+            "alice: create research-consent declared open 1", "alice: invoke research-consent-0 research-consent create 1 0", "alice: submit research-consent-0"]);
         assert_eq!(s["researchConsent"], "none");
         let entry = std::fs::read_to_string(w.p.door_friends().join("alice.pub")).unwrap();
         assert!(entry.ends_with(&format!("{KEY} alice\n")), "{entry}");

@@ -40,7 +40,7 @@ const SSH_BLOB_PREFIX: [u8; 19] = [
 /// A door account name: `^[a-z][a-z0-9-]{1,24}$` (split tenancy logs in as `mini-s-NAME`,
 /// 32 characters at most), never reserved, never ending in `-`.
 /// The member's research-consent fact (ember's policy ruling, 2026-10-27): the reference
-/// `research-consent` in the member's own workspace, a declared cell under the open law, whose
+/// `research-consent` in the member's own workspace, a declared cell under the open law holding
 /// field 1 is 1 for CC0 (contributed for research) and 0 for none. The lines that write it at
 /// enrolment, as the member, through the same tenant path as every other enrolment step.
 pub const RESEARCH_CONSENT_REF: &str = "research-consent";
@@ -49,7 +49,7 @@ pub const RESEARCH_CONSENT_ATTEMPT: &str = "research-consent-0";
 
 pub fn research_consent_lines(cc0: bool) -> [String; 3] {
     [
-        format!("create {RESEARCH_CONSENT_REF} declared open"),
+        format!("create {RESEARCH_CONSENT_REF} declared open {RESEARCH_CONSENT_FIELD}"),
         format!("invoke {RESEARCH_CONSENT_ATTEMPT} {RESEARCH_CONSENT_REF} create {RESEARCH_CONSENT_FIELD} {}", u8::from(cc0)),
         format!("submit {RESEARCH_CONSENT_ATTEMPT}"),
     ]

@@ -696,7 +696,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                     return export_page(site, Some(format!("Your world already records that choice (field 1 = {want}).")));
                 }
                 Some(now) => vec![format!("invoke {id} research-consent write 1 {want} {now}"), format!("submit {id}")],
-                None => vec!["create research-consent declared open".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
+                None => vec!["create research-consent declared open 1".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
             };
             let mut page = act(site, "Research consent", lines, &id, &[("export", "/export")]);
             page.title = "Research consent".into();
