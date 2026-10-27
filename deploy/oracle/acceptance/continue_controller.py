@@ -5,6 +5,7 @@ Preserve the definite pre-START account-creation failure before the installer
 performs its separately checked pending-account recovery. Never submit a call.
 """
 import base64
+import fcntl
 import hashlib
 import re
 import json
@@ -16,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import time
 
 
 def sha(path):
@@ -33,6 +35,99 @@ def read(path):
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def durable_json(path, value):
+    """Publish a new evidence record; never replace an earlier outcome."""
+    raw = (json.dumps(value, indent=2, sort_keys=True) + '\n').encode()
+    temporary = path.with_name('.' + path.name + '.' + str(os.getpid()))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as sink:
+        sink.write(raw)
+        sink.flush()
+        os.fsync(sink.fileno())
+    # Hard-link publication is atomic and refuses an existing destination. A
+    # crashed temporary remains evidence; it never counts as a phase outcome.
+    os.link(temporary, path, follow_symlinks=False)
+    temporary.unlink()
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def locked_exec(run, command):
+    """Hold one operator lock across preflight, effects, and shell cleanup."""
+    meta = run.lstat()
+    require(stat.S_ISDIR(meta.st_mode) and meta.st_uid == os.getuid(), 'run lock directory differs')
+    path = run / 'acceptance.lock'
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    meta = os.fstat(fd)
+    require(stat.S_ISREG(meta.st_mode) and meta.st_uid == os.getuid()
+            and stat.S_IMODE(meta.st_mode) == 0o600 and meta.st_nlink == 1, 'run lock custody differs')
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        raise ValueError('another acceptance invocation owns this run') from error
+    os.set_inheritable(fd, True)
+    os.environ['ORACLE_ACCEPTANCE_LOCK_FD'] = str(fd)
+    os.execvp(command[0], command)
+
+
+def verify_lock(run):
+    descriptor = os.environ.get('ORACLE_ACCEPTANCE_LOCK_FD', '')
+    require(descriptor.isdecimal(), 'acceptance lock is absent')
+    fd = int(descriptor)
+    opened, named = os.fstat(fd), (run / 'acceptance.lock').lstat()
+    require(stat.S_ISREG(opened.st_mode) and opened.st_uid == os.getuid()
+            and stat.S_IMODE(opened.st_mode) == 0o600 and opened.st_nlink == 1
+            and (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino), 'acceptance lock identity differs')
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        raise ValueError('acceptance lock belongs to another invocation') from error
+    # A separately opened descriptor cannot acquire the held flock, even from
+    # this process. Merely inheriting an open file is not proof of exclusion.
+    probe = os.open(run / 'acceptance.lock', os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        raise ValueError('acceptance lock is not held')
+    finally:
+        os.close(probe)
+
+
+def phase_record(directory, name, action, evidence=()):
+    """Evidence only. Native outcome validators run before completion is called.
+
+    A started record is deliberately irreversible here: neither a timeout nor a
+    wrapper exit authorizes retry. Continuation requires a separately checked
+    checkpoint, and never derives permission from these markers alone.
+    """
+    require(re.fullmatch('[a-z][a-z0-9-]{0,79}', name), 'phase name malformed')
+    require(action in ('started', 'completed'), 'phase action malformed')
+    started = directory / (name + '.started.json')
+    completed = directory / (name + '.completed.json')
+    if action == 'started':
+        require(not started.exists() and not completed.exists(), 'phase already began; inspect retained outcome')
+        require(not evidence, 'started phase cannot claim evidence')
+        value = {'schema': 'mini-oracle-phase-v1', 'phase': name, 'state': action,
+                 'unix_time_ns': time.time_ns(), 'permits_automatic_retry': False}
+    else:
+        require(started.is_file() and not started.is_symlink(), 'phase has no durable start')
+        require(evidence, 'completed phase requires validated evidence')
+        files = {}
+        for item in evidence:
+            path = Path(item)
+            require(path.is_absolute() and path.is_file() and not path.is_symlink(), 'phase evidence absent or linked')
+            files[str(path)] = sha(path)
+        value = {'schema': 'mini-oracle-phase-v1', 'phase': name, 'state': action,
+                 'started_sha256': sha(started), 'evidence': files,
+                 'unix_time_ns': time.time_ns(), 'permits_automatic_retry': False}
+    durable_json(started if action == 'started' else completed, value)
 
 
 def manifest(path):
@@ -230,7 +325,8 @@ def resume_prepared_archive(output, current, source_manifest, check_only):
     return output
 
 
-def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_manifest=None, check_only=False):
+def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_manifest=None, check_only=False,
+                    observe_only=False):
     """Snapshot the exact failed attach before separately admitted repairs.
 
     Call only with a fresh fixed-installer export. No native operation, config
@@ -296,8 +392,9 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_
     custody = retained_run_custody(run)
     services = stopped_services(run, world['store'])
     output = run / 'continuations/session-refusal-1'
-    require(output.is_dir() if resume_manifest is not None else not output.exists(),
-            'session continuation directory does not match selected boundary')
+    if not observe_only:
+        require(output.is_dir() if resume_manifest is not None else not output.exists(),
+                'session continuation directory does not match selected boundary')
     workroom = run / 'world/store/base/workroom'
     store_files = list((workroom / 'store').rglob('*'))
     require(all(not p.is_symlink() and p.is_file() for p in store_files)
@@ -316,6 +413,8 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_
              'physical_repair_phases': ['consent-storage', 'controller-runtime-upgrade'],
              'fresh_export_sha256': sha(exported_path), 'native_profile_sha256': sha(profile_path),
              'host_config_sha256': config_sha}
+    if observe_only:
+        return value
     if resume_manifest is not None:
         return resume_prepared_archive(output, value, resume_manifest, check_only)
     if check_only:
@@ -375,6 +474,130 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_
             os.fsync(fd)
         finally:
             os.close(fd)
+    return output
+
+
+def repair_checkpoint(run, spk, inventory, benchmark, repo, exported, status_path, failure_path,
+                      output, check_only=False):
+    """Seal the observed transport boundary; no source operation is replayable.
+
+    Physical completion is joined to the fixed installer's current status. The
+    logical Store and controller must still be exactly at the old null-operation
+    refusal. Supporting later source boundaries requires their native outcomes,
+    not merely another phase name or a successful shell exit.
+    """
+    verify_lock(run)
+    current = prepare_session(run, spk, inventory, benchmark, repo, exported, observe_only=True)
+    old = run / 'continuations/session-refusal-1'
+    prepared = read(old / 'prepared.json')
+    for key in ('run', 'store', 'boundary', 'original_inputs', 'original_binaries', 'native_files_before',
+                'run_custody', 'store_before', 'native_profile_sha256', 'host_config_sha256'):
+        require(prepared[key] == current[key], 'post-repair boundary changed: ' + key)
+    for name, digest in prepared['prior_files'].items():
+        require(sha(old / 'prior' / name) == digest, 'prior session archive differs')
+    failure = read(failure_path)
+    require(failure.get('schema') == 'mini-oracle-physical-repair-service-failure-v1'
+            and failure.get('run') == str(run) and failure.get('store') == current['store']
+            and failure.get('failed_phase') == 'services'
+            and failure.get('physical_repairs_completed') == ['consent-storage', 'controller-runtime-upgrade']
+            and failure.get('exit') == read(old / 'exit.json') ==
+                {'execution_exit': 1, 'cleanup_exit': 0, 'namespace_preserved': True}
+            and all(failure.get(key) is False for key in ('source_policy_started', 'native_enrollment_started',
+                                                         'new_session_tool_started', 'start_attempted')),
+            'predecessor is not the definite pre-source service failure')
+    for name, digest in failure['files'].items():
+        require(sha(Path(name)) == digest, 'failed execution evidence changed')
+    storage, runtime, status = read(old / 'consent-storage.json'), read(old / 'runtime-upgrade.json'), read(status_path)
+    require(status.get('store') == storage.get('store') == runtime.get('store') == current['store']
+            and status.get('stopped') is True and status.get('controllerUid') == current['run_custody']['controller_uid']
+            and status.get('stageSha256') == runtime.get('stageSha256')
+            and status.get('runtimeSha256') == runtime.get('runtimeSha256') == sha(old / 'bin/grain-runtime')
+            and runtime.get('previousRuntimeSha256') == sha(run / 'bin/grain-runtime')
+            and status.get('controllerConfigSha256') == sha(run / 'agent-lifetime/controller-stage/controller.json')
+            and status.get('consent') == storage.get('consent'), 'installed physical repair pins differ')
+    require('publicListener' not in status, 'public listener already registered; inspect its exact phase outcome')
+    receipts = {str(path): sha(path) for path in (old / 'prepared.json', old / 'consent-storage.json',
+        old / 'runtime-upgrade.json', old / 'exit.json', failure_path, status_path, exported)}
+    checkpoint = {'schema': 'mini-oracle-phase-checkpoint-v1', 'run': str(run), 'store': current['store'],
+        'boundary': 'after-physical-repairs-before-source', 'next_phase': 'public-listener',
+        'completed_phases': ['consent-storage', 'controller-runtime-upgrade'], 'receipts': receipts,
+        'observed_state': current, 'installer_state': status, 'repeated_source_phases': [],
+        'predecessor': str(old), 'original_request_id': current['boundary']['request_id']}
+    if check_only:
+        return checkpoint
+    require(output.parent == run / 'checkpoints', 'checkpoint output must be inside fixed run checkpoints')
+    output.parent.mkdir(mode=0o700, exist_ok=True)
+    durable_json(output, checkpoint)
+    fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return output
+
+
+def begin_checkpoint(checkpoint_path, spk, inventory, benchmark, repo, exported, status_path, source_manifest,
+                     check_only=False):
+    checkpoint = read(checkpoint_path)
+    run = Path(checkpoint['run'])
+    verify_lock(run)
+    require(checkpoint.get('schema') == 'mini-oracle-phase-checkpoint-v1'
+            and checkpoint.get('boundary') == 'after-physical-repairs-before-source'
+            and checkpoint.get('next_phase') == 'public-listener'
+            and checkpoint.get('completed_phases') == ['consent-storage', 'controller-runtime-upgrade']
+            and checkpoint.get('repeated_source_phases') == [], 'unsupported checkpoint boundary')
+    require(checkpoint_path.parent == run / 'checkpoints' and not checkpoint_path.is_symlink(),
+            'checkpoint path differs')
+    for name, digest in checkpoint['receipts'].items():
+        require(sha(Path(name)) == digest, 'checkpoint predecessor evidence changed')
+    current = prepare_session(run, spk, inventory, benchmark, repo, exported, observe_only=True)
+    for key in ('run', 'store', 'boundary', 'original_inputs', 'original_binaries', 'native_files_before',
+                'run_custody', 'stopped_services', 'store_before', 'native_profile_sha256', 'host_config_sha256'):
+        require(current[key] == checkpoint['observed_state'][key], 'checkpoint state changed: ' + key)
+    require(read(status_path) == checkpoint['installer_state'], 'checkpoint installer state changed')
+    sources = manifest(source_manifest)
+    output = run / 'continuations' / ('checkpoint-' + sha(checkpoint_path)[:16])
+    require(not output.exists(), 'checkpoint already attempted; inspect its phase records')
+    if check_only:
+        return {'checked': True, 'checkpoint_sha256': sha(checkpoint_path), 'execution_directory': str(output)}
+    output.mkdir(mode=0o700)
+    prior = output / 'prior'
+    prior.mkdir(mode=0o700)
+    names = ['cleanup.log', 'broker.log', 'native-state.tar']
+    names += [str(path.relative_to(run)) for directory in (run / 'agent-lifetime', run / 'world/sock')
+              for path in directory.rglob('*') if path.is_file()]
+    require(all(not (run / name).is_symlink() for name in names)
+            and sum((run / name).stat().st_size for name in names) <= 64 * 1024 * 1024,
+            'checkpoint archive exceeds bound or contains linked evidence')
+    archived = {}
+    for name in names:
+        target = prior / name
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.copyfile(run / name, target)
+        target.chmod(0o400)
+        with target.open('rb') as source:
+            os.fsync(source.fileno())
+        archived[str(run / name)] = {'path': str(target), 'sha256': sha(target)}
+        require(sha(run / name) == sha(target), 'checkpoint input changed during archive')
+    for directory in sorted([prior, *(p for p in prior.rglob('*') if p.is_dir())],
+                            key=lambda p: len(p.parts), reverse=True):
+        directory.chmod(0o500)
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    phases = output / 'phases'
+    phases.mkdir(mode=0o700)
+    durable_json(output / 'checkpoint.json', {'schema': 'mini-oracle-checkpoint-execution-v1',
+        'checkpoint': str(checkpoint_path), 'checkpoint_sha256': sha(checkpoint_path), 'source': str(repo),
+        'sources': sources, 'archived_original_paths': archived, 'repeated_phases': [],
+        'next_phase': checkpoint['next_phase'], 'original_request_id': checkpoint['original_request_id']})
+    fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     return output
 
 
@@ -516,6 +739,24 @@ def prepare(run, spk, inventory, benchmark, repo, check_only=False):
 if __name__ == '__main__':
     os.umask(0o077)
     args = sys.argv[1:]
+    if args[:1] == ['--locked-exec']:
+        require(len(args) >= 4, 'locked execution requires run and command')
+        locked_exec(Path(args[1]), args[2:])
+    if args[:1] == ['--verify-lock']:
+        require(len(args) == 2, 'lock check requires run')
+        verify_lock(Path(args[1]))
+        sys.exit(0)
+    if args[:1] == ['--phase']:
+        require(len(args) >= 5, 'phase record requires run, directory, name and action')
+        verify_lock(Path(args[1]))
+        phase_record(Path(args[2]), args[3], args[4], args[5:])
+        sys.exit(0)
+    if args[:1] in (['--seal-checkpoint'], ['--begin-checkpoint']):
+        target = repair_checkpoint if args[0] == '--seal-checkpoint' else begin_checkpoint
+        check = args[1:2] == ['--check-only']
+        value = target(*map(Path, args[2:] if check else args[1:]), check_only=check)
+        print(json.dumps(value) if check else value)
+        sys.exit(0)
     if args[:1] == ['--check-session-custody']:
         require(len(args) == 2, 'session custody requires exactly one run path')
         print(json.dumps(retained_run_custody(Path(args[1]))))
