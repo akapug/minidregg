@@ -637,8 +637,23 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
+        // Platform install (L1, Kernel/PlatformCell.lean): the controller's operator route only.
+        // Plan: the controller's command. Assemble: the plan, then the controller's signature and
+        // the custodian's cosignature (empty when the key does not rotate). Submit and the
+        // receipt-only lookup: one ingress. Lean decides everything past framing.
+        [mini_sdk::host_operations::PLATFORM_INSTALL_PLAN, command @ ..] => !command.is_empty() && command.len() < HOST_MAX_FRAME,
+        [mini_sdk::host_operations::PLATFORM_INSTALL_ASSEMBLE, pair @ ..] => pair.len() < HOST_MAX_FRAME
+            && exact_pair(pair).is_some_and(|(_, signed)| signature_then_cosign(signed)),
+        [mini_sdk::host_operations::PLATFORM_INSTALL_SUBMIT | mini_sdk::host_operations::PLATFORM_INSTALL_LOOKUP, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         _ => false,
     }
+}
+
+/// `u32(len(signature)) ‖ signature ‖ cosign`: a nonempty signature; the cosignature may be empty.
+fn signature_then_cosign(signed: &[u8]) -> bool {
+    let Some(prefix) = signed.get(..4) else { return false };
+    let length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
+    length > 0 && length <= signed.len() - 4
 }
 
 /// A host config pin: a regular file of at most `MAX_CONFIG` bytes.
@@ -1990,6 +2005,40 @@ mod tests {
             let mut oversized = vec![0; super::HOST_MAX_FRAME + 1];
             oversized[0] = operation;
             assert!(!super::allowed_operator_operation(&oversized));
+        }
+    }
+
+    #[test]
+    fn platform_install_is_the_operators_alone_and_meter_refill_stays_closed() {
+        use mini_sdk::host_operations::{
+            METER_REFILL_ASSEMBLE, METER_REFILL_LOOKUP, METER_REFILL_PLAN, METER_REFILL_SUBMIT,
+            PLATFORM_INSTALL_ASSEMBLE, PLATFORM_INSTALL_LOOKUP, PLATFORM_INSTALL_PLAN, PLATFORM_INSTALL_SUBMIT,
+        };
+        let pair = |left: &[u8], right: &[u8]| [&(left.len() as u32).to_le_bytes()[..], left, right].concat();
+        let signed = |cosign: &[u8]| pair(&[7; 64], cosign);
+        let valid = [
+            [&[PLATFORM_INSTALL_PLAN][..], b"command"].concat(),
+            [&[PLATFORM_INSTALL_ASSEMBLE][..], &pair(b"plan", &signed(b""))].concat(),
+            [&[PLATFORM_INSTALL_ASSEMBLE][..], &pair(b"plan", &signed(&[9; 64]))].concat(),
+            [&[PLATFORM_INSTALL_SUBMIT][..], b"ingress"].concat(),
+            [&[PLATFORM_INSTALL_LOOKUP][..], b"ingress"].concat(),
+        ];
+        for request in &valid {
+            assert!(super::allowed_operator_operation(request), "operator route refused {}", request[0]);
+            assert!(!super::allowed_operation(request, false) && !super::allowed_operation(request, true),
+                "a member's socket admitted {}", request[0]);
+        }
+        for op in [PLATFORM_INSTALL_PLAN, PLATFORM_INSTALL_ASSEMBLE, PLATFORM_INSTALL_SUBMIT, PLATFORM_INSTALL_LOOKUP] {
+            assert!(!super::allowed_operator_operation(&[op]), "{op} with no payload");
+        }
+        // an assemble without the controller's signature, or whose signature length overruns
+        assert!(!super::allowed_operator_operation(&[&[PLATFORM_INSTALL_ASSEMBLE][..], &pair(b"plan", &[0, 0, 0, 0])].concat()));
+        assert!(!super::allowed_operator_operation(&[&[PLATFORM_INSTALL_ASSEMBLE][..], &pair(b"plan", &[64, 0, 0, 0, 1])].concat()));
+        // the reserved meter-refill family stays refused on both sockets
+        for op in [METER_REFILL_PLAN, METER_REFILL_ASSEMBLE, METER_REFILL_SUBMIT, METER_REFILL_LOOKUP] {
+            for request in [vec![op, 1], [&[op][..], &pair(b"plan", &signed(b""))].concat()] {
+                assert!(!super::allowed_operator_operation(&request) && !super::allowed_operation(&request, true), "{op} admitted");
+            }
         }
     }
 

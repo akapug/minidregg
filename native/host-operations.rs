@@ -377,13 +377,13 @@ pub const SEAT_SUBMIT: u8 = 217;
 pub const SEAT_LOOKUP: u8 = 218;
 // active; public,operator; owner: seats-native; effect: none
 pub const SEAT_VIEW: u8 = 219;
-// active; Host stdio only; owner: platform; effect: none
+// active; operator; owner: platform; effect: none
 pub const PLATFORM_INSTALL_PLAN: u8 = 240;
-// active; Host stdio only; owner: platform; effect: none
+// active; operator; owner: platform; effect: none
 pub const PLATFORM_INSTALL_ASSEMBLE: u8 = 241;
-// active; Host stdio only; owner: platform; effect: append
+// active; operator; owner: platform; effect: append
 pub const PLATFORM_INSTALL_SUBMIT: u8 = 242;
-// active; Host stdio only; owner: platform; effect: none
+// active; operator; owner: platform; effect: none
 pub const PLATFORM_INSTALL_LOOKUP: u8 = 243;
 // reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_PLAN: u8 = 244;
