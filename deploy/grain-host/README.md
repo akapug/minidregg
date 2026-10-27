@@ -57,16 +57,32 @@ entry alone must never trigger an automatic kill of a possibly reused unit.
 
 ## Controller unit installation
 
-`install-controller` creates a direct `mini-grain-controller@TASK.service`
-user unit for a persistent `grain-runtime serve` process, writing the exact
-task, executable and config paths; there is no template unit to edit (the
-historical one, which could not satisfy the controller, was deleted on
-2026-10-26; dregg-infra keeps its own). The runtime JSON must configure
+`install-controller` writes the one unit shape grain-runtime's own checks
+accept: `mini-grain-controller@TASK.service`, running a persistent
+`grain-runtime serve`, with the exact task, executable and config paths. It
+has two modes (`src/systemd_manager.rs` `load` is the contract); there is no
+template unit to edit (the historical one, which could not satisfy the
+controller, was deleted on 2026-10-26; dregg-infra keeps its own):
+
+- **user** (default, run as the task account): a user unit under that
+  account's user manager with all three of `MINI_GRAIN_CONTROLLER_MANAGER=user`,
+  `MINI_GRAIN_WORKER_MANAGER=user` and `MINI_GRAIN_CONTROLLER_UNIT=<unit>`.
+  Setting only some of them is a hard error at open; setting none opens the
+  controller unscoped, and its first sandboxed prompt then fails.
+- **system** (`--system --service-user NAME`, run as root): a system unit with
+  `User=NAME`, controller manager `system`, worker manager `user`, and the
+  root-owned registration `/etc/mini/controllers/TASK.json`
+  (`mini-controller-registration-v1`: task, config, managers, service uid,
+  optional `residentConfig`). Workers are still user units, so the account
+  needs linger, and the scoped launcher must answer
+  `--controller-manager-protocol` (the shipped `bwrap` does).
+
+The runtime JSON must configure
 `controlSocket` directly inside its durable private `stateDir` (for example,
 `/var/lib/mini/grains/task-7001/control.sock`). The task account must own
-that directory and keep it at mode 0700. The service
-sets `MINI_GRAIN_CONTROLLER_UNIT` for the launcher, which adds a `BindsTo=`
-dependency: stopping the controller service also stops its worker units.
+that directory and keep it at mode 0700. The launcher reads
+`MINI_GRAIN_CONTROLLER_UNIT` and adds a `BindsTo=` dependency: stopping the
+controller service also stops its worker units.
 
 Run the installer as the task account after placing the runtime JSON and
 executables. The pins file is JSON with one entry per executable, including
@@ -95,6 +111,10 @@ install-controller --config /opt/mini/grains/7001.json \
 systemd-analyze --user verify "$HOME/.config/systemd/user/mini-grain-controller@7001.service"
 # After inspecting the unit and signed Mini task state:
 systemctl --user enable --now mini-grain-controller@7001.service
+# Or, as root, the system shape with its registration:
+install-controller --system --service-user grain-7001 \
+  --config /opt/mini/grains/7001.json --runtime /opt/mini/bin/grain-runtime \
+  --pins /opt/mini/grains/7001-pins.json --render-only
 ```
 
 The installer never enables or starts a unit. The unit directory must already

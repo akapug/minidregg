@@ -616,13 +616,6 @@ impl Runtime {
     /// The caller may retain this guard through a narrowly typed resident
     /// reconciliation. Never drop/reacquire between inspection and mutation.
     pub(crate) fn inspect_quiescence_locked(&mut self, resident: &ResidentGuard) -> Result<Status> {
-        self.inspect_quiescence_locked_via(resident, None)
-    }
-
-    /// Same complete inspection and original binding; a root-attested token
-    /// changes only signed-query routing and annotates every observation.
-    pub(crate) fn inspect_quiescence_locked_via(&mut self, resident: &ResidentGuard,
-        transport: Option<&crate::quiescence_transport::AuthorizedTransport>) -> Result<Status> {
         resident.assert_config(&self.config)?;
         let resident_path = resident.path.as_deref();
         if let Err(error) = self.quiescence_stop_proof() {
@@ -641,12 +634,8 @@ impl Runtime {
         let mut observations = Vec::new();
         let mut errors = Vec::new();
         for (slot, authority) in authorities {
-            match self.query_as_via(&authority, transport) {
-                Ok(state) => {
-                    let mut observation = json!({"slot":slot,"task":authority.task,"state":state});
-                    if let Some(via) = transport { observation["transportEvidence"] = via.evidence(); }
-                    observations.push(observation)
-                }
+            match self.query_as(&authority) {
+                Ok(state) => observations.push(json!({"slot":slot,"task":authority.task,"state":state})),
                 Err(error) => errors.push(format!("{slot} signed boundary: {error}")),
             }
         }

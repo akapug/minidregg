@@ -278,6 +278,20 @@ fn source_entry(assignment: &Value, room: &str, subject: &str) -> Result<Option<
 }
 
 impl FinalRecord {
+    /// The review plan names the requester's text and the final only by
+    /// digest and length (H14): any member could make the requester text
+    /// 12 KB, and the final is retained in `resident-final-N.json`, which the
+    /// deliver receiver re-reads and re-hashes against `planSha256`.
+    fn review_projection(&self) -> Result<Value> {
+        let mut plan = serde_json::to_value(self).map_err(|e| e.to_string())?;
+        let source_text = self.source_entry["text"].as_str().unwrap_or("");
+        plan["sourceEntry"]["text"] = Value::Null;
+        plan["sourceEntry"]["textSha256"] = json!(sha256_bytes(source_text.as_bytes())?);
+        plan["sourceEntry"]["textBytes"] = json!(source_text.len());
+        plan["finalText"] = Value::Null;
+        plan["finalTextBytes"] = json!(self.final_text.len());
+        Ok(plan)
+    }
     fn arguments(&self, reply_entry_number: u64) -> Value {
         json!({"text":self.final_text,"to":self.source_entry["author"],
             "re":reply_entry_number.to_string()})
@@ -654,8 +668,8 @@ impl Runtime {
         } else { self.delivery_reply_number(&record)? };
         Ok(
             json!({"type":"mini-resident-delivery-plan-v1","status":if done.as_ref().is_some_and(|r|r["type"]=="mini-resident-final-refused-v1") {"refused"} else if done.is_some(){"delivered"}else{"pending"},
-            "plan":record,"planSha256":hash(&record)?,"residentState":state,"residentSha256":sha256_bytes(guard.bytes()?)?,
-            "receipt":done,"replyEntryNumber":reply_entry_number,"arguments":record.arguments(reply_entry_number),"modelRequests":0}),
+            "plan":record.review_projection()?,"planSha256":hash(&record)?,"residentState":state,"residentSha256":sha256_bytes(guard.bytes()?)?,
+            "receipt":done,"replyEntryNumber":reply_entry_number,"argumentsSha256":hash(&record.arguments(reply_entry_number))?,"modelRequests":0}),
         )
     }
 
@@ -981,7 +995,6 @@ pub(crate) fn drain_completed(config: &Config, state: &Path, lock: &File) -> Res
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("resident lock changed while final delivery was draining; reload under its current owner".into());
     }
-    config_migration::ensure_resident_current(config)?;
     result
 }
 
@@ -1124,6 +1137,22 @@ mod tests {
         json!({"operationId":id.to_string(),"tool":"mini_say","arguments":record.arguments(7),
             "residentOrigin":record.origin,"expectedReply":[record.source_entry["cell"],record.source_entry["sequence"]],"payment":{"confirmed":true},"toolCharge":"1",
             "result":{"resolution":"performed","basis":"exact-operation-record","value":{"transaction":"123"}}})
+    }
+
+    #[test]
+    fn delivery_plan_carries_requester_text_only_by_digest_and_length() {
+        let (root, _rt, mut record) = receiving_fixture("delivery-plan-redact");
+        let long = "q".repeat(12_000);
+        record.source_entry["text"] = json!(long);
+        let plan = record.review_projection().unwrap();
+        let text = plan.to_string();
+        assert!(!text.contains(&long), "requester text must not enter the admin reply");
+        assert!(!text.contains("exact final"), "the final is re-read from its retained file");
+        assert_eq!(plan["sourceEntry"]["textBytes"], 12_000);
+        assert_eq!(plan["sourceEntry"]["textSha256"], json!(sha256_bytes(long.as_bytes()).unwrap()));
+        assert_eq!(plan["finalTextSha256"], json!(record.final_text_sha256));
+        assert!(text.len() < 4_096, "plan stays small whatever a member writes: {}", text.len());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
