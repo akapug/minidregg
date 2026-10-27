@@ -140,7 +140,8 @@ theorem decideWith_iff (verifies : List UInt8 → Bool) (birthHeight : Nat) (hel
     · simp only [below, if_false]
       rcases physical with _ | tip
       · simp
-      · by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record, tag⟩]
+      · dsimp only
+        by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record, tag⟩]
         · rw [if_pos ok]
           constructor
           · intro _
@@ -283,9 +284,8 @@ theorem teeth_failedVerify (s : StoreIdentity) (c : Digest) (f : List (Nat × Di
     (t : List UInt8) (p : Option Physical) (bad : ∀ h, Head.verify s 5 t c f ≠ .ok h) :
     verdict 3 (untagged s c (some f) (some t)) p = .openingUnverified := by
   have auth : (untagged s c (some f) (some t)).authentic t = false := by
-    show (match Head.verify s 5 t c f with | .ok _ => true | .error _ => false) = false
     cases hv : Head.verify s 5 t c f with
-    | error r => rfl
+    | error r => simp [Held.authentic, untagged, hv]
     | ok h => exact absurd hv (bad h)
   exact decideWith_unverified _ 3 _ p recordBytes t rfl rfl auth
 
