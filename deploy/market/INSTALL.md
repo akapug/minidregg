@@ -18,6 +18,7 @@ What the infra lane applies (dregg-infra `demo-vm`, `edge/demo/`) and what the c
 ```
 /var/lib/mini-market                 mini-market:mini-apps 0750
   index.json                         0644   the catalogue (mini apps search/show read it; L12's pane too)
+  local.json                         0644   the operator's pinned entries (root writes it; index-check merges them; docs/ORACLE-GRAIN-2026-10-27.md §2)
   quarantine/                        0750   ID.spk 0640 (sha256 prefix == ID, <= 256 MiB)
   meta/ refused/                     0755   ID.json 0644
   wanted/                            0730   flags dropped by the worker (mini-core, via group mini-apps)
