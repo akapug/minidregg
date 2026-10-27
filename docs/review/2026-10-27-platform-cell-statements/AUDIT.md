@@ -336,3 +336,51 @@ included) is refused naming `h`. A fold divergence is caught nightly, never at o
 **Before `DurableFastForwardSpec.lean`:** the checkpoint-relative `Loaded` and an index-based
 `representsCheck`; the fold identity in the v4 body with its refusal; the keystone as `HostWritten`
 induction concluding World equality; one shared `bodyOf` for the three sealers.
+
+## 2026-10-27, sixth pass: `Compiler/DurableFastForwardSpec.lean` (lane/hot-path-world-checkpoint 93e94fa2)
+
+| statement | verdict |
+|---|---|
+| `Derived`, `Body4`, the three `Honest` | SOUND: every field pinned to the genesis replay; World by equality |
+| `MacGate`, `MacGateRefusals` | SOUND, but vacuous in isolation (below) |
+| `SuffixGate` | SOUND; the anchor closes the foreign-checkpoint hole at the open |
+| `TailCutAsReplay` | WEAK: existence only; cuts below the checkpoint uncovered |
+| `Exact`, `Wrote`, `Keystone` | SOUND in shape; one `step` for two sessions |
+| `AuditSound`, `AuditRefuses` | SOUND |
+| `HeadSealZero` | SOUND; the only pole forcing `seal4`/`open4` to round-trip |
+
+**Trivial instantiations.** `ff` cannot replay: its type receives only the checkpoint, the anchor and
+the suffix. `bodyOf` cannot carry nothing: `Body4.Honest` pins every `Derived` field. But each `def`
+takes its own parameters. With `decode4 := fun _ => none`, `MacGate` holds, and then the checkpoint
+branch of `Exact`, `reopenCheckpoint` and `SuffixGate` all hold vacuously (their premises need
+`open4 … = .ok`). Only `HeadSealZero` forces `ff` (hence, through `SuffixGate`, `open4`) to accept
+`seal4`'s output. **Bundle them:**
+one structure `Spec rootBytes logStart semanticsId open4 step bodyOf seal4 ff audit` holding all
+eleven, plus `SealOpens : open4 key (seal4 key b) = .ok b` (for this key and semantics), plus an
+inhabitation pole: a `Wrote` derivation through `append`, `seal` at a positive height, and
+`reopenCheckpoint`.
+
+**Foreign checkpoint versus backup.** `Wrote` reopens only from `(height, body) ∈ store.checkpoints`.
+At the open itself the hole is closed by `SuffixGate`'s anchor clause: the stored entry at the body's
+height must carry this key's trailer over `body.chain` and its world root, so a different Store's body
+fails unless its chain is this one's. An atomic backup is an earlier `Written`, so restore is covered. A non-atomic backup (a checkpoint newer than the copied entries)
+leaves the anchor missing. State the Host's selection: the newest checkpoint whose height is at most
+the head, falling back to genesis.
+
+**`TailCutAsReplay`.** It needs no named refusal. Rollback detection rests on the signer's `headTag` (ruling (f)). But "as the genesis
+replay opens it" is not what it says. It asserts only that some `view'` exists, and only for cuts
+inside the suffix. Strengthen it: the cut opens to `View.Honest` of `⟨seed, records.take n⟩`, for
+every `n`, including cuts below the newest checkpoint, through the selection rule.
+
+**Light session.** Whole-World equality (`world = worldAt image`) is the right strength. Per append it is the `foldRecords` append step. But `Wrote`
+has one `step` and one `genesisView`, while the light session (`DurableServed`) is a separate code
+path. Add a `lightAppend` constructor or a theorem `lightStep = step` on `View`; otherwise the light
+session is outside the keystone.
+
+**`Loaded` reshape.** Yes, state it now. `View` fixes the observable part, but `representsCheck`,
+`chainExact` and `indexExact` still read `image.accepted`. Add `LoadedView : Loaded → View` with
+`View.Honest image (LoadedView L)` as the invariant, and `representsCheck` restated over `Derived`.
+
+**Verdict:** proofs may start once there is the bundled `Spec` with `SealOpens` and the inhabitation
+pole, plus the light-session clause in `Wrote`. Strengthen `TailCutAsReplay` and add the `Loaded`
+Prop in the same commit.
