@@ -195,10 +195,14 @@ if install_app EtherCalc; then
 fi
 if install_app Etherpad; then
   if open_grain "$G"; then
-    # UNVERIFIED against the package (README, owed): the pad API. A non-OK answer is a skip, never a failure.
-    c=$(web "$G" GET /api/1/createPad -G --data-urlencode padID=welcome --data-urlencode "text=$(cat "$D/apps/pad-welcome.txt")")
-    if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then ok_ "Etherpad pad welcome created"
-    else skip_ "Etherpad installed; its pad write is not verified on this package (HTTP $c); open the grain and type"; fi
+    # The Sandstorm package disables /api completely. Its pad UI imports a multipart `file` here;
+    # a .txt upload becomes the pad's text, and the matching export proves the write.
+    c=$(web "$G" POST /p/welcome/import -F "file=@$D/apps/pad-welcome.txt;filename=welcome.txt;type=text/plain")
+    if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then
+      c=$(web "$G" GET /p/welcome/export/txt)
+      if [ "$c" = 200 ] && grep -Fq 'Welcome to the pad. Type here' "$T/body"; then ok_ "Etherpad pad welcome imported and read back"
+      else fail_ "Etherpad import readback: HTTP $c"; fi
+    else fail_ "Etherpad pad import: HTTP $c $(head -c 160 "$T/body")"; fi
   else fail_ "Etherpad: could not open $G"; fi
 fi
 if install_app "Hacker Slides"; then

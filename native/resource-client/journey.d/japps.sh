@@ -204,6 +204,13 @@ if [ "$mode" = --box ]; then
         GET_PATH_A=/ GET_PATH_B=/ GET_PATH_C=/p/main CLASS_A=S CLASS_B=S CLASS_C=M ROLE_BASIS_A="$BASIS_A" ROLE_BASIS_B="$BASIS_B" \
         ROLE_BASIS_C="$BASIS_C" SPK_A="$W/state/quarantine/$SLIDES_PKG.spk" SPK_B="$W/state/quarantine/$TODOS_PKG.spk" \
         SPK_C="$W/state/quarantine/$ETHERPAD_PKG.spk" "$@"; }
+      req() {
+        local method=$1 path=$2; shift 2
+        curl -sS --max-time 900 --unix-socket "$dir/http.sock" -X "$method" -H 'Host: grain.test' \
+          -H "Cookie: __Host-mini_spk_session=$(cat "$dir/browser.token")" -H 'Origin: https://grain.test' \
+          -o "$body" -w '%{http_code}' "$@" "http://grain.test$path" 2>>"$out/curl.err"
+      }
+      . "$REPO/scripts/spk-platform/market-writes/japps.sh"
       state=$(jq -er .stateRoot "$(jq -er .profilePath "$run/evidence/profile-result.json")")
       # The tour's step 7: a second browser session on the running Simple Todos grain co-edits.
       app_b=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/b-app-source.json")
@@ -223,6 +230,12 @@ if [ "$mode" = --box ]; then
       # A third market app, Etherpad (saveIdentityCaps): create, install, share, start, enrol, GET.
       if jenv $J birth-c install-c share-c start-c enroll-c get-c >"$W/etherpad-world.out" 2>"$W/etherpad-world.err"; then ep=1; else ep=0; fi
       row "Etherpad on the same world: create, install, share, start, enrol, its pad /p/main 200" "$ep" "$(tail -1 "$W/etherpad-world.err" | cut -c1-160)"
+      if [ "$ep" = 1 ]; then
+        app_c=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/c-app-source.json")
+        dir=$state/apps/$app_c/routes/owner-web body=$W/etherpad-write.body out=$W
+        result=$(write_Etherpad 2>&1 | tail -1)
+        row "Etherpad: one pad import beneath the HTML, exported back" "$([ "${result%% *}" = 1 ] && echo 1 || echo 0)" "${result#* }"
+      fi
     fi
     [ -n "${WORLD_RUN:-}" ] || sh "$REPO/scripts/spk-platform/grain-journey.sh" stop-services "$run" >/dev/null 2>&1 || true
   else

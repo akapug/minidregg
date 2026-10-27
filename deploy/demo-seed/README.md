@@ -59,10 +59,11 @@ stop the run; the exit status is non-zero if any step failed, and re-running res
 
 1. The app writes beneath the HTML are not shell verbs. The script does them as the member over the grain's own
    origin: `apps open GRAIN --json`, POST the printed token to `/__mini/bootstrap`, then plain HTTP with the
-   cookie. EtherCalc's `PUT /_/SHEET` is the recorded qualify write. **Etherpad's `/api/1/createPad` and Hacker Slides'
-   `PUT /slides.md` plus `POST /publish` are guesses**: the repo records no working write for either. Each is
-   checked (Slides by a `GET` on the `-www` origin) and a miss prints `skip`, not FAIL, and the welcome page then
-   does not mention the deck. Replace the two lines in section 7 of `seed.sh` with the package's real endpoints.
+   cookie. EtherCalc's `PUT /_/SHEET` is the recorded qualify write. Etherpad uses its package's real pad UI
+   route, multipart `POST /p/welcome/import` with the text as `file`, then checks `GET /p/welcome/export/txt`
+   (its Sandstorm build disables `/api` unconditionally). **Hacker Slides' `PUT /slides.md` plus `POST /publish`
+   are guesses**: the repo records no working write for them. The deck is checked by a `GET` on the `-www`
+   origin and a miss prints `skip`, not FAIL; the welcome page then does not mention it.
 2. The shape of `apps list --json` (the script finds a grain id with a recursive `jq`), and the output of
    `history all` (`attempt<TAB>ID<TAB>...`, as `j12.sh` greps it).
 3. Whether the public reader can read a chat room's per-member streams from the `lobby` grant alone.
