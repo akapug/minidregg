@@ -875,36 +875,35 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes());
     }
-    let mut out = child.stdout.take()?;
-    let mut err = child.stderr.take()?;
-    // Both pipes are drained on their own threads: a read on this thread would block until the
-    // shell exits, and the deadline below could never fire while a long `can` runs.
-    let reader = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        let _ = out.read_to_end(&mut s);
-        s
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        let _ = err.read_to_end(&mut s);
-        s
-    });
+    let out = child.stdout.take()?;
+    let err = child.stderr.take()?;
+    // Both pipes are drained on their own threads into shared buffers: the deadline below can then
+    // fire while the shell runs, and a page can carry what was printed so far.
+    let drain = |mut pipe: Box<dyn Read + Send>| {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = buf.clone();
+        let handle = std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(n) = pipe.read(&mut chunk) {
+                if n == 0 { break; }
+                if let Ok(mut b) = sink.lock() { b.extend_from_slice(&chunk[..n]); }
+            }
+        });
+        (buf, handle)
+    };
+    let (out_buf, out_thread) = drain(Box::new(out));
+    let (err_buf, err_thread) = drain(Box::new(err));
+    let snapshot = |b: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| b.lock().map(|v| v.clone()).unwrap_or_default();
     // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
-    // member can read (what was decided so far, and a named notice), never as the gateway's 504.
+    // member can read, never as the gateway's 504.
     let deadline = Instant::now() + Duration::from_secs(100);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
+            _ => break None,
         }
     };
-    let stdout = reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
     let cap = |v: Vec<u8>| {
         let mut s = String::from_utf8_lossy(&v).into_owned();
         if s.len() > 64 * 1024 {
@@ -913,22 +912,49 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         }
         s
     };
-    Some(match status {
-        Some(status) => Ending { code: status.code().unwrap_or(1), stdout: cap(stdout), stderr: cap(stderr) },
-        None => {
-            let stdout = cap(stdout);
-            // A bare `can` judges every reference held, printing each as it is decided: the notice
-            // counts them. Any other line that ran out of time says so and keeps what it printed.
-            let first = lines.first().map(String::as_str).unwrap_or("");
-            let bare_can = first == "can" || first == "can --all";
-            let notice = if bare_can {
-                let judged = stdout.lines().filter(|l| !l.is_empty() && !l.starts_with(' ') && !l.starts_with("mini> ")).count();
-                format!("error: {judged} of {} grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)\n", site.names().len())
-            } else {
-                "error: the shell did not finish within 100 s; what it printed stands above, and an attempt, if any, is retained under Receipts\n".to_owned()
-            };
-            Ending { code: 1, stdout, stderr: notice }
-        }
+    if let Some(status) = status {
+        let _ = out_thread.join();
+        let _ = err_thread.join();
+        return Some(Ending { code: status.code().unwrap_or(1), stdout: cap(snapshot(&out_buf)), stderr: cap(snapshot(&err_buf)) });
+    }
+    if !only_answers(lines) {
+        // A line that may move the world is never cut short: the shell keeps running to its
+        // decision (a thread reaps it), and the page says undecided, with where the outcome lands.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            let _ = out_thread.join();
+            let _ = err_thread.join();
+        });
+        let mut stderr = cap(snapshot(&err_buf));
+        stderr.push_str("undecided: still deciding after 100 s; the shell keeps running to its decision, which lands under Receipts (or `lookup ID` / `retry ID` for this attempt)\n");
+        return Some(Ending { code: 255, stdout: cap(snapshot(&out_buf)), stderr });
+    }
+    // Reads and local verbs are stopped at the deadline: nothing they do can be left half-done.
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = out_thread.join();
+    let _ = err_thread.join();
+    let stdout = cap(snapshot(&out_buf));
+    // A bare `can` judges every reference held, printing each as it is decided: the notice counts them.
+    let first = lines.first().map(String::as_str).unwrap_or("");
+    let notice = if first == "can" || first == "can --all" {
+        let judged = stdout.lines().filter(|l| !l.is_empty() && !l.starts_with(' ') && !l.starts_with("mini> ")).count();
+        format!("error: {judged} of {} grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)\n", site.names().len())
+    } else {
+        "error: the read did not finish within 100 s; what it printed stands above\n".to_owned()
+    };
+    Some(Ending { code: 1, stdout, stderr: notice })
+}
+
+/// Whether every line is a read or a local verb by its grammar leaf (stopping one cannot leave the
+/// world half-moved). A line the grammar cannot place counts as one that may move the world.
+fn only_answers(lines: &[String]) -> bool {
+    use crate::shell_grammar::{grammar, parse, parse_line, Effect};
+    lines.iter().all(|line| {
+        let Ok(words) = crate::shell::words(line) else { return false };
+        let Some(g) = words.first().and_then(|w| grammar(w)) else { return false };
+        let Ok(p) = parse(g, &words).or_else(|_| parse_line(g, line)) else { return false };
+        matches!(p.leaf.effect, Effect::Read | Effect::Local)
     })
 }
 
@@ -1112,6 +1138,16 @@ pub(super) fn quote(word: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_reads_and_local_lines_may_be_stopped_at_the_deadline() {
+        let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(super::only_answers(&l(&["can"])));
+        assert!(super::only_answers(&l(&["whoami", "help"])));
+        assert!(!super::only_answers(&l(&["story new t --from tale"])));
+        assert!(!super::only_answers(&l(&["can", "submit p1"])));
+        assert!(!super::only_answers(&l(&["no-such-verb x"])));
+    }
+
     use super::*;
 
     #[test]
