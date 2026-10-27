@@ -481,10 +481,21 @@ consent from that tree's `.lake/build/bin`). Run directories must sit under
 uses the user unit `mini-grain-controller@9870001`: one J14 at a time per account. The manifest's
 `shell` entry must be overridden too, or shell lines run the candidate's mini.
 
-**The subscriber tier row** is `J14_ROUTE=zai J14_TIER=1` (same script). Through tier-6: subscribe
-(observe guest reference, `pay lab week`, the concierge's window, roster row and join-file drop)
-passed; tier-7 carries the join adoption and the refused-turn fix into the member-cap and expiry
-rows.
+**The subscriber tier row** is `J14_ROUTE=zai J14_TIER=1` (same script; for a candidate, set the
+manifest and binaries in `run-j14-tip.sh`'s header). Last run, tier-7 (lane tip 0b35fbac, 167 rows
+before the 3600 s hook timeout): subscribe (observe guest reference, `pay lab week`, the concierge's
+window, roster row, join-file drop, `chat join` adopting the window), summon, the route fact, ask and
+no-grant all pass; the broker refuses the over-cap call for bob `member-day-ceiling` and the
+controller decides the turn as a typed failure `provider-refused:member-day-ceiling`. Owed, not yet
+run:
+- attach1's turn count in a workroom (the template's own documents are linked too): bcd78780.
+- **The resident leaves a failed prompt pending.** `room_resident.rs` `prompt()` returns Err on a
+  `prompt-complete` whose outcome is `failed`, keeping `journal.pending`; the main loop then refuses
+  every later pass ("uncertain prior prompt") before `resident_requests::reconcile` can close the
+  request `failed-after-admission` from the controller's typed `refused` record. A failed frame
+  whose typed outcome is `refused` should be reconciled and cleared there (the bob notice row and
+  the dismissal cascade from this).
+- The tier row outruns the J14 hook's 3600 s bound (`journey.sh`); the expiry rows were not reached.
 
 **The resident's tools and grants** (for a new tool, e.g. an await bridge): the room catalogue is
 `resource_tools::room_tool_specs()` (the MCP schemas, also the provider's function list); reads go
