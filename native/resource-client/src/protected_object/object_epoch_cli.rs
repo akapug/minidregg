@@ -27,7 +27,7 @@ fn fixed(v: &Value, n: &str) -> Result<[u8; 32]> {
     mini_sdk::decimal::to_be_bytes32(&natural(v, n)?).map_err(|_| format!("{n} exceeds 256 bits"))
 }
 fn hex32(v: &Value, n: &str) -> Result<[u8; 32]> {
-    crate::decode_hex(text(v, n)?)?
+    mini_sdk::hex::decode(text(v, n)?).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{n} must be 32 bytes"))
 }
@@ -82,7 +82,7 @@ fn phase_transport(dir:&Path)->Result<(std::path::PathBuf,std::path::PathBuf)> {
 /// Return false only when this journal has never retained the operation. Known
 /// phases reconstruct their exact artifacts, including accepted historical ones.
 pub(crate) fn restore_phase(dir:&Path,state:&Path,storage:&Path,operation:&str)->Result<bool> {
-    let op:[u8;32]=crate::decode_hex(operation)?.try_into().map_err(|_|"operation must be 32 bytes")?;
+    let op:[u8;32]=mini_sdk::hex::decode(operation).map_err(|e| e.0)?.try_into().map_err(|_|"operation must be 32 bytes")?;
     let mut store=Store::open(state,crate::read_secret(storage)?.to_bytes())?;
     if !store.operation_known(&op)? {return Ok(false);}
     let (host,config)=phase_transport(dir)?;
@@ -194,7 +194,7 @@ pub(crate) fn run(
     let mut checked_roster = None;
     let mut roster_bytes = Vec::new();
     if phase != "freeze" {
-        roster_bytes = crate::decode_hex(text(&r, "rosterBytes")?)?;
+        roster_bytes = mini_sdk::hex::decode(text(&r, "rosterBytes")?).map_err(|e| e.0)?;
         let roster_bin = dir.join("audience-roster.bin");
         crate::write_new(&roster_bin, &roster_bytes)?;
         let roster_view_path = dir.join("audience-roster.json");
@@ -372,7 +372,7 @@ pub(crate) fn retry(
     operation: &str,
     writer: Option<&Path>,
 ) -> Result<()> {
-    let op: [u8; 32] = crate::decode_hex(operation)?
+    let op: [u8; 32] = mini_sdk::hex::decode(operation).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| "operation must be 32 bytes")?;
     let mut store = Store::open(state, crate::read_secret(storage)?.to_bytes())?;

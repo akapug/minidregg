@@ -706,7 +706,6 @@ Kernel.ReactiveTerminalCell	3.2	3705080	0
 Compiler.WorldKindCell	2.4	3704676	0
 Assurance.Ext6GateProofDeploymentAdmission	2.1	3704068	0
 Assurance.BfvSuiteMigrationBoundary	2.2	3704036	0
-Compiler.DeployedCellRegistry	2.3	3703780	0
 Assurance.ProofCompositionGame	2.6	3703180	0
 Assurance.Tower256AdditiveFriRawAdmission	2.7	3703100	0
 Kernel.WorldKindProjection	2.3	3703020	0
@@ -1314,5 +1313,4 @@ Selvage.Statements	0.3	468072	0
 Compiler.Placeholder	0.3	467892	0
 Theory.Channel	0.3	466900	0
 Theory.Sp800185Cshake256Core	0.3	465344	0
-Pred.Placeholder	0.3	463976	0
 Effects.Placeholder	0.3	461664	0

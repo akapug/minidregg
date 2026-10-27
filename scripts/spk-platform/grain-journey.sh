@@ -424,15 +424,25 @@ delegate_observe() (
   confirmed "$D-attempt/outcome.json"
 )
 
-# share LABEL APP SESSION TICKET CAP NONCE KIND: session birth, event22 ticket
-# and event28 enrollment for participant 8, then `spk-host grain route`.
+# share LABEL APP SESSION TICKET CAP NONCE KIND [ROUTE]: session birth, event22
+# ticket and event28 enrollment for participant 8, then `spk-host grain route`.
+# LABEL is the app's letter, or letter+digit for a second browser session on the
+# same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
-  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7
+  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
+  expected_host=grain.test
+  if [ "$label" = b ] && [ -n "${GRAIN_EXPECTED_HOST_B:-}" ]; then
+    expected_host=$GRAIN_EXPECTED_HOST_B
+    case "$expected_host" in localhost:*) ;; *) fail "browser-B expected host must be localhost with an explicit port" ;; esac
+    host_port=${expected_host#localhost:}
+    case "$host_port" in ''|0*|*[!0-9]*) fail "browser-B port must be canonical decimal" ;; esac
+    [ "$host_port" -ge 1024 ] && [ "$host_port" -le 65535 ] || fail "browser-B port out of range"
+  fi
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   birth_session "$label" "$nonce" "$app" "$session" "$kind" "$cap"
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
@@ -490,12 +500,13 @@ share() (
   fi
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
-  jq -n --arg name "owner-$kind" --arg session "$EV/$label-session-author/source.json" \
+  case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
+  jq -n --arg host "$expected_host" --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
-    --arg seed "$WR/tool.key" \
+    --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
-    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
-     displayName:"Grain owner",preferredHandle:"owner",sessionSource:$session,
+    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:$host,
+     displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
     >"$EV/$label-route-request.json"
@@ -508,9 +519,9 @@ share() (
 enroll() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
@@ -584,10 +595,11 @@ enroll() (
 # (curl header arguments, one per line): the API bearer, or the browser
 # session cookie the bootstrap would set (the operator owns the route dir).
 cred() {
+  expected_host=$(jq -er .expectedHost "$2/custodian.json")
   case "$1" in
     api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
     web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
-      -H "Origin: https://grain.test" ;;
+      -H "Origin: https://$expected_host" ;;
     *) echo "unknown route kind $1" >&2; return 1 ;;
   esac
 }
@@ -597,28 +609,30 @@ cred() {
 http_post() (
   label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Host: $expected_host" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # One authenticated request through the resident's route: the resident asks
 # Mini to author, sign and admit it (op36/37/34), then delivers it over fd3.
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
-  dir=$STATE/apps/$app/routes/owner-$kind
+  dir=$STATE/apps/$app/routes/${5:-owner-$kind}
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -H "Host: $expected_host" "$@" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # floor APP: the M11 floor as the running app sees it. Every process in the
@@ -827,11 +841,19 @@ run_phase() {
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
           "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
       fi ;;
-    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind" ;;
-    enroll) step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
-      $((base + 2000 + ${n:-1} * 1000)) ;;
+    # A trailing 2 (share-b2, enroll-b2, get-b2) is a second browser session on the
+    # same grain: session ${P}50, ticket ${P}30, capabilities 3${i}51.. (ticket
+    # 3${i}81..), route guest2-KIND, nonces from base + 6000.
+    share) if [ "$n" = 2 ]; then
+        step "$phase" share "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 6000)) "$kind" "guest2-$kind"
+      else step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind"; fi ;;
+    enroll) if [ "$n" = 2 ]; then
+        step "$phase" enroll "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 7000))
+      else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
+        $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
-    get) step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" ;;
+    get) if [ "$n" = 2 ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
+      else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
     poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
     floor) step "$phase" floor "$app" ;;

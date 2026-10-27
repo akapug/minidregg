@@ -89,7 +89,7 @@ fn read_secret(source: &str) -> Result<credentials::Secret> {
 fn owner_view(host: &Path, socket: &Path, config: &Path, owner: &Owner) -> Result<Value> {
     let payload =
         serde_json::to_vec(&json!({"subject":owner.subject,"publicKey":owner.public_key})).unwrap();
-    let reply = crate::session_invoke(host, socket, config, 144, &payload)?;
+    let reply = crate::session_invoke(host, socket, config, mini_sdk::host_operations::KEY_ROTATION_STATUS, &payload)?;
     let mut view: Value = match reply.split_first() {
         Some((144, body)) => {
             serde_json::from_slice(body).map_err(|_| "invalid native owner status")?

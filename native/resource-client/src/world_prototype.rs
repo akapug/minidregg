@@ -73,22 +73,22 @@ pub(super) fn construct(root: &Path, workspace: &Value, id: &str, target_name: &
         origins.push(json!({"name":name,"target":reference["target"],
             "root":view["cell"]["root"],"revision":view["cell"]["worldKind"]["descriptor"]["revision"]}));
     }
-    let shown=world_kind::method_operation(workspace,132,program.as_bytes())?;
+    let shown=world_kind::method_operation(workspace,mini_sdk::host_operations::NOCK_PROGRAM_SHOW,program.as_bytes())?;
     let outputs=shown.pointer("/abi/outputs").and_then(Value::as_array).ok_or("constructor lacks ABI outputs")?;
     if outputs.len()!=1 || outputs[0]["key"]!="definition" || outputs[0]["target"]!="0"
         || outputs[0]["field"]!="0" || outputs[0]["type"]!="noun" {
         return Err("constructor must declare sole noun output definition at target0 coordinate0".into());
     }
     let values=selected_values(&shown,&slots)?;
-    let dry=world_kind::method_operation(workspace,134,
+    let dry=world_kind::method_operation(workspace,mini_sdk::host_operations::NOCK_DRY_RUN,
         json!({"programId":program,"caller":member(workspace,"subject")?,"room":"0",
             "targets":targets,"values":values}).to_string().as_bytes())?;
     if dry["verdict"]!="ok" {return Err(format!("constructor did not complete: {dry}"));}
     let kind=b"world-prototype-output";
     let mut payload=(kind.len() as u16).to_le_bytes().to_vec();
     payload.extend_from_slice(kind);
-    payload.extend(crate::decode_hex(member(&dry,"output")?)?);
-    let result=world_kind::method_operation(workspace,8,&payload)?;
+    payload.extend(mini_sdk::hex::decode(member(&dry,"output")?).map_err(|e| e.0)?);
+    let result=world_kind::method_operation(workspace,mini_sdk::host_operations::INSPECT,&payload)?;
     let mut proposal_targets=vec![json!({"name":target_name,"expectedTargetRoot":origins[0]["root"],
         "payload":{"type":"kindDefinition","definition":result["definition"]}})];
     for origin in &origins[1..] {

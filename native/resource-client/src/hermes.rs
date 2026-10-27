@@ -466,8 +466,8 @@ fn select_registration(
         chat::decimal(member(record, k)?, k)?;
     }
     let enc = member(record, "encryptionKey")?;
-    if enc.len() != 64 || !enc.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("registered Hermes encryptionKey must be 64 hex digits".into());
+    if !mini_sdk::hex::is_canonical_len(enc, 32) {
+        return Err("registered Hermes encryptionKey must be 64 lowercase hex digits".into());
     }
     let record = (**record).clone();
     Ok(record)

@@ -82,16 +82,6 @@ fn selectors(reference: &Value, pin: &Value) -> Result<Value> {
     }
     Ok(selected.clone())
 }
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
-    let width = u32::try_from(first.len()).map_err(|_| "App request exceeds frame bound")?;
-    let mut bytes = width.to_le_bytes().to_vec();
-    bytes.extend(first);
-    bytes.extend(second);
-    if bytes.len() >= crate::transport::HOST_MAX_FRAME {
-        return Err("App request exceeds frame bound".into());
-    }
-    Ok(bytes)
-}
 fn authentication_bytes(domain: &str, semantics: &str, request: &[u8]) -> Vec<u8> {
     [
         format!("MINI/APPLICATION/AUTHENTICATED-PLAN/v1\n{domain}\n{semantics}\n").as_bytes(),
@@ -156,7 +146,7 @@ fn check_plan(
             {
                 return Err("App signing slot differs from this member's current key".into());
             }
-            let bytes = crate::decode_hex(header)?;
+            let bytes = mini_sdk::hex::decode(header).map_err(|e| e.0)?;
             if bytes.is_empty() || bytes.len() > 65536 {
                 return Err("App signing header bound refused".into());
             }
@@ -257,9 +247,9 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
         .to_bytes();
     let mut observed = reads.pop().unwrap();
     while let Some(read) = reads.pop() {
-        observed = pair(&read, &observed)?;
+        observed = mini_sdk::local::pair(&read, &observed)?;
     }
-    let payload = pair(&request_bytes, &pair(&auth, &observed)?)?;
+    let payload = mini_sdk::local::pair(&request_bytes, &mini_sdk::local::pair(&auth, &observed)?)?;
     let plan_bytes = crate::key_rotation::call(&host, &socket, &config, PLAN_OP, &payload)?;
     crate::create_private(&attempt.join("app-plan.bin"), &plan_bytes)?;
     let plan = crate::inspect(
@@ -301,7 +291,7 @@ pub(super) fn status(root: &Path, pin: &Value, name: &str) -> Result<Value> {
         &socket,
         &config,
         READY_OP,
-        &pair(&plan_bytes, &signed)?,
+        &mini_sdk::local::pair(&plan_bytes, &signed)?,
     )?;
     let mut ready: Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid native app readiness: {e}"))?;

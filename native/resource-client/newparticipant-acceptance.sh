@@ -244,6 +244,7 @@ jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OW
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2
 sh "$GENESIS_PARAMS_SH" fill-genesis "$ROOT/genesis-params.json"
+fill_completion_custodian "$ROOT/genesis-params.json" "$ROOT" "$MINI" || exit 2
 EXTRA_GENESIS_ENROLLMENTS="$ROOT/pay/genesis-enrollments-all.json" \
 GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \
   sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" "$CLOCK_PUBLIC" \

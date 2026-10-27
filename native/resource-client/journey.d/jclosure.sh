@@ -16,6 +16,7 @@
 # Ran with the hook contract (journey.sh header): MINI, SPONSOR_WS, NEWCOMER_WS, SPONSOR_SUBJECT,
 # NEWCOMER_SUBJECT, JOURNEY_STEP_DIR exported. Exit 0 = every row matched; last stdout line = rows.tsv.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in MINI SPONSOR_WS NEWCOMER_WS NEWCOMER_SUBJECT JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jclosure: $name is required" >&2; exit 2; fi
@@ -37,8 +38,8 @@ row() {  # row CELL NAME EXPECTED OBSERVED OK(0/1)
 }
 refusal() {
   local a=$1/attempts/jcl-$2
-  if [ -f "$a/outcome.json" ] && jq -e '.type == "refused"' "$a/outcome.json" >/dev/null 2>&1; then
-    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+  if [ -f "$a/outcome.json" ] && attempt_answer "$a/outcome.json" | jq -e '.type == "refused"' >/dev/null 2>&1; then
+    printf '%s: %s' "$(attempt_answer "$a/outcome.json" | jq -r '.phase // empty' | xxd -r -p)" "$(attempt_answer "$a/outcome.json" | jq -r '.detail // empty' | xxd -r -p)"
   elif [ -s "$D/$2-submit.err" ]; then
     tail -1 "$D/$2-submit.err"
   else
@@ -56,7 +57,7 @@ attempt() {  # attempt WS ID NAME ACTION... -> 0 iff admitted
   [ "$(cat "$D/$id-propose.rc")" = 0 ] || return 1
   run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
     --intent "$ws/proposals/jcl-$id/intent.json" --attempt "$ws/attempts/jcl-$id"
-  [ "$(cat "$D/$id-submit.rc")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/jcl-$id/outcome.json" >/dev/null 2>&1
+  [ "$(cat "$D/$id-submit.rc")" = 0 ] && attempt_answer "$ws/attempts/jcl-$id/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 admit() {  # admit CELL ID LABEL WS NAME ACTION...
   local cell=$1 id=$2 label=$3 ws=$4; shift 4
@@ -101,8 +102,8 @@ run seal-propose "$MINI" workspace --action propose --dir "$WS_A" --request "$D/
 run seal-submit "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jcl-seal/intent.json" \
   --attempt "$WS_A/attempts/jcl-seal"
 row board "A seals the board (install: every write leaves fields 2 and 3 as they are)" installed \
-  "$(jq -r '.type + " " + (.confirmation // "")' "$WS_A/attempts/jcl-seal/outcome.json" 2>/dev/null)" \
-  "$(jq -e '.type == "confirmed"' "$WS_A/attempts/jcl-seal/outcome.json" >/dev/null 2>&1; echo $?)"
+  "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -r '.type + " " + (.confirmation // "")' 2>/dev/null)" \
+  "$(attempt_answer "$WS_A/attempts/jcl-seal/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1; echo $?)"
 jq -n --arg r "$B" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"kcl-board",
   recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/grant.json"
 run grant-propose "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/grant.json" --proposal-id jcl-grant

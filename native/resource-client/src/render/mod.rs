@@ -179,7 +179,7 @@ pub fn decos(names: &BTreeMap<String, String>, marks: &Value, depth: usize) -> V
 }
 
 fn decode_hex(value: &str) -> Vec<u8> {
-    crate::decode_hex(value).unwrap_or_default()
+    mini_sdk::hex::decode(value).unwrap_or_default()
 }
 
 /// `12 B`, `3 KB`, `2 MB`: an embed's size, to the unit a reader thinks in.
@@ -574,7 +574,7 @@ mod tests;
 
 #[test]
 fn decode_hex_malformed_payload_retains_empty_fallback() {
-    for invalid in ["0é0", "😀", "a", "zz"] {
+    for invalid in ["0é0", "😀", "a", "zz", "AB"] {
         assert!(decode_hex(invalid).is_empty());
     }
     assert_eq!(decode_hex("4869"), b"Hi");

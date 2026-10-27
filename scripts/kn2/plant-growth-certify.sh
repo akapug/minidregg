@@ -22,7 +22,9 @@ cp "$plant_root/native/resource-client/genesis.sh" "$plant_tmp/genesis.sh"
 cp "$plant_root/native/resource-client/genesis-params.example.json" "$plant_tmp/genesis-params.example.json"
 plant_call='  grow_checkpoint "$id" || return 1'
 test "$(grep -Fc "$plant_call" "$plant_tmp/journey.sh")" -eq 1
-sed -i 's/^  grow_checkpoint "\$id" || return 1$/  : # planted: growth checkpoint removed/' "$plant_tmp/journey.sh"
+# no `sed -i`: BSD sed reads the script as the backup suffix and edits nothing
+sed 's/^  grow_checkpoint "\$id" || return 1$/  : # planted: growth checkpoint removed/' "$plant_tmp/journey.sh" >"$plant_tmp/journey.sh.new"
+mv "$plant_tmp/journey.sh.new" "$plant_tmp/journey.sh"
 test "$(grep -Fc '  : # planted: growth checkpoint removed' "$plant_tmp/journey.sh")" -eq 1
 if grep -Fq "$plant_call" "$plant_tmp/journey.sh"; then
   echo "PLANT DID NOT APPLY: in-loop checkpoint call remains" >&2

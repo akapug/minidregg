@@ -80,10 +80,7 @@ pub(crate) const FN_ACK_OPERATOR_ONLY: &str =
     "fn ACK (op 13/15) is operator-only: Lean has not stated who may ACK a public fn delivery";
 
 fn fn_ack_transaction(digits: &[u8]) -> bool {
-    !digits.is_empty()
-        && digits.len() <= 80
-        && digits.iter().all(u8::is_ascii_digit)
-        && (digits.len() == 1 || digits[0] != b'0')
+    mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
 }
 
 /// A named refusal for an op the public route withholds on purpose, so a
@@ -198,8 +195,13 @@ pub(crate) fn pinned_address(address: &Path) -> Result<String, String> {
 fn split_envelope<'a>(
     envelope: &'a [u8],
     config: &[u8],
-) -> Result<(Option<&'a [u8]>, &'a [u8]), &'static str> {
-    if envelope.len() < 5 || !matches!(envelope[0], 1 | 2) {
+) -> Result<(&'a [u8], &'a [u8]), &'static str> {
+    // Version 1 (no Host image pin) is retired: every client sends v2, and an unpinned request is
+    // refused by name before anything is forwarded.
+    if envelope.first() == Some(&1) {
+        return Err("socket envelope v1 is retired: send v2 with the Host image pin");
+    }
+    if envelope.len() < 5 || envelope[0] != 2 {
         return Err("invalid socket envelope");
     }
     let config_length = u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize;
@@ -209,20 +211,11 @@ fn split_envelope<'a>(
     if config_length != config.len() || envelope.get(5..config_end) != Some(config) {
         return Err("config pin mismatch");
     }
-    let (pin, request_start) = if envelope[0] == 2 {
-        let sha_end = config_end
-            .checked_add(32)
-            .ok_or("invalid socket envelope")?;
-        (
-            Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
-            sha_end,
-        )
-    } else {
-        (None, config_end)
-    };
-    let request = envelope
-        .get(request_start..)
+    let sha_end = config_end
+        .checked_add(32)
         .ok_or("invalid socket envelope")?;
+    let pin = envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?;
+    let request = envelope.get(sha_end..).ok_or("invalid socket envelope")?;
     if request.is_empty() {
         return Err("invalid socket envelope");
     }
@@ -235,7 +228,7 @@ fn request_from_envelope<'a>(
     host_sha256: &[u8; 32],
 ) -> Result<&'a [u8], &'static str> {
     let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_some_and(|pin| pin != host_sha256.as_slice()) {
+    if pin != host_sha256.as_slice() {
         return Err("host image pin mismatch");
     }
     Ok(request)
@@ -269,9 +262,8 @@ pub(crate) fn public_envelope(
 /// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
 /// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
 pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
-    let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
-    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+    let (_, request) = split_envelope(envelope, config)?;
+    if !matches!(request.first().copied(), Some(mini_sdk::host_operations::AGENT_PAID_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_RESERVE_PLAN | mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE | mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_ASSEMBLE))
         || !request_within_bound(request) || !allowed_operator_operation(request) {
         return Err("operation unavailable on agent operator proxy");
     }
@@ -315,9 +307,7 @@ fn provider_continuity_request(payload: &[u8]) -> bool {
     } else if let Some(body) = payload.strip_prefix(crate::provider_continuity::V3) {
         exact_pair(body).is_some_and(|(receipts, point)| {
             v2_body(receipts) && exact_pair(point).is_some_and(|(count, root)| {
-                let natural = |digits: &[u8]| !digits.is_empty() && digits.len() <= 80
-                    && digits.iter().all(u8::is_ascii_digit)
-                    && (digits.len() == 1 || digits[0] != b'0');
+                let natural = |digits: &[u8]| mini_sdk::decimal::is_canonical_ascii_max(digits, 80);
                 natural(count) && count != b"0" && natural(root)
             })
         })
@@ -375,11 +365,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
-            catalog_enabled
-                && !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
+            catalog_enabled && mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
         }
         [19, payload @ ..] if payload.len() >= 10 => {
             let metadata_length = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
@@ -401,6 +387,10 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         }
         [20 | 21, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // Recipient receipt lookup: Host canonical-decodes the complete ingress and
+        // requires exact event22 certificate/record/original-receipt equality in
+        // its verified walk. No current authority or issue append is granted.
+        [55, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [30 | 31, payload @ ..] => {
             !payload.is_empty()
                 && payload.len() <= 256 * 1024
@@ -485,12 +475,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
-        [102, digits @ ..] => {
-            !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
-        }
+        [102, digits @ ..] => mini_sdk::decimal::is_canonical_ascii_max(digits, 80),
         // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
         [126 | 128, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
@@ -892,17 +877,6 @@ pub(crate) fn durability_barrier() -> Result<(), String> {
     mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
 }
 
-/// A failed write or read leaves the request's execution status unknown. Callers
-/// retain the original signed call and use historical lookup before resubmission.
-pub fn invoke(
-    socket: &Path,
-    config: &Path,
-    operation: u8,
-    payload: &[u8],
-) -> Result<Vec<u8>, String> {
-    invoke_inner(Path::new(""), socket, config, None, operation, payload)
-}
-
 /// An upgraded worker requires the executable image actually serving the
 /// socket to match its durable host pin. Version 2 is mandatory on this path:
 /// an older service rejects the envelope before it can forward the request.
@@ -914,7 +888,7 @@ pub fn invoke_pinned(
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
-    invoke_inner(Path::new(""), socket, config, Some(&expected), operation, payload)
+    invoke_inner(Path::new(""), socket, config, &expected, operation, payload)
 }
 
 /// The main caller has an independently selected local Host; direct remote
@@ -924,7 +898,7 @@ pub(crate) fn invoke_pinned_with_local(
     operation: u8, payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
-    invoke_inner(local_host, socket, config, Some(&expected), operation, payload)
+    invoke_inner(local_host, socket, config, &expected, operation, payload)
 }
 
 fn check_signing_plan_reply(local_host: &Path, config: &Path, operation: u8,
@@ -1136,7 +1110,7 @@ fn invoke_inner(
     local_host: &Path,
     socket: &Path,
     config: &Path,
-    expected_host_sha256: Option<&[u8; 32]>,
+    expected_host_sha256: &[u8; 32],
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
@@ -1151,12 +1125,10 @@ fn invoke_inner(
         return Err("host request exceeds frame bound or has malformed carried lookup before transmission".to_owned());
     }
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
-    frame.push(if expected_host_sha256.is_some() { 2 } else { 1 });
+    frame.push(2);
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
     frame.extend_from_slice(&config);
-    if let Some(expected) = expected_host_sha256 {
-        frame.extend_from_slice(expected);
-    }
+    frame.extend_from_slice(expected_host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
     durability_barrier()?;
@@ -2027,6 +1999,16 @@ mod tests {
     }
 
     use super::*;
+
+    /// The test services pin the Host image as zeros (`EnvelopeRules.host_sha256`); every test
+    /// client speaks envelope v2 with that pin (v1 is retired).
+    const TEST_HOST_PIN: [u8; 32] = [0; 32];
+    fn invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>, String> {
+        invoke_inner(Path::new(""), socket, config, &TEST_HOST_PIN, operation, payload)
+    }
+    fn v2_head() -> Vec<u8> {
+        [vec![2, 6, 0, 0, 0], b"config".to_vec(), TEST_HOST_PIN.to_vec()].concat()
+    }
     use std::thread;
 
     fn refusal_for_peer(peers: &OperatorPeers) -> Vec<u8> {
@@ -2046,8 +2028,14 @@ mod tests {
             }
         });
         // One frame that no envelope rule accepts: an admitted peer is refused
-        // for the frame, a foreign peer before any byte is read.
-        write_frame(&mut client, b"x").unwrap();
+        // for the frame, a foreign peer before any byte is read. The foreign
+        // refusal may close the socket before this write lands (EPIPE); the
+        // refusal it wrote first is still there to read.
+        match write_frame(&mut client, b"x") {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("{error}"),
+        }
         let reply = read_frame(&mut client).unwrap().unwrap();
         worker.join().unwrap();
         reply
@@ -2406,12 +2394,16 @@ mod tests {
             request_from_envelope(&v2[..v2.len() - 2], b"config", &host),
             Err("invalid socket envelope")
         );
+        // Envelope v1 (no Host image pin) is retired: refused by name, never forwarded.
         let v1 = [vec![1, 6, 0, 0, 0], b"config".to_vec(), request.to_vec()].concat();
         assert_eq!(
             request_from_envelope(&v1, b"config", &host),
-            Ok(request.as_slice())
+            Err("socket envelope v1 is retired: send v2 with the Host image pin")
         );
-        assert_ne!(v2[0], 1); // A prior v1-only service refuses rather than forwarding v2.
+        assert_eq!(
+            public_envelope(&v1, b"config", false),
+            Err("socket envelope v1 is retired: send v2 with the Host image pin")
+        );
     }
 
     #[test]
@@ -2442,11 +2434,11 @@ mod tests {
             write_frame(&mut stream, &[13, 1]).unwrap();
         });
         assert_eq!(
-            invoke_pinned(&socket, &config, &host_hex, 13, b"4").unwrap(),
+            invoke_pinned(&socket, &config, &host_hex, mini_sdk::host_operations::FN_ACK, b"4").unwrap(),
             vec![13, 1]
         );
         thread.join().unwrap();
-        assert!(invoke_pinned(&socket, &config, &"AB".repeat(32), 13, b"4").is_err());
+        assert!(invoke_pinned(&socket, &config, &"AB".repeat(32), mini_sdk::host_operations::FN_ACK, b"4").is_err());
         fs::remove_file(socket).unwrap();
         fs::remove_file(config).unwrap();
         fs::remove_dir(directory).unwrap();
@@ -2503,7 +2495,7 @@ mod tests {
             let (mut first, _) = listener.accept().unwrap();
             assert_eq!(
                 read_frame(&mut first).unwrap(),
-                Some([vec![1, 6, 0, 0, 0], b"config".to_vec(), vec![2, 42]].concat())
+                Some([v2_head(), vec![2, 42]].concat())
             );
             let mut reply = Vec::new();
             write_frame(&mut reply, &[2, 7, 8]).unwrap();
@@ -2513,11 +2505,11 @@ mod tests {
             let (mut second, _) = listener.accept().unwrap();
             assert_eq!(
                 read_frame(&mut second).unwrap(),
-                Some([vec![1, 6, 0, 0, 0], b"config".to_vec(), vec![2, 42]].concat())
+                Some([v2_head(), vec![2, 42]].concat())
             );
         });
-        assert_eq!(invoke(&socket, &config, 2, &[42]).unwrap(), vec![2, 7, 8]);
-        assert!(invoke(&socket, &config, 2, &[42])
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::SUBMIT, &[42]).unwrap(), vec![2, 7, 8]);
+        assert!(invoke(&socket, &config, mini_sdk::host_operations::SUBMIT, &[42])
             .unwrap_err()
             .contains("uncertain"));
         thread.join().unwrap();
@@ -2559,12 +2551,12 @@ done"#;
             };
             let _ = supervise(&listener, None, b"config", &[0; 32], false, &mut start);
         });
-        assert_eq!(invoke(&socket, &config, 3, &[1, 2]).unwrap(), vec![3]);
-        assert!(invoke(&socket, &config, 9, &[])
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[1, 2]).unwrap(), vec![3]);
+        assert!(invoke(&socket, &config, mini_sdk::host_operations::SIGNATURES, &[])
             .unwrap_err()
             .contains("uncertain"));
-        assert_eq!(invoke(&socket, &config, 3, &[]).unwrap(), vec![3]);
-        assert_eq!(invoke(&socket, &config, 5, &[7]).unwrap(), vec![5]);
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[]).unwrap(), vec![3]);
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::AUTHORIZED_QUERY, &[7]).unwrap(), vec![5]);
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2);
         let _ = fs::remove_dir_all(directory);
     }
@@ -2674,7 +2666,7 @@ done"#;
         );
         let mut staller = UnixStream::connect(&service.socket).unwrap();
         staller.write_all(&[9, 0, 0]).unwrap();
-        let (answer, waited) = timed_invoke(&service, 3);
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::LOOKUP);
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         let refusal = read_frame(&mut DeadlinePipe {
@@ -2703,7 +2695,7 @@ done"#;
         let slow = {
             let socket = service.socket.clone();
             let config = service.config.clone();
-            thread::spawn(move || invoke(&socket, &config, 8, &[]))
+            thread::spawn(move || invoke(&socket, &config, mini_sdk::host_operations::INSPECT, &[]))
         };
         thread::sleep(Duration::from_millis(200));
         let queued = {
@@ -2711,18 +2703,18 @@ done"#;
             let config = service.config.clone();
             thread::spawn(move || {
                 let started = Instant::now();
-                (invoke(&socket, &config, 3, &[]), started.elapsed())
+                (invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[]), started.elapsed())
             })
         };
         thread::sleep(Duration::from_millis(200));
-        let (busy, waited) = timed_invoke(&service, 5);
+        let (busy, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY);
         assert_eq!(busy.unwrap_err(), "socket rejected request: busy: host queue full");
         assert!(waited < Duration::from_secs(1), "busy refusal waited {waited:?}");
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
         let (answer, waited) = queued.join().unwrap();
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(3), "queued client waited {waited:?}");
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
     }
 
     /// Idle connections up to the bound cost the others nothing; one beyond
@@ -2743,7 +2735,7 @@ done"#;
             .map(|_| UnixStream::connect(&service.socket).unwrap())
             .collect();
         thread::sleep(Duration::from_millis(100));
-        let (answer, waited) = timed_invoke(&service, 3);
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::LOOKUP);
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         // The honest connection's slot is released just after its reply is
@@ -2754,7 +2746,7 @@ done"#;
             .collect();
         thread::sleep(Duration::from_millis(100));
         assert_eq!(
-            timed_invoke(&service, 3).0.unwrap_err(),
+            timed_invoke(&service, mini_sdk::host_operations::LOOKUP).0.unwrap_err(),
             "socket rejected request: busy: connection limit"
         );
         for mut stream in idle.into_iter().chain(extra) {
@@ -2767,7 +2759,7 @@ done"#;
             assert_eq!(refusal, b"\xfeinvalid socket frame: frame read deadline");
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(timed_invoke(&service, 3).0.unwrap(), vec![3]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::LOOKUP).0.unwrap(), vec![3]);
     }
 
     /// A client that sends a whole request and never reads the reply does not
@@ -2776,8 +2768,8 @@ done"#;
     fn serve_a_client_that_never_reads_holds_no_one_else() {
         let service = fake_service("noread", SERVE_BOUNDS);
         let mut silent = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut silent, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[3]].concat()).unwrap();
-        let (answer, waited) = timed_invoke(&service, 5);
+        write_frame(&mut silent, &[v2_head().as_slice(), &[3]].concat()).unwrap();
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY);
         assert_eq!(answer.unwrap(), vec![5]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         drop(silent);
@@ -2797,14 +2789,14 @@ done"#;
                 queue_residence: Duration::from_secs(60),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(200));
         let mut abandoned = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[7]].concat()).unwrap();
+        write_frame(&mut abandoned, &[v2_head().as_slice(), &[7]].concat()).unwrap();
         thread::sleep(Duration::from_millis(200));
         drop(abandoned);
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(service.forwarded(), vec![8, 5]);
     }
 
@@ -2821,13 +2813,13 @@ done"#;
                 queue_residence: Duration::from_millis(300),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(200));
-        let (late, waited) = timed_invoke(&service, 7);
+        let (late, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHOR);
         assert_eq!(late.unwrap_err(), "socket rejected request: busy: queue residence deadline");
         assert!(waited < Duration::from_secs(2), "refusal waited {waited:?}");
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(service.forwarded(), vec![8, 5]);
     }
 
@@ -2846,14 +2838,14 @@ done"#;
                 queue_residence: Duration::from_millis(500),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(100));
         let queued: Vec<_> = [1u8, 2, 3, 4]
             .into_iter()
             .map(|operation| (operation, service.invoke_later(operation)))
             .collect();
         let mut abandoned = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[6]].concat()).unwrap();
+        write_frame(&mut abandoned, &[v2_head().as_slice(), &[6]].concat()).unwrap();
         thread::sleep(Duration::from_millis(100));
         drop(abandoned);
         // The slow exchange itself lasts twice the residence deadline.
@@ -2871,7 +2863,7 @@ done"#;
                 }
             }
         }
-        assert_eq!(timed_invoke(&service, 10).0.unwrap(), vec![10]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::OBSERVATION_ASSEMBLE).0.unwrap(), vec![10]);
         outcomes.push((10, true));
         let forwarded = service.forwarded();
         assert!(!forwarded.contains(&6), "abandoned request reached the Host");
@@ -2883,9 +2875,10 @@ done"#;
     }
 
     fn envelope_for(request: &[u8]) -> Vec<u8> {
-        let mut envelope = vec![1];
+        let mut envelope = vec![2];
         envelope.extend_from_slice(&6u32.to_le_bytes());
         envelope.extend_from_slice(b"config");
+        envelope.extend_from_slice(&TEST_HOST_PIN);
         envelope.extend_from_slice(request);
         envelope
     }
@@ -2941,14 +2934,14 @@ done"#;
             },
         );
         let oversized = vec![b' '; AUTHOR_BODY_MAX + 1];
-        let refused = invoke(&service.socket, &service.config, 7, &oversized).unwrap_err();
+        let refused = invoke(&service.socket, &service.config, mini_sdk::host_operations::AUTHOR, &oversized).unwrap_err();
         assert_eq!(
             refused,
             "socket rejected request: author request body exceeds its bound"
         );
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(
-            invoke(&service.socket, &service.config, 7, &vec![b' '; 1024]).unwrap(),
+            invoke(&service.socket, &service.config, mini_sdk::host_operations::AUTHOR, &vec![b' '; 1024]).unwrap(),
             vec![7]
         );
         assert_eq!(service.forwarded(), vec![5, 7]);
@@ -3122,6 +3115,21 @@ done"#;
         assert!(!allowed_operation(&[21], false));
     }
 
+    #[test]
+    fn grain_share_receipt_lookup_is_bounded_public_but_issue_writes_stay_private() {
+        for catalog in [false,true] {
+            assert!(!allowed_operation(&[55],catalog));
+            assert!(allowed_operation(&[55,1],catalog));
+            let mut maximum=vec![1;HOST_MAX_FRAME];maximum[0]=55;
+            assert!(allowed_operation(&maximum,catalog));
+            maximum.push(1);
+            assert!(!allowed_operation(&maximum,catalog));
+            for operation in [54,56,57] {
+                assert!(!allowed_operation(&[operation,1],catalog));
+            }
+        }
+        assert!(allowed_operator_operation(&[55,1]));
+    }
     #[test]
     fn carried_lookup_keeps_full_old_call_capacity_with_narrow_frame_exception() {
         let mut header =
@@ -3379,15 +3387,15 @@ done"#;
     fn dispatch_response_tags_require_exact_no_record_verdict() {
         let mut refused = vec![164];
         refused.extend_from_slice(b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1");
-        assert!(response_operation_matches(34, &refused));
-        assert!(response_operation_matches(164, &[34, 1]));
-        assert!(response_operation_matches(34, &[34, 1]));
-        assert!(!response_operation_matches(152, &refused));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &refused));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_BOUND_DISPATCH, &[34, 1]));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[34, 1]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_STREAM_RENEW, &refused));
         refused.push(0);
-        assert!(!response_operation_matches(34, &refused));
-        assert!(!response_operation_matches(34, &[164]));
-        assert!(!response_operation_matches(154, &[34, 1]));
-        assert!(!response_operation_matches(34, &[]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &refused));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[164]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_INSPECT, &[34, 1]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[]));
     }
 
     #[test]
@@ -3542,7 +3550,7 @@ done"#;
             assert!(!allowed_operator_operation(&[operation, 1, 0, 0, 0, b'P']));
         }
 
-        for operation in [54, 55, 56] {
+        for operation in [54, 56] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operator_operation(&[operation]));
             assert!(!allowed_operation(&[operation, 1], true));
@@ -3766,9 +3774,10 @@ done"#;
             vec![181, b'{', b'}'], vec![182, b'{', b'}'], vec![183, 1],
             claim_assembly(1, 64), vec![185, 1], vec![186, 1],
         ] {
-            let mut envelope = vec![1];
+            let mut envelope = vec![2];
             envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
             envelope.extend_from_slice(config);
+            envelope.extend_from_slice(&TEST_HOST_PIN);
             envelope.extend_from_slice(&request);
             assert!(public_envelope(&envelope, config, false).is_ok());
             assert!(public_envelope(&envelope, b"other-config", false).is_err());
@@ -3829,8 +3838,9 @@ done"#;
             supervise(&listener, Some(&OperatorPeers::with(&[])), b"config", &[0;32], false, &mut start)
         });
         let envelope = |request: &[u8]| {
-            let mut bytes = vec![1,6,0,0,0];
+            let mut bytes = vec![2,6,0,0,0];
             bytes.extend_from_slice(b"config");
+            bytes.extend_from_slice(&[0; 32]);
             bytes.extend_from_slice(request);
             bytes
         };
@@ -3868,13 +3878,13 @@ done"#;
         }
         // A catalog route must not acquire permission merely by reaching the
         // union gate of the private Host.
-        assert!(invoke(&socket,&config,16,b"catalog").unwrap_err()
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::FN_ORIGIN_OUTBOX,b"catalog").unwrap_err()
             .contains("operation unavailable"));
-        assert!(invoke(&socket,&config,187,b"unknown").unwrap_err()
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::NEXT_KEY_ADOPTION_PLAN,b"unknown").unwrap_err()
             .contains("operation unavailable"));
         count += 1;
-        assert_eq!(invoke(&socket,&config,185,b"ingress").unwrap(),vec![185,count]);
-        assert!(invoke(&socket,&config,9,&[]).unwrap_err().contains("uncertain"));
+        assert_eq!(invoke(&socket,&config,mini_sdk::host_operations::PAY_CLAIM_SUBMIT,b"ingress").unwrap(),vec![185,count]);
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::SIGNATURES,&[]).unwrap_err().contains("uncertain"));
         assert_eq!(service.join().unwrap().unwrap_err(),"fixture completed");
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3884,6 +3894,16 @@ done"#;
 #[cfg(test)]
 mod bootstrap_deadline_tests {
     use super::*;
+
+    /// The test services pin the Host image as zeros (`EnvelopeRules.host_sha256`); every test
+    /// client speaks envelope v2 with that pin (v1 is retired).
+    const TEST_HOST_PIN: [u8; 32] = [0; 32];
+    fn invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>, String> {
+        invoke_inner(Path::new(""), socket, config, &TEST_HOST_PIN, operation, payload)
+    }
+    fn v2_head() -> Vec<u8> {
+        [vec![2, 6, 0, 0, 0], b"config".to_vec(), TEST_HOST_PIN.to_vec()].concat()
+    }
     struct Scratch(std::path::PathBuf);
     impl Scratch {
         fn new() -> Self {
@@ -3949,7 +3969,7 @@ mod bootstrap_deadline_tests {
                 &socket,
                 &scratch.0.join("config"),
                 &"11".repeat(32),
-                121,
+                mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
                 b"{}",
                 Instant::now() + Duration::from_secs(2)
             )
@@ -3960,7 +3980,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             Instant::now() + Duration::from_secs(2)
         )
@@ -3983,7 +4003,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             start + Duration::from_millis(60)
         )
@@ -4005,7 +4025,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             start + Duration::from_millis(60),
         )
@@ -4021,25 +4041,29 @@ mod bootstrap_deadline_tests {
         let scratch = Scratch::new();
         let socket = scratch.0.join("socket");
         let listener = UnixListener::bind(&socket).unwrap();
+        // The server accepts and never reads, so a frame far above the socket buffer cannot be
+        // written. The deadline leaves the connect time on a loaded box (a 60 ms deadline expired
+        // in connect on dregg-build), and the write must still end at the deadline, not when the
+        // server goes away.
         let server = std::thread::spawn(move || {
             let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(350));
+            std::thread::sleep(Duration::from_millis(3000));
         });
         let start = Instant::now();
         let error = invoke_pinned_deadline(
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             &vec![b'x'; HOST_MAX_FRAME - 1],
-            start + Duration::from_millis(60),
+            start + Duration::from_millis(400),
         )
         .unwrap_err();
         assert!(
             error.contains("write") && error.contains("deadline"),
             "{error}"
         );
-        assert!(start.elapsed() < Duration::from_millis(250));
+        assert!(start.elapsed() < Duration::from_millis(2000));
         server.join().unwrap();
     }
 }

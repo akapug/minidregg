@@ -140,7 +140,18 @@ pub struct Caps {
     /// would pass the ceiling refuses `spend-ceiling`. A deployed (root-owned)
     /// broker refuses to start with a pool row that has none.
     pub spend: Option<(u64, u64)>,
+    /// One member's share of that ceiling: `(memberDayMicroUsd,
+    /// memberTotalMicroUsd)`, charged at the same `callMicroUsd` per call
+    /// against the member the call serves (the resident's requester, else the
+    /// runner). A call past either refuses `member-day-ceiling` or
+    /// `member-total-ceiling`. A row with a spend ceiling and no member caps
+    /// gets the defaults: a day at 1/40 and a total at 1/10 of the ceiling.
+    pub member: Option<(u64, u64)>,
 }
+
+/// The default member share of a pool row's spend ceiling.
+pub const MEMBER_DAY_DIVISOR: u64 = 40;
+pub const MEMBER_TOTAL_DIVISOR: u64 = 10;
 
 #[derive(Clone, Debug)]
 pub struct ProviderRow {
@@ -295,7 +306,8 @@ impl ProviderTable {
             let caps = match (credential, entry.get("caps")) {
                 (CredentialSource::Pool, Some(caps)) => {
                     let label = "provider caps";
-                    object_keys(caps, &["perCall", "perDay", "ceilingMicroUsd", "callMicroUsd"], label)?;
+                    object_keys(caps, &["perCall", "perDay", "ceilingMicroUsd", "callMicroUsd",
+                        "memberDayMicroUsd", "memberTotalMicroUsd"], label)?;
                     let field = |n: &str, max: u64| -> Result<u64, String> {
                         let v = string(caps, n, label)?;
                         decimal(v, n)?;
@@ -316,10 +328,29 @@ impl ProviderTable {
                         }
                         _ => return Err(format!("provider {name}: caps.ceilingMicroUsd and caps.callMicroUsd go together")),
                     };
+                    let member = match (spend, caps.get("memberDayMicroUsd"), caps.get("memberTotalMicroUsd")) {
+                        (None, None, None) => None,
+                        (None, _, _) => return Err(format!("provider {name}: member caps need caps.ceilingMicroUsd and caps.callMicroUsd")),
+                        (Some((ceiling, call)), None, None) => {
+                            Some(((ceiling / MEMBER_DAY_DIVISOR).max(call), (ceiling / MEMBER_TOTAL_DIVISOR).max(call)))
+                        }
+                        (Some((ceiling, call)), Some(_), Some(_)) => {
+                            let day = field("memberDayMicroUsd", 1_000_000_000_000)?;
+                            let total = field("memberTotalMicroUsd", 1_000_000_000_000)?;
+                            if call > day || day > total || total > ceiling {
+                                return Err(format!(
+                                    "provider {name}: caps need callMicroUsd <= memberDayMicroUsd <= memberTotalMicroUsd <= ceilingMicroUsd"
+                                ));
+                            }
+                            Some((day, total))
+                        }
+                        _ => return Err(format!("provider {name}: caps.memberDayMicroUsd and caps.memberTotalMicroUsd go together")),
+                    };
                     Some(Caps {
                         per_call: field("perCall", 1_000_000)?,
                         per_day: field("perDay", 100_000)?,
                         spend,
+                        member,
                     })
                 }
                 (CredentialSource::Pool, None) => {

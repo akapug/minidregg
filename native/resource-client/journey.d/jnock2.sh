@@ -42,6 +42,10 @@ trap 'stop; journey_shortdir_return' EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
 import hashlib, json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, W = sys.argv[1], sys.argv[2]
 MINI, NOCK_RUN, TPL = os.environ["MINI"], os.environ["NOCK_RUN"], os.environ["NOCK_TEMPLATES"]
 CONFIG = os.path.join(W, "deployment", "pinned-config.json")
@@ -54,10 +58,11 @@ def row(name, ok, detail):
     print(f"{'PASS' if ok else 'FAIL'}\t{name}\t{detail}", file=sys.stderr)
 
 cfg = open(CONFIG, "rb").read()
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 def frame(b): return struct.pack("<I", len(b)) + b
 def op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    s.sendall(frame(bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload))
+    s.sendall(frame(bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload))
     def exact(n):
         out = b""
         while len(out) < n:
@@ -91,7 +96,7 @@ def birth(name, verdict_name):
         "--program", path(f"{verdict_name}.check.json")], capture_output=True, text=True)
     open(path(f"{name}.birth.out"), "w").write(r.stdout); open(path(f"{name}.birth.err"), "w").write(r.stderr)
     outcome = os.path.join(WS, "attempts", f"create-{name}", "outcome.json")
-    o = json.load(open(outcome)) if os.path.exists(outcome) else None
+    o = attempt_answer(outcome) if os.path.exists(outcome) else None
     last = (r.stderr.strip().splitlines() or [""])[-1]
     retained = os.path.join(WS, "sources", f"create-{name}.current", "reply.frame")
     if "retained encoded Host outcome" in last and os.path.exists(retained):

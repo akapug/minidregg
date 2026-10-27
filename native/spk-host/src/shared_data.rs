@@ -17,6 +17,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
+use crate::canonical::hex;
 
 pub const SIGNED_MEMBER: &str = "minidregg-data.json";
 pub const MOUNT_TARGET: &str = "/opt/oracle-data";
@@ -35,14 +36,8 @@ const RECEIPT_SCHEMA: &str = "minidregg-public-data-custody-v1";
 fn invalid(reason: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.to_string())
 }
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
 fn digest(text: &str) -> io::Result<[u8; 32]> {
-    if text.len() != 64
-        || !text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    if !crate::canonical::hex64(&text)
     {
         return Err(invalid(
             "digest must be 64 lowercase hexadecimal characters",

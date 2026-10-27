@@ -227,7 +227,7 @@ fn object_value(field: &Value, value: &Value) -> String {
     if field["codec"] == "bytes" {
         if let Some(text) = value
             .as_str()
-            .and_then(|hex| crate::decode_hex(hex).ok())
+            .and_then(|hex| mini_sdk::hex::decode(hex).ok())
             .and_then(|bytes| String::from_utf8(bytes).ok())
         {
             // JSON quoting keeps untrusted text and terminal controls visible.

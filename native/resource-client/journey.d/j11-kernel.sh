@@ -19,6 +19,7 @@
 # NEWCOMER_SUBJECT JOURNEY_WORLD JOURNEY_STEP_DIR. Exit 0 = every row as
 # expected. Last stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 AW=$SPONSOR_WS
@@ -181,8 +182,8 @@ plan "$CW" c-into-b sb-forged general "C speaking in B's stream"
 ok plan-c-into-b
 submit "$CW" c-into-b
 outcome=$CW/attempts/c-into-b/outcome.json
-if [ "$(cat "$D/c-into-b.rc")" != 0 ] && [ "$(jq -r .type "$outcome" 2>/dev/null)" = refused ]; then
-  got=refused; detail="phase=$(jq -r .phase "$outcome" | xxd -r -p) detail=$(jq -r .detail "$outcome" | xxd -r -p)"
+if [ "$(cat "$D/c-into-b.rc")" != 0 ] && [ "$(attempt_answer "$outcome" | jq -r .type)" = refused ]; then
+  got=refused; detail="phase=$(attempt_answer "$outcome" | jq -r .phase | xxd -r -p) detail=$(attempt_answer "$outcome" | jq -r .detail | xxd -r -p)"
 # On final (P-LAW) the Host evaluates the target's law when it prepares the
 # submission and refuses there with the failing clause: law-denied, naming
 # sb's author clause.

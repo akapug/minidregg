@@ -465,6 +465,40 @@ class ControllerWorldTests(unittest.TestCase):
         finish.assert_called_once_with(registry,self.root,reservation)
         self.assertTrue(result['resumedPendingCreation'])
 
+    def test_controller_export_accepts_normal_history_and_caps_4096_files(self):
+        state=self.root/'state';state.mkdir(mode=0o700)
+        r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            for i in range(513):(state/str(i)).write_bytes(b'evidence')
+            self.assertEqual(len(c.export_state('fixture','/unused')['files']),513)
+            for i in range(513,4096):(state/str(i)).write_bytes(b'evidence')
+            self.assertEqual(len(c.export_state('fixture','/unused')['files']),4096)
+            (state/'4096').write_bytes(b'evidence')
+            with self.assertRaisesRegex(ValueError,'file bound'):c.export_state('fixture','/unused')
+
+    def test_controller_export_retains_byte_file_and_depth_bounds(self):
+        state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            oversized=state/'oversized'
+            with oversized.open('wb') as f:f.truncate(8*1024*1024+1)
+            with self.assertRaisesRegex(ValueError,'mode/size'):c.export_state('fixture','/unused')
+            oversized.unlink()
+            for i in range(5):(state/str(i)).write_bytes(b'budget fixture')
+            with patch.object(c,'read_file',return_value=b'x'*(8*1024*1024)):
+                with self.assertRaisesRegex(ValueError,'byte bound'):c.export_state('fixture','/unused')
+            for p in state.iterdir():p.unlink()
+            nested=state
+            for _ in range(17):nested=nested/'d';nested.mkdir()
+            with self.assertRaisesRegex(ValueError,'directory bound'):c.export_state('fixture','/unused')
+
+    def test_controller_export_directory_count_stays_bounded(self):
+        state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            for i in range(1023):(state/str(i)).mkdir()
+            self.assertEqual(c.export_state('fixture','/unused')['files'],{})
+            (state/'1023').mkdir()
+            with self.assertRaisesRegex(ValueError,'directory bound'):c.export_state('fixture','/unused')
+
     def test_exact_reserve_export_has_eight_files_and_no_custody(self):
         r=self.record();prefix='agent-lifetime-reserve-0000000000000042'
         (self.root/'state').mkdir(mode=0o700)
@@ -621,6 +655,39 @@ class ControllerWorldTests(unittest.TestCase):
             self.assertEqual(c.register_public_listener(r['store'],'helper',str(binary)),status)
             binary.write_bytes(b'other binary')
             with self.assertRaises(ValueError):c.register_public_listener(r['store'],'helper',str(binary))
+
+    def test_public_listener_upgrade_recovers_exact_record_and_binary_boundaries(self):
+        for fail_at in (1,2,3,4,5,6,7):
+            with self.subTest(fail_at=fail_at),self.public_listener_fixture('upgrade'+str(fail_at)) as (base,r,stage,public,binary,after):
+                prior=c.register_public_listener(r['store'],'helper',str(binary))
+                old=binary.read_bytes(); old_sha=c.sha(old)
+                binary.write_bytes(b'new opcode55 qualified mini'); new_sha=c.sha(binary.read_bytes())
+                publish=c.publish_exact; calls=[0]
+                def interrupted(*args,**kwargs):
+                    calls[0]+=1
+                    if calls[0]==fail_at:raise OSError('publication interrupted')
+                    return publish(*args,**kwargs)
+                with patch.object(c,'publish_exact',side_effect=interrupted):
+                    with self.assertRaises(OSError):c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha)
+                result=c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha)
+                self.assertEqual(result['publicListener']['binarySha256'],new_sha)
+                self.assertEqual((base/'public-listener'/(old_sha+'.binary')).read_bytes(),old)
+                self.assertEqual({k:v for k,v in result['publicListener'].items() if k!='binarySha256'},
+                                 {k:v for k,v in prior['publicListener'].items() if k!='binarySha256'})
+                self.assertEqual(c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha),result)
+                with self.assertRaises(ValueError):c.upgrade_public_listener(r['store'],'helper',str(binary),'0'*64,new_sha)
+
+    def test_recover_session_only_invokes_fixed_private_admin_command(self):
+        r=self.consent_record();base=self.root/'controller';r['home']=str(base/'home')
+        request='ab'*16
+        with patch.object(c,'load',return_value=({},base,r)),patch.object(c,'checked_units'),patch.object(c,'controller_child',return_value=0) as child:
+            self.assertEqual(c.recover_session(r['store'],'helper',request),0)
+            args=child.call_args
+            self.assertEqual(args.args[1],[str(base/'bin/grain-runtime'),'admin',str(base/'home/state/admin.sock'),'recover foreground session '+request])
+            self.assertEqual(args.kwargs,{'timeout':1800})
+            for bad in ('',request+'; quit','AB'*16,'../request'):
+                with self.assertRaises(ValueError):c.recover_session(r['store'],'helper',bad)
+            self.assertEqual(child.call_count,1)
 
     def test_public_listener_refuses_busy_lock_live_socket_and_changed_custody(self):
         with self.public_listener_fixture() as (base,r,stage,public,binary,after):

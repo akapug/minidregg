@@ -24,6 +24,7 @@
 # NEWCOMER_SUBJECT JOURNEY_WORLD JOURNEY_STEP_DIR. Exit 0 = every row as
 # expected. Last stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 TW=$W/third-workspace
@@ -43,8 +44,8 @@ host_refused() {
 retained_outcome() { # NAME -> phase/detail of a retained refused outcome, if any
   local dir; dir=$(grep -o 'workspace attempt: .*' "$D/$1.err" | tail -1 | cut -d' ' -f3)
   [ -n "$dir" ] && [ -f "$dir/outcome.json" ] || return 0
-  printf 'outcome %s phase %s: %s' "$(jq -r .type "$dir/outcome.json")" \
-    "$(jq -r .phase "$dir/outcome.json" | xxd -r -p)" "$(jq -r .detail "$dir/outcome.json" | xxd -r -p)"
+  printf 'outcome %s phase %s: %s' "$(attempt_answer "$dir/outcome.json" | jq -r .type)" \
+    "$(attempt_answer "$dir/outcome.json" | jq -r .phase | xxd -r -p)" "$(attempt_answer "$dir/outcome.json" | jq -r .detail | xxd -r -p)"
 }
 refusal_text() {
   { retained_outcome "$1"; echo; grep -o 'encoded refusal: [0-9a-f]*' "$D/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \

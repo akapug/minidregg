@@ -8,7 +8,7 @@ umask 077
 invocation_args=("$@")
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-checkpoint CHECKPOINT_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-checkpoint CHECKPOINT_JSON|--recover-foreground PLAN_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -25,6 +25,10 @@ Its --resume-prepared suffix is limited to the recorded source-manifest refusal
 with a durable backup, identical stopped state, and no repair or tool attempt.
 --continue-checkpoint accepts an explicitly sealed unstarted phase boundary;
 completed effects remain retained and any started phase requires inspection.
+--recover-foreground requires an independently qualified binary manifest and
+an explicitly reviewed recovery plan for the retained uncertain session. It
+invokes one native recovery of the same foreground ID and parent reservation;
+it never resends the tool request. A failed recovery remains inspect-only.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -37,12 +41,14 @@ HELP
 [[ ${1:-} != --help ]] || { usage; exit 0; }
 mode=new
 checkpoint=
+recovery_plan=
 session_resume_prepared=0
 case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
   --continue-checkpoint) mode=continue-checkpoint; checkpoint=${2:?checkpoint required}; shift 2 ;;
+  --recover-foreground) mode=recover-foreground; recovery_plan=${2:?recovery plan required}; shift 2 ;;
 esac
 if [[ ${1:-} == --resume-prepared ]]; then
   [[ $mode == continue-session ]] || { usage >&2; exit 2; }
@@ -68,7 +74,7 @@ fi
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  if [[ $mode == continue-session || $mode == continue-checkpoint ]]; then
+  if [[ $mode == continue-session || $mode == continue-checkpoint || $mode == recover-foreground ]]; then
     python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
   else
     [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
@@ -125,18 +131,35 @@ for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null 
 inventory_sha=$(sha256sum "$inventory" | cut -d ' ' -f1)
 export SPK=$spk CLASS_A=L CLASS_B=L GET_PATH_A=/health GET_PATH_B=/health
 export KIND_A=api KIND_B=api ROLE_BASIS_A='{"type":"role","id":"0"}' ROLE_BASIS_B='{"type":"role","id":"0"}'
+if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then
+  [[ $mode == new ]] || fail 'browser-B is only supported for a fresh qualification'
+  [[ ${ORACLE_BROWSER_PORT:-} =~ ^[1-9][0-9]{3,4}$ ]] && ((ORACLE_BROWSER_PORT>=1024 && ORACLE_BROWSER_PORT<=65535)) || fail 'explicit browser port required'
+  [[ ${ORACLE_CADDY_BIN:-} == /* && -x $ORACLE_CADDY_BIN && ! -L $ORACLE_CADDY_BIN
+      && ${ORACLE_CADDY_SHA256:-} =~ ^[0-9a-f]{64}$ ]] || fail 'pinned Caddy executable required'
+  [[ $(sha256sum "$ORACLE_CADDY_BIN" | cut -d ' ' -f1) == "$ORACLE_CADDY_SHA256" ]] || fail 'Caddy pin differs'
+  export KIND_B=web GRAIN_EXPECTED_HOST_B=localhost:$ORACLE_BROWSER_PORT
+elif [[ ${ORACLE_BROWSER_B:-0} != 0 ]]; then
+  fail 'ORACLE_BROWSER_B must be 0 or 1'
+fi
+case ${ORACLE_POOLED_TENANT_PROBE:-0} in
+  0) ;;
+  1) [[ $mode == new ]] || fail 'pooled tenant probe requires a fresh qualification' ;;
+  *) fail 'ORACLE_POOLED_TENANT_PROBE must be 0 or 1' ;;
+esac
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
-[[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint ]] || preserve_existing_exit=1
+[[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
 controller_create_verb=controller-create
-if [[ $mode == continue-checkpoint ]]; then
+if [[ $mode == recover-foreground ]]; then
+  world_recover_foreground "$run" "$repo"
+elif [[ $mode == continue-checkpoint ]]; then
   world_continue_checkpoint "$run" "$repo"
 elif [[ $mode == continue-session ]]; then
   world_continue_session "$run" "$repo"
@@ -162,7 +185,7 @@ cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
-if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint ]]; then
+if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -178,8 +201,8 @@ world_disk_snapshot after-publication
 phase share-a
 fi
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
-if [[ $mode != continue-session && $mode != continue-checkpoint ]]; then world_controller_prepare; fi
-if [[ $mode == continue-checkpoint ]]; then world_phase_record admitted-application-journey started; fi
+if [[ $mode != continue-session && $mode != continue-checkpoint && $mode != recover-foreground ]]; then world_controller_prepare; fi
+if [[ $mode == continue-checkpoint || $mode == recover-foreground ]]; then world_phase_record admitted-application-journey started; fi
 phase start-a
 world_controller_activate "$run/world/evidence/start-a.stdout" initial
 world_controller_probe initial probe
@@ -195,6 +218,12 @@ request() {
   if [[ $letter == a ]]; then export POST_BODY_A=$body; else export POST_BODY_B=$body; fi
   phase "post-$letter$label"
 }
+if [[ ${ORACLE_POOLED_TENANT_PROBE:-0} == 1 ]]; then
+  jq -n '{protocol:"mini-oracle-pooled-tenant-probe-v1",app:"9101",path:"/query",
+    request:{request_id:"mini-u3-weather-structured",conversation_id:"mini-owner-pool-collision",text:"Who wrote Leaves of Grass?"}}' \
+    >"$run/pooled-tenant-probe-request.json"
+  request a 15 mini-u3-weather-structured mini-owner-pool-collision 'Who wrote Leaves of Grass?'
+fi
 request a 1 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'
 request a 2 oracle-austen oracle-followup 'Who wrote Emma?'
 request a 3 oracle-pronoun oracle-followup 'When was she born?'
@@ -207,6 +236,7 @@ request a 12 oracle-order-salinger oracle-order-salinger 'Who is older, J. D. Sa
 request a 13 oracle-order-shakespeare oracle-order-shakespeare 'Who is older, William Shakespeare or Isaac Newton?'
 request a 14 oracle-order-uncertain oracle-order-uncertain 'Who is older, Hildegard of Bingen or William Shakespeare?'
 phase share-b start-b floor-b enroll-b get-b
+if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then world_browser_probe; fi
 # Reusing both IDs with a different body would conflict in a shared journal.
 request b 1 oracle-isolation oracle-acceptance 'Who wrote Emma?'
 request a 6 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'
@@ -367,5 +397,5 @@ if [[ -f $run/resume-retained-install-sha256.txt ]]; then
 fi
 journalctl --user --no-pager -u "mini-spk-ingest-s$store-*.service" -o json >"$run/import-units.jsonl"
 python3 "$repo/deploy/oracle/acceptance/report.py" "$run" "$inventory_sha"
-if [[ $mode == continue-checkpoint ]]; then world_phase_record admitted-application-journey completed "$run/report.json"; fi
+if [[ $mode == continue-checkpoint || $mode == recover-foreground ]]; then world_phase_record admitted-application-journey completed "$run/report.json"; fi
 echo "Oracle shared-data acceptance passed: $run/report.json"

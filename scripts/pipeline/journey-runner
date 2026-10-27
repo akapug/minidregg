@@ -44,7 +44,9 @@ scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [
 product_inputs() {
   # One world template per variant per tip (newparticipant-acceptance.sh NEWPARTICIPANT_TEMPLATE_DIR): the
   # first row of a variant builds its world and leaves it; the others restore it. Removed with the tip's run.
-  export NEWPARTICIPANT_TEMPLATE_DIR=$J/world-templates; mkdir -p -m 700 "$NEWPARTICIPANT_TEMPLATE_DIR"
+  # JOURNEY_WORLD_TEMPLATES=0 builds every world fresh (the before/after wall measurement; a suspected template).
+  if [ "${JOURNEY_WORLD_TEMPLATES:-1}" = 0 ]; then export NEWPARTICIPANT_TEMPLATE_DIR=""
+  else export NEWPARTICIPANT_TEMPLATE_DIR=$J/world-templates; mkdir -p -m 700 "$NEWPARTICIPANT_TEMPLATE_DIR"; fi
   export HOST=$set/bin/minidregg-host MINI=$set/bin/mini STORE=$set/bin/minidregg-link-sqlite-store
   export VERIFIER=$set/bin/minidregg-credential-signature-verifier SHELL_BIN=$set/bin/mini
   export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher

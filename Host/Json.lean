@@ -59,6 +59,7 @@ import Host.ResidentContextInspection
 import Host.ObjectiveActivityJson
 import Host.SeatJson
 import Lean.Data.Json
+import Kernel.NativeHostStoreIdentity
 
 namespace Minidregg.Host.Json
 
@@ -2960,11 +2961,12 @@ private def agentLifetimePaidRequest (json : Lean.Json) : Result (List UInt8) :=
 private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
   return ⟨← nat path json⟩
 
-/-- The resident signed-SPK profile names units by Store (`Config.expectedSeed`):
-its authoring kinds run only against a deployed config. -/
+/-- The resident signed-SPK profile names units by Store identity
+(`Config.storeIdentity`: the genesis seed at the Store's root): its authoring kinds
+run only against a deployed config. -/
 private def residentStore (deployed : Option NativeHost.Config) : Result Digest :=
   match deployed with
-  | some config => pure config.expectedSeed
+  | some config => pure config.storeIdentity
   | none => throw "resident signed-SPK authoring needs the deployed config (its Store names the unit)"
 
 /-- Validate an already signed BEGIN-v2 frame for this physical host profile.

@@ -50,6 +50,16 @@ TARIFF = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'hea
 RATE_KEYS = [k for k in TARIFF if k not in ('version', 'base')]
 
 
+def policy_of(constants):
+    """The Objective invocation policy JSON every activity world (and the demo genesis, through
+    scripts/author-objective-policy.sh) pins: this file's MAXIMUM, SOURCE_BYTES and TARIFF, and the
+    generic codec and front-end identity of the Host that answered `objective-constants`."""
+    return {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
+            'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),
+            'outputs': [constants['genericCodec']], 'clearAudience': '01ff', 'frontEnd': constants['frontEnd'],
+            'tariff': TARIFF}
+
+
 def price(c):
     """The public price of a declared envelope (`Tariff.workOf`)."""
     return int(TARIFF['base']) + sum(int(TARIFF[k]) * int(c.get(k, '0')) for k in RATE_KEYS)
@@ -260,10 +270,7 @@ class World:
         (object cell + operation capability) per name, none of them an object yet (no record)."""
         root = self.root
         constants = json.loads(self.sh('constants', self.host, '/dev/null', 'objective-constants').stdout)
-        policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
-                  'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
-                  'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': TARIFF}
-        (root / 'policy.json').write_text(json.dumps(policy, indent=1))
+        (root / 'policy.json').write_text(json.dumps(policy_of(constants), indent=1))
         self.sh('policy', self.host, '/dev/null', 'author', 'objective-policy', root / 'policy.json',
                 root / 'policy.hex')
         # The second subject's key is made by the fixture (NEWPARTICIPANT_EXTRA_SUBJECTS -> W/extra/40.key), not

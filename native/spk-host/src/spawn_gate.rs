@@ -68,11 +68,7 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
                 spec.program.file_name().and_then(OsStr::to_str),
                 Some("bwrap" | "mini-grain-bwrap")
             ))
-        || spec.sha256.len() != 64
-        || !spec
-            .sha256
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !crate::canonical::hex64(&spec.sha256)
         || spec.args.len() > MAX_BWRAP_ARGS
     {
         return Err(invalid("invalid pinned app launch shape"));
@@ -422,6 +418,14 @@ impl BoundedChild {
     }
     pub fn pid(&self) -> u32 {
         self.pid as u32
+    }
+    /// The app's published tree, through the remote launch worker (the only
+    /// process with the app's identity outside the sandbox).
+    pub(crate) fn open_www(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
+        match &mut self.remote {
+            Some(client) if !self.reaped => client.open_www(self.pid as u32),
+            _ => Err(invalid("published tree needs the live remote launch worker")),
+        }
     }
     pub fn kill_and_reap(&mut self) -> bool {
         if !self.reaped {

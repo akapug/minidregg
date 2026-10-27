@@ -105,6 +105,13 @@
 # JOURNEY_STEPS (default: every step) runs only the named steps, in this
 # script's order; the frontier is computed over those alone. A step whose
 # dependency is not selected is blocked, so a subset must carry its deps.
+# --only STEP (repeatable, or JOURNEY_ONLY_CLOSURE="STEP ..."): run those steps and exactly the steps
+# they depend on (the `run_step ID DEP...` lines below, transitively), nothing else: one red step re-run
+# on its own world in the minutes its spine takes, never the whole journey.
+# --keep-going (or JOURNEY_KEEP_GOING=1): a step whose dependency FAILED still runs, so one run reports
+# every failure instead of the first and its shadow; its detail names the failed dependencies, and a
+# step that then passes is still PASS (it asserted its own rows). J0 is the one exception: without the
+# world nothing can run, so a failed J0 blocks everything as before. A SKIPPED dependency still blocks.
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -152,6 +159,32 @@ if [ "${1:-}" = --list-set ]; then
   esac
   exit 0
 fi
+ONLY_CLOSURE=${JOURNEY_ONLY_CLOSURE:-}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --only) [ "$#" -ge 2 ] || { echo "journey: --only needs a step id" >&2; exit 2; }; ONLY_CLOSURE="$ONLY_CLOSURE $2"; shift 2 ;;
+    --keep-going) JOURNEY_KEEP_GOING=1; shift ;;
+    *) break ;;
+  esac
+done
+JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-0}
+if [ -n "${ONLY_CLOSURE// /}" ]; then
+  [ -z "${JOURNEY_STEPS:-}${JOURNEY_SET:-}" ] || { echo "journey: give --only, JOURNEY_SET or JOURNEY_STEPS, not two" >&2; exit 2; }
+  # The dependency graph is this script's own `run_step` lines: read, never restated.
+  declare -A DEPS_OF=()
+  while read -r _ id deps; do DEPS_OF[$id]=$deps; done < <(grep -E '^run_step [A-Z0-9]+' "$SELF")
+  declare -A WANT=()
+  read -r -a pending <<<"$ONLY_CLOSURE"
+  while [ "${#pending[@]}" -gt 0 ]; do
+    id=${pending[0]}; pending=("${pending[@]:1}")
+    [ -n "${WANT[$id]:-}" ] && continue
+    [ "${DEPS_OF[$id]+set}" = set ] || { echo "journey: --only names unknown step $id" >&2; exit 2; }
+    WANT[$id]=1; read -r -a more <<<"${DEPS_OF[$id]}"; pending+=("${more[@]}")
+  done
+  JOURNEY_STEPS=""
+  for id in "${STEPS[@]}"; do [ -n "${WANT[$id]:-}" ] && JOURNEY_STEPS="$JOURNEY_STEPS $id"; done
+  echo "journey: --only$ONLY_CLOSURE runs$JOURNEY_STEPS" >&2
+fi
 if [ -n "${JOURNEY_SET:-}" ]; then
   [ -z "${JOURNEY_STEPS:-}" ] || { echo "journey: give JOURNEY_SET or JOURNEY_STEPS, not both" >&2; exit 2; }
   case "$JOURNEY_SET" in
@@ -161,7 +194,7 @@ if [ -n "${JOURNEY_SET:-}" ]; then
   esac
 fi
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 MANIFEST.json NEW_RUN_ROOT | $0 --list-set demo|kernel|all" >&2
+  echo "usage: $0 [--only STEP]... [--keep-going] MANIFEST.json NEW_RUN_ROOT | $0 --list-set demo|kernel|all" >&2
   exit 2
 fi
 MANIFEST=$1
@@ -461,7 +494,7 @@ frontier() {
 }
 
 # run_step ID DEP... : a step whose dependency did not pass is FAIL (blocked).
-# The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
+# The operator's checkpoint timer (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)), run between steps: certify
 # the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
 # the journey's Store (L = 256) never reaches its tail bound between certifies.
 # Every certify, and every skip, is logged to $S/certify.log; a confirmed
@@ -504,7 +537,12 @@ run_step() {
     result_json "$(frontier)"
     return
   fi
+  local failed_deps=""
   for dep in "$@"; do
+    if [ "${STATUS[$dep]:-}" != PASS ] && [ "$JOURNEY_KEEP_GOING" = 1 ] && [ "$dep" != J0 ] && [ "${STATUS[$dep]:-}" != SKIPPED ]; then
+      failed_deps="$failed_deps $dep"
+      continue
+    fi
     if [ "${STATUS[$dep]:-}" != PASS ]; then
       STATUS[$id]=FAIL; WALL[$id]=0.000; ART[$id]=""; DET[$id]="blocked: $dep did not pass"
       printf '%s\t%s\t%s\t%s\t%s\n' "$id" FAIL 0.000 "" "${DET[$id]}" >>"$TSV"
@@ -534,6 +572,7 @@ run_step() {
     5) STATUS[$id]=UNCONFIGURED ;;
     *) STATUS[$id]=FAIL ;;
   esac
+  [ -z "$failed_deps" ] || DETAIL="(kept going past failed:$failed_deps) $DETAIL"
   WALL[$id]=$(elapsed "$t0" "$t1"); ART[$id]=$ARTIFACT; DET[$id]=$DETAIL
   printf '%s\t%s\t%s\t%s\t%s\n' "$id" "${STATUS[$id]}" "${WALL[$id]}" "$ARTIFACT" "$DETAIL" >>"$TSV"
   echo "STEP $id ${STATUS[$id]} ${WALL[$id]}s $DETAIL" >&2

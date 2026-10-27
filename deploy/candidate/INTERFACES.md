@@ -397,8 +397,8 @@ ten integer keys, `issuanceCap`, `tailBound`, `payControlCapability`, optional
 `disabledEvaluators`, and, for a world that hosts SPK grains (`deploy/market/INSTALL.md`
 section 0), `grainPlatform {lifecycleManagement {managementSubject managementKeyId}
 grainBirthTariff {base perBirth} completionCustodianKey}` (`genesis.sh:82-97`).
-The management subject is a Host setting (`run.sh platform` changes it on a stopped
-Store); without `grainPlatform` the world refuses every grain install by name.
+The management subject is a Host setting (`run.sh platform` rewrites it, restarting a
+Store that `run.sh start` launched; a unit-managed Store is stopped by its unit first); without `grainPlatform` the world refuses every grain install by name.
 `params.sh require-platform PARAMS.json` refuses a genesis lacking the block,
 naming the field.
 
@@ -472,8 +472,9 @@ manifest's helpers, section 7).
 * `upgrade --manifest N1_MANIFEST` rebinds a stopped Store's `storageBinary` and
   `signatureBinary` and its recorded Host pin to a new candidate; the Store and its
   semantic configuration are unchanged (`run.sh:133-174`). `platform
-  --management-subject S --management-key K` sets a stopped Store's lifecycle
-  management in the pinned config (`run.sh:181-206`); clients re-pin the config.
+  --management-subject S --management-key K` sets the Store's lifecycle management in
+  the pinned config (a Store `start` launched is stopped through its PID file and
+  started again; a unit-managed one is refused until its unit stops it; `run.sh:182-215`); clients re-pin the config.
 
 **Key and workspace files.**
 

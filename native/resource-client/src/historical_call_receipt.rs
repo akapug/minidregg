@@ -32,7 +32,7 @@ fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
 }
 
 fn invoke_lookup(host: &Path, socket: &Path, config: &Path, call: &[u8]) -> Result<Vec<u8>> {
-    session_invoke(host, socket, config, 3, call)
+    session_invoke(host, socket, config, mini_sdk::host_operations::LOOKUP, call)
 }
 
 fn inspect_direct(host: &Path, config: &Path, input: &Path, output: &Path) -> Result<Value> {

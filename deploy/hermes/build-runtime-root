@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# build-runtime-root SOURCE OUT CANDIDATE     stage a new root
+# build-runtime-root --rebind OUT CANDIDATE   swap in another candidate's binaries
+#
+# The nonsecret Hermes worker runtime root the bwrap launcher mounts at /agent:
+# upstream Hermes Agent (Nous Research) with its ACP and MCP extras in a venv,
+# Mini's tool-catalogue patch (hermes-agent/mini-tool-catalogue.patch: the
+# restricted room resident admits a session only when Hermes reports exactly
+# the Mini MCP tools it loaded), the keyless grain-runtime the worker runs as
+# its MCP server, grain-provider-bridge, and the /agent/hermes-acp entrypoint.
+#
+# CANDIDATE is a candidate directory (its manifest.json names grainRuntime and
+# grainProviderBridge with their sha256); the two binaries are copied from it
+# and checked against the manifest. OUT/pins.json records every digest the
+# root carries, including the candidate manifest's, so a root is tied to the
+# candidate it was built for. A shipped candidate changes only those two
+# binaries: `--rebind` replaces them (no venv rebuild, no network) and rewrites
+# pins.json; the worker's grain-runtime must equal the controller's.
+#
+# SOURCE is a hermes-agent checkout at HERMES_AGENT_COMMIT (or set
+# HERMES_AGENT_COMMIT= to accept SOURCE's HEAD); OUT must not exist. Needs
+# python3 3.11-3.13 (the worker sees the host's /usr read-only), uv on PATH (or
+# UV) and network for the venv. Nothing is installed outside OUT.
+set -euo pipefail
+# 6d8a8beb: the commit that ran in the gated worker on 2026-09-26
+# (deploy/grain-host/HERMES-LINUX-2026-09-26.md); Python >=3.11,<3.14, so
+# Debian 13's python3 3.13 serves it. Later commits lock to Python >=3.14.
+HERMES_AGENT_COMMIT=${HERMES_AGENT_COMMIT-6d8a8bebf70b09554deda5a0fcd95facbbde7b07}
+UV=${UV:-uv}
+here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+usage() { echo 'usage: build-runtime-root SOURCE OUT CANDIDATE | build-runtime-root --rebind OUT CANDIDATE' >&2; exit 64; }
+die() { echo "build-runtime-root: $*" >&2; exit 65; }
+sha() { sha256sum "$1" | cut -d' ' -f1; }
+
+# candidate_binaries CANDIDATE: set runtime, bridge, manifest after checking
+# both binaries against the candidate manifest's digests.
+candidate_binaries() {
+  local cand; cand=$(realpath -e -- "$1")
+  manifest=$cand/manifest.json
+  [[ -f $manifest ]] || die "$cand has no manifest.json"
+  runtime=$(jq -r '.grainRuntime // empty' "$manifest"); bridge=$(jq -r '.grainProviderBridge // empty' "$manifest")
+  [[ -x $runtime && -x $bridge ]] || die "the manifest names no executable grainRuntime and grainProviderBridge"
+  [[ $(sha "$runtime") == $(jq -r '.sha256.grainRuntime' "$manifest") ]] || die "grainRuntime differs from the manifest digest"
+  [[ $(sha "$bridge") == $(jq -r '.sha256.grainProviderBridge' "$manifest") ]] || die "grainProviderBridge differs from the manifest digest"
+}
+
+install_binaries() { # OUT
+  install -m 0755 "$runtime" "$1/grain-runtime"
+  install -m 0755 "$bridge" "$1/grain-provider-bridge"
+}
+
+write_pins() { # OUT
+  local out=$1
+  jq -n --arg commit "$(cat "$out/source/.hermes-agent-commit")" --arg patch "$(cat "$out/source/.mini-patch-sha256")" \
+    --arg pyproject "$(sha "$out/source/pyproject.toml")" --arg lock "$(sha "$out/source/uv.lock")" \
+    --arg entry "$(sha "$out/hermes-acp")" --arg runtime "$(sha "$out/grain-runtime")" --arg bridge "$(sha "$out/grain-provider-bridge")" \
+    --arg manifest "$manifest" --arg manifestSha "$(sha "$manifest")" \
+    '{type:"mini-hermes-runtime-root-v1",hermesAgentCommit:$commit,miniPatchSha256:$patch,pyprojectSha256:$pyproject,
+      uvLockSha256:$lock,hermesAcpSha256:$entry,grainRuntimeSha256:$runtime,grainProviderBridgeSha256:$bridge,
+      candidateManifest:$manifest,candidateManifestSha256:$manifestSha}' >"$out/pins.json.tmp"
+  chmod 0644 "$out/pins.json.tmp"; mv "$out/pins.json.tmp" "$out/pins.json"
+  cat "$out/pins.json"
+}
+
+if [[ ${1:-} == --rebind ]]; then
+  [[ $# == 3 ]] || usage
+  out=$(realpath -e -- "$2")
+  [[ -f $out/pins.json && -x $out/hermes-acp ]] || die "$out is not a runtime root from this script"
+  candidate_binaries "$3"
+  install_binaries "$out"
+  write_pins "$out"
+  exit 0
+fi
+
+[[ $# == 3 ]] || usage
+src=$(realpath -e -- "$1"); out=$2
+candidate_binaries "$3"
+[[ ! -e $out ]] || die "$out exists"
+head=$(git -C "$src" rev-parse HEAD)
+[[ -z $HERMES_AGENT_COMMIT || $head == "$HERMES_AGENT_COMMIT" ]] || die "$src is at $head, not $HERMES_AGENT_COMMIT"
+mkdir -p -m 0755 "$out"; out=$(realpath -e -- "$out")
+build=$(mktemp -d "$out.build.XXXXXX")
+trap 'rm -rf -- "$build"' EXIT
+# The source snapshot: tracked files only (no .git, venvs, builds), then the patch.
+mkdir "$build/source"
+git -C "$src" archive --format=tar HEAD | tar -x -C "$build/source" --exclude='tests' --exclude='website' --exclude='evals' --exclude='apps'
+patch -d "$build/source" -p1 --forward --batch <"$here/hermes-agent/mini-tool-catalogue.patch"
+printf '%s\n' "$head" >"$build/source/.hermes-agent-commit"
+sha "$here/hermes-agent/mini-tool-catalogue.patch" >"$build/source/.mini-patch-sha256"
+mv "$build/source" "$out/source"
+( cd "$out/source" && UV_PROJECT_ENVIRONMENT="$out/venv" UV_CACHE_DIR="$build/cache" UV_CONCURRENT_DOWNLOADS=2 \
+    UV_CONCURRENT_BUILDS=2 UV_CONCURRENT_INSTALLS=2 \
+    "$UV" sync --locked --no-dev --extra acp --extra mcp --python /usr/bin/python3 --no-install-project )
+install_binaries "$out"
+cat >"$out/hermes-acp" <<'ENTRY'
+#!/bin/sh
+# Upstream Hermes ACP inside the Mini worker: workspace-private home, no lazy
+# installs, the Mini tool catalogue reported on every session response.
+export HOME=/workspace HERMES_HOME=/workspace/.hermes PYTHONPATH=/agent/source PYTHONDONTWRITEBYTECODE=1 \
+  XDG_CACHE_HOME=/workspace/.cache XDG_CONFIG_HOME=/workspace/.config XDG_DATA_HOME=/workspace/.local/share \
+  HERMES_DISABLE_LAZY_INSTALLS=1 HERMES_MINI_TOOL_CATALOGUE=1
+exec /agent/venv/bin/python -m acp_adapter.entry "$@"
+ENTRY
+chmod 0755 "$out/hermes-acp"
+chmod -R go-w "$out"
+write_pins "$out"

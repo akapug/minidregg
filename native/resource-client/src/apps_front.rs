@@ -60,7 +60,7 @@ pub(crate) struct Origin {
 }
 
 fn hex64(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    mini_sdk::hex::is_canonical_len(text, 32)
 }
 
 /// `origins/<grain>.json`, written by the worker; refused whole on any drift.
@@ -126,9 +126,27 @@ fn connect_route(origin: &Origin, route: &Route) -> io::Result<UnixStream> {
     }
 }
 
+/// The grain's publishing socket, through the worker's connector (`www`). The
+/// refusal names why: `grainStopped` when no resident is listening.
+fn connect_www(origin: &Origin) -> std::result::Result<UnixStream, String> {
+    let connector = origin.connector.as_ref().ok_or("noConnector")?;
+    let mut edge = UnixStream::connect(connector).map_err(|_| "connectorUnavailable".to_owned())?;
+    edge.set_read_timeout(Some(Duration::from_secs(10))).map_err(|e| e.to_string())?;
+    edge.write_all(format!("{{\"verb\":\"www\",\"grain\":\"{}\"}}\n", origin.grain).as_bytes()).map_err(|e| e.to_string())?;
+    let (reply, socket) = super::worker::receive_with_fd(&edge)?;
+    socket.ok_or_else(|| reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused").to_owned())
+}
+
+/// The grain of a publishing origin `a4501-www.demo.dregg.online`.
+pub(crate) fn www_grain_of_host(host: &str, domain: &str) -> Option<String> {
+    let name = host.split(':').next()?.to_ascii_lowercase();
+    let label = name.strip_suffix(domain)?.strip_suffix('.')?.strip_suffix("-www")?;
+    super::valid_grain(label).then(|| label.to_owned())
+}
+
 fn token_hash(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    mini_sdk::hex::encode(&digest)
 }
 
 fn valid_token(token: &str) -> bool {
@@ -339,6 +357,41 @@ impl Front {
         Ok(origin)
     }
 
+    /// The publishing origin (INSTALL.md §5a): anonymous GET/HEAD of the grain's
+    /// `/var/www`, answered by its resident. Only the method and the path travel
+    /// upstream: no cookie, no credential, no other header.
+    fn serve_www(&self, mut client: TcpStream, head: &Head, grain: &str) {
+        if head.method != "GET" && head.method != "HEAD" {
+            let body = "the publishing origin answers GET and HEAD only\n";
+            let _ = write!(client, "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            return;
+        }
+        if !head.target.starts_with('/') || head.target.len() > 2048 || head.target.bytes().any(|b| b <= b' ' || b == 0x7f) {
+            return respond(&mut client, "404 Not Found", "no such published file\n", false);
+        }
+        let Ok(origin) = self.origin(grain) else {
+            return respond(&mut client, "404 Not Found", "no such published site\n", false);
+        };
+        let Some(_slot) = self.take_slot(grain) else {
+            return respond(&mut client, "503 Service Unavailable", &format!("grain {grain} has every connection slot in use ({PER_GRAIN_CONNECTIONS})\n"), false);
+        };
+        let mut upstream = match connect_www(&origin) {
+            Ok(upstream) => upstream,
+            Err(reason) if reason == "grainStopped" => {
+                let body = format!("grain {grain} is stopped; its owner starts it with mini apps start --grain {grain}\n");
+                let _ = write!(client, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 30\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                return;
+            }
+            Err(_) => return respond(&mut client, "404 Not Found", "no such published site\n", false),
+        };
+        if write!(upstream, "{} {} HTTP/1.0\r\n\r\n", head.method, head.target).is_err() {
+            return respond(&mut client, "502 Bad Gateway", "published site refused the request\n", false);
+        }
+        let _ = upstream.set_read_timeout(Some(Duration::from_secs(120)));
+        let _ = pump(&mut upstream, &mut client);
+        let _ = client.shutdown(Shutdown::Both);
+    }
+
     fn serve(&self, mut client: TcpStream) {
         let mut buffer = Vec::with_capacity(8192);
         let head_end = match read_head(&mut client, &mut buffer) {
@@ -349,6 +402,9 @@ impl Front {
             Ok(head) => head,
             Err(reason) => return respond(&mut client, "400 Bad Request", &format!("{reason}\n"), false),
         };
+        if let Some(grain) = head.host.as_deref().and_then(|h| www_grain_of_host(h, &self.domain)) {
+            return self.serve_www(client, &head, &grain);
+        }
         let Some(grain) = head.host.as_deref().and_then(|h| grain_of_host(h, &self.domain)) else {
             return respond(&mut client, "404 Not Found", "not a grain origin\n", false);
         };
@@ -634,6 +690,59 @@ mod tests {
         let mut out = Vec::new();
         let _ = stream.read_to_end(&mut out);
         String::from_utf8_lossy(&out).into_owned()
+    }
+
+    #[test]
+    fn apps_front_serves_the_publishing_origin_through_the_connector() {
+        assert_eq!(www_grain_of_host("a4501-www.demo.dregg.online", "demo.dregg.online").as_deref(), Some("a4501"));
+        assert_eq!(www_grain_of_host("a4501.demo.dregg.online", "demo.dregg.online"), None);
+        assert_eq!(www_grain_of_host("x-www.demo.dregg.online", "demo.dregg.online"), None);
+        let dir = scratch("www");
+        let origins = dir.join("origins");
+        std::fs::create_dir_all(&origins).unwrap();
+        let connector = dir.join("edge.sock");
+        let edge = UnixListener::bind(&connector).unwrap();
+        // The fake connector: the first www request finds the grain stopped, every
+        // later one is handed a site that echoes the one line it was sent.
+        std::thread::spawn(move || {
+            for (n, stream) in edge.incoming().enumerate() {
+                let stream = stream.unwrap();
+                let mut line = String::new();
+                std::io::BufRead::read_line(&mut std::io::BufReader::new(stream.try_clone().unwrap()), &mut line).unwrap();
+                assert!(line.contains("\"verb\":\"www\"") && line.contains("a4501"), "{line}");
+                if n == 0 {
+                    (&stream).write_all(b"{\"refused\":\"grainStopped\"}\n").unwrap();
+                    continue;
+                }
+                let (front_end, mut site) = UnixStream::pair().unwrap();
+                std::thread::spawn(move || {
+                    let mut got = Vec::new();
+                    let mut chunk = [0_u8; 512];
+                    while !got.ends_with(b"\r\n\r\n") {
+                        let k = site.read(&mut chunk).unwrap();
+                        if k == 0 { break; }
+                        got.extend_from_slice(&chunk[..k]);
+                    }
+                    let seen = String::from_utf8_lossy(&got).replace("\r\n", "|");
+                    let _ = write!(site, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{seen}", seen.len());
+                });
+                super::super::worker::send_with_fd(&stream, &serde_json::json!({"state":"connected"}), std::os::fd::AsRawFd::as_raw_fd(&front_end)).unwrap();
+            }
+        });
+        let table = origin_json("a4501", &[]).replace("\"routes\"", &format!("\"connector\":\"{}\",\"routes\"", connector.display()));
+        std::fs::write(origins.join("a4501.json"), table).unwrap();
+        let address = start_front(origins);
+        let host = "Host: a4501-www.demo.dregg.online";
+        let stopped = request(address, format!("GET / HTTP/1.1\r\n{host}\r\n\r\n").as_bytes());
+        assert!(stopped.starts_with("HTTP/1.1 503") && stopped.contains("Retry-After: 30") && stopped.contains("mini apps start --grain a4501"), "{stopped}");
+        let page = request(address, format!("GET /deck/ HTTP/1.1\r\n{host}\r\nCookie: {COOKIE_NAME}={ALICE}\r\n\r\n").as_bytes());
+        assert!(page.starts_with("HTTP/1.1 200") && page.ends_with("GET /deck/ HTTP/1.0||"), "{page}");
+        assert!(!page.contains("Cookie"), "no credential travels upstream: {page}");
+        let post = request(address, format!("POST / HTTP/1.1\r\n{host}\r\nContent-Length: 0\r\n\r\n").as_bytes());
+        assert!(post.starts_with("HTTP/1.1 405") && post.contains("Allow: GET, HEAD"), "{post}");
+        let unknown = request(address, b"GET / HTTP/1.1\r\nHost: a9-www.demo.dregg.online\r\n\r\n");
+        assert!(unknown.starts_with("HTTP/1.1 404") && unknown.contains("no such published site"), "{unknown}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -23,6 +23,18 @@ pub fn is_canonical_max(text: &str, max_digits: usize) -> bool {
     text.len() <= max_digits && is_canonical(text)
 }
 
+/// [`is_canonical_max`] over raw bytes (a frame's digits): ASCII, canonical, at most `max_digits`.
+pub fn is_canonical_ascii_max(bytes: &[u8], max_digits: usize) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|text| is_canonical_max(text, max_digits))
+}
+
+/// The value of a canonical decimal in an unsigned integer type, or `None` (not canonical, or
+/// out of the type's range). `toString n == text` for the result: `+5`, `05` and `5 ` are refused,
+/// which `str::parse` alone would accept or leave to the caller.
+pub fn parse<T: std::str::FromStr>(text: &str) -> Option<T> {
+    if is_canonical(text) { text.parse().ok() } else { None }
+}
+
 /// A canonical signed decimal: a canonical natural, or `-` and a canonical NONZERO natural.
 pub fn is_canonical_signed_max(text: &str, max_digits: usize) -> bool {
     match text.strip_prefix('-') {
@@ -142,6 +154,21 @@ pub fn to_be_bytes32(text: &str) -> Result<[u8; 32]> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod parse_tests {
+    #[test]
+    fn parse_is_the_canonical_spelling_in_the_type() {
+        assert_eq!(super::parse::<u64>("18446744073709551615"), Some(u64::MAX));
+        assert_eq!(super::parse::<u64>("18446744073709551616"), None);
+        for bad in ["", "+5", "05", "5 ", "-1", "0x5"] {
+            assert_eq!(super::parse::<u128>(bad), None, "{bad:?}");
+        }
+        assert_eq!(super::parse::<u32>("0"), Some(0));
+        assert!(super::is_canonical_ascii_max(b"80", 2) && !super::is_canonical_ascii_max(b"080", 3));
+        assert!(!super::is_canonical_ascii_max(&[0xff], 3) && !super::is_canonical_ascii_max(b"123", 2));
+    }
 }
 
 #[cfg(test)]

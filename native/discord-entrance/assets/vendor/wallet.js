@@ -1,6 +1,8 @@
 // passwap wallet adapter, copied verbatim from ember's sol-misc (docs/passwap/wallet.js, 2026-10-27): the one
 // provider shape {name, icon, connect(), publicKey, signTransaction(tx)} from Wallet Standard wallets and the
 // legacy window injections. The door page passes it the vendored @solana/web3.js namespace.
+// Changed for the door (audit INTEGRITY 7): list(web3, { chain }) asks a Wallet Standard wallet for the
+// quote's cluster (solana:mainnet or solana:devnet) instead of always preferring mainnet.
 // passwap wallet adapter: one provider shape for the pages, from whatever wallets are present.
 //   await passwapWallets.list(web3) -> [{ name, icon, connect(), publicKey, signTransaction(tx), signAllTransactions(txs) }]
 // Sources: Wallet Standard wallets with a Solana chain (Talisman, Phantom, Solflare, Backpack, MetaMask, ...), discovered
@@ -12,7 +14,7 @@
   const rescan = () => { try { window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: { register } })); } catch {} };
   rescan();
 
-  function wrapStandard(w, web3) {
+  function wrapStandard(w, web3, want) {
     let account = null, chain = null;
     const ser = (tx) => tx.serialize({ requireAllSignatures: false, verifySignatures: false });
     const input = (tx) => ({ transaction: ser(tx), account, chain });
@@ -24,7 +26,8 @@
         const accounts = (r && r.accounts && r.accounts.length ? r.accounts : w.accounts) || [];
         account = accounts.find((a) => a.chains && a.chains.some((c) => String(c).startsWith("solana:"))) || accounts[0];
         if (!account) throw new Error(w.name + " connected but exposed no Solana account");
-        chain = (account.chains || []).find((c) => c === "solana:mainnet") || (account.chains || []).find((c) => String(c).startsWith("solana:")) || "solana:mainnet";
+        if (want && !(account.chains || []).includes(want)) throw new Error(w.name + "'s account is not on " + want + ", the cluster this quote is for");
+        chain = want || (account.chains || []).find((c) => c === "solana:mainnet") || (account.chains || []).find((c) => String(c).startsWith("solana:")) || "solana:mainnet";
         this.publicKey = new web3.PublicKey(account.publicKey); this.isConnected = true;
         return { publicKey: this.publicKey };
       },
@@ -50,9 +53,10 @@
     return found;
   };
   root.passwapWallets = {
-    async list(web3) {
+    async list(web3, options) {
+      const want = options && options.chain;
       rescan(); await new Promise((r) => setTimeout(r, 250)); rescan(); await new Promise((r) => setTimeout(r, 100));
-      const out = standard.map((w) => wrapStandard(w, web3));
+      const out = standard.map((w) => wrapStandard(w, web3, want));
       const names = new Set(out.map((w) => w.name.toLowerCase()));
       for (const { name, p } of legacy()) if (!names.has(name.toLowerCase())) { out.push(wrapLegacy(name, p)); names.add(name.toLowerCase()); }
       return out;

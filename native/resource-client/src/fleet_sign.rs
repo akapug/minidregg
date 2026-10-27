@@ -399,7 +399,7 @@ fn turn_hash(transaction: &str) -> Result<String> {
 /// A `--turn-hash` argument: the 64-hex form `turn_hash` prints, read back to the decimal
 /// transaction id. The decimal form is refused by name: one shape on this surface.
 fn transaction_of_turn_hash(value: &str) -> Result<String> {
-    if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !mini_sdk::hex::is_canonical_len(value, 32) {
         return Err(format!(
             "--turn-hash {value}: a turn hash is the 64 hex digits `turn_hash` printed"
         ));
@@ -623,7 +623,7 @@ fn send(flags: &Flags) -> Result<(Value, Profile)> {
     // contract holds here: the profile's own account is accepted and means nothing more; any
     // other destination is refused by name, since a send never moves value.
     if let Some(to) = &flags.to {
-        if to.len() == 64 && to.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if to.len() == 64 && mini_sdk::hex::decode_any_case(to).is_ok() {
             return Err("--to is a Bread cell id; a Mini account is the decimal `cell` its join printed".into());
         }
         if to != field(&record, "account")? {
@@ -684,7 +684,7 @@ fn transfer(flags: &Flags) -> Result<(Value, Profile)> {
         return Err("transfer requires a positive --amount: a zero transfer moves nothing and still pays the fee".into());
     }
     let to = flags.to.clone().ok_or("transfer requires --to ACCOUNT")?;
-    if to.len() == 64 && to.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if to.len() == 64 && mini_sdk::hex::decode_any_case(&to).is_ok() {
         return Err("--to is a Bread cell id; a Mini account is the decimal `cell` its join printed".into());
     }
     decimal(&to, "--to")?;

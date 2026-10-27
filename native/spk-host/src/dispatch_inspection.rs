@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 use std::io;
+use crate::canonical::{decimal as canonical_decimal, hex, lower_hex};
 
 const MAX_INSPECTION_BYTES: usize = 96_822_080;
 const MAX_PERMIT_BYTES: usize = 12_102_759; // Host frame also has opcode 34.
@@ -24,13 +25,6 @@ fn string<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
         .ok_or_else(|| invalid("Mini inspection field is not text"))
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn decimal<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
     let value = string(object, field)?;
     if !canonical_decimal(value) {
@@ -39,39 +33,9 @@ fn decimal<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
     Ok(value)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push_str(&format!("{byte:02x}"));
-    }
-    result
-}
-
-fn lower_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 fn hex32(value: &str) -> io::Result<[u8; 32]> {
-    if value.len() != 64 || !lower_hex(value) {
-        return Err(invalid(
-            "Mini checked identity is not 32 lowercase-hex bytes",
-        ));
-    }
-    let mut bytes = [0u8; 32];
-    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        let digit = |byte: u8| -> u8 {
-            if byte.is_ascii_digit() {
-                byte - b'0'
-            } else {
-                byte - b'a' + 10
-            }
-        };
-        bytes[index] = (digit(pair[0]) << 4) | digit(pair[1]);
-    }
-    Ok(bytes)
+    crate::canonical::unhex_array(value)
+        .ok_or_else(|| invalid("Mini checked identity is not 32 lowercase-hex bytes"))
 }
 
 /// Mini Digest Nat is projected as decimal; the physical RPC cache uses the

@@ -626,14 +626,14 @@ impl ProofSource for CarryProof<'_> {
                 socket,
                 &self.transport_config,
                 digest,
-                151,
+                mini_sdk::host_operations::RECEIPT_CONTINUITY,
                 &bytes,
             )?,
             None => crate::session_invoke(
                 &self.transport_host,
                 socket,
                 &self.transport_config,
-                151,
+                mini_sdk::host_operations::RECEIPT_CONTINUITY,
                 &bytes,
             )?,
         };
@@ -1501,7 +1501,7 @@ pub(crate) fn retry_lookup(attempt: &Path, mode: &str, direct: bool) -> Result<O
         .ok_or_else(|| fail("carried lookup requires current pinned socket"))?;
     let host = workspace::workspace_host(&workspace)?;
     let (binary, json_path) = crate::next_retry(&attempt)?;
-    let frame = crate::session_invoke(&host, socket, &config, 153, &payload)?;
+    let frame = crate::session_invoke(&host, socket, &config, mini_sdk::host_operations::CARRY_RECEIPT_LOOKUP, &payload)?;
     // Reserve this retry evidence even when the returned protocol is malformed.
     create_file(&binary, &frame)?;
     save(

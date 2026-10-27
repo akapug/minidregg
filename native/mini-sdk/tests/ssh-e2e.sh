@@ -114,6 +114,8 @@ grep -v '^  IdentityFile ' "$RUN/ssh_config_good" >"$RUN/ssh_config_nokey"
 
 # --- the tests ---------------------------------------------------------------------------------------
 export MINI_SDK_E2E_ALIAS=mini-box MINI_SDK_E2E_SOCKET=$SOCKET MINI_SDK_E2E_CONFIG=$STORE/public/mini.config
+# envelope v2 pins the Host image the socket serves (v1 is retired): the candidate's own host
+export MINI_SDK_E2E_HOST_SHA256=$(sha256sum "$(jq -r .host "$ART/manifest.json")" | cut -d' ' -f1)
 export MINI_SDK_E2E_SSH_CONFIG_GOOD=$RUN/ssh_config_good MINI_SDK_E2E_SSH_CONFIG_WRONG=$RUN/ssh_config_wrong
 export MINI_SDK_E2E_SSH_CONFIG_EMPTY=$RUN/ssh_config_empty MINI_SDK_E2E_SSH_CONFIG_NOKEY=$RUN/ssh_config_nokey MINI_SDK_E2E_SSHD_LOG=$LOG/sshd.log
 export MINI_SDK_E2E_KNOWN_HOSTS_EMPTY=$RUN/known_hosts_empty

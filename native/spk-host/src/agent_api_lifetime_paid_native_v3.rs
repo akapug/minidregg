@@ -11,13 +11,10 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use crate::canonical::hex;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn source_payload(frame: &[u8], opcode: u8) -> io::Result<&[u8]> {
@@ -144,7 +141,7 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
     {
         return Err(refused("lifetime paid request source projection drift"));
     }
-    let plan = source_payload(&operator.invoke(78, &paid_request)?, 78)?.to_vec();
+    let plan = source_payload(&operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, &paid_request)?, crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?.to_vec();
     let plan_path = write_new(attempt_dir, "paid-plan-v3.bin", &plan)?;
     let inspection_bytes = operator.tool(
         "inspect",
@@ -180,7 +177,7 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
         &json!(payer.signatures),
     )?;
     let detached = pair(&app_binary, &pair(&grant, &payer_binary)?)?;
-    let ingress = source_payload(&operator.invoke(79, &pair(&plan, &detached)?)?, 79)?.to_vec();
+    let ingress = source_payload(&operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, &pair(&plan, &detached)?)?, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?.to_vec();
     write_new(attempt_dir, "paid-ingress-v3.bin", &ingress)?;
     write_new(
         attempt_dir,
@@ -223,9 +220,9 @@ mod tests {
         reply[..4].copy_from_slice(&3u32.to_le_bytes());
         reply[4] = 79;
         reply[5..].copy_from_slice(b"ok");
-        assert_eq!(source_payload(&reply, 79).unwrap(), b"ok");
-        assert!(source_payload(&reply, 78).is_err());
+        assert_eq!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE).unwrap(), b"ok");
+        assert!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN).is_err());
         reply[0] = 4;
-        assert!(source_payload(&reply, 79).is_err());
+        assert!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE).is_err());
     }
 }

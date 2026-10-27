@@ -129,6 +129,8 @@ enum Reply {
     /// A whole page or a fragment around `html`, with `status` and `title`.
     Stage { status: u16, title: String, html: String, who: Option<Who>, path: String, set_cookie: Option<String> },
     Raw(Response),
+    /// A file the body hands the member (their export), streamed from the body as it arrives.
+    Download(proxy::Download),
     /// The connection now belongs to a terminal.
     Upgraded,
 }
@@ -149,6 +151,12 @@ impl Gateway {
         let reply = self.route(&request, &mut stream);
         let response = match reply {
             Reply::Upgraded => return,
+            Reply::Download(download) => {
+                if let Err(e) = self.stream_download(download, &mut stream, head_only) {
+                    eprintln!("mini-web: download: {e}");
+                }
+                return;
+            }
             Reply::Raw(response) => self.finish(response),
             Reply::Stage { status, title, html, who, path, set_cookie } => {
                 // Every POST form on the page (the shell's and the stage's) gets this session's
@@ -390,7 +398,8 @@ impl Gateway {
             None => Target::Public,
         };
         match proxy::fetch(&self.sessions.client, target, request) {
-            Ok(fragment) => {
+            Ok(proxy::Answer::Download(download)) => Reply::Download(download),
+            Ok(proxy::Answer::Page(fragment)) => {
                 if let Some(location) = fragment.location.filter(|_| (300..400).contains(&fragment.status)) {
                     if !http::same_origin_path(&location) {
                         return self.stage(502, "Unavailable", refusal("The body asked for a redirect elsewhere", "a body redirects only within this origin"), who, request);
@@ -408,6 +417,35 @@ impl Gateway {
                 self.stage(status, "Unavailable", refusal(headline, &why), who, request)
             }
         }
+    }
+
+    /// The head the gateway's own answers carry (`finish`), then the body's bytes as they come.
+    fn stream_download(&self, mut download: proxy::Download, stream: &mut TcpStream, head_only: bool) -> std::io::Result<()> {
+        use std::io::{Read, Write};
+        let head = self.finish(Response::new(200).with("Content-Type", &download.content_type).with("Content-Disposition", &download.disposition));
+        let mut out = String::from("HTTP/1.1 200 OK\r\n");
+        for (k, v) in &head.headers {
+            out.push_str(&format!("{k}: {v}\r\n"));
+        }
+        if let Some(n) = download.length {
+            out.push_str(&format!("Content-Length: {n}\r\n"));
+        }
+        out.push_str("Connection: close\r\n\r\n");
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(60)));
+        stream.write_all(out.as_bytes())?;
+        if head_only {
+            return stream.flush();
+        }
+        stream.write_all(&download.first)?;
+        let mut buffer = [0u8; 65536];
+        loop {
+            let n = download.stream.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            stream.write_all(&buffer[..n])?;
+        }
+        stream.flush()
     }
 
     fn asset(&self, name: &str) -> Response {

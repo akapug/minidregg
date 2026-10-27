@@ -18,7 +18,7 @@
 //! `tail` (head − certified) and `remaining` (heights left before the bound refuses).
 //!
 //! Today the certifier is the operator, trusted as the operator is; a timer runs this
-//! verb (deploy/checkpoint). After SURPASS N1 the certificate is a witness quorum's.
+//! verb (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)). After SURPASS N1 the certificate is a witness quorum's.
 
 use crate::agent_reserve::field;
 use crate::*;
@@ -80,20 +80,13 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 
 /// Host op 7: source-owned authoring of a JSON value into canonical bytes.
 fn author(ws: &Workspace, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
 }
 
 /// Host op 8: source-owned inspection of canonical bytes as JSON.
 fn inspect(ws: &Workspace, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("checkpoint: invalid Host inspection of {kind}: {error}"))
-}
-
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
 }
 
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
@@ -110,7 +103,7 @@ fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
 }
 
 fn view(ws: &Workspace) -> Result<Value> {
-    let bytes = invoke(ws, 173, &[])?;
+    let bytes = invoke(ws, mini_sdk::host_operations::CERTIFY_VIEW, &[])?;
     inspect(ws, "certify-view", &bytes)
 }
 
@@ -137,17 +130,17 @@ fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Va
             "digest": field(&current, "chain")?,
         }),
     )?;
-    let plan = invoke(ws, 170, &command)?;
+    let plan = invoke(ws, mini_sdk::host_operations::CERTIFY_PLAN, &command)?;
     let header = inspect(ws, "certify-plan", &plan)?;
     let canonical = header
         .get("header")
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("certify plan lacks a canonical header")?;
-    let header_bytes = decode_hex(canonical).map_err(|_| "certify plan header is not hex")?;
+    let header_bytes = mini_sdk::hex::decode(canonical).map_err(|_| "certify plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
-    let ingress = invoke(ws, 171, &pair(&plan, &signature))?;
-    let outcome = invoke(ws, 172, &ingress)?;
+    let ingress = invoke(ws, mini_sdk::host_operations::CERTIFY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
+    let outcome = invoke(ws, mini_sdk::host_operations::CERTIFY_SUBMIT, &ingress)?;
     let mut value = inspect(ws, "outcome", &outcome)?;
     value["certified"] = json!({"height": field(&current, "head")?, "digest": field(&current, "chain")?});
     Ok(value)

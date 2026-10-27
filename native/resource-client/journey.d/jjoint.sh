@@ -18,12 +18,13 @@
 # Runs as a journey hook (MINI SPONSOR_WS JOURNEY_STEP_DIR). Exit 0 = every row
 # matched. Last stdout line = the result table.
 set -euo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 mkdir -p "$D/req"
 res=$D/jjoint-result.tsv
 : >"$res"
 
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 create() { printf '{"type":"create","key":{"type":"object","field":"%s"},"value":"%s"}' "$1" "$2"; }
 write() { printf '{"type":"write","key":{"type":"object","field":"%s"},"expected":"%s","value":"%s"}' "$1" "$2" "$3"; }
 target() { printf '{"name":"%s","payload":{"type":"scalar","actions":[%s]}}' "$1" "$2"; }
@@ -63,11 +64,11 @@ row() {
     --attempt "$SPONSOR_WS/attempts/jj-$label" >"$D/$label.submit.out" 2>"$D/$label.submit.err" || rc=$?
   if installed "$SPONSOR_WS/attempts/jj-$label/outcome.json"; then
     verdict=admitted
-    detail="record $(jq -r .acceptedCount "$SPONSOR_WS/attempts/jj-$label/outcome.json")"
+    detail="record $(attempt_answer "$SPONSOR_WS/attempts/jj-$label/outcome.json" | jq -r .acceptedCount)"
   else
     local out=$SPONSOR_WS/attempts/jj-$label/outcome.json
-    if jq -e '.type == "refused"' "$out" >/dev/null 2>&1; then
-      detail="$(jq -r .phase "$out" | xxd -r -p): $(jq -r .detail "$out" | xxd -r -p)"
+    if attempt_answer "$out" | jq -e '.type == "refused"' >/dev/null 2>&1; then
+      detail="$(attempt_answer "$out" | jq -r .phase | xxd -r -p): $(attempt_answer "$out" | jq -r .detail | xxd -r -p)"
     else
       detail=$(reason "$D/$label.submit.err")
     fi

@@ -47,7 +47,7 @@ pub(crate) fn document(root:&Path, workspace:&Value, name:&str, max_rows:usize, 
             original==*atom
         }).ok_or("context current atom opening changed its signed source")?;
         let body=if atom["kind"]==json!({"type":"text"}) {
-            Some(crate::decode_hex(member(atom,"payload")?)?)
+            Some(mini_sdk::hex::decode(member(atom,"payload")?).map_err(|e| e.0)?)
         } else if private::is_private_kind(&atom["kind"]) {
             private::opened_text(display).ok().flatten()
         } else {None};

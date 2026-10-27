@@ -34,13 +34,13 @@ Build: `CARGO_BUILD_JOBS=2 cargo build --manifest-path native/resource-client/Ca
   (`native/host-operations.rs:401,405`, from `protocol/host-operations.json` by `scripts/host-operations.py`) and
   imported by the client (`src/main.rs:275`). A frame under 253 is the Host's decision that nothing was appended; the
   rest of the contract is in the `src/main.rs:228-280` comments and `native/mini-sdk/src/flow.rs:109`.
-- **Socket envelope, v1 and v2.** The service accepts both (`src/transport.rs:202`). A v2 envelope also carries the
-  SHA-256 of the client's chosen Host image, and a service running other bytes refuses it. The pinned senders
-  (`transport::invoke_pinned*`) send v2. v1 is still sent by `transport::invoke` with no pin: `mini enrollment-view`
-  (`src/main.rs:2552`, `:2567`), a test stub (`src/client_consent.rs:368`), and `mini_sdk::operator::request` when it
-  is given no pin (`native/mini-sdk/src/operator.rs:378`). Twelve journey files hand-build v1 frames (`journey-stranger.py` and `journey.d/` `jnock2`, `jnock3`, `jnock3p`,
-  `jnock5`, `jjob`, `jjob1`, `jjob-money`, `jeval`, `jsync`, `jpay-e4`, `jworld-method`; `rg 'bytes\(\[1\]\)|b"\\x01"'`);
-  `j12x.sh` sends version 1 by default in its `raw` helper (`:54`).
+- **Socket envelope v2 only.** The service refuses envelope v1 by name ("socket envelope v1 is retired",
+  `src/transport.rs` `split_envelope`). A v2 envelope carries the SHA-256 of the client's chosen Host image, and a
+  service running other bytes refuses it. Every sender pins: `transport::invoke_pinned*`, `mini enrollment-view
+  --host HOST|--host-sha256 HEX`, `mini_sdk::operator::{request, Operator::new}` (the pin is not optional), and the
+  journey scripts that hand-build frames (`journey-stranger.py`, `jnock2/3/3p/5`, `jjob`, `jjob1`, `jjob-money`,
+  `jeval`, `jsync`, `jpay-e4`, `jworld-method`, `j12x`'s `raw`). `j12x` keeps one row that sends v1 on purpose and
+  asserts the socket's refusal by name.
 - **Shell grammar is data.** `src/shell_grammar.rs` describes each verb once (`GRAMMARS`, 69 grammars, `:478`); the
   parser, `help`, completion and the web forms consume it. The `VERBS` rows in `src/shell.rs:54` only hold the order:
   every one has empty usage and operation strings, rendered from the grammar (`rendered_row`). The module header's

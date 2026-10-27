@@ -18,6 +18,7 @@ use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
+use crate::canonical::hex;
 
 const MAX_MANIFEST: u64 = 64 * 1024;
 
@@ -25,21 +26,8 @@ fn invalid(reason: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.into())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 fn unhex<const N: usize>(text: &str) -> io::Result<[u8; N]> {
-    let text = text.trim();
-    if text.len() != N * 2 {
-        return Err(invalid("hex length refused"));
-    }
-    let mut out = [0u8; N];
-    for (index, byte) in out.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16)
-            .map_err(|_| invalid("hex refused"))?;
-    }
-    Ok(out)
+    crate::canonical::unhex_array(text.trim()).ok_or_else(|| invalid("hex refused"))
 }
 
 fn sha256_file(path: &Path) -> io::Result<String> {

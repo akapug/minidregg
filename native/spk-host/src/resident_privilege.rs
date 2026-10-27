@@ -14,6 +14,8 @@ use std::time::Duration;
 const LIMIT: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 static LAUNCH: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
+/// The launch worker's answer when the app has no `/var/www` yet.
+const WWW_ABSENT: &str = "noPublishedSite";
 fn refused(s: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, s)
 }
@@ -276,6 +278,28 @@ impl Client {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+    /// The grain's published tree `/var/www`, opened by the app-identity
+    /// worker; `None` while the app has published nothing.
+    pub(crate) fn open_www(&mut self, pid: u32) -> io::Result<Option<OwnedFd>> {
+        if self.pid != pid || self.start.is_empty() {
+            return Err(refused("launch reaper identity differs"));
+        }
+        send_rights(&self.stream, 6, &[])?;
+        let r: Reply = receive_frame(&mut self.stream)?;
+        if r.pid != pid || r.start != self.start || r.reaped || r.status.is_some() {
+            return Err(refused("published tree reply binding differs"));
+        }
+        match r.error.as_deref() {
+            Some(WWW_ABSENT) => return Ok(None),
+            Some(error) => return Err(io::Error::other(error.to_owned())),
+            None => {}
+        }
+        let (tag, mut fds) = receive_rights(&self.stream)?;
+        if tag != 6 || fds.len() != 1 {
+            return Err(refused("published tree descriptor absent"));
+        }
+        Ok(fds.pop())
+    }
     pub(crate) fn kill_and_reap(&mut self, pid: u32) -> io::Result<bool> {
         Ok(self.command(3, pid)?.reaped)
     }
@@ -445,6 +469,15 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(e);
         }
     };
+    // The grain's /var is kept (an O_PATH directory, the app's own) for one
+    // purpose: opening its published tree `www` for the resident (tag 6).
+    let var_keep = {
+        let high = unsafe { libc::fcntl(owned[2].as_raw_fd(), libc::F_DUPFD_CLOEXEC, 10) };
+        if high < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { OwnedFd::from_raw_fd(high) }
+    };
     // The child inherited its own descriptor table at fork. The reaper must
     // release both SCM_RIGHTS originals and high duplicates now: retaining an
     // RPC peer or output writer would hide EOF after the app exits, until the
@@ -470,8 +503,27 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
     stream.set_read_timeout(None)?;
     loop {
         let (tag, fds) = receive_rights(&stream)?;
-        if !fds.is_empty() || !matches!(tag, 2 | 3) {
+        if !fds.is_empty() || !matches!(tag, 2 | 3 | 6) {
             return Err(refused("launch worker command refused"));
+        }
+        if tag == 6 {
+            // The published tree, opened as the app: the resident reads under it
+            // with its own (operator) credentials, so only world-readable files
+            // are served. Never a path from the resident, never a write.
+            let opened = unsafe {
+                libc::openat(var_keep.as_raw_fd(), c"www".as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            };
+            let error = (opened < 0).then(|| {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ENOENT) { WWW_ABSENT.to_owned() } else { format!("published tree unavailable: {error}") }
+            });
+            send_frame(&mut stream, &Reply { pid, start: start.clone(), reaped: false, status: None, error })?;
+            if opened >= 0 {
+                let tree = unsafe { OwnedFd::from_raw_fd(opened) };
+                send_rights(&stream, 6, &[tree.as_raw_fd()])?;
+            }
+            continue;
         }
         let result = if tag == 3 {
             let dead = child.kill_and_reap();

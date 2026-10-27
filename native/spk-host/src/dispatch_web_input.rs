@@ -281,10 +281,9 @@ fn project(
         .map_err(|_| invalid("Mini session resource exceeds physical host range"))?;
     let subject = matched.subject.parse::<u64>()
         .map_err(|_| invalid("Mini subject exceeds physical host range"))?;
-    if matched.app == 0 || subject == 0 || session_resource == 0
-        || matched.subject != subject.to_string()
+    if matched.subject != subject.to_string()
         || matched.session_resource != session_resource.to_string() {
-        return Err(invalid("Mini session identity requires nonzero app, subject and resource"));
+        return Err(invalid("Mini session identity coordinates must be canonical unsigned integers"));
     }
     // Sandstorm tabId correlates a source session across process restarts. It
     // is not a browser label or request header and carries no new authority.
@@ -364,9 +363,9 @@ fn project_http(
                 }
                 context.etag_precondition = etags(value, name == "if-match")?;
             }
-            "x-requested-with" | "x-csrftoken" | "x-csrf-token" | "oc-total-length"
-            | "oc-chunk-size" | "x-oc-mtime" | "oc-fileid" | "oc-chunked" | "oc-checksum"
-            | "oc-chunk-offset" | "oc-lazyops" => {
+            // The rest of Lean's ordinaryHeaderName (generated): carried as additional headers. The
+            // names with their own projection are matched above this arm.
+            other if crate::host_operations::ordinary_header_name(other) => {
                 context.additional_headers.push(Header {
                     name: name.clone(),
                     value: value.clone(),
@@ -472,7 +471,9 @@ mod tests {
         source.app_generation+=1;source.session_fingerprint=[7;32];
         assert_eq!(project_tab(&source).unwrap(),original);
         source.session_resource="6210".into();assert_ne!(project_tab(&source).unwrap(),original);
-        for bad in ["0","","01","+9","18446744073709551616"] {
+        source.app=0;source.subject="0".into();source.session_resource="0".into();
+        assert_eq!(project_tab(&source).unwrap(),[b"mini-session-v1\0".as_slice(), &[0_u8;24]].concat());
+        for bad in ["","01","+9","18446744073709551616"] {
             source.session_resource=bad.into();assert!(project_tab(&source).is_err());
         }
     }

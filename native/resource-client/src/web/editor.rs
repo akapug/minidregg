@@ -440,6 +440,7 @@ fn render(site: &Site, edit: &Edit) -> Page {
             height: edit.height.clone(),
             authority_root: edit.authority_root.clone(),
             cell_root: edit.cell_root.clone(),
+            world_root: String::new(),
         }),
         body,
     }

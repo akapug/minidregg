@@ -28,31 +28,7 @@ fn invalid(reason: &'static str) -> io::Error {
 /// Read one retained private file: regular, single-link, operator-owned,
 /// mode 0600, non-empty, at most `max` bytes, and unchanged while read.
 pub(crate) fn retained(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("retained lifecycle artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("retained lifecycle artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("retained lifecycle artifact length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "retained lifecycle artifact identity refused")
 }
 
 /// `[transactionId, eventId, acceptedCount, worldRoot]` of a confirmed outcome

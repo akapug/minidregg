@@ -8,16 +8,10 @@ use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use crate::canonical::decimal;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// The operator-owned ledger allocates one monotonic identity before source
