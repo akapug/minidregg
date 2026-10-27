@@ -164,6 +164,7 @@ import Host.ApplicationLifecycleBeginOperator
 import Host.DryRun
 import Host.RequestRefusal
 import Kernel.Bounds
+import Kernel.SubjectRate
 import Host.LawSatWire
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
@@ -689,6 +690,16 @@ private def lifetimeTargetProbe : AgentLifetimeDispatchTargetSettings :=
   { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with maximumCharge := 2 } }
   ].all (fun wrong => !(LifetimeDispatchPin.targets lifetimeTargetProbe.selectors).matches wrong)
 
+/-- The operator's per-subject request rate (`Kernel.SubjectRate`): `limit` signed reads per
+subject per `windowMs`, the `exempt` subjects (the operator's own and the sponsor's) never
+rated. Operator-local admission policy, not runtime semantics: absent, the Host applies
+`SubjectRate.hostDefault` with no exempt subject. -/
+structure RequestRateSettings where
+  limit : Nat
+  windowMs : Nat
+  exempt : Option (List Nat) := none
+  deriving FromJson, ToJson
+
 structure Settings where
   /-- Operator-local carry registry and independently authorized handoff key.
   Neither value can be selected by a network frame. -/
@@ -745,6 +756,8 @@ structure Settings where
   committed in the runtime semantics, so `expectedSemantics` must be computed with the same
   list. A name the registry lacks refuses the config (`loadSettings`). -/
   disabledEvaluators : Option (List String) := none
+  /-- The per-subject request rate (`RequestRateSettings`); absent is the Host default. -/
+  requestRate : Option RequestRateSettings := none
   deriving FromJson, ToJson
 
 /-- The disabled evaluators' registry ids, by name. `loadSettings` refuses a name the registry
@@ -2008,6 +2021,67 @@ def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
     | throw (RequestRefusal.malformed "native host kind is not UTF-8")
   return (kind, payload.drop (2 + width))
 
+/-! ## The per-subject request rate (`Kernel.SubjectRate`; docs/PD-HOST-RATE-DESIGN.md) -/
+
+/-- The Host's rate gate: the policy, the exempt subjects, and the one table of windows,
+which lives as long as the Host process and holds only subjects that verified. -/
+structure RateGate where
+  policy : SubjectRate.Policy
+  exempt : List Nat
+  table : IO.Ref SubjectRate.Table
+
+def Settings.rateGate (settings : Settings) : IO RateGate := do
+  let policy ← match settings.requestRate with
+    | none => pure SubjectRate.hostDefault
+    | some rate => IO.ofExcept (SubjectRate.Policy.make rate.limit rate.windowMs)
+  let table ← IO.mkRef ([] : SubjectRate.Table)
+  return ⟨policy, (settings.requestRate.bind (·.exempt)).getD [], table⟩
+
+/-- The first half of a pair frame, or none (the pure reading of `splitPair`). -/
+def pairFirst? (payload : List UInt8) : Option (List UInt8) :=
+  if payload.length < 4 then none else
+  let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
+    65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
+  if width ≤ payload.length - 4 then some ((payload.drop 4).take width) else none
+
+def claimOf (bytes : List UInt8) : Option Nat :=
+  (NativeObservationCodec.signedCodec.decode bytes).map (·.challenge.intent.subject)
+
+/-- The subjects a rated request claims, read before any Store work: the signed observation's
+intent subject, for authorized prepare (1), authorized query (5; each member of a batch, in
+order) and dry run (130). `none`: the operation is not rated, or its bytes do not decode (its
+receiver refuses it `malformed`, and nothing is charged). Unsigned operations are never rated:
+nothing verifies a subject there. -/
+def ratedClaims (operation : UInt8) (payload : List UInt8) : Option (List Nat) :=
+  match operation with
+  | 1 => (claimOf payload).map fun subject => [subject]
+  | 5 =>
+      if NativeObservationCodec.isBatch payload then
+        (NativeObservationCodec.batchCodec.decode payload).bind fun members =>
+          if members.isEmpty then none else members.mapM claimOf
+      else (claimOf payload).map fun subject => [subject]
+  | 130 => (pairFirst? payload).bind fun observation => (claimOf observation).map fun subject => [subject]
+  | _ => none
+
+/-- Check every claimed subject at `now`; the first full window refuses, with its retry time. -/
+def RateGate.check (gate : RateGate) (claims : List Nat) (now : Nat) : IO (Option Nat) := do
+  let table ← gate.table.get
+  for subject in claims do
+    match SubjectRate.check gate.policy (SubjectRate.exemptOf gate.exempt) table subject now with
+    | .limited retryAfterMs => return some retryAfterMs
+    | .admit => pure ()
+  return none
+
+/-- Charge after the receiver answered: every member of a verified reply; on a refusal reached
+after verification, only the first member, the one the receiver verified first (a batch stops at
+its first refusal, and every member before it verified). -/
+def RateGate.charge (gate : RateGate) (claims : List Nat) (operation responseOperation : UInt8)
+    (payload : List UInt8) (now : Nat) : IO Unit := do
+  unless RequestRefusal.chargeable operation responseOperation payload do return
+  let charged := if responseOperation == operation then claims else claims.take 1
+  gate.table.modify fun table => charged.foldl
+    (fun t subject => SubjectRate.charge gate.policy (SubjectRate.exemptOf gate.exempt) t subject now) table
+
 def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   unless payload.length ≥ 4 do throw (RequestRefusal.malformed "short native host pair frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
@@ -2778,6 +2852,7 @@ def serveFrame (config : NativeHost.Config)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (gate : RateGate)
     (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let wrote ← IO.mkRef false
   let tracked : IO.FS.Stream :=
@@ -2797,14 +2872,22 @@ def serveFrame (config : NativeHost.Config)
       dispatchLifecycleClaimSubmitSession config state payload tracked
     else
       let started ← IO.monoMsNow
-      let (responseOperation, responsePayload) ←
-        dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
-      -- A refusal returned under 255 is a receiver's decision: it goes out as NO_RECORD
-      -- (`RequestRefusal.returnedMarker`); undecided outcomes keep the 255 envelope.
-      writeSessionFrame tracked (RequestRefusal.returnedMarker responseOperation responsePayload)
-        responsePayload
-      if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
-        IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
+      let claims := (ratedClaims operation payload).getD []
+      match ← gate.check claims started with
+      | some retryAfterMs =>
+          -- A full window: refused by name before any receiver or Store work, under NO_RECORD.
+          writeSessionFrame tracked HostOperations.noRecordMarker
+            (RequestRefusal.rateLimitedFrame operation retryAfterMs)
+      | none =>
+        let (responseOperation, responsePayload) ←
+          dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
+        -- A refusal returned under 255 is a receiver's decision: it goes out as NO_RECORD
+        -- (`RequestRefusal.returnedMarker`); undecided outcomes keep the 255 envelope.
+        writeSessionFrame tracked (RequestRefusal.returnedMarker responseOperation responsePayload)
+          responsePayload
+        gate.charge claims operation responseOperation responsePayload started
+        if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
+          IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
   catch error =>
     if ← wrote.get then
       throw (IO.userError s!"op {operation} failed after its reply was written: {error}")
@@ -2827,6 +2910,7 @@ partial def serveSession (config : NativeHost.Config)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (gate : RateGate)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then
@@ -2857,8 +2941,8 @@ partial def serveSession (config : NativeHost.Config)
         (RequestRefusal.overBound refusal))
     | .ok () =>
       let payload ← readExactly input (length - 1)
-      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
-  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
+      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch gate operation payload.toList output
+  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch gate input output
 
 /-- The storeless codec loop (`minidregg-host CONFIG codec`): answers only the
 pure codec frames (`pureCodec`) and never opens, admits or reads a Store. A
@@ -7978,7 +8062,7 @@ def run (arguments : List String) : IO UInt32 := do
                     else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
                   serveSession pinnedConfig state meteringProfile
                     (← IO.ofExcept settings.providerRoutes) fnDispatch applicationDispatch
-                    (← IO.getStdin) (← IO.getStdout)
+                    (← settings.rateGate) (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))

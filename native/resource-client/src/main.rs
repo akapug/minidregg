@@ -457,6 +457,20 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
         return Some(format!("refused: {reason}: {explain}"));
     }
     let detail = outcome_text(outcome.get("detail"));
+    // The Host's per-subject request rate (`Kernel.SubjectRate`): the detail is
+    // `rate-limited retry-after-ms N`; say when the subject may try again.
+    if reason == "rate-limited" {
+        if let Some(ms) = detail
+            .strip_prefix("rate-limited retry-after-ms ")
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            return Some(format!(
+                "refused: rate-limited: this subject has used its request rate for now; retry in {} s (phase {})",
+                ms.div_ceil(1000),
+                outcome_text(outcome.get("phase"))
+            ));
+        }
+    }
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -3995,6 +4009,12 @@ mod tests {
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));
+        let limited = json!({"type":"refused","reason":"rate-limited","phase":hex(b"op 5"),
+            "detail":hex(b"rate-limited retry-after-ms 1500")});
+        assert_eq!(
+            refusal_line(&limited).unwrap(),
+            "refused: rate-limited: this subject has used its request rate for now; retry in 2 s (phase op 5)"
+        );
         let prose = json!({"type":"refused","phase":hex(b"x"),"detail":hex(b"revoked")});
         assert!(refusal_line(&prose)
             .unwrap()

@@ -403,7 +403,7 @@ fail() { DETAIL="$*"; return 1; }
 # refusal) AND names the Host's decoded RefusalReason for `host refused
 # <stage>` AND the encoded refusal carries the native outcome v6 tag. A client
 # crash, a parse error or an undecoded frame is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7636   # DREGG/NATIVE-HOST/OUTCOME/v6
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7637   # DREGG/NATIVE-HOST/OUTCOME/v7
 refused() {
   local name=$1
   [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
