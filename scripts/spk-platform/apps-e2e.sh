@@ -171,7 +171,7 @@ install_app() { # APP-ID
 }
 # The member's own account pays: its balance before the first install and after each one is the
 # measured cost of an install (the budget figure INSTALL.md §4 states).
-balance() { mini credit --action balance --dir "$WS9" 2>/dev/null | jq -r '[.. | objects | select(has("balance")) | .balance][0] // empty' 2>/dev/null; }
+balance() { mini credit --action balance --dir "$WS9" 2>/dev/null | sed -nE 's/^credit ([0-9]+) .*/\1/p' | head -1; }   # "credit N  (asset 0, account A, signed read at height H)"
 bal_before=$(balance); echo "member balance before installs: ${bal_before:-unreadable}" >>"$out/balances.log"
 for app in "$@"; do
   name=$(jq -r --arg a "$app" '.apps[] | select(.appId == $a or .packageId == $a) | .name' "$FIXTURE" | head -1)
