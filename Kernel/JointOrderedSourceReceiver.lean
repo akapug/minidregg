@@ -84,7 +84,7 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
 exact physical source readback; engine journal flags cannot construct it. -/
 def Applied.verified {config : Config} {target : Durable}
     {old : Verified config target} {expected : Context} (applied : Applied config old expected) :
-    Verified config (exactCandidate old applied.readback.derived applied.readback.ready) :=
+    Verified config (exactCandidate old applied.readback.derived applied.readback.ready applied.readback.tag) :=
   extendExact applied.reader old applied.readback
 
 theorem applied_exact_source_record {config : Config} {target : Durable}

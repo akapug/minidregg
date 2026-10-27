@@ -3751,8 +3751,8 @@ def exactCandidate {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (derived : Derived config old.opened)
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
-      old.opened.durable.snapshot derived.intent) : Durable :=
-  old.opened.durable.extend ready
+      old.opened.durable.snapshot derived.intent) (tag : List UInt8) : Durable :=
+  { old.opened.durable.extend ready with headTag := some tag }
 
 /-- A receiver-created exact readback: the store holds, at the next height,
 exactly the entry this admitted intent produced (record bytes and tag), read
@@ -3772,7 +3772,11 @@ structure ExactReadback (config : Config) {oldTarget : Durable}
   appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
     derived.intent
   after : Opened config
-  validated : validateLoaded config (exactCandidate old derived ready) = .ok after
+  validated : validateLoaded config (exactCandidate old derived ready appended.entry.tag) = .ok after
+
+/-- The tag the append wrote at the new head (`Appended.headTagExact`). -/
+def ExactReadback.tag {config : Config} {oldTarget : Durable} {old : Verified config oldTarget}
+    (readback : ExactReadback config old) : List UInt8 := readback.appended.entry.tag
 
 /-- Build the exact readback from a receiver's `.exact` append: the shared
 executor is re-run at the same verified snapshot (it is a pure function), the
@@ -3790,11 +3794,11 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       match judged : derived.judge with
       | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
       | .ok certificate =>
-        match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready) with
+        match incremental : validateLoadedFrom config old.opened (exactCandidate old derived ready appended.entry.tag) with
         | .error detail => .error s!"post-image validation: {detail}"
         | .ok after =>
-          have validated : validateLoaded config (exactCandidate old derived ready) = .ok after :=
-            (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready)).symm.trans incremental
+          have validated : validateLoaded config (exactCandidate old derived ready appended.entry.tag) = .ok after :=
+            (validateLoadedFrom_eq config old.opened (exactCandidate old derived ready appended.entry.tag)).symm.trans incremental
           .ok ⟨⟨derived, ready, prepared, certificate, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact
@@ -3802,9 +3806,9 @@ readback gives one new accepted step and its *original-prefix* receipt. -/
 def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     (reader : DurableHistoryReader.Reader rootBytes store) {oldTarget : Durable}
     (old : Verified config oldTarget) (readback : ExactReadback config old) :
-    Verified config (exactCandidate old readback.derived readback.ready) := by
+    Verified config (exactCandidate old readback.derived readback.ready readback.tag) := by
   let record := DurableReceiver.IntentRecord.ofIntent readback.derived.intent
-  let target := exactCandidate old readback.derived readback.ready
+  let target := exactCandidate old readback.derived readback.ready readback.tag
   let receipt : NativeHostCodec.Receipt :=
     ⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
       old.opened.durable.image.accepted.length + 1, target.worldRoot⟩
@@ -3869,7 +3873,7 @@ theorem extendExact_receipts {config : Config} {store : DurableHistory.StoreIden
     (extendExact reader old readback).receipts = old.receipts ++
       [⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        (exactCandidate old readback.derived readback.ready).worldRoot⟩] := by
+        (exactCandidate old readback.derived readback.ready readback.tag).worldRoot⟩] := by
   rfl
 
 /-- The physically read-back entry is exactly this admitted intent's record. -/
