@@ -20,6 +20,8 @@ Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
 path as the grain API: event22 share, event28 enrollment and admitted dispatch.
+ORACLE_STOP_BENCHMARK_JSON must name the qualified same-Host copied-Store cold/served receipt.
+Fresh STOP probes check resident refresh and refusals, without duplicate cold walks.
 Run inside a bounded operator unit, e.g. RuntimeMaxSec=10800 CPUQuota=200%.
 HELP
 }
@@ -28,11 +30,12 @@ mode=new
 if [[ ${1:-} == --resume ]]; then mode=resume; shift; fi
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
+benchmark=${ORACLE_STOP_BENCHMARK_JSON:?qualified copied-Store STOP benchmark receipt required}
 repo=$(cd "$(dirname "$0")/.." && pwd)
 journey=$repo/scripts/spk-platform/grain-journey.sh
 fail() { echo "Oracle shared-data journey: $*" >&2; exit 1; }
 [[ $(uname -s) == Linux ]] || fail 'Linux required'
-for path in "$base" "$own" "$run" "$spk" "$source" "$inventory"; do
+for path in "$base" "$own" "$run" "$spk" "$source" "$inventory" "$benchmark"; do
   [[ $path == /* && $path != *[!a-zA-Z0-9_./-]* && $path != */../* && $path != */./* && $path != *//* ]] || fail "simple absolute canonical path required: $path"
 done
 if [[ $mode == new ]]; then
@@ -82,6 +85,7 @@ while :; do
 done
 for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 [[ -f $spk && ! -L $spk && -f $inventory && ! -L $inventory && -d $source && ! -L $source ]] || fail 'inputs absent or linked'
+[[ -f $benchmark && ! -L $benchmark ]] || fail 'qualified STOP benchmark absent or linked'
 [[ $(stat -c '%s' "$spk") -le 268435456 ]] || fail 'runtime exceeds Mini signed package admission cap'
 # The publisher, signed package inspector and Mini decide identity/acceptance.
 # These are preflight and evidence pins only.
@@ -107,10 +111,11 @@ jq --argjson bytes "$(stat -c '%s' "$spk")" '
   {selected_profile:(.importProfile // "standard-v1"),
    deadline_seconds:(if .importProfile=="operator-appliance-v1" then 1800 else 120 end),
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
-sha256sum "$spk" "$inventory" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
+sha256sum "$spk" "$inventory" "$benchmark" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
   "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/deploy/oracle/acceptance/agent.py" \
   "$repo/deploy/oracle/acceptance/agent-cases.json" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
+cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
