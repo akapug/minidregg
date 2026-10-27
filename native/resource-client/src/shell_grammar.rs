@@ -390,7 +390,74 @@ pub static APPS: Grammar = Grammar { verb: "apps", leaves: &[
     Leaf { path: &["apps", "revoke-identity"], args: &[arg("GRAIN", Kind::Word), arg("TOKEN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "revoke one saved identity" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
+// Keys, identity, births and the rest.
+pub static KEY: Grammar = Grammar { verb: "key", leaves: &[
+    Leaf { path: &["key", "set"], args: &[arg("PROVIDER", Kind::Word), arg("-|@FILE", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini key --action set (the provider key from stdin or @FILE in HOME/keys, never on the line; hosted custody)" },
+    Leaf { path: &["key", "grant"], args: &[arg("PROVIDER", Kind::Word), arg("RUNNER", Kind::Word)], flags: &[valued("--per-call", "TOKENS", Kind::Number), valued("--per-day", "CALLS", Kind::Number), valued("--until", "HEIGHT", Kind::Number), valued("--model", "MODEL", Kind::Word)], effect: Effect::Transition, about: "mini key --action grant: a runner's bounded use of the provider key (per call, per day, until a height)" },
+    Leaf { path: &["key", "revoke"], args: &[arg("PROVIDER", Kind::Word), opt("RUNNER", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mini key --action revoke" },
+    Leaf { path: &["key", "ls"], args: &[], flags: &[], effect: Effect::Local, about: "mini key --action ls" },
+    Leaf { path: &["key", "providers"], args: &[], flags: &[], effect: Effect::Local, about: "mini key --action providers" },
+    Leaf { path: &["key", "choose"], args: &[arg("PROVIDER", Kind::Word), arg("MODEL", Kind::Word), arg("RUNNER", Kind::Word), arg("TASK", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini key --action choose" },
+] };
+pub static KEYGEN: Grammar = Grammar { verb: "keygen", leaves: &[
+    Leaf { path: &["keygen"], args: &[arg("FILE", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
+] };
+pub static KEY_STATUS: Grammar = Grammar { verb: "key-status", leaves: &[
+    Leaf { path: &["key-status"], args: &[], flags: &[], effect: Effect::Local, about: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
+] };
+pub static ADOPT_NEXT_KEY: Grammar = Grammar { verb: "adopt-next-key", leaves: &[
+    Leaf { path: &["adopt-next-key", "lookup"], args: &[arg("ATTEMPT", Kind::Word)], flags: &[], effect: Effect::Transition, about: "recover a retained adoption attempt without signing again" },
+    Leaf { path: &["adopt-next-key"], args: &[arg("NEXTFILE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "commit a next key for an existing identity" },
+] };
+pub static ROTATE_KEY: Grammar = Grammar { verb: "rotate-key", leaves: &[
+    Leaf { path: &["rotate-key"], args: &[arg("NEXTFILE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
+] };
+pub static INIT: Grammar = Grammar { verb: "init", leaves: &[
+    Leaf { path: &["init"], args: &[arg("KEYFILE", Kind::Word), arg("SUBJECT", Kind::Subject)], flags: &[dangerous("--no-prerotation")], effect: Effect::Local, about: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
+] };
+pub static ENROLL: Grammar = Grammar { verb: "enroll", leaves: &[
+    Leaf { path: &["enroll", "plan"], args: &[arg("NAME", Kind::Id), arg("KEYFILE|PUBLIC-KEY-HEX", Kind::Word), opt("NEXT-PUBLIC-KEY-HEX", Kind::Word), opt("COSIGN-HEX", Kind::Word), opt("FACTORY-REF", Kind::Word)], flags: &[dangerous("--no-prerotation")], effect: Effect::Local, about: "mini enroll --action plan --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret never enters this home; the record commits to the newcomer's next key, or --no-prerotation says so)" },
+    Leaf { path: &["enroll", "offer"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Local, about: "mini enroll --action offer" },
+    Leaf { path: &["enroll", "seal"], args: &[arg("NAME", Kind::Id), opt("SIGNATURE-HEX", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini enroll --action seal (with the newcomer's possession signature when given)" },
+    Leaf { path: &["enroll", "submit"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini enroll --action submit" },
+    Leaf { path: &["enroll", "lookup"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini enroll --action lookup" },
+    Leaf { path: &["enroll", "welcome"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Local, about: "mini enroll --action welcome (the newcomer's birth context, when this workspace provisioned them)" },
+] };
+pub static PROVISION: Grammar = Grammar { verb: "provision", leaves: &[
+    Leaf { path: &["provision"], args: &[arg("NAME", Kind::Id), arg("HOLDER", Kind::Subject), arg("FUNDING", Kind::Number), arg("PREDICATE-JSON|@FILE", Kind::Word), opt("FACTORY-REF", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
+] };
+pub static CREATE: Grammar = Grammar { verb: "create", leaves: &[
+    Leaf { path: &["create"], args: &[arg("NAME", Kind::Ref), arg("STORAGE", Kind::Word), arg("LAW|PREDICATE-JSON|@FILE", Kind::Word), opt("FIELDS|open", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref), valued("--owner", "SUBJECT", Kind::Subject), valued("--from", "KIND", Kind::Ref)], effect: Effect::Transition, about: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]; --from KIND births a world-resident kind's instance" },
+] };
+pub static INVOKE: Grammar = Grammar { verb: "invoke", leaves: &[
+    Leaf { path: &["invoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("create", Kind::Choice(&["create"])), arg("FIELD", Kind::Number), arg("VALUE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action invoke: one scalar create)" },
+    Leaf { path: &["invoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("write", Kind::Choice(&["write"])), arg("FIELD", Kind::Number), arg("VALUE", Kind::Word), arg("EXPECTED", Kind::Word)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action invoke: one scalar write, compare-and-set against EXPECTED)" },
+] };
+pub static KIND: Grammar = Grammar { verb: "kind", leaves: &[
+    Leaf { path: &["kind", "create"], args: &[arg("NAME", Kind::Ref), arg("DEFINITION-JSON|@FILE", Kind::Word), arg("LAW", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref)], effect: Effect::Transition, about: "world-resident definition create" },
+    Leaf { path: &["kind", "show"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "signed read of the definition" },
+    Leaf { path: &["kind", "revise"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("DEFINITION-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "guarded revision (propose)" },
+    Leaf { path: &["kind", "construct"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("PROGRAM-ID", Kind::Subject), arg("PARENTS-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "authenticated source construction" },
+] };
+pub static PROGRAM: Grammar = Grammar { verb: "program", leaves: &[
+    Leaf { path: &["program", "create"], args: &[arg("NAME", Kind::Ref), arg("SOURCE-JSON|@FILE", Kind::Word), arg("LAW", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref)], effect: Effect::Transition, about: "register canonical code and ABI with the existing evaluator, then birth its immutable program cell" },
+] };
+pub static INSTANCE: Grammar = Grammar { verb: "instance", leaves: &[
+    Leaf { path: &["instance", "show"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "signed descriptor and entry read" },
+    Leaf { path: &["instance", "call"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("METHOD", Kind::Word)], flags: &[valued("--fund", "ACCOUNT", Kind::Ref), valued("--max-compute-credits", "N", Kind::Number)], effect: Effect::Transition, about: "a method call with compute consent (--fund and --max-compute-credits together)" },
+    Leaf { path: &["instance", "set"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("FIELD", Kind::Word), arg("KEY", Kind::Number), arg("VALUE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "named guarded edit using the last displayed values (propose)" },
+    Leaf { path: &["instance", "erase"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("FIELD", Kind::Word), arg("KEY", Kind::Number)], flags: &[], effect: Effect::Propose, about: "named guarded erase (propose)" },
+] };
+pub static APP: Grammar = Grammar { verb: "app", leaves: &[
+    Leaf { path: &["app", "status"], args: &[arg("NAME", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "current app admission (mini member --action app-status)" },
+    Leaf { path: &["app", "delegate-lifecycle", "prepare"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref)], flags: &[valued("--package", "PKG", Kind::Ref), valued("--snapshot", "SNAP", Kind::Ref), valued("--manager", "SUBJECT", Kind::Subject)], effect: Effect::Transition, about: "member-signed lifecycle management delegation, prepared with retained exact recovery" },
+    Leaf { path: &["app", "delegate-lifecycle"], args: &[arg("prepare|submit|recover|status", Kind::Choice(&["prepare", "submit", "recover", "status"])), arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "the delegation's lifecycle by request id" },
+] };
+pub static FORGET: Grammar = Grammar { verb: "forget", leaves: &[
+    Leaf { path: &["forget"], args: &[arg("ROOM", Kind::Id), opt("EPOCH", Kind::Number)], flags: &[], effect: Effect::Local, about: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate). Private rooms: devnet quality; privacy not audited" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
     &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
@@ -800,6 +867,15 @@ mod tests {
         assert!(parse_line(&SUMMON, "summon lab librarian").is_err());
         assert_eq!(parse_line(&TAIL, "tail -n 5 --since 30 --follow").unwrap().flag("-n"), Some(Some("5")));
         assert_eq!(parse_line(&HERMES, "hermes cancel 3 lab").unwrap().arg(1), "lab");
+        let w = words("app delegate-lifecycle prepare r1");
+        assert_eq!(parse(&APP, &w).unwrap().leaf.path, ["app", "delegate-lifecycle"]);
+        let w = words("app delegate-lifecycle prepare r1 myapp --package pkg --snapshot snap --manager 9");
+        assert_eq!(parse(&APP, &w).unwrap().leaf.path, ["app", "delegate-lifecycle", "prepare"]);
+        let w = words("invoke x shared write 2 5 1");
+        assert_eq!(parse(&INVOKE, &w).unwrap().index_in(&INVOKE), 1);
+        assert!(parse(&INVOKE, &words("invoke x shared delete 2")).is_err());
+        let w = words("adopt-next-key lookup a1");
+        assert_eq!(parse(&ADOPT_NEXT_KEY, &w).unwrap().leaf.path, ["adopt-next-key", "lookup"]);
         let w = words("topup lab 5 again");
         let p = parse(&TOPUP, &w).unwrap();
         assert_eq!((p.opt(2), p.opt(3)), (None, Some("again")));

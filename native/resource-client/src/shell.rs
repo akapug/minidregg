@@ -52,16 +52,16 @@ pub(crate) struct Verb {
 }
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "app", usage: "app status NAME [--json] | app delegate-lifecycle prepare ID NAME --package PKG --snapshot SNAP --manager SUBJECT | app delegate-lifecycle prepare|submit|recover|status ID", operation: "current app admission | member-signed lifecycle management delegation with retained exact recovery" },
+    Verb { name: "app", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "home", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "whoami", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
-    Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
-    Verb { name: "adopt-next-key", usage: "adopt-next-key NEXTFILE | adopt-next-key lookup ATTEMPT", operation: "commit a next key for an existing identity; recover a retained attempt without signing again" },
-    Verb { name: "rotate-key", usage: "rotate-key NEXTFILE", operation: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
-    Verb { name: "init", usage: "init KEYFILE SUBJECT [--no-prerotation]", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
-    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
-    Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
+    Verb { name: "keygen", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "key-status", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "adopt-next-key", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "rotate-key", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "init", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "enroll", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "provision", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "refs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "read", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "can", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -69,12 +69,12 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "why", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "describe", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "import", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "kind", usage: "kind create NAME DEFINITION-JSON|@FILE LAW [--in ROOM] | kind show NAME | kind revise ID NAME DEFINITION-JSON|@FILE | kind construct ID NAME PROGRAM-ID PARENTS-JSON|@FILE", operation: "world-resident definition create, signed read, guarded revision, or authenticated source construction" },
-    Verb { name: "program", usage: "program create NAME SOURCE-JSON|@FILE LAW [--in ROOM]", operation: "register canonical code and ABI with the existing evaluator, then birth its immutable program cell" },
-    Verb { name: "instance", usage: "instance show NAME | instance call ID NAME METHOD [--fund ACCOUNT --max-compute-credits N] | instance set ID NAME FIELD KEY VALUE | instance erase ID NAME FIELD KEY", operation: "signed descriptor and entry read; named guarded edits using the last displayed values" },
-    Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
+    Verb { name: "kind", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "program", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "instance", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "create", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "propose", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
+    Verb { name: "invoke", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "delegate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "law", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "apps", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -91,7 +91,7 @@ pub(crate) const VERBS: &[Verb] = &[
     // `doc` is the first verb whose grammar is data (shell_grammar::DOC): its usage and operation
     // are rendered from it by `command_catalog`; this row only holds its place in the order.
     Verb { name: "doc", usage: "", operation: "" },
-    Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate). Private rooms: devnet quality; privacy not audited" },
+    Verb { name: "forget", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     // `room` is grammar data (shell_grammar::ROOM); the row holds its place, see `rendered_row`.
     Verb { name: "room", usage: "", operation: "" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
@@ -103,7 +103,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "credit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "tariff", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "topup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
+    Verb { name: "key", usage: "", operation: "" },  // grammar data (shell_grammar::KEY), rendered by `rendered_row`
     Verb { name: "history", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "help", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "exit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -930,35 +930,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
     };
     Ok(match verb.as_str() {
         "app" => {
-            if w.get(1).is_some_and(|v|v=="delegate-lifecycle") {
-                if !matches!(w.len(),4|11) || !matches!(w[2].as_str(),"prepare"|"submit"|"recover"|"status") {return Err(u.to_owned());}
-                crate::workspace::validate_name(&w[3])?;
-                let mut flags=vec![flag("dir",ws()),flag("action","app-lifecycle"),flag("request-id",&w[3]),flag("op",&w[2])];
-                if w.len()==11 {
-                    if w[2]!="prepare" {return Err(u.to_owned());}
-                    ref_name(&w[4],"app reference")?;
-                    let mut options=std::collections::BTreeMap::new();
-                    for option in w[5..].chunks_exact(2) {
-                        if !matches!(option[0].as_str(),"--package"|"--snapshot"|"--manager")
-                            || options.insert(option[0].as_str(),option[1].as_str()).is_some() {
-                            return Err(u.to_owned());
-                        }
-                    }
-                    if options.len()!=3 {return Err(u.to_owned());}
-                    ref_name(options["--package"],"package reference")?;
-                    ref_name(options["--snapshot"],"snapshot reference")?;
-                    crate::workspace::decimal(options["--manager"],"manager subject")?;
-                    flags.extend([flag("name",&w[4]),flag("package-name",options["--package"]),
-                        flag("snapshot-name",options["--snapshot"]),flag("manager",options["--manager"])]);
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::APP, &w)?;
+            match p.leaf.path {
+                ["app", "status"] => {
+                    let mut args = vec![flag("dir", ws()), flag("action", "app-status"), flag("name", p.arg(0))];
+                    if p.has("--json") { args.push(flag("json", "true")); }
+                    client("member", args)
                 }
-                client("workspace",flags)
-            } else {
-                if w.len()<3 || w[1]!="status" || w.len()>4 || (w.len()==4 && w[3]!="--json") {
-                    return Err(u.to_owned());
+                ["app", "delegate-lifecycle", "prepare"] => {
+                    crate::workspace::validate_name(p.arg(0))?;
+                    let (package, snapshot, manager) = match (p.flag("--package").flatten(), p.flag("--snapshot").flatten(), p.flag("--manager").flatten()) {
+                        (Some(a), Some(b), Some(c)) => (a, b, c),
+                        _ => return Err(u.to_owned()),
+                    };
+                    client("workspace", vec![flag("dir", ws()), flag("action", "app-lifecycle"), flag("request-id", p.arg(0)), flag("op", "prepare"),
+                        flag("name", p.arg(1)), flag("package-name", package), flag("snapshot-name", snapshot), flag("manager", manager)])
                 }
-                let mut args=vec![flag("dir",ws()),flag("action","app-status"),flag("name",&w[2])];
-                if w.len()==4 {args.push(flag("json","true"));}
-                client("member",args)
+                _ => {
+                    crate::workspace::validate_name(p.arg(1))?;
+                    client("workspace", vec![flag("dir", ws()), flag("action", "app-lifecycle"), flag("request-id", p.arg(1)), flag("op", p.arg(0))])
+                }
             }
         }
         "home" => {
@@ -1001,18 +992,9 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "room" => room_plan(session, &w, u)?,
         "forget" => {
-            arity(&w, 1, 2, u)?;
-            workspace_name(&w[1], "room name")?;
-            let mut flags = vec![
-                flag("action", "room-key"),
-                flag("op", "forget"),
-                flag("dir", ws()),
-                flag("name", w[1].clone()),
-            ];
-            if let Some(epoch) = w.get(2) {
-                decimal(epoch, "epoch")?;
-                flags.push(flag("epoch", epoch.clone()));
-            }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::FORGET, &w)?;
+            let mut flags = vec![flag("action", "room-key"), flag("op", "forget"), flag("dir", ws()), flag("name", p.arg(0))];
+            if let Some(epoch) = p.opt(1) { flags.push(flag("epoch", epoch)); }
             client("workspace", flags)
         }
         "doc" => {
@@ -1225,24 +1207,14 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::History { all: p.opt(0).is_some() }
         }
         "keygen" => {
-            arity(&w, 1, 1, u)?;
-            session_file(&w[1], "key file")?;
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::KEYGEN, &w)?;
+            session_file(p.arg(0), "key file")?;
             let keys = session.home.join("keys");
-            client(
-                "keygen",
-                vec![
-                    flag("secret", keys.join(&w[1])),
-                    flag("public", keys.join(format!("{}.pub", w[1]))),
-                    flag("hosted", "yes"),
-                ],
-            )
+            client("keygen", vec![flag("secret", keys.join(p.arg(0))), flag("public", keys.join(format!("{}.pub", p.arg(0)))), flag("hosted", "yes")])
         }
         "init" => {
-            let mut w: Vec<String> = w.to_vec();
-            let without = take_switch(&mut w, "--no-prerotation");
-            arity(&w, 2, 2, u)?;
-            session_file(&w[1], "key file")?;
-            decimal(&w[2], "subject")?;
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::INIT, &w)?;
+            session_file(p.arg(0), "key file")?;
             let context = session.home.join("provision").join("birth-context.json");
             if !context.is_file() {
                 return Ok(Plan::NotHere(format!(
@@ -1258,63 +1230,59 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
             flags.extend([
                 flag("config", session.config.clone()),
-                flag("key", session.home.join("keys").join(&w[1])),
-                flag("subject", w[2].clone()),
+                flag("key", session.home.join("keys").join(p.arg(0))),
+                flag("subject", p.arg(1)),
                 flag("birth-context", context),
                 flag("namespace-root", session.home.join("namespace")),
                 flag("dir", ws()),
             ]);
             // init refuses a subject whose committed next key is not
             // HOME/keys/KEYFILE.next.pub (FIX-IDENTITY), unless --no-prerotation.
-            if without {
+            if p.has("--no-prerotation") {
                 flags.push(flag("no-prerotation", "true"));
             }
             client("workspace", flags)
         }
         "enroll" => {
-            let Some(action) = w.get(1) else {
-                return Err(u.to_owned());
-            };
-            match action.as_str() {
-                "plan" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::ENROLL, &w)?;
+            let name = p.arg(0);
+            let enroll_dir = session.home.join("enroll").join(name);
+            match p.leaf.path {
+                ["enroll", "plan"] => {
                     // enroll plan NAME KEYFILE|PUBLIC-HEX [NEXT-PUB-HEX COSIGN-HEX | --no-prerotation] [FACTORY-REF]
                     // The next public key and its co-signature are the NEWCOMER's
                     // (their `keygen` / `mini join --key` prints them): never a file
                     // this session home happens to hold (FIX-IDENTITY).
-                    let mut w: Vec<String> = w.to_vec();
-                    let without = take_switch(&mut w, "--no-prerotation");
-                    let next = match (w.get(4).and_then(|word| hex_bytes(word, 32)), w.get(5).and_then(|word| hex_bytes(word, 64))) {
+                    let without = p.has("--no-prerotation");
+                    let mut extra: Vec<&str> = [p.opt(2), p.opt(3), p.opt(4)].into_iter().flatten().collect();
+                    let next = match (extra.first().and_then(|word| hex_bytes(word, 32)), extra.get(1).and_then(|word| hex_bytes(word, 64))) {
                         (Some(next), Some(cosign)) => {
-                            w.drain(4..6);
+                            extra.drain(0..2);
                             Some((next, cosign))
                         }
                         _ => None,
                     };
-                    arity(&w, 3, 4, u)?;
-                    workspace_name(&w[2], "enrollment name")?;
-                    let factory = w.get(4).cloned().unwrap_or_else(|| "factory".into());
+                    if extra.len() > 1 {
+                        return Err(u.to_owned());
+                    }
+                    let factory = extra.first().map(|f| f.to_string()).unwrap_or_else(|| "factory".into());
                     ref_name(&factory, "factory reference")?;
-                    let mut flags = vec![
-                        flag("action", "plan"),
-                        flag("sponsor-workspace", ws()),
-                        flag("factory-ref", factory),
-                        flag("name", w[2].clone()),
-                    ];
+                    let mut flags = vec![flag("action", "plan"), flag("sponsor-workspace", ws()), flag("factory-ref", factory), flag("name", name)];
                     let mut writes = vec![];
-                    if let Some(public) = hex_bytes(&w[3], 32) {
+                    if let Some(public) = hex_bytes(p.arg(1), 32) {
                         // The newcomer keeps the secret; only the public key
                         // enters this session home.
-                        let path = session.home.join("keys").join(format!("{}.pub", w[2]));
+                        let path = session.home.join("keys").join(format!("{name}.pub"));
                         flags.push(flag("new-public-key", path.clone()));
                         writes.push((path, public));
                     } else {
-                        session_file(&w[3], "key file")?;
-                        flags.push(flag("new-key", session.home.join("keys").join(&w[3])));
+                        session_file(p.arg(1), "key file")?;
+                        flags.push(flag("new-key", session.home.join("keys").join(p.arg(1))));
                     }
                     match (next, without) {
                         (Some((next, cosign)), false) => {
-                            let next_path = session.home.join("enroll").join(format!("{}.next.pub", w[2]));
-                            let cosign_path = session.home.join("enroll").join(format!("{}.next.cosign", w[2]));
+                            let next_path = session.home.join("enroll").join(format!("{name}.next.pub"));
+                            let cosign_path = session.home.join("enroll").join(format!("{name}.next.cosign"));
                             flags.push(flag("next-public-key", next_path.clone()));
                             flags.push(flag("next-cosign", cosign_path.clone()));
                             writes.push((next_path, next));
@@ -1322,50 +1290,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         }
                         (None, true) => flags.push(flag("no-prerotation", "true")),
                         (Some(_), true) => return Err("a next public key and --no-prerotation exclude each other".into()),
-                        (None, false) => return Err("enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX: the record commits to the newcomer's next key, and that key co-signs (their `keygen` prints both; `mini enroll --action cosign --key KEY` prints them again), or add --no-prerotation".into()),
+                        (None, false) => return Err("enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX: the record commits to the newcomer's next key, and that key is theirs to make; --no-prerotation says you mean to enrol without one".into()),
                     }
-                    flags.push(flag("dir", session.home.join("enroll").join(&w[2])));
+                    flags.push(flag("dir", enroll_dir));
                     Plan::Client { command: "enroll".into(), flags, writes }
                 }
-                "seal" if w.len() == 4 => {
-                    workspace_name(&w[2], "enrollment name")?;
-                    let signature = hex_bytes(&w[3], 64)
+                ["enroll", "seal"] if p.opt(1).is_some() => {
+                    let signature = hex_bytes(p.arg(1), 64)
                         .ok_or("the possession signature is 128 hex digits (from the newcomer's mini join)")?;
-                    let path = session.home.join("requests").join(format!("{}.possession", w[2]));
-                    Plan::Client {
-                        command: "enroll".into(),
-                        flags: vec![
-                            flag("action", "seal"),
-                            flag("dir", session.home.join("enroll").join(&w[2])),
-                            flag("possession-signature", path.clone()),
-                        ],
-                        writes: vec![(path, signature)],
-                    }
+                    let path = session.home.join("requests").join(format!("{name}.possession"));
+                    Plan::Client { command: "enroll".into(), flags: vec![flag("action", "seal"), flag("dir", enroll_dir), flag("possession-signature", path.clone())], writes: vec![(path, signature)] }
                 }
-                "welcome" => {
-                    arity(&w, 2, 2, u)?;
-                    workspace_name(&w[2], "enrollment name")?;
-                    let mut flags = vec![
-                        flag("action", "welcome"),
-                        flag("dir", session.home.join("enroll").join(&w[2])),
-                    ];
-                    let context = ws().join("provisions").join(&w[2]).join("birth-context.json");
+                ["enroll", "welcome"] => {
+                    let mut flags = vec![flag("action", "welcome"), flag("dir", enroll_dir)];
+                    let context = ws().join("provisions").join(name).join("birth-context.json");
                     if context.is_file() {
                         flags.push(flag("birth-context", context));
                     }
                     client("enroll", flags)
                 }
-                "seal" | "submit" | "lookup" | "offer" => {
-                    arity(&w, 2, 2, u)?;
-                    workspace_name(&w[2], "enrollment name")?;
-                    client(
-                        "enroll",
-                        vec![
-                            flag("action", action.clone()),
-                            flag("dir", session.home.join("enroll").join(&w[2])),
-                        ],
-                    )
-                }
+                ["enroll", action] => client("enroll", vec![flag("action", *action), flag("dir", enroll_dir)]),
                 _ => return Err(u.to_owned()),
             }
         }
@@ -1416,54 +1360,35 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "provision" => {
-            arity(&w, 4, 5, u)?;
-            workspace_name(&w[1], "provision name")?;
-            decimal(&w[2], "holder subject")?;
-            decimal(&w[3], "funding")?;
-            let predicate = json_argument(session, &w[4], "account predicate")?;
-            let factory = w.get(5).cloned().unwrap_or_else(|| "factory".into());
-            workspace_name(&factory, "factory reference")?;
-            let path = session.home.join("requests").join(format!("provision-{}.json", w[1]));
-            Plan::Client {
-                command: "workspace".into(),
-                flags: vec![
-                    flag("action", "provision"),
-                    flag("dir", ws()),
-                    flag("name", w[1].clone()),
-                    flag("holder", w[2].clone()),
-                    flag("funding", w[3].clone()),
-                    flag("account-predicate", path.clone()),
-                    flag("factory-ref", factory),
-                ],
-                writes: vec![request_file(path, &predicate)],
-            }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PROVISION, &w)?;
+            let predicate = json_argument(session, p.arg(3), "account predicate")?;
+            let factory = p.opt(4).unwrap_or("factory");
+            let path = session.home.join("requests").join(format!("provision-{}.json", p.arg(0)));
+            Plan::Client { command: "workspace".into(), flags: vec![flag("action", "provision"), flag("dir", ws()), flag("name", p.arg(0)), flag("holder", p.arg(1)),
+                flag("funding", p.arg(2)), flag("account-predicate", path.clone()), flag("factory-ref", factory)], writes: vec![request_file(path, &predicate)] }
         }
         "key-status" => {
-            arity(&w, 0, 0, u)?;
+            crate::shell_grammar::parse(&crate::shell_grammar::KEY_STATUS, &w)?;
             client("key-status", vec![flag("workspace", ws())])
         }
         "adopt-next-key" => {
-            arity(&w, 1, 2, u)?;
-            if w[1] == "lookup" {
-                arity(&w, 2, 2, u)?;
-                session_file(&w[2], "adoption attempt")?;
-                client("adopt-next-key", vec![flag("workspace", ws()), flag("action", "lookup"), flag("attempt", w[2].clone())])
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::ADOPT_NEXT_KEY, &w)?;
+            if p.leaf.path.len() == 2 {
+                session_file(p.arg(0), "adoption attempt")?;
+                client("adopt-next-key", vec![flag("workspace", ws()), flag("action", "lookup"), flag("attempt", p.arg(0))])
             } else {
-                arity(&w, 1, 1, u)?;
-                session_file(&w[1], "next key file")?;
-                client("adopt-next-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(&w[1]))])
+                // `adopt-next-key lookup` without its ATTEMPT is a usage error, not a key file named lookup.
+                if p.arg(0) == "lookup" {
+                    return Err(u.to_owned());
+                }
+                session_file(p.arg(0), "next key file")?;
+                client("adopt-next-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(p.arg(0)))])
             }
         }
         "rotate-key" => {
-            arity(&w, 1, 1, u)?;
-            session_file(&w[1], "next key file")?;
-            client(
-                "rotate-key",
-                vec![
-                    flag("workspace", ws()),
-                    flag("next-key", session.home.join("keys").join(&w[1])),
-                ],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::ROTATE_KEY, &w)?;
+            session_file(p.arg(0), "next key file")?;
+            client("rotate-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(p.arg(0)))])
         }
         "refs" => {
             crate::shell_grammar::parse(&crate::shell_grammar::REFS, &w)?;
@@ -1519,91 +1444,63 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "program" => {
-            if w.get(1).map(String::as_str)!=Some("create") { return Err(u.into()); }
-            arity(&w,4,4,u)?;ref_name(&w[2],"program name")?;
-            let source=json_argument(session,&w[3],"program source")?;
-            let predicate=law_argument(session,&w[4..5])?;
-            let prefix=session.home.join("requests");
-            let path=prefix.join(format!("program-{}.json",ref_file(&w[2])));
-            let lawpath=prefix.join(format!("program-{}-law.json",ref_file(&w[2])));
-            let mut flags=vec![flag("action","program-create"),flag("dir",ws()),flag("name",&w[2]),
-                flag("source",path.clone()),flag("predicate",lawpath.clone())];
-            if let Some(room)=&room {flags.push(flag("in",room));}
-            Plan::Client {command:"workspace".into(),flags,
-                writes:vec![request_file(path,&source),request_file(lawpath,&predicate)]}
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PROGRAM, &w)?;
+            let source = json_argument(session, p.arg(1), "program source")?;
+            let predicate = law_argument(session, &[p.arg(2).to_owned()])?;
+            let prefix = session.home.join("requests");
+            let path = prefix.join(format!("program-{}.json", ref_file(p.arg(0))));
+            let lawpath = prefix.join(format!("program-{}-law.json", ref_file(p.arg(0))));
+            let mut flags = vec![flag("action", "program-create"), flag("dir", ws()), flag("name", p.arg(0)), flag("source", path.clone()), flag("predicate", lawpath.clone())];
+            if let Some(room) = &room { flags.push(flag("in", room)); }
+            Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(path, &source), request_file(lawpath, &predicate)] }
         }
         "kind" => {
-            match w.get(1).map(String::as_str) {
-                Some("show") => {
-                    arity(&w, 2, 2, u)?; ref_name(&w[2], "kind name")?;
-                    client("workspace", vec![flag("action", "kind-show"), flag("dir", ws()), flag("name", &w[2])])
-                }
-                Some("create") => {
-                    arity(&w, 4, 4, u)?; ref_name(&w[2], "kind name")?;
-                    let definition = json_argument(session, &w[3], "kind definition")?;
-                    let predicate = law_argument(session, &w[4..5])?;
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::KIND, &w)?;
+            match p.leaf.path {
+                ["kind", "show"] => client("workspace", vec![flag("action", "kind-show"), flag("dir", ws()), flag("name", p.arg(0))]),
+                ["kind", "create"] => {
+                    let definition = json_argument(session, p.arg(1), "kind definition")?;
+                    let predicate = law_argument(session, &[p.arg(2).to_owned()])?;
                     let prefix = session.home.join("requests");
-                    let defpath = prefix.join(format!("kind-{}.json", ref_file(&w[2])));
-                    let lawpath = prefix.join(format!("kind-{}-law.json", ref_file(&w[2])));
-                    let mut flags = vec![flag("action", "kind-create"), flag("dir", ws()), flag("name", &w[2]),
-                        flag("definition", defpath.clone()), flag("predicate", lawpath.clone())];
+                    let defpath = prefix.join(format!("kind-{}.json", ref_file(p.arg(0))));
+                    let lawpath = prefix.join(format!("kind-{}-law.json", ref_file(p.arg(0))));
+                    let mut flags = vec![flag("action", "kind-create"), flag("dir", ws()), flag("name", p.arg(0)), flag("definition", defpath.clone()), flag("predicate", lawpath.clone())];
                     if let Some(room) = &room { flags.push(flag("in", room)); }
-                    Plan::Client { command:"workspace".into(), flags,
-                        writes:vec![request_file(defpath,&definition),request_file(lawpath,&predicate)] }
+                    Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(defpath, &definition), request_file(lawpath, &predicate)] }
                 }
-                Some("construct") => {
-                    arity(&w, 5, 5, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "target kind name")?;
-                    decimal(&w[4], "constructor program ID")?;
-                    let parents=json_argument(session,&w[5],"ordered parent reference names")?;
-                    let parent_path=session.home.join("requests").join(format!("construct-{}.json",ref_file(&w[2])));
-                    Plan::Client {command:"workspace".into(),flags:vec![flag("action","kind-construct"),
-                        flag("dir",ws()),flag("proposal-id",&w[2]),flag("name",&w[3]),
-                        flag("program",&w[4]),flag("parents",parent_path.clone())],
-                        writes:vec![request_file(parent_path,&parents)]}
+                ["kind", "construct"] => {
+                    let parents = json_argument(session, p.arg(3), "ordered parent reference names")?;
+                    let parent_path = session.home.join("requests").join(format!("construct-{}.json", ref_file(p.arg(0))));
+                    Plan::Client { command: "workspace".into(), flags: vec![flag("action", "kind-construct"), flag("dir", ws()), flag("proposal-id", p.arg(0)), flag("name", p.arg(1)),
+                        flag("program", p.arg(2)), flag("parents", parent_path.clone())], writes: vec![request_file(parent_path, &parents)] }
                 }
-                Some("revise") => {
-                    arity(&w, 4, 4, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "kind name")?;
-                    let definition = json_argument(session, &w[4], "kind definition")?;
-                    proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-                        "targets":[{"name":w[3],"payload":{"type":"kindDefinition","definition":definition}}]}))
+                _ => {
+                    let definition = json_argument(session, p.arg(2), "kind definition")?;
+                    proposal(session, p.arg(0), &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                        "targets":[{"name":p.arg(1),"payload":{"type":"kindDefinition","definition":definition}}]}))
                 }
-                _ => return Err(u.into()),
             }
         }
         "instance" => {
-            match w.get(1).map(String::as_str) {
-                Some("show") => {
-                    arity(&w, 2, 2, u)?; ref_name(&w[2], "instance name")?;
-                    client("workspace", vec![flag("action", "instance-show"), flag("dir", ws()), flag("name", &w[2])])
-                }
-                Some("call") => {
-                    arity(&w, 4, 8, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "instance name")?;
-                    let mut flags=vec![flag("action", "instance-call"),flag("dir",ws()),
-                        flag("proposal-id",&w[2]),flag("name",&w[3]),flag("method",&w[4])];
-                    let mut seen=std::collections::BTreeSet::new();
-                    let mut options=w[5..].iter();
-                    while let Some(option)=options.next() {
-                        let key=match option.as_str() {"--fund"=>"fund", "--max-compute-credits"=>"max-compute-credits", _=>return Err(u.into())};
-                        if !seen.insert(key) {return Err("duplicate compute consent option".into());}
-                        let value=options.next().ok_or("compute consent option needs a value")?;
-                        if key=="fund" {ref_name(value,"funding account")?;} else {decimal(value,"maximum compute credits")?;}
-                        flags.push(flag(key,value));
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::INSTANCE, &w)?;
+            match p.leaf.path {
+                ["instance", "show"] => client("workspace", vec![flag("action", "instance-show"), flag("dir", ws()), flag("name", p.arg(0))]),
+                ["instance", "call"] => {
+                    let mut flags = vec![flag("action", "instance-call"), flag("dir", ws()), flag("proposal-id", p.arg(0)), flag("name", p.arg(1)), flag("method", p.arg(2))];
+                    match (p.flag("--fund").flatten(), p.flag("--max-compute-credits").flatten()) {
+                        (None, None) => {}
+                        (Some(fund), Some(max)) => { flags.push(flag("fund", fund)); flags.push(flag("max-compute-credits", max)); }
+                        _ => return Err("--fund and --max-compute-credits must be supplied together".into()),
                     }
-                    if seen.len()==1 {return Err("--fund and --max-compute-credits must be supplied together".into());}
                     client("workspace", flags)
                 }
-                Some(operation @ ("set" | "erase")) => {
-                    let count = if operation == "set" { 6 } else { 5 };
-                    arity(&w, count, count, u)?; workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "instance name")?;
-                    decimal(&w[5], "entry key")?;
-                    let mut action = json!({"type":operation,"field":w[4],"key":w[5]});
-                    if operation == "set" { action["value"] = json!(w[6]); }
-                    proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-                        "targets":[{"name":w[3],"payload":{"type":"worldNamed","actions":[action]}}]}))
+                ["instance", operation @ ("set" | "erase")] => {
+                    let mut action = json!({"type":operation,"field":p.arg(2),"key":p.arg(3)});
+                    if *operation == "set" { action["value"] = json!(p.arg(4)); }
+                    proposal(session, p.arg(0), &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                        "targets":[{"name":p.arg(1),"payload":{"type":"worldNamed","actions":[action]}}]}))
                 }
-                _ => return Err(u.into()),
+                _ => return Err(u.to_owned()),
             }
         }
         "create" if birth.from.is_some() => {
@@ -1617,22 +1514,15 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::Client { command:"workspace".into(),flags,writes:vec![request_file(path,&predicate)] }
         }
         "create" => {
-            arity(&w, 3, 4, u)?;
-            ref_name(&w[1], "resource name")?;
-            let predicate = law_argument(session, &w[3..4])?;
-            let path = session.home.join("requests").join(format!("create-{}.json", ref_file(&w[1])));
-            let mut flags = vec![
-                flag("action", "create"),
-                flag("dir", ws()),
-                flag("name", w[1].clone()),
-                flag("storage", w[2].clone()),
-                flag("predicate", path.clone()),
-            ];
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::CREATE, &w)?;
+            let predicate = law_argument(session, &[p.arg(2).to_owned()])?;
+            let path = session.home.join("requests").join(format!("create-{}.json", ref_file(p.arg(0))));
+            let mut flags = vec![flag("action", "create"), flag("dir", ws()), flag("name", p.arg(0)), flag("storage", p.arg(1)), flag("predicate", path.clone())];
             // `create NAME declared LAW FIELDS`: the fields the cell may hold
             // (`0-3,7` or `open`); without it a declared cell holds none.
-            if let Some(fields) = w.get(4) {
+            if let Some(fields) = p.opt(3) {
                 crate::workspace::parse_fields(fields)?;
-                flags.push(flag("fields", fields.clone()));
+                flags.push(flag("fields", fields));
             }
             if let Some(room) = &room {
                 flags.push(flag("in", room.clone()));
@@ -1648,24 +1538,15 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             proposal(session, p.arg(0), &request)
         }
         "invoke" => {
-            workspace_name(w.get(1).map(String::as_str).unwrap_or(""), "proposal ID")?;
-            let action = w.get(3).map(String::as_str);
-            let scalar = match action {
-                Some("create") => {
-                    arity(&w, 5, 5, u)?;
-                    json!({"type":"create","key":{"type":"object","field":w[4]},"value":w[5]})
-                }
-                Some("write") => {
-                    arity(&w, 6, 6, u)?;
-                    json!({"type":"write","key":{"type":"object","field":w[4]},
-                        "value":w[5],"expected":w[6]})
-                }
-                _ => return Err(u.to_owned()),
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::INVOKE, &w)?;
+            let scalar = if p.arg(2) == "create" {
+                json!({"type":"create","key":{"type":"object","field":p.arg(3)},"value":p.arg(4)})
+            } else {
+                json!({"type":"write","key":{"type":"object","field":p.arg(3)},"value":p.arg(4),"expected":p.arg(5)})
             };
-            ref_name(&w[2], "reference name")?;
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-                "targets":[{"name":w[2],"payload":{"type":"scalar","actions":[scalar]}}]});
-            proposal(session, &w[1], &request)
+                "targets":[{"name":p.arg(1),"payload":{"type":"scalar","actions":[scalar]}}]});
+            proposal(session, p.arg(0), &request)
         }
         "delegate" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::DELEGATE, &w)?;
