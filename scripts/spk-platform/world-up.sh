@@ -52,8 +52,21 @@ config=$run/w/store/base/workroom/deployment/pinned-config.json
 "$run/bin/minidregg-host" "$config" profile >"$run/w/native-profile.json"
 store=$(jq -er '.storeTag | select(test("^[0-9a-f]{16}$"))' "$run/w/native-profile.json")
 root=/var/lib/mini-spk-worlds/$store
-start=$(awk -F: -v user="$op_name" '$1==user && $3>=32 {print $2;exit}' /etc/subuid)
-[[ $start =~ ^[0-9]+$ ]] || { echo "no /etc/subuid range for $op_name" >&2; exit 1; }
+# A free 16-ID slice of the operator's subordinate allocation: a lane box carries several standing
+# worlds, and the installer refuses a slice another world's registry already names.
+read -r start count < <(awk -F: -v user="$op_name" '$1==user && $3>=16 {print $2,$3;exit}' /etc/subuid)
+[[ $start =~ ^[0-9]+$ && $count =~ ^[0-9]+$ ]] || { echo "no /etc/subuid range for $op_name" >&2; exit 1; }
+end=$((start + count))
+while ((start + 16 <= end)); do
+  occupied=0
+  for registry in /etc/mini-spk-volumes/*.json; do
+    [[ -f $registry ]] || continue
+    if jq -e --argjson first "$start" --argjson last "$((start + 16))" '.appUids | any(. >= $first and . < $last)' "$registry" >/dev/null 2>&1; then occupied=1; break; fi
+  done
+  [[ $occupied == 1 ]] || break
+  start=$((start + 16))
+done
+((start + 16 <= end)) || { echo "no unused 16-ID subordinate slice for $op_name" >&2; exit 1; }
 bwrap=$(sh "$repo/deploy/grain-host/resolve-bwrap") || exit 1
 deployment=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 host=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
