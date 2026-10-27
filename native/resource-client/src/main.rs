@@ -135,6 +135,8 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+#[cfg(unix)]
+mod private_compute;
 mod bend;
 mod seat;
 #[cfg(unix)]
@@ -457,6 +459,20 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
         return Some(format!("refused: {reason}: {explain}"));
     }
     let detail = outcome_text(outcome.get("detail"));
+    // The Host's per-subject request rate (`Kernel.SubjectRate`): the detail is
+    // `rate-limited retry-after-ms N`; say when the subject may try again.
+    if reason == "rate-limited" {
+        if let Some(ms) = detail
+            .strip_prefix("rate-limited retry-after-ms ")
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            return Some(format!(
+                "refused: rate-limited: this subject has used its request rate for now; retry in {} s (phase {})",
+                ms.div_ceil(1000),
+                outcome_text(outcome.get("phase"))
+            ));
+        }
+    }
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -705,6 +721,7 @@ usage:
     --replan-max N: when a tick, certify or another write lands between an observation and
     its use, the Host answers stale-root; mini observes again up to N times (default 5;
     MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
+  mini private-compute --left 0..=255 --right 0..=255   (research demonstration: a local four-party MPC computation, never an admission; needs the mini-private-compute binary beside mini)
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini adopt-next-key --workspace WORKSPACE [--next-key NEXT-KEY] [--attempt CHILD] [--action prepare|submit|lookup]
   mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
@@ -2685,6 +2702,8 @@ fn run(mut args: Args) -> Result<()> {
         "checkpoint" => checkpoint::run(args),
         "export-world" => world_export::run(args),
         #[cfg(unix)]
+        "private-compute" => private_compute::run(args),
+        #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
         "bend" => bend::run(args),
@@ -3995,6 +4014,12 @@ mod tests {
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));
+        let limited = json!({"type":"refused","reason":"rate-limited","phase":hex(b"op 5"),
+            "detail":hex(b"rate-limited retry-after-ms 1500")});
+        assert_eq!(
+            refusal_line(&limited).unwrap(),
+            "refused: rate-limited: this subject has used its request rate for now; retry in 2 s (phase op 5)"
+        );
         let prose = json!({"type":"refused","phase":hex(b"x"),"detail":hex(b"revoked")});
         assert!(refusal_line(&prose)
             .unwrap()

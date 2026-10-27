@@ -303,186 +303,431 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "8"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "8"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -490,22 +735,41 @@
   "expected": "aWins",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -523,165 +787,410 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "timeout",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "timeout",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -689,22 +1198,41 @@
   "expected": "bForfeits",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -722,124 +1250,327 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "timeout",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "timeout",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -847,22 +1578,41 @@
   "expected": "aForfeits",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
       "value": {
        "tag": "natural",
-       "value": "0"
+       "value": "2"
       }
      },
      {
-      "name": "toB",
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
+      }
+     },
+     {
+      "name": "write",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -880,90 +1630,301 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "timeout",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "8"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "timeout",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "8"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "2"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -971,28 +1932,47 @@
   "expected": "voided",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "10"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
    }
   },
-  "expectedTurns": 3
+  "expectedTurns": 4
  },
  {
   "name": "CommitRevealActivityOutOfTurnIgnored",
@@ -1004,220 +1984,507 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "8"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "8"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1225,22 +2492,41 @@
   "expected": "aWins",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1258,268 +2544,597 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "5"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "8"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "5"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "8"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "5"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "8"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "5"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "8"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1527,22 +3142,41 @@
   "expected": "aWins",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1560,193 +3194,522 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "timeout",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "refused",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "timeout",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "13"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "timeout",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "refused",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "timeout",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "13"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1754,22 +3717,41 @@
   "expected": "bForfeits",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "disburse",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "toA",
+      "name": "to",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "amount",
       "value": {
        "tag": "natural",
        "value": "20"
       }
      },
      {
-      "name": "toB",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1787,137 +3769,298 @@
    }
   ],
   "entry": "play",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
-    "tag": "natural",
-    "value": "1"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "5"
-   },
-   {
-    "tag": "natural",
-    "value": "0"
+    "tag": "record",
+    "fields": [
+     {
+      "name": "a",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "b",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "stake",
+      "value": {
+       "tag": "natural",
+       "value": "10"
+      }
+     },
+     {
+      "name": "window",
+      "value": {
+       "tag": "natural",
+       "value": "5"
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
+     }
+    ]
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "seal",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "seal",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "who",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "move",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "7"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "6"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "who",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "move",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "7"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "6"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "moves",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1929,17 +4072,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "revealB"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "moves",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "due",
+      "name": "on",
+      "value": {
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "11"
+       "value": "64"
       }
      }
     ]

@@ -430,6 +430,17 @@ theorem v5_outcome_refused (payload : List UInt8) :
   have different : retiredOutcomeFrameV5 ≠ outcomeFrame := by decide +kernel
   simp [outcomeCodec, framed_decode, lengthExact, different]
 
+def retiredOutcomeFrameV6 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v6".toUTF8.toList
+
+/-- A version-6 outcome (its refusal reason without `rateLimited`, tag 16)
+refuses to decode: a v6 peer would read tag 16 as unknown, a v7 reader never
+reinterprets a v6 frame. -/
+theorem v6_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV6 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV6.length := by decide +kernel
+  have different : retiredOutcomeFrameV6 ≠ outcomeFrame := by decide +kernel
+  simp [outcomeCodec, framed_decode, lengthExact, different]
+
 /-- A version-4 signing plan (its draft without `renounce`) refuses to decode. -/
 theorem v4_signingPlan_refused (payload : List UInt8) :
     signingPlanCodec.decode (retiredSigningPlanFrame ++ payload) = none := by

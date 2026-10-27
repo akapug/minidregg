@@ -2358,41 +2358,41 @@
     {
       "code": 240,
       "symbol": "PLATFORM_INSTALL_PLAN",
-      "status": "reserved",
-      "routes": [],
+      "status": "active",
+      "routes": ["operator"],
       "owner": "platform",
-      "purpose": "platform install plan (GENESIS-COUPLING L1; statements in Kernel/PlatformCell.lean; proof phase)",
-      "receiver": null,
+      "purpose": "platform install plan: the controller's signing plan (the signed header frame) on one opened image",
+      "receiver": "fnDispatch",
       "effect": "none"
     },
     {
       "code": 241,
       "symbol": "PLATFORM_INSTALL_ASSEMBLE",
-      "status": "reserved",
-      "routes": [],
+      "status": "active",
+      "routes": ["operator"],
       "owner": "platform",
-      "purpose": "platform install assemble (L1)",
-      "receiver": null,
+      "purpose": "platform install assemble: the controller's signature and, for a custodian rotation, the custodian's cosignature over the plan's frame",
+      "receiver": "fnDispatch",
       "effect": "none"
     },
     {
       "code": 242,
       "symbol": "PLATFORM_INSTALL_SUBMIT",
-      "status": "reserved",
-      "routes": [],
+      "status": "active",
+      "routes": ["operator"],
       "owner": "platform",
-      "purpose": "platform install submit: controller-signed, version-monotone platform record (L1); effect becomes append at activation",
-      "receiver": null,
-      "effect": "none"
+      "purpose": "platform install submit: controller-signed, version-monotone platform record (PlatformInstallReceiver.receiveLoaded)",
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 243,
       "symbol": "PLATFORM_INSTALL_LOOKUP",
-      "status": "reserved",
-      "routes": [],
+      "status": "active",
+      "routes": ["operator"],
       "owner": "platform",
-      "purpose": "platform install receipt-only lookup (L1)",
-      "receiver": null,
+      "purpose": "platform install receipt-only lookup",
+      "receiver": "fnDispatch",
       "effect": "none"
     },
     {
@@ -2502,7 +2502,8 @@
     "GRAIN_SHARE_ISSUE_PLAN": "operator-only spk route; the signer is the operator's grain tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
     "FN_FRONTIER_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
     "APPLICATION_DISPATCH_READY": "not a signing plan: `ApplicationDispatchReady.assembledReadyVerified` takes an already signed plan and its signatures and returns a Json record (`Host/ApplicationDispatchReady.lean:138`, type `IO Json`); nothing is signed after it. Named *_READY, listed here so the registry check does not read the suffix as a plan",
-    "AUTHORIZED_PREPARE": "the member's own ordinary signing plan: every submit routes it through the local consent provider's frame 222 (NativeClientConsent.checkIntentPlan against the retained intent), not through the operator-plan list; listed here so the check knows it is covered elsewhere"
+    "AUTHORIZED_PREPARE": "the member's own ordinary signing plan: every submit routes it through the local consent provider's frame 222 (NativeClientConsent.checkIntentPlan against the retained intent), not through the operator-plan list; listed here so the check knows it is covered elsewhere",
+    "PLATFORM_INSTALL_PLAN": "Host-stdio platform route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN, and an operator socket route in native/resource-client/src/transport.rs when the controller's tooling needs it"
   },
   "client_constants": [
     {

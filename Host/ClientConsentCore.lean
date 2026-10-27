@@ -202,7 +202,7 @@ def parseSettings (json : Json) : Except String Settings := do
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
     "jointConsensus", "nockFSync", "disabledEvaluators", "fnGateway",
     "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation",
-    "providerServices", "agentLifetimeDispatchTargets"]
+    "providerServices", "agentLifetimeDispatchTargets", "requestRate"]
   -- A deployment config written by `mini bootstrap` spells every absent Host
   -- option as null. Null is absence; any other value of a key this provider
   -- cannot honor refuses, since it would change the semantics it verifies.

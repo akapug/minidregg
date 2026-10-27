@@ -1,0 +1,83 @@
+edition ObjectiveBend 1
+# The effect Plan on the activity kernel (Kernel/ObjectiveActivity, statement:
+# docs/evidence/2026-10-27-world-native/DOMAINS.md, "The effect Plan: statement first").
+# A Tally-shaped program whose first yield is `commit {write}` (the kernel applies the write
+# through the object's law, exactly as an await's write) and whose second is
+# `transfer {to, amount, write}` (the kernel moves `amount` of the credit asset from the
+# activity's purse to `to`, in the same turn, when the purse still reserves the await's fee pair
+# and storage after it and `to` is an open account other than the purse, the collector and the
+# issuer well). Each is decided AT its yield; the next delivery resumes with `settled` or
+# `refused`. The result is 1 when the transfer was performed, 0 when the kernel refused it.
+record State:
+  total: Nat
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+record Write:
+  total: EditNat
+record Start:
+  init: EditNat
+  to: Nat
+  amount: Nat
+record Ask:
+  decider: Nat
+record At:
+  at: Nat
+sum Source:
+  reply: Ask
+  height: At
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+record Pay:
+  to: Nat
+  amount: Nat
+  write: Write
+record Commit:
+  write: Write
+sum Plan:
+  await: Await
+  transfer: Pay
+  commit: Commit
+record Reply:
+  amount: Nat
+sum Outcome:
+  reply: Reply
+  settled: {}
+  refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+record View:
+  version: Nat
+  state: State
+record Step:
+  outcome: Outcome
+  view: View
+sum Resumed:
+  resumed: Step
+def pay(start: Start) -> Activity<Plan, Resumed, Nat>:
+  match perform(Plan.transfer({to: start.to, amount: start.amount, write: {total: EditNat.add(1n)}})):
+    case resumed(step):
+      match step.outcome:
+        case settled(_): 1n
+        case refused(_): 0n
+        case reply(_): 2n
+        case unknown(_): 2n
+        case timedOut(_): 2n
+        case broken(_): 2n
+        case upgraded(_): 2n
+def effects(start: Start) -> Activity<Plan, Resumed, Nat>:
+  match perform(Plan.commit({write: {total: start.init}})):
+    case resumed(step):
+      match step.outcome:
+        case settled(_): pay(start)
+        case reply(_): 3n
+        case refused(_): 3n
+        case unknown(_): 3n
+        case timedOut(_): 3n
+        case broken(_): 3n
+        case upgraded(_): 3n

@@ -62,7 +62,7 @@ def Session.rememberReadback {config : Config} (session : Session config)
   if session.durable.image = old.opened.durable.image then
     { session with
       opened := readback.after
-      walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready,
+      walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag,
         NativeHostReplay.extendExact reader old readback⟩ }
   else session
 
@@ -95,7 +95,7 @@ theorem Session.rememberReadback_image {config : Config} (session : Session conf
     (readback : NativeHostReplay.ExactReadback config old)
     (current : session.durable.image = old.opened.durable.image) :
     (session.rememberReadback reader old readback).durable.image =
-      (NativeHostReplay.exactCandidate old readback.derived readback.ready).image := by
+      (NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag).image := by
   unfold Session.durable
   rw [Session.rememberReadback_opened session reader old readback current]
   exact (NativeHostReplay.extendExact reader old readback).image_exact

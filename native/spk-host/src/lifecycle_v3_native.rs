@@ -457,7 +457,7 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v6")?;
+    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v7")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",

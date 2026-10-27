@@ -17,6 +17,37 @@ const require=(ok:boolean,message:string)=>{if(!ok)failures.push(message);return
 const canonical=(v:any):string=>JSON.stringify(v&&typeof v==="object"?Array.isArray(v)?v.map(x=>JSON.parse(canonical(x))):Object.fromEntries(Object.keys(v).sort().map(k=>[k,JSON.parse(canonical(v[k]))])):v);
 // Typed data with record fields ordered by name (materialization keeps source order).
 const norm=(d:any):any=>d?.tag==="record"?{...d,fields:d.fields.map((f:any)=>({name:f.name,value:norm(f.value)})).sort((a:any,b:any)=>a.name<b.name?-1:1)}:d?.tag==="variant"?{...d,payload:norm(d.payload)}:d;
+// The activity kernel's protocol (Kernel/ObjectiveActivity: decodePlan, responseData, effectProtocol), for
+// rows marked `"protocol":"kernel"`: every yielded Plan is one the kernel performs (`await {write, on,
+// patience}`, `transfer {to, amount, write}`, `commit {write}`), and every response is the kernel's
+// `resumed {outcome, view}` with an outcome the kernel can deliver for the Plan it answers: an effect is
+// decided at its yield (`settled` | `refused`), an await by its slot, height or deadline.
+const fieldOf=(d:any,name:string)=>d?.tag==="record"?d.fields.find((f:any)=>f.name===name)?.value:undefined;
+const natural=(d:any)=>d?.tag==="natural"&&/^[0-9]+$/.test(String(d.value));
+// A transfer is decided `settled` or `refused` at its yield; a commit is always `settled` (its write
+// goes through the object's law exactly as an await's: a law refusal refuses the whole turn, so no
+// response follows it).
+const awaitOutcomes=["reply","refused","unknown","timedOut","broken","upgraded"],transferOutcomes=["settled","refused"],commitOutcomes=["settled"];
+const planKind=(p:any):string|null=>{
+ if(p?.tag!=="variant"||p.payload?.tag!=="record")return null;
+ const f=(n:string)=>fieldOf(p.payload,n);
+ if(p.label==="await"){const on=f("on");
+  const source=on?.tag==="variant"&&((on.label==="reply"&&natural(fieldOf(on.payload,"decider")))||(on.label==="height"&&natural(fieldOf(on.payload,"at"))));
+  return f("write")?.tag==="record"&&source&&natural(f("patience"))&&BigInt(f("patience").value)>0n?"await":null;}
+ if(p.label==="transfer")return f("write")?.tag==="record"&&natural(f("to"))&&natural(f("amount"))&&BigInt(f("amount").value)>0n?"transfer":null;
+ if(p.label==="commit")return f("write")?.tag==="record"?"commit":null;
+ return null;};
+const kernelProtocol=(item:any,turns:any[])=>{
+ const responses=item.responses??[];
+ turns.forEach((turn:any,i:number)=>{
+  const kind=planKind(turn.plan);
+  if(!require(kind!==null,"not a kernel Plan: "+item.name+" turn "+i+" "+JSON.stringify(turn.plan)))return;
+  const r=responses[i];if(r===undefined)return;
+  const outcome=fieldOf(r?.payload,"outcome"),view=fieldOf(r?.payload,"view");
+  require(r?.tag==="variant"&&r.label==="resumed"&&outcome?.tag==="variant"&&natural(fieldOf(view,"version"))&&fieldOf(view,"state")!==undefined,
+   "not a kernel response resumed {outcome, view}: "+item.name+" response "+i);
+  require((kind==="transfer"?transferOutcomes:kind==="commit"?commitOutcomes:awaitOutcomes).includes(outcome?.label),
+   "outcome the kernel cannot deliver for a "+kind+": "+item.name+" response "+i+" "+outcome?.label);});};
 mkdirSync(outputRoot,{recursive:true});
 const cohort=JSON.parse(readFileSync(cohortPath,"utf8"));
 const requests:string[]=[];const results:any[]=[];
@@ -41,6 +72,7 @@ for(const item of cohort){
   continue;}
  // Activities: every yield is quiescent and its checkpoint round-trips (executed, not proved here).
  for(const turn of turns)require(turn.quiescent===true&&turn.checkpointRoundTrips===true,"yield not a quiescent round-tripping checkpoint: "+item.name);
+ if(item.protocol==="kernel")kernelProtocol(item,turns);
  if(item.expectedTurns!==undefined)require(turns.length===item.expectedTurns,"turn count differs: "+item.name+" "+turns.length);
  if(item.expectedLastPlan!==undefined)require(turns.length>0&&canonical(norm(turns[turns.length-1].plan))===canonical(norm(item.expectedLastPlan)),"yielded plan differs: "+item.name+" "+JSON.stringify(turns.at(-1)?.plan));
  if(item.expectedStatus==="yielded"){require(out.status==="yielded"&&out.preview.result===null,"activity did not stop at a yield: "+item.name+" "+out.status);continue;}

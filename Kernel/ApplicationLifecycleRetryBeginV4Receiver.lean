@@ -30,13 +30,13 @@ structure Confirmed (config : Config) where
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
-        confirmed.readback.derived confirmed.readback.ready) :=
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) :=
   NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate confirmed.old
-    confirmed.readback.derived confirmed.readback.ready
+    confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     confirmed.old.opened.durable.height + 1,
@@ -62,7 +62,7 @@ theorem Confirmed.successor_validated {config : Config} (confirmed : Confirmed c
         ApplicationLifecycleRetryBeginV4Admission.event confirmed.ingress ∧
       NativeHost.validateLoaded config
           (NativeHostReplay.exactCandidate confirmed.old
-            confirmed.readback.derived confirmed.readback.ready) =
+            confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) =
         .ok confirmed.readback.after :=
   ⟨confirmed.event_exact, confirmed.readback.validated⟩
 

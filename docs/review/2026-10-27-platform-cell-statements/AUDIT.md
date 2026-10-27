@@ -594,3 +594,91 @@ reader's prefix guarantee moves back from chain-hash collision resistance to KMA
 **The condition:** the root log read from the tags is new served state. `Opened.view`/`View` must carry it,
 and `View.Honest` must pin it (each entry's receipt root equals the replay's root at that height), or `exact`
 and `keystone` leave it unstated.
+
+## 2026-10-27, fourteenth pass: partial `ofOpened` and `reopens` (hot-path-v4 aa025c8d)
+
+**`reopens` is the right form.** It is stated under `exact`'s hypotheses, not over `Wrote`, and that is
+the stronger and more reusable choice. A `Wrote` reopen already carries `ofOpened opened = .ok loaded`
+as a premise, and every `Wrote` checkpoint is honest by the keystone, so a per-`Wrote` restatement would
+only be a corollary. `inhabited` now includes a successful build.
+
+`reopens` is true only if the build refuses nothing the replay accepts. Both of its checks meet that bar:
+- *Nullifiers:* a suffix record carrying a prefix nullifier fails `preflight`'s `nullifiersFreshCheck`
+  (`.alreadyConsumed`).
+- *Transaction ids:* `DurableCommitProtocol.execute` (`:427`) answers a recorded transaction id with
+  `.replayed`/`.transactionConflict`, never `.accepted`.
+
+So the proof rests on `replay` demanding `.accepted` for every record; cite that lemma. Admissibility for
+`pre ++ suf` from admissibility for `pre` should follow from `mem_cellIds_append`.
+
+**Missing teeth: the build's soundness.** `viewOpened` and the keystone constrain builds only on Stores
+this Host wrote. Nothing states what a successful build guarantees on a MAC-valid Store whose suffix
+reuses a prefix nullifier. Either instantiate `Loaded4 := Loaded`, so the real resume proof makes it hold
+by type (say so in the spec), or add `buildSound : ofOpened opened = .ok loaded → (impl.view
+loaded).snapshot = (protocol resume of the image)`, with a teeth pole: a suffix record carrying a prefix
+nullifier makes `ofOpened` refuse.
+
+**Addendum, fce764f7.** `buildSound` (`:391`) has the right shape, but `Impl.stateCheckpoint` (`:214`)
+appears in no gate. Nothing ties it to the MAC'd body's `state` (or to `State.ofSeed seed` from genesis),
+so the law is relative to whatever starting state `ffState` reports. Add `stateCheckpoint state =
+body.body.state` to `suffixGate` and `stateCheckpoint state = State.ofSeed seed` to `genesisGate`.
+Then `buildSound` is about the checkpoint the reader authenticated.
+
+**Addendum, un-effects 2aaf5ec9: the pass-11 additions are stated. Proofs may proceed.**
+- `FundsAgreeStatement` states agreement on purse balance and open accounts for every `written`. Its
+  birth clause holds by definition. The disagreement it found (the submitter or the collector is the
+  purse) is now refused before the verdict (`Delivery.purseApart`). That is a new refusal, which is right,
+  though `payerInvalid` is a loose name for "the collector is the purse".
+- `DepositIndependentStatement` quantifies over both verdicts and every other yield field, so it is the
+  general form.
+- `BirthCommitJudgedStatement` covers births.
+- `DeliverLawRefusesStatement` follows `deliver`'s order and names `.objectWrite reason`.
+- `commitYield_spec` keeps equality except for a refused transfer, as asked.
+
+One remaining weakness: `CommitLawRefusedPole` exhibits only the `judgeWritten` refusal. No witness
+satisfies `DeliverLawRefusesStatement`'s twelve premises jointly. Add one through a concrete delivery
+when the fixtures allow; until then, that statement's premises are not shown inhabited.
+
+**Addendum, un-stream-continuity-wip e0916a53 (not yet elaborated): the pass-10 gaps are closed.**
+`decide` = `decideWith held.authentic`, where `authentic` is `Head.verify` at the held height, chain
+and frontier. `hotRegistration_iff` names `Head.verify … = .ok head` for whichever tag is the
+candidate, so copying the tip's tag is refused (`teeth_copiedTagUnverified`, `openingUnverified`).
+`withOpenedFreshTip` builds `Held` from the session's own `durable` (height, `headTag`, chain,
+frontier; `ApplicationStreamContinuity.lean:236-237`), not from the physical read, and runs the
+handoff exactly when `gate (decide …) = none` (`handoff_runs_iff`).
+
+`appended_headTag` pins `Appended.next.headTag = some entry.tag`. The stale, forked and below-birth teeth
+quantify over every verifier `v` through `decideWith`, which is stronger than a closed instance, not
+weaker. Proofs may start once the file elaborates green.
+
+**Addendum, un-pred-census 0d7156f19 (reasoned, not built).** The shape requested in the eighth pass is
+in place:
+- `Ran` is the live `Answered`, minted once, after `verify`/`verifySshsig` returned `.ok`.
+- `live_voucher_has_ran` is the IO-level tooth over the type.
+- `admitted_live_ran` (`Kernel/Receiving.lean:512`) is the top-level theorem at
+  `receiverVerifier (.live config)`, and it covers both verified and observed.
+- `receiverVerifier` is restricted to the receiving modules, and `ofAnswered` is honest in its docstring.
+
+Two gaps remain:
+1. **`Ran` has no fields, so `by constructor` or `⟨⟩` in any other file mints one without writing
+   `Ran.mk`.** The module's own comment says it: private `mk` "stops names but not `by constructor`".
+   `check-receiver-verifier.sh` counts the text `Ran\.mk`, so it misses that. The guarantee therefore
+   rests entirely on `TokenCensus` checking, at the term level, which compiled constants reference
+   `Ran.mk`. Confirm the restricted row is checked over the environment (not by grep), and add a plant
+   (`⟨⟩ : Ran c q a` in another module) that the gate must catch.
+2. **`.recorded`:** `receiverVerifier (.recorded t)` vouches for whatever a constructible transcript
+   says. That is fine for fixtures, but the Host's receivers must be shown to run at `.live`. Add a census
+   row or check that `.recorded` is named only in fixture or assurance modules.
+
+**Addendum, un-pred-census f013827d6.** Gap 2 is closed: `.recorded` is refused outside fixtures,
+assurance and tests, and is never allowed in `Host/`, with a plant. Gap 1 is narrowed but **not closed**.
+The gate refuses files that *name* `Ran`, but a forged proof need not name it. Each of these elaborates to
+`Ran.mk` by unfolding:
+- `theorem x : oracleAnswered (.live c) q a := ⟨⟩`
+- `(receiverVerifier (.live c)).Answered q a := ⟨⟩`
+- `Vouchers.ofAnswered … (fun _ _ => ⟨⟩)` at the live verifier
+
+`oracleAnswered` and `Vouchers.ofAnswered` are not restricted. The only spelling-independent guard is
+term-level. Every forged proof's value contains the constant `Ran.mk`, so add one environment scan,
+theorems included, that admits `Ran.mk` only inside `receiverVerifier`. This is a small Lean check over
+`env.constants` for one constant, not the whole census. Add a plant for the `oracleAnswered` spelling.

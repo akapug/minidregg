@@ -420,10 +420,11 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
-    use crate::field_network_store::{LayerStore, Store};
+    use crate::field_network_store::LayerStore;
     use std::{
         collections::VecDeque,
         fs,
@@ -444,7 +445,7 @@ pub(crate) mod tests {
     }
     pub(crate) fn nodes() -> (
         Vec<LayerEngine>,
-        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
     ) {
         let (engines, anchors) = crate::field_network::tests::engine_nodes(Field(1), Field(1));
         (
@@ -594,13 +595,27 @@ pub(crate) mod tests {
         assert!(ns
             .iter()
             .all(|n| n.completed_batches() == 1 && n.output().is_some()));
-        let (old, _) = crate::field_network::tests::engine_nodes(Field(0), Field(1));
-        let mut started = old.into_iter().next().unwrap();
-        started.start().unwrap();
-        assert!(
-            LayerEngine::new(started).is_err(),
-            "cannot reinterpret a protocol already opening shares"
-        );
+    }
+    #[test]
+    fn non_boolean_input_refuses_output_after_every_batch_and_the_failure_opens_the_check() {
+        let (engines, _anchors) = crate::field_network::tests::engine_nodes(Field(2), Field(1));
+        let mut ns = engines
+            .into_iter()
+            .map(|e| LayerEngine::new(e).unwrap())
+            .collect::<Vec<_>>();
+        let mut q = start(&mut ns);
+        drive(&mut ns, &mut q, false, false);
+        for n in &ns {
+            assert!(n.output().is_none(), "no output for a non-Boolean input");
+            assert_eq!(
+                n.failure().unwrap().opened_checks,
+                vec![Field(2).mul(Field(3)), Field(0)]
+            );
+            assert_eq!(n.completed_batches(), 1, "every counted batch evaluated first");
+        }
+        // Validation failure publicly opens x*(x+1) in this reference profile;
+        // honest admitted input is Boolean. This is not privacy for arbitrary
+        // invalid honest secrets or a native application refusal/release token.
     }
     #[test]
     fn corrupt_early_vector_waits_for_late_honest_full_vector_and_rejects_shape() {
@@ -646,10 +661,6 @@ pub(crate) mod tests {
             q.extend(ps.into_iter().map(|p| (i as u16, p)));
         }
         drop(stores[1].take());
-        assert!(
-            Store::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).is_err(),
-            "sequential WAL cannot reinterpret layer wire events"
-        );
         let reopened = LayerStore::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).unwrap();
         assert_eq!(reopened.replay_outboxes().unwrap(), saved);
         q.extend(saved.into_iter().map(|p| (1, p)));

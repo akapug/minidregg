@@ -279,6 +279,12 @@ impl App {
                 Err(e) => return (say(Ending::entrance("usage", &e)), None),
             },
             (interaction::COMMAND_STATUS, _) => String::new(),
+            // The same report the shell's `feedback` makes, as this member's own turn; the text is
+            // quoted whole so no word of it can be read as a flag of the verb.
+            (interaction::COMMAND_FEEDBACK, _) => match cmd.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                Some(text) => format!("feedback --via discord \"{text}\""),
+                None => return (say(Ending::entrance("usage", "/feedback text: say what went wrong or what you wish were different")), None),
+            },
             (other, _) => return (say(Ending::entrance("error", &format!("unknown command /{other}"))), None),
         };
 

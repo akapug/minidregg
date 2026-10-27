@@ -19,7 +19,7 @@ def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6".toUTF8.
 /-- Version 5 adds the committed charged terminal disposition and its canonical
 typed objective-activity cause bytes. Older outcomes refuse; none is
 reinterpreted. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v6".toUTF8.toList
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v7".toUTF8.toList
 
 end Minidregg.Compiler.NativeHostCodec
 

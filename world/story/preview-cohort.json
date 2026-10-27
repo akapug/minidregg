@@ -387,241 +387,668 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "1"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a ship in the fog"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "5"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a ship in the fog"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "5"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -629,29 +1056,49 @@
   "expected": "complete",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "author",
-      "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "text",
-      "value": {
-       "tag": "label",
-       "value": "a ship in the fog"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "2"
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "label",
+           "value": "a ship in the fog"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -669,337 +1116,988 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a ship in the fog"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "5"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "the keeper wakes"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "13"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
        }
-      ]
-     }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a ship in the fog"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "5"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "the keeper wakes"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "13"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "2"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1007,29 +2105,49 @@
   "expected": "complete",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "author",
-      "value": {
-       "tag": "natural",
-       "value": "3"
-      }
-     },
-     {
-      "name": "text",
-      "value": {
-       "tag": "label",
-       "value": "the keeper wakes"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "2"
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "label",
+           "value": "the keeper wakes"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1047,180 +2165,495 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "1"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "edit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "id",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "stolen"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "edit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "id",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "stolen"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1228,29 +2661,49 @@
   "expected": "complete",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "author",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "text",
-      "value": {
-       "tag": "label",
-       "value": "a light on the rock"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "label",
+           "value": "a light on the rock"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1259,7 +2712,7 @@
   "expectedTurns": 5
  },
  {
-  "name": "StoryActivityRefusedPublishWaits",
+  "name": "StoryActivitySealCommitsOnce",
   "modules": [
    {
     "name": "CoAuthor",
@@ -1268,201 +2721,488 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "1"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
+      "value": {
+       "tag": "natural",
+       "value": "1"
+      }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a ship in the fog"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "refused",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "12"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a ship in the fog"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1470,35 +3210,55 @@
   "expected": "complete",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "author",
-      "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "text",
-      "value": {
-       "tag": "label",
-       "value": "a ship in the fog"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "2"
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "label",
+           "value": "a ship in the fog"
+          }
+         }
+        }
+       ]
       }
      }
     ]
    }
   },
-  "expectedTurns": 7
+  "expectedTurns": 5
  },
  {
   "name": "StoryActivitySealedEditIgnored",
@@ -1510,344 +3270,995 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "2"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
+      "value": {
+       "tag": "natural",
+       "value": "2"
+      }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a ship in the fog"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "4"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "vote",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "12"
-        }
-       },
-       {
-        "name": "pick",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "5"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "edit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "id",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "stolen"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "13"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "the keeper wakes"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "14"
-        }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
        }
-      ]
-     }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "seal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "22"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a ship in the fog"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "4"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "vote",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           },
+           {
+            "name": "pick",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "5"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "edit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "id",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "stolen"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "13"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "the keeper wakes"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "14"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "seal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "22"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "2"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1855,29 +4266,49 @@
   "expected": "complete",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "author",
-      "value": {
-       "tag": "natural",
-       "value": "3"
-      }
-     },
-     {
-      "name": "text",
-      "value": {
-       "tag": "label",
-       "value": "the keeper wakes"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "2"
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "label",
+           "value": "the keeper wakes"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1895,111 +4326,258 @@
    }
   ],
   "entry": "tell",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
-   {
-    "tag": "label",
-    "value": "the lighthouse"
-   },
-   {
-    "tag": "natural",
-    "value": "10"
-   },
-   {
-    "tag": "natural",
-    "value": "3"
-   },
    {
     "tag": "record",
     "fields": [
      {
-      "name": "first",
+      "name": "title",
+      "value": {
+       "tag": "label",
+       "value": "the lighthouse"
+      }
+     },
+     {
+      "name": "window",
       "value": {
        "tag": "natural",
        "value": "10"
       }
      },
      {
-      "name": "count",
+      "name": "total",
       "value": {
        "tag": "natural",
        "value": "3"
       }
+     },
+     {
+      "name": "electorate",
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "name": "first",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "count",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "name": "now",
+      "value": {
+       "tag": "natural",
+       "value": "0"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a light on the rock"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "1"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a light on the rock"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "propose",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "author",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "text",
-        "value": {
-         "tag": "label",
-         "value": "a ship in the fog"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "2"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "propose",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "author",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "text",
+            "value": {
+             "tag": "label",
+             "value": "a ship in the fog"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "chapters",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "author",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "text",
+             "value": {
+              "tag": "label",
+              "value": ""
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -2011,17 +4589,70 @@
     "tag": "record",
     "fields": [
      {
-      "name": "chapter",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "chapters",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "author",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "text",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "closes",
+      "name": "on",
+      "value": {
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "10"
+       "value": "64"
       }
      }
     ]
