@@ -80,6 +80,10 @@ mod operator_drain;
 mod scheduled_transport;
 #[path = "../../hybrid_kem.rs"]
 mod hybrid_kem;
+// Shared with private-backend; only the sealed-snapshot primitive is used here.
+#[allow(dead_code)]
+#[path = "../../pinned_execution.rs"]
+mod pinned_execution;
 #[cfg(unix)]
 #[path = "../../crypto_transit.rs"]
 mod crypto_transit;

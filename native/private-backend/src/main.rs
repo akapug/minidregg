@@ -67,7 +67,9 @@ fn run() -> std::io::Result<()> {
    let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
    let mut input=vec![];std::io::stdin().take(MAX as u64+1).read_to_end(&mut input)?;
    let dispatch=mini_private_backend::native_worker::DispatchClaim::decode(&input)?;
-   let pending=mini_private_backend::native_worker::receive(&config,&dispatch)?;
+   let settings=std::fs::read(config.native_argv.first().ok_or_else(||bad("worker native settings argument absent"))?)?;
+   let held=mini_private_backend::native_worker::SealedNative::new(&config,&settings)?;
+   let pending=mini_private_backend::native_worker::receive(&config,&dispatch,&held)?;
    std::io::stdout().write_all(&pending)?;Ok(())
   }
   Some("anchor") if a.len()==4=>run_anchor(Path::new(&a[2]),Path::new(&a[3])),
