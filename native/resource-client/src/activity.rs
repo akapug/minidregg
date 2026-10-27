@@ -58,11 +58,20 @@ fn ws(root: PathBuf) -> Result<Ws> {
     })
 }
 
+/// One Host frame. For submit (212) and lookup (213) a 255 reply IS the Host's encoded outcome:
+/// it is returned for the local codec to decode, never read as a refusal by its byte (Lean also
+/// answers 255 for `unavailable` and thrown handlers; review §4.7, Q1). 254 is certain: never
+/// forwarded. Elsewhere (authoring, planning, assembly: no state change) a 255 stops the turn.
 fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     let frame = session_invoke(&ws.host, &ws.socket, &ws.config, operation, payload)?;
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((255, body)) if matches!(operation, 212 | 213) && !body.is_empty() => Ok(body.to_vec()),
+        Some((254, body)) => Err(format!(
+            "never forwarded: op{operation}: {}",
+            String::from_utf8_lossy(&body[body.len().saturating_sub(600)..]).split_whitespace().collect::<Vec<_>>().join(" ")
+        )),
+        Some((255, body)) => Err(format!(
             "refused: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(600)..])
                 .split_whitespace()
@@ -110,8 +119,9 @@ fn authority_root(ws: &Ws) -> Result<String> {
     Ok(current.get("authorityRoot").and_then(Value::as_str).ok_or("activity: view lacks authorityRoot")?.to_owned())
 }
 
-/// The signed command for `turn` against `authority`.
-fn command_for(ws: &Ws, turn: &Value, authority: &str) -> Result<Value> {
+/// The signed command for `turn` against `authority`. A non-invoke turn's `nonce` is its record's
+/// (`turn_nonce`), never minted per attempt.
+fn command_for(ws: &Ws, turn: &Value, authority: &str, nonce: Option<&str>) -> Result<Value> {
     // An invoke's nonce is its operation id, `turn.opId`: the caller names the operation in the turn it
     // writes before the first submit, and a retry resubmits the same turn. Minting one here, per attempt,
     // would make every retry a second invocation.
@@ -122,8 +132,56 @@ fn command_for(ws: &Ws, turn: &Value, authority: &str) -> Result<Value> {
         }
         json!({"subject": ws.subject, "expectedAuthorityRoot": authority, "turn": turn})
     } else {
-        json!({"subject": ws.subject, "nonce": crate::fsio::random_nonce()?, "expectedAuthorityRoot": authority, "turn": turn})
+        let nonce = nonce.ok_or("activity: a non-invoke turn is signed only under its record's nonce")?;
+        json!({"subject": ws.subject, "nonce": nonce, "expectedAuthorityRoot": authority, "turn": turn})
     })
+}
+
+/// The nonce a non-invoke `turn` is signed under, from its record `WS/activity-operations/KEY-N.json`
+/// (KEY the digest of the turn): a rerun of the same turn reuses the record, so it is never a
+/// second operation (`topUp` twice, review §5.3). A record whose `out` retains an ingress is not
+/// signed again: an undecided one is looked up or resubmitted exactly by its ingress; a decided
+/// one is followed only by the member's decision (`again`). A record that never reached an
+/// ingress reuses its nonce (nothing was sent).
+fn turn_nonce(ws: &Ws, turn: &Value, out: &Path, again: bool) -> Result<Option<String>> {
+    if turn.get("kind").and_then(Value::as_str) == Some("invoke") {
+        return Ok(None);
+    }
+    let dir = ws.root.join("activity-operations");
+    crate::fsio::ensure_private_dir(&dir)?;
+    let key = &crate::fleet::digest(turn.to_string().as_bytes())[..16];
+    let name = |n: u32| dir.join(format!("{key}-{n}.json"));
+    let mut n = 0;
+    while name(n + 1).exists() {
+        n += 1;
+    }
+    let fresh = |n: u32| -> Result<Option<String>> {
+        let nonce = crate::fsio::random_nonce()?;
+        crate::fsio::retain_json(&name(n), &json!({"type":"minidregg-activity-operation-v1","turn":turn,"nonce":nonce,"out":out}))?;
+        Ok(Some(nonce))
+    };
+    if n == 0 {
+        return fresh(1);
+    }
+    let record: Value = serde_json::from_slice(&fs::read(name(n)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let previous = PathBuf::from(field(&record, "out")?);
+    let nonce = field(&record, "nonce")?.to_owned();
+    if !previous.join("ingress.bin").is_file() {
+        return Ok(Some(nonce));
+    }
+    let decided = fs::read(previous.join("outcome.json")).ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|o| o.get("type").and_then(Value::as_str).map(str::to_owned));
+    match (decided.as_deref(), again) {
+        (Some("confirmed" | "refused"), true) => fresh(n + 1),
+        (Some(kind @ ("confirmed" | "refused")), false) => Err(format!(
+            "activity: this turn was already submitted ({kind}; {}); a second one is your decision: --again true",
+            previous.display())),
+        _ => Err(format!(
+            "undecided: this turn's exact ingress is retained at {} and may have been admitted; nothing new is signed: \
+             `mini activity --action lookup --workspace WS --ingress {}` (or `--action resubmit`, the same bytes)",
+            previous.display(), previous.join("ingress.bin").display())),
+    }
 }
 
 /// Author and plan `command` (frame 210) and inspect the plan; retains command.json, command.bin and
@@ -185,7 +243,7 @@ fn quote_front_end(ws: &Ws, turn: &mut Value, authority: &str, quote: &FrontEndQ
         }
         let directory = out.join(format!("front-end-plan-{attempt}"));
         fs::create_dir(&directory).map_err(|error| format!("activity: cannot create {}: {error}", directory.display()))?;
-        let (_, inspected) = plan_command(ws, &command_for(ws, &probe, authority)?, &directory)?;
+        let (_, inspected) = plan_command(ws, &command_for(ws, &probe, authority, None)?, &directory)?;
         let planned = inspected.get("frontEnd").filter(|value| value.is_object()).cloned()
             .ok_or_else(|| format!("activity: the plan reported no front end: {inspected}"))?;
         let verdict = inspected.get("verdict").map(Value::to_string).unwrap_or_default();
@@ -223,7 +281,8 @@ fn quote(ws: &Ws, turn: &Value, out: &Path, front_end: &FrontEndQuote) -> Result
 
 /// With `front_end`, the invoke is first quoted (`quote_front_end`) in this same process and the
 /// declared turn is what is signed and submitted.
-fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>) -> Result<Value> {
+fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>, again: bool) -> Result<Value> {
+    let nonce = turn_nonce(ws, turn, out, again)?;
     create_out(out)?;
     let authority = authority_root(ws)?;
     let mut turn = turn.clone();
@@ -231,7 +290,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
         Some(front_end) => Some(quote_front_end(ws, &mut turn, &authority, front_end, out)?),
         None => None,
     };
-    let (plan, inspected) = plan_command(ws, &command_for(ws, &turn, &authority)?, out)?;
+    let (plan, inspected) = plan_command(ws, &command_for(ws, &turn, &authority, nonce.as_deref())?, out)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("activity: plan lacks a header")?;
     let header = crate::decode_hex(canonical).map_err(|error| format!("activity: {error}"))?;
@@ -287,13 +346,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let front_end = args.optional(if action == "quote" { "quote" } else { "quote-front-end" })
                 .map(|text| FrontEndQuote::parse(text.to_str().ok_or("activity: the front-end quote must be UTF-8")?))
                 .transpose()?;
+            let again = match args.optional("again").as_deref().map(|v| v.to_str()) {
+                None | Some(Some("false")) => false,
+                Some(Some("true")) => true,
+                _ => return Err("--again must be true or false".into()),
+            };
             args.finish()?;
             let turn: Value = serde_json::from_slice(&fs::read(&command).map_err(|e| e.to_string())?)
                 .map_err(|error| format!("activity: invalid command JSON: {error}"))?;
             if action == "quote" {
                 quote(&ws, &turn, &out, front_end.as_ref().ok_or("activity quote requires --quote")?)?
             } else {
-                submit(&ws, &turn, &out, prepare_only, front_end.as_ref())?
+                submit(&ws, &turn, &out, prepare_only, front_end.as_ref(), again)?
             }
         }
         "resubmit" => {

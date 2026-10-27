@@ -3655,6 +3655,7 @@ pub(crate) fn submit_intent(
         }
         return result;
     }
+    refuse_rerun(root, &source, kind)?;
     if crate::client_consent::thin_mode() {
         if kind != "intent" {
             return Err("thin consent signs retained invocation intents only; nothing signed".into());
@@ -3672,6 +3673,40 @@ pub(crate) fn submit_intent(
     )?;
     if !prepare_only {
         renounce_note(&source);
+    }
+    Ok(())
+}
+
+/// A second submission of an intent that an earlier attempt of this workspace already holds is
+/// refused unless that attempt is decided as refused or never sealed a call: the attempt is the
+/// intent's record, and a rerun after a lost reply must look up its exact call, not author a second
+/// one (review §5.2 P4). The retained copy (`intent.json`, or `intent-source.bin` for binary
+/// intents) identifies it, byte for byte.
+fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
+    let retained = if kind == "binary" { "intent-source.bin" } else { "intent.json" };
+    let bytes = fs::read(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
+    let Ok(entries) = fs::read_dir(root.join("attempts")) else { return Ok(()) };
+    for entry in entries.flatten() {
+        let attempt = entry.path();
+        let copy = attempt.join(retained);
+        if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
+            continue;
+        }
+        if !attempt.join("call.bin").is_file() {
+            continue; // never sealed: nothing can have been submitted
+        }
+        let retry = format!("`mini retry --dir {} --mode lookup`", attempt.display());
+        match retained_attempt_outcome(&attempt)? {
+            AttemptOutcome::Refused => continue,
+            AttemptOutcome::Confirmed(_) => return Err(format!(
+                "this intent is already confirmed by attempt {}; it is not submitted again (its receipt: {retry})",
+                attempt.display())),
+            AttemptOutcome::Charged(_) => return Err(format!(
+                "this intent was admitted as a charged failure by attempt {}; it is not submitted again", attempt.display())),
+            AttemptOutcome::Pending => return Err(format!(
+                "undecided: attempt {} holds this intent's exact call and may have been admitted; nothing new is submitted: {retry}",
+                attempt.display())),
+        }
     }
     Ok(())
 }

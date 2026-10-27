@@ -249,6 +249,34 @@ pub(crate) enum HostDecision {
     Outcome(Value),
 }
 
+impl HostDecision {
+    /// The Host's own decoding of its answer, when there is one.
+    pub(crate) fn outcome(&self) -> Option<&Value> {
+        match self {
+            HostDecision::RefusedFrame { decoded, .. } => decoded.as_ref(),
+            HostDecision::Outcome(outcome) => Some(outcome),
+        }
+    }
+
+    /// Whether the Host DECIDED a refusal: its own decoded outcome has type `refused`. The 255
+    /// byte alone never says so. Lean answers 255 for refusals and also for `.unavailable "host
+    /// session reopening"` and for any handler exception (`Host/Main.lean` `serveFrame`), and op 125
+    /// answers 255 for `uncertain` and `contention`; an undecoded frame decides nothing either. Each
+    /// of those is undecided: the exact call may have been admitted, so nothing licenses a second
+    /// operation. Open (Lean lane): can a handler commit and then answer 255 (review Q1,
+    /// `docs/review/2026-10-26-native-crates/resource-client.md` §8.1)? Until the Host answers
+    /// proven no-append outcomes with its positive no-record frame, a decoded `refused` is the
+    /// only refusal the client reports.
+    pub(crate) fn is_refusal(&self) -> bool {
+        self.outcome().and_then(|o| o.get("type")).and_then(Value::as_str) == Some("refused")
+    }
+}
+
+/// The Host's decoded outcome type, or `undecoded`.
+pub(crate) fn outcome_type(outcome: Option<&Value>) -> &str {
+    outcome.and_then(|o| o.get("type")).and_then(Value::as_str).unwrap_or("undecoded")
+}
+
 // Request scratch belongs to its caller. Concurrent browser/native views
 // must not consume another caller's refusal and change their recovery class.
 thread_local! {
@@ -433,27 +461,52 @@ fn refusal_hint(detail: &str) -> &'static str {
     }
 }
 
-/// The line `mini` prints when the Host decided a refusal, from the recorded
-/// decision only.
-fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
-    match decision {
-        HostDecision::RefusedFrame {
-            command,
-            byte,
-            decoded: Some(outcome),
-            ..
-        } => refusal_line(outcome).map(|line| {
-            format!(
-                "{line}{}\n  Host refused {command}, reply byte {byte}",
-                bad_signature_explanation(outcome)
-            )
-        }),
-        HostDecision::RefusedFrame { command, byte, .. } => Some(format!(
-            "refused: Host refused {command}, reply byte {byte}; the frame was not decoded"
-        )),
-        HostDecision::Outcome(outcome) => {
-            refusal_line(outcome).map(|line| format!("{line}{}", bad_signature_explanation(outcome)))
-        }
+/// The exit code and line `mini` prints for the Host's recorded decision: `refused` (exit 3)
+/// only for a decoded refusal; any other decoded type, or a frame the Host could not decode, is
+/// `undecided` (exit 4), never a refusal (`HostDecision::is_refusal`). A charged failure is its
+/// own line (exit 3: decided, and not done).
+pub(crate) fn host_ending(decision: &HostDecision) -> Option<(u8, String)> {
+    if decision.is_refusal() {
+        let outcome = decision.outcome()?;
+        let line = refusal_line(outcome)?;
+        return Some((EXIT_REFUSED, match decision {
+            HostDecision::RefusedFrame { command, byte, .. } => format!(
+                "{line}{}\n  Host refused {command}, reply byte {byte}", bad_signature_explanation(outcome)),
+            HostDecision::Outcome(_) => format!("{line}{}", bad_signature_explanation(outcome)),
+        }));
+    }
+    if let Some(line) = decision.outcome().and_then(charged_line) {
+        return Some((EXIT_REFUSED, line));
+    }
+    if matches!(decision, HostDecision::Outcome(_)) && outcome_type(decision.outcome()) == "confirmed" {
+        return None; // a confirmation is no Host verdict against the command; the client error stands
+    }
+    let kind = outcome_type(decision.outcome());
+    Some((EXIT_UNDECIDED, match decision {
+        HostDecision::RefusedFrame { command, byte, .. } => format!(
+            "undecided: Host answered {command} with reply byte {byte} and outcome {kind}; the effect is unknown, \
+             so do not repeat the operation: look up the exact retained call"),
+        HostDecision::Outcome(_) => format!(
+            "undecided: Host outcome {kind}; the effect is unknown, so do not repeat the operation: look up the exact retained call"),
+    }))
+}
+
+/// The registry's never-forwarded marker (254).
+pub(crate) fn host_operations_never_forwarded() -> u8 {
+    mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED
+}
+
+/// Exit code for a request whose effect is unknown (`mini retry --mode lookup` asks again).
+pub(crate) const EXIT_UNDECIDED: u8 = 4;
+
+/// `charged: ...` for a confirmed outcome whose disposition is `charged`: the call is admitted and
+/// only its price was posted; nothing else was written (`mini_sdk::custody::Outcome::Charged`).
+pub(crate) fn charged_line(outcome: &Value) -> Option<String> {
+    match mini_sdk::custody::outcome_of(outcome) {
+        mini_sdk::custody::Outcome::Charged { cause, .. } => Some(format!(
+            "charged: the Host admitted the call and posted only its price; nothing else was written (cause {})",
+            match cause.as_str() { Some(hex) => outcome_text(Some(&Value::String(hex.to_owned()))), None => cause.to_string() })),
+        _ => None,
     }
 }
 
@@ -718,10 +771,14 @@ usage:
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
   mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
   mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
+    pay, topup and refund keep one operation record per request (or --operation-record PATH): a rerun
+    recovers it and never pays twice; --again true pays once more after a decided one
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
   mini fleet --action feed --dir WORKSPACE --accounts NAME[,NAME...] --topic TOPIC   (one topic, several authors: one feed ordered by admission height)
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
-  mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
+  mini well --action mint|burn|floor --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR] [--again true]
+    one attempt chain per request: a rerun reports the retained attempt and authors nothing new
+  mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
   mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
@@ -1271,6 +1328,17 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
     Ok(output)
 }
 
+/// A 255 frame whose decoded outcome is not a refusal (or that the Host could not decode): the
+/// effect is unknown. For an exact call (`submit`, `lookup`) the retry is named: a lookup of the
+/// SAME retained call, never a new operation.
+fn undecided_frame_message(command: &str, kind: &str, destination: Option<&Path>, encoded: &[u8]) -> String {
+    let retry = match (command, destination.and_then(Path::parent)) {
+        ("submit" | "lookup", Some(dir)) => format!("; the exact call is retained: `mini retry --dir {} --mode lookup`", dir.display()),
+        _ => String::new(),
+    };
+    format!("undecided: Host answered {command} with reply byte 255 and outcome {kind}{retry}; encoded frame: {}", hex(encoded))
+}
+
 fn refused_frame_message(command: &str, encoded: &[u8], line: Option<String>) -> String {
     match line {
         Some(line) => format!("host refused {command}: {line}; encoded refusal: {}", hex(encoded)),
@@ -1358,18 +1426,24 @@ fn socket_process(
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
         let line = decoded.as_ref().and_then(refusal_line);
-        note_host_decision(HostDecision::RefusedFrame {
+        let decision = HostDecision::RefusedFrame {
             command: command.to_owned(),
             byte: 255,
             encoded: reply[1..].to_vec(),
             decoded,
-        });
+        };
+        let refusal = decision.is_refusal();
+        let kind = outcome_type(decision.outcome()).to_owned();
+        note_host_decision(decision);
         if command == "prepare" {
             let destination = Path::new(arguments[2]);
             prepare_refusal::retain(destination, &payload, config, &reply)?;
         }
         if command == "query" || command == "query-batch" {
             query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
+        }
+        if !refusal {
+            return Err(undecided_frame_message(command, &kind, destination.map(Path::new), &reply[1..]));
         }
         return Err(refused_frame_message(command, &reply[1..], line));
     }
@@ -1701,8 +1775,12 @@ fn print_confirmed_outcome(value: &Value) -> Result<()> {
 
 fn confirmed_outcome(value: &Value, emit: bool) -> Result<()> {
     if emit { print_json(value)?; }
-    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+    let charged = charged_line(value);
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") || charged.is_some() {
         note_host_decision(HostDecision::Outcome(value.clone()));
+    }
+    if let Some(line) = charged {
+        return Err(format!("{line}; exact outcome evidence was retained"));
     }
     match value.get("type").and_then(Value::as_str) {
         Some("confirmed") => Ok(()),
@@ -1996,15 +2074,11 @@ fn submit_once(
 pub(crate) fn host_decided<T>(result: Result<T>) -> Result<std::result::Result<T, String>> {
     match result {
         Ok(value) => Ok(Ok(value)),
+        // Only a decoded refusal is the Host's refusal; an undecided 255 frame stays an error
+        // (`HostDecision::is_refusal`), so no caller reads it as "refused, try another way".
         Err(error) => match take_host_decision() {
-            Some(HostDecision::RefusedFrame {
-                decoded: Some(outcome),
-                ..
-            }) => Ok(Err(refusal_line(&outcome)
-                .unwrap_or_else(|| format!("stopped: {}", outcome["type"])))),
-            Some(HostDecision::RefusedFrame { command, .. }) => Ok(Err(format!(
-                "refused: Host refused {command}; the frame was not decoded"
-            ))),
+            Some(decision @ HostDecision::RefusedFrame { .. }) if decision.is_refusal() => Ok(Err(
+                decision.outcome().and_then(refusal_line).unwrap_or_else(|| "refused: unnamed".into()))),
             _ => Err(error),
         },
     }
@@ -4533,8 +4607,8 @@ pub(crate) fn main_ending(parsed: Result<()>, status: u8) -> MainEnding {
     match parsed {
         Ok(()) => ended(status, String::new(), String::new()),
         Err(error) if error == USAGE => ended(0, error, String::new()),
-        Err(error) => match take_host_decision().as_ref().and_then(host_refusal_ending) {
-            Some(line) => ended(EXIT_REFUSED, String::new(), format!("{line}\n  client: {error}\n")),
+        Err(error) => match take_host_decision().as_ref().and_then(host_ending) {
+            Some((code, line)) => ended(code, String::new(), format!("{line}\n  client: {error}\n")),
             None => ended(status.max(1), String::new(), format!("mini: {error}\n")),
         },
     }
@@ -4892,9 +4966,9 @@ mod tests {
             encoded: vec![1],
             decoded: Some(revoked),
         };
-        assert!(host_refusal_ending(&decision)
-            .unwrap()
-            .starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
+        let (code, line) = host_ending(&decision).unwrap();
+        assert_eq!(code, EXIT_REFUSED);
+        assert!(line.starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
         // Prose that names a reason is not a reason.
         let nested = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
             "detail":hex(b"invocation preparation: A.Reject.scalar\n  (B.Reject.pageMutation\n    (C.RejectReason.overflow))")});
@@ -4914,10 +4988,44 @@ mod tests {
             encoded: vec![1],
             decoded: None,
         };
-        assert!(host_refusal_ending(&undecoded)
-            .unwrap()
-            .starts_with("refused: Host refused query, reply byte 255"));
-        assert!(host_refusal_ending(&HostDecision::Outcome(json!({"type":"uncertain"}))).is_none());
+        // A 255 frame is not a refusal by its byte: undecoded, or decoded as anything but
+        // `refused`, it is undecided (exit 4), and the line says not to repeat the operation.
+        let (code, line) = host_ending(&undecoded).unwrap();
+        assert_eq!(code, EXIT_UNDECIDED);
+        assert!(line.starts_with("undecided: Host answered query with reply byte 255 and outcome undecoded"), "{line}");
+        for kind in ["uncertain", "unavailable", "contention", "absent"] {
+            let frame = HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+                decoded: Some(json!({"type": kind})) };
+            assert!(!frame.is_refusal());
+            let (code, line) = host_ending(&frame).unwrap();
+            assert_eq!(code, EXIT_UNDECIDED, "{kind}");
+            assert!(line.contains(&format!("outcome {kind}")) && !line.starts_with("refused"), "{line}");
+        }
+        let (code, _) = host_ending(&HostDecision::Outcome(json!({"type":"uncertain"}))).unwrap();
+        assert_eq!(code, EXIT_UNDECIDED);
+        assert_eq!(host_ending(&HostDecision::Outcome(json!({"type":"confirmed"}))), None);
+        let charged = json!({"type":"confirmed","confirmation":"installed","disposition":"charged","cause":hex(b"exhausted"),
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+        let (code, line) = host_ending(&HostDecision::Outcome(charged.clone())).unwrap();
+        assert_eq!((code, line.as_str()), (EXIT_REFUSED,
+            "charged: the Host admitted the call and posted only its price; nothing else was written (cause exhausted)"));
+        assert!(print_confirmed_outcome(&charged).unwrap_err().starts_with("charged: "));
+    }
+
+    /// `host_decided` reports only a decoded refusal as the Host's refusal; an undecided 255
+    /// frame stays an error, so no caller reads it as "refused, so another way is safe".
+    #[test]
+    fn host_decided_reads_only_a_decoded_refusal_as_a_refusal() {
+        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+            decoded: Some(json!({"type":"unavailable"})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
+        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
+        note_host_decision(HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1],
+            decoded: Some(json!({"type":"refused","reason":"revoked","phase":hex(b"x"),"detail":hex(b"gone")})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Ok(Err("refused: revoked: gone (phase x)".into())));
+        let message = undecided_frame_message("submit", "uncertain", Some(Path::new("/w/attempts/a/outcome.bin")), &[7]);
+        assert!(message.contains("`mini retry --dir /w/attempts/a --mode lookup`"), "{message}");
     }
 
     #[test]

@@ -676,16 +676,6 @@ fn fresh_id(prefix: &str) -> Result<String, Done> {
     Ok(format!("{prefix}-{}", &nonce[nonce.len().saturating_sub(12)..]))
 }
 
-/// How many times a signed exchange is repeated when the Host answers
-/// `stale-root`: its challenge named a world root that another admission has
-/// since moved, so nothing was decided and the same request is signed again
-/// over a fresh challenge.
-const FRESH_CHALLENGES: u32 = 10;
-
-fn stale_root(done: &Done) -> bool {
-    done.0 == EXIT_REFUSED && done.1.starts_with("refused: stale-root")
-}
-
 /// A short pause before a fresh challenge, longer each time and different per
 /// process, so racing writers do not keep meeting.
 fn backoff(attempt: u32) {
@@ -693,10 +683,10 @@ fn backoff(attempt: u32) {
     std::thread::sleep(std::time::Duration::from_millis(150 * u64::from(attempt) + jitter % 250));
 }
 
-/// Propose and submit one request; Ok: `{id, outcome, resigned}`. A
-/// `stale-root` answer at either step is not a decision about the request:
-/// the plan is made again from a fresh signed read (propose), or the same
-/// intent is signed again over a fresh challenge (submit, a new attempt).
+/// Propose and submit one request; Ok: `{id, outcome}`. Each step is ONE client
+/// operation: a `stale-root` answer is re-signed over a fresh challenge inside it, by the one
+/// retry budget (`replan.rs`), on the same attempt. Chat no longer wraps it in a loop of its own
+/// that authored a new attempt (`ID-rN`) per stale answer: up to sixty signed attempts per `say`.
 pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
     propose_submit_in(session, prefix, request, None)
 }
@@ -707,54 +697,30 @@ pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -
 fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
     crate::fsio::ensure_private_dir_all(&session.home.join("requests")).map_err(error)?;
     let ws = session.workspace.clone();
-    let mut resigned = 0u32;
-    let mut tries = 0u32;
-    let id = loop {
-        let id = fresh_id(prefix)?;
-        let path = session.home.join("requests").join(format!("{id}.json"));
-        let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
-        bytes.push(b'\n');
-        create_private(&path, &bytes).map_err(error)?;
-        let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
-        if let Some(room) = sealed {
-            flags.push(("private", os(room)));
-        }
-        match client("workspace", &flags) {
-            Ok(_) => break id,
-            Err(done) if stale_root(&done) && tries + 1 < FRESH_CHALLENGES => {
-                tries += 1;
-                resigned += 1;
-                backoff(tries);
-            }
-            Err(done) => return Err(done),
-        }
-    };
-    let mut attempt = 0u32;
-    let out = loop {
-        let name = if attempt == 0 { id.clone() } else { format!("{id}-r{attempt}") };
-        match client(
-            "workspace",
-            &[
-                ("action", os("submit")),
-                ("dir", os(&ws)),
-                ("intent", os(ws.join("proposals").join(&id).join("intent.json"))),
-                ("attempt", os(ws.join("attempts").join(&name))),
-            ],
-        ) {
-            Ok(out) => break out,
-            Err(done) if stale_root(&done) && attempt + 1 < FRESH_CHALLENGES => {
-                attempt += 1;
-                resigned += 1;
-                backoff(attempt);
-            }
-            Err(done) => return Err(done),
-        }
-    };
+    let id = fresh_id(prefix)?;
+    let path = session.home.join("requests").join(format!("{id}.json"));
+    let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
+    bytes.push(b'\n');
+    create_private(&path, &bytes).map_err(error)?;
+    let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
+    if let Some(room) = sealed {
+        flags.push(("private", os(room)));
+    }
+    client("workspace", &flags)?;
+    let out = client(
+        "workspace",
+        &[
+            ("action", os("submit")),
+            ("dir", os(&ws)),
+            ("intent", os(ws.join("proposals").join(&id).join("intent.json"))),
+            ("attempt", os(ws.join("attempts").join(&id))),
+        ],
+    )?;
     let mut outcome = Value::Null;
     for doc in serde_json::Deserializer::from_str(&out).into_iter::<Value>().flatten() {
         outcome = doc;
     }
-    Ok(json!({"id":id,"outcome":outcome,"resigned":resigned}))
+    Ok(json!({"id":id,"outcome":outcome}))
 }
 
 /// A signed read in this process (no JSON on the terminal). The attempt is
@@ -782,28 +748,16 @@ pub(crate) fn signed_read(
     }
     let path = |k| member_path(ws, k).map_err(error);
     let (host, config, key) = (path("host")?, path("config")?, path("key")?);
-    let mut attempt = 0u32;
-    let (dir, result, refusal) = loop {
-        let nonce = if attempt == 0 { nonce.clone() } else { random_nonce().map_err(error)? };
-        intent["nonce"] = json!(nonce);
-        let source = folder.join(format!("q-{nonce}.json"));
-        create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
-        let dir = folder.join(format!("{label}.{nonce}"));
-        let _ = crate::take_host_decision();
-        let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
-        let _ = fs::remove_file(&source);
-        let refusal = match &result {
-            Ok(_) => None,
-            Err(_) => crate::take_host_decision().as_ref().and_then(crate::host_refusal_ending),
-        };
-        // A read whose challenge went stale decided nothing: read again.
-        if refusal.as_deref().is_some_and(|l| l.starts_with("refused: stale-root")) && attempt + 1 < FRESH_CHALLENGES {
-            let _ = fs::remove_dir_all(&dir);
-            attempt += 1;
-            backoff(attempt);
-            continue;
-        }
-        break (dir, result, refusal);
+    // One signed read: `query_retained` re-signs a stale challenge itself (`replan.rs`).
+    let source = folder.join(format!("q-{nonce}.json"));
+    create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
+    let dir = folder.join(format!("{label}.{nonce}"));
+    let _ = crate::take_host_decision();
+    let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
+    let _ = fs::remove_file(&source);
+    let ending = match &result {
+        Ok(_) => None,
+        Err(_) => crate::take_host_decision().as_ref().and_then(crate::host_ending),
     };
     match result {
         Ok(value) => {
@@ -817,8 +771,8 @@ pub(crate) fn signed_read(
             }
             Ok(value)
         }
-        Err(e) => Err(match refusal {
-            Some(line) => (EXIT_REFUSED, format!("{line}\n  read: {view} of {label} in {room}\n")),
+        Err(e) => Err(match ending {
+            Some((code, line)) => (i32::from(code), format!("{line}\n  read: {view} of {label} in {room}\n")),
             None => error(format!("{e} (read {view} of {label} in {room})")),
         }),
     }
@@ -1637,9 +1591,9 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
 
 fn said(room: &Room, what: &str, result: &Value) {
     let tx = result.pointer("/outcome/transactionId").and_then(Value::as_str).unwrap_or("");
-    let again = match (result["replanned"].as_u64().unwrap_or(0), result["resigned"].as_u64().unwrap_or(0)) {
-        (0, 0) => String::new(),
-        (p, r) => format!("; other writes landed first: re-planned {p}, re-signed {r}"),
+    let again = match result["replanned"].as_u64().unwrap_or(0) {
+        0 => String::new(),
+        p => format!("; other writes landed first: re-planned {p}"),
     };
     println!("{what} in {} (transaction …{}{again})", room.name, &tx[tx.len().saturating_sub(10)..]);
 }
