@@ -737,8 +737,15 @@ impl Ending {
     /// 2 usage, 3 refused, 4 undecided). Admitted, refused and undecided name WORLD TRANSITIONS
     /// only; a local or read verb that returns 0 is "answered", a refused read "read refused".
     fn class(&self, transition: bool) -> (&'static str, String) {
-        // Script mode echoes `mini> LINE` before each line; the ending's own first line follows.
-        let first = self.stderr.lines().find(|l| !l.trim().is_empty() && !l.starts_with("mini> ")).unwrap_or("").to_owned();
+        // Script mode echoes `mini> LINE` before each line, and the client may print notices
+        // (`workspace continuity: legacy; ...`) before the ending; the ending is the first
+        // `refused:`/`undecided:`/`error:`/`usage:` line, else the first line that is not an echo.
+        let lines = || self.stderr.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("mini> "));
+        let first = lines()
+            .find(|l| ["refused: ", "undecided: ", "error: ", "usage: "].iter().any(|p| l.starts_with(p)))
+            .or_else(|| lines().next())
+            .unwrap_or("")
+            .to_owned();
         match (self.code, transition) {
             (0, true) => ("admitted", "Admitted".into()),
             (0, false) => ("answered", "Answered".into()),

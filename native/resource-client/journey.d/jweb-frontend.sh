@@ -156,6 +156,7 @@ out=$(python3 -I "$HERE/jweb-frontend-ws.py" "127.0.0.1" "$PORT" "$WSPATH" "$ORI
 row term-whoami "$([ "$ws_rc" = 0 ] && echo 1 || echo 0)" "$(tail -c 200 <<<"$out" | tr '\n' ' ' | cut -c1-160) $(tail -1 "$R/ws.err")"
 DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 page=$(req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$DOC" --data-urlencode "law=note")
+printf '%s\n' "$page" >"$R/doc-new.html"
 row doc-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 TEXT="hello from the browser $(date +%s)"
 page=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT")
@@ -188,8 +189,10 @@ done
 # to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
 mkdir -p "${HOMEDIR:-$R/home}/requests" "${HOMEDIR:-$R/home}/keys"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"; printf '{}\n' >"${HOMEDIR:-$R/home}/requests/x.json"; printf 'k\n' >"${HOMEDIR:-$R/home}/keys/x.txt"
 dry_leaves=0; dry_errors=0; dry_bad=""
+mkdir -p "$R/dry"
 for v in $verbs; do
   page=$(req GET "/verb/$v/dry")
+  printf '%s\n' "$page" >"$R/dry/$v.html"
   l=$(grep -o 'data-leaves="[0-9]*"' <<<"$page" | grep -o '[0-9]*'); e=$(grep -o 'data-errors="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
   dry_leaves=$((dry_leaves + ${l:-0})); dry_errors=$((dry_errors + ${e:-0}))
   [ "${e:-1}" = 0 ] || dry_bad="$dry_bad $v($(grep -o '<tr class="error"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
