@@ -153,7 +153,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev fn_selective_release_key_v2 : String := "DREGG/FN/SELECTIVE-RELEASE-KEY/v2"
 @[persisted_codec_tag] abbrev participant_factory_observe : String := "DREGG/PARTICIPANT/FACTORY-OBSERVE/"
 @[persisted_codec_tag] abbrev application_dispatch_request_bind_v2 : String := "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v2"
-@[persisted_codec_tag] abbrev durable_checkpoint_byte_v3 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [3]
+@[persisted_codec_tag] abbrev durable_checkpoint_byte_v4 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [4]
 @[persisted_codec_tag] abbrev pay_self_enrol_subject_v1 : String := "DREGG.PAY.SELF-ENROL.SUBJECT/v1"
 @[persisted_codec_tag] abbrev fn_selective_ingress_v3 : String := "DREGG/FN/SELECTIVE-INGRESS/v3"
 @[persisted_codec_tag] abbrev well_signed_v1 : String := "DREGG/WELL/SIGNED/v1"
