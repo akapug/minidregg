@@ -61,13 +61,14 @@ SOCKET=${SOCKET:-$ROOT/public/mini.sock}
 TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR:-}
 TEMPLATE_VARIANT= TEMPLATE_TAR= TEMPLATE_META=
 variant_digest() {
-  { for b in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$HERE/genesis-params.example.json" "$HERE/genesis.sh" "$0"; do sha256sum "$b"; done
+  # contents only (`sha256sum -` names no path): a caller's spec file lives under its own run root
+  { for b in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$HERE/genesis-params.example.json" "$HERE/genesis.sh" "$0"; do sha256sum <"$b"; done
     printf 'domain=%s subject=%s budget=%s balance=%s disabled=%s tail=%s objective=%s observer=%s serve=%s now=%s step=%s socket-in-root=%s\n' \
       "$DOMAIN" "$SUBJECT" "$OWNER_BUDGET" "$SPONSOR_BALANCE" "$DISABLED_EVALUATORS" "${MINI_TAIL_BOUND:-256}" \
       "${OBJECTIVE_INVOCATION_POLICY:-}" "${NEWPARTICIPANT_CLOCK_OBSERVER:-}" "${NEWPARTICIPANT_SERVE:-serve}" \
       "${GENESIS_NOW:-}" "${MAX_STEP_SECONDS:-}" "$(case $SOCKET in "$ROOT"/*) echo yes;; *) echo no;; esac)"
     for f in "${EXTRA_GENESIS_ENROLLMENTS:-}" "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" "${EXTRA_CLOCK_TICKERS:-}" "${NEWPARTICIPANT_PROVIDER_SERVICES:-}"; do
-      [ -n "$f" ] && { printf '%s ' "$(basename "$f")"; sha256sum "$f"; }
+      [ -n "$f" ] && { printf '%s ' "$(basename "$f")"; sha256sum <"$f"; }
     done
   } | sha256sum | cut -c1-32
 }
