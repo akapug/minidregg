@@ -1546,7 +1546,6 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    include!("http_entrance_gitweb_probe.rs");
 
     #[test]
     fn admission_bounds_principals_and_apps_independently() {
