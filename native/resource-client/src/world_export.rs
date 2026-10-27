@@ -228,6 +228,19 @@ pub(crate) fn export(root: &Path, workspace: &Value, home: &Path, out: &Path) ->
         "custody": crate::shell::HOSTED_CUSTODY_BANNER,
         "note": "the secret key is not in this archive: it stays in your account's home on the box, which is destroyed with the demo"}))?;
 
+    // The member's research-consent fact (field 1 of `research-consent`: 1 = CC0, 0 = none), as
+    // a signed read now; "unrecorded" when the cell is absent or unreadable.
+    let consent = crate::workspace::reference(root, "research-consent")
+        .ok()
+        .and_then(|reference| crate::workspace::signed_view(root, workspace, &reference, "resource").ok())
+        .and_then(|(view, _, _)| {
+            view["cell"]["entries"].as_array()?.iter().find(|e| e["key"]["field"] == "1")?["value"].as_str().map(str::to_owned)
+        });
+    let research = match consent.as_deref() {
+        Some("1") => "cc0",
+        Some("0") => "none",
+        _ => "unrecorded",
+    };
     let exported_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let manifest = json!({
         "type": "mini-world-export-v1",
@@ -236,6 +249,8 @@ pub(crate) fn export(root: &Path, workspace: &Value, home: &Path, out: &Path) ->
         "worldRoot": world.0,
         "height": world.1,
         "worldRootIs": "the world root and height the Host reported to the last signed read of this export",
+        "researchConsent": research,
+        "researchConsentIs": "field 1 of this member's research-consent cell, read now: cc0 (contributed for research, dedicated to the public domain under CC0), none, or unrecorded",
         "coverage": "every reference held; each document as the Host renders it to this key now (text, struck lines omitted) and its signed view; every retained attempt with its standing; the local room state under HOME/chat; the public key; no secret key",
         "documents": documents,
         "attempts": attempts,

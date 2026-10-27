@@ -158,59 +158,55 @@ the door; the patch in `deploy/web-frontend/door.patch` adds the login record an
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).
 
-## 6. A0: the structured command grammar, verb by verb (the series after this batch)
+## 6. State (2026-10-27, lane tip `abf33668`)
 
-The council's finding stands: `Verb` is three strings and the forms are read from usage prose, so
-"derived from the verb table" is an interim. The honest artifact (ATLAS law 13) is ONE grammar per
-verb, as data, that the shell's parsing, `help`, Tab completion and the web body all consume. The
-series, each step a commit that keeps the usage-string form for every verb whose grammar is not
-yet data and labels the page accordingly:
+**The grammar (A0) is done.** Every verb of the four tables is data in `shell_grammar.rs` (69
+verbs, 203 leaves); the shell parses through `parse`/`parse_line`; `help`, `usage_of` and Tab
+completion read it; the body renders every form from the leaves (effect → outcome class, dangerous
+switches as explicit ticks, required flags as required fields, `Rest` as free text). **Parity is a
+journey row**: `/verb/NAME/dry` plans every leaf's filled form with `mini shell --line L --plan`;
+zero usage refusals over 203 leaves, red-proofed by a verb the shell lacks; the spine rows assert
+decoded outcomes.
 
-1. **The type** (`shell::Grammar`): a verb is a list of leaves; a leaf is its literal path
-   (`doc append`), its positional arguments (name, kind: `Id | Ref(kind) | Subject | Text | Json |
-   File | Number | Height | Choice(..) | Word`, optional), its flags (name, value kind, dangerous:
-   needs confirmation, as `--i-know`, `--freeze-roster`, `--i-lock-myself-out`), its effect
-   (`Read | Local | Transition { proposes: bool }`) and its outcome schema (what the ending prints:
-   a JSON view, a receipt, a text). `usage` and `operation` are RENDERED from the grammar (one
-   printer), so `help` cannot drift from the parser; `subcommands()` reads the leaves, not prose.
-2. **The parser arm consumes the grammar**: `plan()` for a converted verb walks the leaf's
-   arguments (arity, validators per kind) and hands the plan builder typed values; the per-verb
-   `match` arm shrinks to the builder. The web body renders the form from the same leaf (kinds →
-   fields, dangerous flags → an explicit confirmation checkbox, effect → the outcome class, the
-   outcome schema → the bespoke renderer or the one partial).
-3. **Order**: `doc` (the forty leaves: the tour's step 3), `room`/`chat`/`say`/`tail`, `delegate`/
-   `revoke`/`renounce`/`law`/`can`/`why`/`inspect`, the money verbs (`pay`/`credit`/`tariff`/
-   `topup`/`market`/`bid`/`reveal`/`bids`/`job`/`jobs`), the lifecycle (`propose`/`submit`/`lookup`/
-   `retry`/`publish`/`history`), `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story`, keys, the rest.
-4. **The gate** (reached): `parity` holds when every leaf has (a) a route and a no-JS
-   form from its grammar and (b) an outcome test: a journey row per spine flow (steps 3–7 of the
-   tour) asserting the decoded outcome class and the receipt, plus a per-leaf dry-run where the
-   verb has one (`can`, op 130) and a usage-ending test where it does not. The red-proof stays.
-5. **Deletions as each verb lands**: its usage/operation strings (rendered now), its hand-written
-   arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
-   `subcommands()` once the last verb converts.
+**What landed, with shas.**
 
-State (2026-10-27, lane tip): every verb of the four tables is grammar data in `shell_grammar.rs`
-(69 verbs, 203 leaves: `doc`, `room`, the money verbs, the lifecycle, the reads and local verbs,
-the chat, Hermes and story verbs through `parse_line` on the raw line, `apps` on L13's final verb,
-keys, identity, births, `kind`/`program`/`instance`, `app`, `forget`, `board`). The shell parses
-through `parse`/`parse_line`; `help`, `usage_of` and Tab completion read the grammar (the usage
-scraper is gone; `command_catalog` renders every row); the body renders every form from the leaves
-(effect → outcome class, dangerous switches as explicit ticks, required flags as required fields,
-`Rest` as free text). A flag can be `required` (printed bare, refused by name) and `Kind::KeyFile`
-types the plain names under HOME/keys; both came from the dry run, which found fifteen leaves whose
-forms promised what their arms refused. The hand-written usage strings, arity checks and the arm
-guards the grammar now covers are deleted (shell.rs about −1,450 lines over the series; chat.rs −211,
-hermes.rs −83, story.rs −51, keys.rs −60).
+| what | sha |
+|---|---|
+| Progressive `can`: the grants page judges one grant per request as each answer lands; a bare `can` ends with "N of M grants judged within 100 s", never a 504 | `fe1cf181`, `db61a971` |
+| The body's deadline never cuts a transition short (it runs to its decision; the page says undecided with where it lands); a read stopped at 100 s is stopped with its whole process group | `9b03c4e6`, `43533e6d` |
+| The tour runs no shell itself (its purse meter loads after the page) | `890d2b3d` |
+| `jtour` asks `can DOC`, waits the body deadline + 30 s on step 4's own outcome, prints `step4-ms`, expects `answered` | `575e1b21` |
+| The door: "Pay with your wallet" (vendored @solana/web3.js 1.99.0 and the sol-misc adapter, pinned by sha256; transfer + memo built from the quote, signed by the wallet, sent from the browser, the signature posted; the paste path stays) | `b3da2198` |
+| The door: the free route names the configured funding; the enrolled status says what was funded | `da4bed53` |
+| The door's pay-page audit fixes: only new requests spend the per-source budget (4); amount in tokens and the quote's chain hour (5, 3); the adapter asks for the quote's cluster (7); a door refusal is said with the signature, the signature shown before the POST, a stale quote refused, a signed transaction that differs from the built one refused (1, 2, 3, 6) | `861fe953`, `b4a1a9d6`, `3710db83`, `37f23dfc` |
+| Export my world: `export world [NAME]` → `mini export-world` (reads only: every reference; each document as rendered and its signed view; every attempt with its standing; room state; public key and custody statement; a manifest with the world root and a sha256 per file); `/export` starts it in the background, Download streams it through the gateway and deletes it; a notice on the front page from 10 November; the read stamp carries the world root | `370d606e`, `071aaf95` |
+| Subscribe: what the tier buys from the `zai-glm` provider row (model, member calls a day and until the weekly reset), ember's policy line as a marked placeholder, price and period, purse meter, the window end as a UTC date, `pay subscribers week`, the join from the inbox invitation; front page and rail | `0ac2e8df` |
 
-**Parity is the journey's row now**: `/verb/NAME/dry` fills every leaf's form with placeholders
-(each positional field and the required flags), assembles it through the one assembler the POST
-uses, and plans it with `mini shell --line L --plan` (the real parser and plan builder, no Host).
-`usage` (exit 2: the grammar refused the form's line) is red; `world` (exit 1: the words parse but
-this workspace cannot plan them, e.g. an open room given a private room's declaration) is named
-and left to the spine rows (jchat's private room). The row requires zero usage refusals over all
-203 leaves, is red-proofed by a verb the shell lacks, and the spine rows assert the decoded
-outcomes of the flows (doc new and append admitted, their receipt, whoami answered, logout
-revokes). JWF provisions its own member with a birth context from the sponsor's shell (as the
-docuverse provisions its authors), so the document rows run on the spine world too; the member's
-HOME is short because the client's resident consent socket lives under it.
+**Box verification** (dregg-build, the round-2 candidate, the long-lived world `wf-jrun3`, at
+`a0f9c246`): door tests 9 + 8 green under node; JWF 43/48 with export end to end (start, ready,
+download, deleted on the box, the appended text in the archive, manifest height 425 and world root
+equal to the live page's), `subscribe-page`, and `tour-chromium` (step 4 answered in 91 s). The
+one row-order red (`receipt-anchor` read a page the new rows had replaced) is fixed in `abf33668`.
+
+**Four story rows stay strict.** `story-invite`, `story-join`, `story-move`, `story-refused` failed
+on that run because `story invite` (a transition) outlasted the body's 100 s and answered
+"still deciding": the rows still assert admitted / answered / refused, because those are what a
+member sees on a world that answers in time, and the cut gate runs on a fresh one. Loosening them
+to accept "still deciding" would make the tour's door 11 green while showing a member nothing.
+`story new` (nineteen transitions in its template) is the one step the journey waits out by
+retrying the seal, because its length is the template's, not the world's.
+
+**The aged world, published** (dregg-build at load 12–25 on 8 cores, `wf-jrun3` after about twenty
+JWF runs, the member holding 124–169 references and about 7,100 attempts): `mini shell` start 51 s;
+`can DOC` (one reference) 6 min 3 s before the first verdict, then about 10 s per verb; `story new`
+about 4 min (nineteen transitions, about 5–12 s each); the export of 169 references 317 s
+(385 MB). The tail bound (L = 256) is reached without the operator's checkpoint timer: the box
+runner certifies every 30 s when the uncertified tail is at least 64, as the box's timer does.
+These are numbers, not a gate.
+
+**What waits on others.** L4: the resident page names its route once the room records it (a room
+fact such as `hermes/route`; today the room cell has no such field); the Join button takes the
+founder-signed invitation once the concierge drops it into HOME/inbox (Option A, not on
+`54a43e15`), matched by content (a room grant to this subject on the room's target), not by file
+name. ember: the policy sentence on the Z.AI coding plan's terms, for the line marked
+`data-owner="ember"` on `/subscribe`.
