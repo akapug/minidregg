@@ -417,6 +417,48 @@ try:
                      'state': after.get('state')})
             again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
             w.check('refused-disbursement-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
+    if a.scenario == 'play':
+        # Pot law natively (world/play/README.md:20 "Every settlement pays out exactly the pot, once"; CommitReveal.obend
+        # `serve` :319, `disburse` :339, `payBNow` :357). A (the sponsor) plays paper (move 1, salt 7: seal 3*7+1 = 22,
+        # `seal` :118), B (the second subject) scissors (move 2, salt 4: seal 14): B wins, `toA` is 0 so A is not paid
+        # and B's one `transfer` is the whole pot (2 * stake), decided `settled` at the yield.
+        rec = v['recordCell']
+        commit_ = lambda who, seal_, now: ev('commit', who=nat(who), seal=nat(seal_), now=nat(now))  # Commit :83
+        reveal_ = lambda who, move, salt, now: ev('reveal', who=nat(who), move=nat(move), salt=nat(salt), now=nat(now))  # Reveal :88
+        with w.group('play'):
+            w.check('born-awaiting-the-keeper-ledger-0', source_of(v).get('kind') == 'reply'
+                    and field_of(v.get('state'), 'moves') == 0, {'source': source_of(v), 'state': v.get('state')})
+            _, v1 = drive('obj', 'commit-a', tx, rec, v, commit_(sponsor_acct, 22, 2))
+            _, v2 = drive('obj', 'commit-b', tx, rec, v1, commit_(second_acct, 14, 4))
+            _, v3 = drive('obj', 'reveal-a', tx, rec, v2, reveal_(sponsor_acct, 1, 7, 6))
+            mid, v4 = drive('obj', 'reveal-b', tx, rec, v3, reveal_(second_acct, 2, 4, 8))
+            w.check('winner-paid-exactly-the-pot-from-the-purse',
+                    source_of(v4) == performed('settled') and bal(v4, w.SECOND) == bal(mid, w.SECOND) + APP_REWARD
+                    and field_of(v4.get('state'), 'moves') == 1,
+                    {'source': source_of(v4), 'winner': [bal(mid, w.SECOND), bal(v4, w.SECOND)], 'state': v4.get('state'),
+                     'purse': [v.get('purse'), v4.get('purse')]})
+            v5 = deliver_only('obj', 'settled', tx, rec, v4)
+            w.check('pot-paid-once-and-finished',
+                    field_of(v5.get('state'), 'moves') == 1 and bal(v5, w.SECOND) == bal(v4, w.SECOND)
+                    and v5['record'].get('phase', {}).get('kind') != 'awaiting',
+                    {'phase': v5['record'].get('phase'), 'state': v5.get('state')})
+        # Teeth: a purse of one stake cannot pay a pot of two. A lapses in its reveal window (timeout at 10 > due 9
+        # forfeits A: `toB` is the pot): B's transfer is refused `unfunded`, nothing moves or is written, and the
+        # game waits for the next event (the payout is tried again).
+        with w.group('play-teeth-unfunded'):
+            tx2, b = birth_of('obj', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
+            rec2 = b['recordCell']
+            _, c1 = drive('obj', 'commit-a-underfunded', tx2, rec2, b, commit_(sponsor_acct, 22, 2))
+            _, c2 = drive('obj', 'commit-b-underfunded', tx2, rec2, c1, commit_(second_acct, 14, 4))
+            mid2, after = drive('obj', 'timeout-underfunded', tx2, rec2, c2, ev('timeout', now=nat(10)))
+            w.check('payout-refused-unfunded-moves-nothing',
+                    source_of(after) == performed('refused', 'unfunded') and bal(after, w.SECOND) == bal(mid2, w.SECOND)
+                    and after.get('stateVersion') == c2.get('stateVersion')
+                    and field_of(after.get('state'), 'moves') == field_of(c2.get('state'), 'moves'),
+                    {'source': source_of(after), 'version': [c2.get('stateVersion'), after.get('stateVersion')],
+                     'state': after.get('state')})
+            again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
+            w.check('refused-payout-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()
