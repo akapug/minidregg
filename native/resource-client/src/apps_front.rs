@@ -20,8 +20,9 @@ use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The custodian's bounds: 64 KiB head, 10 s to read it, 8 MiB body.
@@ -217,6 +218,27 @@ struct Front {
     origins: PathBuf,
     domain: String,
     live: AtomicUsize,
+    /// Live connections per grain: one noisy grain cannot take every slot.
+    per_grain: Mutex<BTreeMap<String, usize>>,
+}
+
+/// A grain's connection slot, released when the connection ends.
+struct GrainSlot<'a> {
+    front: &'a Front,
+    grain: String,
+}
+
+impl Drop for GrainSlot<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.front.per_grain.lock() {
+            match map.get_mut(&self.grain) {
+                Some(n) if *n > 1 => *n -= 1,
+                _ => {
+                    map.remove(&self.grain);
+                }
+            }
+        }
+    }
 }
 
 fn respond(stream: &mut TcpStream, status: &str, body: &str, html: bool) {
@@ -273,6 +295,16 @@ fn pump(mut from: impl Read, mut to: impl Write) -> io::Result<u64> {
 }
 
 impl Front {
+    fn take_slot(&self, grain: &str) -> Option<GrainSlot<'_>> {
+        let mut map = self.per_grain.lock().ok()?;
+        let count = map.entry(grain.to_owned()).or_insert(0);
+        if *count >= PER_GRAIN_CONNECTIONS {
+            return None;
+        }
+        *count += 1;
+        Some(GrainSlot { front: self, grain: grain.to_owned() })
+    }
+
     fn origin(&self, grain: &str) -> Result<Origin> {
         let bytes = crate::fsio::read_bounded(&self.origins.join(format!("{grain}.json")), 64 * 1024)
             .map_err(|_| format!("no such grain {grain}"))?;
@@ -299,6 +331,9 @@ impl Front {
         let origin = match self.origin(&grain) {
             Ok(origin) => origin,
             Err(reason) => return respond(&mut client, "404 Not Found", &format!("{reason}\n"), false),
+        };
+        let Some(_slot) = self.take_slot(&grain) else {
+            return respond(&mut client, "503 Service Unavailable", &format!("grain {grain} has every connection slot in use ({PER_GRAIN_CONNECTIONS})\n"), false);
         };
         // The bootstrap POST carries its token in a 128-byte body: read it here
         // so the route can be chosen; the bytes are forwarded unchanged.
@@ -373,7 +408,7 @@ impl Front {
 }
 
 pub(crate) fn serve(listener: TcpListener, origins: PathBuf, domain: String) -> Result<()> {
-    let front = Arc::new(Front { origins, domain, live: AtomicUsize::new(0) });
+    let front = Arc::new(Front { origins, domain, live: AtomicUsize::new(0), per_grain: Mutex::new(BTreeMap::new()) });
     for stream in listener.incoming() {
         let mut stream = match stream {
             Ok(stream) => stream,
