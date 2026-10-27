@@ -43,13 +43,16 @@ const USAGE: &str = "mini fleet-sign: dregg-client-sign's verbs as Mini fleet tu
        exit 0 only with the exact receipt of this turn\n\
   receipt (--turn-hash HEX64 | --head) [--profile P] [--home H]\n\
        the exact receipt of one transaction, or the profile account's newest fleet turn\n\
+  incoming [--topic S] [--since HEIGHT] [--limit N] [--profile P] [--home H]
+       the accepted fleet turns that paid the profile's account (Host op 180, behind the profile's
+       signed observation of it), ascending above HEIGHT, on topic S (default: every topic)
   retry --attempt DIR [--profile P] [--home H]\n\
        resubmit the EXACT retained bytes of one attempt; an accepted original answers\n\
        with its original receipt and nothing moves twice\n\n\
 env (flags win): MINI_FLEET_HOME, MINI_PROFILE, MINI_FLEET_SPONSOR, MINI_FLEET_FACTORY_REF.\n\
 --node-url accepts only unix:/ABSOLUTE/SOCKET, and only the socket the profile is pinned to.";
 
-const VERBS: [&str; 5] = ["join", "send", "transfer", "receipt", "retry"];
+const VERBS: [&str; 6] = ["join", "send", "transfer", "receipt", "incoming", "retry"];
 
 /// The account reference name every fleet-sign profile pays from.
 const ACCOUNT: &str = "account";
@@ -60,6 +63,9 @@ struct Flags {
     profile: Option<String>,
     socket: Option<PathBuf>,
     topic: String,
+    topic_given: bool,
+    since: String,
+    limit: String,
     to: Option<String>,
     amount: Option<String>,
     fund: Option<String>,
@@ -122,6 +128,9 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
         profile: env_value("MINI_PROFILE"),
         socket: None,
         topic: "client-sign".into(),
+        topic_given: false,
+        since: "0".into(),
+        limit: "64".into(),
         to: None,
         amount: None,
         fund: None,
@@ -139,7 +148,12 @@ fn parse(argv: Vec<OsString>) -> Result<Flags> {
             "--home" => home = Some(PathBuf::from(value("--home")?)),
             "--profile" => flags.profile = Some(value("--profile")?),
             "--node-url" => flags.socket = Some(node_socket(&value("--node-url")?)?),
-            "--topic" => flags.topic = value("--topic")?,
+            "--topic" => {
+                flags.topic = value("--topic")?;
+                flags.topic_given = true;
+            }
+            "--since" => flags.since = value("--since")?,
+            "--limit" => flags.limit = value("--limit")?,
             "--to" => flags.to = Some(value("--to")?),
             "--amount" => flags.amount = Some(value("--amount")?),
             "--fund" => flags.fund = Some(value("--fund")?),
@@ -731,6 +745,16 @@ fn receipt(flags: &Flags) -> Result<Value> {
     }
 }
 
+/// The profile account's incoming ledger: what `fleet --action incoming` prints, under this verb's
+/// one-object contract. Without `--topic` it is every topic.
+fn incoming(flags: &Flags) -> Result<Value> {
+    let profile = profile(flags)?;
+    let (agent, _, record) = joined(flags, &profile)?;
+    let topic = if flags.topic_given { flags.topic.as_str() } else { "" };
+    let ledger = fleet::incoming(&agent.root, ACCOUNT, topic, &flags.since, &flags.limit)?;
+    Ok(merge(json!({"profile": profile.name, "cell": record["account"]}), ledger))
+}
+
 fn retry(flags: &Flags) -> Result<Value> {
     let attempt = flags.attempt.clone().ok_or("retry requires --attempt DIR")?;
     let profile = profile(flags)?;
@@ -820,6 +844,7 @@ pub(crate) fn run(argv: Vec<OsString>) -> Result<()> {
             "send" => send(&flags).map(|(value, profile)| (value, Some(profile))),
             "transfer" => transfer(&flags).map(|(value, profile)| (value, Some(profile))),
             "receipt" => receipt(&flags).map(|value| (value, None)),
+            "incoming" => incoming(&flags).map(|value| (value, None)),
             "retry" => retry(&flags).map(|value| (value, None)),
             other => Err(format!("unknown verb '{other}' (try --help)")),
         }
@@ -871,6 +896,16 @@ mod tests {
         assert!(refusal(&["send", "--home", "/h", "--token", "t", "x"]).contains("no bearer token"));
         assert!(refusal(&["transfer", "--home", "/h", "--accept-tentative"]).contains("one commitment level"));
         assert!(refusal(&["send", "--home", "/h", "--bogus", "x"]).contains("unknown option"));
+    }
+
+    #[test]
+    fn incoming_reads_every_topic_unless_one_is_named() {
+        let all = parse(argv(&["incoming", "--home", "/h"])).unwrap();
+        assert!(!all.topic_given);
+        assert_eq!((all.since.as_str(), all.limit.as_str()), ("0", "64"));
+        let one = parse(argv(&["incoming", "--home", "/h", "--topic", "inbox", "--since", "7", "--limit", "3"])).unwrap();
+        assert!(one.topic_given);
+        assert_eq!((one.topic.as_str(), one.since.as_str(), one.limit.as_str()), ("inbox", "7", "3"));
     }
 
     #[test]
