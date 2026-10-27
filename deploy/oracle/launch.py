@@ -105,7 +105,8 @@ def main():
         ["/usr/bin/python3.12", "-B", "/opt/oracle/adapter/serve.py",
          "--runtime", "/opt/oracle", "--data-root", "/opt/oracle/root",
          "--workspace", "/var/oracle-workspace", "--port", "7070",
-         "--max-request-bytes", "65536"],
+         "--max-request-bytes", "65536",
+         "--tenant-pool", "--max-resident", "1", "--max-tenants", "128"],
         ["/opt/oracle-bin/minidregg-oracle-appliance", "--port", "7070"],
     )
 

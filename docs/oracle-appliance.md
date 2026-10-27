@@ -32,13 +32,41 @@ configuration and request examples.
   matching revision read-only at `/opt/oracle-data`; the app cannot choose a host
   path or another dataset. No chunking or reassembly is needed.
 - **Private state:** each grain has a separate writable `/var` for conversation
-  and request history. Two grains can share data without sharing conversations.
+  and request history. The new hosted build divides this into private workspaces
+  for each authenticated source session, with separate request journals. The
+  installed v5 package predates this pool and retains one workspace per grain.
 
 Publication hashes the data; startup checks protected custody metadata. This
 assumes a trusted operator and filesystem. Only deliberately published public
 data is supported. A private dataset would need its own access-control design.
 The [packaging guide](oracle-shared-data-packaging.md) describes the existing
 contract without requiring changes to the SPK format.
+
+## Shared hosting
+
+The new hosted build serves many users and agents from one grain. Mini derives
+the tenant identity from the authenticated principal and source session; callers
+cannot select another tenant by changing a request or conversation ID. A new
+source session gets a new workspace. Two agents using the very same source
+session intentionally share its workspace.
+
+The worker pool bounds resident computation independently of tenant count. The
+initial class-L configuration permits one resident Oracle worker and 128
+persistent workspaces. Idle workers retire before a replacement starts; busy
+capacity returns a retryable refusal. Increasing concurrent workers also needs
+an appropriate memory budget. Runtime files and the public dataset remain
+shared and read-only, while each resident worker has separate process state.
+
+Completed requests replay from disk without starting a worker. Oracle loses
+some conversational context when its worker exits, so a new turn after eviction
+requires a fresh conversation ID and supplied context. The service reports this
+explicitly rather than silently answering without the earlier context.
+
+The new browser page offers questions, operation discovery and direct calls
+through the same routes agents use. It retains exact request bytes for manual
+retry and makes conversation resets explicit. These hosting changes are being
+qualified for the next package; they do not change the retained v5 deployment.
+See the [bridge contract](oracle-appliance-bridge.md) for the identity boundary.
 
 ## Checked state — 27 October 2026
 
