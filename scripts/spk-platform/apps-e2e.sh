@@ -75,12 +75,16 @@ WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-me
 # installs the next version with only that worker pin dropped: any subject may read or birth in
 # grain-backed mode. A signed policy read, then install-source under the read's exact root.
 widen_factory() {
-  local d=$out/factory-law key n1 n2 n3
+  local d=$out/factory-law key n1 n2 n3 gs=$RUN/store/base/workroom/deployment/genesis-source.json fsub fcap
   mkdir -m 700 -p "$d"; key=$(jq -r .key "$WSC/workspace.json")
+  # The factory's controller and its control capability, from the world's own genesis (54 is only the
+  # controller's observe grant; the workroom's control capability is 53).
+  fsub=$(jq -er '.factoryControllerSubject' "$gs") && fcap=$(jq -er '.factoryControllerCapability' "$gs") || { echo "no factory controller in $gs" >"$d/intent.err"; return 1; }
+  [ "$fsub" = 7 ] || { echo "factoryControllerUnexpected: $fsub is not the controller workspace's subject 7" >"$d/intent.err"; return 1; }
   n1=$(od -An -N4 -tu4 /dev/urandom | tr -d ' '); n2=$(od -An -N4 -tu4 /dev/urandom | tr -d ' '); n3=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')
   jq -n --arg n "$n1" '{subject:"7",nonce:$n,purpose:{type:"query",kind:"object",target:"10",view:"policy"},grants:[{kind:"object",target:"10",capability:"54"}]}' >"$d/query-intent.json"
   mini query --host "$HOST" --config "$CONFIG" --intent "$d/query-intent.json" --key "$key" --view policy --dir "$d/query" >"$d/query.out" 2>"$d/query.err" || return 1
-  jq -n --slurpfile p "$d/query/view.json" --slurpfile c "$d/query/challenge.json" --arg n "$n2" --arg dn "$n3" '
+  jq -n --slurpfile p "$d/query/view.json" --slurpfile c "$d/query/challenge.json" --arg n "$n2" --arg dn "$n3" --arg fcap "$fcap" '
     def eq($s;$v): {slot:$s,type:"eq",value:$v};
     def pinned: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/subject";"8"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"all"}],type:"any"};
     def widened: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"any"};
@@ -88,7 +92,7 @@ widen_factory() {
     $p[0] as $p | $c[0] as $c |
     if ($p.predicate | count(widened)) == 1 and ($p.predicate | count(pinned)) == 0 then {already:true}
     elif ($p.predicate | count(pinned)) != 1 then error("factoryLawUnrecognized: the worker-pinned birth clause is not present exactly once")
-    else {subject:"7",nonce:$n,purpose:{type:"prepare",draft:{type:"install-source",subject:"7",control:"54",
+    else {subject:"7",nonce:$n,purpose:{type:"prepare",draft:{type:"install-source",subject:"7",control:$fcap,
       declaration:{expectedPreRoot:$c.authorityRoot,expected:{version:$p.version,address:$p.address},nonce:$dn,
         source:{policyId:$p.policyId,version:(($p.version|tonumber)+1|tostring),domain:$p.domain,semantics:$p.semantics,
           previous:$p.address,predicate:($p.predicate | walk(if . == pinned then widened else . end))}}}},
