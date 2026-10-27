@@ -29,21 +29,27 @@ Branch `lane/custody-drivers` (main merged at `859ad3ce`). Mac worktree
 Verified on dregg-build: at `6aa5dde3` spk-host filtered 276/276; at `d2041a21` check green,
 build green, resource-client filtered 241/241, mini-sdk 33/33, and again at `cce04212` (241/241, 33/33; script: `/build/lanes/custody-drivers-logs/run-wire-5.sh`).
 
+- resource-client's own decimal and hex copies take mini_sdk's rule (`94b6ac5f`, 36 copies: 20 hex,
+  16 decimal; mini_sdk gains `decimal::parse`, `is_canonical_ascii_max`, `hex::decode_fixed`). pay.rs's
+  unsigned reader had accepted `+5`. Linux at `94b6ac5f`: check and build green, mini-sdk 34/34,
+  resource-client filtered 401/403; the two reds are cohort_tcp's wall-clock slot tests ("missed
+  public link slot"), a different pair failing on a serial rerun (20/22), untouched by this change
+  (its one edit there is a test-local hex closure): the traffic-privacy stack's, not this lane's.
+
 Not done here, by decision: grain-runtime's ~13 bounded readers (another crate's lane; the
 `private_file` shape is the template); the three BPF assemblers (RT 30, `setid_bound.rs` deletion,
-the sandbox lane's); resource-client's own decimal/hex copies (fewer, and `mini_sdk` already has
-`hex`; next pass).
+the sandbox lane's); `crate::decode_hex` stays any-case (`hex::decode_any_case`): it reads typed
+input as well as Host values, and splitting its ~200 call sites is its own pass.
 
-## Enrol / world template: waiting on a candidate
+## Enrol / world template
 
-1. Step 7 of `native/resource-client/enrol-resume-acceptance.sh` asserts a pinned plan is admitted
-   across two ticks; it needs a candidate carrying L1's `92341df2` (the integrator's cut 8). None on
-   dregg-build has it yet (checked: 203ed84c, 23861533, 45f45d15, 6236826f, a94bed71, a972c742).
-   Run: `enrol-resume-acceptance.sh HOST MINI STORE VERIFIER NEW_DIR` with this tip's `mini`
-   beside the candidate's host/store/verifier, `CANDIDATE=<set>`; template
-   `/build/lanes/custody-drivers-logs/run-enrol-10.sh`. Expect
-   `enrol-resume: PASS (...; pinned plan admitted across two ticks)`.
-2. On that candidate, the standing run with `JOURNEY_WORLD_TEMPLATES=0` then `=1`
+1. `native/resource-client/enrol-resume-acceptance.sh` PASSES on cut 7 (3315a908, which carries L1's
+   `92341df2`) with this lane's `mini` at `182e5494`: every step, five members under the 15 s ticker
+   in 5 seals, and step 7's pinned plan admitted across two ticks (two confirmed ticks, rising
+   count and second, two world roots). Every tick waits for a wall-clock second later than the last
+   tick's (the Host refuses a non-advancing tick, `clockNotAdvancing`). Template:
+   `/build/lanes/custody-drivers-logs/run-enrol-12.sh`.
+2. On cut 9 (28235a17) or later, the standing run with `JOURNEY_WORLD_TEMPLATES=0` then `=1`
    (`/build/lanes/custody-drivers-logs/run-measure.sh`; re-add the frozen tree
    `/build/lanes/custody-drivers-measure` at the tip). Last numbers (a94bed71 binaries, which lack
    this lane's mini fixes): 1119 s off, 1089 s on, both cut short by J1's seal red.

@@ -50,11 +50,28 @@ step() { # NAME EXPECT(ok|fail) COMMAND...
   if [ "$expect" = fail ] && [ "$code" -eq 0 ]; then echo "step $name unexpectedly succeeded" >&2; exit 1; fi
 }
 said() { grep -q "$2" "$LOG/$1.stderr" || { echo "step $1 did not say: $2" >&2; tail -3 "$LOG/$1.stderr" >&2; exit 1; }; }
-nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" >>"$ROOT/public/serve.log" 2>&1 </dev/null &
-printf '%s\n' "$!" >"$ROOT/public/server.pid"
+# The fixture hands over its running server (ROOT/public/server.pid, the socket bound). This run uses
+# that server and stops it by that PID file when it ends, however it ends. (Starting a second
+# `mini serve` here overwrote the PID file and left the fixture's server running after every run.)
+[ -s "$ROOT/public/server.pid" ] && kill -0 "$(cat "$ROOT/public/server.pid")" 2>/dev/null \
+  || { echo 'the fixture handed over no running server (ROOT/public/server.pid)' >&2; exit 1; }
 trap 'kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 waited=0; until [ -S "$SOCKET" ]; do waited=$((waited + 1)); [ "$waited" -lt 1200 ] || { echo 'socket did not appear' >&2; exit 1; }; sleep 0.1; done
-tick() { step "$1" ok "$MINI" clock --action tick --workspace "$ROOT/clock"; }
+# A tick asserts the wall clock's second; the Host refuses one that does not advance past the last
+# tick's (ClockTickReceiver.decideTick: clockNotAdvancing, no record). Every tick here, and step 6's
+# ticker, therefore waits for a second later than the last tick's (`$ROOT/last-tick`), so two ticks
+# never share a second and each is a commit.
+next_second() {
+  last=$(cat "$ROOT/last-tick" 2>/dev/null || echo 0)
+  while [ "$(date +%s)" -le "$last" ]; do sleep 0.1; done
+}
+tick() {
+  next_second
+  step "$1" ok "$MINI" clock --action tick --workspace "$ROOT/clock"
+  date +%s >"$ROOT/last-tick"
+}
+# A confirmed tick's commit: the clock's accepted count, the second it asserted, the world root after it.
+tick_commit() { jq -er 'select(.type == "confirmed") | "\(.acceptedCount) \(.asserted.now) \(.worldRoot)"' "$LOG/$1.stdout"; }
 NS=$(jq -r .namespaceRoot "$ROOT/sponsor/workspace.json")
 A="$ROOT/attempts/newcomer"
 plan() { step "$1" "$2" "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
@@ -129,7 +146,7 @@ step lookup ok "$MINI" enroll --action lookup --dir "$A"
 # 6. Five members back to back under a running ticker (a tick every 15 s, a box's one-minute ticker
 #    compressed, racing the composed world's enrolments): a seal or submit refused because a tick landed
 #    after the plan re-plans the same request (bounded at six); five admissions.
-( while :; do "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; sleep 15; done ) &
+( while :; do next_second; "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; date +%s >"$ROOT/last-tick"; sleep 15; done ) &
 printf '%s\n' "$!" >"$ROOT/ticker.pid"
 trap 'kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 for i in 1 2 3 4 5; do
@@ -172,6 +189,11 @@ step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/spon
 tick tick-4
 step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
 tick tick-5
+# the plan crossed two commits: both ticks confirmed, the clock's count and asserted second strictly
+# rising, and two different world roots (each tick moved the log the plan was pinned under)
+set -- $(tick_commit tick-4) $(tick_commit tick-5)
+[ "$#" -eq 6 ] && [ "$4" -gt "$1" ] && [ "$5" -gt "$2" ] && [ "$3" != "$6" ] \
+  || { echo "step 7: the two ticks are not two distinct commits: $*" >&2; exit 1; }
 step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
 [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
 [ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
