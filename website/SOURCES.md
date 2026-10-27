@@ -2,7 +2,7 @@
 
 Every factual sentence on the hand-written pages, and the file and lines it comes from, on
 `lane/W14-WEBSITE-REGEN` over main `df0cd116` (2026-10-05). `status.html` is not listed:
-`gen-status.py` generates it from the README's What is live table (`README.md:84-113`), each
+`gen-status.py` generates it from the README's What is live table (`README.md:87-113`), each
 row carrying the landing commit or journey row it rests on, and the `website` gate fails when
 it is stale. When a source changes, fix the page and this map in the same commit. Paths are
 relative to the repository root. FRIENDS = `deploy/shell/FRIENDS.md`; OB =
@@ -113,18 +113,18 @@ A redirect to https://demo.dregg.online/join (meta refresh and a link); no factu
 
 ## edition.html
 
-Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/DEMO-EXPERIENCE-2026-10-27.md`; WF = `docs/WEB-FRONTEND-2026-10-27.md`; AM = `docs/APP-MARKET-2026-10-27.md`; HP = `docs/HOT-PATH-2026-10-27.md`. Every row is also a row of the README's What is live table (`README.md:84-113`), which `status.html` renders.
+Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/DEMO-EXPERIENCE-2026-10-27.md`; WF = `docs/WEB-FRONTEND-2026-10-27.md`; AM = `docs/APP-MARKET-2026-10-27.md`; HP = `docs/HOT-PATH-2026-10-27.md`. Every row is also a row of the README's What is live table (`README.md:87-113`), which `status.html` renders.
 
 | Claim | Source |
 | --- | --- |
-| the box still serves an earlier rehearsal, every login closed, `/join` closed until the owner opens it | README.md:88 (The box today); docs/DEMO-PREFIX-2026-10-26.md §2 |
+| the box still serves an earlier rehearsal, every login closed, `/join` closed until the owner opens it | README.md:87 (The box today); docs/DEMO-PREFIX-2026-10-26.md §2 |
 | the door opens on the owner's word; shuts down 11 November 2026 and everything is erased | README.md "The demo"; index.html rows above |
 | one admission path for documents, grants, money, programs, applications; refusal names its clause; the web shows the request that would pass | DE:53 (step 4), DE §0; README.md:22 |
 | the client keeps the exact call before sending; undecided attempt retried byte for byte | native/mini-sdk/src/custody.rs:1-27, 145; DE:55 (step 6) |
 | join: a name, a hosted key, one session link | DE:51 (step 2); WF (door rows) |
 | free route has a fixed number of seats | deploy/door/README.md:95 (`freeCap`) |
 | paid route 50 DREGG a week on Solana mainnet | deploy/pay/enrol-terms.json |
-| every shell command has a web form, 203 leaves; outcomes announced as live regions | README.md:94 (parity row); native/resource-client/src/web/verbs.rs:610; native/resource-client/src/web/body.rs:1240 |
+| every shell command has a web form, 203 leaves; outcomes announced as live regions | README.md:95 (web pages row); native/resource-client/src/web/verbs.rs:610; native/resource-client/src/web/body.rs:1240 |
 | export archive of documents, receipts and key, streamed then deleted; one per member per 10 minutes | WF:182, WF:197-199 |
 | research consent: unchecked box at the door, a fact in the member's world, shown and changeable on the export page | WF:185-193; deploy/policy/RETENTION.txt |
 | a built-in tale under a sealed law; a member can install a law and see the next write judged | DE:65-66 (doors 11, 12); Kernel/StoryLaw.lean |
