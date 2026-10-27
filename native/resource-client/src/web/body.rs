@@ -532,8 +532,10 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
         ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
-        ("summons an agent", "A Hermes resident into your room with a budget; ask it to read a document and post a summary; its turns land as paid, admitted writes with receipts; the purse drains; <code>dismiss</code> refunds the remainder.".into(),
-            forms(6, &[("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("dismiss", "dismiss")])),
+        ("summons an agent", "First a bounded grant on one document to the resident's subject (<code>delegate … --until H</code>: the grant's expiry is a height); then a Hermes resident into your room with a budget funded from your purse (the meter); ask it to read the document and post a summary; its turns land as paid, admitted writes with receipts and the meter drains; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant; <code>dismiss</code> refunds the remainder.".into(),
+            if member {
+                format!("{}{}", purse_meter(site), forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
+            } else { String::new() }),
         ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
             format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
         ("asks the oracle", "The veri7vn grain: a question, an answer with its evidence and the machine-checked function it rests on (the oracle appliance lands on the same grain path).".into(), String::new()),
@@ -892,25 +894,30 @@ fn json_tree(v: &Value) -> String {
     }
 }
 
-/// `/purse`: the member's account as a meter (`credit`), then `pay status`.
-fn purse(site: &Site) -> Page {
-    let mut body = String::new();
+/// The member's purse as a meter (`credit`): the balance a summon's budget is funded from and
+/// that a resident's paid turns drain; on the purse page and in the tour's agent step.
+fn purse_meter(site: &Site) -> String {
     match verb(site, &["credit".to_owned()]) {
         Some(ending) if ending.code == 0 => {
             let line = ending.stdout.lines().find(|l| l.starts_with("credit ")).unwrap_or("").to_owned();
             let balance: u64 = line.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
             let scale = balance.max(1000);
-            body.push_str(&format!(
-                "<section class=\"purse\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
+            format!(
+                "<section class=\"purse\" data-live=\"15000\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
                  <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
                 scale / 10,
                 escape(&line)
-            ));
+            )
         }
-        Some(ending) => body.push_str(&answered(&ending, &[])),
-        None => body.push_str("<p class=note>no shell paths</p>"),
+        Some(ending) => answered(&ending, &[]),
+        None => "<p class=note>no shell paths</p>".to_owned(),
     }
+}
+
+/// `/purse`: the member's account as a meter (`credit`), then `pay status`.
+fn purse(site: &Site) -> Page {
+    let mut body = purse_meter(site);
     if let Some(ending) = verb(site, &["pay status".to_owned()]) {
         body.push_str(&format!("<section><h2>Pay</h2>{}</section>", answered(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
     }
