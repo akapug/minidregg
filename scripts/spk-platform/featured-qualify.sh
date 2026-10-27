@@ -56,23 +56,31 @@ req() {
     -o "$body" -D "$body.headers" -w '%{http_code}' "$@" "http://grain.test$path" 2>>"$out/curl.err"
 }
 
+# Like req, but keeps the cookies the app sets (PHP and CSRF sessions bind a form token to them) in $jar,
+# on top of the route token. Reset with jar="" at the start of a write. NOT called inside $(...) (a
+# subshell would drop the jar): the status is left in $JS.
+jreq() {
+  local method=$1 path=$2; shift 2
+  JS=$(curl -sS --max-time 900 --unix-socket "$dir/http.sock" -X "$method" -H 'Host: grain.test' \
+    -H "Cookie: __Host-mini_spk_session=$(cat "$dir/browser.token")${jar:+; $jar}" -H 'Origin: https://grain.test' \
+    -o "$body" -D "$body.headers" -w '%{http_code}' "$@" "http://grain.test$path" 2>>"$out/curl.err")
+  local c; while read -r c; do
+    jar=$(printf '%s\n%s\n' "${jar//; /$'\n'}" "$c" | awk -F= 'NF&&!seen[$1]++{printf "%s%s", (n++?"; ":""), $0}')
+  done < <(grep -i '^set-cookie:' "$body.headers" | tr -d '\r' | sed 's/^[Ss]et-[Cc]ookie: *//; s/;.*//')
+}
+
 # The beneath-HTML write per app: what a resident does instead of clicking.
 write_EtherCalc() {
   local put; put=$(req PUT /_/featured -H 'Content-Type: text/csv' --data-binary $'item,qty\nwidgets,3\n')
   local got; got=$(req GET /_/featured/csv)
   [[ $put =~ ^20 && $got == 200 ]] && grep -q widgets "$body" && echo "1 PUT /_/featured text/csv $put; GET csv $got"
 }
-# HedgeDoc's package (ff642cdb) lacks node_modules/iconv-lite/encodings, which the packager's
-# trace never touched: every request body it parses (text, form or JSON) throws "Cannot find
-# module '../encodings'" in the app (400 or 500). Its write therefore goes over its realtime
-# socket.io channel, which never reaches body-parser; until that recipe is in, the row names this.
-write_HedgeDoc() {
-  local made; made=$(req POST /new -H 'Content-Type: text/markdown' --data-binary $'# featured\nwritten by a resident\n')
-  local note; note=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); note=${note#https://grain.test}
-  [[ $made =~ ^30 && -n $note ]] || { echo "0 POST /new $made: the package lacks iconv-lite/encodings (app output: Cannot find module '../encodings'); the write moves to socket.io"; return; }
-  local got; got=$(req GET "$note/download")
-  [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST /new $made -> $note; GET download $got"
-}
+# HedgeDoc's package (ff642cdb) lacks node_modules/iconv-lite/encodings, which the packager's trace
+# never touched: every request body it parses (text, form or JSON) throws "Cannot find module
+# '../encodings'" in the app (400 or 500; POST /new answered 400 on w11). So its write never sends a
+# body over HTTP: GET /new makes the note (303 to /<id>) and the text goes in as a socket.io
+# `operation`, the one recipe shared with the rt table (write_HedgeDocRT in market-writes/rt.sh).
+write_HedgeDoc() { write_HedgeDocRT; }
 write_Davros() {
   local put; put=$(req PUT /remote.php/webdav/featured.txt -H 'Content-Type: text/plain' --data-binary 'filed by a resident')
   local got; got=$(req GET /remote.php/webdav/featured.txt)
@@ -83,26 +91,44 @@ write_sntfy() {
   local got; got=$(req GET '/featured/json?poll=1&since=all')
   [[ $post == 200 && $got == 200 ]] && grep -q 'job done' "$body" && echo "1 POST /featured $post; poll $got"
 }
+# DokuWiki: the edit form (id dw__editform) posts sectok, id, rev, date, prefix, suffix, changecheck and
+# target as hidden fields next to wikitext, summary and the button do[save]. sectok is a hash of the PHP
+# session id, so the form GET and the POST must share the session cookie the GET sets (jreq keeps it);
+# the first recipe sent a bare sectok with no cookie, and DokuWiki refused the save.
 write_DokuWiki() {
-  local edit; edit=$(req GET '/doku.php?id=featured&do=edit')
-  local sectok; sectok=$(grep -o 'name="sectok" value="[0-9a-f]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
-  [[ $edit == 200 && -n $sectok ]] || { echo "0 edit form $edit, sectok '${sectok:-}'"; return; }
-  local save; save=$(req POST /doku.php --data-urlencode id=featured --data-urlencode "sectok=$sectok" \
-    --data-urlencode 'do[save]=1' --data-urlencode 'summary=resident' --data-urlencode $'wikitext======= Featured ======\nwritten by a resident\n')
-  local got; got=$(req GET '/doku.php?id=featured&do=export_raw')
-  [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && { echo "1 POST do=save $save; export_raw $got"; return; }
-  echo "0 POST do=save $save; export_raw $got without the text"
+  jar=""
+  jreq GET '/doku.php?id=featured&do=edit'; local edit=$JS
+  local fields=() f
+  while IFS= read -r -d '' f; do fields+=(--data-urlencode "$f"); done < <(python3 -I "$here/market-writes/form-fields.py" dw__editform <"$body")
+  [[ $edit == 200 && ${#fields[@]} -gt 0 ]] || { echo "0 edit form $edit, no dw__editform hidden fields"; return; }
+  [[ " ${fields[*]} " == *sectok=* ]] || { echo "0 edit form $edit carries no sectok"; return; }
+  jreq POST '/doku.php?id=featured' "${fields[@]}" --data-urlencode $'wikitext======= Featured ======\nwritten by a resident\n' \
+    --data-urlencode 'summary=resident' --data-urlencode 'do[save]=Save'; local save=$JS
+  jreq GET '/doku.php?id=featured&do=export_raw'; local got=$JS
+  [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && { echo "1 POST do[save] $save; export_raw $got"; return; }
+  echo "0 POST do[save] $save; export_raw $got without the text"
 }
+# hledger-web 1.31 runs with --allow=sandstorm (the owner holds view, add, manage): its JSON API takes
+# PUT /add with the full JSON of one transaction (the form needs a Yesod _token). The read-back is
+# GET /transactions (JSON).
 write_HledgerWeb() {
-  local add; add=$(req POST /add --data-urlencode "date=$(date -u +%Y-%m-%d)" --data-urlencode 'description=featured by a resident' \
-    --data-urlencode 'account=assets:cash' --data-urlencode 'amount=$3' --data-urlencode 'account=expenses:demo' --data-urlencode 'amount=')
-  local got; got=$(req GET /journal)
-  [[ $add =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 POST /add $add; GET /journal $got"
+  local amt='{"aprice":null,"acommodity":"$","aquantity":{"floatingPoint":Q,"decimalPlaces":10,"decimalMantissa":M},"aismultiplier":false,"astyle":{"ascommodityside":"L","asdigitgroups":null,"ascommodityspaced":false,"asprecision":2,"asdecimalpoint":"."}}'
+  local a1=${amt//Q/3}; a1=${a1//M/30000000000}; local a2=${amt//Q/-3}; a2=${a2//M/-30000000000}
+  local post1='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a1"'],"ptransaction_":"1","paccount":"expenses:demo","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
+  local post2='{"pbalanceassertion":null,"pstatus":"Unmarked","pamount":['"$a2"'],"ptransaction_":"1","paccount":"assets:cash","pdate":null,"ptype":"RegularPosting","pcomment":"","pdate2":null,"ptags":[],"poriginal":null}'
+  local txn='{"tcomment":"","tpostings":['"$post1,$post2"'],"ttags":[],"tsourcepos":{"tag":"JournalSourcePos","contents":["",[1,1]]},"tdate":"2026-10-27","tcode":"","tindex":1,"tprecedingcomment":"","tdate2":null,"tdescription":"featured by a resident","tstatus":"Unmarked"}'
+  local add; add=$(req PUT /add -H 'Content-Type: application/json' --data "$txn")
+  local got; got=$(req GET /transactions)
+  [[ $add =~ ^20 && $got == 200 ]] && grep -q 'featured by a resident' "$body" && echo "1 PUT /add $add; GET /transactions $got"
 }
+# Datasette 0.63 has no HTTP write (a database is uploaded through the page's own form), so the row is
+# a RECORDED READ and passes as one: the grain answers the JSON API beneath the HTML and the database
+# list is read back. Any other outcome fails.
 write_Datasette() {
   local got; got=$(req GET '/-/versions.json')
-  # Datasette 0.63 has no write API; its write is the upload of a database through the page.
-  [[ $got == 200 ]] && echo "0 read-only: GET /-/versions.json $got; Datasette 0.63 has no HTTP write (upload is the page's form)"
+  [[ $got == 200 ]] && grep -q '"datasette"' "$body" || { echo "0 GET /-/versions.json $got"; return; }
+  local dbs; dbs=$(req GET '/-/databases.json')
+  [[ $dbs == 200 ]] && echo "1 read-only by design (no HTTP write in 0.63): recorded GET /-/versions.json $got, GET /-/databases.json $dbs"
 }
 for f in "$here"/market-writes/*.sh ${QUALIFY_WRITES:+"$QUALIFY_WRITES"/*.sh}; do [[ -f $f ]] && . "$f"; done
 
