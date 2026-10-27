@@ -153,6 +153,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
   the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
+- **No lane waits on its own closure build** (ember, 2026-10-27 night: "we need to avoid having the dependence on these closure builds"). A lane per-file elaborates its changed files and their direct importers, pushes, and moves on; the integrator's hourly cut is the closure, and its reds are named within minutes and fixed forward by the owning lane. A lane's own closure runs only in the background (dregg-ref, closure-lock) when a change touches importers it cannot check per file. The iteration-speed lane is replacing per-file batch checks with a live Lean server per lane and Lean 4.30's module system.
 - **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
   `dregg-build` builds the Host closure for the integrator's cut; a lane elaborates per file (`lean-ask`,
   `lake env lean`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
