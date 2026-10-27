@@ -877,6 +877,9 @@ usage:
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
+  mini serve-resident-operator-proxy --socket RESIDENT-PRIVATE/mini.sock --upstream PRIVATE --config CONFIG.json --resident-uid UID
+                         requires two systemd-activated listeners (mini.sock, mini.control); the resident's host
+                         operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
@@ -2629,12 +2632,11 @@ fn enrollment_view(socket: &Path, config: &Path, host_sha256: &str) -> Result<()
 
 fn run(mut args: Args) -> Result<()> {
     #[cfg(unix)]
-    if let Some(uid) = args.optional("operator-peer-uid") {
-        let command = args.command.to_string_lossy();
-        if !(command.starts_with("agent-reserve-") || command.starts_with("agent-lifetime-reserve-")
-            || command.starts_with("agent-lifetime-paid-") || command == "agent-payer-sign") {
-            return Err("--operator-peer-uid is restricted to agent reserve/payer commands".into());
-        }
+    // The listener creator of an activated operator route (a resident's or an
+    // agent controller's: systemd, uid 0) is pinned explicitly, by flag or by
+    // the root-owned unit's MINI_OPERATOR_PEER_UID, which every child `mini`
+    // of a controller inherits. Never inferred from the path's owner.
+    if let Some(uid) = args.optional("operator-peer-uid").or_else(|| std::env::var_os("MINI_OPERATOR_PEER_UID")) {
         let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
         operator_peer::configure(uid)?;
     }
@@ -2832,6 +2834,16 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
             public_proxy::serve(socket, &upstream, &config, group, controller)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-resident-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("resident-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("resident UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-resident-operator-proxy requires --socket")?;
+            public_proxy::serve_resident_activated(socket, &upstream, &config, uid)
         }
         #[cfg(target_os = "linux")]
         "serve-agent-operator-proxy" => {

@@ -11,6 +11,7 @@ mod concierge;
 mod hermes_room;
 mod room_task;
 mod sandbox_tools;
+mod history_compaction;
 mod resident_compute;
 mod room_resident;
 mod resident_context;
@@ -14409,6 +14410,7 @@ impl Runtime {
         let recorded = self.record_prompt_outcome(invocation);
         if recorded.is_ok() {
             self.reconcile_after_prompt_record();
+            self.compact_history();
         }
         match (result, recorded) {
             (result, Ok(())) => result,
@@ -14437,6 +14439,22 @@ impl Runtime {
                 "decisionId":decision.to_string(),"action":"post-record-reconcile",
                 "automatic":true,"result":error}));
             let _ = self.save();
+        }
+    }
+
+    /// A room resident's decided history leaves its per-operation files for
+    /// one line each in `history.jsonl` once nothing is retained
+    /// (history_compaction.rs). Never fails the prompt: a refusal is reported
+    /// and the files stay for the next pass.
+    fn compact_history(&mut self) {
+        let Some(room) = self.config.tool_task.as_ref().and_then(|t| t.room.as_ref()) else { return };
+        let (workspace, home) = (room.workspace.clone(), room.home.clone());
+        match history_compaction::compact(&self.journal, &self.config.state_dir, &[workspace.as_path()], &[home.as_path()]) {
+            Ok(Some(summary)) if summary.entries > 0 => eprintln!(
+                "grain-runtime: compacted {} decided operations, {} workspace attempts and {} superseded reads ({} entries) into {}",
+                summary.operations, summary.workspace_attempts, summary.transient, summary.entries, history_compaction::HISTORY),
+            Ok(_) => {}
+            Err(error) => eprintln!("grain-runtime: history compaction refused: {error}"),
         }
     }
 
