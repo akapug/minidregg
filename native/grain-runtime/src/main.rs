@@ -13119,7 +13119,7 @@ impl Runtime {
                 ));
             }
         };
-        let result = self.complete_foreground_result(result, completion_charge)?;
+        let result = self.complete_attached_foreground_result(result, completion_charge)?;
         self.finish_reconnected_mode()?;
         let _queued = self.output.as_ref().is_some_and(|output| {
             output.try_tool_event_for(

@@ -164,3 +164,46 @@ fn native_refusal_cleanup_failure_never_becomes_definite() {
     assert!(rt.journal.parent_hold.is_some());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn attached_completion_hard_cancel_runs_disconnect_without_settlement_or_rebirth() {
+    let (mut rt, root) = fixture(false);
+    produce(&mut rt);
+    let result = rt.completed_birth_refusal_result().unwrap().unwrap();
+    let log_path = rt.config.state_dir.join("operations.jsonl");
+    let before = fs::read_to_string(&log_path).unwrap().lines().count();
+    rt.hard_connection.store(true, Ordering::SeqCst);
+    rt.completion_phase.store(PHASE_CANCELLED, Ordering::SeqCst);
+    assert!(rt.complete_attached_foreground_result(result, "0").is_err());
+    // Only disconnect changes this physical connection flag. The shared
+    // completion's durable error fence alone deliberately does not.
+    assert!(!rt.hard_connection.load(Ordering::SeqCst));
+    assert!(rt.cancelled.load(Ordering::SeqCst));
+    assert!(rt.custody_gate.is_idle());
+    assert!(rt.journal.parent_hold.is_some());
+    assert!(rt.journal.birth_refusal.is_some());
+    assert!(rt
+        .journal
+        .foreground_attempt
+        .as_ref()
+        .unwrap()
+        .result_path
+        .is_some());
+    assert_eq!(
+        rt.journal.foreground_attempt.as_ref().unwrap().phase,
+        ForegroundPhase::Uncertain
+    );
+    let tail: Vec<Value> = fs::read_to_string(&log_path)
+        .unwrap()
+        .lines()
+        .skip(before)
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(tail.iter().any(|entry| entry["command"] == "submit"
+        && entry["source"]["grain"]["operation"]["type"] == "interrupt"));
+    assert!(!tail
+        .iter()
+        .any(|entry| entry["source"].get("grainBirth").is_some()
+            || entry["source"]["grain"]["operation"]["type"] == "settle"));
+    fs::remove_dir_all(root).unwrap();
+}

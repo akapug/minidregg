@@ -228,6 +228,26 @@ impl Runtime {
         }).to_string()})))
     }
 
+    /// A hard attachment break also performs the normal physical stop and
+    /// signed fencing path immediately. Recovery calls the shared completion
+    /// directly: it must not introduce disconnect effects on a retained hold.
+    pub(super) fn complete_attached_foreground_result(
+        &mut self,
+        result: Value,
+        charge: &str,
+    ) -> Result<Value> {
+        let outcome = self.complete_foreground_result(result, charge);
+        if outcome.is_err() && self.completion_phase.load(Ordering::SeqCst) == PHASE_CANCELLED {
+            if let Err(cleanup) = self.disconnect() {
+                return Err(format!(
+                    "{}; hard disconnect: {cleanup}",
+                    outcome.unwrap_err()
+                ));
+            }
+        }
+        outcome
+    }
+
     /// The ordinary foreground and recovery paths use one result/settlement
     /// sequence. Persisted result bytes precede the first settlement effect.
     pub(super) fn complete_foreground_result(
