@@ -57,6 +57,18 @@ World template (ember: snapshots, not replays):
   Two fixes are possible: a Host verb that seals a checkpoint at the head, which the fixture would
   call before taring, or checkpointing at a clean shutdown.
 
+Abuse limits (infra's review):
+- `3a050e77`: `deploy/shell/mini-shell-ssh` allows at most two calls per member at once (flock
+  slots in HOME/.call-slots; the third exits 75, "two calls already running for this member"). The
+  slot is the wrapper's descriptor, which `mini` and its residents never inherit. Tests in
+  `test_shell_credential_launcher.py` (Linux: 7/7 on dregg-build).
+- `b085895e`: export world, one per member per 10 minutes. The one file is HOME/exports/.last-export,
+  claimed through `world_export::claim_export(home, now)`, which the web lane's /export calls too.
+  A failed export costs nothing.
+- OWED to a Lean lane: a per-subject request rate in the Host. The Store queue is shared, so the
+  wrapper's slot pair only bounds what one member's ssh account can queue; the Host is where every
+  face (ssh, web, socket) meets.
+
 ## Owed on cut 9 (28235a17)
 
 - The world template's before/after (waiting for the coordinator's cut 9 path). The run that matters is

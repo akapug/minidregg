@@ -474,25 +474,37 @@ def rust_literals(root, data):
     return findings, unregistered
 
 def lean_ordinary_headers(root):
-    source = (root / "Kernel/ApplicationDispatchAdmission.lean").read_text()
+    source = (root / LEAN_HEADERS).read_text()
     m = re.search(r"def ordinaryHeaderName\b.*?:=\s*\(\[(.*?)\]\s*:\s*List String\)", source, re.S)
     require(m, "Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: shape not recognised")
     return re.findall(r'"([^"]*)"', m[1])
 
 def lean_consent_frames(root):
     """The frame numbers Host/ClientConsentCore.lean dispatches on (match arms, comparisons, ranges)."""
-    source = masked((root / "Host/ClientConsentCore.lean").read_text(), "lean")
+    source = masked((root / LEAN_CONSENT).read_text(), "lean")
     found = {int(n) for n in re.findall(r"\|\s*(2[2-3]\d)\s*=>", source)}
     found |= {int(n) for n in re.findall(r"operation\s*==\s*(2[2-3]\d)\b", source)}
     for a, b in re.findall(r"operation\s*≥\s*(2[2-3]\d)\s*&&\s*operation\s*≤\s*(2[2-3]\d)", source):
         found |= set(range(int(a), int(b) + 1))
     return found
 
+LEAN_HEADERS = Path("Kernel/ApplicationDispatchAdmission.lean")
+LEAN_CONSENT = Path("Host/ClientConsentCore.lean")
+HOST_MAIN = Path("Host/Main.lean")
+TRANSPORT = Path("native/resource-client/src/transport.rs")
+
+def inputs(root, data):
+    """Every path `check` reads, relative to root: the one list a copy of the tree must carry."""
+    paths = {REGISTRY, GENERATED, GENERATED_LEAN, LEAN_HEADERS, LEAN_CONSENT, HOST_MAIN, TRANSPORT}
+    paths.update(Path(binding["path"]) for binding in data["client_constants"])
+    paths.update(f.relative_to(root) for crate in WIRE_CRATES for f in (root / "native" / crate).rglob("*.rs"))
+    return paths
+
 def check(root, check_generated=True):
     data, ids = load(root)
     symbols = {e["symbol"]: e["code"] for e in ids.values()}
-    receivers = host_receivers((root / "Host/Main.lean").read_text())
-    rust = (root / "native/resource-client/src/transport.rs").read_text()
+    receivers = host_receivers((root / HOST_MAIN).read_text())
+    rust = (root / TRANSPORT).read_text()
     public = rust_routes(rust, "allowed_operation", symbols)
     private = rust_routes(rust, "allowed_operator_operation", symbols)
     active = {code for code, entry in ids.items() if entry["status"] == "active"}

@@ -23,9 +23,7 @@ class GateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         data, _ = ops.load(ROOT)
-        paths = {ops.REGISTRY, ops.GENERATED, ops.GENERATED_LEAN, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
-        paths.update(Path(binding["path"]) for binding in data["client_constants"])
-        for path in paths:
+        for path in ops.inputs(ROOT, data):
             (self.root / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / path, self.root / path)
 
@@ -166,18 +164,27 @@ class GateTests(unittest.TestCase):
         self.edit("native/resource-client/src/transport.rs", "_ => false,", "_ => true,")
         self.rejects("unknown fallback")
 
-    def test_registered_client_constant_drift_refuses(self):
+    def bound_constant(self):
+        """The first registered client constant and its source spelling (it names the generated constant)."""
         data, ids = ops.load(self.root)
         binding = data["client_constants"][0]
         entry = next(e for e in ids.values() if e["symbol"] == binding["operation"])
-        self.edit(binding["path"], f"{binding['constant']}: u8 = {entry['code']};", f"{binding['constant']}: u8 = 161;")
+        return binding, entry, f"{binding['constant']}: u8 = mini_sdk::host_operations::{entry['symbol']};"
+
+    def test_registered_client_constant_drift_refuses(self):
+        binding, entry, named = self.bound_constant()
+        other = next(e for e in ops.load(self.root)[1].values() if e["symbol"] != entry["symbol"])
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = mini_sdk::host_operations::{other['symbol']};")
         self.rejects("client constant drift")
 
+    def test_client_constant_spelled_as_a_literal_refuses(self):
+        binding, entry, named = self.bound_constant()
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = {entry['code']};")
+        self.rejects("literal Host operation bytes")
+
     def test_generated_constant_reference_is_checked(self):
-        data, ids = ops.load(self.root)
-        binding = data["client_constants"][0]
-        entry = next(e for e in ids.values() if e["symbol"] == binding["operation"])
-        self.edit(binding["path"], f"{binding['constant']}: u8 = {entry['code']};", f"{binding['constant']}: u8 = crate::host_operations::{entry['symbol']};")
+        binding, entry, named = self.bound_constant()
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = crate::host_operations::{entry['symbol']};")
         ops.check(self.root)
 
     def test_generated_output_drift_refuses(self):
