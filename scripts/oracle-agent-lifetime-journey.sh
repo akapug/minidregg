@@ -9,9 +9,9 @@ if [ "$#" -eq 4 ] && [ "$1" = prepare-controller ]; then
   run=$2 repo=$3 home=$4
   exec python3 "$repo/deploy/oracle/acceptance/agent.py" prepare-controller "$run" "$home"
 fi
-if [ "$#" -eq 4 ] && [ "$1" = prepare-worker-policy ]; then
-  run=$2 repo=$3 config=$4
-  exec python3 "$repo/deploy/oracle/acceptance/agent.py" prepare-worker-policy "$run" "$config"
+if [ "$#" -eq 4 ] && { [ "$1" = prepare-worker-policy ] || [ "$1" = prepare-bootstrap-dispatch ]; }; then
+  phase=$1 run=$2 repo=$3 input=$4
+  exec python3 "$repo/deploy/oracle/acceptance/agent.py" "$phase" "$run" "$input"
 fi
 if [ "$#" -eq 4 ] && [ "$1" = issue-grant ]; then
   run=$2 repo=$3 result=$4

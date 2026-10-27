@@ -125,6 +125,33 @@ class Operator:
                                      "--socket", self.public, "--intent", source, "--key", key, "--dir", attempt])
         return receipt(read(attempt / "outcome.json"))
 
+    def dispatch_config(self, home, layout):
+        a, caps = self.agent, self.agent["plannedCaps"]
+        if layout["controllerHome"] != str(home):
+            raise ValueError("dispatch layout names another controller home")
+        return {"task": a["dispatch"]["task"], "subject": a["dispatch"]["subject"],
+            "capability": caps["dispatchOwner"], "queryCapability": caps["dispatchOwner"],
+            "custodyKey": str(home / "custody/dispatch.key"),
+            "parentCapability": caps["parentDispatchWitness"], "parentObserveCapability": caps["parentDispatchWitness"],
+            "reserve": "1", "charge": "1", "socketPath": layout["reverseSocket"], "hostUid": os.getuid(),
+            "operatorSocket": layout["operatorSocket"], "operatorPeerUid": layout["operatorPeerUid"],
+            "reserveSigner": {"role": "4", "index": "0",
+                "publicKey": (self.workroom / "agents" / a["route"] / "dispatch.pub").read_bytes().hex(),
+                "keyId": a["dispatch"]["keyId"], "keyEpoch": "2"}}
+
+    def prepare_bootstrap_dispatch(self, layout_file):
+        """Render the real dispatch role for a pre-attachment continuation."""
+        layout = read(layout_file)
+        home = Path(layout["controllerHome"])
+        config = read(self.root / "controller-stage/controller.json")
+        if config.get("dispatchTask") is not None:
+            raise ValueError("bootstrap already configures dispatch; no replacement permitted")
+        config["dispatchTask"] = self.dispatch_config(home, layout)
+        bundle = self.calls / "controller-update"
+        bundle.mkdir(mode=0o700)
+        write(bundle / "controller.json", config)
+        return bundle / "controller.json"
+
     def prepare_controller(self, home):
         """Earn discovery grants, then render an installable private candidate.
 
@@ -204,6 +231,7 @@ class Operator:
                       "parentObserveCapability": caps["parentToolWitness"], "reserve": "5", "charge": "0",
                       "allowedPublications": [], "registeredSharedApplications": [shared],
                       "allowedSessionFamilies": [family], "currentBirthHostSha256": sha(self.host)}, "commands": []}
+        config["dispatchTask"] = self.dispatch_config(home, read(self.root / "controller-create.json"))
         write(stage / "controller.json", config)
         write(self.root / "controller-stage.json", {"protocol": "mini-oracle-controller-stage-v1",
               "stage": str(stage), "home": str(home), "configSha256": sha(stage / "controller.json"),
@@ -579,13 +607,7 @@ class Operator:
         route["grantAttemptDir"] = str(home / "state/oracle-grant")
         config["toolTask"].update(allowedApplicationLifetimeRoutes=[route], lifetimeApiHostSha256=sha(self.host),
                                  applicationServices=[{"application": "oracle-app", "protocol": "oracle-operations-v1"}])
-        config["dispatchTask"] = {"task": a["dispatch"]["task"], "subject": a["dispatch"]["subject"],
-            "capability": caps["dispatchOwner"], "queryCapability": caps["dispatchOwner"], "custodyKey": str(home / "custody/dispatch.key"),
-            "parentCapability": caps["parentDispatchWitness"], "parentObserveCapability": caps["parentDispatchWitness"],
-            "reserve": "1", "charge": "1", "socketPath": layout["reverseSocket"], "hostUid": os.getuid(),
-            "operatorSocket": layout["operatorSocket"], "operatorPeerUid": layout["operatorPeerUid"],
-            "reserveSigner": {"role": "4", "index": "0", "publicKey": (identity / "dispatch.pub").read_bytes().hex(),
-                              "keyId": a["dispatch"]["keyId"], "keyEpoch": "2"}}
+        config["dispatchTask"] = self.dispatch_config(home, layout)
         check_current("current-start-before-publication")
         write(bundle / "controller.json", config)
         write(self.calls / "activation.json", {"protocol": "mini-oracle-agent-activation-v1", "bundle": str(bundle),
@@ -596,7 +618,7 @@ class Operator:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["prepare-controller", "prepare-worker-policy", "issue-grant", "prepare-route", "activate"])
+    parser.add_argument("command", choices=["prepare-controller", "prepare-bootstrap-dispatch", "prepare-worker-policy", "issue-grant", "prepare-route", "activate"])
     parser.add_argument("run", type=Path)
     parser.add_argument("input", type=Path, help="controller home for prepare; retained session tool result for issue")
     parser.add_argument("--repo", type=Path)
@@ -615,6 +637,8 @@ def main():
         result = operator.prepare_controller(args.input)
     elif args.command == "prepare-worker-policy":
         result = operator.prepare_worker_policy(args.input)
+    elif args.command == "prepare-bootstrap-dispatch":
+        result = operator.prepare_bootstrap_dispatch(args.input)
     elif args.command == "issue-grant":
         result = operator.issue_grant(args.input)
     elif args.command == "prepare-route":
