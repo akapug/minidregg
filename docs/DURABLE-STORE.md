@@ -61,8 +61,9 @@ unseeded v2–v4 Store gains the durable tables; a **seeded v2–v4 Store refuse
 takes no write lock and writes nothing.
 
 Checkpoints: the Host opens from the latest one; `durable-checkpoint-at H`
-reads the latest at or below `H` (history views). Nothing prunes them, so the
-table grows by one row per `checkpointEvery` records.
+reads the latest at or below `H` (history views). Nothing prunes them (the
+only write is the upsert by height at `native/hyperdocument-link-sqlite-store/src/lib.rs:1386`, and no
+code path deletes a `durable_checkpoint` row), so the table grows by one row per `checkpointEvery` records.
 
 ## What the key means, and what it does not
 
