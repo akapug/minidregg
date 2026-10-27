@@ -130,38 +130,42 @@ theorem decideWith_iff (verifies : List UInt8 → Bool) (birthHeight : Nat) (hel
   rcases hc : held.candidate with _ | tag
   · simp
   simp only
-  by_cases hv : verifies tag = false
-  · simp only [hv, if_true]
-    constructor
-    · intro h; cases h
-    · rintro ⟨_, _, hr', hc', hv', _⟩
-      have : tag = _ := Option.some.inj (hc.symm.trans hc')
-      subst this; simp_all
-  · have hv' : verifies tag = true := by simpa using hv
-    simp only [hv, hv', if_false, true_and]
+  by_cases hv' : verifies tag = true
+  · simp only [hv', reduceCtorEq, if_false]
     by_cases below : held.height < birthHeight
     · simp only [below, if_true]
       constructor
       · intro h; cases h
-      · rintro ⟨_, _, _, _, le, _⟩; omega
-    · rcases physical with _ | tip
-      · simp [below]
-      · simp only [below, if_false]
-        by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record, tag⟩]
-        · simp only [ok, and_self, if_true, true_iff]
-          refine ⟨record, tag, rfl, rfl, by omega, ?_⟩
-          obtain ⟨a, b⟩ := ok
-          cases tip; simp_all
-        · simp only [ok, if_false]
+      · rintro ⟨_, _, _, _, _, le, _⟩; omega
+    · simp only [below, if_false]
+      rcases physical with _ | tip
+      · simp
+      · by_cases ok : tip.head = held.height ∧ tip.entries = [⟨record, tag⟩]
+        · rw [if_pos ok]
+          constructor
+          · intro _
+            refine ⟨record, tag, rfl, rfl, hv', by omega, ?_⟩
+            obtain ⟨a, b⟩ := ok
+            cases tip; simp_all
+          · intro _; rfl
+        · rw [if_neg ok]
           constructor
           · intro h; cases h
           · rintro ⟨r, t, hr', hc', _, _, hp⟩
             have e1 : record = r := Option.some.inj hr'
             have e2 : tag = t := Option.some.inj hc'
             subst e1; subst e2
-            simp at hp
-            subst hp
+            have hp' := Option.some.inj hp
+            subst hp'
             exact absurd ⟨rfl, rfl⟩ ok
+  · have hv : verifies tag = false := by simpa using hv'
+    simp only [hv, if_true]
+    constructor
+    · intro h; cases h
+    · rintro ⟨r, t, _, hc', hv2, _⟩
+      have e2 : tag = t := Option.some.inj hc'
+      subst e2
+      exact absurd hv2 hv'
 
 /-- The statement, read: the head record, a candidate tag that
 `Head.verify` accepts, birth height, and the exact physical tip. -/
@@ -187,8 +191,15 @@ theorem hotRegistration_iff (birthHeight : Nat) (held : Held) (physical : Option
     unfold Held.authentic
     rcases hf : held.frontier with _ | frontier
     · simp
-    · simp only [Option.some.injEq, exists_eq_left']
-      rcases hv : Head.verify held.store held.height tag held.chain frontier with _ | head <;> simp
+    · constructor
+      · intro h
+        cases hv : Head.verify held.store held.height tag held.chain frontier with
+        | error r => simp [hv] at h
+        | ok head => exact ⟨frontier, head, rfl, hv⟩
+      · rintro ⟨f, head, hf', hv⟩
+        have e := Option.some.inj hf'
+        subst e
+        simp [hv]
   constructor
   · rintro ⟨r, t, h1, h2, h3, h4, h5⟩
     exact ⟨r, t, h1, (cand t).1 h2, (auth t).1 h3, h4, h5⟩
@@ -208,6 +219,21 @@ def untagged (store : StoreIdentity) (chain : Digest) (frontier : Option (List (
 
 def tipAt (tag : List UInt8) : Option Physical := some ⟨5, [⟨recordBytes, tag⟩]⟩
 
+/-- What the Host writes verifies: for every key, log start, chain, carried
+values and frontier, the trailer at a height is accepted by `Head.verify`
+(a `Head` is only ever obtained from the verifier). -/
+theorem verify_trailer_ok (key : MacKey) (logStart chain root indexRoot : Digest)
+    (height : Nat) (frontier : List (Nat × Digest)) :
+    ∃ head, Head.verify (StoreIdentity.ofOpen key logStart) height
+      (trailer key height ⟨root, chain, frontierDigest height frontier, indexRoot⟩) chain frontier
+      = .ok head := by
+  simp only [Head.verify, trailerCarried_trailer]
+  split
+  · exact ⟨_, rfl⟩
+  · rename_i r hr
+    exact absurd ((verifyTagged_trailer key height
+      ⟨root, chain, frontierDigest height frontier, indexRoot⟩).symm.trans hr) (by intro h; cases h)
+
 /-- Satisfiable (the defect case): an image with no carried tag, whose head entry
 read back from the Store authenticates under the open's own verifier at the
 image's height, chain and frontier, is admitted at the exact tip. For any Store
@@ -220,10 +246,9 @@ theorem satisfiable_verified_reread (key : MacKey) (logStart chain root indexRoo
       (tipAt tag) := by
   intro tag
   rw [hotRegistration_iff]
-  refine ⟨recordBytes, tag, rfl, Or.inr ⟨rfl, rfl⟩, ⟨frontier, ?_, rfl, ?_⟩, by decide, rfl⟩
-  · exact ⟨_, by
-      simp [tag, Head.verify, StoreIdentity.ofOpen, verifyTagged_trailer]⟩
-  
+  obtain ⟨head, hv⟩ := verify_trailer_ok key logStart chain root indexRoot 5 frontier
+  exact ⟨recordBytes, tag, rfl, Or.inr ⟨rfl, rfl⟩, ⟨frontier, head, rfl, hv⟩, by simp [untagged], rfl⟩
+
 /-- Satisfiable: the same with the tag carried by the image. -/
 theorem satisfiable_held_tag (key : MacKey) (logStart chain root indexRoot : Digest)
     (frontier : List (Nat × Digest)) :
@@ -233,8 +258,8 @@ theorem satisfiable_held_tag (key : MacKey) (logStart chain root indexRoot : Dig
       (tipAt tag) := by
   intro tag
   rw [hotRegistration_iff]
-  refine ⟨recordBytes, tag, rfl, Or.inl rfl, ⟨frontier, ?_, rfl, ?_⟩, by decide, rfl⟩
-  exact ⟨_, by simp [tag, Head.verify, StoreIdentity.ofOpen, verifyTagged_trailer]⟩
+  obtain ⟨head, hv⟩ := verify_trailer_ok key logStart chain root indexRoot 5 frontier
+  exact ⟨recordBytes, tag, rfl, Or.inl rfl, ⟨frontier, head, rfl, hv⟩, by simp, rfl⟩
 
 /-- Teeth, by name: no tag carried and none read back. -/
 theorem teeth_noOpeningRead (s : StoreIdentity) (c : Digest) (f : Option (List (Nat × Digest)))
@@ -248,16 +273,21 @@ theorem teeth_copiedTagUnverified (s : StoreIdentity) (c : Digest) (t : List UIn
     verdict 3 (untagged s c none (some t)) (tipAt t) = .openingUnverified := by
   simp [verdict, decideWith, untagged, Held.candidate, Held.authentic]
 
+theorem decideWith_unverified (v : List UInt8 → Bool) (b : Nat) (h : Held) (p : Option Physical)
+    (record tag : List UInt8) (hr : h.headRecord = some record) (hc : h.candidate = some tag)
+    (hv : v tag = false) : decideWith v b h p = .openingUnverified := by
+  simp [decideWith, hr, hc, hv]
+
 /-- Teeth: any tag that fails `Head.verify` is refused, whatever the tip. -/
 theorem teeth_failedVerify (s : StoreIdentity) (c : Digest) (f : List (Nat × Digest))
     (t : List UInt8) (p : Option Physical) (bad : ∀ h, Head.verify s 5 t c f ≠ .ok h) :
     verdict 3 (untagged s c (some f) (some t)) p = .openingUnverified := by
-  have : (untagged s c (some f) (some t)).authentic t = false := by
-    unfold Held.authentic untagged
-    rcases hv : Head.verify s 5 t c f with _ | h
-    · simp
-    · exact absurd hv (bad h)
-  simp [verdict, decideWith, untagged, Held.candidate, this]
+  have auth : (untagged s c (some f) (some t)).authentic t = false := by
+    show (match Head.verify s 5 t c f with | .ok _ => true | .error _ => false) = false
+    cases hv : Head.verify s 5 t c f with
+    | error r => rfl
+    | ok h => exact absurd hv (bad h)
+  exact decideWith_unverified _ 3 _ p recordBytes t rfl rfl auth
 
 /-- Teeth: a stale tip (the Store moved on past the session's head). -/
 theorem teeth_staleTip (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest)
@@ -269,7 +299,7 @@ theorem teeth_staleTip (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest
 theorem teeth_forkedTip (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest)
     (f : Option (List (Nat × Digest))) (hv : v tagBytes = true) :
     decideWith v 3 (untagged s c f (some tagBytes)) (tipAt [8]) = .tipChanged := by
-  simp [decideWith, untagged, Held.candidate, hv, tipAt, tagBytes]
+  simpa [decideWith, untagged, Held.candidate, tipAt, tagBytes] using hv
 
 /-- Teeth: the session image is below the grain's birth height. -/
 theorem teeth_belowBirth (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest)
@@ -328,6 +358,8 @@ theorem appended_headTag {rootBytes : List UInt8 → Digest}
 #assert_axioms gate_none_iff
 #assert_axioms gate_injective
 #assert_axioms decideWith_iff
+#assert_axioms verify_trailer_ok
+#assert_axioms decideWith_unverified
 #assert_axioms hotRegistration_iff
 #assert_axioms satisfiable_verified_reread
 #assert_axioms satisfiable_held_tag
