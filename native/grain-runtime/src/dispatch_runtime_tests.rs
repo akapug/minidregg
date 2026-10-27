@@ -194,6 +194,7 @@ esac
             socket_path: root.join("dispatch.sock"),
             host_uid: unsafe { libc::geteuid() } + 1,
             operator_socket: None,
+            operator_peer_uid: None,
             reserve_signer: None,
         }),
         provider_task: None,

@@ -24,6 +24,15 @@
 //! rolled-back Store refuses the next command as a new provider would. A refusal there, or a dead
 //! provider, ends the resident; the next command starts a new one from the retained anchor. Its
 //! socket lives in the owner-private anchor directory, and both ends check the peer is this user.
+//!
+//! **The resident codec Host** ([`ResidentKind::Codec`]) is the same machinery holding the
+//! member's storeless codec image (`HOST SETTINGS codec`, [`crate::local`]) instead of a consent
+//! provider: ONE child per binding for every process of this user, where each process used to
+//! start its own 159 MB Lean image. The codec is pure (`Host.Main.pureCodec` holds no state
+//! between frames), so the reply bytes are the same function of the frame whichever process's
+//! connection carries it; there is no Store to re-check and no anchor to retain. The image it
+//! holds is the client's own selected semantic Host (`MINI_LOCAL_HOST`), never the serving
+//! Store's: the operator selects that one.
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -231,9 +240,43 @@ pub fn start(anchors: &Path, executable: PathBuf, settings: &Path, settings_byte
     Ok(session)
 }
 
-/// `r-<first 16 bytes of the binding>.<suffix>`: a Unix socket path must fit `sun_path`.
-fn resident_path(dir: &Path, binding: &[u8; 32], suffix: &str) -> PathBuf {
-    dir.join(format!("r-{}.{suffix}", crate::hex::encode(&binding[..16])))
+/// Which resident a binding's socket serves: the consent provider (`r-`, `CONSENT SETTINGS
+/// stdio`) or the storeless codec Host (`c-`, `HOST SETTINGS codec`, frames 7–11). Both live in
+/// the owner-private anchor directory, both are keyed by [`binding`] (executable identity and
+/// settings bytes), both hold one child under a flock with a PID file, check the peer's uid and
+/// end when idle; only the consent one re-checks the Store per connection and retains an anchor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResidentKind {
+    Consent,
+    Codec,
+}
+
+impl ResidentKind {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Consent => "r",
+            Self::Codec => "c",
+        }
+    }
+    /// The resident's name in errors and logs.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Consent => "resident consent provider",
+            Self::Codec => "resident codec Host",
+        }
+    }
+    /// The one child a resident of this kind holds.
+    fn start(self, anchors: &Path, executable: PathBuf, settings: &Path, settings_bytes: Vec<u8>) -> Result<Session> {
+        match self {
+            Self::Consent => start(anchors, executable, settings, settings_bytes),
+            Self::Codec => Session::spawn(executable, settings, settings_bytes, "codec", "local native codec"),
+        }
+    }
+}
+
+/// `<r|c>-<first 16 bytes of the binding>.<suffix>`: a Unix socket path must fit `sun_path`.
+fn resident_file(kind: ResidentKind, dir: &Path, binding: &[u8; 32], suffix: &str) -> PathBuf {
+    dir.join(format!("{}-{}.{suffix}", kind.prefix(), crate::hex::encode(&binding[..16])))
 }
 
 /// A connection to a listening resident provider of this user, or an error.
@@ -245,7 +288,7 @@ fn resident_stream(socket: &Path) -> Result<std::os::unix::net::UnixStream> {
     }
     let stream = std::os::unix::net::UnixStream::connect(socket).map_err(|e| e.to_string())?;
     if crate::private::peer_uid(&stream)? != unsafe { libc::geteuid() } {
-        return Err("resident consent provider runs as another user".into());
+        return Err("the resident process runs as another user".into());
     }
     Ok(stream)
 }
@@ -255,15 +298,22 @@ fn resident_stream(socket: &Path) -> Result<std::os::unix::net::UnixStream> {
 /// own `consent-resident` verb); it is started in its own session, so it outlives this process
 /// and never takes its terminal's signals, with its stderr in the binding's log.
 pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Command) -> Result<Session> {
+    connect_resident_kind(ResidentKind::Consent, executable, settings_bytes, launch)
+}
+
+/// Connect to this binding's resident of `kind`, starting it when none listens. `launch` is the
+/// command that serves [`serve_resident_kind`] of this kind for this executable and settings (the
+/// client binary's own `consent-resident` or `codec-resident` verb).
+pub fn connect_resident_kind(kind: ResidentKind, executable: &Path, settings_bytes: Vec<u8>, launch: Command) -> Result<Session> {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
     let dir = private_anchor_dir()?;
     let binding = binding(executable, &settings_bytes)?;
-    let socket = resident_path(&dir, &binding, "sock");
+    let socket = resident_file(kind, &dir, &binding, "sock");
     let stream = match resident_stream(&socket) {
         Ok(stream) => stream,
         Err(_) => {
-            let log = resident_path(&dir, &binding, "log");
+            let log = resident_file(kind, &dir, &binding, "log");
             let errors = OpenOptions::new().create(true).append(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
                 .open(&log).map_err(|e| format!("{}: {e}", log.display()))?;
             let mut command = launch;
@@ -271,7 +321,7 @@ pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Comm
             unsafe {
                 command.pre_exec(|| if libc::setsid() < 0 { Err(io::Error::last_os_error()) } else { Ok(()) });
             }
-            let mut daemon = command.spawn().map_err(|e| format!("cannot start the resident consent provider: {e}"))?;
+            let mut daemon = command.spawn().map_err(|e| format!("cannot start the {}: {e}", kind.name()))?;
             let began = std::time::Instant::now();
             loop {
                 if let Ok(stream) = resident_stream(&socket) {
@@ -281,11 +331,11 @@ pub fn connect_resident(executable: &Path, settings_bytes: Vec<u8>, launch: Comm
                     // Exit 0 without a socket: another start holds the binding's lock and is
                     // still starting; keep waiting for its socket.
                     if !status.success() {
-                        return Err(format!("resident consent provider failed to start ({status}); see {}", log.display()).into());
+                        return Err(format!("{} failed to start ({status}); see {}", kind.name(), log.display()).into());
                     }
                 }
                 if began.elapsed() > std::time::Duration::from_secs(300) {
-                    return Err(format!("resident consent provider did not listen within 300 s; see {}", log.display()).into());
+                    return Err(format!("{} did not listen within 300 s; see {}", kind.name(), log.display()).into());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
@@ -319,28 +369,36 @@ struct Resident {
 /// until the provider ends or no frame arrives for `idle`. Exits at once (Ok) when another
 /// resident provider holds the binding.
 pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: std::time::Duration) -> Result<()> {
+    serve_resident_kind(ResidentKind::Consent, dir, executable, settings, idle)
+}
+
+/// Hold one child of `kind` for this binding (a consent provider, or the storeless codec Host)
+/// and serve its frames on the binding's socket in `dir`, one frame at a time across every
+/// connection, until the child ends or no frame arrives for `idle`. Exits at once (Ok) when
+/// another resident of this kind holds the binding.
+pub fn serve_resident_kind(kind: ResidentKind, dir: &Path, executable: PathBuf, settings: PathBuf, idle: std::time::Duration) -> Result<()> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::os::unix::io::AsRawFd;
     use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc};
     if !executable.is_absolute() || !settings.is_absolute() {
-        return Err("local consent executable/settings must be absolute".into());
+        return Err(format!("{}: executable and settings must be absolute", kind.name()).into());
     }
     let settings_bytes = settings_bytes(&settings)?;
     let binding = binding(&executable, &settings_bytes)?;
-    let lock_path = resident_path(dir, &binding, "lock");
+    let lock_path = resident_file(kind, dir, &binding, "lock");
     let lock = OpenOptions::new().create(true).read(true).write(true).mode(0o600).custom_flags(libc::O_NOFOLLOW)
         .open(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Ok(()); // another resident provider holds this binding
+        return Ok(()); // another resident of this kind holds this binding
     }
-    let socket = resident_path(dir, &binding, "sock");
+    let socket = resident_file(kind, dir, &binding, "sock");
     crate::private::clear_stale_socket(&socket)?;
-    let session = start(dir, executable, &settings, settings_bytes)?;
+    let session = kind.start(dir, executable, &settings, settings_bytes)?;
     let listener = std::os::unix::net::UnixListener::bind(&socket)
-        .map_err(|e| format!("resident consent socket {}: {e}", socket.display()))?;
+        .map_err(|e| format!("{} socket {}: {e}", kind.name(), socket.display()))?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     let meta = fs::symlink_metadata(&socket).map_err(|e| e.to_string())?;
-    let pid = resident_path(dir, &binding, "pid");
+    let pid = resident_file(kind, dir, &binding, "pid");
     let _files = ResidentFiles { socket: socket.clone(), pid: pid.clone(), identity: (meta.dev(), meta.ino()) };
     crate::durable::replace(&pid, format!("{}\n", std::process::id()).as_bytes(), crate::durable::Perm::Private)
         .map_err(|e| format!("{}: {e}", pid.display()))?;
@@ -358,7 +416,7 @@ pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: 
                 active.fetch_add(1, Ordering::AcqRel);
                 let (shared, last, active, ended) = (shared.clone(), last.clone(), active.clone(), ended.clone());
                 std::thread::spawn(move || {
-                    serve_connection(stream, &shared, &last, &ended);
+                    serve_connection(kind, stream, &shared, &last, &ended);
                     active.fetch_sub(1, Ordering::AcqRel);
                 });
             }
@@ -369,15 +427,19 @@ pub fn serve_resident(dir: &Path, executable: PathBuf, settings: PathBuf, idle: 
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            Err(e) => return Err(format!("resident consent provider accept: {e}").into()),
+            Err(e) => return Err(format!("{} accept: {e}", kind.name()).into()),
         }
     }
 }
 
-/// One client connection: frames in, the provider's answers out, one frame at a time across all
-/// connections. The connection's first frame is preceded by the Store re-check (233); 228, 229
-/// and 233 are the resident provider's own.
-fn serve_connection(stream: std::os::unix::net::UnixStream, shared: &Mutex<Resident>,
+/// One client connection: frames in, the child's answers out, one frame at a time across all
+/// connections. For the consent provider, the connection's first frame is preceded by the Store
+/// re-check (233), and 228, 229 and 233 are the resident's own. For the codec Host every frame
+/// is relayed as it is (nothing to re-check, nothing to retain), and a connection whose child
+/// failed is closed without a reply: a 255 frame would read as the Host's own undecided outcome,
+/// which it is not; the client's frame fails as it would with its own dead child, and its next
+/// frame starts a new resident.
+fn serve_connection(kind: ResidentKind, stream: std::os::unix::net::UnixStream, shared: &Mutex<Resident>,
     last: &Mutex<std::time::Instant>, ended: &std::sync::atomic::AtomicBool) {
     if stream.set_nonblocking(false).is_err() {
         return;
@@ -407,15 +469,21 @@ fn serve_connection(stream: std::os::unix::net::UnixStream, shared: &Mutex<Resid
             *t = std::time::Instant::now();
         }
         let operation = frame[0];
+        let codec = kind == ResidentKind::Codec;
         let (answer, body) = match shared.lock() {
+            Err(_) if codec => return,
             Err(_) => (CONSENT_REFUSAL, b"resident consent provider lock poisoned".to_vec()),
             Ok(mut resident) => {
                 if resident.ended {
+                    if codec {
+                        return;
+                    }
                     (CONSENT_REFUSAL, b"the resident consent provider ended; the next command starts a new one".to_vec())
-                } else if matches!(operation, 228 | 229 | 233) {
+                } else if !codec && matches!(operation, 228 | 229 | 233) {
                     (CONSENT_REFUSAL, format!("frame {operation} is reserved to the resident consent provider").into_bytes())
                 } else {
-                    let checked = if rechecked {
+                    // The codec Host holds no Store: nothing to re-check, no anchor to retain.
+                    let checked = if rechecked || codec {
                         Ok(())
                     } else {
                         match resident.session.exchange(233, &[]) {
@@ -427,12 +495,17 @@ fn serve_connection(stream: std::os::unix::net::UnixStream, shared: &Mutex<Resid
                     rechecked = true;
                     match checked.and_then(|_| resident.session.exchange(operation, &frame[1..]).map_err(|e| e.0)) {
                         Ok(reply) => {
-                            retain_anchor(&mut resident.session);
+                            if !codec {
+                                retain_anchor(&mut resident.session);
+                            }
                             reply
                         }
                         Err(e) => {
                             resident.ended = true;
                             ended.store(true, std::sync::atomic::Ordering::Release);
+                            if codec {
+                                return;
+                            }
                             (CONSENT_REFUSAL, e.into_bytes())
                         }
                     }
@@ -580,6 +653,10 @@ mod tests {
         dir
     }
 
+    fn framed(body: &[u8]) -> Vec<u8> {
+        [(body.len() as u32).to_le_bytes().as_slice(), body].concat()
+    }
+
     /// A provider stub answering one frame with `answer` and `detail`, after reading 13 bytes.
     fn answering(answer: u8, detail: &str) -> Session {
         let mut body = vec![answer];
@@ -671,8 +748,9 @@ mod tests {
     fn unchecked_operator_opcodes_refuse_before_any_frame() {
         let mut consent = Consent(answering(224, ""));
         assert!(consent.operator_plan(1, b"", b"").is_err());
-        assert_eq!(CONSENT_PLANS.len(), 31);
+        // The list is generated from protocol/host-operations.json; pin membership, not a count.
         assert!(CONSENT_PLANS.contains(&210) && CONSENT_PLANS.contains(&215));
+        assert!(CONSENT_PLANS.contains(&187) && CONSENT_PLANS.contains(&194));
     }
 
     #[test]
@@ -725,7 +803,7 @@ mod tests {
         let anchors = dir.join("anchors");
         fs::create_dir(&anchors).unwrap();
         let binding = binding(&provider, b"{}").unwrap();
-        let socket = resident_path(&anchors, &binding, "sock");
+        let socket = resident_file(ResidentKind::Consent, &anchors, &binding, "sock");
         let (a, p, s) = (anchors.clone(), provider.clone(), settings.clone());
         let daemon = std::thread::spawn(move || serve_resident(&a, p, s, std::time::Duration::from_millis(400)));
         let connect = || {
@@ -749,11 +827,60 @@ mod tests {
         }
         assert_eq!(opcodes(&dir), vec![233, 220, 229, 221, 229, 233, 222, 229]);
         assert_eq!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().as_deref(), Some(&b"ANCHOR-R"[..]));
-        assert!(resident_path(&anchors, &binding, "pid").exists());
+        assert!(resident_file(ResidentKind::Consent, &anchors, &binding, "pid").exists());
         drop(first);
         drop(second);
         daemon.join().unwrap().unwrap();
-        assert!(!socket.exists() && !resident_path(&anchors, &binding, "pid").exists());
+        assert!(!socket.exists() && !resident_file(ResidentKind::Consent, &anchors, &binding, "pid").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// One resident codec Host serves every connection (every `mini` process) of its binding with
+    /// ONE child, re-checks nothing, retains nothing, answers each frame with the child's own reply,
+    /// and ends when idle, taking its socket and PID file with it.
+    #[test]
+    fn resident_codec_host_serves_every_connection_with_one_child() {
+        // A short directory: the socket path must fit sun_path.
+        let dir = PathBuf::from(format!("/tmp/mcc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        let host = crate::local::fake::codec_stub(&dir);
+        // The stub answers frame i from reply-i: each reply echoes the operation it answers.
+        fs::write(dir.join("reply-1"), framed(b"\x07ok")).unwrap();
+        fs::write(dir.join("reply-2"), framed(b"\x08ok")).unwrap();
+        fs::write(dir.join("reply-3"), framed(b"\x0bok")).unwrap();
+        fs::write(dir.join("reply"), framed(b"\xff unexpected fourth frame")).unwrap();
+        let settings = dir.join("settings.json");
+        fs::write(&settings, b"{}").unwrap();
+        let anchors = dir.join("anchors");
+        fs::create_dir(&anchors).unwrap();
+        let binding = binding(&host, b"{}").unwrap();
+        let socket = resident_file(ResidentKind::Codec, &anchors, &binding, "sock");
+        assert_ne!(socket, resident_file(ResidentKind::Consent, &anchors, &binding, "sock"), "the codec socket is not the consent socket");
+        let (a, h, s) = (anchors.clone(), host.clone(), settings.clone());
+        let daemon = std::thread::spawn(move || serve_resident_kind(ResidentKind::Codec, &a, h, s, std::time::Duration::from_millis(400)));
+        let connect = || {
+            for _ in 0..2000 {
+                if let Ok(stream) = resident_stream(&socket) {
+                    let input = stream.try_clone().unwrap();
+                    return Session::over(Box::new(input), Box::new(stream), host.clone(), b"{}".to_vec());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("resident codec Host never listened");
+        };
+        let mut first = connect();
+        assert_eq!(round_trip(&mut first, 7, b"intent").unwrap(), b"ok");
+        let mut second = connect();
+        assert_eq!(round_trip(&mut second, 8, b"outcome").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut first, 11, b"assemble").unwrap(), b"ok");
+        assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one child for all connections");
+        assert!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().is_none(), "the codec Host retains no anchor");
+        assert!(resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());
+        drop(first);
+        drop(second);
+        daemon.join().unwrap().unwrap();
+        assert!(!socket.exists() && !resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

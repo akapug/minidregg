@@ -506,13 +506,21 @@ TABLE_ROWS = {
              "models": [MODEL], "credential": "user"},
     "pool": {"name": "local", "endpoint": ENDPOINT, "kind": "openai-compatible",
              "models": [MODEL], "credential": "pool", "caps": {"perCall": "64", "perDay": "10"}}}
+INSTALL = "/usr/bin/install"
+# The one root step of this journey, probed as the one rule it needs (a targeted sudoers rule satisfies it;
+# a broad one is never required): RUNNER ALL=(root) NOPASSWD: /usr/bin/install
+probe = subprocess.run(["sudo", "-n", "-l", INSTALL], capture_output=True)
+if probe.returncode != 0:
+    import pwd
+    fail(f"missing input: sudoers rule {pwd.getpwuid(os.getuid()).pw_name} ALL=(root) NOPASSWD: {INSTALL} "
+         "(the provider table is root-owned, as in production): " + probe.stderr.decode("utf-8", "replace")[-160:])
 def install_table(*routes):
     json.dump({"type": "mini-provider-table-v2", "providers": [TABLE_ROWS[r] for r in routes]},
               open(TABLE_SOURCE, "w"))
-    installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
+    installed = subprocess.run(["sudo", "-n", INSTALL, "-o", "root", "-g", "root", "-m", "0644",
                                 TABLE_SOURCE, TABLE], capture_output=True)
     if installed.returncode != 0:
-        fail("the provider table must be root-owned; sudo -n install failed: "
+        fail(f"the provider table must be root-owned; sudo -n {INSTALL} failed: "
              + installed.stderr.decode("utf-8", "replace")[-200:])
 install_table("user", "pool")
 # Credential custody is the key broker's (native/mini-keys): same account in this

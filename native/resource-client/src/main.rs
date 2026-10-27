@@ -26,6 +26,8 @@ mod key_adoption;
 #[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
+mod operator_peer;
+#[cfg(unix)]
 mod agent_reserve;
 #[cfg(unix)]
 mod current_birth;
@@ -761,8 +763,9 @@ usage:
   mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
+  mini apps bootstrap --dir OPERATOR-WORKSPACE [--budget N] [--tool-ref tool] [--parent-ref parent]   operator, once per world: the metered tasks
   mini apps-front --listen 127.0.0.1:8797 --origins DIR [--domain demo.dregg.online]   the grain entrance behind Caddy
-  mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH] [--member-group G] [--edge-group G]   the operator custodian
+  mini apps-worker --state DIR --world WORLD.json [--member-socket PATH] [--edge-socket PATH] [--member-group G] [--edge-group G]   the operator custodian
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
@@ -831,6 +834,8 @@ usage:
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
+  mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
+                         requires one systemd-activated listener; controller clients pin --operator-peer-uid
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -2573,6 +2578,16 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
 }
 
 fn run(mut args: Args) -> Result<()> {
+    #[cfg(unix)]
+    if let Some(uid) = args.optional("operator-peer-uid") {
+        let command = args.command.to_string_lossy();
+        if !(command.starts_with("agent-reserve-") || command.starts_with("agent-lifetime-reserve-")
+            || command.starts_with("agent-lifetime-paid-") || command == "agent-payer-sign") {
+            return Err("--operator-peer-uid is restricted to agent reserve/payer commands".into());
+        }
+        let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
+        operator_peer::configure(uid)?;
+    }
     replan::configure(args.optional("replan-max"))?;
     if let Some(identity) = args.optional("ssh-identity") { pin_ssh_identity(&path(identity))?; }
     let mut socket_argument = args.optional("socket");
@@ -2721,6 +2736,15 @@ fn run(mut args: Args) -> Result<()> {
             client_consent::resident(consent, settings)
         }
         #[cfg(unix)]
+        "codec-resident" => {
+            // HOT-PATH 2a: one storeless codec Host per image+settings binding for every `mini`
+            // process of this user, started by the first `local_frame` that finds none listening.
+            let host = path(args.required("host")?);
+            let settings = path(args.required("settings")?);
+            args.finish()?;
+            client_consent::codec_resident(host, settings)
+        }
+        #[cfg(unix)]
         "serve-operator" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -2744,6 +2768,16 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
             public_proxy::serve(socket, &upstream, &config, group)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-agent-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("controller-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("controller UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-agent-operator-proxy requires --socket")?;
+            public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {

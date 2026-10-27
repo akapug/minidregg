@@ -362,11 +362,12 @@ fn inspect_original(
             .ok_or_else(|| invalid("STOP probe parent absent"))?,
     )?;
     DirBuilder::new().mode(0o700).create(probe_dir)?;
-    let plan_path = write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
-    let committed_path = write_new(probe_dir, "committed-v3.bin", &committed)?;
+    write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
+    write_new(probe_dir, "committed-v3.bin", &committed)?;
     let output_path = probe_dir.join("current.json");
-    let inspection =
-        operator.inspect_stop_claim(&plan_path, &committed_path, &output_path, MAX_INSPECTION)?;
+    let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
+        operator, &plan, &committed, &output_path,
+    )?;
     let target = StopTarget::from_verified_inspection(
         &plan,
         &committed,

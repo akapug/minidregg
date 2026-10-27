@@ -878,10 +878,14 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
         .and_then(|t| serde_json::from_str(t).ok())
         .ok_or("the attach brief is not JSON")?;
     let me = brief.get("me").and_then(Value::as_str).ok_or("brief.me absent")?.to_owned();
-    let docs: Vec<String> = brief["docs"].as_array().into_iter().flatten().filter_map(|d| d.as_str().map(str::to_owned)).collect();
+    // The assignment names each document as {name, target, verbs}; older
+    // briefs named it by its bare name.
+    let docs: Vec<String> = brief["docs"].as_array().into_iter().flatten()
+        .filter_map(|d| d.as_str().or_else(|| d.get("name").and_then(Value::as_str)).map(str::to_owned)).collect();
     let index = docs.iter().find(|d| d.ends_with("-index")).cloned().ok_or("brief names no index")?;
     let digest = docs.iter().find(|d| d.ends_with("-digest")).cloned().ok_or("brief names no digest")?;
-    let program = brief.get("program").and_then(Value::as_str).unwrap_or("").to_owned();
+    // The program document's name (`programName`; older briefs put the name in `program`).
+    let program = brief.get("programName").or_else(|| brief.get("program")).and_then(Value::as_str).unwrap_or("").to_owned();
     let every: usize = brief.get("every").and_then(Value::as_str).and_then(|e| e.parse().ok()).unwrap_or(3);
     let current = &messages[user..];
     let issued: Vec<String> = current
@@ -1698,7 +1702,7 @@ mod tests {
     }
 
     fn brief() -> Value {
-        json!({"role":"user","content":json!({"me":"42","docs":["lab-index","lab-digest"],"program":"lab-hermes-librarian","every":"3"}).to_string()})
+        json!({"role":"user","content":json!({"me":"42","docs":[{"name":"lab-index","target":"1","verbs":["observe","mutate"]},{"name":"lab-digest","target":"2","verbs":["observe","mutate"]}],"program":"lab-hermes-librarian","every":"3"}).to_string()})
     }
 
     fn tool_msg(id: &str, value: Value) -> Value {

@@ -266,6 +266,18 @@ pub(crate) fn public_envelope(
     Ok(())
 }
 
+/// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
+/// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
+pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
+    let (pin, request) = split_envelope(envelope, config)?;
+    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
+    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+        || !request_within_bound(request) || !allowed_operator_operation(request) {
+        return Err("operation unavailable on agent operator proxy");
+    }
+    Ok(())
+}
+
 pub(crate) fn catalog_enabled(config: &[u8]) -> Result<bool, String> {
     Ok(serde_json::from_slice::<serde_json::Value>(config)
         .map_err(|e| format!("invalid operator config JSON: {e}"))?
@@ -554,6 +566,8 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
+        // STOP inspection only joins retained bytes to current verified history.
+        [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
         [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // Route-bound164 uses the same mutating dispatch receiver with an extra immutable restriction.
@@ -1192,8 +1206,15 @@ const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (
 
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
     durability_barrier()?;
+    let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
+    if let Some(uid) = expected_peer {
+        if peer_uid(&stream)? != uid {
+            return Err("operator endpoint peer UID mismatch before transmission".into());
+        }
+        crate::operator_peer::check_socket(socket)?;
+    }
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
@@ -3367,6 +3388,27 @@ done"#;
         assert!(!response_operation_matches(34, &[164]));
         assert!(!response_operation_matches(154, &[34, 1]));
         assert!(!response_operation_matches(34, &[]));
+    }
+
+    #[test]
+    fn stop_inspection_is_private_and_requires_two_nonempty_inputs() {
+        let mut request = vec![155];
+        request.extend_from_slice(&1u32.to_le_bytes());
+        request.extend_from_slice(b"PC");
+        assert!(allowed_operator_operation(&request));
+        assert!(!allowed_operation(&request, false));
+        assert!(!allowed_operation(&request, true));
+        for malformed in [
+            vec![155],
+            vec![155, 1, 0, 0],
+            vec![155, 0, 0, 0, 0, b'C'],
+            vec![155, 1, 0, 0, 0, b'P'],
+            vec![155, 255, 255, 255, 255, b'P', b'C'],
+        ] {
+            assert!(!allowed_operator_operation(&malformed));
+        }
+        request.resize(HOST_MAX_FRAME + 1, 1);
+        assert!(!allowed_operator_operation(&request));
     }
 
     #[test]

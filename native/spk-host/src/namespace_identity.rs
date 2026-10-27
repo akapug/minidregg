@@ -13,37 +13,234 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::collections::BTreeMap;
-static ROOTS: OnceLock<BTreeMap<PathBuf, (File, Metadata)>>=OnceLock::new();
+// Bootstrap deliberately inspects only the fixed world SPK namespace. No archive
+// or resident JSON is parsed before isolation. Finalized packages contribute their
+// retained metadata, not every executable-image file; public revisions contribute
+// their complete bounded metadata tree. Kernel FD limits can impose a lower bound.
+const MAX_CUSTODY_HANDLES: usize = 131_072;
+const MAX_CUSTODY_PATH_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CUSTODY_DEPTH: usize = 32;
+struct Pin { file: File, original: Metadata }
+struct Provenance {
+    paths: BTreeMap<PathBuf, std::sync::Arc<Pin>>,
+    inodes: BTreeMap<(u64,u64), std::sync::Arc<Pin>>,
+    path_bytes: usize,
+}
+impl Provenance {
+    fn new() -> Self { Self { paths:BTreeMap::new(), inodes:BTreeMap::new(), path_bytes:0 } }
+}
+static ROOTS: OnceLock<Provenance> = OnceLock::new();
 fn refused(s: &str)->io::Error { io::Error::new(io::ErrorKind::PermissionDenied,s) }
+fn stable(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
+    (meta.dev(),meta.ino(),meta.mode(),meta.nlink(),meta.len(),meta.mtime(),meta.mtime_nsec(),meta.ctime(),meta.ctime_nsec())
+}
+fn unchanged(pin: &Pin, observed: &Metadata) -> bool {
+    let Ok(current) = pin.file.metadata() else { return false; };
+    stable(&current) == stable(&pin.original) && stable(observed) == stable(&pin.original)
+        && (current.uid(),current.gid()) == (observed.uid(),observed.gid())
+}
+/// Exact pre-namespace owner/group, only for the same unchanged held inode.
+/// Once bootstrap has captured custody, an unknown inode is never blessed by
+/// its namespace-visible UID (including the ambiguous overflow UID/GID).
+pub(crate) fn original_owner(observed: &Metadata) -> Option<(u32,u32)> {
+    match ROOTS.get() {
+        Some(roots) => roots.inodes.get(&(observed.dev(),observed.ino()))
+            .filter(|pin| unchanged(pin,observed)).map(|pin|(pin.original.uid(),pin.original.gid())),
+        None if observed.uid()==0 || observed.uid()==unsafe{libc::geteuid()} => Some((observed.uid(),observed.gid())),
+        None => None,
+    }
+}
 /// Root in the initial namespace is unmapped inside the resident namespace.
-/// Retained handles carry its verified provenance, never the overflow uid.
+/// Retained handles carry its verified provenance, never the overflow UID.
 pub(crate) fn root_owned(path: &Path, observed: &Metadata) -> bool {
-    if crate::os::root_owner(observed.uid()) { return true; }
-    ROOTS.get().and_then(|roots|roots.get(path)).is_some_and(|(f, held)| {
-        let Ok(current)=f.metadata() else { return false; };
-        if (current.dev(),current.ino(),current.ctime(),current.ctime_nsec())!=(held.dev(),held.ino(),held.ctime(),held.ctime_nsec()) { return false; }
-        (held.dev(),held.ino(),held.mode(),held.nlink(),held.len(),held.mtime(),held.mtime_nsec(),held.ctime(),held.ctime_nsec())
-        ==(observed.dev(),observed.ino(),observed.mode(),observed.nlink(),observed.len(),observed.mtime(),observed.mtime_nsec(),observed.ctime(),observed.ctime_nsec())
+    if ROOTS.get().is_none() && crate::os::root_owner(observed.uid()) { return true; }
+    ROOTS.get().and_then(|roots|roots.paths.get(path)).is_some_and(|pin| {
+        pin.original.uid()==0 && unchanged(pin,observed)
     })
 }
-fn remember(path: &Path, roots: &mut BTreeMap<PathBuf,(File,Metadata)>) -> io::Result<()> {
-    let m=fs::symlink_metadata(path)?;
-    if m.file_type().is_symlink() || m.mode()&0o022!=0 { return Err(refused("namespace bootstrap custody path writable or symlinked")); }
-    if m.uid()==0 {
-        let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_PATH).open(path)?;
-        let held=f.metadata()?;
-        if held.uid()!=0 || (held.dev(),held.ino())!=(m.dev(),m.ino()) { return Err(refused("namespace bootstrap root handle changed")); }
-        roots.insert(path.to_owned(),(f,held));
-    } else if m.uid()!=unsafe{libc::geteuid()} { return Err(refused("namespace bootstrap custody path belongs to another principal")); }
+fn host_trusted(meta: &Metadata) -> bool {
+    !meta.file_type().is_symlink() && meta.mode()&0o022==0
+        && (meta.uid()==0 || meta.uid()==unsafe{libc::geteuid()})
+}
+fn protected_handle(path: &Path) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Component;
+    if !path.is_absolute() { return Err(refused("bootstrap custody path must be absolute")); }
+    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/")?;
+    let components:Vec<_>=path.components().skip(1).collect();
+    for (index,component) in components.iter().enumerate() {
+        if !host_trusted(&current.metadata()?) { return Err(refused("bootstrap custody ancestor belongs to another principal or is writable")); }
+        let Component::Normal(name)=component else { return Err(refused("bootstrap custody path not normalized")); };
+        let name=CString::new(name.as_bytes()).map_err(|_|refused("bootstrap custody path contains NUL"))?;
+        let flags=libc::O_PATH|libc::O_NOFOLLOW|libc::O_CLOEXEC|if index+1<components.len(){libc::O_DIRECTORY}else{0};
+        let fd=unsafe{libc::openat(current.as_raw_fd(),name.as_ptr(),flags)};
+        if fd<0 { return Err(io::Error::last_os_error()); }
+        current=unsafe{File::from_raw_fd(fd)};
+    }
+    let meta=current.metadata()?;
+    if !host_trusted(&meta) || (!meta.is_dir() && !meta.is_file()) {
+        return Err(refused("bootstrap custody entry belongs to another principal, is writable, or is not regular"));
+    }
+    Ok(current)
+}
+fn remember(path: &Path, roots: &mut Provenance) -> io::Result<()> {
+    if roots.paths.contains_key(path) { return Ok(()); }
+    let count=roots.paths.len();
+    let bytes=path.as_os_str().len();
+    if count>=MAX_CUSTODY_HANDLES || bytes>MAX_CUSTODY_PATH_BYTES.saturating_sub(roots.path_bytes) {
+        return Err(refused("bootstrap custody handle/path bound exceeded"));
+    }
+    let file=protected_handle(path)?;
+    let original=file.metadata()?;
+    let pin=std::sync::Arc::new(Pin {file,original});
+    if let Some(previous)=roots.inodes.get(&(pin.original.dev(),pin.original.ino())) {
+        if !unchanged(previous,&pin.original) { return Err(refused("bootstrap custody inode changed")); }
+    }
+    roots.inodes.insert((pin.original.dev(),pin.original.ino()),pin.clone());
+    roots.paths.insert(path.to_owned(),pin);
+    roots.path_bytes+=bytes;
+    Ok(())
+}
+fn finalized_name(name: &str) -> bool {
+    name.strip_prefix("sha256-").is_some_and(|hash| hash.len()==64 && hash.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)))
+}
+fn public_tree(path: &Path, roots: &mut Provenance, depth: usize) -> io::Result<()> {
+    if depth>MAX_CUSTODY_DEPTH { return Err(refused("bootstrap public-data tree depth exceeded")); }
+    remember(path,roots)?;
+    if roots.paths[path].original.is_dir() {
+        for entry in fs::read_dir(path)? {
+            public_tree(&entry?.path(),roots,depth+1)?;
+        }
+    }
+    Ok(())
+}
+fn remember_spk_namespace(world: &Path, roots: &mut Provenance) -> io::Result<()> {
+    let namespace=world.join("spk");
+    match fs::symlink_metadata(&namespace) {
+        Err(error) if error.kind()==io::ErrorKind::NotFound => return Ok(()),
+        result => { result?; }
+    }
+    for ancestor in namespace.ancestors() { remember(ancestor,roots)?; }
+    for kind in ["packages","public-data"] {
+        let store=namespace.join(kind);
+        match fs::symlink_metadata(&store) {
+            Err(error) if error.kind()==io::ErrorKind::NotFound => continue,
+            result => { result?; }
+        }
+        remember(&store,roots)?;
+        let mut seen=0;
+        for entry in fs::read_dir(&store)? {
+            seen+=1;
+            if seen>MAX_CUSTODY_HANDLES { return Err(refused("bootstrap publication listing bound exceeded")); }
+            let entry=entry?;
+            if !entry.file_name().to_str().is_some_and(finalized_name) { continue; }
+            let publication=entry.path();
+            if kind=="public-data" { public_tree(&publication,roots,0)?; }
+            else {
+                remember(&publication,roots)?;
+                for name in ["package.spk","manifest.json","import-policy.json","root"] {
+                    let path=publication.join(name);
+                    match fs::symlink_metadata(&path) {
+                        Err(error) if error.kind()==io::ErrorKind::NotFound => continue,
+                        result => { result?; }
+                    }
+                    remember(&path,roots)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 pub(crate) fn prepare_root_handles(config: &Path, root: &Path, store: &str, grain: &str) -> io::Result<()> {
-    let mut roots=BTreeMap::new();
+    let mut roots=Provenance::new();
     for path in config.ancestors().skip(1) { remember(path,&mut roots)?; }
     let witness=root.join("attest").join(format!("{store}-{grain}.witness"));
     for path in witness.ancestors() { remember(path,&mut roots)?; }
+    remember_spk_namespace(root,&mut roots)?;
+    let controller=root.join("controller");
+    match fs::symlink_metadata(&controller) {
+        Err(e) if e.kind()==io::ErrorKind::NotFound => {},
+        result => { result?; remember(&controller,&mut roots)?; }
+    }
     ROOTS.set(roots).map_err(|_|refused("namespace root provenance initialized twice"))
 }
+/// Root setup may register one already-delegated controller. This protects the
+/// operator from the controller, not controller keys from their trusted operator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ControllerIdentity { uid: u32, gid: u32 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+struct ControllerReceipt {
+    protocol: String, store: String, deployment_id: String, host_id: String,
+    operator_uid: u32, operator_gid: u32, controller_uid: u32, controller_gid: u32,
+    account: String,
+}
+static CONTROLLER: OnceLock<Option<ControllerIdentity>> = OnceLock::new();
+fn receipt_identity(r: &ControllerReceipt, registry: &crate::volume_helper::Registry) -> io::Result<ControllerIdentity> {
+    let valid = |id: u32| id>=65536 && id<u32::MAX;
+    if r.protocol!="mini-spk-controller-namespace-v1" || r.store!=registry.store
+        || r.deployment_id!=registry.deployment_id || r.host_id!=registry.host_id
+        || r.operator_uid!=registry.operator_uid || r.operator_gid!=registry.operator_gid
+        || r.account!=format!("mini-c-{}",registry.store)
+        || !valid(r.controller_uid) || !valid(r.controller_gid)
+        || r.controller_uid==registry.operator_uid || r.controller_gid==registry.operator_gid
+        || registry.app_uids.contains(&r.controller_uid) || registry.app_uids.contains(&r.controller_gid)
+    { return Err(refused("registered controller namespace identity differs from world")); }
+    Ok(ControllerIdentity {uid:r.controller_uid,gid:r.controller_gid})
+}
+fn account_matches(name: &str, home: &Path, identity: ControllerIdentity) -> io::Result<()> {
+    use std::ffi::{CString,CStr};
+    let name=CString::new(name).map_err(|_|refused("controller account name"))?;
+    let mut bytes=vec![0 as libc::c_char;16384];
+    let mut entry:libc::passwd=unsafe{std::mem::zeroed()};
+    let mut result=std::ptr::null_mut();
+    let code=unsafe{libc::getpwnam_r(name.as_ptr(),&mut entry,bytes.as_mut_ptr(),bytes.len(),&mut result)};
+    if code!=0 || result.is_null() || entry.pw_dir.is_null() || entry.pw_shell.is_null()
+        || entry.pw_uid!=identity.uid || entry.pw_gid!=identity.gid
+        || unsafe{CStr::from_ptr(entry.pw_dir)}.to_bytes()!=home.as_os_str().as_encoded_bytes()
+        || unsafe{CStr::from_ptr(entry.pw_shell)}.to_bytes()!=b"/usr/sbin/nologin"
+    { return Err(refused("registered controller passwd identity differs")); }
+    let mut group:libc::group=unsafe{std::mem::zeroed()};
+    let mut result=std::ptr::null_mut();
+    let code=unsafe{libc::getgrnam_r(name.as_ptr(),&mut group,bytes.as_mut_ptr(),bytes.len(),&mut result)};
+    if code!=0 || result.is_null() || group.gr_gid!=identity.gid
+        || (!group.gr_mem.is_null() && !unsafe{*group.gr_mem}.is_null())
+    { return Err(refused("registered controller private group differs")); }
+    Ok(())
+}
+pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Registry) -> io::Result<Option<ControllerIdentity>> {
+    let directory=registry.grains_root.join("controller");
+    match fs::symlink_metadata(&directory) {
+        Err(e) if e.kind()==io::ErrorKind::NotFound => return Ok(None),
+        result => { result?; }
+    }
+    let path=directory.join("namespace.json");
+    minidregg_compatible_upgrade_custody::root_ancestors(&path)?;
+    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path)?;
+    let before=file.metadata()?;
+    if !before.is_file() || before.uid()!=0 || before.nlink()!=1 || before.mode()&0o7777!=0o644
+        || before.len()==0 || before.len()>4096 {
+        return Err(refused("registered controller namespace receipt custody refused"));
+    }
+    let mut bytes=Vec::new();
+    Read::by_ref(&mut file).take(4097).read_to_end(&mut bytes)?;
+    let after=file.metadata()?;
+    let named=fs::symlink_metadata(&path)?;
+    if bytes.len() as u64!=before.len() || stable(&before)!=stable(&after)
+        || stable(&before)!=stable(&named) || (before.dev(),before.ino(),before.uid(),before.gid())!=(named.dev(),named.ino(),named.uid(),named.gid()) {
+        return Err(refused("registered controller receipt changed while read"));
+    }
+    let receipt:ControllerReceipt=serde_json::from_slice(&bytes)?;
+    let identity=receipt_identity(&receipt,registry)?;
+    account_matches(&receipt.account,&directory.join("home"),identity)?;
+    Ok(Some(identity))
+}
+pub(crate) fn require_registered_controller(uid:u32) -> io::Result<()> {
+    if CONTROLLER.get().and_then(|v|*v).is_some_and(|c|c.uid==uid) { Ok(()) }
+    else { Err(refused("agent controller UID is not the root-registered mapped identity")) }
+}
+
 /// The physical bubblewrap binaries a host may provide (deploy/grain-host/resolve-bwrap):
 /// the AppArmor-profiled copy a host restricting unprivileged user namespaces ships, and
 /// the distro binary. The namespace and the app sandbox are made by the same binary.
@@ -77,10 +274,12 @@ fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error {
     let (step, path) = (step.to_owned(), path.to_owned());
     move |error| io::Error::new(error.kind(), format!("namespace bootstrap {step} ({path}): {error}"))
 }
-fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
+fn map(program: &str, pid: u32, operator: u32, app: u32, controller: Option<u32>) -> io::Result<()> {
     eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
+    let mut args=vec![pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()];
+    if let Some(id)=controller { args.extend([id.to_string(),id.to_string(),"1".into()]); }
     let status = Command::new(program)
-        .args([pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()])
+        .args(args)
         .env_clear()
         .status()
         .map_err(at("mapping helper", program))?;
@@ -105,9 +304,12 @@ fn thread_count() -> io::Result<u32> {
         .and_then(|rest| rest.trim().parse().ok())
         .ok_or_else(|| refused("thread census refused: /proc/self/status names no Threads"))
 }
-fn exact_map(text: &str, op: u32, app: u32) -> bool {
-    let rows: Vec<Vec<u32>> = text.lines().map(|r| r.split_whitespace().filter_map(|n| n.parse().ok()).collect()).collect();
-    rows.len() == 2 && rows.contains(&vec![op, op, 1]) && rows.contains(&vec![app, app, 1])
+fn exact_map(text: &str, op: u32, app: u32, controller:Option<u32>) -> bool {
+    let rows:Result<Vec<Vec<u32>>,_>=text.lines().map(|r|r.split_whitespace().map(str::parse::<u32>).collect()).collect();
+    let Ok(mut rows)=rows else{return false};
+    let mut expected=vec![vec![op,op,1],vec![app,app,1]];
+    if let Some(id)=controller {expected.push(vec![id,id,1]);}
+    rows.sort();expected.sort();rows==expected
 }
 /// `bwrap --unshare-user --userns-block-fd 4 --info-fd 3` creates the namespace and,
 /// given the block fd, writes no uid/gid map itself: it reports its namespaced child and
@@ -122,6 +324,13 @@ fn exact_map(text: &str, op: u32, app: u32) -> bool {
 /// keeps every capability of the namespace, none of the host, until the bootstrap
 /// drops them.
 pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32, app_uid: u32, app_gid: u32) -> io::Result<()> {
+    enter_registered(bwrap,bwrap_sha256,operator_uid,operator_gid,app_uid,app_gid,None)
+}
+pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32,
+    app_uid: u32, app_gid: u32, controller:Option<&ControllerIdentity>) -> io::Result<()> {
+    if controller.is_some_and(|c| c.uid==operator_uid || c.uid==app_uid || c.gid==operator_gid || c.gid==app_gid) {
+        return Err(refused("registered controller overlaps operator or app"));
+    }
     if unsafe { libc::geteuid() } == 0 || unsafe { libc::geteuid() } != operator_uid || unsafe { libc::getegid() } != operator_gid {
         return Err(refused("resident requires its unprivileged operator uid"));
     }
@@ -176,8 +385,8 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
         if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
-        map("/usr/bin/newuidmap", pid, operator_uid, app_uid)?;
-        map("/usr/bin/newgidmap", pid, operator_gid, app_gid)?;
+        map("/usr/bin/newuidmap", pid, operator_uid, app_uid,controller.map(|c|c.uid))?;
+        map("/usr/bin/newgidmap", pid, operator_gid, app_gid,controller.map(|c|c.gid))?;
         File::from(block_w).write_all(&[1])?;
         if !holder.wait()?.success() {
             return Err(refused("namespace bwrap failed"));
@@ -192,9 +401,10 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
         }
         let uid = fs::read_to_string("/proc/self/uid_map")?;
         let gid = fs::read_to_string("/proc/self/gid_map")?;
-        if !exact_map(&uid, operator_uid, app_uid) || !exact_map(&gid, operator_gid, app_gid) {
+        if !exact_map(&uid, operator_uid, app_uid,controller.map(|c|c.uid)) || !exact_map(&gid, operator_gid, app_gid,controller.map(|c|c.gid)) {
             return Err(refused("namespace identity maps differ from broker selection"));
         }
+        CONTROLLER.set(controller.copied()).map_err(|_|refused("controller mapping initialized twice"))?;
         Ok(())
     })();
     if result.is_err() {
@@ -207,6 +417,59 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    fn registry() -> crate::volume_helper::Registry {
+        serde_json::from_value(serde_json::json!({
+            "protocol":"mini-spk-volume-registry-v1","store":"ab".repeat(8),"deploymentId":"cd".repeat(32),
+            "hostId":"ef".repeat(32),"grainsRoot":format!("/var/lib/mini-spk-worlds/{}","ab".repeat(8)),
+            "operatorUid":1000,"operatorGid":1001,"appUids":[100000,100001],
+            "helper":"/usr/local/libexec/mini-spk-volume-helper","helperSha256":"12".repeat(32)
+        })).unwrap()
+    }
+    fn receipt() -> serde_json::Value {
+        serde_json::json!({"protocol":"mini-spk-controller-namespace-v1","store":"ab".repeat(8),
+            "deploymentId":"cd".repeat(32),"hostId":"ef".repeat(32),"operatorUid":1000,"operatorGid":1001,
+            "controllerUid":100032,"controllerGid":100033,"account":format!("mini-c-{}","ab".repeat(8))})
+    }
+    #[test]
+    fn controller_receipt_binds_world_operator_and_independent_ids() {
+        let good:ControllerReceipt=serde_json::from_value(receipt()).unwrap();
+        assert_eq!(receipt_identity(&good,&registry()).unwrap(),ControllerIdentity{uid:100032,gid:100033});
+        for (field,value) in [("store",serde_json::json!("ff".repeat(8))),
+            ("deploymentId",serde_json::json!("00".repeat(32))),("hostId",serde_json::json!("00".repeat(32))),
+            ("operatorUid",serde_json::json!(1001)),("operatorGid",serde_json::json!(1000)),
+            ("controllerUid",serde_json::json!(100000)),("controllerGid",serde_json::json!(100001)),
+            ("controllerUid",serde_json::json!(65534)),("controllerGid",serde_json::json!(u32::MAX)),
+            ("controllerUid",serde_json::json!(1000)),("account",serde_json::json!("another-controller"))] {
+            let mut bad=receipt(); bad[field]=value;
+            let parsed:ControllerReceipt=serde_json::from_value(bad).unwrap();
+            assert!(receipt_identity(&parsed,&registry()).is_err(),"{field}");
+        }
+    }
+    #[test]
+    fn controller_receipt_is_strict_and_never_infers_optional_mapping() {
+        let mut bad=receipt(); bad["extra"]=serde_json::json!(true);
+        assert!(serde_json::from_value::<ControllerReceipt>(bad).is_err());
+        let mut bad=receipt(); bad.as_object_mut().unwrap().remove("controllerGid");
+        assert!(serde_json::from_value::<ControllerReceipt>(bad).is_err());
+        let encoded=serde_json::to_string(&receipt()).unwrap();
+        let duplicate=encoded.replacen('{',"{\"controllerUid\":100040,",1);
+        assert!(serde_json::from_str::<ControllerReceipt>(&duplicate).is_err());
+    }
+    #[test]
+    fn controller_mapping_accepts_only_exact_two_or_three_single_ids() {
+        let two="1000 1000 1\n100000 100000 1\n";
+        let three=format!("{two}100032 100032 1\n");
+        assert!(exact_map(two,1000,100000,None));
+        assert!(!exact_map(two,1000,100000,Some(100032)));
+        assert!(exact_map(&three,1000,100000,Some(100032)));
+        assert!(!exact_map(&three,1000,100000,None));
+        assert!(!exact_map(&format!("{three}999 999 1\n"),1000,100000,Some(100032)));
+        assert!(!exact_map("1000 1000 1 garbage\n100000 100000 1\n",1000,100000,None));
+        assert!(!exact_map("1000 1000 1\n100000 100000 2\n",1000,100000,None));
+        assert!(!exact_map(&three,1000,100000,Some(100033)));
+    }
 
     /// The libtest harness runs every test on a spawned thread, so this process
     /// has at least two. `enter` must refuse by name here, before it looks for

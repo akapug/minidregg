@@ -1,0 +1,90 @@
+{
+  "changed_source_sha256": {
+    "native/spk-host/src/materialize.rs": "e4a9f2fd9f107e470813b14209cc059826ef19d00d938e2a4771f93cc2fba748",
+    "native/spk-host/src/namespace_identity.rs": "b1005a4be0032be01fd301af3784b471221443e6f586752f52b93b4f1a7b0ee1",
+    "native/spk-host/src/shared_data.rs": "7c615746b08c76874e3b9a32b2fb6094a3f45b93010241c9aee422ee3750f45d",
+    "native/spk-package-stream/src/lib.rs": "2480417a74eeecb3d3205f2f67a411d09d06f2a85602739f355d6db45e93d870"
+  },
+  "date": "2026-10-27",
+  "focused_checks": {
+    "bootstrap_descriptor": 1,
+    "inspection_example": 2,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-checks-namespace.log",
+    "log_sha256": "7774cf3a48453fa2dc0a454c372b35d71f60bc2e44ddbc610fecab5803b76218",
+    "passed_marker": "ORACLE_SHARED_NATIVE_CHECKS_PASS",
+    "profile_retention": 1,
+    "public_data": 3,
+    "stream_library": 9
+  },
+  "host": "hbox",
+  "independent_real_namespace": {
+    "checks": [
+      "genuine signed package exact raw hash",
+      "forged signing key refusal",
+      "foreign/app/symlink scratch ancestry refusal",
+      "original UID and GID restoration from unchanged pinned inode",
+      "public-data receipt/open/full audit",
+      "unknown inode and replacement refusal",
+      "new catalog entry preserves held publication",
+      "held catalog rename fails closed"
+    ],
+    "log": "/tank/dregg-build/attachment-review-20261027/namespace-signed.log",
+    "log_sha256": "a04f3cb3cd7a1f8b0513537267b652454b7f21619c2e0e7437e0aad2118a5864",
+    "passed": true,
+    "source_receipt": "/tank/dregg-build/attachment-review-20261027/namespace-signed.sha256",
+    "source_receipt_sha256": "e99cbee691a4131be5be29d605dcbb824e43dbb161bf0b9ac8589dc41bfc9333"
+  },
+  "limits": [
+    "fixed world/spk metadata scan before namespace entry; no archive parsing then",
+    "all finalized public-data entries retain handles; host FD limit can refuse below nominal131072",
+    "32MiB total path bytes and depth32",
+    "held publication rename changes metadata and refuses later recheck; mounted data stays pinned"
+  ],
+  "release_binary_sha256": {
+    "mini-spk-broker": "db5363cf59d494404d2bdfc9cb566a7ee0d431bbe07b38c34bd42ef9ad2a3d22",
+    "mini-spk-volume-helper": "facf14b944a1202ac4936947622ab9d9845675b53ec79df0821f8e8e49a4b797",
+    "spk-data-publish": "9637f60be3dd1e2cf4d3e83fe5c9ff6f1c232425e22adc77e881235fcce8e326",
+    "spk-host": "875ec9f4b8dd14458ea8329e190967ab785b78d1112505822206088b5d334db9"
+  },
+  "release_build": {
+    "affinity_adjustment": {
+      "memory_max_unchanged": "4294967296",
+      "processes": [
+        {
+          "before": "Cpus_allowed_list:\t0-15",
+          "cwd": "/othersys/lanes/oracle-u2-20261027",
+          "pid": 1941112,
+          "result": "pid 1941112's current affinity list: 0-15\npid 1941112's new affinity list: 20,21\npid 1941451's current affinity list: 0-15\npid 1941451's new affinity list: 20,21\npid 1941586's current affinity list: 0-15\npid 1941586's new affinity list: 20,21\npid 1942817's current affinity list: 0-15\npid 1942817's new affinity list: 20,21\n"
+        },
+        {
+          "before": "Cpus_allowed_list:\t0-15",
+          "cwd": "/othersys/lanes/oracle-u2-20261027",
+          "pid": 1942826,
+          "result": "pid 1942826's current affinity list: 0-15\npid 1942826's new affinity list: 20,21\npid 1942894's current affinity list: 0-15\npid 1942894's new affinity list: 20,21\npid 1942895's current affinity list: 0-15\npid 1942895's new affinity list: 20,21\npid 1976366's current affinity list: 0-15\npid 1976366's new affinity list: 20,21\npid 2016039's current affinity list: 0-15\npid 2016039's new affinity list: 20,21\npid 2016074's current affinity list: 0-15\npid 2016074's new affinity list: 20,21\npid 2016093's current affinity list: 0-15\npid 2016093's new affinity list: 20,21\n"
+        }
+      ],
+      "reason": "default0-15 cores saturated;20-21 approximately5percent busy;retain two jobs and4GiB cap",
+      "scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/swarm.slice/run-u61514.scope",
+      "selected_cpus": [
+        20,
+        21
+      ]
+    },
+    "elapsed": "11m08s",
+    "exit": 0,
+    "jobs": 2,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-release-namespace.log",
+    "log_sha256": "95a131bd68bc12067062e0fb1682cfb3eaa4fe7b52ed9cdb9c77f7fdda7f8be7",
+    "memory_max": "4G"
+  },
+  "schema": "mini-public-data-namespace-checks-v1",
+  "scope": "Namespace-aware physical custody, signed package verification, and bounded public-data fixture. Full receiving journey recorded separately. No new Lean authority theorem.",
+  "snapshot": "/othersys/lanes/oracle-u2-20261027",
+  "source_commit": "4bf272a0",
+  "source_manifest": {
+    "files": 1647,
+    "mismatches_with_committed_native_and_cargo_files": [],
+    "path": "/othersys/lanes/oracle-u2-20261027/native-namespace-source-files.json",
+    "sha256": "e818850b3093817a5820e349edabe2693d4045444a0379abbd8ea6abcd326ff1"
+  }
+}

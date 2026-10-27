@@ -1,11 +1,13 @@
 #!/bin/sh
 # Operate one Mini Store from a built candidate. Every path is the operator's.
 #
-#   run.sh init    --manifest CANDIDATE/manifest.json --params PARAMS.json --state NEW_DIR
+#   run.sh init    --manifest CANDIDATE/manifest.json --params PARAMS.json --state NEW_DIR [--pay-observer OBSERVER.json]
 #   run.sh serve   --state DIR     foreground; for systemd or any supervisor
 #   run.sh start   --state DIR     background, with DIR/public/server.pid
 #   run.sh stop    --state DIR     stop what `start` started (checks the pid's cmdline)
 #   run.sh upgrade --manifest N1_MANIFEST --state DIR   rebind a stopped Store
+#   run.sh platform --state DIR --management-subject S --management-key K   set a stopped Store's lifecycle
+#                                  management (a Host setting, not a genesis parameter); then start
 #   run.sh status  --state DIR
 #   run.sh sponsor --state DIR     create the genesis sponsor's workspace (Store must be serving)
 #   run.sh unit    --state DIR     print a systemd unit that runs `serve`
@@ -27,12 +29,15 @@ unset MINI_LOCAL_HOST MINI_CONSENT_HOST MINI_CONSENT_CONFIG
 [ $# -ge 1 ] || { sed -n '2,15p' "$0" >&2; exit 2; }
 action=$1
 shift
-manifest="" params="" state=""
+manifest="" params="" state="" pay_observer="" management_subject="" management_key=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --manifest) manifest=$2; shift 2 ;;
     --params) params=$2; shift 2 ;;
     --state) state=$2; shift 2 ;;
+    --pay-observer) pay_observer=$2; shift 2 ;;
+    --management-subject) management_subject=$2; shift 2 ;;
+    --management-key) management_key=$2; shift 2 ;;
     *) candidate_die "unknown argument: $1" ;;
   esac
 done
@@ -84,7 +89,25 @@ init() {
   "$MINI" keygen --secret "$state/keys/clock.key" --public "$state/keys/clock.pub" \
     >"$state/keys/clock.pub.hex"
   clock_public=$(od -An -tx1 -v "$state/keys/clock.pub" | tr -d ' \n')
+  # The grain platform's completion custodian (deploy/market/INSTALL.md §0): a key pair the operator
+  # generates here, beside the sponsor's, with no copy anywhere else; its public key is pinned into
+  # the genesis config. An operator who made the pair beforehand sets the hex in the params instead.
+  if jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$p" >/dev/null; then
+    "$MINI" keygen --secret "$state/keys/completion.seed" --public "$state/keys/completion.pub" --no-prerotation \
+      >"$state/keys/completion.pub.hex"
+    completion_public=$(od -An -tx1 -v "$state/keys/completion.pub" | tr -d ' \n')
+    jq --arg k "$completion_public" '.grainPlatform.completionCustodianKey = $k' "$p" >"$p.filled" && mv "$p.filled" "$p"
+  fi
 
+  # The PAY observer, when the operator names one at genesis (deploy/pay/README.md): the genesis
+  # template installs the pay law with it. Without one the pay law is installed all the same and
+  # an observer is installed later (the kernel's observer_replaceable), never by a re-genesis.
+  if [ -n "$pay_observer" ]; then
+    pay_observer=$(candidate_abs "$pay_observer")
+    [ -f "$pay_observer" ] && [ ! -L "$pay_observer" ] || candidate_die "--pay-observer must name a regular file: $pay_observer"
+    GENESIS_PAY_OBSERVER=$pay_observer
+    export GENESIS_PAY_OBSERVER
+  fi
   sh "$GENESIS" "$p" "$sponsor_public" "$clock_public" "$HOST" "$STORE" "$VERIFIER" "$state" \
     || candidate_die "genesis template refused (see above)"
 
@@ -148,6 +171,38 @@ upgrade() {
   rm -rf -- "$upgrade_tmp"
   trap - EXIT
   printf 'upgraded runtime bindings to %s; Store unchanged\n' "$CANDIDATE_MANIFEST"
+}
+
+# Set a stopped Store's lifecycle management identity: the subject and key that author every
+# grain's lifecycle (deploy/market/INSTALL.md §0). A Host setting of the pinned config, not a
+# genesis parameter: applications already born keep the manager their own laws bound at birth
+# (Host/Main.lean, LifecycleManagementSettings); new births take the new one. The operator holds
+# that subject's key. The Store must be stopped; start it afterwards.
+platform() {
+  load_state "$state"
+  case "$management_subject" in ''|0*|*[!0-9]*) candidate_die "platform needs --management-subject S (a positive decimal)" ;; esac
+  case "$management_key" in ''|0*|*[!0-9]*) candidate_die "platform needs --management-key K (a positive decimal key id)" ;; esac
+  CONFIG=$STATE/deployment/pinned-config.json
+  [ -f "$CONFIG" ] || candidate_die "no pinned config at $CONFIG"
+  [ "$(jq -er '.pinnedConfigSha256' "$STATE/state.json")" = "$(candidate_sha256 "$CONFIG")" ] \
+    || candidate_die "pinned config differs from recorded state"
+  candidate_require_stopped
+  service_config=$STATE/public/mini.config
+  platform_tmp=$(mktemp -d "$STATE/tmp/platform.XXXXXX")
+  trap 'rm -rf -- "$platform_tmp"' EXIT
+  jq --argjson s "$management_subject" --argjson k "$management_key" \
+    '.lifecycleManagement = {managementSubject: $s, managementKeyId: $k}' "$CONFIG" >"$platform_tmp/config.json"
+  jq --arg config "$(candidate_sha256 "$platform_tmp/config.json")" '.pinnedConfigSha256 = $config' \
+    "$STATE/state.json" >"$platform_tmp/state.json"
+  if [ -f "$service_config" ] && [ ! -L "$service_config" ]; then
+    cp "$platform_tmp/config.json" "$platform_tmp/service.json"
+    mv "$platform_tmp/service.json" "$service_config"
+  fi
+  mv "$platform_tmp/config.json" "$CONFIG"
+  mv "$platform_tmp/state.json" "$STATE/state.json"
+  rm -rf -- "$platform_tmp"
+  trap - EXIT
+  printf 'lifecycle management set to subject %s key %s in %s; start the Store (clients re-pin the config)\n' "$management_subject" "$management_key" "$CONFIG"
 }
 
 serve_exec() {
@@ -278,6 +333,7 @@ case "$action" in
   start) start ;;
   stop) stop ;;
   upgrade) upgrade ;;
+  platform) platform ;;
   status) status ;;
   sponsor) sponsor ;;
   unit) unit ;;

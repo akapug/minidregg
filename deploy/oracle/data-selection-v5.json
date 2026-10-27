@@ -1,0 +1,33 @@
+{
+  "paths": [
+    "root/fable-content/oracle-m-series-2026-08-15/m13a_wordnet_build_a_v4/wordnet_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_conceptnet_build_a_v1/conceptnet_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_dbpedia_build_a_v2/wikipedia_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_simplewiki_build_a_v1/wikipedia_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_simplewiki_full_build_a_v1/wikipedia_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e5_wiktionary_build_a_v1/wiktionary_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m13e8_dbpedia_enslot_openstax_full_fable_bench_a_v1/wikipedia_specialist.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m30_admitted_closure_v1.sqlite3",
+    "root/fable-content/oracle-m-series-2026-08-15/m31_wordnet_corpus_v3.sqlite3",
+    "root/nltk_data/corpora/wordnet.zip",
+    "root/relstore/names_v1.sqlite3",
+    "root/relstore/relations_v1.sqlite3",
+    "root/relstore/relations_v2.sqlite3",
+    "root/specialists/cooking-v3-r2/nutrition_v1.sqlite3",
+    "root/specialists/cooking/nutrition_v1.sqlite3",
+    "root/specialists/warehouse-r2/site_fresh.sqlite3",
+    "root/specialists/warehouse/site_fresh.sqlite3",
+    "root/textbooks/gutenberg/jokes_store_v1.sqlite3",
+    "root/textbooks/gutenberg/pg10136.txt",
+    "root/textbooks/gutenberg/pg12444.txt",
+    "root/textbooks/gutenberg/pg13923.txt",
+    "root/textbooks/gutenberg/pg15338.txt",
+    "root/textbooks/gutenberg/pg21084.txt",
+    "root/textbooks/gutenberg/pg26558.txt",
+    "root/textbooks/gutenberg/recipes_store_v1.sqlite3",
+    "root/textbooks/textbook_store_v1.sqlite3"
+  ],
+  "reviewed_appliance_receipt_sha256": "05c15112339540e3d1329babbbd86f231c2a91722b360379090ddf98b61092fa",
+  "schema": "oracle-shared-data-selection-v1",
+  "selection_basis": "Public non-executable SQLite stores, WordNet archive, and Gutenberg source texts. Paths are explicit; runtime staging never chooses files by size or glob. V5 date_precision_v1.json stays runtime metadata inside the signed SPK."
+}

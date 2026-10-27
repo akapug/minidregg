@@ -5,6 +5,7 @@ mod deadline;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
+mod oracle_tools;
 mod application_tools;
 mod concierge;
 mod hermes_room;
@@ -147,6 +148,9 @@ struct ToolTask {
     /// Current execution generations come from each source-inspected plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_application_lifetime_routes: Vec<application_api_tools::LifetimeRoutePin>,
+    /// Protocol discovery profiles over existing lifetime API routes; never grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    application_services: Vec<oracle_tools::ServiceProfile>,
     /// Only an explicitly certified Mini Host with the agent event21 route
     /// may enable the forward API tool. The SPK host still obtains and checks
     /// a fresh event21 permit for each request.
@@ -192,9 +196,26 @@ struct DispatchTask {
     /// planning/assembly. The ordinary hostSocket remains public receipt IO.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     operator_socket: Option<PathBuf>,
+    /// Kernel credentials of the listening endpoint. A systemd-activated
+    /// controller-private socket may report its activator (often UID 0), not
+    /// the operator process accepting requests. Never inferred from path owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operator_peer_uid: Option<u32>,
     /// Pinned enrolled identity for the controller's private purse signer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_signer: Option<DispatchSignerPin>,
+}
+
+fn pin_operator_peer_command(command: &mut Command, mini: &Path, task: Option<&DispatchTask>) {
+    if command.get_program() != mini.as_os_str() { return; }
+    let selected = command.get_args().next().and_then(|arg| arg.to_str()).is_some_and(|name|
+        name.starts_with("agent-reserve-") || name.starts_with("agent-lifetime-reserve-")
+        || name.starts_with("agent-lifetime-paid-") || name == "agent-payer-sign");
+    if selected {
+        if let Some(uid) = task.and_then(|task| task.operator_peer_uid) {
+            command.arg("--operator-peer-uid").arg(uid.to_string());
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1724,32 +1745,50 @@ fn provider_metering_metadata(
     reserve: &str,
 ) -> Result<Value> {
     provider_route_code(&pin.route)?;
-    Ok(json!({"version":"3","providerResourceId":pin.provider_resource_id,
-        "route":pin.route,"status":status.to_string(),"contentType":content_type,
-        "reserve":reserve}))
+    Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"leg":"complete","status":status.to_string(),
+        "contentType":content_type,"reserve":reserve}))
 }
 
-/// The Lean ask (lane/lean-critical): a settle request for a metered call
-/// that has no complete retained reply. Version "4" is v3 with `status` "0",
-/// `contentType` "" and one more field, `outcomeClass`, one of
-/// `timeout-after-send`, `malformed`, `crash-after-send`; the response bytes
-/// are whatever partial body was retained (possibly empty). A complete
-/// non-200 reply keeps the v3 frame: its `status` already says so.
+/// The Host's leg (`Kernel/ProviderMetering.lean` `Leg`) for an after-send
+/// class without a complete reply.
+fn provider_class_leg(class: &str) -> Result<&'static str> {
+    match class {
+        "timeout-after-send" => Ok("timeout"),
+        "malformed" => Ok("truncated"),
+        "crash-after-send" => Ok("lost"),
+        _ => Err("provider class settle names an unknown outcome class".into()),
+    }
+}
+
+/// A settle request for a call that crossed the send boundary with no
+/// complete retained reply (`Host/ProviderUsage.lean` `quotePayload` v4): the
+/// leg names what happened, `status` is "0" and `contentType` empty; the
+/// response bytes are whatever partial body was retained (possibly empty).
 fn provider_class_metadata(pin: &ProviderMeteringPin, reserve: &str, class: &str) -> Result<Value> {
     provider_route_code(&pin.route)?;
-    if !matches!(class, "timeout-after-send" | "malformed" | "crash-after-send") {
-        return Err("provider class settle names an unknown outcome class".into());
-    }
+    let leg = provider_class_leg(class)?;
     Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
-        "route":pin.route,"status":"0","contentType":"","reserve":reserve,
-        "outcomeClass":class}))
+        "route":pin.route,"leg":leg,"status":"0","contentType":"","reserve":reserve}))
 }
 
-/// The report status and claim the widened Lean quote answers for a metered
-/// call charged by its declared outcome class rather than a usage record.
-const PROVIDER_CLASS_STATUS: &str = "quoted-outcome-class";
-const PROVIDER_CLASS_CLAIM: &str =
-    "metered call without a quotable usage record; charged by declared outcome class under operator tariff";
+/// The Host's report statuses and claims (`Host/ProviderUsage.lean` `reportJson`).
+const QUOTED_PER_OPERATION: (&str, &str) = (
+    "quoted-per-operation",
+    "per-operation fee under operator tariff; the provider bill is the key owner's",
+);
+const QUOTED_REPORTED_USAGE: (&str, &str) = (
+    "quoted-reported-usage",
+    "provider-reported usage under operator tariff; not invoice-verified",
+);
+const QUOTED_REFUSED_REPLY: (&str, &str) = (
+    "quoted-refused-reply",
+    "complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call",
+);
+const QUOTED_UNDECIDED_AT_HOLD: (&str, &str) = (
+    "quoted-undecided-at-hold",
+    "no usage record could be read for this leg: the whole hold, the maximum the provider may have billed",
+);
 
 fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
     let per_op = pin
@@ -1788,21 +1827,32 @@ fn provider_quote_charge(
     outcome_class: Option<&str>,
 ) -> Result<String> {
     let user = pin.route == "user";
-    // The user route is quoted its per-operation fee whatever the reply was.
-    let class = outcome_class.filter(|_| !user);
-    let (status, claim) = if class.is_some() {
-        (PROVIDER_CLASS_STATUS, PROVIDER_CLASS_CLAIM)
-    } else if user {
-        (
-            "quoted-per-operation",
-            "per-operation fee under operator tariff; the provider bill is the key owner's",
-        )
-    } else {
-        (
-            "quoted-reported-usage",
-            "provider-reported usage under operator tariff; not invoice-verified",
-        )
+    // `outcome_class`: None for a complete 200, "complete-non-200" for a
+    // complete refused reply, else the after-send class (no complete reply).
+    let (leg, http_status) = match outcome_class {
+        None => ("complete", None),
+        Some("complete-non-200") => ("complete", None),
+        Some(class) => (provider_class_leg(class)?, Some("0")),
     };
+    let reported_status = report.get("status").and_then(Value::as_str);
+    // The user route is quoted its per-operation fee whatever the leg; a
+    // metered route by the leg and reply; a complete 200 whose usage cannot
+    // be read is quoted undecided at the hold.
+    let (status, claim) = if user {
+        QUOTED_PER_OPERATION
+    } else {
+        match outcome_class {
+            None if reported_status == Some(QUOTED_UNDECIDED_AT_HOLD.0) => QUOTED_UNDECIDED_AT_HOLD,
+            None => QUOTED_REPORTED_USAGE,
+            Some("complete-non-200") => QUOTED_REFUSED_REPLY,
+            Some(_) => QUOTED_UNDECIDED_AT_HOLD,
+        }
+    };
+    if report.get("leg").and_then(Value::as_str) != Some(leg)
+        || http_status.is_some_and(|code| report.get("httpStatus").and_then(Value::as_str) != Some(code))
+    {
+        return Err("provider quote names another leg or HTTP status than the retained attempt".into());
+    }
     if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v2")
         || report.get("status").and_then(Value::as_str) != Some(status)
         || report.get("route").and_then(Value::as_str) != Some(pin.route.as_str())
@@ -1854,18 +1904,18 @@ fn provider_quote_charge(
         }
         decimal(value, name)?;
     }
-    if let Some(class) = class {
-        // Kernel/ProviderRoute.lean: a metered settle charges nothing or at
-        // least its fee, never more than the hold (checked above).
-        let amount = charge.parse::<u64>().map_err(|_| "provider quote charge exceeds u64")?;
-        let fee = pin.per_op.parse::<u64>().map_err(|_| "provider per-operation fee exceeds u64")?;
-        if report.get("outcomeClass").and_then(Value::as_str) != Some(class)
-            || (amount != 0 && amount < fee)
-            || ["promptTokens", "completionTokens", "totalTokens"]
-                .iter()
-                .any(|name| report.get(*name).is_some())
-        {
-            return Err("outcome-class quote differs from its class, fee rule or usage absence".into());
+    let no_usage = ["promptTokens", "completionTokens", "totalTokens"]
+        .iter()
+        .all(|name| report.get(*name).is_none());
+    if !user && status == QUOTED_REFUSED_REPLY.0 {
+        if charge != pin.per_op || !no_usage {
+            return Err("refused-reply quote is not exactly the route fee without usage".into());
+        }
+        return Ok(charge.to_owned());
+    }
+    if !user && status == QUOTED_UNDECIDED_AT_HOLD.0 {
+        if charge != reserve || !no_usage {
+            return Err("undecided-leg quote is not exactly the hold without usage".into());
         }
         return Ok(charge.to_owned());
     }
@@ -2902,6 +2952,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
         {
             return Err("dispatchTask requires a distinct absolute custody key path".into());
         }
+        if d.operator_peer_uid.is_some() && d.operator_socket.is_none() {
+            return Err("dispatchTask.operatorPeerUid requires operatorSocket".into());
+        }
         if let Some(operator_socket) = &d.operator_socket {
             if !operator_socket.is_absolute()
                 || c.host_socket.as_ref() == Some(operator_socket)
@@ -3133,6 +3186,8 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
         } else if t.lifetime_api_host_sha256.is_some() {
             return Err("lifetime API Host pin has no operator route".into());
         }
+        oracle_tools::validate_profiles(&t.application_services,
+            &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -3182,6 +3237,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             &t.allowed_publications,
             (&peer_targets, &peer_capabilities),
         )?;
+        for family in &t.allowed_session_families {
+            application_tools::session_participant(family, &t.subject, &c.subject)?;
+        }
         for family in &t.allowed_birth_families {
             let charge = resource_tools::planned_birth_charge(family)?;
             if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
@@ -6765,6 +6823,7 @@ impl Runtime {
                     family,
                     tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex {
                         nonce: pending.operation_id,
@@ -6871,6 +6930,12 @@ impl Runtime {
         Ok(())
     }
     fn verified_born_named(&self, name: &str) -> Result<Option<resource_tools::BornResource>> {
+        Ok(self.verified_born_read(name)?.map(|(born, _)| born))
+    }
+    fn verified_born_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<(resource_tools::BornResource, resource_tools::ResourceReadSigner)>> {
         let Some(record) = self.journal.born_resources.iter().find(|record| {
             record
                 .pending
@@ -6881,12 +6946,22 @@ impl Runtime {
             return Ok(None);
         };
         self.verify_born_record(record)?;
+        let signer = if record.pending.route == Some(ApplicationBirthRoute::Session) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            let family = tool.allowed_session_families.iter()
+                .find(|family| family.name == record.pending.family)
+                .ok_or("retained session family is no longer configured")?;
+            application_tools::session_read_signer(family, &tool.subject, &self.config.subject)?
+        } else {
+            resource_tools::ResourceReadSigner::Tool
+        };
         Ok(record
             .pending
             .members()
             .iter()
             .find(|born| born.name == name)
-            .cloned())
+            .cloned()
+            .map(|born| (born, signer)))
     }
     fn verified_born_target(
         &self,
@@ -7218,6 +7293,7 @@ impl Runtime {
     ) -> std::result::Result<(), custody_gate::CustodyError> {
         let mut command = Command::new(program);
         command.args(args);
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -7245,7 +7321,16 @@ impl Runtime {
         read: &resource_tools::AllowedResourceRead,
         nonce: u64,
     ) -> Result<Value> {
-        resource_tools::read_resource_with(&self.config, tool, read, nonce, |command| {
+        self.supervised_resource_read_as(tool, read, nonce, resource_tools::ResourceReadSigner::Tool)
+    }
+    fn supervised_resource_read_as(
+        &self,
+        tool: &ToolTask,
+        read: &resource_tools::AllowedResourceRead,
+        nonce: u64,
+        signer: resource_tools::ResourceReadSigner,
+    ) -> Result<Value> {
+        resource_tools::read_resource_with(&self.config, tool, read, nonce, signer, |command| {
             let output = self
                 .custody_gate
                 .run_capture(&self.cancelled, command)
@@ -7261,6 +7346,7 @@ impl Runtime {
         })
     }
     fn supervised_json_command(&self, mut command: Command) -> Result<Value> {
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -8115,6 +8201,19 @@ impl Runtime {
         };
         let _ = request.reply.send(response);
     }
+    /// A product tool constructs ordinary HTTP only. Dispatch below still
+    /// checks the current route, signed authority, native permit and settlement.
+    fn application_tool_arguments(&self, name: &str, arguments: &Value) -> Result<Value> {
+        if oracle_tools::is_tool(name) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            oracle_tools::http_arguments(name, arguments, &tool.application_services)
+        } else if matches!(name, "mini_application_api" | "__mini_gitweb_http_raw") {
+            Ok(arguments.clone())
+        } else {
+            Err("unknown application tool".into())
+        }
+    }
+
     fn begin_application_api(
         &mut self,
         arguments: &Value,
@@ -10635,6 +10734,7 @@ impl Runtime {
                     family,
                     &tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex { nonce: id, ordinal },
                     &tool_view,
@@ -12101,9 +12201,11 @@ impl Runtime {
                     .ok_or("toolTask is not configured")?
                     .clone();
                 let mut reads = configured.allowed_reads.clone();
+                let mut signer = resource_tools::ResourceReadSigner::Tool;
                 if let Some(name) = arguments.get("name").and_then(Value::as_str) {
-                    if let Some(born) = self.verified_born_named(name)? {
+                    if let Some((born, owner)) = self.verified_born_read(name)? {
                         reads.push(resource_tools::born_read(&born));
+                        signer = owner;
                     }
                 }
                 // A factory-minted owner capability carries both observe and
@@ -12112,7 +12214,7 @@ impl Runtime {
                 // exact composite receipt is revalidated above.
                 let read = resource_tools::select_read(&reads, arguments)?.clone();
                 let nonce = self.next_id()?;
-                self.supervised_resource_read(&configured, &read, nonce)
+                self.supervised_resource_read_as(&configured, &read, nonce, signer)
             }
             "mini_create_resource" => {
                 if self.tool_catalog()?.resource_workspace_create {
@@ -12529,7 +12631,7 @@ impl Runtime {
                         .journal
                         .born_resources
                         .iter()
-                        .any(|born| born.pending.born.name == name)
+                        .any(|born| born.pending.members().iter().any(|member| member.name == name))
                 {
                     return Err("resource read name is not configured or recorded".into());
                 }
@@ -12651,7 +12753,9 @@ impl Runtime {
                     }
                 }
             }
-            "mini_application_api" => {
+            "mini_application_api" | "mini_oracle_discover" | "mini_oracle_call" => {
+                let mapped = self.application_tool_arguments(&request.name, arguments)?;
+                let arguments = &mapped;
                 let mut allowed = tool
                     .allowed_application_api_routes
                     .iter()
@@ -12775,6 +12879,8 @@ impl Runtime {
                 | "mini_create_application_session"
                 | "mini_publish"
                 | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
         ) {
             return Err("foreground tool is not delegated".into());
         }
@@ -12859,8 +12965,9 @@ impl Runtime {
             self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
             self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Executing;
             self.save()?;
-            let result = if request.name == "mini_application_api" {
-                self.foreground_application_api(&request.arguments, input)?
+            let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
+                let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+                self.foreground_application_api(&arguments, input)?
             } else {
                 self.tool_call(&request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
@@ -14108,6 +14215,9 @@ impl Runtime {
             } else {
                 Vec::new()
             },
+            oracle_applications: if tool.lifetime_api_host_sha256.is_some() {
+                oracle_tools::applications(&tool.application_services)
+            } else { Vec::new() },
             resource_workspace: tool.resource_workspace.is_some(),
             room_tools: tool.room.is_some(),
             resource_workspace_create: if let Some(root) = &tool.resource_workspace {
@@ -14159,10 +14269,37 @@ impl Runtime {
         };
         // The record is written whatever the result; a write failure is
         // reported with the prompt's own outcome and never replaces it.
-        match (result, self.record_prompt_outcome(invocation)) {
+        let recorded = self.record_prompt_outcome(invocation);
+        if recorded.is_ok() {
+            self.reconcile_after_prompt_record();
+        }
+        match (result, recorded) {
             (result, Ok(())) => result,
             (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
             (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
+        }
+    }
+
+    /// A failed prompt pushes its note and trips the breaker, whose automatic
+    /// reconcile runs before the prompt's outcome record exists (R11 derives
+    /// the note only from that record), so the note would wait for an
+    /// operator. Once the record is durable, derive what it proves, for a
+    /// detached task with no child; a refusal is logged like the
+    /// post-disconnect one.
+    fn reconcile_after_prompt_record(&mut self) {
+        if self.journal.unresolved_external.is_empty()
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.connection != Connection::Detached
+        {
+            return;
+        }
+        if let Err(error) = self.automatic_reconcile() {
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                "automatic":true,"result":error}));
+            let _ = self.save();
         }
     }
 
@@ -14958,18 +15095,20 @@ impl Runtime {
                         if matches!(
                             request.name.as_str(),
                             "mini_application_api" | "__mini_gitweb_http_raw"
+                                | "mini_oracle_discover" | "mini_oracle_call"
                         ) =>
                     {
                         if application_api_call.is_some() {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
                         } else {
-                            match self.begin_application_api(
-                                &request.arguments,
-                                request.reply.clone(),
-                                Some(request.prompt_epoch),
-                                request.name == "__mini_gitweb_http_raw",
-                            ) {
+                            match self.application_tool_arguments(&request.name, &request.arguments)
+                                .and_then(|arguments| self.begin_application_api(
+                                    &arguments,
+                                    request.reply.clone(),
+                                    Some(request.prompt_epoch),
+                                    request.name == "__mini_gitweb_http_raw",
+                                )) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {
                                     let _ =
@@ -18981,6 +19120,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
                 registered_shared_applications: vec![],
                 allowed_application_api_routes: vec![],
                 allowed_application_lifetime_routes: vec![],
+                application_services: vec![],
                 agent_api_host_sha256: None,
                 lifetime_api_host_sha256: None,
                 current_birth_host_sha256: None,
@@ -19244,7 +19384,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             max_output_tokens: Some(3),
         };
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-reported-usage",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-reported-usage",
             "providerResourceId":"7004", "route":"pool", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "promptTokens":"2",
@@ -19299,7 +19439,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         };
         assert_eq!(provider_max_charge_bound(&pin, 1000, 1000).unwrap(), 4);
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-per-operation",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-per-operation",
             "providerResourceId":"7004", "route":"user", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "perOp":"4", "reserve":"4", "charge":"4",
@@ -19374,36 +19514,43 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
     }
 
     #[test]
-    fn provider_class_quote_follows_the_route_fee_rule() {
+    fn provider_leg_quotes_follow_the_host_report() {
         let pin = ProviderMeteringPin {
             provider_resource_id: "7".into(), model: "m".into(), tariff_version: "1".into(),
             tariff_digest: "9".into(), route: "pool".into(), per_op: "3".into(),
             input_micro_per_million: "0".into(), output_micro_per_million: "0".into(),
             max_input_tokens: Some(10), max_output_tokens: Some(10),
         };
-        let report = |charge: &str, class: &str| json!({"type":"minidregg-provider-metering-v2",
-            "status":PROVIDER_CLASS_STATUS,"providerResourceId":"7","route":"pool","model":"m",
+        // The shape `Host/ProviderUsage.lean` `reportJson` answers.
+        let report = |(status, claim): (&str, &str), leg: &str, http: &str, charge: &str| json!({
+            "type":"minidregg-provider-metering-v2","status":status,"basis":"b","leg":leg,
+            "httpStatus":http,"providerResourceId":"7","route":"pool","model":"m",
             "tariffVersion":"1","tariffDigest":"9","requestDigest":"1","responseDigest":"2",
             "requestBytes":"20","responseBytes":"0","perOp":"3","reserve":"10","charge":charge,
-            "outcomeClass":class,"operation":{"type":"settle","charge":charge,"route":"pool"},
-            "claim":PROVIDER_CLASS_CLAIM});
-        for charge in ["0", "3", "10"] {
-            assert_eq!(provider_quote_charge(&report(charge, "timeout-after-send"), &pin, "10", 20, 0,
-                Some("timeout-after-send")).unwrap(), charge);
+            "operation":{"type":"settle","charge":charge,"route":"pool"},"claim":claim});
+        // An undecided leg settles at the whole hold, with its leg named.
+        for (class, leg) in [("timeout-after-send", "timeout"), ("malformed", "truncated"), ("crash-after-send", "lost")] {
+            assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "10"), &pin, "10", 20, 0,
+                Some(class)).unwrap(), "10");
+            assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "3"), &pin, "10", 20, 0,
+                Some(class)).is_err());
+            let meta = provider_class_metadata(&pin, "10", class).unwrap();
+            assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some(leg), Some("0")));
         }
-        // Below the fee but not zero, above the hold, or the wrong class: refused.
-        assert!(provider_quote_charge(&report("2", "malformed"), &pin, "10", 20, 0, Some("malformed")).is_err());
-        assert!(provider_quote_charge(&report("11", "malformed"), &pin, "10", 20, 0, Some("malformed")).is_err());
-        assert!(provider_quote_charge(&report("3", "malformed"), &pin, "10", 20, 0, Some("crash-after-send")).is_err());
-        // A usage-quote report is not accepted as a class settle, nor the reverse.
-        let mut usage = report("3", "complete-non-200");
-        usage["status"] = json!("quoted-reported-usage");
-        assert!(provider_quote_charge(&usage, &pin, "10", 20, 0, Some("complete-non-200")).is_err());
-        assert!(provider_quote_charge(&report("3", "complete-non-200"), &pin, "10", 20, 0, None).is_err());
-        // The v4 frame names exactly the after-send classes without a reply.
-        let meta = provider_class_metadata(&pin, "10", "crash-after-send").unwrap();
-        assert_eq!(meta["version"], "4");
-        assert_eq!(meta["outcomeClass"], "crash-after-send");
+        assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "lost", "0", "10"), &pin, "10", 20, 0,
+            Some("malformed")).is_err());
+        // A complete refused reply settles at the route fee.
+        assert_eq!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "3"), &pin, "10", 20, 0,
+            Some("complete-non-200")).unwrap(), "3");
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "10"), &pin, "10", 20, 0,
+            Some("complete-non-200")).is_err());
+        // A complete 200 whose usage the Host could not read: the hold.
+        assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "complete", "200", "10"), &pin, "10", 20, 0,
+            None).unwrap(), "10");
+        // A refused-reply report is never accepted for a 200.
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "200", "3"), &pin, "10", 20, 0, None).is_err());
+        let meta = provider_metering_metadata(&pin, 409, "application/json", "10").unwrap();
+        assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some("complete"), Some("409")));
         assert!(provider_class_metadata(&pin, "10", "complete-non-200").is_err());
     }
 
@@ -19487,7 +19634,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         let metadata = provider_metering_metadata(&pool, 200, "application/json", "50").unwrap();
         assert_eq!(
             metadata,
-            json!({"version":"3","providerResourceId":"7004","route":"pool","status":"200",
+            json!({"version":"4","providerResourceId":"7004","route":"pool","leg":"complete","status":"200",
                 "contentType":"application/json","reserve":"50"})
         );
         // The HERMES-KEYS task shape (fixed charge, opt-in metering) refuses.

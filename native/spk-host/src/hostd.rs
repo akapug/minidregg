@@ -1864,6 +1864,25 @@ impl Journal {
                 return Err(invalid("STOP requires Running or Fenced journal"));
             }
             if record.phase == Phase::Running {
+                // Physical cleanup may already have stopped this incarnation
+                // and cleared systemd's InvocationID. A fresh source STOP is
+                // still required, but there is no live unit to signal. Use the
+                // complete post-stop predicate, never merely an empty ID.
+                if let Ok(audit) = inspect(&record) {
+                    if audit.prove(&record).is_ok() {
+                        record.phase = Phase::Fenced;
+                        this.write_unlocked(&record)?;
+                        verify_volume()?;
+                        // A replacement or new manager job appearing across
+                        // the durable fence leaves Fenced and receives no stop.
+                        let audit = inspect(&record)?;
+                        audit.prove(&record)?;
+                        record.phase = Phase::Stopped;
+                        record.child_pid = None;
+                        this.write_unlocked(&record)?;
+                        return Ok(audit);
+                    }
+                }
                 before_stop(&record)?;
                 record.phase = Phase::Fenced;
                 this.write_unlocked(&record)?;
@@ -2773,6 +2792,107 @@ mod tests {
         })
     }
 
+    fn stop_identity(record: &Record) -> StopIdentity {
+        StopIdentity {
+            app: record.app(), generation: record.generation(), unit: record.unit().into(),
+            image_identity: record.image_identity().into(),
+            invocation_id: record.invocation_id().unwrap().into(),
+            control_group: record.control_group().unwrap().into(),
+        }
+    }
+
+    #[test]
+    fn source_stop_reconciles_already_inactive_running_without_manager_command() {
+        use std::cell::Cell;
+        let (path, journal, _) = running_journal();
+        let original = journal.read().unwrap().unwrap();
+        let expected = stop_identity(&original);
+        let observations = Cell::new(0);
+        let volumes = Cell::new(0);
+        let audit = journal.fence_and_stop_checked_with(
+            &expected, || { volumes.set(volumes.get() + 1); Ok(()) },
+            |_| panic!("already-stopped incarnation must not require a live invocation"),
+            |_| panic!("already-stopped incarnation must not receive a manager command"),
+            |record| {
+                assert_eq!(record.phase, if observations.get() == 0 { Phase::Running } else { Phase::Fenced });
+                assert_eq!(journal.read_unlocked()?.unwrap().phase, record.phase);
+                observations.set(observations.get() + 1);
+                stopped(record)
+            },
+        ).unwrap();
+        assert_eq!((observations.get(), volumes.get()), (2, 2));
+        let result = journal.read().unwrap().unwrap();
+        assert_eq!(result.phase, Phase::Stopped);
+        assert_eq!(result.child_pid, None);
+        assert_eq!(result.identity, original.identity);
+        assert_eq!(result.invocation_id, original.invocation_id);
+        assert_eq!(result.control_group, original.control_group);
+        audit.source_stop_audit(&expected).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn source_stop_inactive_reconciliation_refuses_identity_volume_and_replacement() {
+        use std::cell::Cell;
+        for changed in ["app", "generation", "unit", "image", "invocation", "group", "volume"] {
+            let (path, journal, _) = running_journal();
+            let original = journal.read().unwrap().unwrap();
+            let mut expected = stop_identity(&original);
+            match changed {
+                "app" => expected.app += 1, "generation" => expected.generation += 1,
+                "unit" => expected.unit.push('x'), "image" => expected.image_identity.push('x'),
+                "invocation" => expected.invocation_id = "e".repeat(32),
+                "group" => expected.control_group.push('x'), _ => {},
+            }
+            assert!(journal.fence_and_stop_checked_with(&expected,
+                || if changed == "volume" { Err(invalid("volume changed")) } else { Ok(()) },
+                |_| panic!("identity/volume refusal must precede manager inspection"),
+                |_| panic!("no manager stop"), stopped).is_err(), "{changed}");
+            assert_eq!(journal.read().unwrap().unwrap(), original);
+            fs::remove_dir_all(path).unwrap();
+        }
+        for change_after_fence in [false, true] {
+            for changed in ["unit", "invocation", "group", "missing", "active", "pid", "job", "populated", "volume"] {
+                let (path, journal, _) = running_journal();
+                let original = journal.read().unwrap().unwrap();
+                let expected = stop_identity(&original);
+                let observations = Cell::new(0);
+                let volumes = Cell::new(0);
+                let result = journal.fence_and_stop_checked_with(&expected,
+                    || {
+                        volumes.set(volumes.get() + 1);
+                        if changed == "volume" && (!change_after_fence || volumes.get() == 2) { Err(invalid("volume changed")) } else { Ok(()) }
+                    },
+                    |_| Err(invalid("current live incarnation is not the selected one")),
+                    |_| panic!("replacement must never receive a manager stop"),
+                    |record| {
+                        observations.set(observations.get() + 1);
+                        let mut audit = stopped(record)?;
+                        if !change_after_fence || observations.get() == 2 {
+                            match changed {
+                                "unit" => audit.unit.push('x'),
+                                "invocation" => audit.invocation_id = Some("e".repeat(32)),
+                                "group" => audit.control_group = Some("/replacement".into()),
+                                "missing" => audit.unit_loaded = false,
+                                "active" => audit.inactive = false,
+                                "pid" => audit.main_pid = 123,
+                                "job" => audit.queued_job = true,
+                                "populated" => audit.exact_cgroup_empty = false,
+                                _ => {},
+                            }
+                        }
+                        Ok(audit)
+                    });
+                assert!(result.is_err(), "{changed}, after fence {change_after_fence}");
+                let retained = journal.read().unwrap().unwrap();
+                assert_eq!(retained.phase, if change_after_fence { Phase::Fenced } else { Phase::Running });
+                assert_eq!(retained.identity, original.identity);
+                assert_eq!(retained.child_pid, original.child_pid);
+                fs::remove_dir_all(path).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn source_bound_stop_checks_incarnation_and_volume_under_lock_and_recovers_fence() {
         use std::sync::atomic::AtomicUsize;
@@ -3175,6 +3295,75 @@ mod tests {
         journal.fence_and_stop(|_| Ok(()), stopped).unwrap();
         assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
         fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn source_stop_already_inactive_actual_manager_probe() {
+        // The operator harness installs/starts only this disposable fixture.
+        // This exercises the real manager/cgroup receiver, not Mini admission.
+        if std::env::var("MINI_SPK_STOPPED_RUNNING_PROBE").as_deref() != Ok("1") { return; }
+        assert_ne!(unsafe { libc::geteuid() }, 0);
+        let unit = "mini-spk-s0123456789abcdef-a991007-g1.service";
+        let manager = systemd_show(unit).unwrap();
+        assert_eq!(property(&manager, "LoadState").unwrap(), "loaded");
+        assert_eq!(property(&manager, "ActiveState").unwrap(), "active");
+        struct Cleanup(&'static str);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = bounded_systemctl(&["--user", "stop", self.0], Duration::from_secs(10)); }
+        }
+        let cleanup = Cleanup(unit);
+        let instance = UnitInstance {
+            invocation_id: property(&manager, "InvocationID").unwrap().into(),
+            control_group: property(&manager, "ControlGroup").unwrap().into(),
+        };
+        instance.validate(unit).unwrap();
+        let original = Record {
+            version: VERSION,
+            identity: VerifiedBegin {
+                app: 991007, generation: 1, operation_id: "1".into(), transaction_id: "123".into(), event_id: "456".into(),
+                package_sha256: "c".repeat(64), image_identity: "already-inactive-manager-probe".into(),
+                process_identity: "installed-unit".into(), unit: unit.into(),
+            },
+            phase: Phase::Running,
+            child_pid: Some(property(&manager, "MainPID").unwrap().parse().unwrap()),
+            invocation_id: Some(instance.invocation_id), control_group: Some(instance.control_group),
+            dispatch_in_flight: None,
+        };
+        original.validate().unwrap();
+        let expected = stop_identity(&original);
+        UnitStopAudit::before_stop(&original).unwrap();
+        assert!(bounded_systemctl(&["--user", "stop", unit], Duration::from_secs(10)).unwrap().status.success());
+        let inactive = systemd_show(unit).unwrap();
+        assert_eq!(property(&inactive, "InvocationID").unwrap(), "");
+        assert_eq!(property(&inactive, "MainPID").unwrap(), "0");
+        assert!(UnitStopAudit::before_stop(&original).unwrap_err().to_string().contains("invocation drift"));
+        UnitStopAudit::inspect(&original).unwrap().prove(&original).unwrap();
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        journal.with_lock(|this| this.write_unlocked(&original)).unwrap();
+        journal.fence_and_stop_manager_checked(&expected, || Ok(())).unwrap()
+            .source_stop_audit(&expected).unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        println!("already-inactive-running-source-stop=pass");
+
+        // A new invocation of this same unit is not the source-selected old
+        // incarnation. It must remain live and untouched by reconciliation.
+        assert!(bounded_systemctl(&["--user", "start", unit], Duration::from_secs(10)).unwrap().status.success());
+        let replacement = systemd_show(unit).unwrap();
+        assert_eq!(property(&replacement, "ActiveState").unwrap(), "active");
+        assert_ne!(property(&replacement, "InvocationID").unwrap(), expected.invocation_id);
+        let replacement_path = scratch();
+        let retained = Journal::open(&replacement_path).unwrap();
+        retained.with_lock(|this| this.write_unlocked(&original)).unwrap();
+        assert!(retained.fence_and_stop_manager_checked(&expected, || Ok(())).is_err());
+        assert_eq!(retained.read().unwrap().unwrap(), original);
+        let still_running = systemd_show(unit).unwrap();
+        assert_eq!(property(&still_running, "ActiveState").unwrap(), "active");
+        assert_eq!(property(&still_running, "InvocationID").unwrap(), property(&replacement, "InvocationID").unwrap());
+        println!("replacement-invocation-refused-without-stop=pass");
+        drop(cleanup);
+        fs::remove_dir_all(path).unwrap();
+        fs::remove_dir_all(replacement_path).unwrap();
     }
 
     #[test]

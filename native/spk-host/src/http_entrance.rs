@@ -1186,7 +1186,10 @@ impl PrivateHttpEntrance {
                         &mut entrances,
                     )
                     .and_then(|reply| reply.ok_or_else(|| refuse("resident HTTP response absent")))
-                    .unwrap_or_else(|error| dispatch_error_response(method, &error))
+                    .unwrap_or_else(|error| {
+                        eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
+                        dispatch_error_response(method, &error)
+                    })
                 };
                 let stream = queued.stream;
                 let guard = queued._guard;

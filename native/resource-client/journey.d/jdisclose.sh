@@ -31,10 +31,14 @@ row() {  # row CHECK EXPECTED OBSERVED OK(0/1)
 }
 die() { echo "$T"; echo "JDISCLOSE: $*" >&2; exit 1; }
 ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
-q() {  # q WHO LINE : one shell line; RC
+Q=0
+q() {  # q WHO LINE : one shell line; RC. Every line's output is retained as raw/NNN-WHO.{line,out,err}.
   MINI_KEYCACHE_PASSPHRASE="cache-pass-$1" timeout 600 "$SH" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
     --workspace "$(ws_of "$1")" --home "$H/$1" --line "$2" >"$LAST" 2>"$LASTERR"
   RC=$?
+  Q=$((Q + 1)); local tag; tag=$(printf '%03d-%s' "$Q" "$1")
+  printf '%s\n' "$2" >"$D/raw/$tag.line"; cp "$LAST" "$D/raw/$tag.out"; cp "$LASTERR" "$D/raw/$tag.err"
+  return "$RC"  # `q ... || die` sees the shell's exit (a usage or error line is 2 or 1), never the assignment's 0
 }
 refused() { grep -m1 '^refused: \|^error: ' "$LASTERR" | sed 's/; encoded refusal.*//' | cut -c1-200; }
 enc() { grep -o 'encoded refusal: [0-9a-f]*' "$LASTERR" | head -1 | cut -d' ' -f3; }
@@ -44,11 +48,13 @@ enroll() {  # enroll WHO FUND
   mkdir -p -m 700 "$H/$f"
   q "$f" "keygen mini.key" || die "keygen $f"
   install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jd-$f.key"
-  install_private 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/jd-$f.key.next.pub"
-  q sponsor "enroll plan jd-$f jd-$f.key" || die "enroll plan $f: $(refused)"
+  # The record commits to the newcomer's NEXT key and that key co-signs (FIX-IDENTITY): `keygen` printed both
+  # beside the key; the shell's `enroll plan` takes them as hex (or --no-prerotation), never a file of the home.
+  q sponsor "enroll plan jd-$f jd-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")" || die "enroll plan $f: $(refused)"
   q sponsor "enroll seal jd-$f" || die "enroll seal $f"
   q sponsor "enroll submit jd-$f" || die "enroll submit $f: $(refused)"
   subject=$(jq -r '.subject // empty' "$LAST")
+  [ -n "$subject" ] || die "enroll submit $f printed no subject (raw/$(printf '%03d' "$Q")-sponsor.out): $(head -c 160 "$LAST") $(refused)"
   rm -f "$H/sponsor/keys/jd-$f.key"
   "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jd-$f" --holder "$subject" --funding "$2" \
     --account-predicate "$D/permit-all.json" --factory-ref factory >"$LAST" 2>"$LASTERR" || die "provision $f"

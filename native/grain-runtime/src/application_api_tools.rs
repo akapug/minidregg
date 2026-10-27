@@ -20,8 +20,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const MAX_TOOL_INPUT_BYTES: usize = 65_536;
-const MAX_BODY_BYTES: usize = 24 * 1024;
+// The controller receives both compact Oracle arguments and already-hexed
+// generic HTTP input. Reserve room for a full native body plus metadata without
+// relaxing the separately checked serialized forward-frame bound.
+const MAX_TOOL_INPUT_BYTES: usize = 196_608;
+pub(crate) const MAX_BODY_BYTES: usize = 65_536;
 const MAX_PATH_QUERY_BYTES: usize = 8192;
 const MAX_HEADERS: usize = 128;
 const MAX_FORWARD_FRAME: usize = 262_144;
@@ -133,12 +136,19 @@ pub(crate) fn lifetime_dispatch_request(
     if !lowercase_hex64(binding_sha256) {
         return Err("lifetime binding digest is invalid".into());
     }
-    Ok(json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL,
+    if input.body.len() > MAX_BODY_BYTES {
+        return Err("lifetime HTTP body exceeds native 65536-byte bound".into());
+    }
+    let request = json!({"type":"dispatch-v3","protocol":LIFETIME_PROTOCOL,
         "operationId":operation_id.to_string(),"bindingSha256":binding_sha256,
         "method":input.method,"path":input.path,"query":input.query,
         "headers":input.ordered_headers.iter().map(|(name,value)|
             json!({"name":name,"value":value})).collect::<Vec<_>>(),
-        "bodyHex":hex(&input.body)}))
+        "bodyHex":hex(&input.body)});
+    if serde_json::to_vec(&request).map_err(|e| e.to_string())?.len() > MAX_FORWARD_FRAME {
+        return Err("lifetime HTTP request exceeds forward frame bound".into());
+    }
+    Ok(request)
 }
 
 pub(crate) fn inspect_request(operation_id: u64) -> Value {
@@ -1753,7 +1763,8 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-/// Parse a single MCP tool call against operator-selected names. This is a
+/// Parse canonical HTTP input against operator-selected names. MCP and the
+/// model-free foreground interface impose their own outer framing bounds. This is a
 /// preflight bound only; it never authorizes a session, dispatch or charge.
 pub(crate) fn parse_input(
     arguments: &Value,
@@ -1761,7 +1772,7 @@ pub(crate) fn parse_input(
 ) -> Result<HttpInput, String> {
     let encoded = serde_json::to_vec(arguments).map_err(|error| error.to_string())?;
     if encoded.len() > MAX_TOOL_INPUT_BYTES {
-        return Err("application API tool input exceeds MCP frame bound".into());
+        return Err("application API tool input exceeds canonical HTTP input bound".into());
     }
     let object = arguments
         .as_object()
@@ -1932,6 +1943,38 @@ mod tests {
             "a".repeat(64)
         );
         assert!(inspect_historical_request(7, "A").is_err());
+    }
+
+    #[test]
+    fn native_body_boundary_survives_hex_input_and_lifetime_frame() {
+        let mut value = request();
+        value["bodyHex"] = json!("61".repeat(MAX_BODY_BYTES));
+        let parsed = parse_input(&value, &["workroom".into()]).unwrap();
+        assert_eq!(parsed.body.len(), 65_536);
+        let frame = lifetime_dispatch_request(u64::MAX, &"f".repeat(64), &parsed).unwrap();
+        assert_eq!(frame["bodyHex"], value["bodyHex"]);
+        assert!(serde_json::to_vec(&frame).unwrap().len() < MAX_FORWARD_FRAME);
+        value["bodyHex"] = json!("61".repeat(MAX_BODY_BYTES + 1));
+        assert!(parse_input(&value, &["workroom".into()]).unwrap_err().contains("bodyHex exceeds"));
+        let mut oversized = parsed.clone();
+        oversized.body.push(0);
+        assert!(lifetime_dispatch_request(1, &"f".repeat(64), &oversized).unwrap_err().contains("body exceeds"));
+    }
+
+    #[test]
+    fn expanded_input_still_bounds_metadata_and_actual_forward_frame() {
+        let mut value = request();
+        value["bodyHex"] = json!("61".repeat(MAX_BODY_BYTES));
+        value["headers"] = json!((0..9).map(|_| json!({"name":"accept","value":"a".repeat(8192)})).collect::<Vec<_>>());
+        assert!(parse_input(&value, &["workroom".into()]).unwrap_err().contains("canonical HTTP input bound"));
+        let mut parsed = parse_input(&request(), &["workroom".into()]).unwrap();
+        parsed.ordered_headers = vec![("accept".into(), "a".repeat(MAX_FORWARD_FRAME))];
+        assert!(lifetime_dispatch_request(1, &"f".repeat(64), &parsed).unwrap_err().contains("forward frame bound"));
+        let oversized = json!({"padding":"x".repeat(MAX_FORWARD_FRAME)});
+        // Frame refusal occurs before even inspecting a socket or sending.
+        let error = exchange_once_guarded(Path::new("/no-such-oracle-socket"),
+            unsafe { libc::geteuid() }, &oversized, Instant::now() + Duration::from_secs(1), None, None).unwrap_err();
+        assert!(matches!(error, TransportError::BeforeSend(ref reason) if reason.contains("frame bound")));
     }
 
     #[test]

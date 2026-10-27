@@ -154,6 +154,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             registered_shared_applications: vec![],
             allowed_application_api_routes: vec![],
             allowed_application_lifetime_routes: vec![],
+            application_services: vec![],
             agent_api_host_sha256: None,
             lifetime_api_host_sha256: None,
             current_birth_host_sha256: None,
@@ -522,6 +523,7 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         socket_path: runtime.config.state_dir.join("dispatch.sock"),
         host_uid: unsafe { libc::geteuid() } + 1,
         operator_socket: None,
+            operator_peer_uid: None,
         reserve_signer: None,
     });
     runtime.config.provider_task = Some(ProviderTask {

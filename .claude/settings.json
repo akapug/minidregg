@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(cv show *)",
+      "Bash(cv ls *)",
+      "Bash(cv ls)",
+      "Bash(cv doctor *)",
+      "Bash(cv search *)",
+      "Bash(cv lanes *)",
+      "Bash(cv deferrals *)",
+      "Bash(cv events *)",
+      "Bash(cv tools *)",
+      "Bash(cv workflow *)",
+      "Bash(cargo check *)",
+      "Bash(cargo metadata *)",
+      "Bash(hcloud server list *)",
+      "Bash(hcloud server list)"
+    ]
+  }
+}

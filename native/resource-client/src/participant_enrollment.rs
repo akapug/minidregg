@@ -271,10 +271,10 @@ pub(crate) fn staged_invoke(
         if operation == 86 || operation == 92 {
             let current =
                 session_invoke(host, socket, config, operation, payload).map_err(|error| {
-                    format!("retained enrollment plan is stale; start a new request with a new --name label: {error}")
+                    format!("retained enrollment plan is stale against the moved source: {error}; `--action plan` with this exact --dir plans the same request again")
                 })?;
             if current != retained {
-                return Err("retained enrollment plan differs from current source image; start a new request with a new --name label".into());
+                return Err("retained enrollment plan differs from the current source image; `--action plan` with this exact --dir plans the same request again".into());
             }
         }
         retained
@@ -315,6 +315,108 @@ struct Pin {
     /// The committed next key and its co-signature (both empty without one).
     next_public: Vec<u8>,
     next_cosign: Vec<u8>,
+    /// The name's namespace reservation this plan holds (released only on a decided no-record refusal).
+    reservation: participant_namespace::Reservation,
+    /// The observation height the plan's sponsor deadline is pinned to (`pin-enrollment-plan-height`),
+    /// or `None` when the Host that planned it had no pin (the unpinned plan is accepted as before).
+    pinned_at: Option<String>,
+}
+
+/// The pinned form of an enrollment plan: the Host's `pin-enrollment-plan-height PLAN HEIGHT OUT`
+/// moves only the sponsor header's deadline to `height` (Kernel/NativePlanHeight
+/// `pinEnrollment_only_sponsor_deadline`), the height of the observation the plan was made over,
+/// so the local consent provider re-derives the same pinned bytes (`NativeSpecializedConsent.
+/// pinnedExpectedBytes`) and the plan is accepted at that height, however many ticks later it is
+/// sealed and submitted. `Ok(None)`: this Host has no such verb (older image); the plan stays
+/// unpinned and is accepted exactly as before.
+fn pin_plan_height(host: &Path, config: &Path, plan: &Path, height: &str, output: &Path) -> Result<Option<Vec<u8>>> {
+    decimal(height, "observation height")?;
+    let arguments = [
+        OsStr::new("pin-enrollment-plan-height"), plan.as_os_str(), OsStr::new(height), output.as_os_str(),
+    ];
+    match crate::local_process(host, config, &arguments) {
+        Ok(_) => Ok(Some(private_bytes(output, LIMIT)?)),
+        // A Host without the verb answers an unknown subcommand with its own verb listing
+        // (`minidregg-host CONFIG.json profile|describe|...`) and exit 1; a Host that has the verb
+        // and refused prints its refusal, never the listing.
+        Err(error) if error.contains("minidregg-host CONFIG.json ") && !error.contains("pin-enrollment-plan-height") => Ok(None),
+        Err(error) => Err(format!("pin-enrollment-plan-height: {error}")),
+    }
+}
+
+/// The height of the factory observation retained under `directory` (`Challenge.height`, the
+/// height the signer saw).
+fn observation_height(directory: &Path) -> Result<String> {
+    let challenge = json_private(&directory.join("observation/challenge.json"))?;
+    Ok(field(&challenge, "height")?.to_owned())
+}
+
+/// The marker a `submit` leaves when the Host refused the sealed plan with NO RECORD (253): the
+/// attempt is definitely unadmitted, its namespace binding released, and the next `plan` in this
+/// directory retires it and observes again under the same request and reservation.
+const SUBMIT_REFUSED: &str = "submit-refused.json";
+
+fn refused_pending(directory: &Path) -> Result<()> {
+    if directory.join(SUBMIT_REFUSED).exists() {
+        return Err(format!(
+            "this plan was refused by the Host with no record (see {}); plan again with `--action plan` and this exact --dir (the same request and reservation) before anything else",
+            directory.join(SUBMIT_REFUSED).display()
+        ));
+    }
+    Ok(())
+}
+
+/// The plan custody `plan` prints: the same for the plan that was just validated and for a
+/// retained plan a later `plan` resumes.
+fn plan_custody(subject: &str, key_id: &str, public_key: &str, plan_view: &Value) -> Value {
+    json!({"type":"minidregg-participant-enrollment-plan-custody-v1",
+        "subject":subject,"keyId":key_id,
+        "publicKey":public_key,"plan":plan_view,"authority":"candidate-only"})
+}
+
+/// Whether a retained plan is still the Host's plan over the current source: the Host plans the
+/// retained observation and command again (op 86) and answers the exact retained frame. A moved
+/// source (any commit since the observation) answers a refusal or another plan: the retained plan
+/// could not be sealed (the consent provider prepares the same plan over its admitted source and
+/// refuses) and is dead.
+fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
+    let retained = bounded(&directory.join("plan.frame"), transport::HOST_MAX_FRAME)?;
+    let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
+    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &pair(&observation, &pin.command)?);
+    let _ = take_host_decision();
+    let Ok(frame) = current else { return Ok(false) };
+    if frame == retained {
+        return Ok(true);
+    }
+    // A pinned plan: the Host's fresh plan differs only by its deadline when the source merely
+    // moved; pinned to the same observation height it is the retained pinned plan again (what the
+    // consent provider accepts, `checkExactOrPinned`). Anything else is a dead plan.
+    let Some(height) = &pin.pinned_at else { return Ok(false) };
+    let body = reply(&frame, 86)?;
+    let fresh = directory.join("plan-current.bin");
+    let fresh_pinned = directory.join("plan-current-pinned.bin");
+    for stale in [&fresh, &fresh_pinned] {
+        if stale.exists() { fs::remove_file(stale).map_err(|error| error.to_string())?; }
+    }
+    retain_exact(&fresh, body)?;
+    let pinned_now = pin_plan_height(&pin.host, &pin.config, &fresh, height, &fresh_pinned)?;
+    for temporary in [&fresh, &fresh_pinned] {
+        let _ = fs::remove_file(temporary);
+    }
+    Ok(pinned_now.is_some_and(|bytes| bytes == pin.plan))
+}
+
+/// The next free `replanned/NN` of a directory.
+fn next_retirement(directory: &Path) -> Result<u32> {
+    let parent = directory.join(crate::replan::REPLANNED);
+    if !parent.exists() {
+        return Ok(1);
+    }
+    let mut number = 1;
+    while parent.join(format!("{number:02}")).exists() {
+        number += 1;
+    }
+    Ok(number)
 }
 
 /// A home identity keeps its origin subject number, so only the Store-local
@@ -416,7 +518,12 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     pinned(&request, "hostSha256", field(&pin, "hostSha256")?)?;
     pinned(&request, "configSha256", field(&pin, "configSha256")?)?;
     let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
-    let plan = private_bytes(&directory.join("plan.bin"), LIMIT)?;
+    let pinned_at = match pin.get("pinnedAtHeight") {
+        Some(Value::String(height)) => Some(height.clone()),
+        _ => None,
+    };
+    let plan = private_bytes(
+        &directory.join(if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }), LIMIT)?;
     pinned(&pin, "commandSha256", &digest(&command))?;
     pinned(&pin, "planSha256", &digest(&plan))?;
     let name = field(&pin, "name")?;
@@ -488,6 +595,8 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         public_key,
         plan,
         command,
+        reservation,
+        pinned_at,
     })
 }
 
@@ -793,12 +902,23 @@ fn plan(mut args: Args) -> Result<()> {
     }
     sync_directory_ancestors(&directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
+    if directory.join(SUBMIT_REFUSED).exists() {
+        // The sealed plan was refused with no record (`submit`): definitely unadmitted, its binding
+        // released. Everything but the request, the retained config and the lock retires under
+        // replanned/NN, and the plan below observes again under the SAME request and reservation.
+        let number = next_retirement(&directory)?;
+        let retired = crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])?;
+        eprintln!(
+            "mini: enroll plan: the previous plan was refused by the Host with no record; it is retired at {} and this request is planned again",
+            retired.display()
+        );
+    }
     if directory.join("submit-marker.json").exists() {
         return Err(
             "enrollment may have been submitted; use --action lookup with this exact --dir".into(),
         );
     }
-    if directory.join("seal.json").exists() || directory.join("ingress.bin").exists() {
+    if (directory.join("seal.json").exists() || directory.join("ingress.bin").exists()) && !directory.join("pin.json").exists() {
         return Err(
             "enrollment already sealed; use --action submit or lookup with this exact --dir".into(),
         );
@@ -832,8 +952,61 @@ fn plan(mut args: Args) -> Result<()> {
         expected_request["nextCosign"] = json!(hex(&cosign));
     }
     let request = retained_request(&directory, &expected_request)?;
+    if directory.join("pin.json").exists() {
+        // A validated plan is retained here and holds this name's namespace reservation. While it is
+        // still the Host's plan over the current source it is RESUMED, never planned again (a second
+        // request would strand that reservation): the same custody is printed and the next step
+        // named. Once the source has moved under it (a tick, a certify: any commit stales the
+        // signed observation it was planned over, and the consent provider refuses to sign it), the
+        // plan is definitely dead and nothing of it was submitted, so it retires under replanned/NN,
+        // its binding is released, and the SAME request (nonce, reservation, identity) is planned
+        // again below. A home-identity member then signs possession over the new plan.
+        let pin = load_pin(&directory)?;
+        let plan_view = json_private(&directory.join("plan.json"))?;
+        validate_plan(&plan_view, &pin.command, &pin.plan)?;
+        if retained_plan_is_current(&directory, &pin)? {
+            if directory.join("seal.json").exists() || directory.join("ingress.bin").exists() {
+                return Err("enrollment already sealed; use --action submit or lookup with this exact --dir".into());
+            }
+            let next = if pin.new_key.is_some() {
+                "`--action seal`, then `--action submit`"
+            } else {
+                "`--action offer` (the member signs possession with `mini join --sponsor-plan`), `--action seal --possession-signature`, then `--action submit`"
+            };
+            eprintln!(
+                "mini: enroll plan: a validated plan is retained at {}; nothing is planned again. Continue with {next}, all with this exact --dir",
+                directory.display()
+            );
+            return print_json(&plan_custody(&pin.subject, &pin.key_id, &pin.public_key, &plan_view));
+        }
+        participant_namespace::release_attempt(&pin.reservation, &directory)?;
+        let number = next_retirement(&directory)?;
+        let retired = crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])?;
+        eprintln!(
+            "mini: enroll plan: the retained plan is stale against the moved source (a tick or certify since it was planned; nothing of it was submitted); it is retired at {} and the same request is planned again",
+            retired.display()
+        );
+    } else if directory.join("plan.frame").exists() {
+        // A plan that never validated (no pin.json: the process ended between the Host's plan and
+        // the binding) reserved nothing and binds nothing; it retires and the request is planned again.
+        let number = next_retirement(&directory)?;
+        crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])?;
+    }
     let roles = enrollment_roles(home);
     let request_bytes = private_bytes(&directory.join("request.json"), 256 * 1024)?;
+    // The name's reservation may already be a retained plan's, in another directory: that plan is
+    // resumed there, never planned again here (one request, one reservation, one identity).
+    if let Some(bound) = participant_namespace::bound_attempt(&namespace_root, &deployment_domain, &sponsor, &name)? {
+        let here = fs::canonicalize(directory.parent().ok_or("enrollment attempt lacks parent")?)
+            .map_err(|error| error.to_string())?
+            .join(directory.file_name().ok_or("enrollment attempt lacks filename")?);
+        if bound != here {
+            return Err(format!(
+                "enrollment {name} is already planned at {bound}; resume it there (`mini enroll --action offer|seal|submit --dir {bound}`): a second plan is never made, the name's namespace reservation is that plan's",
+                bound = bound.display()
+            ));
+        }
+    }
     let reservation = participant_namespace::reserve(
         &namespace_root,
         &deployment_domain,
@@ -852,7 +1025,7 @@ fn plan(mut args: Args) -> Result<()> {
     // re-plannable unit: nothing is bound or submitted until the Plan is
     // validated, so a Host stale-root (a tick, certify or write between the
     // observation and its use) retires them under replanned/ and observes again.
-    let (command, plan, plan_view) = crate::replan::replan(
+    let (command, plan, plan_view, pinned_at) = crate::replan::replan(
         "enroll plan",
         || {
             let (signed, factory_root, authority_root) = signed_factory_observation(
@@ -929,12 +1102,39 @@ fn plan(mut args: Args) -> Result<()> {
                 &retained_config,
                 PLAN_KIND,
                 &directory.join("plan.bin"),
-                &directory.join("plan.json"),
+                &directory.join("plan-unpinned.json"),
             )?;
             validate_plan(&plan_view, &command, &plan)?;
-            Ok((command, plan, plan_view))
+            // The plan is pinned to the observation's height before anything signs it, so it
+            // survives the ticks between plan, possession and seal (`pin_plan_height`).
+            let height = observation_height(&directory)?;
+            match pin_plan_height(&host, &retained_config, &directory.join("plan.bin"), &height, &directory.join("plan-pinned.bin"))? {
+                Some(pinned_plan) => {
+                    let pinned_view = inspect(
+                        &host,
+                        &public_socket,
+                        &retained_config,
+                        PLAN_KIND,
+                        &directory.join("plan-pinned.bin"),
+                        &directory.join("plan.json"),
+                    )?;
+                    validate_plan(&pinned_view, &command, &pinned_plan)?;
+                    Ok((command, pinned_plan, pinned_view, Some(height)))
+                }
+                None => {
+                    eprintln!("mini: enroll plan: this Host has no pin-enrollment-plan-height; the plan is unpinned and does not survive a tick before it is sealed");
+                    fs::copy(directory.join("plan-unpinned.json"), directory.join("plan.json")).map_err(|error| error.to_string())?;
+                    Ok((command, plan, plan_view, None))
+                }
+            }
         },
-        |_, decision| stale_refusal(&host, &public_socket, &retained_config, decision),
+        // The Host's own stale-root, or the local consent provider's proven stale observation (the
+        // source moved between the Host's challenge and the local check; nothing was signed): both
+        // observe again. Any other refusal stays terminal.
+        |_, decision| {
+            let consent_stale = crate::client_consent::take_stale_observation();
+            stale_refusal(&host, &public_socket, &retained_config, decision) || consent_stale
+        },
         |number| {
             crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
                 .map(|_| ())
@@ -959,14 +1159,10 @@ fn plan(mut args: Args) -> Result<()> {
         "name":name,"sponsor":sponsor,"subject":subject,
         "keyId":reservation.ids["keyId"],"publicKey":public_key,
         "requestSha256":digest(&request_bytes),"commandSha256":command_sha,
-        "planSha256":digest(&plan),"reservationDigest":reservation.request_digest,
+        "planSha256":digest(&plan),"pinnedAtHeight":pinned_at,"reservationDigest":reservation.request_digest,
         "reservationRecord":reservation.record_path}),
     )?;
-    print_json(
-        &json!({"type":"minidregg-participant-enrollment-plan-custody-v1",
-        "subject":subject,"keyId":reservation.ids["keyId"],
-        "publicKey":public_key,"plan":plan_view,"authority":"candidate-only"}),
-    )
+    print_json(&plan_custody(&subject, reservation.ids["keyId"].as_str(), &public_key, &plan_view))
 }
 
 fn validate_plan(view: &Value, command: &[u8], plan: &[u8]) -> Result<()> {
@@ -1063,6 +1259,7 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
 /// digest, which every envelope pins.
 fn offer(directory: &Path) -> Result<()> {
     let directory = absolute(directory)?;
+    refused_pending(&directory)?;
     let pin = load_pin(&directory)?;
     if pin.new_key.is_some() {
         return Err("this enrollment holds the new secret key; only a public-key enrollment has an offer".into());
@@ -1493,6 +1690,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
 fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     let directory = absolute(directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
+    refused_pending(&directory)?;
     if directory.join("submit-marker.json").exists() {
         return Err(
             "enrollment may have been submitted; use --action lookup with this exact --dir".into(),
@@ -1528,7 +1726,9 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     }
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
     crate::client_consent::operator_plan(&pin.host, &pin.config, 86,
-        &pair(&observation, &pin.command)?, &pin.plan)?;
+        &pair(&observation, &pin.command)?, &pin.plan).map_err(|error| format!(
+            "{error}; a plan the source has moved under (a tick or certify since it was planned) is not signed: `mini enroll --action plan` with this exact --dir retires it and plans the same request again (a home-identity member then signs possession over the new plan)"
+        ))?;
     let sponsor_header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
     let possession_header = decode_hex(field(&plan_view, "possessionHeader")?)?;
     let sponsor = key(&pin.sponsor_key)?;
@@ -1698,9 +1898,44 @@ fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8]) -> Result<()> {
     result(directory, pin, &value)
 }
 
+/// The Host answered the sealed plan's submit with NO RECORD (253): a refusal decided before any
+/// append (Host/RequestRefusal.lean), so the attempt is definitely unadmitted. The frame and the
+/// Host's own decoding of it are retained, the name's namespace binding is released (the
+/// reservation and its ids stay the request's), and the caller is pointed at `plan` in this same
+/// directory: the same request, a fresh observation, and the member seals the new plan.
+fn refused_without_record(directory: &Path, pin: &Pin, frame: &[u8], ingress: &[u8]) -> Result<()> {
+    retain_exact(&directory.join("submit.frame"), frame)?;
+    let encoded = &frame[1..];
+    let kind = b"outcome";
+    let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
+    payload.extend_from_slice(kind);
+    payload.extend_from_slice(encoded);
+    let decoded = session_invoke(&pin.host, &pin.public_socket, &pin.config, 8, &payload)
+        .ok()
+        .filter(|reply| reply.first() == Some(&8))
+        .and_then(|reply| serde_json::from_slice::<Value>(&reply[1..]).ok());
+    let reason = decoded
+        .as_ref()
+        .and_then(|outcome| outcome.get("reason").and_then(Value::as_str))
+        .unwrap_or("undecoded")
+        .to_owned();
+    save_json(
+        &directory.join(SUBMIT_REFUSED),
+        &json!({"format":FORMAT,"operation":88,"ingressSha256":digest(ingress),
+            "response":crate::RESPONSE_NO_RECORD,"outcome":decoded,"status":"refused-no-record"}),
+    )?;
+    let released = participant_namespace::release_attempt(&pin.reservation, directory)?;
+    Err(format!(
+        "enrollment refused by the Host with no record ({reason}); nothing was admitted{}. Plan again with `mini enroll --action plan ... --dir {}` (the same request and reservation; the member seals the new plan), then seal and submit",
+        released.map(|path| format!("; the namespace binding is released ({})", path.display())).unwrap_or_default(),
+        directory.display()
+    ))
+}
+
 fn submit(directory: &Path) -> Result<()> {
     let directory = absolute(directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
+    refused_pending(&directory)?;
     let (pin, ingress) = sealed(&directory)?;
     if pin.operation_socket != pin.public_socket {
         private_socket(&pin.operation_socket)?;
@@ -1717,6 +1952,9 @@ fn submit(directory: &Path) -> Result<()> {
         "ingressSha256":digest(&ingress),"status":"may-have-submitted"}),
     )?;
     match session_invoke(&pin.host, &pin.operation_socket, &pin.config, 88, &ingress) {
+        Ok(frame) if frame.first() == Some(&crate::RESPONSE_NO_RECORD) => {
+            refused_without_record(&directory, &pin, &frame, &ingress)
+        }
         Ok(frame) => {
             let value = outcome(&directory, &pin, "submit", &frame, 88)?;
             if confirmed(&value).is_ok() {
@@ -1731,6 +1969,7 @@ fn submit(directory: &Path) -> Result<()> {
 fn lookup(directory: &Path) -> Result<()> {
     let directory = absolute(directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
+    refused_pending(&directory)?;
     let (pin, ingress) = sealed(&directory)?;
     if !directory.join("submit-marker.json").exists() {
         return Err("enrollment has no submitted or uncertain attempt".into());
@@ -2016,6 +2255,10 @@ mod tests {
             command: vec![],
             next_public: vec![],
             next_cosign: vec![],
+            reservation: participant_namespace::Reservation {
+                request_digest: "00".repeat(32), ids: Default::default(), record_path: PathBuf::new(),
+            },
+            pinned_at: None,
         };
         let installed = json!({"type":"confirmed","confirmation":"installed",
             "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});

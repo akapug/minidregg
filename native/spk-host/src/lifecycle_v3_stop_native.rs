@@ -515,14 +515,11 @@ pub(crate) fn resume_fenced_exact(
         .ok_or_else(|| invalid("STOP recovery probe parent absent"))?;
     private_dir(probe_parent)?;
     DirBuilder::new().mode(0o700).create(fresh_probe_dir)?;
-    let plan_path = write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
-    let committed_path = write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
+    write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
+    write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
     let output = fresh_probe_dir.join("stop-claim-current.json");
-    let inspection = operator.inspect_stop_claim(
-        &plan_path,
-        &committed_path,
-        &output,
-        MAX_INSPECTION as u64,
+    let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
+        operator, &retained_plan, &retained_committed, &output,
     )?;
     let target = StopTarget::from_verified_inspection(
         &retained_plan,
