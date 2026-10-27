@@ -12,14 +12,18 @@ fields of ONE `Impl`, and every law is a field of ONE `Spec impl` over those sha
 instance that satisfies one law by a degenerate field (an `open4` that never decodes) fails
 `sealOpens` and `inhabited`.
 
-`Derived` is what the v3 open rebuilt from every entry below the checkpoint and the v4 body
-carries instead: the six indexes, the journal and history the snapshot's model reads, and the
-fold's World. It moves into `DurableCheckpointCodec` with its codec when v4 lands (a move: this
-module then imports it).
+`Derived` is the derived state a session serves from: the six indexes, the journal and history
+the snapshot's model reads, and the fold's World. Option A (coordinator, 2026-10-27): the v4 body
+carries the fold's World and its `semantics`; the open reads the prefix RECORD BYTES (no tags),
+authenticates them by recomputing the chain to the MAC'd `body.chain`, and rebuilds the indexes,
+journal and history from them without executing any (`ffState` below holds the World and the
+state and has no prefix in its type). The open stays linear in log bytes with no execution; the
+journal read at use (no prefix read at all) is the next unit. `Body4` moves into
+`DurableCheckpointCodec` with its codec when v4 lands (a move: this module then imports it).
 
-What changes, said once: the open trusts the MAC'd checkpoint for the prefix's indexes, journal
-and World as v3 already trusts it for the prefix's state. A fold that diverges from the genesis
-replay under the same key and semantics is caught by `store audit` (item 5), never at open.
+What changes, said once: the open trusts the MAC'd checkpoint for the prefix's World as v3 already
+trusts it for the prefix's state. A fold that diverges from the genesis replay under the same key
+and semantics is caught by `store audit` (item 5), never at open.
 -/
 
 namespace Minidregg.Compiler.DurableFastForwardSpec
@@ -40,7 +44,7 @@ set_option autoImplicit false
 
 /-! ## What a checkpoint carries beyond v3, and what makes it the replay's -/
 
-/-- The derived state at a height: what the open no longer rebuilds from the prefix. -/
+/-- The derived state at a height, as a session serves from it. -/
 structure Derived where
   presence : PresenceIndex.Index
   links : LinkIndex.Index
@@ -56,13 +60,14 @@ structure Derived where
   spent, allowance), not a `representsCheck` verdict. `none` when the fold is lost. -/
   world : Option HostRefinesWorld.DWorld
 
-/-- The v4 checkpoint body: v3's body, the fold's semantics identity, the derived state. -/
+/-- The v4 checkpoint body: v3's body, the fold's semantics identity, the fold's World. -/
 structure Body4 where
   body : Body
-  /-- The identity of the fold that produced `derived.world` (the Host's semantics digest):
-  a body sealed by a different fold under the same Store key is refused by name. -/
+  /-- The identity of the fold that produced `world` (the Host's semantics digest): a body sealed
+  by a different fold under the same Store key is refused by name. -/
   semantics : Digest
-  derived : Derived
+  /-- The fold's World at the body's height (system store via `WorldSystemCodec.systemStream`). -/
+  world : Option HostRefinesWorld.DWorld
 
 structure Sealed4 where
   body : Body4
@@ -102,13 +107,13 @@ structure Derived.Honest (image : Image) (derived : Derived) : Prop where
   history : derived.history = (image.accepted.map fun record => (IntentRecord.erase record).event).reverse
   world : derived.world = worldAt rootBytes image
 
-/-- A v4 body is the replay's value at `image`: height, chain, state, semantics, derived. -/
+/-- A v4 body is the replay's value at `image`: height, chain, state, semantics, World. -/
 structure Body4.Honest (image : Image) (body : Body4) : Prop where
   height : body.body.height = image.accepted.length
   chain : body.body.chain = chainAfter (logStart image.seed) image.accepted
   state : replaySnapshot rootBytes image = some (body.body.state.snapshot rootBytes image.accepted)
   semantics : body.semantics = semanticsId
-  derived : Derived.Honest rootBytes image body.derived
+  world : body.world = worldAt rootBytes image
 
 /-- What an open serves from: the checkpoint-relative `Loaded`'s observable part. -/
 structure View where
@@ -125,11 +130,15 @@ structure View.Honest (image : Image) (view : View rootBytes) : Prop where
 
 /-! ## The implementation's v4 pieces, shared by every law -/
 
-/-- A fast-forward open: from the checkpoint's bytes and the stored entry AT its height (the
-anchor; it binds the body when the suffix is empty), the stored entries after it and the Store's
-head height. It receives nothing below the anchor: that it reads no prefix is its type. -/
-abbrev FastForward (α : Type) := MacKey → Seed → Option (List UInt8 × Entry) → List Entry → Nat →
-  Except String α
+/-- A fast-forward open: from the checkpoint's bytes, the stored record bytes below its height (no
+tags), the stored entries after it and the Store's head height. -/
+abbrev FastForward (α : Type) := MacKey → Seed → Option (List UInt8) → List (List UInt8) → List Entry →
+  Nat → Except String α
+
+/-- The executing part of an open: the World and the state at the head, from the checkpoint and the
+suffix. It has no prefix in its type, so it cannot execute a prefix record. -/
+abbrev FastForwardState (σ : Type) := MacKey → Seed → Option (List UInt8) → List Entry → Nat →
+  Except String σ
 
 structure Impl where
   /-- The checkpoint-relative `Loaded` (the reshape: seed, base height, base `Derived` and state,
@@ -159,6 +168,12 @@ structure Impl where
   /-- A full session handing over to the light one. -/
   toLight : Loaded4 → Light
   ff : FastForward Loaded4
+  /-- The state part a full open is built on (the World, the state at the head). -/
+  State4 : Type
+  ffState : FastForwardState State4
+  /-- The World and snapshot of a state part. -/
+  stateWorld : State4 → Option HostRefinesWorld.DWorld
+  stateSnapshot : State4 → DataSnapshot rootBytes
   audit : MacKey → Seed → List IntentRecord → List (Nat × List UInt8) → Except (Nat × String) Unit
 
 variable {rootBytes} in
@@ -186,7 +201,7 @@ def OwnEntries (key : MacKey) (seed : Seed) (entries : List Entry) (records : Li
     (entries.map (·.tag)) = .ok ()
 
 /-- The backup rule: open from the newest checkpoint at a positive height at or below the head,
-else from genesis. -/
+else from genesis. A non-atomic restore that left the prefix short fails the chain gate. -/
 def newestAtOrBelow (checkpoints : List (Nat × Body4)) (head : Nat) : Option (Nat × Body4) :=
   (checkpoints.filter fun checkpoint => 0 < checkpoint.1 ∧ checkpoint.1 ≤ head).foldl
     (fun best checkpoint => match best with
@@ -194,15 +209,14 @@ def newestAtOrBelow (checkpoints : List (Nat × Body4)) (head : Nat) : Option (N
       | none => some checkpoint) none
 
 variable {rootBytes} in
-/-- What `ff` is handed for a Store cut at `head` under the backup rule. -/
+/-- What `ff` is handed for a Store cut at `head` under the backup rule: the checkpoint, the record
+bytes below it, the entries from it to the cut. -/
 def openInputs (impl : Impl rootBytes) (key : MacKey) (checkpoints : List (Nat × Body4))
-    (entries : List Entry) (head : Nat) : Option (List UInt8 × Entry) × List Entry :=
+    (entries : List Entry) (head : Nat) : Option (List UInt8) × List (List UInt8) × List Entry :=
   match newestAtOrBelow checkpoints head with
-  | none => (none, entries.take head)
+  | none => (none, [], entries.take head)
   | some (height, body) =>
-      match entries[height - 1]? with
-      | some anchor => (some (impl.seal4 key body, anchor), (entries.take head).drop height)
-      | none => (none, entries.take head)
+      (some (impl.seal4 key body), (entries.take height).map (·.record), (entries.take head).drop height)
 
 /-- The Stores this Host writes, with the session that wrote them: genesis; an append a full
 session accepted (`step`); an append the light session accepted (`lightStep`); a hand-over to the
@@ -228,14 +242,13 @@ inductive Wrote (impl : Impl rootBytes) (key : MacKey) : Written → Session imp
         session
   | reopenGenesis {store session loaded'} (entries : List Entry) :
       Wrote impl key store session → OwnEntries logStart key store.seed entries store.records →
-      impl.ff key store.seed none entries entries.length = .ok loaded' →
+      impl.ff key store.seed none [] entries entries.length = .ok loaded' →
       Wrote impl key store (.inl loaded')
-  | reopenCheckpoint {store session loaded'} (entries : List Entry) (height : Nat) (body : Body4)
-      (anchor : Entry) :
+  | reopenCheckpoint {store session loaded'} (entries : List Entry) (height : Nat) (body : Body4) :
       Wrote impl key store session → OwnEntries logStart key store.seed entries store.records →
-      (height, body) ∈ store.checkpoints → height ≠ 0 → entries[height - 1]? = some anchor →
-      impl.ff key store.seed (some (impl.seal4 key body, anchor)) (entries.drop height) entries.length
-        = .ok loaded' →
+      (height, body) ∈ store.checkpoints → height ≠ 0 →
+      impl.ff key store.seed (some (impl.seal4 key body)) ((entries.take height).map (·.record))
+        (entries.drop height) entries.length = .ok loaded' →
       Wrote impl key store (.inl loaded')
 
 /-! ## The laws -/
@@ -258,16 +271,34 @@ structure Spec (impl : Impl rootBytes) : Prop where
   /-- What is sealed opens, as itself: the gate is not vacuous. -/
   sealOpens : ∀ key view, impl.open4 key (impl.seal4 key (impl.bodyOf key view)) = .ok (impl.bodyOf key view)
   -- ### 2. The suffix gate
-  /-- Every acceptance is authenticated over exactly what it read. -/
-  suffixGate : ∀ key seed bytes anchor suffix head loaded,
-    impl.ff key seed (some (bytes, anchor)) suffix head = .ok loaded →
-    ∃ body carried, impl.open4 key bytes = .ok body ∧
-      anchor.tag = DurableHistory.trailer key body.body.height carried ∧
-      carried.chain = body.body.chain ∧ carried.root = worldRoot rootBytes body.body ∧
+  /-- Every acceptance is authenticated over exactly what it read: the checkpoint opens; the prefix
+  record bytes are as many as its height, each decodes, and their chain recomputed from the seed's
+  start IS the MAC'd `body.chain` (the prefix is authenticated by the chain, no tags); the suffix's
+  tags verify chained from that chain; every suffix record decodes; the head is reached. -/
+  suffixGate : ∀ key seed bytes (below : List (List UInt8)) suffix head loaded,
+    impl.ff key seed (some bytes) below suffix head = .ok loaded →
+    ∃ body, impl.open4 key bytes = .ok body ∧
+      below.length = body.body.height ∧
+      (∀ record ∈ below, (recordFrame.decode record).isSome) ∧
+      (chainPrefixesStored (logStart seed) below).getLastD (logStart seed) = body.body.chain ∧
       verifyTags key body.body.height
         (chainPrefixesStored body.body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
       (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
       body.body.height + suffix.length = head ∧ (impl.view loaded).height = head
+  /-- From genesis the open is handed no prefix and verifies every entry's tag. -/
+  genesisGate : ∀ key seed (below : List (List UInt8)) suffix head loaded,
+    impl.ff key seed none below suffix head = .ok loaded →
+    below = [] ∧ verifyTags key 0 (chainPrefixesStored (logStart seed) (suffix.map (·.record)))
+      (suffix.map (·.tag)) = .ok () ∧ suffix.length = head
+  /-- `ff` executes no prefix record: the World and the snapshot of every open are those of
+  `ffState` on the same checkpoint and suffix, which has no prefix in its type. The prefix bytes
+  reach the result only through the non-executing rebuilds `Derived.Honest` pins (the indexes,
+  journal and history as functions of the records). -/
+  executesNoPrefix : ∀ key seed checkpoint below suffix head loaded,
+    impl.ff key seed checkpoint below suffix head = .ok loaded →
+    ∃ state, impl.ffState key seed checkpoint suffix head = .ok state ∧
+      (impl.view loaded).derived.world = impl.stateWorld state ∧
+      (impl.view loaded).snapshot = impl.stateSnapshot state
   -- ### 3. Exactness, and the reshaped `Loaded`
   /-- On a Store's own entries, a checkpoint honest for `pre` (or none, `pre = []`) fast-forwards
   to the replay's value at `pre ++ suf`. -/
@@ -276,10 +307,10 @@ structure Spec (impl : Impl rootBytes) : Prop where
     replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
     (match checkpoint with
       | none => pre = []
-      | some (bytes, anchor) => ∃ body, impl.open4 key bytes = .ok body ∧
-          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧
-          entries[pre.length - 1]? = some anchor ∧ pre ≠ []) →
-    ∃ loaded, impl.ff key seed checkpoint (entries.drop pre.length) entries.length = .ok loaded ∧
+      | some bytes => ∃ body, impl.open4 key bytes = .ok body ∧
+          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧ pre ≠ []) →
+    ∃ loaded, impl.ff key seed checkpoint ((entries.take pre.length).map (·.record))
+        (entries.drop pre.length) entries.length = .ok loaded ∧
       View.Honest rootBytes logStart ⟨seed, pre ++ suf⟩ (impl.view loaded) ∧
       (impl.view loaded).snapshot = snapshot
   /-- `representsCheck` from `Derived`: the reshaped check decides the snapshot's representation
@@ -299,11 +330,11 @@ structure Spec (impl : Impl rootBytes) : Prop where
   /-- Inhabitation: a Store reached by an append, a seal at a positive height and a reopen from
   that checkpoint. -/
   inhabited : ∃ (key : MacKey) (seed : Seed) (record : IntentRecord) (loaded1 : impl.Loaded4)
-      (entries : List Entry) (anchor : Entry) (loaded2 : impl.Loaded4),
+      (entries : List Entry) (loaded2 : impl.Loaded4),
     impl.step (impl.genesis seed) record = some loaded1 ∧
-    OwnEntries logStart key seed entries [record] ∧ entries[0]? = some anchor ∧
-    impl.ff key seed (some (impl.seal4 key (impl.bodyOf key (impl.view loaded1)), anchor)) [] 1
-      = .ok loaded2
+    OwnEntries logStart key seed entries [record] ∧
+    impl.ff key seed (some (impl.seal4 key (impl.bodyOf key (impl.view loaded1))))
+      (entries.map (·.record)) [] 1 = .ok loaded2
   -- ### 2'. Every cut height, under the backup rule
   /-- A Store this Host wrote, cut at ANY height (below the newest checkpoint included), opens by
   the backup rule to the replay's value at the cut: a tail rollback opens as the genesis replay
@@ -313,7 +344,8 @@ structure Spec (impl : Impl rootBytes) : Prop where
     OwnEntries logStart key store.seed entries store.records → head ≤ entries.length →
     ∃ loaded,
       impl.ff key store.seed (openInputs impl key store.checkpoints entries head).1
-        (openInputs impl key store.checkpoints entries head).2 head = .ok loaded ∧
+        (openInputs impl key store.checkpoints entries head).2.1
+        (openInputs impl key store.checkpoints entries head).2.2 head = .ok loaded ∧
       View.Honest rootBytes logStart ⟨store.seed, store.records.take head⟩ (impl.view loaded)
   -- ### 5. `store audit`
   auditSound : ∀ key seed records checkpoints, impl.audit key seed records checkpoints = .ok () →
@@ -329,14 +361,12 @@ structure Spec (impl : Impl rootBytes) : Prop where
       ∃ bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, impl.open4 key bytes = .ok body →
         ¬ Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body
   -- ### 6. A head seal fast-forwards zero records
-  headSealZero : ∀ key seed (entries : List Entry) (records : List IntentRecord) (view : View rootBytes)
-      anchor,
-    List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record) entries records →
+  headSealZero : ∀ key seed (entries : List Entry) (records : List IntentRecord) (view : View rootBytes),
+    OwnEntries logStart key seed entries records →
     View.Honest rootBytes logStart ⟨seed, records⟩ view → records ≠ [] →
-    entries.getLast? = some anchor →
-    ∃ loaded, impl.ff key seed (some (impl.seal4 key (impl.bodyOf key view), anchor)) [] entries.length
-        = .ok loaded ∧
+    ∃ loaded, impl.ff key seed (some (impl.seal4 key (impl.bodyOf key view)))
+        (entries.map (·.record)) [] entries.length = .ok loaded ∧
       (impl.view loaded).height = view.height ∧ (impl.view loaded).chain = view.chain ∧
-      (impl.view loaded).derived = view.derived
+      (impl.view loaded).derived.world = view.derived.world
 
 end Minidregg.Compiler.DurableFastForwardSpec
