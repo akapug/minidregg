@@ -377,13 +377,13 @@ pub const SEAT_SUBMIT: u8 = 217;
 pub const SEAT_LOOKUP: u8 = 218;
 // active; public,operator; owner: seats-native; effect: none
 pub const SEAT_VIEW: u8 = 219;
-// reserved; Host stdio only; owner: platform; effect: none
+// active; Host stdio only; owner: platform; effect: none
 pub const PLATFORM_INSTALL_PLAN: u8 = 240;
-// reserved; Host stdio only; owner: platform; effect: none
+// active; Host stdio only; owner: platform; effect: none
 pub const PLATFORM_INSTALL_ASSEMBLE: u8 = 241;
-// reserved; Host stdio only; owner: platform; effect: none
+// active; Host stdio only; owner: platform; effect: append
 pub const PLATFORM_INSTALL_SUBMIT: u8 = 242;
-// reserved; Host stdio only; owner: platform; effect: none
+// active; Host stdio only; owner: platform; effect: none
 pub const PLATFORM_INSTALL_LOOKUP: u8 = 243;
 // reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_PLAN: u8 = 244;
@@ -408,11 +408,11 @@ pub const RESPONSE_HOST_OUTCOME: u8 = 255;
 pub const CONSENT_PLANS: &[u8] = &[APPLICATION_SHARE_ISSUE_PLAN, APPLICATION_DISPATCH_PLAN, APPLICATION_LIFECYCLE_COMPLETION_PLAN, AGENT_PAID_DISPATCH_PLAN, APPLICATION_LIFECYCLE_BEGIN_PLAN, APPLICATION_LIFECYCLE_CLAIM_PLAN, AGENT_RESERVE_PLAN, APPLICATION_LAUNCH_BEGIN_PLAN, APPLICATION_LAUNCH_CLAIM_PLAN, APPLICATION_LAUNCH_COMPLETION_PLAN, AGENT_LIFETIME_GRANT_PLAN, AGENT_LIFETIME_DISPATCH_PLAN, AGENT_LIFETIME_RESERVE_PLAN, APPLICATION_SESSION_ENROLLMENT_PLAN, PARTICIPANT_KEY_ENROLLMENT_PLAN, PARTICIPANT_PROVISIONING_PLAN, FLEET_TURN_PLAN, PAY_COMMAND_PLAN, PAY_OBSERVATION_PLAN, PAY_REFILL_PLAN, PAY_SELF_ENROLLMENT_PLAN, REALM_WELL_PLAN, CLOCK_TICK_PLAN, KEY_ROTATION_PLAN, JOB_MONEY_PLAN, CERTIFY_PLAN, PAY_CLAIM_PLAN, RESERVE_RESOURCE_BIRTH_PLAN, APPLICATION_FAILED_START_RECOVERY_PREPARE, ACTIVITY_PLAN, SEAT_PLAN, NEXT_KEY_ADOPTION_PLAN, APPLICATION_DISPATCH_AUTHENTICATED_PLAN];
 
 // Signing-plan operations recorded as NOT consent-checked, each with its reason in the registry (consent_exempt).
-pub const CONSENT_EXEMPT_PLANS: &[u8] = &[APPLICATION_DISPATCH_READY, AUTHORIZED_PREPARE, FN_FRONTIER_PLAN, FN_NAMESPACE_PLAN, GRAIN_SHARE_ISSUE_PLAN];
+pub const CONSENT_EXEMPT_PLANS: &[u8] = &[APPLICATION_DISPATCH_READY, AUTHORIZED_PREPARE, FN_FRONTIER_PLAN, FN_NAMESPACE_PLAN, GRAIN_SHARE_ISSUE_PLAN, PLATFORM_INSTALL_PLAN];
 
 // Active operations whose receiver never appends to the durable log (effect: none).
 // A reply under RESPONSE_HOST_OUTCOME to any operation is undecided; to one of these it still only ever means undecided.
-pub const NO_APPEND_OPERATIONS: &[u8] = &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 17, 19, 21, 23, 25, 27, 29, 30, 31, 32, 33, 35, 36, 37, 39, 41, 42, 43, 44, 45, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 73, 74, 75, 77, 78, 79, 80, 81, 82, 83, 85, 86, 87, 89, 91, 92, 93, 95, 96, 97, 99, 100, 101, 102, 103, 104, 106, 107, 108, 109, 111, 112, 113, 114, 116, 117, 118, 120, 121, 123, 124, 126, 127, 129, 130, 131, 132, 133, 134, 135, 136, 137, 140, 141, 143, 144, 150, 151, 152, 153, 154, 155, 160, 161, 163, 170, 171, 173, 180, 181, 182, 183, 184, 186, 187, 188, 190, 193, 194, 201, 202, 206, 207, 209, 210, 211, 213, 214, 215, 216, 218, 219];
+pub const NO_APPEND_OPERATIONS: &[u8] = &[0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 17, 19, 21, 23, 25, 27, 29, 30, 31, 32, 33, 35, 36, 37, 39, 41, 42, 43, 44, 45, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 73, 74, 75, 77, 78, 79, 80, 81, 82, 83, 85, 86, 87, 89, 91, 92, 93, 95, 96, 97, 99, 100, 101, 102, 103, 104, 106, 107, 108, 109, 111, 112, 113, 114, 116, 117, 118, 120, 121, 123, 124, 126, 127, 129, 130, 131, 132, 133, 134, 135, 136, 137, 140, 141, 143, 144, 150, 151, 152, 153, 154, 155, 160, 161, 163, 170, 171, 173, 180, 181, 182, 183, 184, 186, 187, 188, 190, 193, 194, 201, 202, 206, 207, 209, 210, 211, 213, 214, 215, 216, 218, 219, 240, 241, 243];
 
 // The local consent provider's frames (Host/ClientConsentCore.lean), a namespace apart from requests.
 // the intent's headers a key may sign (Host/ClientConsentCore.lean consent 220)
