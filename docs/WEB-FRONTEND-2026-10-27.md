@@ -35,7 +35,7 @@ search · Log out), a rail of places, and the stage.
 
 **Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
 the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is
-visual the day its row enters the table; the journey's `face-coverage` row checks every verb × subcommand leaf
+visual the day its row enters the table; the journey's `parity` row checks every verb × subcommand leaf
 `help` lists against `/verb/NAME`'s forms and names any without a face (and red-proofs itself on a
 verb the shell lacks); it is coverage, not parity, until every leaf also has an outcome test. The
 usage-derived forms are the interim; the structured command grammar (A0) replaces them verb by verb.
@@ -182,7 +182,7 @@ yet data and labels the page accordingly:
    `revoke`/`renounce`/`law`/`can`/`why`/`inspect`, the money verbs (`pay`/`credit`/`tariff`/
    `topup`/`market`/`bid`/`reveal`/`bids`/`job`/`jobs`), the lifecycle (`propose`/`submit`/`lookup`/
    `retry`/`publish`/`history`), `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story`, keys, the rest.
-4. **The gate**: `face-coverage` becomes `parity` when every leaf has (a) a route and a no-JS
+4. **The gate** (reached): `parity` holds when every leaf has (a) a route and a no-JS
    form from its grammar and (b) an outcome test: a journey row per spine flow (steps 3–7 of the
    tour) asserting the decoded outcome class and the receipt, plus a per-leaf dry-run where the
    verb has one (`can`, op 130) and a usage-ending test where it does not. The red-proof stays.
@@ -190,14 +190,27 @@ yet data and labels the page accordingly:
    arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
    `subcommands()` once the last verb converts.
 
-State (2026-10-27, lane tip): `shell_grammar.rs` holds the grammars of `doc` (40 leaves), `room`
-(28), `delegate`, `revoke`, `renounce`, `law` (5), `pay` (4), `credit`, `tariff` (2 shapes), `topup`,
-`market` (2), `bid`, `reveal`, `bids`, `job` (8), `jobs`: 16 verbs, 104 leaves. For each, the shell
-parses through `parse()`, `help`/`usage_of`/completion read the usage rendered by one printer, and
-the body renders the forms from the leaves (effect → outcome class and the "and submit" tick); the
-hand-written arity checks, flag scrapers and usage strings of those verbs are deleted (shell.rs:
-−845 lines across the three commits, +336 of builders; the grammar module is 552 lines of data and
-one parser). Still on usage strings: the lifecycle (`propose`/`submit`/`lookup`/`retry`/`publish`/
-`history`), `can`/`inspect`/`why`, `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story` and the chat
-verbs, keys, `kind`/`program`/`instance`, `enroll`/`provision`, the rest; the `/verb/NAME` page says
-which it is.
+State (2026-10-27, lane tip): every verb of the four tables is grammar data in `shell_grammar.rs`
+(69 verbs, 203 leaves: `doc`, `room`, the money verbs, the lifecycle, the reads and local verbs,
+the chat, Hermes and story verbs through `parse_line` on the raw line, `apps` on L13's final verb,
+keys, identity, births, `kind`/`program`/`instance`, `app`, `forget`, `board`). The shell parses
+through `parse`/`parse_line`; `help`, `usage_of` and Tab completion read the grammar (the usage
+scraper is gone; `command_catalog` renders every row); the body renders every form from the leaves
+(effect → outcome class, dangerous switches as explicit ticks, required flags as required fields,
+`Rest` as free text). A flag can be `required` (printed bare, refused by name) and `Kind::KeyFile`
+types the plain names under HOME/keys; both came from the dry run, which found fifteen leaves whose
+forms promised what their arms refused. The hand-written usage strings, arity checks and the arm
+guards the grammar now covers are deleted (shell.rs about −1,450 lines over the series; chat.rs −211,
+hermes.rs −83, story.rs −51, keys.rs −60).
+
+**Parity is the journey's row now**: `/verb/NAME/dry` fills every leaf's form with placeholders
+(each positional field and the required flags), assembles it through the one assembler the POST
+uses, and plans it with `mini shell --line L --plan` (the real parser and plan builder, no Host).
+`usage` (exit 2: the grammar refused the form's line) is red; `world` (exit 1: the words parse but
+this workspace cannot plan them, e.g. an open room given a private room's declaration) is named
+and left to the spine rows (jchat's private room). The row requires zero usage refusals over all
+203 leaves, is red-proofed by a verb the shell lacks, and the spine rows assert the decoded
+outcomes of the flows (doc new and append admitted, their receipt, whoami answered, logout
+revokes). JWF provisions its own member with a birth context from the sponsor's shell (as the
+docuverse provisions its authors), so the document rows run on the spine world too; the member's
+HOME is short because the client's resident consent socket lives under it.

@@ -24,6 +24,8 @@ pub enum Kind {
     TextOrFile,
     /// `@FILE` under `HOME/requests`, only.
     File,
+    /// A plain file name under HOME/keys (`mini.key`, `next.key`): no path, no leading dot.
+    KeyFile,
     /// `@FILE` or `@-` (standard input).
     FileOrStdin,
     /// A law: a quoted clause list, predicate JSON, `@FILE`, or a stock name.
@@ -32,6 +34,9 @@ pub enum Kind {
     Choice(&'static [&'static str]),
     /// Any single word.
     Word,
+    /// The rest of the raw line, untouched (free text: apostrophes and `#` need no quoting; the
+    /// verb removes one pair of outer quotes). Always the last argument; parsed by [`parse_line`].
+    Rest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +61,9 @@ pub struct Arg {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Flag {
     pub name: &'static str,
+    /// The leaf refuses without it (`room welcome … --template T`, `room seal … --freeze-roster`);
+    /// the usage prints it unbracketed and the form marks the field required.
+    pub required: bool,
     /// A flag with a value names its placeholder and kind; without one it is a switch.
     pub value: Option<(&'static str, Kind)>,
     /// A dangerous switch (`--i-know`, `--freeze-roster`): the form asks for an explicit tick.
@@ -86,10 +94,14 @@ const fn opt(name: &'static str, kind: Kind) -> Arg {
     Arg { name, kind, optional: true }
 }
 const fn switch(name: &'static str) -> Flag {
-    Flag { name, value: None, dangerous: false }
+    Flag { name, required: false, value: None, dangerous: false }
 }
 const fn valued(name: &'static str, placeholder: &'static str, kind: Kind) -> Flag {
-    Flag { name, value: Some((placeholder, kind)), dangerous: false }
+    Flag { name, required: false, value: Some((placeholder, kind)), dangerous: false }
+}
+/// The same flag, required.
+const fn req(f: Flag) -> Flag {
+    Flag { required: true, ..f }
 }
 
 const JSON_OR_HTML: &[Flag] = &[switch("--json"), switch("--html")];
@@ -127,8 +139,9 @@ pub static DOC: Grammar = Grammar {
         Leaf { path: &["doc", "insert"], args: &[arg("NAME", Kind::Ref), arg("N", Kind::Number), arg("TEXT|@FILE", Kind::TextOrFile)], flags: &[], effect: Effect::Transition, about: "doc-insert" },
         Leaf { path: &["doc", "move"], args: &[arg("NAME", Kind::Ref), arg("FROM", Kind::Number), arg("TO", Kind::Number)], flags: &[], effect: Effect::Transition, about: "doc-move" },
         Leaf { path: &["doc", "remove"], args: &[arg("NAME", Kind::Ref), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "doc-remove" },
-        Leaf { path: &["doc", "mark"], args: &[arg("NAME", Kind::Ref), arg("LINE", Kind::Number), arg("bold|italic|code|heading|link", Kind::Choice(&["bold", "italic", "code", "heading", "link"])), opt("TARGET", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mark" },
-        Leaf { path: &["doc", "unmark"], args: &[arg("NAME", Kind::Ref), arg("MARK", Kind::Word), opt("KIND", Kind::Word)], flags: &[], effect: Effect::Transition, about: "unmark (MARK, or LINE KIND)" },
+        Leaf { path: &["doc", "mark"], args: &[arg("NAME", Kind::Ref), arg("LINE", Kind::Number), arg("bold|italic|code|heading", Kind::Choice(&["bold", "italic", "code", "heading"]))], flags: &[], effect: Effect::Transition, about: "mark (a style on one line)" },
+        Leaf { path: &["doc", "mark"], args: &[arg("NAME", Kind::Ref), arg("LINE", Kind::Number), arg("link", Kind::Choice(&["link"])), arg("TARGET", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mark (a link on one line to TARGET)" },
+        Leaf { path: &["doc", "unmark"], args: &[arg("NAME", Kind::Ref), arg("MARK|LINE", Kind::Number), opt("KIND", Kind::Choice(&["bold", "italic", "code", "heading", "link"]))], flags: &[], effect: Effect::Transition, about: "unmark (MARK, or LINE KIND)" },
         Leaf { path: &["doc", "annotate"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("LINE", Kind::Number), arg("TEXT|@FILE", Kind::TextOrFile)], flags: &[], effect: Effect::Propose, about: "propose (payload document: annotate)" },
         Leaf { path: &["doc", "link"], args: &[arg("ID", Kind::Id), arg("FROM", Kind::Ref), arg("TO", Kind::Ref), opt("RELATION", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (payload document: link)" },
         Leaf { path: &["doc", "links"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "doc-links (the Host's link index)" },
@@ -136,12 +149,12 @@ pub static DOC: Grammar = Grammar {
         Leaf { path: &["doc", "range"], args: &[arg("NAME", Kind::Ref), arg("FROM", Kind::Number), arg("TO", Kind::Number)], flags: &[], effect: Effect::Transition, about: "doc-range (createRun)" },
         Leaf { path: &["doc", "transclude"], args: &[arg("NAME", Kind::Ref), arg("SOURCE", Kind::Ref), arg("FROM", Kind::Number), arg("TO", Kind::Number), opt("snapshot|live", Kind::Choice(&["snapshot", "live"])), opt("at", Kind::Choice(&["at"])), opt("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "transclude (--from-line --to-line)" },
         Leaf { path: &["doc", "transclusions"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "transclusions" },
-        Leaf { path: &["doc", "follow"], args: &[arg("NAME", Kind::Ref), arg("T", Kind::Word)], flags: &[], effect: Effect::Read, about: "follow" },
+        Leaf { path: &["doc", "follow"], args: &[arg("NAME", Kind::Ref), arg("T", Kind::Number)], flags: &[], effect: Effect::Read, about: "follow" },
     ],
 };
 
 const fn dangerous(name: &'static str) -> Flag {
-    Flag { name, value: None, dangerous: true }
+    Flag { name, required: false, value: None, dangerous: true }
 }
 
 /// `room`: a room's names, its birth, its roster, its keys (private rooms), its economy.
@@ -154,14 +167,15 @@ pub static ROOM: Grammar = Grammar {
         Leaf { path: &["room", "unbind"], args: &[arg("ID", Kind::Id), arg("ROOM", Kind::Ref), arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "shared-name --op unbind" },
         Leaf { path: &["room", "resolve"], args: &[arg("ROOM/NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "shared-name --op resolve" },
         Leaf { path: &["room", "new"], args: &[arg("NAME", Kind::Ref)], flags: &[valued("--law", "open|realm", Kind::Choice(&["open", "realm"])), valued("--referee", "SUBJECT", Kind::Subject), valued("--in", "PARENT", Kind::Ref), switch("--private"), valued("--template", "T|@FILE", Kind::Word), valued("--concierge", "SUBJECT", Kind::Subject), valued("--period", "N", Kind::Number)], effect: Effect::Transition, about: "mini workspace --action create (storage declared, the room's law, --room-template LAW); --private: the private room's law, its keys cell and your own wrap [DEVNET QUALITY; PRIVACY NOT AUDITED]; --template: the template's lines, each one typed line, in order; --concierge: the room's lines, then `room concierge`" },
-        Leaf { path: &["room", "welcome"], args: &[arg("NAME", Kind::Id), arg("SUBJECT", Kind::Subject)], flags: &[valued("--template", "T|@FILE", Kind::Word)], effect: Effect::Transition, about: "the template's member lines" },
+        Leaf { path: &["room", "welcome"], args: &[arg("NAME", Kind::Id), arg("SUBJECT", Kind::Subject)], flags: &[req(valued("--template", "T|@FILE", Kind::Word))], effect: Effect::Transition, about: "the template's member lines" },
         Leaf { path: &["room", "template", "list"], args: &[], flags: &[], effect: Effect::Local, about: "local: the room templates" },
         Leaf { path: &["room", "template", "show"], args: &[arg("T|@FILE", Kind::Word), opt("member", Kind::Choice(&["member"]))], flags: &[], effect: Effect::Local, about: "local: print the template file (its room lines, or its member lines)" },
-        Leaf { path: &["room", "invite"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("SUBJECT", Kind::Subject), opt("DECLARATION|KEY-ID|@FILE", Kind::Word)], flags: &[switch("--past"), dangerous("--i-know"), valued("--verbs", "V,...", Kind::Word), valued("--fields", "F,...", Kind::Word), valued("--max-delta", "F=N,...", Kind::Word), valued("--max-cost", "N", Kind::Number)], effect: Effect::Propose, about: "propose (action delegate, room: true; private: room-key --op invite, which also releases the room key to the invitee's hybrid X25519 + ML-KEM-768 key in one keys write)" },
+        Leaf { path: &["room", "invite"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("SUBJECT", Kind::Subject)], flags: &[valued("--verbs", "V,...", Kind::Word), valued("--fields", "F,...", Kind::Word), valued("--max-delta", "F=N,...", Kind::Word), valued("--max-cost", "N", Kind::Number)], effect: Effect::Propose, about: "propose (action delegate on the room: an open room's invitation)" },
+        Leaf { path: &["room", "invite"], args: &[arg("ID", Kind::Id), arg("PRIVATE-ROOM", Kind::Ref), arg("SUBJECT", Kind::Subject), arg("DECLARATION|KEY-ID|@FILE", Kind::Word)], flags: &[switch("--past"), dangerous("--i-know"), valued("--verbs", "V,...", Kind::Word), valued("--fields", "F,...", Kind::Word), valued("--max-delta", "F=N,...", Kind::Word), valued("--max-cost", "N", Kind::Number)], effect: Effect::Propose, about: "propose (action delegate, room: true; private: room-key --op invite, which also releases the room key to the invitee's hybrid X25519 + ML-KEM-768 key in one keys write)" },
         Leaf { path: &["room", "kick"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("SUBJECT", Kind::Subject)], flags: &[], effect: Effect::Propose, about: "room-kick: one revoke per standing grant SUBJECT holds under NAME (the Host's signed who view), proposed; `submit ID` submits them all (private: room-key --op kick = every revoke + rotate + rewrap, submitted)" },
-        Leaf { path: &["room", "seal"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref)], flags: &[dangerous("--freeze-roster")], effect: Effect::Propose, about: "propose (action install-policy, `sealed`): sealing a room freezes its membership forever, so it needs --freeze-roster" },
+        Leaf { path: &["room", "seal"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref)], flags: &[req(dangerous("--freeze-roster"))], effect: Effect::Propose, about: "propose (action install-policy, `sealed`): sealing a room freezes its membership forever, so it needs --freeze-roster" },
         Leaf { path: &["room", "rotate"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "room-key --op rotate" },
-        Leaf { path: &["room", "transition"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Id), arg("NEXTFILE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "room-key --op transition (founder: hand the room to your next signing key before rotate-key)" },
+        Leaf { path: &["room", "transition"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Id), arg("NEXTFILE", Kind::KeyFile)], flags: &[], effect: Effect::Transition, about: "room-key --op transition (founder: hand the room to your next signing key before rotate-key)" },
         Leaf { path: &["room", "register"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "room-key --op register (publish my current encryption key as my record)" },
         Leaf { path: &["room", "rewrap"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Id), arg("SUBJECT", Kind::Subject)], flags: &[], effect: Effect::Transition, about: "room-key --op rewrap" },
         Leaf { path: &["room", "keys"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Local, about: "room-key --op list (local)" },
@@ -304,8 +318,166 @@ pub static EXIT: Grammar = Grammar { verb: "exit", leaves: &[
     Leaf { path: &["exit"], args: &[], flags: &[], effect: Effect::Local, about: "local" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
-    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT];
+// The chat verbs (chat.rs), Hermes (hermes.rs) and the story (story.rs): raw-line grammars.
+pub static SAY: Grammar = Grammar { verb: "say", leaves: &[
+    Leaf { path: &["say"], args: &[opt("TEXT", Kind::Rest)], flags: &[valued("--to", "NAME", Kind::Word), valued("--re", "N", Kind::Number), valued("--in", "ROOM", Kind::Word), valued("--operation-record", "ABS_PATH", Kind::Word), valued("--file", "FILE", Kind::Word), valued("--status", "STATE", Kind::Word), valued("--expect-re-cell", "CELL", Kind::Number), valued("--expect-re-sequence", "N", Kind::Number), valued("--via", "NETWORK", Kind::Word), valued("--via-id", "ID", Kind::Number), valued("--via-name", "NAME", Kind::Word)], effect: Effect::Transition, about: "append {\"type\":\"say\",\"text\":TEXT} to my stream in the current room (propose + submit); --file FILE says the file's text; --status, --expect-re-* and --via are a resident's and a bridge's typed entries" },
+] };
+pub static TAIL: Grammar = Grammar { verb: "tail", leaves: &[
+    Leaf { path: &["tail"], args: &[], flags: &[valued("-n", "N", Kind::Number), valued("--since", "HEIGHT", Kind::Number), switch("--follow"), switch("-f"), switch("--json"), switch("--held"), valued("--in", "ROOM", Kind::Word), valued("--entry", "CELL:SEQUENCE", Kind::Word), valued("--discover", "FILE", Kind::Word), valued("--discover-json", "-", Kind::Word)], effect: Effect::Read, about: "a signed tail of every member stream in the current room, merged by (height, author, cell, sequence)" },
+] };
+pub static TOPIC: Grammar = Grammar { verb: "topic", leaves: &[
+    Leaf { path: &["topic"], args: &[opt("TEXT", Kind::Rest)], flags: &[], effect: Effect::Transition, about: "show the room topic, or append {\"type\":\"topic\"} (the founder's counts)" },
+] };
+pub static PIN: Grammar = Grammar { verb: "pin", leaves: &[
+    Leaf { path: &["pin"], args: &[arg("N", Kind::Word)], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"pin\"} with ref = entry #N (the founder's count)" },
+] };
+pub static UNPIN: Grammar = Grammar { verb: "unpin", leaves: &[
+    Leaf { path: &["unpin"], args: &[], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"unpin\"} in the current room (the founder's counts)" },
+] };
+pub static REACT: Grammar = Grammar { verb: "react", leaves: &[
+    Leaf { path: &["react"], args: &[arg("N", Kind::Word), arg("EMOJI", Kind::Word)], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
+] };
+pub static CHAT: Grammar = Grammar { verb: "chat", leaves: &[
+    Leaf { path: &["chat", "new"], args: &[arg("ROOM", Kind::Word)], flags: &[switch("--private")], effect: Effect::Transition, about: "a chat room (its roster, its streams); --private: a private room (devnet quality; privacy not audited)" },
+    Leaf { path: &["chat", "adopt"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Transition, about: "the founder gives a room it already controls the chat roster" },
+    Leaf { path: &["chat", "invite"], args: &[arg("ROOM", Kind::Word), arg("SUBJECT", Kind::Subject), opt("NAME", Kind::Word)], flags: &[valued("--enc", "ENC-PUB|@FILE", Kind::Word), dangerous("--i-know"), valued("--verbs", "V,...", Kind::Word)], effect: Effect::Propose, about: "the room grant for SUBJECT (observe, append; --verbs widens it), a petname; --enc releases a private room's key" },
+    Leaf { path: &["chat", "join"], args: &[arg("ROOM", Kind::Word), arg("INVITE-JSON|@FILE", Kind::Rest)], flags: &[], effect: Effect::Local, about: "import the invitation" },
+    Leaf { path: &["chat", "enter"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Local, about: "make ROOM the current room" },
+    Leaf { path: &["chat", "rooms"], args: &[], flags: &[], effect: Effect::Local, about: "local: the rooms this session holds" },
+    Leaf { path: &["chat", "name"], args: &[arg("SUBJECT", Kind::Subject), arg("NAME", Kind::Word)], flags: &[], effect: Effect::Local, about: "local: a petname for a subject" },
+] };
+pub static SUMMON: Grammar = Grammar { verb: "summon", leaves: &[
+    Leaf { path: &["summon"], args: &[arg("ROOM", Kind::Word), arg("as", Kind::Choice(&["as"])), arg("librarian|gm|runner", Kind::Choice(&["librarian", "gm", "runner"]))], flags: &[valued("--budget", "N", Kind::Number), valued("--every", "N", Kind::Number), valued("--program", "@FILE", Kind::Word), valued("--hermes", "SUBJECT", Kind::Subject), dangerous("--i-know")], effect: Effect::Transition, about: "founder: the till (if none), Hermes's budget account funded N from mine, Hermes on the roster (chat invite), the role's documents and grants, the program document ROOM-hermes-ROLE, the room's hermes fields, the hand-off in HOME/outbox/H" },
+] };
+pub static ASK: Grammar = Grammar { verb: "ask", leaves: &[
+    Leaf { path: &["ask"], args: &[arg("[ROOM] TEXT", Kind::Rest)], flags: &[], effect: Effect::Transition, about: "say --to HERMES in the room (Hermes is the room cell's `hermes` field, a signed read); the first word is the room when this session holds one by that name" },
+] };
+pub static HERMES: Grammar = Grammar { verb: "hermes", leaves: &[
+    Leaf { path: &["hermes", "status"], args: &[opt("ROOM", Kind::Word)], flags: &[], effect: Effect::Read, about: "a signed read of the room's streams; each of my requests to Hermes with Hermes's latest typed status for it" },
+    Leaf { path: &["hermes", "cancel"], args: &[arg("N", Kind::Number), opt("ROOM", Kind::Word)], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"withdraw\"} for my request #N" },
+] };
+pub static DISMISS: Grammar = Grammar { verb: "dismiss", leaves: &[
+    Leaf { path: &["dismiss"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Transition, about: "founder: revoke the room grant and the role's delegations to Hermes, zero the room's hermes fields, ask Hermes to return the unspent budget (HOME/outbox/H/dismiss-ROOM.json)" },
+] };
+pub static STORY: Grammar = Grammar { verb: "story", leaves: &[
+    Leaf { path: &["story", "new"], args: &[arg("NAME", Kind::Word)], flags: &[req(valued("--from", "tale|@FILE", Kind::Word)), valued("--gm", "SUBJECT", Kind::Subject)], effect: Effect::Transition, about: "the table and its scenes under the sealed story law (--from a built-in tale or @FILE)" },
+    Leaf { path: &["story", "seal"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Transition, about: "seal the story's law" },
+    Leaf { path: &["story", "invite"], args: &[arg("NAME", Kind::Word), arg("SUBJECT", Kind::Subject), opt("gm", Kind::Choice(&["gm"]))], flags: &[], effect: Effect::Propose, about: "a player's (or the GM's) grant" },
+    Leaf { path: &["story", "join"], args: &[arg("NAME", Kind::Word), arg("INVITATION|@FILE", Kind::Rest)], flags: &[], effect: Effect::Local, about: "import the invitation" },
+    Leaf { path: &["story", "enter"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Local, about: "make NAME the current story" },
+    Leaf { path: &["story", "list"], args: &[], flags: &[], effect: Effect::Local, about: "local: the stories this session holds" },
+    Leaf { path: &["story", "law"], args: &[arg("NAME|tale", Kind::Word), opt("SUBJECT", Kind::Subject)], flags: &[], effect: Effect::Read, about: "the story law, as a player (SUBJECT) would be judged by it" },
+] };
+pub static LOOK: Grammar = Grammar { verb: "look", leaves: &[
+    Leaf { path: &["look"], args: &[], flags: &[], effect: Effect::Read, about: "signed reads: the table, my cell and both their laws; print my scene, its exits, items and the GM's last words" },
+] };
+pub static GO: Grammar = Grammar { verb: "go", leaves: &[
+    Leaf { path: &["go"], args: &[arg("EXIT|SCENE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "one write to my cell: scene := the exit's scene, turn + 1 (the sealed law judges it)" },
+] };
+pub static TAKE: Grammar = Grammar { verb: "take", leaves: &[
+    Leaf { path: &["take"], args: &[arg("ITEM", Kind::Word)], flags: &[], effect: Effect::Transition, about: "one write to my cell: carries/ITEM := 1, turn + 1" },
+] };
+pub static ACT: Grammar = Grammar { verb: "act", leaves: &[
+    Leaf { path: &["act"], args: &[arg("VERB", Kind::Word)], flags: &[], effect: Effect::Transition, about: "one write to my cell: scene := the act's scene, turn + 1" },
+] };
+pub static NARRATE: Grammar = Grammar { verb: "narrate", leaves: &[
+    Leaf { path: &["narrate"], args: &[arg("TEXT", Kind::Rest)], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"say\",\"text\":TEXT} to the story's scenes stream (the GM's)" },
+] };
+
+pub static APPS: Grammar = Grammar { verb: "apps", leaves: &[
+    Leaf { path: &["apps", "search"], args: &[opt("TERM", Kind::Word)], flags: &[valued("--category", "C", Kind::Word), switch("--json")], effect: Effect::Read, about: "the Sandstorm app market index: the publisher's claims beside the box's verdict (signature, signed app id, size against the profile)" },
+    Leaf { path: &["apps", "show"], args: &[arg("APP-ID|PACKAGE-ID", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "one entry whole, and the refusals an install can meet" },
+    Leaf { path: &["apps", "install"], args: &[arg("APP-ID|PACKAGE-ID", Kind::Word)], flags: &[valued("--class", "S|M|L", Kind::Choice(&["S", "M", "L"]))], effect: Effect::Transition, about: "one member turn: the app birth under your key, the hosting delegation, the package choice under law.apps, then the worker's install and start; refused by name (unknownApp, sizeOverProfile, unverifiedSignature, unsupportedBridge, funding, classRefused) or undecided with `apps retry REQUEST-ID`" },
+    Leaf { path: &["apps", "retry"], args: &[arg("REQUEST-ID", Kind::Word)], flags: &[], effect: Effect::Transition, about: "the exact retry of an install whose reply was lost; a second install is never issued" },
+    Leaf { path: &["apps", "list"], args: &[], flags: &[switch("--json")], effect: Effect::Read, about: "the grains you own or were shared, with the v1 identity notice" },
+    Leaf { path: &["apps", "status"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "state, generation, origin, the routes you hold, the identities the grain holds" },
+    Leaf { path: &["apps", "open"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "your route's one-time bootstrap token for the grain's own origin (used once)" },
+    Leaf { path: &["apps", "stop"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "STOP through the lifecycle; undecided with `apps status GRAIN` while it runs" },
+    Leaf { path: &["apps", "start"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "START through the lifecycle" },
+    Leaf { path: &["apps", "share"], args: &[arg("GRAIN", Kind::Word), arg("MEMBER", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "a route on your grain for MEMBER (v1: members of a shared grain look like one user to the app)" },
+    Leaf { path: &["apps", "export"], args: &[arg("GRAIN", Kind::Word), arg("FILE", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "the grain's data as a package you keep" },
+    Leaf { path: &["apps", "delete"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "DELETE through the lifecycle" },
+    Leaf { path: &["apps", "identities"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "the saved identities the grain holds (who, since, revoked)" },
+    Leaf { path: &["apps", "revoke-identity"], args: &[arg("GRAIN", Kind::Word), arg("TOKEN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "revoke one saved identity" },
+] };
+
+// Keys, identity, births and the rest.
+pub static KEY: Grammar = Grammar { verb: "key", leaves: &[
+    Leaf { path: &["key", "set"], args: &[arg("PROVIDER", Kind::Word), arg("-|@FILE", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini key --action set (the provider key from stdin or @FILE in HOME/keys, never on the line; hosted custody)" },
+    Leaf { path: &["key", "grant"], args: &[arg("PROVIDER", Kind::Word), arg("RUNNER", Kind::Word)], flags: &[req(valued("--per-call", "TOKENS", Kind::Number)), req(valued("--per-day", "CALLS", Kind::Number)), req(valued("--until", "HEIGHT", Kind::Number)), valued("--model", "MODEL", Kind::Word)], effect: Effect::Transition, about: "mini key --action grant: a runner's bounded use of the provider key (per call, per day, until a height)" },
+    Leaf { path: &["key", "revoke"], args: &[arg("PROVIDER", Kind::Word), opt("RUNNER", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mini key --action revoke" },
+    Leaf { path: &["key", "ls"], args: &[], flags: &[], effect: Effect::Local, about: "mini key --action ls" },
+    Leaf { path: &["key", "providers"], args: &[], flags: &[], effect: Effect::Local, about: "mini key --action providers" },
+    Leaf { path: &["key", "choose"], args: &[arg("PROVIDER", Kind::Word), arg("MODEL", Kind::Word), arg("RUNNER", Kind::Word), arg("TASK", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini key --action choose" },
+] };
+pub static KEYGEN: Grammar = Grammar { verb: "keygen", leaves: &[
+    Leaf { path: &["keygen"], args: &[arg("FILE", Kind::KeyFile)], flags: &[], effect: Effect::Local, about: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
+] };
+pub static KEY_STATUS: Grammar = Grammar { verb: "key-status", leaves: &[
+    Leaf { path: &["key-status"], args: &[], flags: &[], effect: Effect::Local, about: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
+] };
+pub static ADOPT_NEXT_KEY: Grammar = Grammar { verb: "adopt-next-key", leaves: &[
+    Leaf { path: &["adopt-next-key", "lookup"], args: &[arg("ATTEMPT", Kind::Word)], flags: &[], effect: Effect::Transition, about: "recover a retained adoption attempt without signing again" },
+    Leaf { path: &["adopt-next-key"], args: &[arg("NEXTFILE", Kind::KeyFile)], flags: &[], effect: Effect::Transition, about: "commit a next key for an existing identity" },
+] };
+pub static ROTATE_KEY: Grammar = Grammar { verb: "rotate-key", leaves: &[
+    Leaf { path: &["rotate-key"], args: &[arg("NEXTFILE", Kind::KeyFile)], flags: &[], effect: Effect::Transition, about: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
+] };
+pub static INIT: Grammar = Grammar { verb: "init", leaves: &[
+    Leaf { path: &["init"], args: &[arg("KEYFILE", Kind::KeyFile), arg("SUBJECT", Kind::Subject)], flags: &[dangerous("--no-prerotation")], effect: Effect::Local, about: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
+] };
+pub static ENROLL: Grammar = Grammar { verb: "enroll", leaves: &[
+    Leaf { path: &["enroll", "plan"], args: &[arg("NAME", Kind::Id), arg("KEYFILE|PUBLIC-KEY-HEX", Kind::Word), opt("NEXT-PUBLIC-KEY-HEX", Kind::Word), opt("COSIGN-HEX", Kind::Word), opt("FACTORY-REF", Kind::Ref)], flags: &[dangerous("--no-prerotation")], effect: Effect::Local, about: "mini enroll --action plan --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret never enters this home; the record commits to the newcomer's next key, or --no-prerotation says so)" },
+    Leaf { path: &["enroll", "offer"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Local, about: "mini enroll --action offer" },
+    Leaf { path: &["enroll", "seal"], args: &[arg("NAME", Kind::Id), opt("SIGNATURE-HEX", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini enroll --action seal (with the newcomer's possession signature when given)" },
+    Leaf { path: &["enroll", "submit"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini enroll --action submit" },
+    Leaf { path: &["enroll", "lookup"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini enroll --action lookup" },
+    Leaf { path: &["enroll", "welcome"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Local, about: "mini enroll --action welcome (the newcomer's birth context, when this workspace provisioned them)" },
+] };
+pub static PROVISION: Grammar = Grammar { verb: "provision", leaves: &[
+    Leaf { path: &["provision"], args: &[arg("NAME", Kind::Id), arg("HOLDER", Kind::Subject), arg("FUNDING", Kind::Number), arg("PREDICATE-JSON|@FILE", Kind::Word), opt("FACTORY-REF", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
+] };
+pub static CREATE: Grammar = Grammar { verb: "create", leaves: &[
+    Leaf { path: &["create"], args: &[arg("NAME", Kind::Ref), arg("STORAGE", Kind::Word), arg("LAW|PREDICATE-JSON|@FILE", Kind::Word), opt("FIELDS|open", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref), valued("--owner", "SUBJECT", Kind::Subject), valued("--from", "KIND", Kind::Ref)], effect: Effect::Transition, about: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]; --from KIND births a world-resident kind's instance" },
+] };
+pub static INVOKE: Grammar = Grammar { verb: "invoke", leaves: &[
+    Leaf { path: &["invoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("create", Kind::Choice(&["create"])), arg("FIELD", Kind::Number), arg("VALUE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action invoke: one scalar create)" },
+    Leaf { path: &["invoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("write", Kind::Choice(&["write"])), arg("FIELD", Kind::Number), arg("VALUE", Kind::Word), arg("EXPECTED", Kind::Word)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action invoke: one scalar write, compare-and-set against EXPECTED)" },
+] };
+pub static KIND: Grammar = Grammar { verb: "kind", leaves: &[
+    Leaf { path: &["kind", "create"], args: &[arg("NAME", Kind::Ref), arg("DEFINITION-JSON|@FILE", Kind::Word), arg("LAW", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref)], effect: Effect::Transition, about: "world-resident definition create" },
+    Leaf { path: &["kind", "show"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "signed read of the definition" },
+    Leaf { path: &["kind", "revise"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("DEFINITION-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "guarded revision (propose)" },
+    Leaf { path: &["kind", "construct"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("PROGRAM-ID", Kind::Subject), arg("PARENTS-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Transition, about: "authenticated source construction" },
+] };
+pub static PROGRAM: Grammar = Grammar { verb: "program", leaves: &[
+    Leaf { path: &["program", "create"], args: &[arg("NAME", Kind::Ref), arg("SOURCE-JSON|@FILE", Kind::Word), arg("LAW", Kind::Word)], flags: &[valued("--in", "ROOM", Kind::Ref)], effect: Effect::Transition, about: "register canonical code and ABI with the existing evaluator, then birth its immutable program cell" },
+] };
+pub static INSTANCE: Grammar = Grammar { verb: "instance", leaves: &[
+    Leaf { path: &["instance", "show"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Read, about: "signed descriptor and entry read" },
+    Leaf { path: &["instance", "call"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("METHOD", Kind::Word)], flags: &[valued("--fund", "ACCOUNT", Kind::Ref), valued("--max-compute-credits", "N", Kind::Number)], effect: Effect::Transition, about: "a method call with compute consent (--fund and --max-compute-credits together)" },
+    Leaf { path: &["instance", "set"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("FIELD", Kind::Word), arg("KEY", Kind::Number), arg("VALUE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "named guarded edit using the last displayed values (propose)" },
+    Leaf { path: &["instance", "erase"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref), arg("FIELD", Kind::Word), arg("KEY", Kind::Number)], flags: &[], effect: Effect::Propose, about: "named guarded erase (propose)" },
+] };
+pub static APP: Grammar = Grammar { verb: "app", leaves: &[
+    Leaf { path: &["app", "status"], args: &[arg("NAME", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "current app admission (mini member --action app-status)" },
+    Leaf { path: &["app", "delegate-lifecycle", "prepare"], args: &[arg("ID", Kind::Id), arg("NAME", Kind::Ref)], flags: &[req(valued("--package", "PKG", Kind::Ref)), req(valued("--snapshot", "SNAP", Kind::Ref)), req(valued("--manager", "SUBJECT", Kind::Subject))], effect: Effect::Transition, about: "member-signed lifecycle management delegation, prepared with retained exact recovery" },
+    Leaf { path: &["app", "delegate-lifecycle"], args: &[arg("prepare|submit|recover|status", Kind::Choice(&["prepare", "submit", "recover", "status"])), arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "the delegation's lifecycle by request id" },
+] };
+pub static FORGET: Grammar = Grammar { verb: "forget", leaves: &[
+    Leaf { path: &["forget"], args: &[arg("ROOM", Kind::Id), opt("EPOCH", Kind::Number)], flags: &[], effect: Effect::Local, about: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one). A promise of this client only: the wraps stay in the room's keys cell, so your encryption key could still open them until the room is rotated (room rotate). Private rooms: devnet quality; privacy not audited" },
+] };
+
+pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
+    Leaf { path: &["board", "new"], args: &[arg("NAME", Kind::Ref)], flags: &[], effect: Effect::Transition, about: "mini workspace --action create (storage declared, the board law: tasks 0 and 1, fields 2-5)" },
+    Leaf { path: &["board", "add"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: task TASK's state field 2*TASK+2 := 0)" },
+    Leaf { path: &["board", "move"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number), arg("FROM", Kind::Choice(&["todo", "doing", "done"])), arg("TO", Kind::Choice(&["todo", "doing", "done"]))], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's state FROM -> TO, compare-and-set)" },
+    Leaf { path: &["board", "take"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's owner field 2*TASK+3 := me)" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
+    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
+    &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
     GRAMMARS.iter().copied().find(|g| g.verb == verb)
@@ -322,12 +494,33 @@ pub fn leaf_usage(leaf: &Leaf) -> String {
         words.push(if a.optional { format!("[{}]", a.name) } else { a.name.to_owned() });
     }
     for f in leaf.flags {
-        words.push(match f.value {
-            Some((placeholder, _)) => format!("[{} {placeholder}]", f.name),
-            None => format!("[{}]", f.name),
-        });
+        let shown = match f.value {
+            Some((placeholder, _)) => format!("{} {placeholder}", f.name),
+            None => f.name.to_owned(),
+        };
+        words.push(if f.required { shown } else { format!("[{shown}]") });
     }
     words.join(" ")
+}
+
+/// A leaf's path followed by one word per positional argument, each from `value(arg)`: the pure
+/// render of a line a caller has already decided (e.g. the write a law's witness names). Flags
+/// are not rendered; an optional argument whose value is empty is left out.
+pub fn compose(leaf: &Leaf, value: &dyn Fn(&Arg) -> String) -> String {
+    let mut words: Vec<String> = leaf.path.iter().map(|w| w.to_string()).collect();
+    for a in leaf.args {
+        let v = value(a);
+        if v.is_empty() && a.optional {
+            continue;
+        }
+        words.push(v);
+    }
+    words.join(" ")
+}
+
+/// The leaf of `g` whose literal path is exactly `path`.
+pub fn leaf(g: &'static Grammar, path: &[&str]) -> Option<&'static Leaf> {
+    g.leaves.iter().find(|l| l.path == path)
 }
 
 /// The operation words, rendered: one segment per leaf, aligned with the usage.
@@ -357,6 +550,10 @@ impl Parsed {
     pub fn has(&self, name: &str) -> bool {
         self.flag(name).is_some()
     }
+    /// The value of a required valued flag (the parser refused the line without it).
+    pub fn required(&self, name: &str) -> &str {
+        self.flag(name).flatten().unwrap_or("")
+    }
     /// Every value a repeatable valued flag was given (`--referee 9 --referee 12`).
     pub fn values(&self, name: &str) -> Vec<&str> {
         self.flags.iter().filter(|(n, _)| *n == name).filter_map(|(_, v)| v.as_deref()).collect()
@@ -385,16 +582,28 @@ pub fn parse(g: &'static Grammar, words: &[String]) -> Result<Parsed, String> {
         return Err(usage(g));
     }
     candidates.sort_by_key(|l| std::cmp::Reverse(l.path.len()));
-    let mut first_error = None;
+    // When no shape accepts the words, the refusal is the one from the shape that got furthest
+    // (the longest path, then the most leading words of the right kind): `doc mark p 2 link`
+    // is the link shape missing its TARGET, not the style shape refusing the word `link`.
+    let mut best: Option<((usize, usize), String)> = None;
     for leaf in candidates {
-        match parse_leaf(g, leaf, &words[leaf.path.len()..]) {
+        let rest = &words[leaf.path.len()..];
+        match parse_leaf(g, leaf, rest) {
             Ok(parsed) => return Ok(parsed),
             Err(e) => {
-                first_error.get_or_insert(e);
+                let rank = (leaf.path.len(), progress(leaf, rest));
+                if best.as_ref().is_none_or(|(r, _)| rank > *r) {
+                    best = Some((rank, e));
+                }
             }
         }
     }
-    Err(first_error.unwrap_or_else(|| usage(g)))
+    Err(best.map(|(_, e)| e).unwrap_or_else(|| usage(g)))
+}
+
+/// How many leading words pass the leaf's positional kinds in order (flags not counted).
+fn progress(leaf: &Leaf, rest: &[String]) -> usize {
+    leaf.args.iter().zip(rest).take_while(|(a, w)| check(a.kind, w, a.name).is_ok()).count()
 }
 
 fn parse_leaf(g: &Grammar, leaf: &'static Leaf, rest: &[String]) -> Result<Parsed, String> {
@@ -453,6 +662,130 @@ fn parse_leaf(g: &Grammar, leaf: &'static Leaf, rest: &[String]) -> Result<Parse
         }
         args.push(None);
     }
+    required_flags(leaf, &flags)?;
+    Ok(Parsed { leaf, args, flags })
+}
+
+/// A leaf's required flags must all be present; the refusal names the first that is not.
+fn required_flags(leaf: &Leaf, flags: &[(&'static str, Option<String>)]) -> Result<(), String> {
+    match leaf.flags.iter().find(|f| f.required && !flags.iter().any(|(n, _)| *n == f.name)) {
+        Some(f) => Err(format!("{} needs {}: {}", leaf.path.join(" "), f.name, leaf.about)),
+        None => Ok(()),
+    }
+}
+
+/// [`parse`] over a RAW line: the leading words are split on whitespace only (no quote or
+/// JSON-word processing), flags are read anywhere before the free text, and a [`Kind::Rest`]
+/// argument takes the untouched remainder of the line. The chat, Hermes and story verbs parse
+/// this way so that `say it's #1, isn't it` is the text it looks like.
+pub fn parse_line(g: &'static Grammar, line: &str) -> Result<Parsed, String> {
+    let mut candidates: Vec<&'static Leaf> = Vec::new();
+    let head: Vec<&str> = line.split_whitespace().collect();
+    for leaf in g.leaves {
+        if leaf.path.len() <= head.len() && leaf.path.iter().zip(&head).all(|(p, w)| p == w) {
+            candidates.push(leaf);
+        }
+    }
+    if candidates.is_empty() {
+        return Err(usage(g));
+    }
+    candidates.sort_by_key(|l| std::cmp::Reverse(l.path.len()));
+    let mut first_error = None;
+    for leaf in candidates {
+        // The raw remainder after the leaf's path words.
+        let mut rest = line.trim_start();
+        for _ in leaf.path {
+            rest = rest.trim_start();
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            rest = &rest[end..];
+        }
+        match parse_rest(g, leaf, rest) {
+            Ok(parsed) => return Ok(parsed),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| usage(g)))
+}
+
+fn parse_rest(g: &Grammar, leaf: &'static Leaf, mut rest: &str) -> Result<Parsed, String> {
+    let mut args: Vec<Option<String>> = Vec::new();
+    let mut flags: Vec<(&'static str, Option<String>)> = Vec::new();
+    let next_word = |text: &str| -> Option<(String, usize)> {
+        let trimmed = text.trim_start();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let skipped = text.len() - trimmed.len();
+        let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+        Some((trimmed[..end].to_owned(), skipped + end))
+    };
+    loop {
+        let position = args.len();
+        if let Some(a) = leaf.args.get(position) {
+            if a.kind == Kind::Rest {
+                // Flags may still precede the text; the first non-flag word starts it.
+                while let Some((w, used)) = next_word(rest) {
+                    let Some(f) = leaf.flags.iter().find(|f| f.name == w) else { break };
+                    rest = &rest[used..];
+                    match f.value {
+                        Some((placeholder, kind)) => {
+                            let (v, used) = next_word(rest).ok_or_else(|| usage(g))?;
+                            check(kind, &v, placeholder)?;
+                            flags.push((f.name, Some(v)));
+                            rest = &rest[used..];
+                        }
+                        None => flags.push((f.name, None)),
+                    }
+                }
+                let text = rest.trim();
+                if text.is_empty() {
+                    if !a.optional {
+                        return Err(usage(g));
+                    }
+                    args.push(None);
+                } else {
+                    args.push(Some(text.to_owned()));
+                }
+                rest = "";
+                break;
+            }
+        }
+        let Some((w, used)) = next_word(rest) else { break };
+        if let Some(f) = leaf.flags.iter().find(|f| f.name == w) {
+            rest = &rest[used..];
+            match f.value {
+                Some((placeholder, kind)) => {
+                    let (v, used) = next_word(rest).ok_or_else(|| usage(g))?;
+                    check(kind, &v, placeholder)?;
+                    flags.push((f.name, Some(v)));
+                    rest = &rest[used..];
+                }
+                None => flags.push((f.name, None)),
+            }
+            continue;
+        }
+        if w.starts_with("--") && w.len() > 2 {
+            return Err(usage(g));
+        }
+        let position = args.len();
+        let Some(a) = leaf.args.get(position) else { return Err(usage(g)) };
+        if a.optional && matches!(a.kind, Kind::Choice(_)) && check(a.kind, &w, a.name).is_err() {
+            args.push(None);
+            continue;
+        }
+        check(a.kind, &w, a.name)?;
+        args.push(Some(w));
+        rest = &rest[used..];
+    }
+    for a in &leaf.args[args.len()..] {
+        if !a.optional {
+            return Err(usage(g));
+        }
+        args.push(None);
+    }
+    required_flags(leaf, &flags)?;
     Ok(Parsed { leaf, args, flags })
 }
 
@@ -464,8 +797,9 @@ pub fn check(kind: Kind, value: &str, name: &str) -> Result<(), String> {
         Kind::Subject | Kind::Number => !value.is_empty() && value.len() <= 40 && value.bytes().all(|b| b.is_ascii_digit()),
         Kind::TextOrFile => !value.is_empty() && (!value.starts_with('@') || is_session_file(&value[1..])),
         Kind::File => value.strip_prefix('@').is_some_and(is_session_file),
+        Kind::KeyFile => is_session_file(value),
         Kind::FileOrStdin => value == "@-" || value.strip_prefix('@').is_some_and(is_session_file),
-        Kind::Law => !value.is_empty(),
+        Kind::Law | Kind::Rest => !value.is_empty(),
         Kind::Choice(options) => options.contains(&value),
         Kind::Word => !value.is_empty(),
     };
@@ -478,9 +812,10 @@ pub fn check(kind: Kind, value: &str, name: &str) -> Result<(), String> {
             Kind::Subject | Kind::Number => format!("{name} must be a decimal number"),
             Kind::TextOrFile => format!("{name}: text, or @FILE naming a file in HOME/requests"),
             Kind::File => format!("{name} must be @FILE, a file in HOME/requests"),
+            Kind::KeyFile => format!("{name} must be a plain file name in HOME/keys (letters, digits, '-', '_', '.'; no leading dot)"),
             Kind::FileOrStdin => format!("{name} must be @FILE (HOME/requests) or @- (standard input)"),
             Kind::Choice(options) => format!("{name} must be one of {}, not {value:?}", options.join("|")),
-            Kind::Law | Kind::Word => format!("{name} is required"),
+            Kind::Law | Kind::Word | Kind::Rest => format!("{name} is required"),
         })
     }
 }
@@ -496,6 +831,29 @@ mod tests {
 
     fn words(line: &str) -> Vec<String> {
         line.split(' ').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_line_composes_from_a_leaf_and_the_caller_s_values() {
+        let append = leaf(&DOC, &["doc", "append"]).unwrap();
+        let line = compose(append, &|a| match a.name { "ID" => "ID".into(), "NAME" => "paper".into(), _ => "'hello'".into() });
+        assert_eq!(line, "doc append ID paper 'hello'");
+        let remove = leaf(&DOC, &["doc", "remove"]).unwrap();
+        assert_eq!(compose(remove, &|a| if a.name == "NAME" { "paper".into() } else { "1".into() }), "doc remove paper 1");
+    }
+
+    #[test]
+    fn a_required_flag_is_printed_bare_and_refused_by_name_when_missing() {
+        assert!(usage(&ROOM).contains("room welcome NAME SUBJECT --template T|@FILE"));
+        assert!(usage(&ROOM).contains("room seal ID NAME --freeze-roster"));
+        let e = parse(&ROOM, &words("room seal s1 lab")).unwrap_err();
+        assert!(e.starts_with("room seal needs --freeze-roster"), "{e}");
+        assert!(parse(&ROOM, &words("room seal s1 lab --freeze-roster")).is_ok());
+        let e = parse(&STORY, &words("story new tavern")).unwrap_err();
+        assert!(e.contains("--from"), "{e}");
+        assert_eq!(parse(&KEYGEN, &words("keygen mini.key")).unwrap().arg(0), "mini.key");
+        assert!(parse(&KEYGEN, &words("keygen @x.txt")).unwrap_err().contains("HOME/keys"));
+        assert!(parse(&BOARD, &words("board move m1 tasks 0 todo sideways")).unwrap_err().contains("todo|doing|done"));
     }
 
     #[test]
@@ -584,6 +942,30 @@ mod tests {
         assert_eq!(parse(&INSPECT, &w).unwrap().leaf.path, ["inspect", "caps"]);
         let w = words("can --any shared");
         assert!(parse(&CAN, &w).unwrap().has("--any"));
+        // Raw lines: flags before the free text, the text untouched.
+        let p = parse_line(&SAY, "say --to @bob --re 12 'yes, agreed'").unwrap();
+        assert_eq!((p.flag("--to"), p.flag("--re"), p.arg(0)), (Some(Some("@bob")), Some(Some("12")), "'yes, agreed'"));
+        assert_eq!(parse_line(&SAY, "say it's #1, isn't it").unwrap().arg(0), "it's #1, isn't it");
+        assert_eq!(parse_line(&SAY, "say --file d-1.txt").unwrap().opt(0), None);
+        assert_eq!(parse_line(&SAY, "say --re zero hi").unwrap_err(), "N must be a decimal number");
+        let p = parse_line(&CHAT, r#"chat join commons {"a": "b c"}"#).unwrap();
+        assert_eq!((p.leaf.path, p.arg(1)), (&["chat", "join"][..], r#"{"a": "b c"}"#));
+        let p = parse_line(&CHAT, "chat invite den 1234 --i-know --enc ab12 bob").unwrap();
+        assert_eq!((p.arg(2), p.flag("--enc"), p.has("--i-know")), ("bob", Some(Some("ab12")), true));
+        let p = parse_line(&SUMMON, "summon lab as runner --program @prog.md --hermes 42 --i-know").unwrap();
+        assert_eq!((p.arg(0), p.arg(2), p.flag("--program")), ("lab", "runner", Some(Some("@prog.md"))));
+        assert!(parse_line(&SUMMON, "summon lab librarian").is_err());
+        assert_eq!(parse_line(&TAIL, "tail -n 5 --since 30 --follow").unwrap().flag("-n"), Some(Some("5")));
+        assert_eq!(parse_line(&HERMES, "hermes cancel 3 lab").unwrap().arg(1), "lab");
+        let w = words("app delegate-lifecycle prepare r1");
+        assert_eq!(parse(&APP, &w).unwrap().leaf.path, ["app", "delegate-lifecycle"]);
+        let w = words("app delegate-lifecycle prepare r1 myapp --package pkg --snapshot snap --manager 9");
+        assert_eq!(parse(&APP, &w).unwrap().leaf.path, ["app", "delegate-lifecycle", "prepare"]);
+        let w = words("invoke x shared write 2 5 1");
+        assert_eq!(parse(&INVOKE, &w).unwrap().index_in(&INVOKE), 1);
+        assert!(parse(&INVOKE, &words("invoke x shared delete 2")).is_err());
+        let w = words("adopt-next-key lookup a1");
+        assert_eq!(parse(&ADOPT_NEXT_KEY, &w).unwrap().leaf.path, ["adopt-next-key", "lookup"]);
         let w = words("topup lab 5 again");
         let p = parse(&TOPUP, &w).unwrap();
         assert_eq!((p.opt(2), p.opt(3)), (None, Some("again")));

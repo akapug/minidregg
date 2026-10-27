@@ -24,8 +24,9 @@
 #   doc-new            POST /doc/new (law note) through the form                             -> admitted
 #   doc-append         POST /doc/NAME/append through the form                               -> admitted; the page shows the text
 #   receipt            GET /receipts/ID shows the attempt's decoded outcome                  -> 200, outcome admitted
-#   face-coverage      every verb x subcommand leaf in `help` has a route and a no-JS form        -> none missing
-#   face-coverage-redproof  a verb the shell lacks has no face                                      -> 404
+#   parity             every verb x subcommand leaf in `help` has a route, a no-JS form, and its
+#                      placeholder-filled form plans through the shell (/verb/NAME/dry)          -> none missing, 0 refusals
+#   parity-redproof    a verb the shell lacks has no face                                          -> 404
 #   verb-index         /verb lists the catalog                                                       -> 200
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
@@ -57,15 +58,49 @@ case $mode in
 hook|--dry)
   if [ "$mode" = hook ]; then
     D=${JOURNEY_STEP_DIR:?}; WS=${NEWCOMER_WS:?}; SUBJECT=${NEWCOMER_SUBJECT:?}
-    # The document rows birth a document, which the spine's newcomer cannot (no birth context, and
-    # `shared` is under J8's deny-all law); after K12C the docuverse's carol can, so she is the member.
-    if [ -f "${JOURNEY_WORLD:?}/carol-workspace/workspace.json" ]; then
-      WS=$JOURNEY_WORLD/carol-workspace; SUBJECT=$(jq -r .subject "$WS/workspace.json")
-    fi
   else
     D=${STEP_DIR:?STEP_DIR}; WS=${WS:?WS}; SUBJECT=${SUBJECT:?SUBJECT}
   fi
   : "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}"
+  # The document rows birth a document, which the spine's newcomer cannot (no birth context). JWF
+  # provisions its own member `jwf` from the sponsor's shell, the way the docuverse provisions its
+  # authors (K12C): keygen, enroll plan/seal/submit, provision, the birth context, init.
+if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
+    # The member's HOME must be short: the client's resident consent socket lives under
+    # HOME/.mini/consent-anchors/ and a Unix socket path is bounded (sun_path). Stable per step
+    # directory, so a run on a box that keeps its world finds the member it provisioned before.
+    M=${XDG_RUNTIME_DIR:-/tmp}/jwf-m-$(printf '%s' "$D" | cksum | cut -c1-8); mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
+    [ "$mode" = hook ] && JWF_MEMBER_DIR=$M
+    mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
+      "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
+    }
+    pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
+    provision_jwf() {
+      # A fresh account name each time a member is provisioned: a world that outlives the step
+      # (a box kept between runs) already holds the earlier ones.
+      local NAME; NAME=jwf-$(date +%s | tail -c 6)$$; printf '%s\n' "$NAME" >"$M/name"
+      mline "$WS" "$M/home" "keygen mini.key" >/dev/null || return 1
+      install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/$NAME.key" || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan $NAME $NAME.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal $NAME" >/dev/null || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit $NAME" >"$M/submit.out" || return 1
+      rm -f "$M/sponsor-home/keys/$NAME.key"
+      local subject; subject=$(jq -r '.subject // empty' "$M/submit.out"); [ -n "$subject" ] || return 1
+      printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"
+      "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$NAME" --holder "$subject" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err" || return 1
+      install -m 0600 "$SPONSOR_WS/provisions/$NAME/birth-context.json" "$M/home/provision/birth-context.json" || return 1
+      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null
+    }
+    # A member an earlier run of this step provisioned (the box keeps its world) is reused.
+    [ -f "$M/home/workspace/workspace.json" ] || provision_jwf || true
+    if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
+      JSUBJ=$(jq -r .subject "$M/home/workspace/workspace.json")
+      WS=$M/home/workspace; SUBJECT=$JSUBJ; JWF_HOME=$M/home
+      echo "jwf: provisioned member $(cat "$M/name" 2>/dev/null || echo jwf) as subject $JSUBJ" >&2
+    else
+      echo "jwf: could not provision its own member ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$M/provision.err" 2>/dev/null)); using the newcomer" >&2
+    fi
+  fi
   BIN=$(dirname "$MINI")
   GATEWAY=${MINI_WEB_BIN:-$BIN/mini-web}; HELPER=${MINI_WEB_SPAWN_BIN:-$BIN/mini-web-spawn}
   [ -x "$GATEWAY" ] && [ -x "$HELPER" ] || unconfigured "no mini-web / mini-web-spawn beside $MINI (cargo build -p minidregg-mini-web -p minidregg-mini-web-spawn), or set MINI_WEB_BIN / MINI_WEB_SPAWN_BIN"
@@ -75,8 +110,8 @@ hook|--dry)
   pinned=$(jq -r '.socket // empty' "$WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
   # Unix sockets need a short path (sun_path); the step directory can be long.
-  RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR"' EXIT
-  HOMEDIR=$R/home
+  RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR" ${JWF_MEMBER_DIR:+"$JWF_MEMBER_DIR"}' EXIT
+  HOMEDIR=${JWF_HOME:-$R/home}
   cat >"$R/dev.json" <<EOF
 {"mini":"$MINI","host":"$HOST","config":"$CONFIG","socket":"$SOCKET","wrapper":"$WRAPPER",
  "sessions":{"alice":{"workspace":"$WS","home":"$HOMEDIR"}},
@@ -143,6 +178,7 @@ out=$(python3 -I "$HERE/jweb-frontend-ws.py" "127.0.0.1" "$PORT" "$WSPATH" "$ORI
 row term-whoami "$([ "$ws_rc" = 0 ] && echo 1 || echo 0)" "$(tail -c 200 <<<"$out" | tr '\n' ' ' | cut -c1-160) $(tail -1 "$R/ws.err")"
 DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 page=$(req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$DOC" --data-urlencode "law=note")
+printf '%s\n' "$page" >"$R/doc-new.html"
 row doc-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 TEXT="hello from the browser $(date +%s)"
 page=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT")
@@ -151,10 +187,29 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
+# The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
+# point and not as a proof (A10's inclusion opening is pending).
+row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# The private-room shape of `room invite` (parity's one world leaf): this member founds a private
+# room; the sponsor, as invitee, signs its key declaration into HOME/requests/decl.json.
+shell_as_member() { "$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line "$1" 2>"$R/shell.err"; }
+if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
+  PRIV="priv$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+  # A private room's keys live in the member's encrypted key cache, under a passphrase the member
+  # holds (FRIENDS.md); the journey's member holds one for this step.
+  MINI_KEYCACHE_PASSPHRASE=jwf-cache-pass shell_as_member "room new $PRIV --private" >"$R/priv.out"; priv_rc=$?
+  if [ "$priv_rc" = 0 ] && [ -f "$WS/refs/$PRIV.json" ]; then
+    rid=$(jq -r .target "$WS/refs/$PRIV.json"); kid=$(jq -r .private.keys "$WS/refs/$PRIV.json")
+    fk=$(od -An -tx1 -v "${HOMEDIR:-$R/home}/keys/mini.key.pub" | tr -d ' \n')
+    ke=$("$MINI" key-status --workspace "$SPONSOR_WS" 2>/dev/null | jq -r .keyEpoch)
+    "$MINI" workspace --action room-key --op recipient-record --dir "$SPONSOR_WS" --room-id "$rid" --keys-cell "$kid" --key-epoch "$ke" --founder-key "$fk" >"${HOMEDIR:-$R/home}/requests/decl.json" 2>"$R/decl.err"; decl_rc=$?
+  else decl_rc=1; fi
+  row private-room "$([ "$priv_rc" = 0 ] && [ "${decl_rc:-1}" = 0 ] && jq -e '.type == "minidregg-signed-room-recipient-v3"' "${HOMEDIR:-$R/home}/requests/decl.json" >/dev/null 2>&1 && echo 1 || echo 0)" "room new $PRIV --private rc=$priv_rc; declaration rc=${decl_rc:-1} $(tail -1 "$R/shell.err" 2>/dev/null | cut -c1-100) $(tail -1 "$R/decl.err" 2>/dev/null | cut -c1-100)"
+fi
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
-# FACE COVERAGE (not yet parity: parity needs an outcome test per leaf): every verb x subcommand leaf
+# PARITY: every verb x subcommand leaf
 # the shell's `help` lists (each usage alternative's leading literal words) has a route and a no-JS
 # form in the body; a leaf without one is red by name.
 verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
@@ -171,10 +226,26 @@ for v in $verbs; do
     grep -qF "<h2><code>$lits</code></h2>" <<<"$page" || missing="$missing $v($lits)"
   done < <(sed 's/ | /\n/g' <<<"$usage")
 done
-row face-coverage "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help; without a face:${missing:- none}"
+# PARITY = every leaf has a route and a no-JS form (above) AND its placeholder-filled form assembles
+# to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
+mkdir -p "${HOMEDIR:-$R/home}/requests" "${HOMEDIR:-$R/home}/keys"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"; printf '{}\n' >"${HOMEDIR:-$R/home}/requests/x.json"; printf 'k\n' >"${HOMEDIR:-$R/home}/keys/x.txt"
+dry_leaves=0; dry_errors=0; dry_bad=""; dry_world=0; dry_world_names=""
+mkdir -p "$R/dry"
+for v in $verbs; do
+  page=$(req GET "/verb/$v/dry")
+  printf '%s\n' "$page" >"$R/dry/$v.html"
+  l=$(grep -o 'data-leaves="[0-9]*"' <<<"$page" | grep -o '[0-9]*'); e=$(grep -o 'data-errors="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
+  w=$(grep -o 'data-world="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
+  dry_leaves=$((dry_leaves + ${l:-0})); dry_errors=$((dry_errors + ${e:-0})); dry_world=$((dry_world + ${w:-0}))
+  [ "${e:-1}" = 0 ] || dry_bad="$dry_bad $v($(grep -o '<tr class="usage"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
+  [ "${w:-0}" = 0 ] || dry_world_names="$dry_world_names $v($(grep -o '<tr class="world"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
+done
+# A `world` leaf parsed but this workspace could not plan it (an open room given a private room's
+# declaration): not a form/parser disagreement; it is named, and its outcome is a spine row's.
+row parity "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && [ "$dry_errors" = 0 ] && [ "$dry_leaves" -ge "$leaves" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help, $dry_leaves dry-run leaves, $dry_errors usage refusals, $dry_world world refusals; without a face:${missing:- none}; usage:${dry_bad:- none}; world:${dry_world_names:- none}"
 # Red-proof: a verb the shell does not have must have no face (the check can go red).
 req GET /verb/no-such-verb-x >/dev/null
-row face-coverage-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"
+row parity-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"
 page=$(req GET /verb)
 row verb-index "$([ "$(st)" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$(st)"
 page=$(req POST /verb/whoami --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
@@ -184,7 +255,37 @@ row verb-run "$(grep -q 'outcome answered' <<<"$page" && grep -q "$SUBJECT" <<<"
 page=$(req GET /tour)
 row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
-row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -qE 'outcome (admitted|refused|undecided)' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# `can` is a read (op 130 dry-runs, never submits): its outcome class is `answered`, never a
+# world transition; a Host that lacks op 130 answers it undecided, which is red here by design.
+row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -q 'outcome answered' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# The tour's lost reply (DEMO-EXPERIENCE A11): the append form with `lose this reply once` comes
+# back undecided with its retained attempt; the retry shows the decided outcome; one line landed.
+alt=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
+fields=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' ')
+set -- $fields; F_ID=${1:-a2}; F_NAME=${2:-a3}; F_TEXT=${3:-a4}
+LOSE_ID="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"; LOSE_TEXT="lost once $(date +%s)"
+page=$(req POST /tour/3 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=doc" --data-urlencode "alt=${alt:-0}" --data-urlencode "$F_ID=$LOSE_ID" --data-urlencode "$F_NAME=$DOC" --data-urlencode "$F_TEXT=$LOSE_TEXT" --data-urlencode "submit=on" --data-urlencode "lose=on")
+row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$LOSE_ID" <<<"$page" && echo 1 || echo 0)" "$(st) alt=${alt:-?} fields=$F_ID,$F_NAME,$F_TEXT $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-140)"
+page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
+docpage=$(req GET "/doc/$DOC")
+row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+# The tour's refusal and the write its law admits (step 4): editing a line of the note through
+# the editor (the pinned read, then the save) is refused by the note's law (`content/atom-edits
+# == 0`); `can --any` on the note answers the law and one write it admits (as slot witnesses: the
+# shell line to paste is lawsat's to print); the append, the write the law admits, is admitted.
+pre_of() { python3 -I -c 'import sys,re,html; m=re.search(r"<pre>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")'; }
+page=$(req GET "/doc/$DOC/edit")
+EDIT_URL=$(grep -o 'action="/doc/[^"]*/edit/[^"/]*"' <<<"$page" | head -1 | sed 's/action="//; s/"$//')
+NEWTEXT=$(python3 -I -c 'import sys,re,html; m=re.search(r"<textarea name=text[^>]*>\n?(.*?)</textarea>", sys.stdin.read(), re.S); t=html.unescape(m.group(1)) if m else ""; lines=t.split("\n"); lines[0]="edited: " + lines[0] if lines else ["edited"]; print("\n".join(lines))' <<<"$page")
+page=$(req POST "${EDIT_URL:-/doc/$DOC/edit/none}" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$NEWTEXT")
+row tour-refused "$(grep -q 'data-save-status="refused"' <<<"$page" && echo 1 || echo 0)" "$(st) ${EDIT_URL:-no editor form} $(grep -o 'data-save-status="[a-z]*"[^>]*>[^<]*' <<<"$page" | head -1 | cut -c1-160)"
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC" --data-urlencode "a3=on")
+can_text=$(pre_of <<<"$page")
+# The line `can --any` composed from the grammar leaf of the witnessed verb (`doc append ID DOC
+# 'hello'`), offered as "paste and submit", is submitted and admitted.
+paste_line=$(grep -A1 '^ *paste:' <<<"$can_text" | tail -1 | sed 's/^ *//')
+page2=$(req POST /paste --data-urlencode "csrf=$CSRF" --data-urlencode "line=$paste_line")
+row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law version' <<<"$can_text" && grep -q 'action="/paste"' <<<"$page" && [ -n "$paste_line" ] && grep -q 'outcome admitted' <<<"$page2" && echo 1 || echo 0)" "$(st) can --any $DOC: $(tr '\n' ' ' <<<"$can_text" | cut -c1-160) | paste=${paste_line:-none}: $(grep -o 'class="headline">[^<]*' <<<"$page2" | head -1 | cut -c18-60)"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then

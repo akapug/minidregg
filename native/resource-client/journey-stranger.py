@@ -8,7 +8,7 @@ KIND is `intent` (an intent JSON, authored by the Host's pure codec) or `binary`
 intent.bin). Each is signed with KEY (a 32-byte ed25519 seed, as `mini keygen` writes it) and sent
 to the Host as an op 4 observation challenge over the socket: the first thing any read or write
 needs. One TSV line per input on stdout: `LABEL<TAB>refused<TAB>OP REASON<TAB>TEXT` when the Host
-answers with a refusal frame (255), else `LABEL<TAB>NOT-REFUSED<TAB>reply op N`. Exit 0 always;
+answers with a proven refusal (NO_RECORD, 253: decided before any append), else `LABEL<TAB>NOT-REFUSED<TAB>reply op N`. Exit 0 always;
 the journey counts."""
 import os, socket, struct, subprocess, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -50,7 +50,7 @@ for spec in sys.argv[7:]:
         intent = open(path, "rb").read()
     reply = ask_host(bytes([4]) + struct.pack("<I", len(intent)) + intent + key.sign(intent))
     open(os.path.join(outdir, label + ".reply"), "wb").write(reply)
-    if reply[0] == 255 and reply[1:].startswith(TAG):
+    if reply[0] == 253 and reply[1:].startswith(TAG):  # 255 is undecided, never a refusal (L1)
         text = "".join(chr(b) if 32 <= b < 127 else " " for b in reply[1 + len(TAG):])
         text = " ".join(text.split())
         print(f"{label}\trefused\t{text}")

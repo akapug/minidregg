@@ -465,7 +465,9 @@ def specialized (extraExpected : ExtraExpected) (settings : Settings) (config : 
   else match full with
     | some verified => extraExpected settings config verified operation request
     | none => throw (IO.userError "entry consent adapter requires the full re-admission")
-  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExact expected candidate)
+  -- The re-derived plan, or its height pin where the operation has one (op 86 today).
+  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExactOrPinned expected
+    (NativeSpecializedConsent.pinnedExpectedBytes operation request expected) candidate)
   pure candidate
 
 def possession (config : NativeHost.Config) (payload : List UInt8) : IO (List UInt8) := do

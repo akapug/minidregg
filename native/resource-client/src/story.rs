@@ -68,12 +68,12 @@ pub(crate) const TALE: &str = include_str!("../templates/story/tale/table");
 pub(crate) const PLAYER_FIELDS: [&str; 2] = ["scene", "turn"];
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "story", usage: "story new NAME --from tale|@FILE [--gm SUBJECT] | story seal NAME | story invite NAME SUBJECT [gm] | story join NAME INVITATION|@FILE | story enter NAME | story list | story law NAME|tale|@FILE [SUBJECT]", operation: "a story: a room, a table document the author seals, and one cell per player under the law the table generates; `help story`" },
-    Verb { name: "look", usage: "look", operation: "signed reads: the table, my cell and both their laws; print my scene, its exits, items and the GM's last words" },
-    Verb { name: "go", usage: "go EXIT|SCENE", operation: "one write to my cell: scene := the exit's scene, turn + 1 (the sealed law judges it)" },
-    Verb { name: "take", usage: "take ITEM", operation: "one write to my cell: carries/ITEM := 1, turn + 1" },
-    Verb { name: "act", usage: "act VERB", operation: "one write to my cell: scene := the act's scene, turn + 1" },
-    Verb { name: "narrate", usage: "narrate TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to the story's scenes stream (the GM's)" },
+    Verb { name: "story", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "look", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "go", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "take", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "act", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "narrate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 pub(crate) const HELP: &str = "\
@@ -544,56 +544,34 @@ fn subject_word(w: &str) -> Result<String, String> {
 }
 
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
-    let (verb, rest) = split(line)?;
-    let usage_of = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("").to_owned();
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let one = |name: &str| -> Result<String, String> {
-        match words.as_slice() {
-            [w] => Ok((*w).to_owned()),
-            _ => Err(usage_of(name)),
-        }
-    };
+    use crate::shell_grammar::{parse_line, usage, ACT, GO, LOOK, NARRATE, STORY, TAKE};
+    let (verb, _rest) = split(line)?;
     Some(match verb {
-        "look" if words.is_empty() => Ok(Line::Look),
-        "look" => Err(usage_of("look")),
-        "go" => one("go").map(Line::Go),
-        "take" => one("take").map(Line::Take),
-        "act" => one("act").map(Line::Act),
-        "narrate" => {
-            let t = free_text(rest);
+        "look" => parse_line(&LOOK, line).map(|_| Line::Look),
+        "go" => parse_line(&GO, line).map(|p| Line::Go(p.arg(0).to_owned())),
+        "take" => parse_line(&TAKE, line).map(|p| Line::Take(p.arg(0).to_owned())),
+        "act" => parse_line(&ACT, line).map(|p| Line::Act(p.arg(0).to_owned())),
+        "narrate" => parse_line(&NARRATE, line).and_then(|p| {
+            let t = free_text(p.arg(0));
             if t.is_empty() || t.len() > 2048 { Err("narrate TEXT (1..2048 bytes)".into()) } else { Ok(Line::Narrate(t)) }
-        }
-        "story" => (|| -> Result<Line, String> {
-            let u = usage_of("story");
-            match words.as_slice() {
-                ["new", name, rest @ ..] => {
-                    let name = story_name(name)?;
-                    let (mut from, mut gm) = (None, None);
-                    let mut i = 0;
-                    while i < rest.len() {
-                        match (rest[i], rest.get(i + 1)) {
-                            ("--from", Some(v)) if from.is_none() => from = Some((*v).to_owned()),
-                            ("--gm", Some(v)) if gm.is_none() => gm = Some(subject_word(v)?),
-                            _ => return Err(u),
-                        }
-                        i += 2;
-                    }
-                    Ok(Line::New { name, from: from.ok_or(u)?, gm })
+        }),
+        "story" => parse_line(&STORY, line).and_then(|p| {
+            let u = usage(&STORY);
+            match p.leaf.path {
+                ["story", "new"] => {
+                    let name = story_name(p.arg(0))?;
+                    let gm = p.flag("--gm").flatten().map(subject_word).transpose()?;
+                    Ok(Line::New { name, from: p.required("--from").to_owned(), gm })
                 }
-                ["seal", name] => Ok(Line::Seal(story_name(name)?)),
-                ["invite", name, subject] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: false }),
-                ["invite", name, subject, "gm"] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: true }),
-                ["join", name, _, ..] => {
-                    let invitation = rest.trim_start()[4..].trim_start()[name.len()..].trim().to_owned();
-                    Ok(Line::Join { name: story_name(name)?, invitation })
-                }
-                ["enter", name] => Ok(Line::Enter(story_name(name)?)),
-                ["list"] => Ok(Line::List),
-                ["law", from] => Ok(Line::Law { from: (*from).to_owned(), subject: None }),
-                ["law", from, subject] => Ok(Line::Law { from: (*from).to_owned(), subject: Some(subject_word(subject)?) }),
+                ["story", "seal"] => Ok(Line::Seal(story_name(p.arg(0))?)),
+                ["story", "invite"] => Ok(Line::Invite { name: story_name(p.arg(0))?, subject: subject_word(p.arg(1))?, gm: p.opt(2).is_some() }),
+                ["story", "join"] => Ok(Line::Join { name: story_name(p.arg(0))?, invitation: p.arg(1).trim().to_owned() }),
+                ["story", "enter"] => Ok(Line::Enter(story_name(p.arg(0))?)),
+                ["story", "list"] => Ok(Line::List),
+                ["story", "law"] => Ok(Line::Law { from: p.arg(0).to_owned(), subject: p.opt(1).map(subject_word).transpose()? }),
                 _ => Err(u),
             }
-        })(),
+        }),
         _ => return None,
     })
 }

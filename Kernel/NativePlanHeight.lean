@@ -138,7 +138,35 @@ theorem pin_only_slots (plan pinned : SigningPlan) (ok : pin plan = .ok pinned) 
     all_goals cases ok
     all_goals exact ⟨rfl, len, point⟩
 
+/-- The enrollment plan's pin (op 86): only the sponsor header's deadline moves, to
+`min validUntil height`; the possession frame is a fixed function of the command
+(`NativeHost.enrollmentAssemble` checks it) and is untouched, as are the command bytes. -/
+def pinEnrollment (height : Nat) (plan : ParticipantKeyEnrollment.SigningPlan) :
+    Except String ParticipantKeyEnrollment.SigningPlan := do
+  let some header := CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader
+    | .error "noncanonical enrollment sponsor header"
+  return { plan with sponsorHeader :=
+    CredentialSignedEnvelopeController.headerCodec.encode (pinHeader height header) }
+
+/-- The enrollment pin changes nothing but the sponsor header's deadline. -/
+theorem pinEnrollment_only_sponsor_deadline (height : Nat)
+    (plan pinned : ParticipantKeyEnrollment.SigningPlan)
+    (ok : pinEnrollment height plan = .ok pinned) :
+    pinned.domain = plan.domain ∧ pinned.semantics = plan.semantics ∧
+      pinned.commandBytes = plan.commandBytes ∧ pinned.possessionHeader = plan.possessionHeader ∧
+      ∃ header, CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader = some header ∧
+        pinned.sponsorHeader =
+          CredentialSignedEnvelopeController.headerCodec.encode (pinHeader height header) := by
+  unfold pinEnrollment at ok
+  split at ok
+  · rename_i header decoded
+    simp only [pure, Except.pure, Except.ok.injEq] at ok
+    subst ok
+    exact ⟨rfl, rfl, rfl, rfl, header, decoded, rfl⟩
+  · cases ok
+
 #assert_axioms pinSlot_only_header
+#assert_axioms pinEnrollment_only_sponsor_deadline
 #assert_axioms pin_only_slots
 
 /-- Invert one refusal guard without simplifying any symbolic codec terms. -/

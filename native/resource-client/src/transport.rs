@@ -964,6 +964,14 @@ pub(crate) fn invoke_pinned_deadline(
         &frame,
     )
     .map_err(|e| format!("uncertain host request write: {e}"))?;
+    // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): the exact call
+    // was written; the reply is deliberately not read. The Host decides as it would; the attempt
+    // stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
+    if mini_sdk::operator::lose_reply_armed(operation) {
+        std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        drop(stream);
+        return Err(LOST_REPLY.to_owned());
+    }
     let reply = read_frame(&mut DeadlinePipe {
         reader: &mut stream,
         deadline,
@@ -1139,6 +1147,19 @@ fn invoke_inner(
     frame.extend_from_slice(payload);
     durability_barrier()?;
     let started = std::time::Instant::now();
+    if mini_sdk::operator::lose_reply_armed(operation) {
+        // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): write the
+        // exact frame, then deliberately never read the answer. The Host decides as it would; the
+        // attempt stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
+        std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        if let Endpoint::Unix(path) = endpoint(socket)? {
+            durability_barrier()?;
+            let mut stream = UnixStream::connect(path).map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
+            write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
+            drop(stream);
+        }
+        return Err(LOST_REPLY.to_owned());
+    }
     let reply = match endpoint(socket)? {
         Endpoint::Unix(path) => exchange_unix(path, &frame)?,
         Endpoint::Remote(destination) => crate::proxy::exchange(destination, &frame)?,
@@ -1165,6 +1186,10 @@ fn invoke_inner(
 
 /// One framed request on a fresh unix-socket connection and its framed reply.
 /// A failure after the write leaves the request's status uncertain.
+/// What the client says when it chose not to read the reply (the uncertain-response class, so
+/// the attempt is retained and resolved by lookup or retry, never re-sent).
+const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
+
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
     durability_barrier()?;
     let mut stream = UnixStream::connect(socket)

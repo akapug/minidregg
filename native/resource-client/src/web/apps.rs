@@ -179,7 +179,7 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
              <form method=\"post\" action=\"/grain/{id}/open\" class=\"inline\"><button>Open</button></form> \
              <form method=\"post\" action=\"/grain/{id}/start\" class=\"inline\"><button class=\"quiet\">Start</button></form> \
              <form method=\"post\" action=\"/grain/{id}/stop\" class=\"inline\"><button class=\"quiet\">Stop</button></form> \
-             <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><button class=\"quiet\">Export</button></form> \
+             <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><input name=\"file\" type=\"text\" placeholder=\"export.spk\" required pattern=\"[A-Za-z0-9._-]+\"><button class=\"quiet\">Export</button></form> \
              <form method=\"post\" action=\"/grain/{id}/delete\" class=\"inline\"><button class=\"quiet\">Delete</button></form></p>\
              <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with (member name)</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form></section>"
         ));
@@ -220,9 +220,10 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                 None => Page { status: 200, title: format!("Open {id}"), stamp: Stamp::None, body: super::body::outcome_html(&ending, &[("the grain", &format!("/grain/{id}"))]) },
             }
         }
-        "share" => act(site, &format!("Share {id}"), vec![format!("apps share --grain {id} --to {}", quote(&field("member")))], "", &[("the grain", &format!("/grain/{id}"))]),
-        "revoke-identity" => act(site, &format!("Revoke an identity on {id}"), vec![format!("apps revoke-identity --grain {id} --token {}", quote(&field("token")))], "", &[("the grain", &format!("/grain/{id}"))]),
-        "stop" | "start" | "delete" | "export" => act(site, &format!("{action} {id}"), vec![format!("apps {action} {id}")], "", &[("the grain", &format!("/grain/{id}")), ("your grains", "/grain")]),
+        "share" => act(site, &format!("Share {id}"), vec![format!("apps share {id} {}", quote(&field("member")))], "", &[("the grain", &format!("/grain/{id}"))]),
+        "revoke-identity" => act(site, &format!("Revoke an identity on {id}"), vec![format!("apps revoke-identity {id} {}", quote(&field("token")))], "", &[("the grain", &format!("/grain/{id}"))]),
+        "export" => act(site, &format!("export {id}"), vec![format!("apps export {id} {}", quote(&field("file")))], "", &[("the grain", &format!("/grain/{id}"))]),
+        "stop" | "start" | "delete" => act(site, &format!("{action} {id}"), vec![format!("apps {action} {id}")], "", &[("the grain", &format!("/grain/{id}")), ("your grains", "/grain")]),
         _ => simple(404, "Grain", "no such action"),
     }
 }
