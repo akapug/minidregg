@@ -4,19 +4,21 @@ Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/202
 Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; the integrator reads lane/* at its cuts.
 
 ## Landed (reviewed against the code)
-- lane/un-assurance 60cbb2dc: scripts/assurance-census.py + docs/ASSURANCE-CENSUS-2026-10-27.md (144 modules: DEPLOYED 2 / DEPLOYED-SUBJECT 15 / RESEARCH 127; Host closure 776 = ceiling; Selvage 0 reached since O20); the 20 kernel-subject research modules (RESCUE 3, TWIN 1 DeployedCellRegistry, DEAD 4, ZK-CARGO 12); Door 11: `sealed_story_scene_monotone` is over a twin model (LawHistory), not the Host's step; the honest sentence is in the doc.
-- lane/un-native-rows 6fae5fa4: decision tests + rows for inference-scheduler, signed-api-path, compatible-upgrade-custody (each red on a plant); objective-emit fixtures filed `self`; fixture-authority self-test made portable (BSD sed -i had disabled its control on the Mac); plant-growth-certify.sh likewise.
-- lane/un-moves 0d2d184e: scripts/terminal deleted; benchmarks/ -> docs/evidence/benchmarks-2026-08/; coordination/ -> degg-research branch minidregg-moves-2026-10-27 (503f546); deploy/checkpoint deleted (twin of dregg-infra edge/mini/mini-certify.*); intent-vector authority checked + merge-gate row; Kernel/Contracts verdicts.
-- lane/un-pred-census f8677835: Pred/Placeholder folded and deleted; TokenCensus number (374 rows, 23 open defects) in README with scripts/token-census-count.sh; KERNEL-FAMILIES.md (21 unreached files, none dead); the fn sentence in README/DEMO-EXPERIENCE/AFFORDANCES.
-- lane/un-bend 91841c4c: scripts/author-objective-policy.sh (+ policy_of); verified on dregg-build.
+- lane/un-verify 9f5a7cf4: scripts/gates/check-generic-simplex (merge-gate row): harness, log-reopen, load run; plants fixed-timer, split-tip, flip-byte each red with its message.
+- lane/un-bend e68c2688: `bend publish|run|show` (bend.rs on activity.rs), grammar leaves (web forms derive), jbend row 20/0 on dregg-build (cut-6 candidate, cherry-picked onto 23861533); scripts/author-objective-policy.sh (91841c4c).
+- lane/un-assurance 51740ec2: census + kernel-subject verdicts + Door 11 trace; gen-storylaw --check merge-gate row; Assurance/StoryHistory.lean: story_history_monotone proved over Realized controller legs, poles real, residuals R1-R3.
+- lane/un-native-rows 6fae5fa4: three decision-test rows; objective-emit fixtures `self`; BSD sed -i fixes (fixture-authority self-test, plant-growth-certify).
+- lane/un-moves e9d0f2c1: terminal deleted, benchmarks/coordination moved, deploy/checkpoint deleted, SDK golden authorities, Contracts verdicts, DeployedCellRegistry twin deleted.
+- lane/un-pred-census f8677835: Pred/Placeholder folded; TokenCensus number; KERNEL-FAMILIES.md; fn sentence.
+- lane/un-fixtures a6a32103 (based on integration cut 9): second recording, a member doc append through the socket (candidate 3315a908), authority checked, flipped byte red; NativeTranscripts imports Fixtures again.
+- lane/un-deputy: this file; docs/review/2026-10-27-untouched-areas/EFFECTS.md (Effects decision).
 
 ## In flight
-- un-verify (me): Generic Simplex gate scripts/gates/check-generic-simplex + plants in the harness/log-reopen, row in merge-gate-checks.sh; building the exes on the Mac warm tree.
-- un-bend (faerie): the `bend` verb, grammar leaf, jbend row.
-- un-world (faerie): world/dues admitted natively on dregg-build.
-- un-fixtures (faerie): the second Fixtures recording.
-- un-assurance (faerie): gen-storylaw --check gate row; story_history_monotone statement + poles.
-- un-moves (faerie): delete the DeployedCellRegistry twin (re-point or drop its Assurance theorems).
+- un-world: dues on the activity route after splitting app/scenario modules.
+- un-bend: `bend lookup|retry` leaves for the lost reply.
+- un-assurance: StoryHistory R1/R2.
+- un-pred-census: TokenCensus 23 open defects triage + local fixes.
+- un-moves: the four DEAD kernel modules.
 
 ## Decided
 - fn: out of this demo (ember); the exchange row stays UNCONFIGURED by name; sentence published.
@@ -25,12 +27,14 @@ Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; t
 - Contracts Cuts/Snapshot/Refinements/Futures: kept (parked, proved, censused).
 - Pred BoundedQuantifiedView/CoordinationDial: kept (no live consumer without closure growth).
 - four-source fixture: not in the Simplex gate (a four-process mesh); it is second-node work.
+- Effects: label repaired; registry is a Phase-3 redesign over the live admission (EFFECTS.md); no toy wire.
+- world/dues runs on the activity route (an Activity), split into app + scenario modules.
 
 ## Seams named upward
 - Demo genesis lacks objectiveInvocation (infra adds the helper to the genesis fill).
 - Door 11's sentence (web lane / tour row owner); roomkey.rs:3100 hand-reimplements wrapAtomId (Room lane).
 
 ## Next three
-1. Land and box-check the Simplex gate (the exes run, plants red), push lane/un-verify.
-2. Effects: statement-first, one effect through the registry behind a shell verb; find L1's seam first.
-3. Review un-bend / un-world landings; second batch report.
+1. Confirm the gate's 20-op load leg on the Mac run; push the batch report.
+2. Review un-world / un-bend / TokenCensus landings as they arrive.
+3. Keep faeries filled: Assurance R-list, inference-scheduler/grain-host stay pug-later.
