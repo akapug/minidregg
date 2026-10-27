@@ -41,6 +41,8 @@ The Lean lane of `docs/BACKLOG-2026-10-27.md` §3, as it stands. Worked on the M
     `hashEq_context_bound`
   - `SealedMarket.market_reveal_binds`
   - `PredCompile.lower_hashEq_binds`
+  - `LogAccumulator.rootOfPath_sound` and `verify_sound`, then `DurableHistory.verifyAt_sound`
+    (`NodeCollisionBelow`: a second preimage of an honest block below the covering frontier block)
 
 ## O18 remainder, by file
 
@@ -57,7 +59,6 @@ Re-grep `∨ Collision`; the old statements are often multi-line.
   outright. Use `HashBytes.CollisionAmong` over the absent, tick and cell preimages each proof hashes.
 - `Theory/AuthTrieRange.lean` (114, 182, 264): the reveal path. Mirror AuthTrie's `TreeNode`, plus the
   reveal's node set. Then `DurableIndex.reveal_sound`.
-- `Theory/LogAccumulator.lean` (177, 223), then `Compiler/DurableHistory.lean` (257).
 - `Selvage/BinaryMerkle.lean` (43 `LeafCollision ∨ NodeCollision`, 200, 264, 278), then
   `Compiler/Tower256CshakeMerkleBinding.lean` (254).
 - The coordinator's list also names StoreCodec, AuthMapCommitment and CanonicalResourceEffect. A plain
