@@ -212,7 +212,11 @@ verifies each record against the MAC'd head (`DurableHistoryReader.fetch`), and 
 state is never re-read from the Store (`Anchored`/`Verified` hold it). The exact-prefix
 guarantee -- the signer signs over the fold of exactly the records it admitted -- never rested
 on this re-check; `trailer_eq_carried` says equal tag bytes carry equal (root, chain, frontier,
-index root), so the held comparison is a comparison of the chain at the height. -/
+index root), so the held comparison is a comparison of the chain at the height.
+
+RULING (ember, 2026-10-27): ACCEPTED. Detection of a self-inconsistent prefix rewrite moves to the
+verified read that touches it; rollback and re-tagged rewrites stay refused; the exact-prefix
+guarantee (`headTag` equality at the provider's height + exact prefix) is unchanged. -/
 
 /-- Equal stored tags carry equal values: the trailer encodes `Carried` in the clear through a
 lawful codec, so no two carried values share tag bytes. -/
