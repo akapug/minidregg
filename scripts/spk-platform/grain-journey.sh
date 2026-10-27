@@ -430,6 +430,14 @@ delegate_observe() (
 # same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
+  expected_host=grain.test
+  if [ "$label" = b ] && [ -n "${GRAIN_EXPECTED_HOST_B:-}" ]; then
+    expected_host=$GRAIN_EXPECTED_HOST_B
+    case "$expected_host" in localhost:*) ;; *) fail "browser-B expected host must be localhost with an explicit port" ;; esac
+    host_port=${expected_host#localhost:}
+    case "$host_port" in ''|0*|*[!0-9]*) fail "browser-B port must be canonical decimal" ;; esac
+    [ "$host_port" -ge 1024 ] && [ "$host_port" -le 65535 ] || fail "browser-B port out of range"
+  fi
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
     "$EV/${label%[0-9]}-app-author/source.json")
@@ -493,11 +501,11 @@ share() (
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
   case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
-  jq -n --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
+  jq -n --arg host "$expected_host" --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
     --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
-    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
+    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:$host,
      displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
@@ -587,10 +595,11 @@ enroll() (
 # (curl header arguments, one per line): the API bearer, or the browser
 # session cookie the bootstrap would set (the operator owns the route dir).
 cred() {
+  expected_host=$(jq -er .expectedHost "$2/custodian.json")
   case "$1" in
     api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
     web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
-      -H "Origin: https://grain.test" ;;
+      -H "Origin: https://$expected_host" ;;
     *) echo "unknown route kind $1" >&2; return 1 ;;
   esac
 }
@@ -600,14 +609,15 @@ cred() {
 http_post() (
   label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Host: $expected_host" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # One authenticated request through the resident's route: the resident asks
@@ -615,13 +625,14 @@ http_post() (
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
   dir=$STATE/apps/$app/routes/${5:-owner-$kind}
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -H "Host: $expected_host" "$@" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # floor APP: the M11 floor as the running app sees it. Every process in the

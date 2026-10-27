@@ -972,6 +972,24 @@ mod tests {
         }
     }
     #[test]
+    fn public_recipient_grain_share_lookup_forwards_exact_ingress_and_no_issue_write() {
+        let (fixture,backend)=Fixture::new(bounds());
+        let request=[vec![55],b"retained exact canonical event22 ingress".to_vec()].concat();
+        let frame=envelope(CONFIG,&request);
+        let mut client=fixture.client();
+        transport::write_frame(&mut client,&frame).unwrap();
+        let mut upstream=accept(&backend);
+        assert_eq!(transport::read_frame(&mut upstream).unwrap(),Some(frame));
+        transport::write_frame(&mut upstream,&[55,1,2,3]).unwrap();
+        assert_eq!(transport::read_frame(&mut client).unwrap(),Some(vec![55,1,2,3]));
+        for request in [vec![55],vec![54,1],vec![56,1],vec![57,1]] {
+            let mut client=fixture.client();
+            transport::write_frame(&mut client,&envelope(CONFIG,&request)).unwrap();
+            assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0],254);
+            assert_eq!(backend.accept().unwrap_err().kind(),io::ErrorKind::WouldBlock);
+        }
+    }
+    #[test]
     fn agent_operator_proxy_preserves_only_bounded_source_plans() {
         let (fixture, backend) = Fixture::new(Bounds { controller_uid: Some(mini_sdk::private::euid()), ..bounds() });
         let pair = [1u32.to_le_bytes().as_slice(), &[1, 2]].concat();
@@ -985,7 +1003,7 @@ mod tests {
             transport::write_frame(&mut private, &[operation, 9]).unwrap();
             assert_eq!(transport::read_frame(&mut client).unwrap(), Some(vec![operation, 9]));
         }
-        for operation in [0, 2, 3, 22, 26, 27, 48, 59, 76, 77, 79, 81, 82, 155] {
+        for operation in [0, 2, 3, 22, 26, 27, 48, 55, 59, 76, 77, 79, 81, 82, 155] {
             // Even allowed opcodes refuse an empty body; submit/lifecycle/grant
             // opcodes refuse irrespective of their payload.
             let frame = envelope(CONFIG, &[operation]);
@@ -998,7 +1016,7 @@ mod tests {
         unpinned.extend_from_slice(&(CONFIG.len() as u32).to_le_bytes());
         unpinned.extend_from_slice(CONFIG);
         unpinned.extend_from_slice(&[80, 1]);
-        for frame in [unpinned, envelope(b"changed", &[80, 1]), envelope(CONFIG, &[76, 1]), envelope(CONFIG, &[81, 1])] {
+        for frame in [unpinned, envelope(b"changed", &[80, 1]), envelope(CONFIG, &[76, 1]), envelope(CONFIG, &[55, 1]), envelope(CONFIG, &[81, 1])] {
             let mut client = fixture.client();
             transport::write_frame(&mut client, &frame).unwrap();
             assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);

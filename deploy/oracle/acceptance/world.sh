@@ -10,8 +10,8 @@
 # helpers and fixture inputs selected by this harness.
 world_source_manifest() {
   sha256sum "$repo/scripts/oracle-shared-data-journey.sh" \
-    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
+    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/deploy/oracle/acceptance/browser_edge.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/recover_foreground.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
     "$repo/deploy/oracle/acceptance/agent.py" "$repo/deploy/oracle/acceptance/agent-cases.json" \
     "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
     "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
@@ -87,6 +87,13 @@ world_stop_probe() {
     --committed "$state/apps/$app/g$generation/stop-claim/committed-v3.bin" \
     --out "$output" --deadline 1200 --resident-only "${args[@]}" >"$output.stdout" 2>"$output.stderr"
 }
+
+world_browser_probe() {
+  timeout 1850 python3 -B "$repo/deploy/oracle/acceptance/browser_edge.py" run "$run" "$state" \
+    "$ORACLE_CADDY_BIN" "$ORACLE_CADDY_SHA256" "$ORACLE_BROWSER_PORT" \
+    >"$run/browser-probe.stdout" 2>"$run/browser-probe.stderr"
+}
+
 
 world_controller_prepare() {
   local home
@@ -395,7 +402,7 @@ world_continue_controller() {
   continuation=$(python3 "$repo/deploy/oracle/acceptance/continue_controller.py" "$run" "$spk" "$inventory" "$benchmark" "$repo")
   [[ $continuation == "$run/continuations/controller-create-1" ]] || fail 'continuation evidence path differs'
   preserve_existing_exit=0
-  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/deploy/oracle/acceptance/browser_edge.py" \
     "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
     >"$continuation/recovery-input-sha256.txt"
   configured=1
@@ -586,6 +593,101 @@ PYPOLICY
     "$run/agent-lifetime/issued-grant.json" "$run/agent-lifetime/session-birth.ack.json"
 }
 
+# Resume the retained native operation and reservation, never submit its tool
+# request again. All original client output remains at its original path.
+world_recover_foreground() {
+  local run=$1 repo=$2 fresh candidate old_mini new_mini request_id app
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid} BIN=$run/bin
+  store=$(jq -er .store "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store
+  export BROKER_SOCKET=$GRAINS_ROOT/runtime-$store/broker.sock
+  installer=$repo/deploy/spk-host/install-user-world
+  jq -e --arg run "$run" --arg spk "$spk" --arg inventory "$inventory" --arg benchmark "$benchmark" \
+    '.run == $run and .spk.path == $spk and .inventory.path == $inventory and .benchmark.path == $benchmark' \
+    "$recovery_plan" >/dev/null || fail 'recovery plan differs from selected v5 inputs'
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  fresh=$(mktemp -d "$run/foreground-recovery-preflight.XXXXXXXX")
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" >"$fresh/controller-status.json"
+  controller_runtime=$(jq -er .runtime.path "$recovery_plan")
+  candidate=$(jq -er .public_mini.path "$recovery_plan")
+  old_mini=$(jq -er .old_public_mini_sha256 "$recovery_plan")
+  new_mini=$(jq -er .public_mini.sha256 "$recovery_plan")
+  request_id=$(jq -er .request_id "$recovery_plan")
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$controller_runtime" "$candidate" >>"$fresh/source-input-sha256.txt"
+  continuation=$run/continuations/foreground-$(jq -er .operation_id "$recovery_plan")
+  python3 -B "$repo/deploy/oracle/acceptance/recover_foreground.py" prepare "$recovery_plan" \
+    "$fresh/controller-export.json" "$fresh/controller-status.json" "$fresh/source-input-sha256.txt" "$continuation" \
+    >"$fresh/prepared.stdout"
+  recovery_manifest=$continuation/recovery-input-sha256.txt
+  (set -o noclobber; cat "$fresh/source-input-sha256.txt" >"$recovery_manifest")
+  configured=1 controller_created=1 controller_staged=1 preserve_existing_exit=0
+  world_phase_record runtime-upgrade started
+  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" \
+    >"$continuation/runtime-upgrade.json"
+  jq -e --arg wanted "$(jq -er .runtime.sha256 "$recovery_plan")" '.runtimeSha256 == $wanted' \
+    "$continuation/runtime-upgrade.json" >/dev/null || fail 'recovery runtime differs'
+  world_phase_record runtime-upgrade completed "$continuation/runtime-upgrade.json"
+  world_phase_record public-listener-upgrade started
+  if [[ $old_mini == "$new_mini" ]]; then
+    timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" \
+      >"$continuation/public-listener-status.json"
+    jq -e --arg digest "$new_mini" '.stopped == true and .publicListener.binarySha256 == $digest' \
+      "$continuation/public-listener-status.json" >/dev/null || fail 'already-qualified public listener differs'
+    jq '. + {publicListenerSelection:"already-qualified"}' "$continuation/public-listener-status.json" \
+      >"$continuation/public-listener.json"
+  else
+    timeout 120 sudo -n -- "$installer" controller-public-listener-upgrade "$store" "$helper" "$candidate" "$old_mini" "$new_mini" \
+      >"$continuation/public-listener.json"
+  fi
+  jq -e --arg digest "$new_mini" '.publicListener.binarySha256 == $digest' "$continuation/public-listener.json" >/dev/null
+  export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
+  world_phase_record public-listener-upgrade completed "$continuation/public-listener.json"
+  world_phase_record services started
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'recovery broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  for app in 9101 9201; do
+    timeout 1800 "$BIN/spk-host" grain status "$profile" "$app" >"$continuation/status-$app.json"
+    jq -e --arg app "$app" '.app == $app and .installCompleted and (.runs | length == 0)' "$continuation/status-$app.json" >/dev/null
+  done
+  world_phase_record services completed "$continuation/status-9101.json" "$continuation/status-9201.json"
+  world_phase_record controller-start started
+  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$continuation/controller-start.json"
+  world_phase_record controller-start completed "$continuation/controller-start.json"
+  world_phase_record exact-foreground-recovery started
+  # Exactly one private admin invocation. Timeout/failure leaves this phase
+  # started; there is no retry, result substitute or unconditional ACK.
+  timeout 1850 sudo -n -- "$installer" controller-recover-session "$store" "$helper" "$request_id" \
+    >"$continuation/recovery-result.json" 2>"$continuation/recovery.stderr"
+  timeout 120 sudo -n -- "$installer" controller-tool-result "$store" "$helper" "$request_id" \
+    >"$continuation/retained-result.json"
+  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/settled-journal.json"
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$continuation/settled-export.json"
+  python3 -B "$repo/deploy/oracle/acceptance/recover_foreground.py" result "$recovery_plan" \
+    "$continuation/recovery-result.json" "$continuation/retained-result.json" "$continuation/settled-journal.json" "$continuation/settled-export.json"
+  (set -o noclobber; cat "$continuation/retained-result.json" >"$run/agent-lifetime/session-birth.retained-result.json")
+  world_phase_record exact-foreground-recovery completed "$continuation/recovery-result.json" \
+    "$continuation/retained-result.json" "$continuation/settled-journal.json" "$continuation/settled-export.json"
+  world_phase_record session-grant started
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" issue-grant "$run" "$repo" \
+    "$continuation/retained-result.json" >"$continuation/issue-grant.stdout" 2>"$continuation/issue-grant.stderr"
+  timeout 120 sudo -n -- "$installer" controller-tool-ack "$store" "$helper" "$request_id" \
+    >"$run/agent-lifetime/session-birth.ack.json"
+  jq -e --arg id "$request_id" '.type == "tool-acknowledged" and .requestId == $id and .isError != true' \
+    "$run/agent-lifetime/session-birth.ack.json" >/dev/null
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-route "$run" "$repo" \
+    "$run/agent-lifetime/controller-create.json" >"$continuation/prepare-route.stdout" 2>"$continuation/prepare-route.stderr"
+  world_phase_record session-grant completed "$run/agent-lifetime/issued-grant.json" "$run/agent-lifetime/session-birth.ack.json"
+}
+
 # Run only after the world services have stopped. The planner observes physical
 # state; all unmount/destroy effects still go through native volume custody.
 world_cleanup_volumes() {
@@ -613,6 +715,9 @@ world_cleanup_volumes() {
 world_cleanup() {
   local result=${1:-$?} cleanup_result=0 unit preserve_namespace=false exit_path volume_evidence
   trap - EXIT INT TERM
+  if [[ -d $run/browser ]]; then
+    python3 -B "$repo/deploy/oracle/acceptance/browser_edge.py" stop "$run/browser" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+  fi
   if [[ ${configured:-0} == 1 ]]; then
     if [[ ${controller_created:-0} == 1 ]]; then
       world_controller_stop cleanup >>"$run/cleanup.log" 2>&1 || cleanup_result=1

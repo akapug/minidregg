@@ -239,7 +239,58 @@ def controller_enrollments(run, require):
     return {'owner_policy': policy, 'native_enrollments': enrolled}
 
 
-def session_continuation(run, require):
+def foreground_recovery(run, require):
+    directory = run / 'continuations/foreground-13'
+    if not directory.exists():
+        return None
+    from recover_foreground import prebirth, validate_result
+    value = read(directory / 'prepared.json')
+    plan = value['plan']
+    require('foreground_recovery_same_operation',
+            value.get('protocol') == 'mini-oracle-foreground-recovery-prepared-v1'
+            and plan.get('run') == str(run) and plan.get('operation_id') == 13
+            and plan.get('store') == read(run / 'world-identity.json')['store']
+            and value.get('resend') is False and value.get('automatic_retry') is False
+            and value.get('acknowledge_before_settlement') is False)
+    for name, digest in value['snapshot_files'].items():
+        require('foreground_snapshot_' + name, Path(name).name == name and sha(directory / 'prior' / name) == digest)
+    for name, digest in value['source_manifest'].items():
+        require('foreground_source_' + name, sha(Path(name)) == digest)
+    for name, pin in ((k, v) for k, v in plan.items() if isinstance(v, dict) and 'path' in v):
+        require('foreground_plan_pin_' + name, sha(Path(pin['path'])) == pin['sha256'])
+    from continue_controller import manifest
+    qualification = manifest(Path(plan['qualification_manifest']['path']))
+    require('foreground_independent_binary_qualification', all(
+        qualification.get(plan[k]['path']) == plan[k]['sha256'] for k in ('runtime','public_mini')))
+    boundary = prebirth(read(Path(plan['predecessor_export']['path'])), plan['store'], plan['request_id'], 13)
+    require('foreground_original_boundary_preserved', boundary == value['boundary']
+            and sha(run / 'agent-lifetime/session-birth.result.json') == value['original_result_sha256'])
+    recovery = read(directory / 'recovery-result.json')
+    retained = read(directory / 'retained-result.json')
+    validate_result(plan, recovery, retained, read(directory / 'settled-journal.json'),
+                    read(directory / 'settled-export.json'))
+    require('foreground_native_result_and_settlement_join',
+            sha(directory / 'retained-result.json') == sha(run / 'agent-lifetime/session-birth.retained-result.json'))
+    ack = read(run / 'agent-lifetime/session-birth.ack.json')
+    require('foreground_ordinary_ack_after_recovery', ack.get('type') == 'tool-acknowledged'
+            and ack.get('requestId') == plan['request_id'] and ack.get('isError') is not True)
+    phases = {}
+    for name in ('runtime-upgrade','public-listener-upgrade','services','controller-start',
+                 'exact-foreground-recovery','session-grant'):
+        started = directory / 'phases' / (name + '.started.json')
+        completed = read(directory / 'phases' / (name + '.completed.json'))
+        require('foreground_phase_' + name, completed.get('phase') == name
+                and completed.get('state') == 'completed' and completed.get('started_sha256') == sha(started)
+                and completed.get('permits_automatic_retry') is False)
+        for artifact, digest in completed['evidence'].items():
+            require('foreground_phase_artifact_' + artifact, sha(Path(artifact)) == digest)
+        phases[name] = completed
+    return {'prepared': value, 'receipt': recovery, 'retained_result': retained, 'phases': phases,
+            'original_failed_result_sha256': value['original_result_sha256'],
+            'scope': 'Same operation and parent reservation recovered; original failure preserved without resend.'}
+
+
+def session_continuation(run, require, recovered=None):
     directory = run / 'continuations/session-refusal-1'
     if not directory.exists():
         return None
@@ -287,13 +338,19 @@ def session_continuation(run, require):
             require('session_execution_source_' + name, Path(name).is_absolute() and sha(Path(name)) == digest)
     prior = read(directory / 'prior/agent-lifetime/session-birth.result.json')
     current = read(run / 'agent-lifetime/session-birth.result.json')
+    if recovered is not None:
+        require('session_recovery_preserves_original_failed_operation',
+                current.get('requestId') == recovered['receipt']['requestId']
+                and str(current.get('operationId')) == recovered['receipt']['operationId']
+                and current.get('isError') is True)
+        current = recovered['retained_result']
     require('session_new_tool_does_not_recast_original_failure',
             prior.get('isError') is True and prior.get('operationId') is None
             and prior.get('requestId') == value['boundary']['request_id']
             and current.get('isError') is False and current.get('operationId') is not None
             and current.get('requestId') != prior['requestId']
-            and sha(run / 'agent-lifetime/session-birth.result.json') ==
-                sha(run / 'agent-lifetime/session-birth.retained-result.json')
+            and (recovered is not None or sha(run / 'agent-lifetime/session-birth.result.json') ==
+                sha(run / 'agent-lifetime/session-birth.retained-result.json'))
             and (run / 'agent-lifetime/session-birth.ack.json').is_file())
     upgrade = read(directory / 'runtime-upgrade.json')
     require('session_explicit_runtime_upgrade', upgrade.get('store') == value['store']
@@ -307,7 +364,7 @@ def session_continuation(run, require):
                      'Explicit source policy and native binding enrollments precede the new session attempt.'}
 
 
-def checkpoint_continuation(run, require):
+def checkpoint_continuation(run, require, recovered=None):
     executions = list((run / 'continuations').glob('checkpoint-*/checkpoint.json'))
     if not executions:
         return None
@@ -337,6 +394,11 @@ def checkpoint_continuation(run, require):
     for name in ('public-listener', 'services', 'bootstrap-target', 'worker-policy',
                  'bootstrap-enrollment', 'controller-start', 'session-and-grant'):
         start = path.parent / 'phases' / (name + '.started.json')
+        if name == 'session-and-grant' and recovered is not None:
+            require('checkpoint_uncertain_session_preserved', start.is_file()
+                    and not (path.parent / 'phases' / (name + '.completed.json')).exists())
+            phases[name] = {'state': 'interrupted', 'recovered_by': recovered['receipt']}
+            continue
         completed = read(path.parent / 'phases' / (name + '.completed.json'))
         require('checkpoint_phase_' + name, completed.get('phase') == name and completed.get('state') == 'completed'
                 and completed.get('started_sha256') == sha(start) and completed.get('permits_automatic_retry') is False)
@@ -589,8 +651,9 @@ def main():
     # dispatch receipt and distinct-purse settlement.
     consent = consent_evidence(run, require)
     continuation = controller_continuation(run, require)
-    resumed_session = session_continuation(run, require)
-    checkpoint_result = checkpoint_continuation(run, require)
+    recovered_foreground = foreground_recovery(run, require)
+    resumed_session = session_continuation(run, require, recovered_foreground)
+    checkpoint_result = checkpoint_continuation(run, require, recovered_foreground)
     enrollments = controller_enrollments(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
@@ -663,6 +726,16 @@ def main():
             and authority.get('configSha256') == op155['a']['config_sha256']
             and authority.get('applicationAttemptSha256') == sha(
                 first_agent / 'discover-core-query.lifetime-attempt.json'))
+    browser = None
+    if (run / 'browser').exists():
+        from browser_edge import validate as validate_browser
+        ready = read(run / 'browser/ready.json')
+        browser = read(run / 'browser/result.json')
+        passed = read(run / 'browser/passed.json')
+        validate_browser(browser, ready)
+        require('browser_native_owner_web_journey', passed.get('admission') == 'native owner-web route'
+                and passed.get('result_sha256') == sha(run / 'browser/result.json')
+                and passed.get('ready_sha256') == sha(run / 'browser/ready.json'))
     report = {'schema': 'mini-oracle-shared-data-acceptance-v1', 'passed': True,
               'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch, agent lifetime tools, '
                        'source STOP/restart/reconciliation and sandbox. '
@@ -681,10 +754,10 @@ def main():
                   'sha256': sha(run / 'copied-store-stop-benchmark.json'),
                   'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
-              'controller_consent': consent,
+              'controller_consent': consent, 'browser': browser,
               'controller_continuation': continuation,
               'session_continuation': resumed_session, 'checkpoint_continuation': checkpoint_result,
-              'controller_enrollment': enrollments,
+              'controller_enrollment': enrollments, 'foreground_recovery': recovered_foreground,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}

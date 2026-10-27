@@ -18,10 +18,10 @@ try:
         m = os.fstat(source.fileno())
         if not (stat.S_ISREG(m.st_mode) and m.st_nlink == 1 and
                 m.st_uid in (0, int(os.environ.get('SUDO_UID', '0'))) and
-                m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 98304):
+                m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 131072):
             raise ValueError('controller setup companion custody refused')
-        code = source.read(98305)
-    if hashlib.sha256(code).hexdigest() != 'dd77ba68ff24ace25088b519c27fc877605cafbd6e80641d1a363475ccc66655':
+        code = source.read(131073)
+    if hashlib.sha256(code).hexdigest() != 'd2d79d77bb514ecbf65d2940e29ed03884433765e6f987caf55291a44b85dc7e':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))

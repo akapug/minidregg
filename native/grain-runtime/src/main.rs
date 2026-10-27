@@ -55,6 +55,7 @@ mod query_observation;
 mod publication_refusal_tests;
 mod resource_tools;
 mod shared_app_refs;
+mod foreground_session_recovery;
 mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -15829,6 +15830,9 @@ impl Runtime {
     }
 
     fn recover(&mut self) -> Result<()> {
+        if self.preserves_foreground_session() {
+            return Err("retained session requires exact foreground recovery; reservation preserved".into());
+        }
         if let Some(record) = self.journal.child.clone() {
             let unit = record.unit.as_deref().ok_or(
                 "prior controller died with unscoped child; operator process audit required",
@@ -16952,6 +16956,9 @@ impl Runtime {
     /// is machine-provable, then derive the external-effect acknowledgement
     /// when every channel the worker had is accounted for.
     fn automatic_reconcile(&mut self) -> Result<()> {
+        if self.preserves_foreground_session() {
+            return Err("retained session requires exact foreground recovery; reservation preserved".into());
+        }
         if self.journal.parent_hold.is_some()
             && self.child.is_none()
             && self.journal.child.is_none()
@@ -17852,6 +17859,12 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(id)=request.command.strip_prefix("recover foreground session ") {
+                    let result=rt.recover_foreground_session(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 let outcome = match request.command.as_str() {
                     "reconcile parent" => rt.reconcile_hold(false, false),
                     "reconcile tool" => rt.reconcile_hold(true, false),
@@ -18254,6 +18267,12 @@ fn main() -> ExitCode {
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
+            Ok(response) if command.starts_with("recover foreground session ") => {
+                let request_id = command.strip_prefix("recover foreground session ").unwrap();
+                if foreground_session_recovery::successful_reply(request_id, &response) {
+                    println!("{response}"); ExitCode::SUCCESS
+                } else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if response == "ok" => {
                 println!("{response}");
                 ExitCode::SUCCESS
@@ -18269,7 +18288,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
