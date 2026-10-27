@@ -73,8 +73,8 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
 }
 /// Name the step and the path an OS error came from: a bare ENOENT from the
 /// namespace bootstrap says nothing about which helper or file is missing.
-fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error + '_ {
-    let step = step.to_owned();
+fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error {
+    let (step, path) = (step.to_owned(), path.to_owned());
     move |error| io::Error::new(error.kind(), format!("namespace bootstrap {step} ({path}): {error}"))
 }
 fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
