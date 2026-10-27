@@ -38,9 +38,6 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
     let host = absolute(&path(args.required("host")?))?;
     let config = absolute(&path(args.required("config")?))?;
     args.finish()?;
-    if super::super::SOCKET.get().is_none() {
-        return Err("mini web --body needs --socket (the deployment's public socket)".into());
-    }
     let workspace = workspace::load(&root)?;
     let site = Arc::new(Site {
         mutations: Mutex::new(()),
@@ -556,15 +553,18 @@ impl Ending {
 /// proposal and its `submit`), the same binary and subcommand the ssh login runs.
 pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
-    let socket = super::super::SOCKET.get()?;
     let exe = std::env::current_exe().ok()?;
     let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
     if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
         return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
     }
-    let mut child = Command::new(exe)
-        .arg("--socket").arg(socket)
-        .arg("shell")
+    let mut command = Command::new(exe);
+    command.arg("shell");
+    // The deployment's socket, as the ssh wrapper passes it; a workspace that pins one takes it from the pin.
+    if let Some(socket) = super::super::SOCKET.get() {
+        command.arg("--socket").arg(socket);
+    }
+    let mut child = command
         .arg("--workspace").arg(&site.root)
         .arg("--home").arg(&shell.home)
         .arg("--host").arg(&shell.host)

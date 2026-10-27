@@ -60,6 +60,8 @@ hook|--dry)
   [ -x "$GATEWAY" ] && [ -x "$HELPER" ] || unconfigured "no mini-web / mini-web-spawn beside $MINI (cargo build -p minidregg-mini-web -p minidregg-mini-web-spawn), or set MINI_WEB_BIN / MINI_WEB_SPAWN_BIN"
   WRAPPER=$REPO/deploy/shell/mini-shell-ssh
   [ -x "$WRAPPER" ] || unconfigured "no $WRAPPER"
+  # A workspace that pins its Host's socket must be addressed by that exact path.
+  pinned=$(jq -r '.socket // empty' "$WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
   # Unix sockets need a short path (sun_path); the step directory can be long.
   RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR"' EXIT
@@ -140,7 +142,7 @@ page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
-help=$("$MINI" --socket "$SOCKET" shell --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
+help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
 verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
 missing=""; count=0
 for v in $verbs; do
