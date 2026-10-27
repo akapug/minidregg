@@ -514,7 +514,13 @@ def repair_checkpoint(run, spk, inventory, benchmark, repo, exported, status_pat
             and status.get('runtimeSha256') == runtime.get('runtimeSha256') == sha(old / 'bin/grain-runtime')
             and runtime.get('previousRuntimeSha256') == sha(run / 'bin/grain-runtime')
             and status.get('controllerConfigSha256') == sha(run / 'agent-lifetime/controller-stage/controller.json')
-            and status.get('consent') == storage.get('consent'), 'installed physical repair pins differ')
+            # status deliberately exposes raw stage.consent; the repair receipt
+            # additionally renders fixed unit/UID/path metadata. The complete
+            # root-retained stage SHA is joined above, without projecting it.
+            and set(status.get('consent', {})) == {'configSha256', 'providerSha256', 'storage'}
+            and status['consent'] == {key: storage.get('consent', {}).get(key)
+                                      for key in ('configSha256', 'providerSha256', 'storage')},
+            'installed physical repair pins differ')
     require('publicListener' not in status, 'public listener already registered; inspect its exact phase outcome')
     receipts = {str(path): sha(path) for path in (old / 'prepared.json', old / 'consent-storage.json',
         old / 'runtime-upgrade.json', old / 'exit.json', failure_path, status_path, exported)}
