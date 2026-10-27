@@ -12,8 +12,10 @@ Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; t
 - lane/un-native-rows 6fae5fa4, lane/un-moves e9d0f2c1, lane/un-pred-census f8677835, lane/un-fixtures a6a32103, lane/un-deputy (this file, EFFECTS.md): as batch 2.
 
 ## In flight
-- un-pb-exec (R7, P9, KAT), un-pb-wal (R2, P1-P4, protocol_store delete), un-pb-seal (R3, P7, P13).
-- un-pred-census: TokenCensus 23 defects. un-moves: four DEAD kernel modules. un-assurance: story law generator into Kernel/StoryLaw.lean.
+- un-effects (Opus implementer): the activity kernel's effect Plans (transfer/commit as kernel-decided yields), statement in docs/evidence/2026-10-27-world-native/DOMAINS.md (lane/un-world ae6bf1a1). Coordinator rulings: recordFrame v8->v9 + re-emitted pins are a flag day riding L1's one re-genesis (lane stays OFF cuts until the coordinator says the seed is in; I collect the exact registry/wire entries for L1); law refusal refuses the turn as await.write does; the keystone file Kernel/ObjectiveActivityEffect.lean goes to the statements auditor (file:line via the coordinator) before proof. The closure build waits for dregg-ref to be released (nano winding down).
+- un-pb-wal (R2), un-pb-twins (deletions), un-pred-census (TokenCensus 23 defects), un-moves (four DEAD kernel modules).
+
+Landed since batch 3: lane/un-pb-exec 64211340 (R7/P9/KAT; deadlock test red/green on the box), lane/un-pb-seal 31e65265 (R3/P7/P13/P14; 23/0 on Linux; the adopt_current_epoch channel named in CONSTRUCTION.txt), lane/un-seats ccb34bc5 (seat lock: link-created pid file, stale rule, reclaim lock; red/green both machines), lane/un-assurance e6eac995 (story law generator in Kernel/StoryLaw.lean; receiver note).
 
 ## Decided
 - fn: out of this demo (ember); the exchange row stays UNCONFIGURED by name; sentence published.
