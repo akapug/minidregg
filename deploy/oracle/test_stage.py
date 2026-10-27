@@ -106,6 +106,51 @@ class StageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "512 MiB.*root/store.sqlite"):
             stage.require_spk_members({"root/store.sqlite": {"kind": "file", "size": 512 * 1024 * 1024}})
 
+    @unittest.skipUnless(shutil.which("capnp"), "capnp unavailable")
+    def test_split_preserves_paths_and_pins_exact_public_inventory(self):
+        data = self.appliance / "root/store.sqlite3"
+        data.write_bytes(b"immutable data")
+        receipt_path = self.appliance / "APPLIANCE.json"
+        receipt = json.loads(receipt_path.read_text())
+        entry = {"size": data.stat().st_size, "sha256": stage.digest(data), "executable": False}
+        receipt["files"]["root/store.sqlite3"] = entry
+        receipt["stores"] = [{"path": "root/store.sqlite3", "size": entry["size"], "sha256": entry["sha256"]}]
+        receipt_path.write_text(json.dumps(receipt))
+        self.args.appliance_sha256 = stage.digest(receipt_path)
+        public = {"schema": "minidregg-public-data-inventory-v1", "visibility": "public",
+                  "files": [{"path": "root/store.sqlite3", "size": entry["size"], "sha256": entry["sha256"]}]}
+        self.args.data_inventory = self.base / "public-data.json"
+        self.args.data_inventory.write_text(json.dumps(public))
+        self.args.data_sha256 = stage.digest(self.args.data_inventory)
+        stage.build(self.args)
+        staged = stage.verify_stage(self.args.target)
+        self.assertEqual(staged["expected_package_entries"]["opt/oracle/root/store.sqlite3"],
+                         {"kind": "symlink", "target": "/opt/oracle-data/root/store.sqlite3"})
+        self.assertEqual(staged["expected_package_entries"]["opt/oracle-data"], {"kind": "directory"})
+        self.assertEqual(json.loads((self.args.target / "image/minidregg-data.json").read_text()),
+                         {"schema": "minidregg-public-data-v1", "inventory_sha256": self.args.data_sha256})
+        self.assertEqual(data.read_bytes(), b"immutable data")
+        self.assertFalse(data.is_symlink())
+        self.assertEqual(staged["package_sources"]["opt/oracle/root/store.sqlite3"]["root"], "image")
+        self.assertEqual(staged["package_sources"]["opt/oracle/adapter/serve.py"]["root"], "appliance")
+        public["files"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "differs"):
+            stage.data_inventory(public, receipt)
+
+    def test_public_inventory_cannot_redirect_or_omit_bulk_data(self):
+        receipt = {"files": {"root/data": {"size": 1, "sha256": "a" * 64, "executable": False}},
+                   "stores": [{"path": "root/required"}]}
+        public = {"schema": "minidregg-public-data-inventory-v1", "visibility": "public",
+                  "files": [{"path": "root/data", "size": 1, "sha256": "a" * 64}]}
+        with self.assertRaisesRegex(ValueError, "every declared"):
+            stage.data_inventory(public, receipt)
+        public["files"][0]["path"] = "../host/path"
+        with self.assertRaisesRegex(ValueError, "noncanonical"):
+            stage.data_inventory(public, receipt)
+        public["host_path"] = "/private"
+        with self.assertRaisesRegex(ValueError, "invalid public"):
+            stage.data_inventory(public, receipt)
+
     def test_final_package_rejects_mutation_extra_files_and_wrong_signer(self):
         entries = {"payload": {"kind": "file", "size": 3, "executable": False, "sha256": "expected"}}
         receipt = {"app_id": "reviewed-signer", "version": 1, "expected_package_entries": entries}
