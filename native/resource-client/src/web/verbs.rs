@@ -571,6 +571,19 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
 mod tests {
     use super::*;
 
+    /// The research door: its form is derived from the grammar leaf (no hand-written HTML), and
+    /// the words the verb page prints (`verb.operation`) carry the word "research" and the label.
+    #[test]
+    fn the_private_compute_form_is_derived_and_the_page_text_carries_the_research_label() {
+        let verb = crate::shell::command_catalog().find(|v| v.name == "private-compute").expect("in the catalog");
+        assert_eq!(verb.usage, "private-compute LEFT RIGHT");
+        assert!(verb.operation.contains("RESEARCH") && verb.operation.contains(crate::private_compute::LABEL), "{}", verb.operation);
+        let html = form_for("private-compute", "private-compute", "/verb/private-compute", "").expect("one leaf");
+        assert!(html.contains("LEFT") && html.contains("RIGHT") && html.contains("name=\"a1\"") && html.contains("name=\"a2\""), "{html}");
+        assert!(!transition_of("private-compute", verb.usage, verb.operation, 0, "private-compute"), "a local computation is not a transition");
+        assert!(!html.contains("submit ID"), "never a proposal");
+    }
+
     #[test]
     fn every_catalog_usage_parses_into_literal_led_alternatives() {
         let mut verbs = 0;

@@ -1,10 +1,11 @@
 //! Test-only drivers that run the Lean-emitted two-bit addition plan
 //! (`fixtures/addition-network-2-plan.bin`) over the SAME constant/XOR/AND
 //! network, with every party honest.
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 use crate::circuit_batch::{Network, Op};
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use crate::{
         acss_id::{self, AcssId},

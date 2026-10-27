@@ -886,8 +886,9 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use std::collections::VecDeque;
     pub(crate) fn g() -> Generation {

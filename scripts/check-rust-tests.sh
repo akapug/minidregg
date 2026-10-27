@@ -561,6 +561,20 @@ exact private-king-store private-backend --lib -- \
   king_store::tests::kill9_mid_king_recovers_with_one_dealer_event_per_instance_no_new_allocations_and_complete_triples \
   private_view::curious_holder_view_is_consistent_with_three_input_pairs_and_recipient_gets_256 \
   private_view::retired_public_coefficient_dealing_is_decoded_by_the_curious_holder
+# The research-labelled in-process four-party door (private-backend R1): the report carries the
+# banner, the output and the curious holder's counts and names no input value; the `mini` side
+# refuses a report without the banner, bounds the values, and its verb is a Local grammar leaf
+# whose form and page text carry the research label. Not a spine row: nothing here is an admission.
+exact private-compute-demo private-backend --features demo --lib -- \
+  demo::tests::inputs_are_two_bounded_decimals \
+  demo::tests::an_alternate_pair_keeps_the_sum_and_differs \
+  demo::tests::the_report_on_a_fixed_input_has_the_label_the_output_and_names_no_input
+exact rc-private-compute resource-client --bin mini -- \
+  private_compute::tests::the_banner_is_the_research_word_and_the_label \
+  private_compute::tests::values_are_bounded_decimals \
+  private_compute::tests::a_report_without_the_banner_is_refused \
+  shell::tests::private_compute_takes_two_bounded_values_and_is_a_local_client_call \
+  web::verbs::tests::the_private_compute_form_is_derived_and_the_page_text_carries_the_research_label
 # One hex decoder (c158f9ba); rate budgets per IPv6 /64 with eviction (664ee3c4)
 exact rc-hex-rate-limit      resource-client --bin mini -- \
   decode_hex_tests::decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic \

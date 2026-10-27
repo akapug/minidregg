@@ -135,6 +135,8 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+#[cfg(unix)]
+mod private_compute;
 mod bend;
 mod seat;
 #[cfg(unix)]
@@ -705,6 +707,7 @@ usage:
     --replan-max N: when a tick, certify or another write lands between an observation and
     its use, the Host answers stale-root; mini observes again up to N times (default 5;
     MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
+  mini private-compute --left 0..=255 --right 0..=255   (research demonstration: a local four-party MPC computation, never an admission; needs the mini-private-compute binary beside mini)
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini adopt-next-key --workspace WORKSPACE [--next-key NEXT-KEY] [--attempt CHILD] [--action prepare|submit|lookup]
   mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
@@ -2684,6 +2687,8 @@ fn run(mut args: Args) -> Result<()> {
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
         "export-world" => world_export::run(args),
+        #[cfg(unix)]
+        "private-compute" => private_compute::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
