@@ -98,6 +98,9 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
            "payControlCapability": str(OBSERVER_CAP + 1),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
                            
                            "enrolCapability": str(OBSERVER_CAP + 2)}}
