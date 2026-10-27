@@ -789,8 +789,10 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
     }
 }
 
-fn create(session: &Session, name: &str, storage: &str, law: &Value, room: &str) -> Result<Value, Done> {
-    crate::chat::create_cell(session, name, storage, law, Some(room), None)
+/// The story's table: a document in the story's room (born with its document,
+/// since its rows are appended lines).
+fn create_document(session: &Session, name: &str, law: &Value, room: &str) -> Result<Value, Done> {
+    crate::chat::create_document(session, name, law, Some(room))
 }
 
 fn install(session: &Session, name: &str, law: &Value) -> Result<(), Done> {
@@ -817,7 +819,7 @@ fn story_new(session: &Session, name: &str, from: &str, gm: Option<String>) -> R
     if gm != author {
         install(session, &format!("{name}/scenes"), &scenes_law(&gm))?;
     }
-    let table_ref = create(session, &format!("{name}/table"), "content", &table_open_law(&author), name)?;
+    let table_ref = create_document(session, &format!("{name}/table"), &table_open_law(&author), name)?;
     let actions: Vec<Value> = rows(&text).iter().map(|r| json!({"type":"append","text":r})).collect();
     propose_submit(
         session,
