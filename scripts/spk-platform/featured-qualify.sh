@@ -90,7 +90,8 @@ write_DokuWiki() {
   local save; save=$(req POST /doku.php --data-urlencode id=featured --data-urlencode "sectok=$sectok" \
     --data-urlencode 'do[save]=1' --data-urlencode 'summary=resident' --data-urlencode $'wikitext======= Featured ======\nwritten by a resident\n')
   local got; got=$(req GET '/doku.php?id=featured&do=export_raw')
-  [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST do=save $save; export_raw $got"
+  [[ $save =~ ^(200|302|303)$ && $got == 200 ]] && grep -q 'written by a resident' "$body" && { echo "1 POST do=save $save; export_raw $got"; return; }
+  echo "0 POST do=save $save; export_raw $got without the text"
 }
 write_HledgerWeb() {
   local add; add=$(req POST /add --data-urlencode "date=$(date -u +%Y-%m-%d)" --data-urlencode 'description=featured by a resident' \
