@@ -699,3 +699,28 @@ fn dead_lease_holder_frees_its_slot_only_by_operator_resolve() {
     core.resolve(&held.id, 300).unwrap();
     assert_eq!(core.service_us, service);
 }
+
+#[test]
+fn placement_bound_is_exact_at_context_and_output_limits() {
+    let cfg = config();
+    let accepted = |name: &str, max_input: u32, max_output: u32| {
+        let mut core = Core::new(&cfg).unwrap();
+        core.enqueue(
+            &cfg,
+            "a1",
+            Request {
+                max_input,
+                max_output,
+                ..job(name)
+            },
+            0,
+        )
+        .is_ok()
+    };
+    // context 4096: input + output may equal it, never exceed it by one.
+    assert!(accepted("ctx-at", 4096 - 20, 20));
+    assert!(!accepted("ctx-over", 4096 - 20 + 1, 20));
+    // max_output 512: equal is placed, one more is refused.
+    assert!(accepted("out-at", 100, 512));
+    assert!(!accepted("out-over", 100, 513));
+}

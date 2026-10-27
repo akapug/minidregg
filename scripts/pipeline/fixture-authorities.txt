@@ -18,4 +18,8 @@ Fixtures/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/genera
 native/mini-sdk/golden/lean-intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
 native/mini-sdk/golden/intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
 native/mini-sdk/golden/vectors.json | native/mini-sdk (golden emitter) | - | PENDING
-native/objective-emit/fixtures/* | native/objective-emit (differential generator) | - | PENDING
+# Hand-built, NOT generated (its own note says so): the negative core term (\x.x)(perform 1) that gate `c` of
+# scripts/check-objective-proofs.sh feeds to differential.py, where runtime.c must refuse it sharedEffect like
+# runBounded. Each file is itself the reviewed pin; no generator writes them.
+native/objective-emit/fixtures/SharedEffect/source.core.json | hand-written (no generator) | native/objective-emit/fixtures/SharedEffect/source.core.json | self
+native/objective-emit/fixtures/index.json | hand-written (no generator) | native/objective-emit/fixtures/index.json | self
