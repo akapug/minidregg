@@ -362,3 +362,76 @@ What the steps write, and where each controller field comes from:
 
 One registration serves one room: summoning Hermes into another room needs its
 own task and registration.
+
+## The subscriber tier: Hermes on GLM through the Z.AI coding plan
+
+A flat 4000 DREGG a month buys membership of the `subscribers` room, whose
+resident Hermes answers on GLM through ember's Z.AI coding-plan key. It is
+existing machinery: a concierge room, a second house resident, a pool row.
+
+**The route.** The coding plan serves OpenAI Chat Completions at
+`https://api.z.ai/api/coding/paas/v4/chat/completions` (measured 2026-10-27:
+200, streaming, usage on the finishing chunk), so the row is the ordinary
+`openai-compatible` shape and needs no adapter. The pay-as-you-go
+`/api/paas/v4` is not funded (`1113`), and a 429 on the plan endpoints means a
+wrong endpoint. The Host quotes its stream (it omits `finish_reason` on delta
+chunks; `Host/ProviderUsageAudit.lean` holds the measured stream). Rows in
+`/etc/mini/providers.json`:
+
+```json
+{"name":"zai-glm","kind":"openai-compatible","credential":"pool",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"],
+ "caps":{"perCall":"4096","perDay":"140","ceilingMicroUsd":"70000","callMicroUsd":"500",
+         "memberDayMicroUsd":"10000","memberTotalMicroUsd":"35000"}},
+{"name":"zai-byok","kind":"openai-compatible","credential":"user",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"]}
+```
+
+The key is sealed like the OpenRouter pool key (`mini-keys pool --action set
+--provider zai-glm --secret - < zai-key`, as root, never in a file the repo
+sees). Egress: the broker account to `api.z.ai:443` only.
+
+**Caps, from the plan's quota.** The plan reports (`GET
+/api/monitor/usage/quota/limit`) 28000 credits per 5 hours and 140000 per week
+(level max). Measured: ~50 credits for a 75-token call, ~128 for a 4.4K-token
+call, so a Hermes model call (≤16000 in, ≤4096 out) is at most ~500. On this
+row the broker's spend units are those credits: `callMicroUsd` 500 (worst
+case), `ceilingMicroUsd` 70000 (half the week, the other half stays ember's;
+`mini-keys pool --action spend-reset --provider zai-glm` at each weekly
+reset), `perDay` 140 calls (70000 / 500, per runner: the GLM resident), and
+per subscriber 10000 a day (20 calls, about five asks) and 35000 in all (half
+the ceiling) until the weekly reset. A subscriber past either gets
+`member-day-ceiling` / `member-total-ceiling` by name. The plan's three
+one-time resets (valid to 2026-12-22) raise the week when used; they change
+the ceiling, not the code.
+
+**Who pays what.** The subscriber pays 4000 DREGG to the room's till (`pay
+subscribers week`); the concierge delegates `member` under the room with
+`notAfter = height + 43200` (30 days at one tick a minute; renewing extends),
+refunds anything it does not honour, and the kernel ends the window. The GLM
+resident's purse pays 1 credit a call on either route (the tariff in
+`demo/provider-services.json`, purse 9871003: no token metering, because the
+plan is flat); the room's `hermes/turn` and the summon budget are the
+founder's, funded from the till. ember's plan pays Z.AI. A member's own Z.AI
+plan key goes on `zai-byok` exactly as any friend key (`mini key --action
+set`, `--action grant` to their own grain's runner).
+
+**Install** (after the `hermes` resident; Store genesis carries both purse
+tariffs):
+
+    INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+      HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+
+`concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
+
+**Subscribe** (the web form's verbs): `tariff subscribers` (price and period),
+`credit` (balance), `pay subscribers week`, `room status subscribers` (the
+window and its end).
+
+**Open:** a concierge window is kernel membership, but asking the room's
+Hermes is a chat line, which needs a roster stream only the founder's `chat
+invite` creates. Until that is closed, the founder invites each new member.
+Whether the coding plan's terms permit serving others' agents is for the join
+page to state.
