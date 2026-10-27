@@ -70,6 +70,7 @@ for x in "$BRIDGE" "$MINI_KEYS" "$LAUNCH_GATE"; do [ -x "$x" ] || { echo "j14: n
 # The controller's sockets live in a short directory (journey.d/lib/shortdir.sh).
 . "$REPO/native/resource-client/journey.d/lib/shortdir.sh"
 JOURNEY_SHORTDIR_NOTRAP=1 journey_shortdir j14
+mkdir -p -m 700 "$JOURNEY_D"
 G=$JOURNEY_D/g
 # J14 runs on its OWN Store, served through the private operator socket (the
 # resident's preflight requires it, and a public socket cannot be upgraded to
