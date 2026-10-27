@@ -58,7 +58,11 @@ SOCKET=${SOCKET:-$ROOT/public/mini.sock}
 # restored world IS the world the knobs describe (same genesis, same keys, same records), so nothing
 # a caller asserts changes; what it shares with other callers of the same candidate is test keys.
 # The Store (sqlite files and the head anchor) holds no path; every text file naming one is rewritten.
-TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR:-}
+# ON BY DEFAULT (ember 2026-10-27: keep snapshots and fast-forward them; avoid replays): unset means
+# $TMPDIR/minidregg-world-templates-UID (the variant digests the binaries, so candidates never share a
+# template); NEWPARTICIPANT_TEMPLATE_DIR="" (journey-runner's JOURNEY_WORLD_TEMPLATES=0) builds fresh,
+# the control for the published before/after number.
+TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR-${TMPDIR:-/tmp}/minidregg-world-templates-$(id -u)}
 TEMPLATE_VARIANT= TEMPLATE_TAR= TEMPLATE_META=
 variant_digest() {
   # contents only (`sha256sum -` names no path): a caller's spec file lives under its own run root
