@@ -382,33 +382,28 @@ fn plan_custody(subject: &str, key_id: &str, public_key: &str, plan_view: &Value
 fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     let retained = bounded(&directory.join("plan.frame"), transport::HOST_MAX_FRAME)?;
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
-    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &pair(&observation, &pin.command)?);
+    let request = pair(&observation, &pin.command)?;
+    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &request);
     let _ = take_host_decision();
-    let Ok(frame) = current else { return Ok(false) };
-    if frame == retained {
+    if current.as_ref().is_ok_and(|frame| *frame == retained) {
         return Ok(true);
     }
-    // A pinned plan: the Host's fresh plan differs only by its deadline when the source merely
-    // moved; pinned to the same observation height it is the retained pinned plan again (what the
-    // consent provider accepts, `checkExactOrPinned`). Anything else is a dead plan.
-    let Some(height) = &pin.pinned_at else { return Ok(false) };
-    // A refusal (the observation itself is stale: the Host answers NO_RECORD) is a dead plan too,
-    // never an error of this check: `plan` then retires it and observes again.
-    let Ok(body) = reply(&frame, 86) else {
-        let _ = take_host_decision();
+    // A pinned plan outlives the source it was planned over: once a commit lands, the Host no longer
+    // plans over the retained observation (it refuses it with no record), so the Host cannot vouch
+    // for it. The authority is the one `seal` asks before it signs: the local consent provider
+    // re-derives the plan at the observation's height and accepts the exact or the pinned form
+    // (`NativeSpecializedConsent.checkExactOrPinned`). It judges, it signs nothing. Accepted: the
+    // plan is resumed; refused: it is dead and re-planned under the same request.
+    if pin.pinned_at.is_none() {
         return Ok(false);
-    };
-    let fresh = directory.join("plan-current.bin");
-    let fresh_pinned = directory.join("plan-current-pinned.bin");
-    for stale in [&fresh, &fresh_pinned] {
-        if stale.exists() { fs::remove_file(stale).map_err(|error| error.to_string())?; }
     }
-    retain_exact(&fresh, body)?;
-    let pinned_now = pin_plan_height(&pin.host, &pin.config, &fresh, height, &fresh_pinned)?;
-    for temporary in [&fresh, &fresh_pinned] {
-        let _ = fs::remove_file(temporary);
+    match crate::client_consent::operator_plan(&pin.host, &pin.config, 86, &request, &pin.plan) {
+        Ok(()) => Ok(true),
+        Err(_) => {
+            let _ = crate::client_consent::take_stale_observation();
+            Ok(false)
+        }
     }
-    Ok(pinned_now.is_some_and(|bytes| bytes == pin.plan))
 }
 
 /// The next free `replanned/NN` of a directory.
@@ -491,6 +486,12 @@ fn public_key_file(path: &Path) -> Result<VerifyingKey> {
     VerifyingKey::from_bytes(&bytes).map_err(|_| "enrollment public key is not a valid Ed25519 point".into())
 }
 
+/// The plan the custody signs: the pinned form when the Host pinned it (`pin-enrollment-plan-height`),
+/// else the Host's plan as answered. Every reader of the signed plan goes through this one name.
+fn plan_file(pinned_at: Option<&str>) -> &'static str {
+    if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }
+}
+
 fn load_pin(directory: &Path) -> Result<Pin> {
     crate::fsio::ensure_private_dir_durable(directory)?;
     let pin = json_private(&directory.join("pin.json"))?;
@@ -527,8 +528,7 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         Some(Value::String(height)) => Some(height.clone()),
         _ => None,
     };
-    let plan = private_bytes(
-        &directory.join(if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }), LIMIT)?;
+    let plan = private_bytes(&directory.join(plan_file(pinned_at.as_deref())), LIMIT)?;
     pinned(&pin, "commandSha256", &digest(&command))?;
     pinned(&pin, "planSha256", &digest(&plan))?;
     let name = field(&pin, "name")?;
@@ -1140,8 +1140,10 @@ fn plan(mut args: Args) -> Result<()> {
             let consent_stale = crate::client_consent::take_stale_observation();
             stale_refusal(&host, &public_socket, &retained_config, decision) || consent_stale
         },
-        |number| {
-            crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
+        // The loop counts its own re-plans from 1; the directory may already hold retirements from an
+        // earlier resume or a no-record refusal, so the slot is the directory's next free one.
+        |_| {
+            crate::replan::retire(&directory, next_retirement(&directory)?, &["request.json", "config.json", "enrollment.lock"])
                 .map(|_| ())
         },
     )?;
@@ -1722,7 +1724,7 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     // its inspection), else the Host's plan. Inspecting plan.bin against a pinned plan.json differed
     // whenever the source moved between the observation and the plan (the deadline the pin moves),
     // e.g. the fifth of five members enrolled back to back.
-    let signed_plan = directory.join(if pin.pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" });
+    let signed_plan = directory.join(plan_file(pin.pinned_at.as_deref()));
     let fresh = inspect(
         &pin.host,
         &pin.public_socket,
@@ -1924,13 +1926,13 @@ fn refused_without_record(directory: &Path, pin: &Pin, frame: &[u8], ingress: &[
         .ok()
         .filter(|reply| reply.first() == Some(&8))
         .and_then(|reply| serde_json::from_slice::<Value>(&reply[1..]).ok());
-    record_refused_without_record(directory, pin, ingress, crate::RESPONSE_NO_RECORD, decoded)
+    no_record(directory, pin, ingress, crate::RESPONSE_NO_RECORD, decoded)
 }
 
-/// Retain a no-record refusal of the sealed plan's submit (`response`: the reply byte it came
-/// under: NO_RECORD 253, or op 88's own reply carrying an outcome the Host decoded as `refused`
-/// with `effect: no-record`), release the name's binding and point the caller at `plan`.
-fn record_refused_without_record(directory: &Path, pin: &Pin, ingress: &[u8], response: u8, decoded: Option<Value>) -> Result<()> {
+/// The Host decided the submit refused and left no record: from the NO_RECORD byte (decoded above)
+/// or from a decoded outcome that says so (`type: refused, effect: no-record`, e.g. an expired
+/// signature, `CredentialSignatureAdmission.Reject.expired`). Either way nothing was admitted.
+fn no_record(directory: &Path, pin: &Pin, ingress: &[u8], response: u8, decoded: Option<Value>) -> Result<()> {
     let reason = decoded
         .as_ref()
         .and_then(|outcome| outcome.get("reason").and_then(Value::as_str))
@@ -1977,12 +1979,10 @@ fn submit(directory: &Path) -> Result<()> {
             if confirmed(&value).is_ok() {
                 return result(&directory, &pin, &value);
             }
-            // The receiver's own decided refusal, proven no-append by the Host's decoding
-            // (`effect: no-record`): the same class as a NO_RECORD frame, never an uncertainty.
             if value.get("type").and_then(Value::as_str) == Some("refused")
                 && value.get("effect").and_then(Value::as_str) == Some("no-record")
             {
-                return record_refused_without_record(&directory, &pin, &ingress, 88, Some(value));
+                return no_record(&directory, &pin, &ingress, frame.first().copied().unwrap_or(0), Some(value));
             }
             lookup_exact(&directory, &pin, &ingress)
         }

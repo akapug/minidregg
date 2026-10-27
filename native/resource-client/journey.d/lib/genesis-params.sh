@@ -27,3 +27,17 @@ resolve_params_sh() {  # resolve_params_sh SOURCE_TREE_ROOT
   fi
   export GENESIS_PARAMS_SH
 }
+
+# A driver that runs genesis.sh itself (not `run.sh init`) fills the grain platform's completion
+# custodian the way init does (deploy/candidate/run.sh, deploy/market/INSTALL.md §0): a fresh key pair
+# under DIR/keys/completion.{seed,pub}, its public half into .grainPlatform.completionCustodianKey.
+# Params without a grainPlatform, or with the key already filled, are left as they are. The key is a
+# test key of this run, like every other key the driver makes.
+fill_completion_custodian() {  # fill_completion_custodian PARAMS.json DIR MINI
+  jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$1" >/dev/null || return 0
+  mkdir -p -m 700 "$2/keys"
+  "$3" keygen --secret "$2/keys/completion.seed" --public "$2/keys/completion.pub" --no-prerotation \
+    >"$2/keys/completion.pub.hex" || { echo "genesis-params: completion custodian keygen failed" >&2; return 1; }
+  _gp_key=$(od -An -tx1 -v "$2/keys/completion.pub" | tr -d ' \n')
+  jq --arg k "$_gp_key" '.grainPlatform.completionCustodianKey = $k' "$1" >"$1.filled" && mv "$1.filled" "$1"
+}

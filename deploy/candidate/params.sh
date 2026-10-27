@@ -12,11 +12,6 @@
 #                                        .grainPlatform with lifecycleManagement, grainBirthTariff and
 #                                        completionCustodianKey (null until init fills it), each named
 #                                        when absent (deploy/market/INSTALL.md §0)
-#   params.sh fill-completion PARAMS.json MINI   a fixture or scratch genesis's completion custodian:
-#                                        when .grainPlatform is present and its completionCustodianKey
-#                                        is null, `MINI keygen --no-prerotation` writes completion.seed
-#                                        and completion.pub beside PARAMS.json and fills the key, as
-#                                        `run.sh init` does; a world without the block is left alone
 #
 # Fills the file IN PLACE, at genesis time. An UNFILLED value is absent or null (the shipped
 # genesis-params.example.json carries null for both): genesisNow becomes the current Unix second
@@ -27,25 +22,12 @@
 #   - a present value other than the one this call would write. A genesis time is chosen once:
 #     re-running on a filled file refuses unless GENESIS_NOW / MAX_STEP_SECONDS pin that value.
 set -eu
-usage() { sed -n '4,18p' "$0" >&2; exit 2; }
+usage() { sed -n '4,13p' "$0" >&2; exit 2; }
 die() { echo "params.sh: $*" >&2; exit 2; }
-[ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$1" = fill-completion ]; } || usage
+[ "$#" -eq 2 ] || usage
 verb=$1 file=$2
 command -v jq >/dev/null || die "jq is required"
 [ -f "$file" ] && [ ! -L "$file" ] || die "not a regular file: $file"
-if [ "$verb" = fill-completion ]; then
-  mini=$3; [ -x "$mini" ] || die "fill-completion: not an executable mini: $mini"
-  jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$file" >/dev/null || exit 0
-  dir=$(cd "$(dirname "$file")" && pwd)
-  for k in completion.seed completion.pub; do [ ! -e "$dir/$k" ] || die "fill-completion: refusing existing $dir/$k"; done
-  "$mini" keygen --secret "$dir/completion.seed" --public "$dir/completion.pub" --no-prerotation >/dev/null 2>&1 \
-    || die "fill-completion: mini keygen failed"
-  key=$(od -An -tx1 -v "$dir/completion.pub" | tr -d ' \n')
-  tmp=$file.fill.$$
-  jq --arg k "$key" '.grainPlatform.completionCustodianKey = $k' "$file" >"$tmp" && mv "$tmp" "$file" \
-    || { rm -f "$tmp"; die "fill-completion: cannot write $file"; }
-  exit 0
-fi
 if [ "$verb" = require-platform ]; then
   jq -e 'has("grainPlatform")' "$file" >/dev/null || die "grainPlatformRequired: $file has no .grainPlatform; a world without it cannot host SPK grains (INSTALL.md §0 genesis)"
   for field in lifecycleManagement grainBirthTariff completionCustodianKey; do
