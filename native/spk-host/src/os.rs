@@ -27,6 +27,36 @@ mod real {
     pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, app_uid: u32, app_gid: u32) -> bool {
         crate::spawn_gate::execute_mode_permits(owner, group, mode, app_uid, app_gid)
     }
+    #[repr(C)]
+    struct CapHeader {
+        version: u32,
+        pid: libc::c_int,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CapData {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+
+    /// Async-signal-safe: clear the effective, permitted and inheritable sets
+    /// (called in the forked gate child after the UID switch).
+    fn clear_capabilities() -> bool {
+        const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+        let header = CapHeader {
+            version: LINUX_CAPABILITY_VERSION_3,
+            pid: 0,
+        };
+        let data = [CapData {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        }; 2];
+        unsafe { libc::syscall(libc::SYS_capset, &header as *const CapHeader, data.as_ptr()) == 0 }
+    }
+
     use std::io;
     use std::os::fd::RawFd;
     use std::path::{Path, PathBuf};
@@ -140,7 +170,7 @@ mod real {
             || unsafe { libc::setresgid(gid, gid, gid) } != 0
             || unsafe { libc::setresuid(uid, uid, uid) } != 0
             || unsafe { libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) } != 0
-            || !crate::setid_bound::clear_capabilities()
+            || !clear_capabilities()
             || unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0
         {
             return Err(io::Error::last_os_error());
@@ -166,7 +196,7 @@ mod real {
             // between two non-root UIDs; clear all of them so bubblewrap starts
             // with none.
             if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0
-                || !crate::setid_bound::clear_capabilities()
+                || !clear_capabilities()
             {
                 return false;
             }

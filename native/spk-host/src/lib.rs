@@ -111,8 +111,6 @@ pub mod sandbox;
 #[cfg(target_os = "linux")]
 pub mod seccomp;
 #[cfg(target_os = "linux")]
-mod setid_bound;
-#[cfg(target_os = "linux")]
 mod spawn_gate;
 #[cfg(target_os = "linux")]
 mod volume_custody;
