@@ -749,6 +749,7 @@ usage:
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|invite-check|transition|rotate|kick|register|rewrap|pin-member|list|open|forget --dir WORKSPACE --name ROOM [op options]
+  mini workspace --action room-key --op wrap-atom --dir WORKSPACE --epoch E --gen G --member SUBJECT   (the atom a wrap lands at: Kernel/PrivateRoomKeys.lean wrapAtomId)
       private rooms: DEVNET QUALITY; PRIVACY NOT AUDITED (hybrid X25519 + ML-KEM-768 wraps; docs/PRIVATE-ROOMS-DESIGN.txt)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini web --dir WORKSPACE --listen 127.0.0.1:PORT [--home H]   (loopback hypertext over this workspace's signed reads, with the document edit/create POST forms; the developer's and the journeys' direct face)

@@ -201,7 +201,7 @@ pub static REVOKE: Grammar = Grammar { verb: "revoke", leaves: &[
 ] };
 pub static RENOUNCE: Grammar = Grammar { verb: "renounce", leaves: &[
     Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("CAPABILITY", Kind::Subject), opt("object|account|program", Kind::Choice(&["object", "account", "program"]))], flags: &[], effect: Effect::Propose, about: "propose (action renounce, by capability id and kind)" },
+    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("CAPABILITY", Kind::Subject), arg("object|account|program", Kind::Choice(&["object", "account", "program"]))], flags: &[], effect: Effect::Propose, about: "propose (action renounce, by capability id and kind; the kind is required: without it the number reads as a reference name)" },
 ] };
 pub static LAW: Grammar = Grammar { verb: "law", leaves: &[
     Leaf { path: &["law", "show"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "the installed law from the signed policy view, as the Host prints it" },

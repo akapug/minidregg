@@ -926,6 +926,16 @@ pub(crate) fn wrap_atom_id(epoch: u32, gen: u32, member: u64) -> String {
     (((u128::from(epoch) + 1) << 96) | (u128::from(gen) << 64) | u128::from(member)).to_string()
 }
 
+/// `room-key --op wrap-atom`: the address `wrap_atom_id` gives, from decimal text. Scripts that
+/// assert where a wrap lands ask this rather than restating Kernel/PrivateRoomKeys.lean wrapAtomId.
+pub(crate) fn wrap_atom_text(epoch: &str, gen: &str, member: &str) -> Result<String> {
+    let epoch: u32 = mini_sdk::decimal::parse(epoch).filter(|epoch| *epoch <= MAX_EPOCH)
+        .ok_or_else(|| format!("--epoch must be a canonical decimal at most {MAX_EPOCH}"))?;
+    let gen: u32 = mini_sdk::decimal::parse(gen).ok_or("--gen must be a canonical u32 decimal")?;
+    let member: u64 = mini_sdk::decimal::parse(member).ok_or("--member must be a canonical u64 decimal")?;
+    Ok(wrap_atom_id(epoch, gen, member))
+}
+
 pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u32, u64)> {
     let value: u128 = mini_sdk::decimal::parse(id).ok_or_else(|| format!("wrap atom id {id} is not a canonical decimal below 2^128"))?;
     let high = value >> 96;
@@ -3096,6 +3106,13 @@ mod tests {
         assert_eq!(parse_wrap_atom_id(&wrap_atom_id(7, 3, u64::MAX)).unwrap(), (7, 3, u64::MAX));
         assert_eq!(parse_wrap_atom_id(&wrap_atom_id(MAX_EPOCH, u32::MAX, 1)).unwrap(), (MAX_EPOCH, u32::MAX, 1));
         assert_ne!(wrap_atom_id(4, 1, 12), wrap_atom_id(4, 2, 12), "a re-wrap is a new atom");
+        // The verb scripts ask is the same rule, byte for byte, and refuses what the rule cannot address.
+        assert_eq!(wrap_atom_text("1", "2", "12").unwrap(), wrap_atom_id(1, 2, 12));
+        assert_eq!(wrap_atom_text(&MAX_EPOCH.to_string(), &u32::MAX.to_string(), &u64::MAX.to_string()).unwrap(),
+            wrap_atom_id(MAX_EPOCH, u32::MAX, u64::MAX));
+        assert!(wrap_atom_text(&(MAX_EPOCH + 1).to_string(), "0", "1").is_err());
+        assert!(wrap_atom_text("01", "0", "1").is_err());
+        assert!(wrap_atom_text("0", "0", "18446744073709551616").is_err());
         assert!(parse_wrap_atom_id("012").is_err());
         assert!(parse_wrap_atom_id("12").is_err(), "the record region is not a wrap");
         assert!(parse_wrap_atom_id(&release_atom_id(0, 0, 12)).is_err(), "the release region is not a wrap");

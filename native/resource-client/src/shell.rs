@@ -981,7 +981,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "renounce" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::RENOUNCE, &w)?;
             let request = if p.index_in(&crate::shell_grammar::RENOUNCE) == 1 {
-                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","capability":p.arg(1),"kind":p.opt(2).unwrap_or("object")})
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","capability":p.arg(1),"kind":p.arg(2)})
             } else {
                 json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","name":p.arg(1)})
             };
