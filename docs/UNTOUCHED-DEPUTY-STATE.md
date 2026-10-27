@@ -1,39 +1,37 @@
-# Untouched-areas deputy: state (rewritten whole; 2026-10-27 evening)
+# Untouched-areas deputy: state (rewritten whole; 2026-10-27 late evening)
 
 Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/2026-10-27-blind-spots/BLIND-SPOTS.md Sweep 1.
-Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; the integrator reads lane/* at its cuts.
+Each lane: /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>. The integrator reads lane/* at its cuts.
+Box rules for every brief: dregg-build = filtered tests + journey rows; dregg-ref (lanes@2.31.71.194) = Lean closures, ONLY via `closure-lock swarm-build …`, load < 8, seed only .lake/packages (never cp -al a .lake/build), PID file as its own statement, one box-wait. The Mac = per-file elaboration (APFS clone `cp -cR` of the integration .lake/build is safe there).
 
-## Landed (reviewed against the code)
-- lane/un-verify 9f5a7cf4: Generic Simplex gate (harness, log-reopen, 20-op load; three plants red). The load curve gets published only from the cut's dregg-build run.
-- lane/un-bend 91f8a83c: `bend publish|run|show|lookup|retry`; jbend 29/0 incl. the step-6 lost-reply shape on the committed branch; lose-reply transport fix (poll until readable, then drop); scripts/author-objective-policy.sh (demo genesis seam handed to infra).
-- lane/un-world e279d8ac: Tally, call, send admitted natively (activity route, candidate 203ed84c); dues split; DOMAINS.md: seven domains wait on effect Plans + event Response in the activity kernel.
-- lane/un-pb-codec 470f41e7: private-backend R8 (fixtures built and gated, bit-rot fixed, check-boundary.sh deleted, explicit exclude, sha3 pin); rows green on Linux.
-- lane/un-assurance e9749a75: census, kernel-subject verdicts, Door 11, gen-storylaw row, StoryHistory with R1 proved.
-- lane/un-native-rows 6fae5fa4, lane/un-moves e9d0f2c1, lane/un-pred-census f8677835, lane/un-fixtures a6a32103, lane/un-deputy (this file, EFFECTS.md): as batch 2.
+## Landed (checked against the code; most merged by cut 12)
+- un-verify 9f5a7cf4: Generic Simplex gate (harness, log-reopen, load; plants fixed-timer, split-tip, flip-byte). Load curve: publish only from the cut's dregg-build run.
+- un-bend 91f8a83c: `bend publish|run|show|lookup|retry`; jbend 29/0 incl. the step-6 lost-reply shape; transport lose-reply waits for readability (poll) before dropping; scripts/author-objective-policy.sh (infra adds it to genesis).
+- un-world e279d8ac (+ ae6bf1a1 statement): Tally, call, send admitted natively; dues split; DOMAINS.md (seven domains need effect Plans).
+- un-assurance e6eac995: census, kernel-subject verdicts, Door 11 trace + sentence, gen-storylaw row, StoryHistory (R1 proved; R2a needs the receiver call; generator in Kernel/StoryLaw.lean).
+- un-native-rows 6fae5fa4; un-moves 755e0533 (terminal/benchmarks/coordination/checkpoint/DeployedCellRegistry/QuotaGc/PrivateEscrow; DreggNet lease cluster parked); un-pred-census f8677835 then 109f42b7 (TokenCensus 5 fixed, 18 open, TOKEN-DEFECTS.md); un-fixtures a6a32103; un-seats ccb34bc5 (seat lock).
+- private-backend (stays, ember): un-pb-codec 470f41e7 (R8), un-pb-exec 64211340 (R7/P9/KAT), un-pb-seal e8fd7019 (R3 whole: verified epoch adoption, key-byte digest binding), un-pb-wal 7659fea5 (R2: torn tail rule, two-step sh2t dealer, dzk test gated, anchor on transition_journal, protocol_store deleted).
+- un-deputy: this file; docs/review/2026-10-27-untouched-areas/EFFECTS.md.
 
-## In flight
-- un-effects (Opus implementer): the activity kernel's effect Plans (transfer/commit as kernel-decided yields), statement in docs/evidence/2026-10-27-world-native/DOMAINS.md (lane/un-world ae6bf1a1). Coordinator rulings: recordFrame v8->v9 + re-emitted pins are a flag day riding L1's one re-genesis (lane stays OFF cuts until the coordinator says the seed is in; I collect the exact registry/wire entries for L1); law refusal refuses the turn as await.write does; the keystone file Kernel/ObjectiveActivityEffect.lean goes to the statements auditor (file:line via the coordinator) before proof. The closure build waits for dregg-ref to be released (nano winding down).
-- un-pb-wal (R2), un-pb-twins (deletions), un-pred-census (TokenCensus 23 defects), un-moves (four DEAD kernel modules).
-
-Landed since batch 3: lane/un-pb-exec 64211340 (R7/P9/KAT; deadlock test red/green on the box), lane/un-pb-seal 31e65265 (R3/P7/P13/P14; 23/0 on Linux; the adopt_current_epoch channel named in CONSTRUCTION.txt), lane/un-seats ccb34bc5 (seat lock: link-created pid file, stale rule, reclaim lock; red/green both machines), lane/un-assurance e6eac995 (story law generator in Kernel/StoryLaw.lean; receiver note).
+## In flight (agent ids for resumption are in the session transcript; route through the coordinator)
+- un-effects (Opus implementer): activity-kernel effect Plans (transfer/commit as kernel-decided yields). Statement in DOMAINS.md. Rulings: recordFrame v8->v9 flag day rides L1's re-genesis (lane OFF cuts until the coordinator says the seed is in); law refusal refuses the turn; keystone file Kernel/ObjectiveActivityEffect.lean -> statements auditor before proof; wire entries already sent to L1. Its closure runs on dregg-ref when its Lean elaborates.
+- un-pred-census (Sonnet): Vouchers. Statement 726e1c09 (Theory/ReceivingVerifier.lean). Auditor pass 8 to fold in: deployed receivers stated at `Vouchers receiverVerifier` in Kernel/Compiler + census row refusing other Verifier IO values; ofAnswered private or truthfully justified; Ran's file has no other mint/instances/unsafe, with a check; pilot uses observed+verified, top-level theorem at receiverVerifier, IO-level teeth. Then the sweep of every receiver EXCEPT PlatformInstallReceiver, PayEnrolReceiver/V2, SubjectKeyRotation (those after L1's seed).
+- un-stream-continuity (Sonnet): hot-route `withOpenedFreshTip` refusal (Kernel/ApplicationStreamContinuity.lean:208-227); statement first -> auditor; closure; japps co-edit repro; then tell the coordinator so the L13 successor reruns DDP.
+- un-pb-wal (Sonnet): two-step dealers for King composite, dzk_store, private_send_store.
+- un-pb-twins (Sonnet): private-backend §5.3 twin deletions; then custody Pool/Cut + CLI arms + crash-probes.py on top of un-pb-wal; helper merges last.
 
 ## Decided
-- fn: out of this demo (ember); the exchange row stays UNCONFIGURED by name; sentence published.
-- provider-services/Check.lean is JPAY6's (L1). The resource-client dead dep is the L2 successor's.
-- private-backend STAYS (ember, E5/q6; the MOVE is cancelled). Source: docs/review/2026-10-26-native-crates/private-backend.md §5, SYNTHESIS §C row 21.
-  - Tier 1, NOW (faerie batches): R7 pinned_execution.rs as the one copy (resource-client's transport.rs twin deleted; reader thread; legacy native_worker path deleted) + P12 KAT [lane/un-pb-exec, in flight]; R8 the two Lean codec fixtures as gated lean_exe rows vs check-wire-fixtures/circuit_batch.rs, hbox paths dropped, workspace member or explicit exclude, one sha3 pin [lane/un-pb-codec, in flight]; R2 transition_journal repaired (torn tail refused, interior truncation refused, re-deal test inverted, P4 dzk test gated) and promoted to the anchor's WAL [next]; R3 capsule epoch bound to CurrentRecipientRecord, seeds wrapped at rest, secrets zeroized (P7, P13) [next]; delete the ~2.2K true twins of §5.3 with grep proof [after R2/R7, which touch custody.rs/native_worker.rs].
-  - Tier 2, AFTER the opening: R1, the in-process four-party MPC run as a demo door "private computation" (a CLI arm, a derived form, one row, the curious-holder transcript as the page's evidence, labelled research; no transport). R4-R6 (transport, ReleaseAdmission, ACS wiring) stay parked as Phase 3.
-- Contracts Cuts/Snapshot/Refinements/Futures: kept (parked, proved, censused).
-- Pred BoundedQuantifiedView/CoordinationDial: kept (no live consumer without closure growth).
-- four-source fixture: not in the Simplex gate (a four-process mesh); it is second-node work.
-- Effects: label repaired; registry is a Phase-3 redesign over the live admission (EFFECTS.md); no toy wire.
-- world/dues runs on the activity route (an Activity), split into app + scenario modules.
+- fn out of the demo; exchange row UNCONFIGURED by name; sentence published.
+- private-backend stays; tier 1 now (R7/R8/R2/R3 done, twins in flight); tier 2 after the opening: R1 the in-process four-party MPC as a "private computation" door (CLI arm, derived form, one row, curious-holder transcript, labelled research, no transport); R4-R6 parked (Phase 3).
+- Effects/: label repaired; the registry is a Phase-3 redesign over the live admission (EFFECTS.md).
+- world/dues and six more wait on effect Plans (un-effects); drex (action list) and Route A pure domains out of that change.
+- Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; four-source fixture not in the Simplex gate.
+- provider-services/Check.lean is L1's; resource-client dead dep is the L2 successor's.
 
-## Seams named upward
-- Demo genesis lacks objectiveInvocation (infra adds the helper to the genesis fill).
-- Door 11's sentence (web lane / tour row owner); roomkey.rs:3100 hand-reimplements wrapAtomId (Room lane).
+## Seams handed upward
+- Door 11 sentence -> web lane; roomkey.rs:3100 wrapAtomId -> L2 successor; host closure 777 vs ceiling 776 on main -> integrator; demo genesis objectiveInvocation -> infra; story receiver call (checkActiveComponent resolved (law t S)) -> platform lane.
 
 ## Next three
-1. Review R7/R2/R3 landings; then the private-backend twin deletions (§5.3 of the review), one faerie, after R2/R7.
-2. Review TokenCensus fixes, DEAD module deletions, the story-law move.
-3. If the coordinator assigns it: the activity kernel's effect Plan + event Response, statement first (DOMAINS.md continuation note).
+1. Route the Vouchers pilot sha + pass-8 changes to the auditor; hand the sweep its closure slots.
+2. Review un-effects' keystone (to the auditor) and its closure; then the seven domains' native rows (dues first).
+3. Review un-stream-continuity's statement and fix; tell the coordinator when DDP can rerun.

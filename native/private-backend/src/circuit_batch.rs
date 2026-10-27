@@ -478,7 +478,7 @@ mod tests {
                 reply.extend(out);
                 custody::write_packet(&mut stream, &reply).unwrap();
             }
-            a.journal.clone()
+            a.journal().clone()
         });
         let mut p = plan();
         for row in &mut p.rows {
@@ -495,7 +495,7 @@ mod tests {
         let retained = h.join().unwrap();
         assert_eq!(retained.spent.len(), 2);
         let reopened = custody::Anchor::open(&authority).unwrap();
-        assert_eq!(reopened.journal, retained); // complete batch accepted on replay
+        assert_eq!(reopened.journal(), &retained); // complete batch accepted on replay
         drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
@@ -525,7 +525,7 @@ mod tests {
                 reply.extend(out);
                 custody::write_packet(&mut stream, &reply).unwrap();
             }
-            a.journal.clone()
+            a.journal().clone()
         });
         let mut p = plan();
         for row in &mut p.rows {
@@ -606,7 +606,7 @@ mod tests {
                 reply.extend(out);
                 custody::write_packet(&mut s, &reply).unwrap();
             }
-            a.journal
+            a.journal().clone()
         });
         let mut p = plan();
         for r in &mut p.rows {

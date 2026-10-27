@@ -1,0 +1,106 @@
+import Compiler.DurableFastForwardSpec
+
+/-!
+# The fast-forward open: proofs toward `Spec` (HOT-PATH §2(h))
+
+The snapshot clause of `Spec.exact`, from the resume theorems the open already rests on.
+-/
+
+namespace Minidregg.Compiler.DurableFastForwardSpec
+
+open Minidregg.Theory.TypedAuthorization
+open Minidregg.Kernel
+open Minidregg.Kernel.DurableDataIntent
+open Minidregg.Kernel.DurableReceiver
+open Minidregg.Kernel.DurableCheckpoint
+open Minidregg.Compiler.DurableCheckpointCodec (MacKey)
+
+set_option autoImplicit false
+
+variable {rootBytes : List UInt8 → Digest}
+
+/-- **The executed head state over the records is the resumed snapshot**: whatever height a
+resume starts from (a checkpoint, or genesis), the snapshot it reaches is the snapshot of its own
+head state (`State.ofSnapshot`, the executed part) over every record (journal, history and
+consumed set from the records, the non-executing part). -/
+theorem headState_snapshot {image : Image} {height : Nat} {state : State}
+    {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot) :
+    (State.ofSnapshot image snapshot).snapshot rootBytes image.accepted = snapshot := by
+  have rebased := DurableEngine.resume_rebase resumed
+  unfold resume at rebased
+  rw [if_pos (ofSnapshot_admissible _ _), List.drop_length, List.take_length] at rebased
+  simpa [DurableReceiver.replay] using rebased
+
+/-- **An honest checkpoint resumes to the genesis replay**: a checkpoint state whose snapshot over
+the prefix is the replay of the prefix (`Body4.Honest.state`), admissible for the whole image,
+resumes over the suffix to the replay of the whole log. -/
+theorem resume_honest {seed : Seed} {pre suf : List IntentRecord} {state : State}
+    (seedValid : (seed.cells.map Prod.fst).Nodup)
+    (admissible : state.Admissible ⟨seed, pre ++ suf⟩)
+    (honest : replaySnapshot rootBytes ⟨seed, pre⟩ = some (state.snapshot rootBytes pre)) :
+    resume rootBytes ⟨seed, pre ++ suf⟩ pre.length state = replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ := by
+  have prefixReplay : replay rootBytes (seed.snapshot rootBytes) pre = some (state.snapshot rootBytes pre) := by
+    unfold replaySnapshot at honest
+    rw [resume_genesis] at honest
+    unfold Image.restore at honest
+    simpa [if_pos seedValid] using honest
+  unfold replaySnapshot
+  rw [resume_genesis]
+  apply resume_sound rootBytes ⟨seed, pre ++ suf⟩ pre.length state (state.snapshot rootBytes pre) seedValid
+    admissible
+  · simpa [List.take_left'] using prefixReplay
+  · simp
+
+/-- **The fold splits at any height**: folding `pre ++ suf` from a World at `height` is folding
+`pre`, then folding `suf` from the World reached at `height + pre.length` (the compaction cadence
+reads the absolute height, so both folds compact at the same heights). This is what lets the open
+fold only the suffix from a checkpoint's World. -/
+theorem foldRecords_append (w : HostRefinesWorld.DWorld) (height : Nat) (pre suf : List IntentRecord) :
+    DurableReceiverIO.foldRecords rootBytes w height (pre ++ suf) =
+      (DurableReceiverIO.foldRecords rootBytes w height pre).bind fun w' =>
+        DurableReceiverIO.foldRecords rootBytes w' (height + pre.length) suf := by
+  induction pre generalizing w height with
+  | nil => simp [DurableReceiverIO.foldRecords, Except.bind]
+  | cons record rest ih =>
+      simp only [List.cons_append, DurableReceiverIO.foldRecords, List.length_cons]
+      split
+      · rfl
+      · split
+        · rfl
+        · split
+          · rfl
+          · split
+            · rfl
+            · rw [ih]; simp [Nat.add_assoc, Nat.add_comm 1]
+
+#assert_axioms foldRecords_append
+/-- **The World clause of `exact`**: when a checkpoint's World is the genesis fold's World at the
+prefix, the replay's World over the whole log is the fold of the suffix alone from it. -/
+theorem worldAt_fastForward {seed : Seed} {pre suf : List IntentRecord}
+    {genesis base : HostRefinesWorld.DWorld}
+    (fromSeed : TurnLog.genesisOfSeed seed = .ok genesis)
+    (atPrefix : DurableReceiverIO.foldRecords rootBytes genesis 0 pre = .ok base) :
+    worldAt rootBytes ⟨seed, pre ++ suf⟩ =
+      (DurableReceiverIO.foldRecords rootBytes base pre.length suf).toOption := by
+  unfold worldAt
+  simp only [fromSeed, foldRecords_append, atPrefix, Nat.zero_add]
+  rfl
+
+#assert_axioms worldAt_fastForward
+/-- **The semantics refusal, by name** (`Spec.macRefusals`, first half, for the deployed open): a
+decodable checkpoint under this key whose body names another fold is `.foreignSemantics`, whatever
+its root and MAC. -/
+theorem openSealed_foreign_semantics (key : MacKey) (sealed : DurableCheckpointCodec.Sealed)
+    (keyOk : sealed.body.keyId = key.id)
+    (other : sealed.body.semantics ≠ DurableCheckpointCodec.foldSemantics) :
+    DurableCheckpointCodec.openSealed key rootBytes (DurableCheckpointCodec.checkpointFrame.encode sealed) =
+      .error .foreignSemantics := by
+  unfold DurableCheckpointCodec.openSealed
+  simp [DurableCheckpointCodec.Framed.decode_encode, keyOk, other]
+  rfl
+
+#assert_axioms openSealed_foreign_semantics
+#assert_axioms headState_snapshot
+#assert_axioms resume_honest
+
+end Minidregg.Compiler.DurableFastForwardSpec

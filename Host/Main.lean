@@ -1191,15 +1191,16 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let indexRoot := Minidregg.Compiler.DurableIndex.emptyDigest
   discard <| timedPure "checkpoint: body encode" fun _ =>
     (DurableCheckpointCodec.bodyStream.encode
-      ⟨key.id, height, durable.chain, frontier, indexRoot, state⟩).length
+      ⟨key.id, height, durable.chain, frontier, indexRoot, state, durable.system,
+        DurableCheckpointCodec.foldSemantics⟩).length
   discard <| timedPure "checkpoint: seal from the cached root (encode + MAC)" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealAt key height durable.chain frontier indexRoot state
-        durable.worldRoot)).length
+        durable.system durable.worldRoot)).length
   discard <| timedPure "checkpoint: seal with the root in full" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealCheckpoint key ResourceBirthCodec.rootBytes height durable.chain
-        frontier indexRoot state)).length
+        frontier indexRoot state durable.system)).length
   discard <| timedPure "checkpoint: every cell's rootBytes" fun _ =>
     durable.image.cellIds.foldl (fun acc id =>
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0
@@ -2828,7 +2829,12 @@ partial def serveSession (config : NativeHost.Config)
     (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
-  if first.isEmpty then return
+  if first.isEmpty then
+    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6);
+    -- a failed seal loses nothing.
+    if (← state.get).isSome then
+      discard <| DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes
+    return
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
   if length == 0 then
@@ -6798,6 +6804,12 @@ def run (arguments : List String) : IO UInt32 := do
           IO.FS.writeFile configOutput (toJson pinned).pretty
           pure 0
       | "describe", [] => IO.println (← description config).pretty; pure 0
+      | "checkpoint", [] =>
+          -- A checkpoint at the head (HOT-PATH §2(h) item 6): a Store restored from it opens with
+          -- nothing to fast-forward.
+          match ← DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes with
+          | .ok height => IO.println s!"checkpoint sealed at height {height}"; pure 0
+          | .error message => (← IO.getStderr).putStrLn message; pure 1
       -- The fn archive (FN-DIRECT): posts through the control socket only; the
       -- fn-facing helpers are this file's, injected so their text decoding stays
       -- in one place for the M5 decoders to replace.

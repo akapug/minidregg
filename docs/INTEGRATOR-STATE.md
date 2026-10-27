@@ -1,7 +1,17 @@
 # Integrator state
 
-Present-state record of the integration lane, rewritten whole at each cut. A successor reads this
-first, then `/build/lanes/integ*/COMMANDS.log` on dregg-build for the newest cut.
+Present-state record of the integration lane, rewritten whole when its shape changes. A successor reads
+this first, then `/build/lanes/integ8/COMMANDS.log` on dregg-build.
+
+## The shape (COORDINATION §4, 54feb532e)
+
+There are no numbered cuts after cut 13. A lane's pushed branch is merged into main as it lands (fast-forward
+where possible, dependency order only when two land together; a branch that conflicts semantically with
+another lane's design is named to the coordinator, not resolved by the integrator). dregg-build builds MAIN
+continuously in one warm tree, `/build/lanes/integ8/src` (packages seeded once, never a fresh worktree):
+when a build finishes, the next starts from whatever main is then. The gate runs on the newest built main;
+reds go to the coordinator within minutes (file:line, owning lane) and are fixed forward. A "candidate" is
+the newest built main that passed the gate; each is reported in one line, and infra ships the one ember names.
 
 ## Where things are
 
@@ -36,7 +46,9 @@ first, then `/build/lanes/integ*/COMMANDS.log` on dregg-build for the newest cut
 | 8 | 26418b6b | none (host build killed by memory) | skipped |
 | 9 | 5fdfa393 | none: consent stage red (below) | no gate |
 | 10 | 006cd214 (merged to main by the coordinator) | not built | — |
-| 11 | af84d8cf+ | building next | — |
+| 11 | af84d8cf | folded into 12 | — |
+| 12 | f1ce1626 (main) | stopped by PID for cut 13 (integ8/stop-c12.list) | — |
+| 13 | a75d89d6 (main) | building in integ8 (cut13.sh) | first ship on green |
 
 Cut 11 took: main f392e9bb, hermes e11eef11, custody-drivers e471d6f2, app-market 2a7d092f, hot-path-codec
 acad2eb7, un-assurance e6eac995, un-bend 91f8a83c, un-deputy 3bf7d7be, un-fixtures a6a32103, un-pb-codec
@@ -51,8 +63,15 @@ coordinator).
 native_host_genesis_source_v6"): the source says v7, but the lane's `.lake/build/.../PersistedCodecTags.olean`
 was the 04:31 v6 olean while its `.trace` (14:23) claimed v7 inputs. Cause: integration-build.sh seeded each
 cut's `.lake` with `cp -al` of a whole previous tree, `build/` included, so oleans and traces are hard links
-shared with other trees (link count 8-11), and Lake rewrites a trace in place. Fix: seed only
-`.lake/packages` and let Lake's artifact cache restore the build dir as fresh inodes.
+shared with other trees (link count 8-11), and Lake rewrites a trace in place. Fixed in integration-build.sh: seed
+only `.lake/packages`; Lake's artifact cache restores the build dir as fresh inodes.
+
+## Named reds outstanding
+
+- un-pb-twins d8cc7d72: not merged; redoes un-pb-wal's dealer commit/emit in native/private-backend (dzk_store.rs,
+  sh2t_id_store.rs, scripts/check-rust-tests.sh). Waits for the lane to merge main and keep one design.
+- Cut 13 carries three flag days (lean-critical, un-effects, hot-path-v4): codec-shapes-regen.py runs once on the
+  box if the census reds on moved fingerprints.
 
 ## Conventions
 

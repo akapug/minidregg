@@ -122,11 +122,11 @@ theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State}
   · cases ran
 
 /-- A yielded segment's commit always exists when it was admitted. -/
-theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {config : Config}
+theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation : Nat} {current : Option ObjectState} {viewed : Bool} {state : State} {plan : PlanAwait}
     {committed : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds
       (.yielded state plan) = .ok committed) :
     ∃ yielded, committed = some yielded := by
   simp only [segmentCommit, bind, Except.bind] at ok

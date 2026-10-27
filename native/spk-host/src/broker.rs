@@ -156,8 +156,30 @@ pub fn volume_name(store: &str, app: &str) -> String {
     format!("{store}-{app}")
 }
 
-pub fn app_slice(prefix: &str, store: &str, app: &str) -> String {
-    format!("s{store}-{prefix}-grains-a{app}.slice")
+/// The slice tree is derived by systemd from dashes, and these three functions
+/// are the only place its names are written:
+///
+/// ```text
+/// s{store}-{prefix}-grains.slice                  everything (supervisors sit here)
+///   s{store}-{prefix}-grains-{S|M|L}.slice        one class
+///     s{store}-{prefix}-grains-{S|M|L}-a{app}.slice   one app: its resident grain
+/// ```
+///
+/// A drop-in on the class slice bounds the class in aggregate; a prefix drop-in
+/// `s{store}-{prefix}-grains-{S|M|L}-.slice.d/` bounds each app of that class
+/// (a `CPUQuota` there is per app, i.e. per resident grain unit, not shared).
+/// The class is the one `set-cgroup` recorded from the app's declared size
+/// class; there is no class-less app slice.
+pub fn grains_slice(prefix: &str, store: &str) -> String {
+    format!("s{store}-{prefix}-grains.slice")
+}
+
+pub fn class_slice(prefix: &str, store: &str, class: &SizeClass) -> String {
+    format!("s{store}-{prefix}-grains-{}.slice", class.name)
+}
+
+pub fn app_slice(prefix: &str, store: &str, class: &SizeClass, app: &str) -> String {
+    format!("s{store}-{prefix}-grains-{}-a{app}.slice", class.name)
 }
 
 pub fn supervisor_unit(prefix: &str, store: &str, app: &str) -> String {
@@ -722,11 +744,22 @@ impl Broker {
         let slice = "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grains\n\n\
              [Slice]\nCPUWeight=50\nIOWeight=50\n";
         write_operator_text(
-            &crate::os::runtime_units().join(format!("s{store}-{prefix}-grains.slice")),
+            &crate::os::runtime_units().join(grains_slice(prefix, store)),
             slice,
             0o644,
             true,
         )?;
+        for class in CLASSES {
+            write_operator_text(
+                &crate::os::runtime_units().join(class_slice(prefix, store, class)),
+                &format!(
+                    "# rendered by mini-spk-broker class={c}\n[Unit]\nDescription=Mini SPK grains class {c}\n",
+                    c = class.name
+                ),
+                0o644,
+                true,
+            )?;
+        }
         self.render_adopted_supervisors()?;
         systemctl(&["daemon-reload"])?;
         Ok(())
@@ -777,6 +810,24 @@ impl Broker {
     /// `(store, app, generation)` of a resident unit name, or a refusal.
     fn check_resident_unit_name(unit: &str) -> io::Result<(String, String, String)> {
         parse_resident_unit(unit).ok_or_else(|| invalid("resident unit name refused"))
+    }
+
+    /// Resident units installed for this app (any state).
+    fn app_units_installed(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
+        let mut installed = Vec::new();
+        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
+                continue;
+            };
+            if unit_app == app
+                && unit_store == store
+                && self.unit_store(&name)?.as_deref() == Some(store)
+            {
+                installed.push(name);
+            }
+        }
+        Ok(installed)
     }
 
     fn app_units_active(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
@@ -900,11 +951,11 @@ impl Broker {
                 let class = class(&name)?;
                 let mut placement = self.placement(&store, &app)?;
                 if let Some(existing) = &placement.class {
-                    if existing != class.name && !self.app_units_active(&store, &app)?.is_empty() {
-                        return Err(invalid("class change refused while the app is running"));
+                    if existing != class.name && !self.app_units_installed(&store, &app)?.is_empty() {
+                        return Err(invalid("class change refused once a unit is installed: the unit names its class slice"));
                     }
                 }
-                let slice = app_slice(&self.config.unit_prefix, &store, &app);
+                let slice = app_slice(&self.config.unit_prefix, &store, &class, &app);
                 let text = format!(
                     "# rendered by mini-spk-broker store={store} app={app} class={c}\n\
                      [Unit]\nDescription=Mini SPK grain {app} store {store} class {c}\n\n\
@@ -1008,9 +1059,9 @@ impl Broker {
                     self.adoption_exists(&store)?,
                 )?;
                 let placement = self.placement(&store, &app)?;
-                if placement.class.is_none() {
-                    return Err(invalid("set-cgroup must precede install-unit"));
-                }
+                let unit_class = class(
+                    placement.class.as_deref().ok_or_else(|| invalid("set-cgroup must precede install-unit"))?,
+                )?;
                 let unit = resident_unit(&store, &app, &generation)?;
                 if let Some(owner) = self.unit_store(&unit)? {
                     if owner != store {
@@ -1063,7 +1114,7 @@ impl Broker {
                     supervisor = supervisor_unit(prefix, &store, &app),
                     operator_uid = self.operator_uid,
                     operator_gid = self.operator_gid,
-                    slice = app_slice(prefix, &store, &app),
+                    slice = app_slice(prefix, &store, &unit_class, &app),
                     uid = placement.app_uid,
                     gid = placement.app_gid,
                     root = self.root().display(),
@@ -1093,7 +1144,7 @@ impl Broker {
                 systemctl(&["daemon-reload"])?;
                 self.save_unit_runtime(&unit, &runtime)?;
                 Ok(
-                    json!({"unit":unit,"slice":app_slice(prefix, &store, &app),"spkHostSha256":runtime.spk_host_sha256}),
+                    json!({"unit":unit,"slice":app_slice(prefix, &store, &unit_class, &app),"spkHostSha256":runtime.spk_host_sha256}),
                 )
             }
             Request::Start { unit } => {
@@ -1429,9 +1480,40 @@ mod tests {
             "0123456789abcdef-7701"
         );
         assert_eq!(
-            app_slice("mini", "0123456789abcdef", "7701"),
-            "s0123456789abcdef-mini-grains-a7701.slice"
+            app_slice("mini", "0123456789abcdef", &class("M").unwrap(), "7701"),
+            "s0123456789abcdef-mini-grains-M-a7701.slice"
         );
+    }
+
+    /// systemd nests a slice under the slice named by dropping its last dash
+    /// segment.
+    fn systemd_parent(slice: &str) -> String {
+        let stem = slice.strip_suffix(".slice").unwrap();
+        format!("{}.slice", stem.rsplit_once('-').unwrap().0)
+    }
+
+    #[test]
+    fn grain_class_slices_nest_by_class() {
+        let (p, st) = ("mini", "0123456789abcdef");
+        for (name, mem) in [("S", "512M"), ("M", "1G"), ("L", "2G")] {
+            // a small grain lands in S, a large in L: the class is the one the
+            // size class table names, read through `class`, never a default
+            let c = class(name).unwrap();
+            assert_eq!(c.memory_max, mem);
+            let app = app_slice(p, st, &c, "7701");
+            assert_eq!(app, format!("s{st}-mini-grains-{name}-a7701.slice"));
+            assert_eq!(systemd_parent(&app), class_slice(p, st, &c));
+            assert_eq!(class_slice(p, st, &c), format!("s{st}-mini-grains-{name}.slice"));
+            assert_eq!(systemd_parent(&class_slice(p, st, &c)), grains_slice(p, st));
+        }
+        // every class has its own slice, so no two classes share a quota
+        let mut names: Vec<_> = CLASSES.iter().map(|c| app_slice(p, st, c, "1")).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), CLASSES.len());
+        // there is no class-less size: an unknown class is refused, not defaulted
+        assert!(class("").is_err());
+        assert!(class("l").is_err());
     }
 }
 

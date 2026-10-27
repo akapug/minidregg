@@ -158,7 +158,9 @@ theorem _root_.Minidregg.Kernel.ObjectiveActivity.Delivery.ran_or_fault {rootByt
       (runSegment config delivery.envelope.sourceTicks delivery.resumed = .error refusal ∨
         ∃ segment, runSegment config delivery.envelope.sourceTicks delivery.resumed = .ok segment ∧
           segmentCommit config snapshot height (deliveryTransaction delivery.await.id) request.record
-            delivery.record.object (delivery.record.generation + 1) (some delivery.view) true segment =
+            delivery.record.object (delivery.record.generation + 1) (some delivery.view) true
+            (deliveryFunds config snapshot delivery.input (CanonicalResourceKernel.logicalBook delivery.book.logical) delivery.object
+              delivery.record request.record delivery.settlement.path) segment =
               .error refusal) := by
   have ended := delivery.endExact
   unfold resumedSegment at ended

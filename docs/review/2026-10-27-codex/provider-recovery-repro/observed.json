@@ -1,0 +1,34 @@
+{
+  "reviewed_commit": "54feb532e05039054640fef04b417e62110e4341",
+  "host": "Mac",
+  "exit_code": 0,
+  "fixture": "<lane-owned scratch>/provider-review-40253",
+  "after_send_refusal": {
+    "broker_code": "forward-uncertain",
+    "classified_state": "ReleasedNotSent",
+    "gateway_tag": "not-sent:refused:mini-keys refused forward-uncertain: this ticket's forward stopped where the provider may have been called; the broker will not call it again"
+  },
+  "answered_ticket": {
+    "authorize_mints_new_ticket": true,
+    "manual_sweep_removes_old_ticket": true,
+    "old_answer_replays_past_retention": true
+  },
+  "concurrent_exact_authorize": {
+    "charged_micro_usd": 10000,
+    "distinct_tickets": true
+  },
+  "provider_calls": 0,
+  "same_body_different_members": {
+    "alice_spend": [
+      5000,
+      5000
+    ],
+    "bob_spend": [
+      0,
+      0
+    ],
+    "same_ticket": true
+  },
+  "servers_started": 0,
+  "scope": "Actual public mini-keys handlers and real provider_failure module; gateway outcome tag mapping and native zero-settlement consequence inspected in source, not full controller execution"
+}

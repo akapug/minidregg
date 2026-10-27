@@ -964,6 +964,42 @@ def trackOf (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {
             .held w (HostRefinesWorld.representsCheck_sound resumed ok)
           else .lost "the folded World does not represent the resumed snapshot"
 
+/-- A checkpoint's World: its state's cells decoded as genesis decodes the seed's
+(`TurnLog.genesisOfSeed`), beside the system store the v4 body carries. -/
+def worldOfCheckpoint (state : State)
+    (system : Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys) :
+    Option HostRefinesWorld.DWorld :=
+  (state.cells.foldlM (fun (cells : Minidregg.Kernel.World.Cells DeployedBridge.deployedR) entry =>
+      (DeployedBridge.decodeCell entry.2).map fun slot => DFinsupp.update cells entry.1.value slot)
+    0).map fun cells => ⟨cells, system⟩
+
+/-- A v4 checkpoint body's World: its system store beside its state's cells. -/
+def _root_.Minidregg.Compiler.DurableCheckpointCodec.Body.world (body : Body) :
+    Option HostRefinesWorld.DWorld :=
+  body.system.bind (worldOfCheckpoint body.state)
+
+/-- **The World of a resumed image, fast-forwarded** (HOT-PATH §2(h), option A): from a v4
+checkpoint's World at the resume height, fold only the records after it, then decide the
+representation as `trackOf` does. No record below the checkpoint is executed. From genesis, or a
+checkpoint whose sealing session had lost its World, this is `trackOf`. -/
+def trackFrom (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {state : State}
+    {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot)
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) :
+    WorldTrack snapshot image.accepted.length :=
+  match height, system with
+  | 0, _ => trackOf rootBytes image resumed
+  | _, none => trackOf rootBytes image resumed
+  | _ + 1, some system =>
+      match worldOfCheckpoint state system with
+      | none => .lost "the checkpoint's cells do not decode as a World's"
+      | some base =>
+          match foldRecords rootBytes base height (image.accepted.drop height) with
+          | .error message => .lost message
+          | .ok w =>
+              if ok : HostRefinesWorld.representsCheck image snapshot w = true then
+                .held w (HostRefinesWorld.representsCheck_sound resumed ok)
+              else .lost "the fast-forwarded World does not represent the resumed snapshot"
+
 /-- Re-decide a held World against a re-materialized snapshot of the same image. -/
 def WorldTrack.recheck {rootBytes : List UInt8 → Digest} {snapshot snapshot' : DataSnapshot rootBytes}
     (image : Image) {height : Nat} {state : State}
@@ -1248,8 +1284,9 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       let headChain := chains.getLast?.getD logStart
       lap "chain"
       -- The checkpoint's open evaluates its world root once, as a tree the head advances.
-      let opened : OpenBase rootBytes ← match stored.checkpoint with
-        | none => pure (⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩ : OpenBase rootBytes)
+      let openedWith : OpenBase rootBytes ×
+          Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys) ← match stored.checkpoint with
+        | none => pure ((⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩ : OpenBase rootBytes), none)
         | some checkpoint =>
             match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
                 (fun _ => RootCache.build _) (fun _ built => built.1.root)
@@ -1260,8 +1297,9 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
                   return .error "checkpoint height does not match the log"
                 if body.chain ≠ chains.getD body.height ⟨0⟩ then
                   return .error "checkpoint does not match the log chain"
-                pure (⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩ :
-                  OpenBase rootBytes)
+                pure ((⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩ :
+                  OpenBase rootBytes), body.system)
+      let opened := openedWith.1
       lap s!"checkpoint (height {opened.1})"
       let baseHeight := opened.1
       let base := opened.2.1
@@ -1322,7 +1360,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
             let writesAt := SessionIndex.KeyIndex.ofRecords
               (fun record => record.writes.map DataWrite.cellId) image.accepted
             lap "session indexes"
-            let track := trackOf rootBytes image resumed
+            let track := trackFrom rootBytes image resumed openedWith.2
             if let .lost _ := track then pure () else pure ()
             lap "world fold"
             let loaded : Loaded rootBytes :=
@@ -1971,14 +2009,19 @@ theorem stateEntries_ofSnapshot {rootBytes : List UInt8 → Digest} (image : Ima
   intro id _
   simp [snapshot.coherent id]
 
+/-- The fold's World's system store a session holds: what every sealer puts in a v4 body. -/
+def Loaded.system {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys) :=
+  loaded.track.world?.map (·.system)
+
 /-- **A checkpoint sealed from the cached root is the specification seal**,
 byte for byte: the served root is the world root of the checkpoint body. -/
 theorem sealCheckpoint_uses_cached_root {rootBytes : List UInt8 → Digest} (key : MacKey)
     (loaded : Loaded rootBytes) (frontier : List (Nat × Digest)) (indexRoot : Digest) :
     sealAt key loaded.image.accepted.length loaded.chain frontier indexRoot
-        (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot =
+        (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot =
       sealCheckpoint key rootBytes loaded.image.accepted.length loaded.chain frontier indexRoot
-        (State.ofSnapshot loaded.image loaded.snapshot) := by
+        (State.ofSnapshot loaded.image loaded.snapshot) loaded.system := by
   apply sealAt_eq_sealCheckpoint
   rw [loaded.worldRoot_eq, DurableCheckpointCodec.worldRoot, stateEntries_ofSnapshot]
 
@@ -1986,10 +2029,10 @@ theorem sealCheckpoint_uses_cached_root {rootBytes : List UInt8 → Digest} (key
 theorem cachedSeal_root {rootBytes : List UInt8 → Digest} (key : MacKey)
     (loaded : Loaded rootBytes) (frontier : List (Nat × Digest)) (indexRoot : Digest) :
     (sealAt key loaded.image.accepted.length loaded.chain frontier indexRoot
-        (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).root =
+        (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot).root =
       DurableCheckpointCodec.worldRoot rootBytes
         (sealAt key loaded.image.accepted.length loaded.chain frontier indexRoot
-          (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot).body := by
+          (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot).body := by
   rw [sealCheckpoint_uses_cached_root]
   rfl
 
@@ -2011,7 +2054,7 @@ def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
   let .ok key ← transport.key | return false
   let some frontier := loaded.frontier | return false
   let sealed := sealAt key loaded.image.accepted.length loaded.chain frontier indexRoot
-    (State.ofSnapshot loaded.image loaded.snapshot) loaded.worldRoot
+    (State.ofSnapshot loaded.image loaded.snapshot) loaded.system loaded.worldRoot
   match ← transport.putCheckpoint loaded.image.accepted.length (checkpointFrame.encode sealed) with
   | .error _ => return false
   | .ok () => return true
@@ -2077,9 +2120,9 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
         ((stored.entries[height - 1]?).bind (trailerCarried ·.tag)).map (·.indexRoot)
           |>.getD DurableIndex.emptyDigest
       let cached := checkpointFrame.encode
-        (sealAt key height current.chain frontier indexRoot state current.worldRoot)
+        (sealAt key height current.chain frontier indexRoot state current.system current.worldRoot)
       let full := checkpointFrame.encode
-        (sealCheckpoint key rootBytes height current.chain frontier indexRoot state)
+        (sealCheckpoint key rootBytes height current.chain frontier indexRoot state current.system)
       let atHeight := stored.checkpoint.bind fun checkpoint =>
         if checkpoint.height = height then some checkpoint.bytes else none
       return .ok (cached, full, atHeight)
@@ -2108,6 +2151,25 @@ def Loaded.headIndexRoot {rootBytes : List UInt8 → Digest} (transport : Transp
       loaded.chain frontier with
   | .ok head => return .ok head.indexRoot
   | .error refusal => return .error refusal.message
+
+/-- **A checkpoint at the head, on demand** (HOT-PATH §2(h) item 6): the Host's `checkpoint`
+verb (before a journey template is saved) and a session's clean end. The same sealer as the due
+cadence (`storeCheckpoint`), at whatever height the head is, so a Store restored from it
+fast-forwards zero records. Returns the sealed height (0: an empty log seals nothing). -/
+def sealHead (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Except String Nat) := do
+  let loaded ← match ← load transport rootBytes with
+    | .error message => return .error message
+    | .ok loaded => pure loaded
+  let height := loaded.image.accepted.length
+  if height = 0 then return .ok 0
+  let key ← match ← transport.key with
+    | .error message => return .error message
+    | .ok key => pure key
+  let indexRoot ← match ← loaded.headIndexRoot transport key with
+    | .error message => return .error message
+    | .ok root => pure root
+  if ← storeCheckpoint transport rootBytes loaded indexRoot then return .ok height
+  else return .error "the checkpoint at the head was not stored"
 
 /-- The index rows on the paths of `keys` and beside them (each prefix's
 sibling, which a delete's collapse reads), at or below `height`, down to `depth`

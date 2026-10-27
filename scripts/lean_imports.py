@@ -57,3 +57,28 @@ def header_imports(text):
 def file_imports(path):
     with open(path, encoding="utf-8") as fh:
         return header_imports(fh.read())
+
+
+def header_layout(text):
+    """Where the header's parts sit: (first, imports, end, keywords).
+
+    first: offset of the header's first token (after leading comments), where `module` goes;
+    imports: [(start, end, modifiers, module)] for each import, modifiers like "public meta";
+    end: offset just past the last import (or `first` when there is none);
+    keywords: the `module` / `prelude` keywords the header already carries."""
+    imports, keywords, i = [], [], 0
+    first = _skip_blank(text, 0)
+    end = first
+    while True:
+        i = _skip_blank(text, i)
+        kw = _KEYWORD.match(text, i)
+        if kw:
+            keywords.append(kw.group(0))
+            i = end = kw.end()
+            continue
+        m = _IMPORT.match(text, i)
+        if not m:
+            return first, imports, end, keywords
+        mods = text[m.start():m.end()].split("import")[0].split()
+        imports.append((m.start(), m.end(), " ".join(mods), m.group(1)))
+        i = end = m.end()

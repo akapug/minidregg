@@ -1,6 +1,7 @@
 //! External monotonic anchor: must be a separate rollback authority, not another
 //! path controlled by the snapshot owner. The local Unix service tests IO only.
 use crate::codec::*;
+use crate::transition_journal as wal;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Error, ErrorKind, Read, Result, Write};
@@ -68,82 +69,47 @@ pub(crate) fn lock(p: &Path) -> Result<File> {
     }
     Ok(f)
 }
+/// The anchor's state machine: events are canonical batch reservation
+/// requests, the outbox is the digest of the resulting journal. The WAL record
+/// is therefore linear in the request, never the whole journal.
+#[derive(Clone, Default)]
+struct AnchorMachine {
+    journal: Journal,
+}
+impl wal::Machine for AnchorMachine {
+    fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
+        let (ids, g, p) = parse_batch_request(event)?;
+        if batch_request(&ids, &g, p) != event {
+            return Err(bad("authority request canonical"));
+        }
+        self.journal = self.journal.reserve_batch(&ids, g, p)?;
+        Ok(hash(&self.journal.encode()).to_vec())
+    }
+}
 pub struct Anchor {
-    log: File,
-    pub journal: Journal,
-    _lock: File,
-    poisoned: bool,
+    wal: wal::Journal<AnchorMachine>,
 }
 impl Anchor {
     pub fn open(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)?;
         fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
-        let guard = lock(&root.join("authority.lock"))?;
-        let p = root.join("authority.log");
-        let existed = p.exists();
-        let mut log = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .mode(0o600)
-            .open(&p)?;
-        if !existed {
-            log.sync_all()?;
-            parent_sync(&p)?;
-        }
-        let mut journal = Journal::default();
-        loop {
-            let mut len = [0; 4];
-            if log.read(&mut len[..1])? == 0 {
-                break;
-            }
-            log.read_exact(&mut len[1..])?;
-            let n = u32::from_le_bytes(len) as usize;
-            if n > MAX {
-                return Err(bad("authority record bound"));
-            }
-            let mut b = vec![0; n];
-            log.read_exact(&mut b)?;
-            let mut h = [0; 32];
-            log.read_exact(&mut h)?;
-            if hash(&b) != h {
-                return Err(bad("authority checksum"));
-            }
-            let next = Journal::decode(&b)?;
-            let added = next
-                .allocations
-                .len()
-                .checked_sub(journal.allocations.len())
-                .filter(|x| *x > 0 && *x <= 65536)
-                .ok_or_else(|| bad("authority discontinuity"))?;
-            let prefix = &next.allocations[..added];
-            let first = &prefix[0];
-            if prefix.iter().any(|a| {
-                a.consumed || a.generation != first.generation || a.purpose != first.purpose
-            }) {
-                return Err(bad("authority batch context"));
-            }
-            let ids = prefix
-                .iter()
-                .rev()
-                .map(|a| a.id.clone())
-                .collect::<Vec<_>>();
-            if journal.reserve_batch(&ids, first.generation.clone(), first.purpose)? != next {
-                return Err(bad("authority transition"));
-            }
-            journal = next;
-        }
         Ok(Self {
-            log,
-            journal,
-            _lock: guard,
-            poisoned: false,
+            wal: wal::Journal::open(
+                &root.join("authority.log"),
+                b"DREGG.PRIVATE.ANCHOR.WAL.V2",
+                AnchorMachine::default(),
+            )?,
         })
     }
+    pub fn journal(&self) -> &Journal {
+        &self.wal.state().journal
+    }
+    /// The final record recovery dropped as a crash tear, if any. It was never
+    /// answered: a reply follows the completed fsync.
+    pub fn torn_tail(&self) -> Option<&wal::TornTail> {
+        self.wal.torn_tail()
+    }
     pub fn reserve(&mut self, id: Correlation, g: Generation, p: Purpose) -> Result<Vec<u8>> {
-        if self.poisoned {
-            return Err(bad("authority poisoned by uncertain IO"));
-        }
         self.reserve_batch(&[id], g, p)
     }
     pub fn reserve_batch(
@@ -152,30 +118,15 @@ impl Anchor {
         g: Generation,
         p: Purpose,
     ) -> Result<Vec<u8>> {
-        if self.poisoned {
-            return Err(bad("authority poisoned by uncertain IO"));
-        }
-        let next = self.journal.reserve_batch(ids, g, p)?;
-        let b = next.encode();
-        let append = (|| {
-            self.log.write_all(&(b.len() as u32).to_le_bytes())?;
-            self.log.write_all(&b)?;
-            self.log.write_all(&hash(&b))?;
-            self.log.sync_all()
-        })();
-        if let Err(e) = append {
-            self.poisoned = true;
-            return Err(e);
-        }
-        self.journal = next;
-        Ok(b)
+        self.wal.append(&batch_request(ids, &g, p))?;
+        Ok(self.journal().encode())
     }
     pub fn handle(&mut self, b: &[u8]) -> Result<Vec<u8>> {
-        if self.poisoned {
+        if self.wal.is_poisoned() {
             return Err(bad("authority uncertain"));
         }
         match b.split_first() {
-            Some((0, [])) => Ok(self.journal.encode()),
+            Some((0, [])) => Ok(self.journal().encode()),
             Some((1, b)) => {
                 let (id, g, p) = parse_request(b)?;
                 self.reserve(id, g, p)
@@ -432,6 +383,7 @@ mod tests {
             let mut a = Anchor::open(&p).unwrap();
             let first = a.reserve(old.clone(), g(), Purpose::Coin).unwrap();
             first_len = first.len();
+            let log_before = fs::metadata(p.join("authority.log")).unwrap().len();
             let mut req = vec![2];
             req.extend(batch_request(&rows, &g(), Purpose::Triple));
             let full = a.handle(&req).unwrap();
@@ -442,9 +394,18 @@ mod tests {
                 &expected.spent[..9418],
                 rows.iter().rev().cloned().collect::<Vec<_>>()
             );
-            assert_eq!(fs::metadata(p.join("authority.log")).unwrap().len() as usize, first_len+full_len+2*36,
-                "one complete append for the whole fixed Plan, not one whole-journal append per row");
-            let before = a.journal.clone();
+            let _ = (first_len, full_len);
+            let grown = fs::metadata(p.join("authority.log")).unwrap().len() - log_before;
+            let mut record = vec![];
+            bytes(&batch_request(&rows, &g(), Purpose::Triple), &mut record);
+            bytes(&hash(&full), &mut record);
+            assert_eq!(
+                grown as usize,
+                8 + record.len() + 32,
+                "one complete append for the whole fixed Plan, linear in the request: \
+                 the record never carries the journal"
+            );
+            let before = a.journal().clone();
             assert!(a
                 .reserve_batch(
                     &[
@@ -459,25 +420,38 @@ mod tests {
                 )
                 .is_err());
             assert_eq!(
-                a.journal, before,
+                a.journal(), &before,
                 "all-row preflight must not partially consume a refused batch"
             );
         }
         let mut a = Anchor::open(&p).unwrap();
         assert_eq!(
-            a.journal, expected,
+            a.journal(), &expected,
             "lost response/restart preserves exact completed batch"
         );
         assert!(a.reserve_batch(&rows, g(), Purpose::Triple).is_err());
         assert!(a.reserve(old, g(), Purpose::Triple).is_err());
-        let mut bad = fs::read(p.join("authority.log")).unwrap();
-        *bad.last_mut().unwrap() ^= 1;
         drop(a);
-        fs::write(p.join("authority.log"), bad).unwrap();
-        assert!(
-            Anchor::open(&p).is_err(),
-            "complete checksum fault stays a hard refusal"
-        );
+        // A checksum fault inside an EARLIER record is damage to published
+        // history, never a tear: hard refusal, file untouched.
+        let log = fs::read(p.join("authority.log")).unwrap();
+        let mut last = vec![];
+        bytes(&batch_request(&rows, &g(), Purpose::Triple), &mut last);
+        bytes(&hash(&expected.encode()), &mut last);
+        let first_checksum_end = log.len() - (8 + last.len() + 32);
+        let mut bad = log.clone();
+        bad[first_checksum_end - 1] ^= 1;
+        fs::write(p.join("authority.log"), &bad).unwrap();
+        assert!(Anchor::open(&p).is_err(), "interior checksum fault refuses");
+        assert_eq!(fs::read(p.join("authority.log")).unwrap(), bad);
+        // The same fault in the FINAL record is the tear shape: dropped and
+        // reported, the earlier reservation survives.
+        let mut tail = log.clone();
+        *tail.last_mut().unwrap() ^= 1;
+        fs::write(p.join("authority.log"), &tail).unwrap();
+        let a = Anchor::open(&p).unwrap();
+        assert!(a.torn_tail().is_some());
+        assert_eq!(a.journal().spent.len(), 1);
     }
     #[test]
     fn lost_reply_and_relabel() {
@@ -494,21 +468,35 @@ mod tests {
         let mut other = g();
         other.attempt = Nat::new(77);
         assert!(a.reserve(id, other, Purpose::AudiencePad).is_err());
-        assert_eq!(a.journal.spent.len(), 1);
+        assert_eq!(a.journal().spent.len(), 1);
     }
     #[test]
-    fn torn_anchor_refuses() {
+    fn torn_anchor_tail_recovers_at_every_cut_and_the_anchor_keeps_serving() {
         let p = temp("torn");
+        let id = |n: u64| Correlation {
+            pool: Nat::new(42),
+            row: Nat::new(n),
+        };
+        let (prefix, full);
         {
-            Anchor::open(&p).unwrap();
+            let mut a = Anchor::open(&p).unwrap();
+            a.reserve(id(0), g(), Purpose::Triple).unwrap();
+            prefix = fs::read(p.join("authority.log")).unwrap();
+            a.reserve(id(1), g(), Purpose::Triple).unwrap();
+            full = fs::read(p.join("authority.log")).unwrap();
         }
-        OpenOptions::new()
-            .append(true)
-            .open(p.join("authority.log"))
-            .unwrap()
-            .write_all(&[100, 0])
-            .unwrap();
-        assert!(Anchor::open(&p).is_err());
+        for cut in prefix.len()..full.len() {
+            let q = temp("torn-cut");
+            fs::create_dir_all(&q).unwrap();
+            fs::write(q.join("authority.log"), &full[..cut]).unwrap();
+            let mut a = Anchor::open(&q).unwrap();
+            assert_eq!(a.journal().spent.len(), 1, "cut {cut}");
+            assert_eq!(a.torn_tail().is_some(), cut > prefix.len(), "cut {cut}");
+            // The torn reservation was never answered, so it is free again.
+            a.reserve(id(1), g(), Purpose::Triple).unwrap();
+            drop(a);
+            assert_eq!(Anchor::open(&q).unwrap().journal().spent.len(), 2);
+        }
     }
     #[test]
     fn row_substitution_and_exhaustion() {

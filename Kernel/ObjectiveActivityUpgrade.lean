@@ -1134,7 +1134,7 @@ theorem rebirth_from_stored_input {rootBytes : Bytes → Digest} {config : Confi
       split at commit
       · cases commit
       · rename_i committed ok
-        have wrote := (commitYield_spec ok).1
+        obtain ⟨_, wrote, _⟩ := (commitYield_spec ok).1
         rw [stateWrite_unviewed_never_sets decoded sets] at wrote
         cases wrote
 
