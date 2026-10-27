@@ -1789,7 +1789,11 @@ private theorem branch_bind_error.{u} {α β : Type u} {x : Except Reject α}
     {f : α → Except Reject β} {reason : Reject} (refused : (x >>= f) = .error reason) :
     x = .error reason ∨ ∃ a, x = .ok a ∧ f a = .error reason := by
   cases x with
-  | error other => exact Or.inl refused
+  | error other =>
+      left
+      injection refused with same
+      subst same
+      rfl
   | ok a => exact Or.inr ⟨a, rfl, refused⟩
 
 private theorem require_error {condition : Prop} [Decidable condition] {reason other : Reject}
@@ -1921,26 +1925,12 @@ theorem Pending.admitBranch_policyRejected [DecidableEq F]
     (rejected : pending.admitBranch branch credential receipt = .error .policyRejected) :
     ∃ evidence, pending.judgeBranch branch evidence = .error .policyRejected := by
   unfold Pending.admitBranch at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · cases require_error early
-  try dsimp only at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · split at early <;> cases early
-  try dsimp only at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · cases require_error early
-  try dsimp only at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · split at early <;> cases early
-  try dsimp only at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · repeat' split at early
-    all_goals cases early
-  try dsimp only at rejected
-  rcases branch_bind_error rejected with early | ⟨_, -, rejected⟩
-  · exact ⟨_, early⟩
-  try dsimp only at rejected
-  split at rejected <;> cases rejected
+  simp only [bind, Except.bind, require, pure, Except.pure] at rejected
+  repeat' split at rejected
+  all_goals try cases rejected
+  all_goals first
+    | exact ⟨_, ‹_›⟩
+    | (rename_i early; split at early <;> cases early)
 
 /-- **An accepted branch passed the plan verdict**: the law its configuration resolves had
 the compiler's three verdicts and evaluated true on the branch's step. -/
@@ -2766,7 +2756,7 @@ theorem factoryVerdict_congr
     p₁.factoryVerdict = p₂.factoryVerdict := by
   simp only [Pending.factoryVerdict, planVerdict, Pending.branchConfig_step,
     Pending.branchConfig_profile]
-  rw [← sameStep]
+  simp only [← sameStep]
   cases h₁ : (p₁.branchConfig .factory).resolve? <;>
     cases h₂ : (p₂.branchConfig .factory).resolve? <;> simp_all
 
