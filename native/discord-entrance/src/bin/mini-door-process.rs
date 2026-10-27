@@ -52,6 +52,9 @@ impl Paths {
     fn links(&self) -> PathBuf { self.at("/var/lib/mini-discord/door-links") }
     fn status(&self) -> PathBuf { self.at("/var/lib/mini-door-status") }
     fn state(&self) -> PathBuf { self.at("/var/lib/mini-door-process") }
+    /// The web front end's one-time login records (minidregg docs/WEB-FRONTEND-2026-10-27.md §2):
+    /// root 0600 files named by the SHA-256 of the code, read and deleted by `mini-web-spawn`.
+    fn web_logins(&self) -> PathBuf { self.at("/var/lib/mini-web-spawn/logins") }
     fn config(&self) -> PathBuf { self.node().join("deployment/pinned-config.json") }
     fn socket(&self) -> PathBuf { self.node().join("public/mini.sock") }
 }
@@ -268,6 +271,30 @@ fn chown(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
 }
 
 /// Temp file, fsync, rename, fsync the directory.
+/// 32 random bytes as 43 base64url characters: the token shape `mini-web-spawn` accepts.
+fn web_login_code() -> Result<String, String> {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let bytes = door::random(32)?;
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let mut n = 0u32;
+        for (i, b) in chunk.iter().enumerate() {
+            n |= (*b as u32) << (16 - 8 * i);
+        }
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     use std::io::Write;
     let dir = path.parent().ok_or("no parent")?;
@@ -358,7 +385,7 @@ impl<O: BoxOps> Processor<O> {
     /// The stranger's view: root-owned, readable by the form's group, never the secrets.
     fn publish_status(&self, r: &Value) -> Result<(), String> {
         let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
-        for k in ["detail", "linkCode", "sign", "payment"] {
+        for k in ["detail", "linkCode", "sign", "payment", "webLogin"] {
             if !r[k].is_null() {
                 v[k] = r[k].clone();
             }
@@ -727,6 +754,22 @@ impl<O: BoxOps> Processor<O> {
             self.save_links(&links)?;
             r["linkCode"] = json!(code);
         }
+        if r["webLogin"].is_null() {
+            // The browser session's one-time code: the processor is the only writer of identities,
+            // so the gateway can only exchange what was written here (never mint one itself).
+            let code = web_login_code()?;
+            let dir = self.p.web_logins();
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            if self.p.root == Path::new("/") {
+                std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).map_err(|e| e.to_string())?;
+                if let Some(parent) = dir.parent() {
+                    let _ = std::fs::set_permissions(parent, std::os::unix::fs::PermissionsExt::from_mode(0o700));
+                }
+            }
+            let record = json!({"name": r["name"], "request": r["id"], "expires": self.now + self.cfg.link_ttl_s});
+            write_atomic(&dir.join(format!("{}.json", sha256_hex(code.as_bytes()))), &serde_json::to_vec(&record).map_err(|e| e.to_string())?, 0o600)?;
+            r["webLogin"] = json!(format!("https://{}/login/{code}", self.cfg.login_host));
+        }
         r["phase"] = json!("enrolled");
         r["detail"] = json!("your account is ready");
         r["transaction"] = Value::Null;
@@ -987,6 +1030,13 @@ mod tests {
         assert_eq!(s["login"], "mini-s-alice@demo.example");
         let code = s["linkCode"].as_str().unwrap().to_owned();
         assert!(door::is_link_code(&code));
+        // The browser login: one record under the helper's logins, named by the code's SHA-256.
+        let web = s["webLogin"].as_str().unwrap().to_owned();
+        let web_code = web.strip_prefix("https://demo.example/login/").unwrap();
+        assert_eq!(web_code.len(), 43, "{web}");
+        let record = read_json(&w.p.web_logins().join(format!("{}.json", sha256_hex(web_code.as_bytes())))).unwrap();
+        assert_eq!(record["name"], "alice");
+        assert_eq!(record["expires"], json!(w.now + 3600));
         assert_eq!(*w.ops.calls.borrow(), ["render", "alice: keygen mini.key", "reenroll alice 1000", "alice: init mini.key 4100"]);
         let entry = std::fs::read_to_string(w.p.door_friends().join("alice.pub")).unwrap();
         assert!(entry.ends_with(&format!("{KEY} alice\n")), "{entry}");

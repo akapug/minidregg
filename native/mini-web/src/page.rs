@@ -1,0 +1,280 @@
+//! The one page shell and the gateway's own partials. Everything about kernel state is rendered
+//! by the body and arrives as a stage fragment; this file is the chrome around it: the top bar,
+//! the rail of places, the footer with the world-readable sentence, and the few pages that are the
+//! gateway's own (login, terminals, sessions, refusals).
+
+use crate::http::html_escape as h;
+use crate::session::Who;
+
+pub const PLACES: &[(&str, &str, &str)] = &[
+    ("Documents", "/doc", "The documents you hold: pages, history, diffs, append and edit."),
+    ("Boards", "/board", "Tasks on columns: add, move, take."),
+    ("Rooms", "/room", "Members, streams as chat, residents."),
+    ("Apps", "/apps", "The app market: install, open a grain."),
+    ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
+    ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
+    ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
+    ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
+    ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans."),
+    ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),
+    ("Terminal", "/term", "mini shell, in the page."),
+];
+
+pub const WORLD_READABLE: &str = "Everything on this box is world-readable: every member can read the whole demo Store, and a hosted account's signing key lives on the box. Keep nothing private or precious here.";
+
+/// The whole document around a stage fragment.
+pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &str) -> String {
+    let xterm = if stage.contains("data-ws=") {
+        "<link rel=\"stylesheet\" href=\"/assets/vendor/xterm.css\">\n<script defer src=\"/assets/vendor/xterm.js\"></script>\n<script defer src=\"/assets/vendor/addon-fit.js\"></script>\n"
+    } else {
+        ""
+    };
+    let mut rail = String::new();
+    for (label, href, hint) in PLACES {
+        let current = if path == *href || path.starts_with(&format!("{href}/")) { " aria-current=\"page\"" } else { "" };
+        rail.push_str(&format!("<li><a href=\"{href}\" title=\"{}\" data-pane{current}>{label}</a></li>", h(hint)));
+    }
+    let identity = match who {
+        Some(who) => format!(
+            "<span class=\"me\" title=\"session {}\">{}</span>\
+             <form method=\"post\" action=\"/logout\" class=\"inline\" data-full><button class=\"quiet\">Log out</button></form>",
+            h(&who.prefix()),
+            h(&who.name)
+        ),
+        None => "<span class=\"me public\">public reader</span><a class=\"button\" href=\"/join\" data-full>Join</a>".to_owned(),
+    };
+    let shutdown_line = if shutdown.is_empty() { String::new() } else { format!(" This demo is torn down on {}; nothing you make here persists beyond it.", h(shutdown)) };
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
+         <body data-path=\"{path}\">\n\
+         <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
+         <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
+         <div class=\"identity\">{identity}</div></header>\n\
+         <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
+         <main class=\"stage\" id=\"stage\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
+        title = h(title),
+        path = h(path),
+        world = h(WORLD_READABLE),
+    )
+}
+
+/// Every POST form on the stage carries the session's CSRF token: the body renders plain forms
+/// and never learns the token; the gateway adds one hidden field after each `<form … method=post>`
+/// opening tag (case-insensitive, quoted or bare). GET forms (search, lookups) are left alone.
+pub fn inject_csrf(html: &str, csrf: &str) -> String {
+    let field = format!("<input type=\"hidden\" name=\"csrf\" value=\"{}\">", h(csrf));
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len() + 256);
+    let mut at = 0;
+    while let Some(start) = lower[at..].find("<form") {
+        let start = at + start;
+        let Some(end) = lower[start..].find('>') else { break };
+        let end = start + end + 1;
+        let tag = &lower[start..end];
+        out.push_str(&html[at..end]);
+        if tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post") {
+            out.push_str(&field);
+        }
+        at = end;
+    }
+    out.push_str(&html[at..]);
+    out
+}
+
+/// The outcome partial the gateway uses for its own actions; the body renders the same shape for
+/// verbs (`admitted`, `refused`, `undecided`).
+pub fn outcome(class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> String {
+    let mut links = String::new();
+    for (label, href) in next {
+        links.push_str(&format!("<a href=\"{}\" data-pane>{}</a> ", h(href), h(label)));
+    }
+    format!(
+        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>",
+        h(headline),
+        if detail.is_empty() { String::new() } else { format!("<pre>{}</pre>", h(detail)) },
+        if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
+    )
+}
+
+pub fn refusal(headline: &str, detail: &str) -> String {
+    outcome("refused", headline, detail, &[])
+}
+
+pub fn login_confirm(code: &str) -> String {
+    format!(
+        "<p>This link opens a browser session for the account the door made for you. It works once.</p>\
+         <form method=\"post\" action=\"/login\" data-full><input type=\"hidden\" name=\"code\" value=\"{}\"><button>Open my session</button></form>\
+         <p class=\"note\">Your session is a cookie that names your hosted account; it is never a key. Your signing key stays on the box, in your account's home. Log out from any page; see every session under Keys &amp; sessions.</p>",
+        h(code)
+    )
+}
+
+pub fn public_only(what: &str) -> String {
+    format!(
+        "<p>{} needs a session. The door at <a href=\"/join\" data-full>/join</a> makes you an account and gives you a one-time link that opens one here.</p>",
+        h(what)
+    )
+}
+
+pub fn term_index(terminals: &[(String, bool, bool)]) -> String {
+    let mut rows = String::new();
+    for (id, attached, exited) in terminals {
+        let state = match (attached, exited) { (_, true) => "ended", (true, _) => "attached", (false, _) => "waiting" };
+        rows.push_str(&format!(
+            "<tr><td><a href=\"/term/{id}\" data-pane>shell {}</a></td><td>{state}</td>\
+             <td><form method=\"post\" action=\"/term/{id}/close\" class=\"inline\"><button class=\"quiet\">Close</button></form></td></tr>",
+            h(&id[..6])
+        ));
+    }
+    format!(
+        "<p><code>mini shell</code> as your account, in the page: the same shell <code>ssh -t</code> opens, with the same verbs, Tab completion and history.</p>\
+         <form method=\"post\" action=\"/term\"><button>Open a terminal</button></form>\
+         {}",
+        if rows.is_empty() { String::new() } else { format!("<table><thead><tr><th>terminal</th><th>state</th><th></th></tr></thead><tbody>{rows}</tbody></table>") }
+    )
+}
+
+pub fn term_page(id: &str) -> String {
+    format!(
+        "<div class=\"term\" data-ws=\"/ws/term/{}\" tabindex=\"0\"><noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
+        h(id)
+    )
+}
+
+pub fn sessions_page(sessions: &[(String, u64, u64, bool)]) -> String {
+    let mut rows = String::new();
+    for (prefix, created, last, current) in sessions {
+        rows.push_str(&format!(
+            "<tr><td><code>{prefix}</code>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            if *current { " <em>this one</em>" } else { "" },
+            when(*created),
+            when(*last),
+            if *current {
+                "<form method=\"post\" action=\"/logout\" class=\"inline\"><button class=\"quiet\">Log out</button></form>".to_owned()
+            } else {
+                format!("<form method=\"post\" action=\"/sessions/revoke\" class=\"inline\"><input type=\"hidden\" name=\"prefix\" value=\"{prefix}\"><button class=\"quiet\">Revoke</button></form>")
+            }
+        ));
+    }
+    format!(
+        "<p>Every browser session of this account. A session ends after a day idle, a week at most, or when you revoke it; revoking ends its terminals and its rendering process.</p>\
+         <table><thead><tr><th>session</th><th>opened</th><th>last seen</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+}
+
+/// `/registry`: the operation registry the box runs (`protocol/host-operations.json`, the one
+/// place L1, L2 and L8 meet), rendered as data: every operation byte, its symbol, status, routes,
+/// owner, receiver and effect; the response markers; the consent plans. Public: it is the law of
+/// the box, not a member's state.
+pub fn registry(path: Option<&std::path::Path>) -> String {
+    let Some(path) = path else {
+        return "<p>The operation registry is the law of this box: every Host operation byte, who receives it and what it may change. This gateway was started without <code>--registry PATH</code>, so it cannot show it here; the file is <code>protocol/host-operations.json</code> in the candidate.</p>".to_owned();
+    };
+    let value: serde_json::Value = match std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
+        Some(v) => v,
+        None => return refusal("No registry", &format!("{} is missing or malformed", path.display())),
+    };
+    registry_html(&value)
+}
+
+pub fn registry_html(value: &serde_json::Value) -> String {
+    let text = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(a) => a.iter().map(|x| x.as_str().unwrap_or("").to_owned()).collect::<Vec<_>>().join(" "),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    let mut out = format!(
+        "<p>Every Host operation this box answers, by byte: the receiver that decides it and the effect it may have. Format <code>{}</code>. An <em>active</em> row is live; a <em>reserved</em> one is a number held for a receiver not yet landed.</p>\n",
+        h(&text(&value["format"]))
+    );
+    let mut rows = String::new();
+    let mut active = 0;
+    for op in value["operations"].as_array().into_iter().flatten() {
+        let status = text(&op["status"]);
+        if status == "active" {
+            active += 1;
+        }
+        rows.push_str(&format!(
+            "<tr class=\"{s}\"><td><code>{}</code></td><td><code>{}</code></td><td>{s}</td><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td><td class=\"note\">{}</td></tr>\n",
+            h(&text(&op["code"])),
+            h(&text(&op["symbol"])),
+            h(&text(&op["routes"])),
+            h(&text(&op["owner"])),
+            h(&text(&op["receiver"])),
+            h(&text(&op["effect"])),
+            h(&text(&op["purpose"])),
+            s = h(&status)
+        ));
+    }
+    out.push_str(&format!(
+        "<section><h2>Operations ({active} active)</h2><table class=\"registry\"><thead><tr><th>byte</th><th>symbol</th><th>status</th><th>routes</th><th>owner</th><th>receiver</th><th>effect</th><th>purpose</th></tr></thead><tbody>{rows}</tbody></table></section>\n"
+    ));
+    if let Some(markers) = value["response_markers"].as_object() {
+        let mut rows = String::new();
+        for (k, v) in markers {
+            rows.push_str(&format!("<tr><td><code>{}</code></td><td>{}</td></tr>", h(k), h(&text(v))));
+        }
+        out.push_str(&format!("<section><h2>Response markers</h2><p class=note>What a reply byte means before any frame is decoded: the classes a client turns into admitted, refused and undecided.</p><table><tbody>{rows}</tbody></table></section>\n"));
+    } else if let Some(markers) = value["response_markers"].as_array() {
+        let mut rows = String::new();
+        for m in markers {
+            rows.push_str(&format!("<tr><td><code>{}</code></td><td>{}</td><td class=note>{}</td></tr>", h(&text(&m["code"])), h(&text(&m["symbol"])), h(&text(&m["purpose"]))));
+        }
+        out.push_str(&format!("<section><h2>Response markers</h2><table><tbody>{rows}</tbody></table></section>\n"));
+    }
+    if !value["consent_plans"].is_null() {
+        out.push_str(&format!("<section><h2>Consent plans</h2><p class=note>What a member's client is asked to consent to before it signs, by plan.</p><pre>{}</pre></section>\n", h(&serde_json::to_string_pretty(&value["consent_plans"]).unwrap_or_default())));
+    }
+    out
+}
+
+pub fn when(t: u64) -> String {
+    // Unix seconds as an ISO-like UTC stamp, without a clock library.
+    let days = t / 86400;
+    let secs = t % 86400;
+    let (y, m, d) = civil(days as i64);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}Z", secs / 3600, (secs % 3600) / 60)
+}
+
+fn civil(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_shell_carries_the_rail_identity_and_the_sentence() {
+        let who = Who { sid: "s".into(), name: "alice".into(), csrf: "c".into() };
+        let html = page("Documents", Some(&who), "/doc", "<p>x</p>", "11 November 2026");
+        assert!(html.contains("aria-current=\"page\">Documents"));
+        assert!(html.contains("alice"));
+        assert!(html.contains("action=\"/logout\""));
+        assert!(html.contains(WORLD_READABLE.split(':').next().unwrap()));
+        assert!(html.contains("11 November 2026"));
+        assert!(!html.contains("xterm.js"), "xterm loads only with a terminal on the stage");
+        let injected = inject_csrf("<form method=\"post\" action=\"/x\"><button>Go</button></form><form method=\"get\"><input></form><FORM METHOD=POST class=\"row\">", "tok");
+        assert_eq!(injected.matches("name=\"csrf\" value=\"tok\"").count(), 2, "{injected}");
+        assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
+        let anon = page("Mini", None, "/", &term_page("abc"), "");
+        assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
+        let table = registry_html(&serde_json::json!({"format": 3, "operations": [{"code": 0, "symbol": "DESCRIBE", "status": "active", "routes": ["public"], "owner": "kernel-client", "purpose": "describe", "receiver": "dispatchSession", "effect": "none"}, {"code": 9, "symbol": "X", "status": "reserved"}], "response_markers": {"253": "NO_RECORD"}}));
+        assert!(table.contains("DESCRIBE") && table.contains("(1 active)") && table.contains("NO_RECORD"), "{table}");
+        assert!(registry(None).contains("--registry"));
+        assert_eq!(when(0), "1970-01-01 00:00Z");
+        assert_eq!(when(1_761_600_000), "2025-10-27 21:20Z");
+    }
+}

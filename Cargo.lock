@@ -861,6 +861,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "serde_json",
+ "sha2",
  "tungstenite",
 ]
 
@@ -922,6 +923,26 @@ dependencies = [
  "sha2",
  "wasm-bindgen",
  "zeroize",
+]
+
+[[package]]
+name = "minidregg-mini-web"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "minidregg-mini-web-spawn",
+ "ring",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "minidregg-mini-web-spawn"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

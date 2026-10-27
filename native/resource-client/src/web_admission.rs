@@ -1,11 +1,26 @@
 //! Physical browser ingress bounds. No resource view or admission is cached here.
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::os::unix::net::UnixStream;
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::{Duration, Instant};
 
 pub(super) const MAX_CONNECTIONS: usize = 16;
 pub(super) const INGRESS_DEADLINE: Duration = Duration::from_secs(10);
+
+/// A connection the pool can time out: the loopback TCP face and the body's Unix listener.
+pub(super) trait Ingress: Read + Write + Send + 'static {
+    fn deadline(&mut self, remaining: Duration) -> io::Result<()>;
+    fn refuse(&mut self) -> io::Result<()> {
+        self.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\nRetry-After: 1\r\n\r\nbusy")
+    }
+}
+impl Ingress for TcpStream {
+    fn deadline(&mut self, remaining: Duration) -> io::Result<()> { self.set_read_timeout(Some(remaining)) }
+}
+impl Ingress for UnixStream {
+    fn deadline(&mut self, remaining: Duration) -> io::Result<()> { self.set_read_timeout(Some(remaining)) }
+}
 
 /// One permit spans ingress, current Host work and response delivery. Readers
 /// cannot create an unbounded queue behind a slow Host or a stalled browser.
@@ -27,16 +42,15 @@ impl Pool {
 
     /// Overflow refuses before invoking the handler. A detached worker owns
     /// its permit; completion or panic releases it without retaining handles.
-    pub(super) fn dispatch(
+    pub(super) fn dispatch<S: Ingress>(
         &self,
-        mut stream: TcpStream,
-        handler: Arc<dyn Fn(TcpStream, Instant) + Send + Sync>,
+        mut stream: S,
+        handler: Arc<dyn Fn(S, Instant) + Send + Sync>,
     ) -> io::Result<bool> {
         let accepted = Instant::now();
         if self.live.fetch_update(Ordering::AcqRel, Ordering::Acquire,
             |count| (count < self.limit).then_some(count + 1)).is_err() {
-            stream.set_write_timeout(Some(Duration::from_secs(1)))?;
-            stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\nRetry-After: 1\r\n\r\nbusy")?;
+            stream.refuse()?;
             return Ok(false);
         }
         let permit = Permit(self.live.clone());
@@ -51,11 +65,11 @@ impl Pool {
 /// The complete header AND form body share one deadline from acceptance.
 /// Refreshing a socket's relative timeout after each byte would let a
 /// trickling client occupy a worker forever.
-pub(super) fn read_ingress(stream: &mut TcpStream, buffer: &mut [u8], deadline: Instant) -> io::Result<usize> {
+pub(super) fn read_ingress<S: Ingress>(stream: &mut S, buffer: &mut [u8], deadline: Instant) -> io::Result<usize> {
     let remaining = deadline.checked_duration_since(Instant::now())
         .filter(|remaining| !remaining.is_zero())
         .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "browser ingress deadline"))?;
-    stream.set_read_timeout(Some(remaining))?;
+    stream.deadline(remaining)?;
     stream.read(buffer)
 }
 

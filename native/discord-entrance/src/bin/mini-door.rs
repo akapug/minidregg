@@ -177,6 +177,12 @@ impl Door {
         if let Some(login) = v["login"].as_str() {
             body.push_str(&format!("<p>Log in with:</p><pre>ssh -t {}</pre>", html(login)));
         }
+        if let Some(web) = v["webLogin"].as_str() {
+            body.push_str(&format!(
+                "<p>Or open your workspace in the browser (this link works once, within 7 days; it opens a session, never a key):</p><pre><a href=\"{0}\">{0}</a></pre>",
+                html(web)
+            ));
+        }
         if let Some(code) = v["linkCode"].as_str() {
             body.push_str(&format!("<p>In Discord, type (once, within 7 days):</p><pre>/mini line:link {}</pre>", html(code)));
         }

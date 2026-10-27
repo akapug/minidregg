@@ -68,6 +68,9 @@ ROLES = {
     # The grain launch gate: deploy/grain-host/install-controller and bwrap require it beside the
     # launcher, so it is a product binary (native/launch-gate builds deploy/grain-host/launch-gate.rs).
     "launchGate": "launch-gate",
+    # The web front end (deploy/web-frontend/INSTALL.md): the gateway and its root session helper.
+    "web": "mini-web",
+    "webSpawn": "mini-web-spawn",
 }
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
@@ -79,7 +82,8 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("spkVolumeHelper", "spk-host"),
               ("discord", "discord-entrance"), ("door", "discord-entrance"), ("doorProcess", "discord-entrance"), ("discordMirror", "discord-entrance"),
               ("payWatcher", "pay-watcher"),
-              ("keys", "mini-keys"), ("launchGate", "launch-gate"))
+              ("keys", "mini-keys"), ("launchGate", "launch-gate"),
+              ("web", "mini-web"), ("webSpawn", "mini-web-spawn"))
 # Journey fixtures: built from the tip they test by the journey tooling (lane-build.sh rust puts them in
 # LANE_DIR/fixtures, pack copies them to OUT/fixtures/ with their own SHA256SUMS; journey-runner reads
 # $set/fixtures/<binary>; scripts/check-journey.sh builds them from the tree), never in bin/, the

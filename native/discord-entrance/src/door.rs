@@ -28,7 +28,7 @@ pub const MAX_ARMOUR: usize = 2048;
 /// Names a stranger may never take: the box's own accounts and roles.
 pub const RESERVED: &[&str] = &[
     "ember", "mini", "core", "keys", "discord", "door", "root", "admin", "operator", "sponsor",
-    "pubread", "grain", "web", "mirror", "nobody", "caddy", "backup",
+    "pubread", "public", "grain", "web", "mirror", "nobody", "caddy", "backup",
 ];
 const B32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const B58: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

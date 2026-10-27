@@ -106,7 +106,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 # The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
 # of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
 #   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
@@ -117,7 +117,7 @@ STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K1
 # JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
 # set naming no step refuses every run before anything starts: a new step must be placed.
 SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
-DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
 journey_sets_check() {
   local id n bad=""
@@ -271,6 +271,7 @@ TITLE[K12N]="run edits: a line doc append adds is range-transcludable, an earlie
 TITLE[K12R]="the rendered document: one renderer, golden text, raw atoms, json, outline, html, the reader's placeholder"
 TITLE[K12H]="document history: history / show --at / diff over the element-tree order, coverage at the asked height"
 TITLE[WEB]="mini web: loopback-only, read-only; view-document pages, index backlinks, history / at / diff pages"
+TITLE[JWF]="the web front end: a door login code opens a browser session; the terminal runs mini shell as the member; a document is created and appended through the forms; the receipt shows the admitted outcome; logout revokes"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole, leave (renounce), kick, a realm"
 TITLE[J14]="Hermes as librarian on the ACP room resident: summon, grain create, links and a digest, asks answered from history, a no-grant edit, topup, dismiss returns the rest"
@@ -1081,7 +1082,8 @@ step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinne
 step_K12N() { hook j12n-runs "K-RUNS-RANGES rows: doc append extends the run that ends at the last line (insertRun); a range from an old line to an appended line renders for a covered reader; a range ending before a later append does not move; a range of the newest line alone"; }
 step_K12R() { hook j12r "P-DOC-RENDER rows: A's doc show equals the golden byte for byte; raw is the atoms; json agrees with the text; outline; html; a reader without the source's grant sees the placeholder and no bytes; a backlink names its line (lane p-doc-render)"; }
 step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
-step_WEB() { hook jweb "WEB rows: loopback-only mini web, its --read-only refusals and --render-static snapshot; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
+step_JWF() { hook jweb-frontend "J-WEB-FRONTEND: mini-web-spawn (dev) + mini-web gateway over the newcomer's workspace: login code -> cookie session; /term WebSocket runs whoami as the member; /doc/new and /doc/NAME/append through the forms are admitted; /receipts shows the attempt; logout revokes the cookie and the public reader answers /; a foreign Origin and a wrong CSRF token are refused (docs/WEB-FRONTEND-2026-10-27.md)"; }
+step_WEB() { hook jweb "WEB rows: loopback-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }

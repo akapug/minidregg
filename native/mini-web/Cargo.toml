@@ -1,0 +1,19 @@
+[package]
+name = "minidregg-mini-web"
+version = "0.1.0"
+edition = "2021"
+description = "The Mini web front end: the one application a member's browser session is their world in. Keyless gateway behind Caddy; shells and bodies run as the member through mini-web-spawn."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "mini-web"
+path = "src/main.rs"
+
+[dependencies]
+libc = "=0.2.189"
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
+# The WebSocket accept key is SHA-1 by RFC 6455; ring is already linked by the workspace.
+ring = "=0.17.14"
+mini-web-spawn = { package = "minidregg-mini-web-spawn", path = "../mini-web-spawn" }
