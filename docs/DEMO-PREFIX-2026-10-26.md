@@ -111,6 +111,16 @@ tested rule). The date is re-estimated from each rehearsal's evidence, never pro
   COMPLIANCE, 22 days so every archive outlives 2026-11-18) with the first encrypted archive pushed and
   the restore check green; ember's narrowly scoped Gandi PAT replaced the shared DNS token on the box;
   the tofu state bundle (16 files, five roots) is re-saved in 1Password.
+- **Later on 2026-10-27**: nano's testground page is served from the box itself at
+  `https://nano.demo.dregg.online/` (one origin for page and writer; kernel 7ec94566; the writer runs
+  under the plain hardening contract via Landlock+seccomp self-confinement, so no bwrap and no exception
+  remain on the box). L13's first app-market increment is pushed (`lane/app-market`: the `mini apps`
+  verbs over a recorded index, the Host-dispatching entrance for grain origins, fetcher and units, a
+  journey installing Hacker Slides and Simple Todos from the real store; Etherpad/TT-RSS refused today
+  by the custodian's bridge vocabulary, now being supported: "anything from the store" is the bar). L4's
+  provider-test red was its own fixture; L3's clean-box red now names its missing input. The Discord
+  endpoint save still fails although the key matches and a locally signed PING passes; a raw capture
+  between Caddy and the entrance is in place for the next save.
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
