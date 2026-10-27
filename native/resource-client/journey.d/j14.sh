@@ -484,13 +484,20 @@ hermes attach1 "links both docs and digests three entries"
 checkp attach1 "the resident ran one prompt through the controller" test "$(resident_completed)" -ge 1
 ok attach1 alice "doc show lab-index"
 cp "$OUT" "$SD/index-1.txt"
-check attach1 "lab-index links paper once" 1 "$(grep -c "^link .*$PAPER_T" "$OUT")"
-check attach1 "lab-index links data once" 1 "$(grep -c "^link .*$DATA_T" "$OUT")"
-checkp attach1 "Hermes made both links (created-by $HS)" sh -c "[ \$(grep -E '^link .*($PAPER_T|$DATA_T).*created-by $HS' '$OUT' | wc -l) = 2 ]"
+# `doc links` lists the index's links (a target alice has no name for is shown
+# by its cell); `room ls` names each cell's writers from the signed history.
+ok attach1 alice "doc links lab-index"
+cp "$OUT" "$SD/links-1.txt"
+check attach1 "lab-index links paper once" 1 "$(grep -cE "^link [0-9]+ -> [a-z]+ $PAPER_T " "$OUT")"
+check attach1 "lab-index links data once" 1 "$(grep -cE "^link [0-9]+ -> [a-z]+ $DATA_T " "$OUT")"
+ok attach1 alice "room ls lab"
+cp "$OUT" "$SD/room-ls-1.txt"
+checkp attach1 "Hermes ($HS) is a writer of lab-index and lab-digest (signed history)" sh -c \
+  "grep -E ' by ([0-9]+,)*$HS(,[0-9]+)* .*lab-index' '$OUT' >/dev/null && grep -E ' by ([0-9]+,)*$HS(,[0-9]+)* .*lab-digest' '$OUT' >/dev/null"
 DIGEST_REF=lab-digest
 ok attach1 alice "doc show $DIGEST_REF"
 cp "$OUT" "$SD/digest-1.txt"
-checkp attach1 "lab-digest has a section by Hermes covering the three entries" sh -c "grep -E 'created-by $HS' '$OUT' | grep -q 'entries #'"
+checkp attach1 "lab-digest has a section covering the three entries" grep -qE '^ +[0-9]+  entries #1-#3: ' "$OUT"
 T1=$(paid_turns)
 check attach1 "three turns paid (two links, one digest)" 3 "$T1"
 check attach1 "Hermes's account = $BUDGET - 3*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - 3 * TURN))" "$(credit_of hermes "$ACCT")"
@@ -517,7 +524,7 @@ checkp nogrant "the Host's operator log names it: capabilityRejected (no grant c
 tail_json >"$SD/tail-nogrant.jsonl"
 checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to bob" \
   jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
-check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  created-by')"
+check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  ')"
 
 # ------------------------------------------------ topup
 BAL=$(credit_of hermes "$ACCT")
