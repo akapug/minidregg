@@ -104,8 +104,10 @@ tested rule). The date is re-estimated from each rehearsal's evidence, never pro
   to 10k records (was 1.35 s growing to ~17 s). The memoised image was already on main. Integration round 2
   merges ten branches and rebuilds the whole Lean tree once per box (the kernels change a Core olean).
   Ember's four provisioning inputs are applied: the Discord bot is in Wyrmware (1507637841235017768),
-  four slash commands registered, the entrance running on the box with an empty roster and the
-  Interactions Endpoint URL set; the backup bucket `dreggnet-demo-mini-backups` exists (Object Lock
+  four slash commands registered, the entrance running on the box with an empty roster; Discord's
+  endpoint verification FAILED once because the public key installed on the box was 57 hex characters
+  instead of 64 (the same first and last four, so a prefix check passed): being corrected, then ember
+  re-saves the endpoint; the backup bucket `dreggnet-demo-mini-backups` exists (Object Lock
   COMPLIANCE, 22 days so every archive outlives 2026-11-18) with the first encrypted archive pushed and
   the restore check green; ember's narrowly scoped Gandi PAT replaced the shared DNS token on the box;
   the tofu state bundle (16 files, five roots) is re-saved in 1Password.
