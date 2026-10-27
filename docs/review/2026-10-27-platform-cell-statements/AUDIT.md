@@ -638,3 +638,15 @@ Then `buildSound` is about the checkpoint the reader authenticated.
 One remaining weakness: `CommitLawRefusedPole` exhibits only the `judgeWritten` refusal. No witness
 satisfies `DeliverLawRefusesStatement`'s twelve premises jointly. Add one through a concrete delivery
 when the fixtures allow; until then, that statement's premises are not shown inhabited.
+
+**Addendum, un-stream-continuity-wip e0916a53 (not yet elaborated): the pass-10 gaps are closed.**
+`decide` = `decideWith held.authentic`, where `authentic` is `Head.verify` at the held height, chain
+and frontier. `hotRegistration_iff` names `Head.verify … = .ok head` for whichever tag is the
+candidate, so copying the tip's tag is refused (`teeth_copiedTagUnverified`, `openingUnverified`).
+`withOpenedFreshTip` builds `Held` from the session's own `durable` (height, `headTag`, chain,
+frontier; `ApplicationStreamContinuity.lean:236-237`), not from the physical read, and runs the
+handoff exactly when `gate (decide …) = none` (`handoff_runs_iff`).
+
+`appended_headTag` pins `Appended.next.headTag = some entry.tag`. The stale, forked and below-birth teeth
+quantify over every verifier `v` through `decideWith`, which is stronger than a closed instance, not
+weaker. Proofs may start once the file elaborates green.
