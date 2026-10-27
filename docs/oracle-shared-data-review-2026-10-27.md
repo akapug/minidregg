@@ -48,3 +48,39 @@ The namespace-aware receiving control now runs the production public-data opener
 The implementation retains a descriptor for each captured finalized public-data entry across revisions. Its nominal 131,072-handle bound is not a promise that a host can open that many: the process's file-descriptor limit can be lower, so a large valid inventory or accumulated revisions can refuse startup. The actual host limit and retained revision count must be sized and monitored, and reducing the required retained handles is future engineering work.
 
 The final composed control also exercised the production package-stream receiver in the same real namespace. The old scratch check refused the unmapped root ancestor. The new callback accepted a genuine signed SPK, returned its exact raw SHA-256, and rejected a validly compressed archive whose signing key was changed. Foreign-owned, app-owned and symlink scratch ancestors were refused. The same run passed the public-data receipt/open/audit and provenance controls above. It used an independent snapshot with `SWARM_MEM_MAX=4G swarm-build cargo run -j2 --offline`; the exact source and harness hashes are in hbox `/tank/dregg-build/attachment-review-20261027/namespace-signed.sha256`, with output in `namespace-signed.log`. This is a small fixture, not the full resident lifecycle or a deployed acceptance result.
+
+## Mapped worker and mount composition
+
+Optimized binary pins and scoped native results are recorded in
+[`oracle-public-data-access-2026-10-27.json`](evidence/oracle-public-data-access-2026-10-27.json).
+
+The r2 resident reached bubblewrap but its public-data mount failed because the store was not searchable by the mapped app identity. In an independent hbox snapshot, a fixture entered the production user namespace, forked the production worker, dropped the operator and app identities and capabilities, and exercised the production preflight, SCM_RIGHTS transport, spawn gate and bubblewrap. A snapshot-only `#[cfg(test)]` initializer mirrors the production worker fork/drop/filter sequence; it does not supply a Mini admission or modify production sources. A small static app checked the mounted bytes, denied write, closed fd 7 and writable private `/var`.
+
+All three cases passed:
+
+* Under umask 077, a newly created dedicated public-data store had mode 0755 and the mapped app mounted and read the data read-only. The raw fd 7 was closed in the app and private `/var` was writable.
+* An existing mode-0700 store was unchanged and refused by the app-identity preflight before launch.
+* A mode-0755 store with an explicit deny ACL for the app was also refused by that preflight before launch.
+
+The test does not run a real Mini BEGIN or claim. The source path places the preflight before BEGIN, while these fixture negatives establish that no physical launch is attempted by the fixture after refusal. The retained r2 Store was not touched.
+
+The snapshot was `/tank/dregg-build/attachment-worker-review` on hbox. The host library was built with `SWARM_MEM_MAX=4G CARGO_TARGET_DIR=/tank/dregg-build/attachment-worker-review/target swarm-build taskset -c 22,23 cargo test -j2 --offline -p minidregg-spk-host --lib --no-run`. The three cases ran through `mapped-worker-review.sh` with the same scope, cores and Cargo job bound. Logs are `mapped-positive.log`, `mapped-private.log`, and `mapped-acl.log` in that snapshot. Each ran one exact test and passed.
+
+Exact SHA-256 inputs and outputs:
+
+```text
+9cc9ec2af615e58510cfb1249327638cf1f83aa2feb7cff4d262cfa2ca8af892  shared_data.rs
+2361423133ba39dfcd4e02d7588fdcc28771bfe82d7e510287635a96dd852e8f  resident_privilege.rs (production prefix before test-only hook)
+6700797f2e92db35d704241424e572630ce63b9d1a1e6f6b15ac5c0405206f03  resident_launch.rs (production prefix before test module)
+5bc73081af40af836617d93f451838f9f318fb0e21654598e6de2ed7ce264d38  resident_service.rs
+b1005a4be0032be01fd301af3784b471221443e6f586752f52b93b4f1a7b0ee1  namespace_identity.rs
+c380f9c72728fe0f54cb159235c70c9ea69549c0f5ed794071e69addc94d2236  spawn_gate.rs
+d5e52dab21358866068c74180573d76da09ee6594932c6b0006cdcce007ac07a  sandbox.rs
+9f1ae5e9b52f93367d80f476dc015394de86e9e20324d75d81da8e860f437e35  mapped-worker-hook.rs
+6532a12ecd614558b2f9c7791213606adb907a827693ebc373a9cf4ef3550bc9  mapped-worker-test.rs
+722f5769a96f75482196426b8d14f760678c62ca1a0edc0e116fa9330a84a1ad  mapped-probe.c
+451f0f37013642bce07f1e58fda5854007afe9d288298d43bf002d689120a181  mapped-worker-review.sh
+b73b54f09dcdfda431dce8d1ebbe0997d5708997711cb760332d3a0fee9484ea  mapped-positive.log
+2a4ed281aa8c85d00820c6f004e22c100fdefc7add932cdb8f89ba516dcdb7c1  mapped-private.log
+b1ec5a80ffcd7ad0ea0890b3f9104ef08d183b5b2db5b9a0f202d6587332f6be  mapped-acl.log
+```
