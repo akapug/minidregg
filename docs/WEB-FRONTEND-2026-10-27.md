@@ -190,4 +190,14 @@ yet data and labels the page accordingly:
    arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
    `subcommands()` once the last verb converts.
 
-Not started in this batch; nothing on the page claims it is.
+State (2026-10-27, lane tip): `shell_grammar.rs` holds the grammars of `doc` (40 leaves), `room`
+(28), `delegate`, `revoke`, `renounce`, `law` (5), `pay` (4), `credit`, `tariff` (2 shapes), `topup`,
+`market` (2), `bid`, `reveal`, `bids`, `job` (8), `jobs`: 16 verbs, 104 leaves. For each, the shell
+parses through `parse()`, `help`/`usage_of`/completion read the usage rendered by one printer, and
+the body renders the forms from the leaves (effect → outcome class and the "and submit" tick); the
+hand-written arity checks, flag scrapers and usage strings of those verbs are deleted (shell.rs:
+−845 lines across the three commits, +336 of builders; the grammar module is 552 lines of data and
+one parser). Still on usage strings: the lifecycle (`propose`/`submit`/`lookup`/`retry`/`publish`/
+`history`), `can`/`inspect`/`why`, `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story` and the chat
+verbs, keys, `kind`/`program`/`instance`, `enroll`/`provision`, the rest; the `/verb/NAME` page says
+which it is.

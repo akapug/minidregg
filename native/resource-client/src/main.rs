@@ -130,6 +130,7 @@ mod activity;
 mod seat;
 #[cfg(unix)]
 mod shell;
+mod shell_grammar;
 #[cfg(unix)]
 mod member;
 #[cfg(unix)]

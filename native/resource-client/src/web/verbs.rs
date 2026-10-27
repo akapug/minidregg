@@ -80,6 +80,45 @@ pub(super) fn transition(usage: &str, operation: &str, index: usize, literals: &
     !read
 }
 
+/// The alternatives of a verb: from its grammar when the grammar is data (A0), else read from
+/// its usage string (the interim).
+pub(super) fn alternatives_of(name: &str, usage: &str) -> Vec<Alt> {
+    match crate::shell_grammar::grammar(name) {
+        Some(g) => g.leaves.iter().map(leaf_alt).collect(),
+        None => alternatives(usage),
+    }
+}
+
+/// One grammar leaf as form tokens: typed arguments, flags (a dangerous one is a checkbox the
+/// person must tick), the leaf's literal path.
+fn leaf_alt(leaf: &crate::shell_grammar::Leaf) -> Alt {
+    use crate::shell_grammar::Kind as G;
+    let kind = |k: G| match k {
+        G::Id => Kind::Id,
+        G::Ref => Kind::Ref,
+        G::Subject | G::Word => Kind::Word,
+        G::Number => Kind::Number,
+        G::TextOrFile | G::File | G::FileOrStdin | G::Law => Kind::Text,
+        G::Choice(options) => Kind::Choice(options.iter().map(|o| o.to_string()).collect()),
+    };
+    let mut tokens: Vec<Tok> = leaf.path.iter().map(|w| Tok::Lit(w.to_string())).collect();
+    for a in leaf.args {
+        tokens.push(Tok::Arg { name: a.name.to_owned(), optional: a.optional, kind: kind(a.kind) });
+    }
+    for f in leaf.flags {
+        tokens.push(Tok::Flag { name: f.name.to_owned(), value: f.value.map(|(p, k)| (p.to_owned(), kind(k))), optional: true });
+    }
+    Alt { tokens }
+}
+
+/// Whether an alternative is a world transition: the grammar's effect when the verb has one.
+fn transition_of(name: &str, usage: &str, operation: &str, index: usize, literals: &str) -> bool {
+    match crate::shell_grammar::grammar(name) {
+        Some(g) => g.leaves.get(index).is_some_and(|l| matches!(l.effect, crate::shell_grammar::Effect::Propose | crate::shell_grammar::Effect::Transition)),
+        None => transition(usage, operation, index, literals),
+    }
+}
+
 /// Split a usage into alternatives (` | ` between them; a `|` inside a word is a choice).
 pub(super) fn alternatives(usage: &str) -> Vec<Alt> {
     usage.split(" | ").map(|alt| Alt { tokens: tokens(alt) }).filter(|a| !a.tokens.is_empty()).collect()
@@ -232,7 +271,7 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
     let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
         return simple(404, "No such verb", &format!("the shell has no verb {name}"));
     };
-    let alts = alternatives(verb.usage);
+    let alts = alternatives_of(name, verb.usage);
     let refs = site.names();
     let mut body = format!(
         "<p><code>{}</code></p><p class=note>{}</p>\n<datalist id=\"refs\">{}</datalist>\n",
@@ -240,6 +279,11 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         escape(verb.operation),
         refs.iter().map(|r| format!("<option value=\"{}\">", escape(r))).collect::<String>()
     );
+    if crate::shell_grammar::grammar(name).is_some() {
+        body.push_str("<p class=note>This verb's grammar is data (A0): these forms, the shell's parsing and <code>help</code> read the same leaves.</p>");
+    } else {
+        body.push_str("<p class=note>Interim: this verb's forms are read from its usage string until its grammar is data (A0).</p>");
+    }
     if site.front.read_only {
         body.push_str("<p class=note>The public reader runs no verb.</p>");
         return Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body };
@@ -254,7 +298,7 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
 /// to `action` with `hidden` fields before its own: the tour embeds the real forms this way.
 pub(super) fn form_for(name: &str, literals: &str, action: &str, hidden: &str) -> Option<String> {
     let verb = crate::shell::command_catalog().find(|v| v.name == name)?;
-    let alts = alternatives(verb.usage);
+    let alts = alternatives_of(name, verb.usage);
     let (index, alt) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals)?;
     Some(form(name, index, alt, verb.operation, action, hidden))
 }
@@ -278,7 +322,11 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
             }
         }
     }
-    if alt.proposes(operation) {
+    let proposes = match crate::shell_grammar::grammar(name) {
+        Some(g) => g.leaves.get(index).is_some_and(|l| l.effect == crate::shell_grammar::Effect::Propose),
+        None => alt.proposes(operation),
+    };
+    if proposes {
         out.push_str("<label class=\"check\"><input type=\"checkbox\" name=\"submit\" value=\"on\" checked> and <code>submit ID</code> at once</label>");
     }
     out.push_str("</div><p><button>Run</button></p></form></section>\n");
@@ -310,7 +358,7 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
     let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
         return simple(404, "No such verb", &format!("the shell has no verb {name}"));
     };
-    let alts = alternatives(verb.usage);
+    let alts = alternatives_of(name, verb.usage);
     let Some(alt) = form.get("alt").and_then(|a| a.parse::<usize>().ok()).and_then(|i| alts.get(i)) else {
         return simple(400, name, "which alternative of the usage?");
     };
@@ -360,8 +408,12 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
     }
     let mut lines = vec![words.join(" ")];
     let index = form.get("alt").and_then(|a| a.parse::<usize>().ok()).unwrap_or(0);
-    let mut is_transition = transition(verb.usage, verb.operation, index, &alt.literals());
-    if form.get("submit").map(String::as_str) == Some("on") && alt.proposes(verb.operation) && !id.is_empty() {
+    let mut is_transition = transition_of(name, verb.usage, verb.operation, index, &alt.literals());
+    let proposes = match crate::shell_grammar::grammar(name) {
+        Some(g) => g.leaves.get(index).is_some_and(|l| l.effect == crate::shell_grammar::Effect::Propose),
+        None => alt.proposes(verb.operation),
+    };
+    if form.get("submit").map(String::as_str) == Some("on") && proposes && !id.is_empty() {
         // The tour's lost-reply switch rides on the submit line (DEMO-EXPERIENCE A11).
         let lose = if form.get("lose").map(String::as_str) == Some("on") { " --lose-reply-once" } else { "" };
         lines.push(format!("submit {id}{lose}"));
@@ -420,10 +472,15 @@ mod tests {
         assert!(form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\">").unwrap().contains("action=\"/tour/3\""));
         assert!(form_for("doc", "doc nope", "/x", "").is_none());
         let doc = crate::shell::command_catalog().find(|v| v.name == "doc").unwrap();
-        let show = alternatives(doc.usage).iter().position(|a| a.literals() == "doc show").unwrap();
-        let append = alternatives(doc.usage).iter().position(|a| a.literals() == "doc append").unwrap();
-        assert!(!transition(doc.usage, doc.operation, show, "doc show"), "doc show is a read");
-        assert!(transition(doc.usage, doc.operation, append, "doc append"), "doc append proposes");
+        let alts = alternatives_of("doc", doc.usage);
+        let show = alts.iter().position(|a| a.literals() == "doc show").unwrap();
+        let append = alts.iter().position(|a| a.literals() == "doc append").unwrap();
+        assert!(!transition_of("doc", doc.usage, doc.operation, show, "doc show"), "doc show is a read");
+        assert!(transition_of("doc", doc.usage, doc.operation, append, "doc append"), "doc append proposes");
+        assert_eq!(alts.len(), crate::shell_grammar::DOC.leaves.len(), "one form per grammar leaf");
+        assert_eq!(alts[append].tokens[4], Tok::Arg { name: "TEXT|@FILE".into(), optional: false, kind: Kind::Text });
+        // The rendered usage parses to the same leaves as the grammar names (help and the forms agree).
+        assert_eq!(alternatives(doc.usage).iter().map(|a| a.literals()).collect::<Vec<_>>(), alts.iter().map(|a| a.literals()).collect::<Vec<_>>());
         for (name, is) in [("whoami", false), ("help", false), ("history", false), ("can", false), ("inspect", false), ("refs", false), ("submit", true), ("delegate", true), ("create", true), ("retry", true)] {
             let v = crate::shell::command_catalog().find(|v| v.name == name).unwrap();
             assert_eq!(transition(v.usage, v.operation, 0, name), is, "{name}: {}", v.operation);
