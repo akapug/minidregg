@@ -963,17 +963,30 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         // The concierge's refund: AMOUNT of ASSET from the till reference
         // ACCOUNT to account TO, publishing MEMO on the till's `refund` topic.
+        // With `--operation-record`, a rerun never pays twice: an existing
+        // record is only looked up (`credit --action lookup-operation`).
         "refund" => {
             let account = text(args.required("account")?, "account reference")?;
             let to = text(args.required("to")?, "to")?;
             let amount = text(args.required("amount")?, "amount")?;
             let asset = opt(&mut args, "asset")?;
             let memo = text(args.required("memo")?, "memo")?;
+            let operation = args.optional("operation-record").map(path);
             args.finish()?;
             decimal(&to, "refund account")?;
             decimal(&amount, "refund amount")?;
-            let result = crate::fleet::pay_turn(&root, &account, &to, &amount, asset.as_deref(),
-                Some((REFUND_TOPIC, memo.as_bytes())))?;
+            let reference = workspace::reference(&root, &account)?;
+            let context = json!({"action":"refund","account":reference,"to":to,"amount":amount,
+                "asset":asset,"memo":memo});
+            if let Some(path) = &operation {
+                if let Some(recovered) = crate::fleet::recover_bound_operation(&root, path, &context)? {
+                    print_json(&recovered)?;
+                    return if recovered["status"] == "confirmed" { Ok(()) }
+                        else { Err("recorded refund is not confirmed; exact recovery only".into()) };
+                }
+            }
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &to, &amount, asset.as_deref(),
+                Some((REFUND_TOPIC, memo.as_bytes())), operation.as_deref(), context)?;
             print_json(&json!({"type":"minidregg-refund-v1","from":account,"to":to,"amount":amount,
                 "memo":memo,"fee":result["fee"],"transaction":result["receipt"]["transactionId"]}))
         }
