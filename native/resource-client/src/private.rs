@@ -1218,15 +1218,12 @@ mod tests {
         assert_ne!(hybrid_kem::combine(KEK_LABEL, &[0x22; 32], &[0x11; 32], &transcript)[..], kek[..]);
     }
 
-    /// Independent known answers (pure-Python FIPS 203 `kyber-py` `_keygen_internal(d, z)`
-    /// and pycryptodome `cSHAKE256`, neither of which is the code under test): the
-    /// seeded ML-KEM-768 key AWS-LC derives from a FIPS 203 seed, and the whole chain
-    /// member seed -> cSHAKE256 -> (X25519 secret, ML-KEM seed) -> encapsulation key.
+    /// Independent known answers (pycryptodome `cSHAKE256` and pure-Python FIPS 203
+    /// `kyber-py`, neither the code under test): the whole chain member seed ->
+    /// cSHAKE256 -> (X25519 secret, ML-KEM seed) -> encapsulation key. The bare
+    /// seed -> key known answer lives in `hybrid_kem.rs`'s own tests.
     #[test]
-    fn the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation() {
-        let seed: [u8; KEM_SEED_LEN] = std::array::from_fn(|i| i as u8);
-        let (_, ek) = hybrid_kem::ml_kem_768_from_seed(&seed).unwrap();
-        assert_eq!(hex(&Sha256::digest(ek)), "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9");
+    fn the_member_seed_chain_matches_independent_known_answers() {
         let member = [7u8; 32];
         assert_eq!(hex(&cshake_xof::<KEM_SEED_LEN>(KEM_SEED_LABEL, &[&member])),
             "6dced71e0350ea6f8bc7260011db1c96f00818159ffdde14bef9829680fd16156c7d305aad5baa12d55253580e0c96d153650bd0ce23e0a8067a7699d7e3bc07");
