@@ -102,6 +102,13 @@ J14_TIER=${J14_TIER:-}
 # survives (docs/HERMES-TOOLS-2026-10-27.md §7). Needs J14_HERMES_ROOT (a
 # root built from this tree's patch).
 J14_TOOLS=${J14_TOOLS:-}
+# J14_AWAIT=1: the await bridge. Alice runs the Tally bend twice: one awaits a
+# reply that Hermes decides, one a reply that she decides. She announces both in
+# lab (`await OBJECT TRANSACTION`). Hermes lists the first with
+# mini_pending_awaits and answers it with mini_answer_await, and the program
+# resumes with the answer at a later height. Hermes's answer to the second (the
+# slot named in the ask) is refused by the kernel: notDecider.
+J14_AWAIT=${J14_AWAIT:-}
 [ -z "$J14_TOOLS" ] || [ -n "${J14_HERMES_ROOT:-}" ] || { echo "J14_TOOLS needs J14_HERMES_ROOT (upstream Hermes)" >&2; exit 5; }
 POOL_ROW=pool; [ "$J14_ROUTE" = zai ] && POOL_ROW=zai-glm
 WEEK=40 PERIOD=${J14_PERIOD:-260}
@@ -290,6 +297,8 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 # ------------------------------------------------ friends and Hermes: enroll, provision, init
 declare -A SUBJ FUND
 FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100
+# Two Tally births escrow seven envelope prices each.
+[ -z "$J14_AWAIT" ] || FUND[alice]=${J14_AWAIT_FUNDING:-200000000}
 FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con"
 for f in $FRIENDS; do
   mkdir -p -m 700 "$H/$f"
@@ -713,6 +722,48 @@ if [ -n "$J14_TOOLS" ]; then
   checkp tools "nothing from the scratch persists on the host" sh -c "[ -z \"\$(find '$G' '$SD/worker-work' -name sum.py 2>/dev/null)\" ]"
 fi
 
+if [ -n "$J14_AWAIT" ]; then
+  # -------------------------------------------- the await bridge: a world program asks Hermes and resumes on the answer
+  install -m 0600 "$REPO/world/activity/Tally.obend" "$H/alice/requests/Tally.obend"
+  ok await alice "bend publish tally @Tally.obend --entry tally"
+  for o in ask-hermes ask-alice; do
+    operator await "OBJECT: alice's content resource $o" "$MINI" workspace --action create --dir "$WS/alice" \
+      --name "$o" --storage content --predicate "$SD/permit-all.json"
+  done
+  tally_input() { jq -cn --arg d "$1" '{tag:"record",fields:[{name:"init",value:{tag:"variant",label:"set",payload:{tag:"natural",value:"0"}}},{name:"decider",value:{tag:"natural",value:$d}}]}'; }
+  ok await alice "bend run tally ask-hermes --input $(tally_input "$HS")"
+  ok await alice "bend run tally ask-alice --input $(tally_input "$A")"
+  OBJ1=$(jq -r .object "$WS/alice/bend/objects/ask-hermes.json" 2>/dev/null); TX1=$(jq -r .transaction "$WS/alice/bend/objects/ask-hermes.json" 2>/dev/null)
+  OBJ2=$(jq -r .object "$WS/alice/bend/objects/ask-alice.json" 2>/dev/null); TX2=$(jq -r .transaction "$WS/alice/bend/objects/ask-alice.json" 2>/dev/null)
+  require_nat await "the Hermes-decided program's object" "$OBJ1"
+  require_nat await "the alice-decided program's object" "$OBJ2"
+  ok await alice "bend await $OBJ1 $TX1"; cp "$OUT" "$SD/await-1-before.json"
+  check await "program 1 awaits a reply Hermes decides" "awaiting $HS" "$(jq -r '"\(.phase) \(.decider)"' "$SD/await-1-before.json")"
+  ok await alice "bend await $OBJ2 $TX2"; cp "$OUT" "$SD/await-2-before.json"
+  SLOT2=$(jq -r .slot "$SD/await-2-before.json")
+  check await "program 2 awaits a reply alice decides" "awaiting $A" "$(jq -r '"\(.phase) \(.decider)"' "$SD/await-2-before.json")"
+  AWH0=$(jq -r .height "$SD/await-1-before.json")
+  ok await alice "ask lab please answer await $OBJ1 $TX1"
+  hermes await "lists the program's await and answers it"
+  ok await alice "bend await $OBJ1 $TX1"; cp "$OUT" "$SD/await-1-after.json"
+  check await "program 1 resumed with Hermes's answer: total 7" "{total=7}" "$(jq -r .stateText "$SD/await-1-after.json")"
+  checkp await "it resumed at a later height" sh -c "[ \$(jq -r .height '$SD/await-1-after.json') -gt $AWH0 ]"
+  checkp await "the old slot is decided: the program awaits a new one (or ended)" \
+    sh -c "[ \"\$(jq -r .slot '$SD/await-1-after.json')\" != \"\$(jq -r .slot '$SD/await-1-before.json')\" ]"
+  AWLOG=${PLOG%.log}.await.jsonl
+  checkp await "mini_pending_awaits listed exactly program 1 for Hermes (decider $HS)" \
+    sh -c "jq -e -s --arg o '$OBJ1' '[.[] | select(.id == \"aw-pending\") | .result.awaits[]?] | length >= 1 and all(.object == \$o)' '$AWLOG' >/dev/null"
+  checkp await "the resolve turn was admitted, signed by Hermes (the slot's decider)" \
+    sh -c "jq -r 'select(.id == \"aw-answer-0\") | .content | tostring' '$AWLOG' | head -1 | grep -q 'admitted: bend answer'"
+  # The teeth: Hermes answers the slot alice decides; the kernel refuses it by name.
+  ok await alice "ask lab please answer await $OBJ2 $TX2 slot $SLOT2"
+  hermes await "tries to answer an await it does not decide"
+  checkp await "the kernel refused Hermes's answer: notDecider" \
+    sh -c "jq -r 'select(.id == \"aw-answer-0\") | .content | tostring' '$AWLOG' | tail -1 | grep -q notDecider"
+  ok await alice "bend await $OBJ2 $TX2"
+  check await "program 2 is untouched: still awaiting alice, total 0" "awaiting $A {total=0}" "$(jq -r '"\(.phase) \(.decider) \(.stateText)"' "$OUT")"
+fi
+
 # ------------------------------------------------ topup
 BAL=$(credit_of hermes "$ACCT")
 require_nat topup "Hermes's balance before topup" "$BAL"
@@ -781,8 +832,11 @@ RT_SECRETS=("$SD/credentials.key" "$SD/credentials" "$JOURNEY_D/keys" "$PTABLE" 
 RT_LEAK=$(for s in "${RT_SECRETS[@]}"; do [ -n "$s" ] && grep -qF -- "$s" "$SHOWN" && echo "$s"; done | head -3 | tr '\n' ' ')
 checkp redteam "no operator material in any brief a model was shown ($(wc -l <"$SHOWN") briefs, ${#RT_SECRETS[@]} paths checked)" \
   sh -c "[ -s '$SHOWN' ] && [ -z '$RT_LEAK' ]"
-checkp redteam "every offer to the model was the room catalogue" \
-  sh -c "jq -e -s '[.[].tools[] | ltrimstr(\"mcp__mini_grain__\")] | unique - [\"mini_room_ls\",\"mini_room_status\",\"mini_stream_tail\",\"mini_say\",\"mini_doc_context\",\"mini_doc_show\",\"mini_doc_link\",\"mini_doc_review\",\"mini_doc_append\",\"mini_room_attempts\"] | length == 0' '$SHOWN' >/dev/null"
+RT_CATALOGUE='"mini_room_ls","mini_room_status","mini_stream_tail","mini_say","mini_doc_context","mini_doc_show","mini_doc_link","mini_doc_review","mini_doc_append","mini_pending_awaits","mini_answer_await","mini_room_attempts"'
+# Under J14_TOOLS the sandbox prompt was also offered exactly its granted toolsets.
+[ -z "$J14_TOOLS" ] || RT_CATALOGUE=$RT_CATALOGUE',"read_file","write_file","patch","search_files","terminal","process_manage","execute_code"'
+checkp redteam "every offer to the model was the room catalogue${J14_TOOLS:+ (and the granted sandbox tools)}" \
+  sh -c "jq -e -s '[.[].tools[] | ltrimstr(\"mcp__mini_grain__\")] | unique - [$RT_CATALOGUE] | length == 0' '$SHOWN' >/dev/null"
 
 # ------------------------------------------------ the program document (after the resident rows, so a
 # document-rendering row cannot hide the resident run)
