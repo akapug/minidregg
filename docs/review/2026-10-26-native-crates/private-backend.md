@@ -175,7 +175,7 @@ The primitive codecs match `StreamCodec.nat`/`bytesStream`/`framed` (`Compiler/T
 - Unix throughout: flock, mode bits, `UnixListener`. The worker is Linux-only (procfs exec, memfd seals, GNU `/usr/bin/timeout` at that path; A §2.3).
 - It assumes honest crash-prefix storage and meaningful `fsync`.
 - It assumes "authenticated confidential reliable party channels" that **are not implemented**. Every test moves frames through in-process `VecDeque`s (A §2.4, B §2.4).
-- **The fixtures are frozen artifacts with no in-tree producer.** The width-8 adder's Lean producer (`emitPairs` in `Compiler/ObliviousNatRipple.lean`, `Host/ObliviousNatAddEmit.lean`) was deleted in `212c79af` on 2026-10-04 (B §2.5).
+- **The fixtures are frozen artifacts with no in-tree producer.** The width-8 adder's Lean producer (`emitPairs` in `Compiler.ObliviousNatRipple [deleted 212c79af]`, `Host.ObliviousNatAddEmit [deleted 212c79af]`) was deleted in `212c79af` on 2026-10-04 (B §2.5).
 
 ---
 

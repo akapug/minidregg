@@ -17,6 +17,154 @@ OVERLAY = ROOT / "scripts/spk-platform/agent-genesis-overlay.sh"
 
 
 class HarnessTests(unittest.TestCase):
+    def test_owner_worker_policy_uses_exact_native_source_and_readback(self):
+        spec = importlib.util.spec_from_file_location("oracle_agent_policy", ROOT / "deploy/oracle/acceptance/agent.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_text())["agents"][0]
+        for fault in (None, "active", "changed-policy", "wrong-readback", "unknown-worker"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                op = object.__new__(module.Operator)
+                op.agent, op.calls, op.workroom = allocation, root, root
+                op.mini, op.host, op.config, op.public = map(Path, ("/mini", "/host", "/config", "/socket"))
+                a, caps = allocation, allocation["plannedCaps"]
+                config = {"task": a["controller"]["task"], "subject": a["controller"]["subject"],
+                    "capability": caps["parentOwner"], "queryCapability": caps["parentOwner"],
+                    "policyControlCapability": caps["parentControl"],
+                    "toolTask": {key:a["tool"][key] for key in ("task", "subject")},
+                    "dispatchTask": {key:a["dispatch"][key] for key in ("task", "subject")}}
+                if fault == "unknown-worker": config["dispatchTask"]["subject"] = "777"
+                config_path = root / "controller.json"
+                module.write(config_path, config)
+                original = {"owner":a["controller"]["subject"], "workerSubjects":[a[role]["subject"] for role in ("tool", "dispatch", "provider")], "workerGeneration":"1"}
+                desired = dict(original, workerSubjects=[a[role]["subject"] for role in ("tool", "dispatch")])
+                calls = []
+                def query(label, subject, task, capability, key, view="resource"):
+                    path = root / label
+                    path.mkdir()
+                    if view == "resource":
+                        value = {"cell":{"grain":{"task":task,"generation":"0","status":"2" if fault == "active" else "0","reserved":"0"}}}
+                    else:
+                        after = label == "policy-after"
+                        value = {"policyId":task,"version":"1" if after else "0", "previous":"old-address" if after else None,
+                            "domain":"10","semantics":"20","address":"old-address","canonical":"aa",
+                            "predicate":desired if after else original}
+                        if fault == "changed-policy" and not after: value["predicate"] = {"changed":True}
+                        if fault == "wrong-readback" and after: value["previous"] = "wrong"
+                    module.write(path / "view.json", value)
+                    module.write(path / "challenge.json", {"authorityRoot":"source-root"})
+                    return path
+                def call(label, args):
+                    calls.append((label,args))
+                    if args[1] == "author":
+                        source = Path(args[args.index("--input")+1])
+                        output = Path(args[args.index("--output")+1])
+                        module.write(output, json.dumps(module.read(source),sort_keys=True).encode())
+                    elif args[1] == "submit":
+                        self.assertEqual(args[args.index("--intent-kind")+1], "grain-policy-install-intent")
+                        source = module.read(args[args.index("--intent")+1])
+                        self.assertEqual(source["currentSourceHex"],"aa")
+                        self.assertEqual(source["expectedPreRoot"],"source-root")
+                        self.assertEqual(source["expectedVersion"],"0")
+                        self.assertEqual(source["control"],caps["parentControl"])
+                        self.assertEqual(source["workerSubjects"],desired["workerSubjects"])
+                        path = Path(args[args.index("--dir")+1]); path.mkdir()
+                        module.write(path / "outcome.json", {"type":"confirmed","confirmation":"installed", "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})
+                    else: self.fail("unexpected native operation")
+                op.query, op.call = query, call
+                if fault is None:
+                    report = module.read(op.prepare_worker_policy(config_path))
+                    self.assertEqual(report["workers"],desired["workerSubjects"])
+                    self.assertEqual(report["receipt"]["acceptedCount"],"3")
+                else:
+                    with self.assertRaises(ValueError): op.prepare_worker_policy(config_path)
+                    self.assertEqual(sum(args[1] == "submit" for _,args in calls), 1 if fault == "wrong-readback" else 0)
+
+    def test_complete_grain_store_overlay_on_frozen_339_source(self):
+        # Run the real grain-store -> positive-base -> native-share-member
+        # transformations. Stub only native executables, stopping exactly at
+        # bootstrap before a Store exists. This is a source composition test.
+        baseline = "339abf3e4b37940be0e69620dbf177470b0aeefc"
+        inputs = ["scripts/workroom/provision.sh",
+                  "scripts/application-share-issue/native-positive-base.sh",
+                  "scripts/grain-birth/native-share-member.sh",
+                  "native/resource-client/journey.d/lib/genesis-params.sh",
+                  "deploy/candidate/params.sh"]
+        for mode in ("legacy", "agents", "unrelated-keywords", "missing-config", "duplicate-config"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                repo = root / "repo"
+                for name in inputs:
+                    path = repo / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(subprocess.check_output(["git", "show", baseline + ":" + name], cwd=ROOT))
+                for name in ("scripts/spk-platform/grain-store.sh", "scripts/spk-platform/agent-genesis-overlay.sh"):
+                    path = repo / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes((ROOT / name).read_bytes())
+                provision = repo / "scripts/workroom/provision.sh"
+                original = provision.read_text()
+                line = ' "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}'
+                if mode == "missing-config":
+                    provision.write_text(original.replace(line, line.replace("signatureBinary", "changedSignatureBinary")))
+                elif mode == "duplicate-config":
+                    provision.write_text(original.replace(line, line + "\n" + line))
+                elif mode == "unrelated-keywords":
+                    provision.write_text(original + "\n# lifecycleManagement agentLifetimeDispatchTargets\n")
+                native = root / "native"
+                native.write_text('''#!/usr/bin/env python3
+import hashlib,json,os,pathlib,sys
+args=sys.argv[1:]
+if args[0]=='keygen':
+ for option in ('--secret','--public'):
+  path=pathlib.Path(args[args.index(option)+1]);path.write_bytes(hashlib.sha256(str(path).encode()).digest())
+elif len(args)==2 and args[1]=='profile': print(json.dumps({'semantics':'1'}))
+elif args[0]=='bootstrap':
+ out=pathlib.Path(os.environ['OVERLAY_CAPTURE'])
+ for option,name in (('--config','config.json'),('--source','genesis.json')):
+  (out/name).write_bytes(pathlib.Path(args[args.index(option)+1]).read_bytes())
+ sys.exit(77)
+else: raise SystemExit('unexpected native command: '+repr(args))
+''')
+                native.chmod(0o700)
+                capture = root / "capture"
+                capture.mkdir()
+                env = {key: value for key, value in os.environ.items()
+                       if key not in ("CANDIDATE", "SPK_AGENT_ALLOCATION", "GENESIS_PARAMS_TREE")
+                       and not key.startswith("WORKROOM_")}
+                env.update(OVERLAY_CAPTURE=str(capture), GENESIS_PARAMS_TREE=str(repo))
+                if mode != "legacy":
+                    env["SPK_AGENT_ALLOCATION"] = str(ROOT / "deploy/oracle/acceptance/agent-allocation.json")
+                result = subprocess.run(["sh", str(repo / "scripts/spk-platform/grain-store.sh"),
+                                         str(root / "new-world"), *([str(native)] * 4)],
+                                        env=env, capture_output=True, text=True)
+                if mode in ("missing-config", "duplicate-config"):
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("configuration shape changed", result.stderr)
+                    self.assertFalse((capture / "config.json").exists())
+                    continue
+                diagnostics = result.stderr + "\n".join(p.read_text() for p in root.rglob("*.stderr"))
+                self.assertEqual(result.returncode, 77, diagnostics)
+                config = json.loads((capture / "config.json").read_text())
+                genesis = json.loads((capture / "genesis.json").read_text())
+                self.assertEqual(config["lifecycleManagement"], {"managementSubject": 8, "managementKeyId": 8008})
+                self.assertEqual(config["grainBirthTariff"], {"base": 2, "perBirth": 1})
+                self.assertEqual(config["tariffPerInitialPayloadByte"], 1)
+                self.assertEqual(genesis["tariffPerInitialPayloadByte"], "1")
+                self.assertFalse((root / "new-world/base/workroom/deployment").exists())
+                if mode == "legacy":
+                    self.assertNotIn("agentLifetimeDispatchTargets", config)
+                    self.assertEqual(len(genesis["enrollments"]), 3)
+                else:
+                    targets = config["agentLifetimeDispatchTargets"]
+                    self.assertEqual(len(targets), 1)
+                    self.assertEqual(targets[0]["grantResource"], 29530)
+                    self.assertEqual(targets[0]["legacy"]["ticketResource"], 29520)
+                    self.assertNotIn("issueIndex", targets[0]["legacy"])
+                    self.assertNotIn("grantIssueIndex", targets[0])
+                    self.assertEqual(len(genesis["enrollments"]), 7)
+
     def test_fixed_cases_cover_bounded_operations_and_errors(self):
         cases = json.loads((ROOT / "deploy/oracle/acceptance/agent-cases.json").read_text())
         self.assertEqual(len(cases), 9)

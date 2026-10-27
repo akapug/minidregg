@@ -105,7 +105,7 @@ read -r size_kb avail_kb < <(df --output=size,avail -k "$PARENT" | tail -1)
 [ $(( (avail_kb - need_kb) * 100 / size_kb )) -ge 15 ] || { unclaim; refuse "disk: $PARENT would drop below 15% free"; }
 
 # --- copy ---------------------------------------------------------------------
-mkdir -p "$DEST/logs"
+mkdir -p "$DEST/logs" "$DEST/scratch"
 rsync -a --exclude=/.lake "$BASE/" "$DEST/src/"
 cp -al "$BASE/.lake" "$DEST/src/.lake"
 
@@ -169,7 +169,12 @@ build: cd $DEST/src && $SLOT_SH swarm-build lake build <targets>      (per-build
        slot.sh takes the first FREE lane slot of this box (box.env PIPELINE_SLOTS) and polls all of them; it sets no
        thread count, so export LEAN_NUM_THREADS=$threads (box.env) or less. NEVER hand-type a flock chain: a
        \`flock -n A cmd || flock B cmd\` blocks on B while other slots are free, and re-runs a FAILED cmd in B.
-rust:  export CARGO_TARGET_DIR=$DEST/rust-target
+rust:  export CARGO_TARGET_DIR=$DEST/rust-target     (this lane's own; never another lane's or a shared one)
+scratch: $DEST/scratch/   (uniquely named files only; never a bare name in a shared scratchpad)
+pids:  every process you start: \`nohup JOB > $DEST/logs/JOB.log 2>&1 < /dev/null & echo \$! > $DEST/JOB.pid\`; stop it by that PID and nothing else.
+       No \`pkill -f\`, \`pkill -x\`, \`killall\`, \`kill -u\`. No PID file, no kill: tell the parent. Wait on it with ONE background
+       \`scripts/pipeline/box-wait --pid $DEST/JOB.pid ...\`, never a foreground sleep loop.
+reds:  no "was it red before me" baseline runs; reds are named in a run's output (docs/COORDINATION-2026-10-27.md §3)
 who holds what: systemctl --user list-units 'swarm-*'   (every swarm-build is a named scope: lane, pid, command)
 ORIGIN
 echo "mk-lane: OK $DEST at $TIP"

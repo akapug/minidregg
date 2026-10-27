@@ -1,6 +1,6 @@
 # Linear cSHAKE256 absorption gate (2026-09-26)
 
-Source commit: `7941bcd`; `Compiler/Sp800185Cshake256Core.lean` SHA-256
+Source commit: `7941bcd`; `Theory/Sp800185Cshake256Core.lean` SHA-256
 `c4c8aa4b7cf7b61817803426d728a8a6e51321a3b0d96042117d190b8aae0ba0`.
 The prior indexed absorber rescanned the list prefix for each 136-byte block.
 The new executable carries the remaining suffix forward. The general Lean
@@ -13,7 +13,7 @@ In isolated warm snapshot `/tmp/minidregg-overnight-20260926-session`, with
 
 ```text
 lake build Compiler.Sp800185Cshake256Conformance                 PASS 809/809
-lake env lean Compiler/Sp800185Cshake256Conformance.lean         PASS
+lake env lean Theory/Sp800185Cshake256Conformance.lean         PASS
 lake env lean /tmp/minidregg-cshake-axioms.lean                 PASS
 ```
 

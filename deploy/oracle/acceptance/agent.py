@@ -125,6 +125,33 @@ class Operator:
                                      "--socket", self.public, "--intent", source, "--key", key, "--dir", attempt])
         return receipt(read(attempt / "outcome.json"))
 
+    def dispatch_config(self, home, layout):
+        a, caps = self.agent, self.agent["plannedCaps"]
+        if layout["controllerHome"] != str(home):
+            raise ValueError("dispatch layout names another controller home")
+        return {"task": a["dispatch"]["task"], "subject": a["dispatch"]["subject"],
+            "capability": caps["dispatchOwner"], "queryCapability": caps["dispatchOwner"],
+            "custodyKey": str(home / "custody/dispatch.key"),
+            "parentCapability": caps["parentDispatchWitness"], "parentObserveCapability": caps["parentDispatchWitness"],
+            "reserve": "1", "charge": "1", "socketPath": layout["reverseSocket"], "hostUid": os.getuid(),
+            "operatorSocket": layout["operatorSocket"], "operatorPeerUid": layout["operatorPeerUid"],
+            "reserveSigner": {"role": "4", "index": "0",
+                "publicKey": (self.workroom / "agents" / a["route"] / "dispatch.pub").read_bytes().hex(),
+                "keyId": a["dispatch"]["keyId"], "keyEpoch": "2"}}
+
+    def prepare_bootstrap_dispatch(self, layout_file):
+        """Render the real dispatch role for a pre-attachment continuation."""
+        layout = read(layout_file)
+        home = Path(layout["controllerHome"])
+        config = read(self.root / "controller-stage/controller.json")
+        if config.get("dispatchTask") is not None:
+            raise ValueError("bootstrap already configures dispatch; no replacement permitted")
+        config["dispatchTask"] = self.dispatch_config(home, layout)
+        bundle = self.calls / "controller-update"
+        bundle.mkdir(mode=0o700)
+        write(bundle / "controller.json", config)
+        return bundle / "controller.json"
+
     def prepare_controller(self, home):
         """Earn discovery grants, then render an installable private candidate.
 
@@ -204,6 +231,7 @@ class Operator:
                       "parentObserveCapability": caps["parentToolWitness"], "reserve": "5", "charge": "0",
                       "allowedPublications": [], "registeredSharedApplications": [shared],
                       "allowedSessionFamilies": [family], "currentBirthHostSha256": sha(self.host)}, "commands": []}
+        config["dispatchTask"] = self.dispatch_config(home, read(self.root / "controller-create.json"))
         write(stage / "controller.json", config)
         write(self.root / "controller-stage.json", {"protocol": "mini-oracle-controller-stage-v1",
               "stage": str(stage), "home": str(home), "configSha256": sha(stage / "controller.json"),
@@ -211,6 +239,77 @@ class Operator:
               "discoveryGrantReceipts": grant_receipts,
               "nextTool": {"name": "mini_create_application_session", "arguments": {"family": "oracle-session", "application": "oracle-bootstrap-app"}}})
         return self.root / "controller-stage.json"
+
+    def prepare_worker_policy(self, config_file):
+        """Owner-authorized narrowing for the actual initial controller roles.
+
+        This is deliberately limited to the untouched, paused bootstrap parent.
+        Native signed reads, policy authoring, consent and the ordinary install
+        receiver establish the transition; this harness supplies no authority.
+        """
+        a, caps = self.agent, self.agent["plannedCaps"]
+        config = read(config_file)
+        controller = a["controller"]
+        if (config.get("task"), config.get("subject"), config.get("capability"),
+                config.get("queryCapability"), config.get("policyControlCapability")) != (
+                controller["task"], controller["subject"], caps["parentOwner"],
+                caps["parentOwner"], caps["parentControl"]):
+            raise ValueError("bootstrap controller differs from allocated owner authority")
+        workers = []
+        for field, role in (("toolTask", "tool"), ("dispatchTask", "dispatch"), ("providerTask", "provider")):
+            task = config.get(field)
+            if task is not None:
+                if (task.get("task"), task.get("subject")) != (a[role]["task"], a[role]["subject"]):
+                    raise ValueError("bootstrap worker differs from actual allocated role")
+                workers.append(task["subject"])
+        if not workers or len(workers) == 3:
+            raise ValueError("bootstrap repair requires a strict nonempty worker subset")
+        key = self.workroom / "agents" / a["route"] / "controller.key"
+        parent = self.query("parent-before-policy", controller["subject"], controller["task"], caps["parentOwner"], key)
+        grain = read(parent / "view.json")["cell"]["grain"]
+        if any(grain.get(k) != v for k, v in {"task": controller["task"], "generation": "0", "status": "0", "reserved": "0"}.items()):
+            raise ValueError("bootstrap owner repair requires untouched paused generation zero")
+        before = self.query("policy-before", controller["subject"], controller["task"], caps["parentOwner"], key, "policy")
+        view = read(before / "view.json")
+        if view.get("policyId") != controller["task"] or view.get("version") != "0" or view.get("previous") is not None:
+            raise ValueError("bootstrap policy is not the original source policy")
+
+        def authored(label, kind, value):
+            source, output = self.calls / (label + ".json"), self.calls / (label + ".bin")
+            write(source, value)
+            self.call(label, [self.mini, "author", "--host", self.host, "--config", self.config,
+                             "--socket", self.public, "--kind", kind, "--input", source, "--output", output])
+            return output.read_bytes()
+
+        original = {"owner": controller["subject"], "workerSubjects": [a[role]["subject"] for role in ("tool", "dispatch", "provider")], "workerGeneration": "1"}
+        if authored("original-allocation-law", "grain-policy", original) != authored("current-law", "predicate", view["predicate"]):
+            raise ValueError("current source policy differs from exact allocated worker law")
+        desired = {"owner": controller["subject"], "workerGeneration": "1",
+                   "workerSubject" if len(workers) == 1 else "workerSubjects": workers[0] if len(workers) == 1 else workers}
+        expected = authored("configured-worker-law", "grain-policy", desired)
+        source = dict(desired, subject=controller["subject"], intentNonce=str(secrets.randbits(120)),
+                      declarationNonce=str(secrets.randbits(120)), task=controller["task"], control=caps["parentControl"],
+                      domain=view["domain"], semantics=view["semantics"],
+                      expectedPreRoot=read(before / "challenge.json")["authorityRoot"],
+                      expectedVersion=view["version"], expectedAddress=view["address"], currentSourceHex=view["canonical"],
+                      grants=[{"kind": "object", "target": controller["task"], "capability": caps["parentOwner"]}])
+        intent, attempt = self.calls / "owner-policy-install.json", self.calls / "owner-policy-attempt"
+        write(intent, source)
+        self.call("owner-policy-install", [self.mini, "submit", "--host", self.host, "--config", self.config,
+                  "--socket", self.public, "--intent", intent, "--intent-kind", "grain-policy-install-intent",
+                  "--key", key, "--dir", attempt])
+        confirmed = receipt(read(attempt / "outcome.json"))
+        after = self.query("policy-after", controller["subject"], controller["task"], caps["parentOwner"], key, "policy")
+        installed = read(after / "view.json")
+        if (installed.get("policyId"), installed.get("version"), installed.get("previous")) != (controller["task"], "1", view["address"]):
+            raise ValueError("installed owner policy does not extend exact observed source")
+        if authored("installed-worker-law", "predicate", installed["predicate"]) != expected:
+            raise ValueError("installed owner policy differs from actual configured workers")
+        result = self.calls / "worker-policy.json"
+        write(result, {"protocol": "mini-oracle-bootstrap-worker-policy-v1", "controllerConfigSha256": sha(config_file),
+                      "workers": workers, "workerGeneration": "1", "attempt": str(attempt), "receipt": confirmed,
+                      "before": str(before), "after": str(after)})
+        return result
 
     def slot_signers(self, slots, header_name):
         known = {"8008": (self.workroom / "tool.key", self.workroom / "tool.pub"),
@@ -508,13 +607,7 @@ class Operator:
         route["grantAttemptDir"] = str(home / "state/oracle-grant")
         config["toolTask"].update(allowedApplicationLifetimeRoutes=[route], lifetimeApiHostSha256=sha(self.host),
                                  applicationServices=[{"application": "oracle-app", "protocol": "oracle-operations-v1"}])
-        config["dispatchTask"] = {"task": a["dispatch"]["task"], "subject": a["dispatch"]["subject"],
-            "capability": caps["dispatchOwner"], "queryCapability": caps["dispatchOwner"], "custodyKey": str(home / "custody/dispatch.key"),
-            "parentCapability": caps["parentDispatchWitness"], "parentObserveCapability": caps["parentDispatchWitness"],
-            "reserve": "1", "charge": "1", "socketPath": layout["reverseSocket"], "hostUid": os.getuid(),
-            "operatorSocket": layout["operatorSocket"], "operatorPeerUid": layout["operatorPeerUid"],
-            "reserveSigner": {"role": "4", "index": "0", "publicKey": (identity / "dispatch.pub").read_bytes().hex(),
-                              "keyId": a["dispatch"]["keyId"], "keyEpoch": "2"}}
+        config["dispatchTask"] = self.dispatch_config(home, layout)
         check_current("current-start-before-publication")
         write(bundle / "controller.json", config)
         write(self.calls / "activation.json", {"protocol": "mini-oracle-agent-activation-v1", "bundle": str(bundle),
@@ -525,7 +618,7 @@ class Operator:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["prepare-controller", "issue-grant", "prepare-route", "activate"])
+    parser.add_argument("command", choices=["prepare-controller", "prepare-bootstrap-dispatch", "prepare-worker-policy", "issue-grant", "prepare-route", "activate"])
     parser.add_argument("run", type=Path)
     parser.add_argument("input", type=Path, help="controller home for prepare; retained session tool result for issue")
     parser.add_argument("--repo", type=Path)
@@ -542,6 +635,10 @@ def main():
     operator = Operator(args.run, phase)
     if args.command == "prepare-controller":
         result = operator.prepare_controller(args.input)
+    elif args.command == "prepare-worker-policy":
+        result = operator.prepare_worker_policy(args.input)
+    elif args.command == "prepare-bootstrap-dispatch":
+        result = operator.prepare_bootstrap_dispatch(args.input)
     elif args.command == "issue-grant":
         result = operator.issue_grant(args.input)
     elif args.command == "prepare-route":

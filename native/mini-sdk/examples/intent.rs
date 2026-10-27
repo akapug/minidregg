@@ -34,7 +34,7 @@ fn main() -> Result<()> {
                 },
                 capability: Dec::new("9591460230184716503")?,
                 observe_capability: Dec::new("9591460230184716503")?,
-                schema_version: Dec::new("9")?,
+                schema_version: Dec::new("10")?,
                 payload: json!({"type":"content","actions":[{"type":"createAtom","atom":"1","kind":{"type":"text"},"payload":"68656c6c6f"}]}),
             }],
             family: None,

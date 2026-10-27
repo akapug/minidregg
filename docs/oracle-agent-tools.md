@@ -167,6 +167,43 @@ to replay. Changing the invocation under an existing appliance ID conflicts.
 
 ## Verification scope
 
+An already initialized controller keeps its session births, completed results
+and unresolved attempts when an application is enrolled. Stop the controller,
+publish the operator-selected configuration, then run:
+
+```sh
+grain-runtime application-enroll stopped /private/controller.json /private/enrollment.json
+```
+
+The private request has four fields: `protocol` set to
+`mini-controller-application-enrollment-v1`, `mode` set to `application`,
+`expectedBindingSha256` for the prior journal binding, and
+`targetConfigSha256` for the installed configuration bytes. The binding hash is
+SHA-256 of compact JSON with sorted object keys and unescaped UTF-8. Requests
+are limited to 8 KiB. The supported installer exposes the fixed
+`controller-enroll STORE HELPER REQUEST` command for a separate controller user.
+
+Enrollment can append one matching application reference, lifetime route and
+service, or refresh the running unit of one existing route. It preserves the
+controller identity, keys, purses, budgets and other configuration. A fresh
+peer-checked lifetime hello must match the selected unit and exact route
+lineage. Native receipt and current-grant checks still run on every call.
+Unresolved work or an external resident prevents enrollment. Startup refuses
+the changed configuration until enrollment succeeds; it never silently rewrites
+the journal. The command retains its request and exact before/after journal
+bytes, then atomically changes only the binding. Repeating the same request
+recovers that exact completed change; it does not repeat an application call.
+A nonzero exit can follow publication, for example if the final filesystem
+sync fails. Preserve the request and inspect the retained states before an
+explicit retry; do not restore the old configuration or erase the journal.
+
+The separate `bootstrap-dispatch` mode can add the real dispatch task before
+the controller's first admitted operation. It requires fresh signed reads of
+the untouched parent and dispatch purse and an exact owner-authorized policy
+for the configured workers. A failed initial read may remain fenced; enrollment
+does not clear that fence or erase the prior query. New installations configure
+the dispatch identity from the start and do not need this bootstrap repair.
+
 The scoped Rust tests exercise operator profile selection, MCP discovery,
 path/query injection boundaries, input bounds, deterministic invocation bytes,
 and composition with Mini's existing HTTP parser and lifetime dispatch encoder.

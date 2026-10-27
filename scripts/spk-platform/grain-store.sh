@@ -40,11 +40,20 @@ export SPK_COMPLETION_PUBLIC
 
 # One management identity (subject 8, key 8008: the workroom tool key) for
 # every application this host manages. No application is named here.
+# Match the complete configuration line, not unrelated policy field names.
+require_source_line() {
+  [ "$(rg -Fxc -- "$2" "$1" || true)" = 1 ] ||
+    fail "provisioner configuration shape changed; review the lifecycle overlay"
+}
+# shellcheck disable=SC2016 # This is a literal source line, not runtime JSON.
+require_source_line "$REPO/scripts/workroom/provision.sh" \
+  ' "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}'
 # shellcheck disable=SC2016 # Preserve the provisioner's literal variables.
 sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"signatureBinary"|' \
   "$REPO/scripts/workroom/provision.sh" >"$ROOT/source-stage/provision-grain.sh"
-[ "$(rg -c 'lifecycleManagement' "$ROOT/source-stage/provision-grain.sh")" = 2 ] ||
-  fail "provisioner shape changed; review the lifecycle overlay"
+# shellcheck disable=SC2016 # Verify the exact inserted configuration line.
+require_source_line "$ROOT/source-stage/provision-grain.sh" \
+  ' "storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"signatureBinary":"$SIGNATURE_BINARY"}'
 chmod 700 "$ROOT/source-stage/provision-grain.sh"
 
 # Explicit fresh-genesis agent allocation. The overlay generates only native
@@ -82,8 +91,9 @@ if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
   # shellcheck disable=SC2016 # Expanded only inside the staged provisioner.
   sed 's|"lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},|"lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"agentLifetimeDispatchTargets":$SPK_AGENT_TARGETS,|' \
     "$PROVISION_GRAIN" >"$ROOT/source-stage/provision-grain-agents.sh"
-  [ "$(rg -c 'agentLifetimeDispatchTargets' "$ROOT/source-stage/provision-grain-agents.sh")" = 2 ] ||
-    fail "provisioner lifecycle shape changed"
+  # shellcheck disable=SC2016 # Verify exactly one configuration insertion.
+  require_source_line "$ROOT/source-stage/provision-grain-agents.sh" \
+    ' "storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"agentLifetimeDispatchTargets":$SPK_AGENT_TARGETS,"signatureBinary":"$SIGNATURE_BINARY"}'
   PROVISION_GRAIN="$ROOT/source-stage/provision-grain-agents.sh"
   sh "$HERE/agent-genesis-overlay.sh" "$PROVISION_GRAIN" "$SPK_AGENT_ALLOCATION" \
     "$ROOT/source-stage/provision-with-agents.sh"

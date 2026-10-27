@@ -1,0 +1,275 @@
+{
+  "schema": "mini-oracle-u3-acceptance-evidence-v1",
+  "status": "incomplete",
+  "host": "dregg-build",
+  "public_deployment": false,
+  "specialist_panel_scores": null,
+  "runtime": {
+    "app_version": 5,
+    "raw_sha256": "eabd644ffabd7f21ffd9a6e44e6d5d461cb4b1dd2c3db2fcfcdad121de96295d",
+    "raw_bytes": 96985616,
+    "decoded_bytes": 519614440,
+    "candidate_receipt_sha256": "05c15112339540e3d1329babbbd86f231c2a91722b360379090ddf98b61092fa"
+  },
+  "public_data": {
+    "inventory_sha256": "32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a",
+    "files": 26,
+    "bytes": 15046949326,
+    "input_verification_receipt_sha256": "51df8cd4ad1dcfb31ec91c34ffd251f436c71ee332cf028b5db7d164845dc544"
+  },
+  "attempts": [
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3/run-v5",
+      "receipt_sha256": "d2472c21e77664bb3ed540ce19a5c99602086af496002057de367c79f44b59f3",
+      "receipt": {
+        "schema": "mini-oracle-pre-genesis-attempt-v1",
+        "unit": "oracle-u3-v5-20261027.service",
+        "invocation": "95c284d9c38548b9ac745d5bcb77bb62",
+        "run": "/build/lanes/oracle-acceptance-u3/run-v5",
+        "source_manifest_sha256": "19e451b9be3dccb8b6014dde1e16e560073035a4cbd7097e1c17c1299d643c73",
+        "execution_exit": 2,
+        "cleanup_exit": 0,
+        "namespace_created": false,
+        "cause": "fresh-genesis substitution-count guard mismatches one actual baseline config construction",
+        "files": {
+          "exit.json": "0e73b62f189e3b2cca7ea49d69a7391c9ccd6c88b1570f8e541875c2e00e9999",
+          "store-phase.log": "15124c90f626cced92bc510a5d928517b88a3478478aba4743adf09f788d29f8",
+          "world/evidence/store.stderr": "d8dbf9c6e7037b10dbfd61b4e3a0979404148d7e35f27da1250e89badc9a63bd",
+          "world/evidence/store.exit": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+        }
+      }
+    },
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
+      "receipt_sha256": "e5f05948af599901123fa69b52d57719b14777762e90f694eeb607fe9d16eb24",
+      "receipt": {
+        "schema": "mini-oracle-pre-sign-attempt-v1",
+        "unit": "oracle-u3-v5-r2-20261027.service",
+        "invocation": "be2a0b6226784112a9c74b2f2b16f430",
+        "source_manifest_sha256": "073c74088d515cbf610f756611807b45d8ba9fca6aa764ef617f15f20c8ea943",
+        "execution_exit": 1,
+        "cleanup_exit": 0,
+        "logical_genesis_created": true,
+        "physical_namespace_created": false,
+        "cause": "consent provider refuses non-null lifetime authoring target configuration",
+        "files": {
+          "exit.json": "e1c9354d46cd2a77a7459a5feddcab82a5178ac45c650af5142f23682036f68b",
+          "world/store/base/workroom.stderr": "f1229d210ca43301fc81767ce313481c97028b34ea65d53d6312624bd019ff27",
+          "consent-startup.stderr": "d969140f952db7592b6224c8771968b46f14e00b9ebbc448325edaec404da204",
+          "consent-startup.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "world/store/base/workroom/birth-attempt/attempt.json": "9d1065da93a54cc57d54bcea6dee85165ee623faefa95e33554a2c8ccad4b7c8",
+          "world/store/base/workroom/birth-attempt/intent.bin": "fdf84bb5c88974e626861edfb85b71e7770d6e5dec05d3b56c00a1af1380bb1e",
+          "world/store/base/workroom/deployment/pinned-config.json": "e71e7b90bf62f50cf219aeec4cbe8d5e1a5f802625b79e853217a503863827b3",
+          "world/store/base/workroom/store.head-anchor": "6f7197630c8845e6d96afe6fc54b4f42ee874dba9387c2e7c6341b7d38214787"
+        }
+      }
+    },
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3-r3/run-v5",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/r3-state-checkpoint.json",
+      "receipt_sha256": "8a157e02c3b11fd7797927193a689be57fb830827a07b5c38c6d6f137579a638",
+      "receipt": {
+        "schema": "mini-oracle-u3-retained-progress-v1",
+        "status": "incomplete",
+        "run": "/build/lanes/oracle-acceptance-u3-r3/run-v5",
+        "store": "d4090a0c4c356d31",
+        "original_exit": {
+          "execution_exit": 1,
+          "cleanup_exit": 0,
+          "namespace_preserved": true
+        },
+        "continuation_exit": {
+          "execution_exit": 1,
+          "cleanup_exit": 1,
+          "namespace_preserved": true
+        },
+        "successful_phases": {
+          "store": {
+            "exit": 0,
+            "seconds": 316.93870306
+          },
+          "birth-a": {
+            "exit": 0,
+            "seconds": 46.749005079
+          },
+          "install-a": {
+            "exit": 0,
+            "seconds": 121.390343904
+          },
+          "birth-b": {
+            "exit": 0,
+            "seconds": 100.90039587
+          },
+          "install-b": {
+            "exit": 0,
+            "seconds": 106.780818462
+          },
+          "share-a": {
+            "exit": 0,
+            "seconds": 172.817754745
+          }
+        },
+        "files": {
+          "exit.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/exit.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/exit.json",
+            "sha256": "877fbbc9ca8e675f0bed6f8cc62c11feae308e044b2eda93810dd483658cf4cf"
+          },
+          "world-identity.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/world-identity.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/world-identity.json",
+            "sha256": "f179097c16bc8c73e66cd449d96bf4d43979ed13abd594179c4a79c32d1e56c2"
+          },
+          "publication.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/publication.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/publication.json",
+            "sha256": "872aea444f6aebffb144c3ceb50415d463c5fdcb19aeb44d695c82612779d69c"
+          },
+          "continuations/controller-create-1/prepared.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/prepared.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/prepared.json",
+            "sha256": "cbf7c6660ed27d64a1ef396607644df8bf4b2246783072a0cce502f47eefdee4"
+          },
+          "continuations/controller-create-1/exit.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/exit.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/exit.json",
+            "sha256": "143100ba54fdca1d9b91b9a86c335bf8bc0cfc003f28498fd2092c4e6bbc5f55"
+          },
+          "continuations/controller-create-1/status-9101.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/status-9101.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/status-9101.json",
+            "sha256": "af48276d83f2f84b307a8d81f1d38630d6e575209f54920be5514363c916c3ec"
+          },
+          "continuations/controller-create-1/status-9201.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/status-9201.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/status-9201.json",
+            "sha256": "97a1d1adbb586204841b3f447679db886bead1df2ca2a5c3d7d3e2de40a46547"
+          },
+          "agent-lifetime/controller-create.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-create.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-create.json",
+            "sha256": "b719afca28ab8816728391884b732639eeffb2b26b0fb48d81cf293b2e2463f1"
+          },
+          "agent-lifetime/controller-stage-receipt.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-stage-receipt.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-stage-receipt.json",
+            "sha256": "974ee9f301a22c9ea83ca13bf7d83113ebb695ee0d196cda35851b1bce7329d3"
+          },
+          "agent-lifetime/controller-bootstrap-start.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-bootstrap-start.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-bootstrap-start.json",
+            "sha256": "46f91f42a350b6c7f12f4d77fb6d3b2923620f471f6e4d844076d08c44e5bb78"
+          },
+          "agent-lifetime/session-birth.request-id": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.request-id",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.request-id",
+            "sha256": "8e6cbc111a38f9919eab3e9e61193e27df62fe24d2e6730f91ea71e286f20579"
+          },
+          "agent-lifetime/session-birth.arguments.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.arguments.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.arguments.json",
+            "sha256": "bcf0e0e5fd2952d0fe7fdf7091a0a95d2602289d8450aacc0909227982651d94"
+          },
+          "agent-lifetime/session-birth.result.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.result.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.result.json",
+            "sha256": "3b9f68894d5ee542de926cd6fe1136e6562df994703aa5507f739fc6bc7d2b1a"
+          },
+          "agent-lifetime/session-birth.stderr": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.stderr",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.stderr",
+            "sha256": "846e96ac0f1f35eff862332858fa2ba06f758679a3e88017acd690350be5ff64"
+          },
+          "agent-lifetime/controller-final-journal.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-final-journal.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-final-journal.json",
+            "sha256": "37f2a43a4fb161fe4b02775d929d8f64c906084a44897dc8503228f5451bda85"
+          },
+          "agent-lifetime/consent-memory-before-stop-cleanup.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/consent-memory-before-stop-cleanup.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/consent-memory-before-stop-cleanup.json",
+            "sha256": "27bdaeb47e2aa921d67394a352468ea83a7d5fe3aaa270f16a4ea0066b5b5315"
+          },
+          "agent-lifetime/controller-stop-cleanup.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-stop-cleanup.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-stop-cleanup.json",
+            "sha256": "95cf81e696d4c15acb7eef4a0045daa6e801570a16ce5a8f961b3f3649da2755"
+          }
+        },
+        "session_request_id": "715a6097ed194196f68356d70a3d7ddc",
+        "session_result": {
+          "isError": true,
+          "operationId": null,
+          "requestId": "715a6097ed194196f68356d70a3d7ddc",
+          "result": "foreground tool requires an attached, reconciled idle task",
+          "type": "tool-complete",
+          "v": 1
+        },
+        "diagnostic": {
+          "path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/controller-service-logs.json",
+          "sha256": "d2ff8ef22864c440d9eb5cfd2ccea78d06a884799b1d00d9ccf274698e2d96d3",
+          "cause": "consent helper native durable read failed: sqlite-store Read-only file system (os error 30)"
+        },
+        "no_application_START": true,
+        "no_session_birth": true,
+        "no_retry": true,
+        "report_json_present": false
+      }
+    }
+  ],
+  "qualification_limits": [
+    "Both v5 applications were admitted and installed; 26 public files were published and application A was shared. No application START, query, agent lifetime dispatch or STOP has completed in U3.",
+    "R3 initial account creation failed after successful installs. Its original exit1/cleanup0 and exact pre-continuation files remain retained.",
+    "Supported pending-create recovery reused the same Store and reserved UID100064. Controller stage and process/socket readiness succeeded, but first attach failed on consent verifier SQLite EROFS before session creation.",
+    "The session tool returned a definite error with operationId null. Its request ID and evidence remain retained, with no resend.",
+    "Continuation execution_exit1/cleanup_exit1 reflects repeated unmount of already-unmounted volumes. Authenticated native inventory and independent findmnt confirm both volumes are settled, unpaused and unmounted; all owned services stopped.",
+    "The cleanup planner and shell integration are qualified fixtures/read-only observations, not a successful continuation or admission claim.",
+    "Old U2 partial results and separate copied-Store consent/STOP benchmarks remain separate."
+  ],
+  "next_work": [
+    "Repair and qualify exact production consent-service filesystem needs while preserving independent verification and controller isolation.",
+    "Correct the source setup/configured worker-policy mismatch identified during diagnosis using ordinary owner authority.",
+    "Review a new explicit retained-state continuation boundary; preserve the definite session refusal and all prior identities without blind resend.",
+    "Complete genuine two-grain receiving, lifetime-tool, authority, restart, data-refusal and STOP/reconciliation journey."
+  ],
+  "continuation_decision": {
+    "retained_attempt": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
+    "definite_pre_sign_refusal": true,
+    "signed_call_present": false,
+    "supported_retry_available": false,
+    "reason": "native retry requires call.bin; submit uses exclusive creates; provisioning has no post-genesis resume",
+    "selected_next_attempt": "fresh isolated R3 only after parser and distinct-UID consent transport qualification",
+    "retained_store_mutated": false,
+    "historical_decision": true
+  },
+  "qualified_prerequisites": {
+    "consent_exact_original_config": {
+      "receipt_sha256": "ff3319ae835295e70f651e8553e344a8953ef7a8730bca3352e0b70a35737ee2",
+      "passed": true
+    },
+    "consent_distinct_uid_copied_genesis_store": {
+      "receipt_sha256": "7e6660d445ab8fed9ebcf3dfc6836e6b9cbed44e81a786d26632bca88feaa57e",
+      "passed": true,
+      "max_rss_kib": 101504,
+      "full_history_or_production_installer_qualification": false
+    }
+  },
+  "current_continuation": {
+    "store": "d4090a0c4c356d31",
+    "selected_next_action": "diagnose and qualify supported retained-state continuation; no new Store or resend",
+    "current_boundary": "failed first controller attach before session birth",
+    "request_id": "715a6097ed194196f68356d70a3d7ddc",
+    "services_stopped": true,
+    "report_passed": false
+  },
+  "cleanup_observation": {
+    "host": "dregg-build",
+    "path": "/build/lanes/oracle-volume-cleanup-probe-20261027/retained-r3-plan.json",
+    "planner_sha256": "dd7023cdf029ed55e0e87c736bc3d0b2a6613b4acd6d30e68b6bde6437d32737",
+    "actions": [
+      "already-unmounted",
+      "already-unmounted"
+    ],
+    "admission_or_cleanup_mutation": false
+  }
+}

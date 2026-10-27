@@ -34,7 +34,7 @@ produces on the turn `Turn.ofIntent` derives from the admitted intent.
 
 ## THE LIST
 
-Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
+Empty.  `TurnCensus.census_shapes_admitted_at_w0` decides it for all 48 shapes and
 `TurnCensus.theList_empty`; `TurnCensus.theListWithoutRomBirth_eq` is the pole
 (without ROM birth the list is exactly the six source-creating receivers).
 
@@ -76,28 +76,29 @@ Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
 ## The statement left for T4
 
 ```lean
-theorem host_submit_is_step
-    (H : History deployedR TransactionId StableEvent Digest)
-      -- stage F: WorldRoot.cshakeHistory encode logRoot0 legBytes imageBytes
-    {config : NativeHost.Config} {opened : NativeHost.Opened config}
-    {intent : DataIntent ResourceBirthCodec.rootBytes}
-    (admitted : NativeHostReplay.NativeAdmission config opened intent)
-    {w : World deployedR TransactionId Digest}
-    (represents : DeployedRepresents opened.durable w)
-    {t : DTurn deployedR Digest} (derived : Turn.ofAdmission bridge H w admitted = .ok t)
-    {ready : Ready ResourceBirthCodec.rootBytes opened.durable.image opened.durable.baseHeight
-      opened.durable.base opened.durable.snapshot intent}
-    (prepared : DurableCheckpoint.prepare opened.durable.image opened.durable.baseHeight
-      opened.durable.base opened.durable.snapshot opened.durable.withinLog opened.durable.resumed
-      intent = .inl ready)
-    (stored : Bool) {receipt : NativeHostCodec.Receipt}
-    (sealed : NativeHost.historicalReceipt config
-      (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored)
-      intent.transactionId intent.event.eventId = some receipt) :
-    ∃ w', World.admit H w t = .ok w' ∧
-      DeployedRepresents (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored) w' ∧
-      receipt.acceptedCount = (w.head.map Prod.fst).getD 0 + 1 ∧
-      receipt.worldRoot = WorldRoot.rootOf S w'
+-- statement only; not proved in this repo
+  theorem host_submit_is_step
+      (H : History deployedR TransactionId StableEvent Digest)
+        -- stage F: WorldRoot.cshakeHistory encode logRoot0 legBytes imageBytes
+      {config : NativeHost.Config} {opened : NativeHost.Opened config}
+      {intent : DataIntent ResourceBirthCodec.rootBytes}
+      (admitted : NativeHostReplay.NativeAdmission config opened intent)
+      {w : World deployedR TransactionId Digest}
+      (represents : DeployedRepresents opened.durable w)
+      {t : DTurn deployedR Digest} (derived : Turn.ofAdmission bridge H w admitted = .ok t)
+      {ready : Ready ResourceBirthCodec.rootBytes opened.durable.image opened.durable.baseHeight
+        opened.durable.base opened.durable.snapshot intent}
+      (prepared : DurableCheckpoint.prepare opened.durable.image opened.durable.baseHeight
+        opened.durable.base opened.durable.snapshot opened.durable.withinLog opened.durable.resumed
+        intent = .inl ready)
+      (stored : Bool) {receipt : NativeHostCodec.Receipt}
+      (sealed : NativeHost.historicalReceipt config
+        (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored)
+        intent.transactionId intent.event.eventId = some receipt) :
+      ∃ w', World.admit H w t = .ok w' ∧
+        DeployedRepresents (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored) w' ∧
+        receipt.acceptedCount = (w.head.map Prod.fst).getD 0 + 1 ∧
+        receipt.worldRoot = WorldRoot.rootOf S w'
 ```
 
 Its state half is `confirmed_represents` (proved here, for any bridge).  What

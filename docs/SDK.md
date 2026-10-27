@@ -92,10 +92,10 @@ started, uncompleted delivery is UNKNOWN and is never re-sent (`mini-discord-mir
 
 `@minidregg/sdk` builds intents, computes `InvocationId`, lowers, renders `explain()`, checks
 confirmations, signs, and runs the attempt machine — byte-identical to the Rust core. It has no
-consent process: a browser is not a full peer. A web page or extension reaches the member's
-local Host and consent process through a native-messaging bridge to a member-held replica (the
-extension precondition, `SDK-DESIGN.md` §8); until that bridge or a thin-peer consent producer
-exists, a browser surface must not sign Mini plans.
+consent process and no transport: a browser is not a full peer, and nothing in the SDK reaches a
+Host. A native-messaging bridge to a member-held replica is the extension precondition
+(`SDK-DESIGN.md` §8) and does not exist; until it or a thin-peer consent producer does, a browser
+surface must not sign Mini plans.
 
 ## Tests and the differential
 
@@ -140,7 +140,7 @@ has no ssh client of its own.
 The route is held end to end by `native/mini-sdk/tests/ssh-e2e.sh ART_DIR` (ART_DIR from
 `scripts/pipeline/fetch-artifacts`): it starts a scratch Store behind the candidate Host, an
 unprivileged sshd on 127.0.0.1 with throwaway host and client keys whose only key is forced to
-`mini socket-proxy`, and runs `tests/ssh_e2e.rs`: DESCRIBE over ssh equals the unix socket on one
+`mini socket-proxy`, and runs `native/mini-sdk/tests/ssh_e2e.rs`: DESCRIBE over ssh equals the unix socket on one
 reused session, a planted wrong or unknown host key and an unauthorised key are refused by name with
 nothing sent, and the proxy refuses an unpinned config and an operator-only operation.
 

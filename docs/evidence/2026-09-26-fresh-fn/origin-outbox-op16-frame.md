@@ -1,6 +1,6 @@
 # Prepared R opcode-16 response frame
 
-`scripts/probe-fn-origin-outbox-op16-frame.lean` ran against the coherent
+`scripts.probe-fn-origin-outbox-op16-frame [deleted 1e68f88d]` ran against the coherent
 catalog `Host.Main` build. It constructed a selected-maximum synthetic R
 carrier of 1,516,384 bytes and a 256-byte Message-ID. It used Host's actual
 hex and receipt JSON helpers and mirrored every field returned by

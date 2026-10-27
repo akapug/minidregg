@@ -115,7 +115,7 @@ pub(super) fn grains(site: &Site) -> Page {
                     escape(g["indexName"].as_str().unwrap_or("")),
                     escape(g["state"].as_str().unwrap_or("")),
                     if g["shared"] == true { "shared with you" } else { "yours" },
-                    escape(g["origin"].as_str().unwrap_or("")),
+                    url(g["origin"].as_str().unwrap_or("")),
                     escape(g["origin"].as_str().unwrap_or("")),
                     id = escape(id)
                 ));
@@ -143,10 +143,11 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
             let r = &value["receipt"];
             let origin = r["origin"].as_str().unwrap_or("");
             let mut out = format!(
-                "<p><strong>{}</strong> <code>{id}</code>: {} (class {}); origin <a href=\"{o}\" data-full>{o}</a></p>",
+                "<p><strong>{}</strong> <code>{id}</code>: {} (class {}); origin <a href=\"{u}\" data-full>{o}</a></p>",
                 escape(r["indexName"].as_str().unwrap_or("")),
                 escape(value["state"].as_str().unwrap_or("?")),
                 escape(r["class"].as_str().unwrap_or("?")),
+                u = url(origin),
                 o = escape(origin)
             );
             if let Some(runs) = r["runs"].as_array() {
@@ -201,17 +202,18 @@ pub(super) fn grain_action(site: &Site, n: &str, action: &str, form: &std::colle
                     let body = match r["bootstrapToken"].as_str() {
                         Some(token) => format!(
                             "<p>Your route on <code>{id}</code> is ready. The grain lives on its own origin and keeps its own cookie, so the one-time token is posted there from your browser, not from here:</p>\
-                             <form method=\"post\" action=\"{o}{}\" target=\"_blank\" data-full data-autosubmit><input type=\"hidden\" name=\"token\" value=\"{}\"><button>Sign in to {id} on {o}</button></form>\
+                             <form method=\"post\" action=\"{}\" target=\"_blank\" data-full data-autosubmit><input type=\"hidden\" name=\"token\" value=\"{}\"><button>Sign in to {id} on {o}</button></form>\
                              <p class=\"note\">Then <a href=\"/grain/{id}/pane\">open it in a pane</a>. The token works once; a fresh route needs a new share.</p>{}",
-                            escape(r["bootstrapPath"].as_str().unwrap_or("/__mini/bootstrap")),
+                            url(&format!("{origin}{}", r["bootstrapPath"].as_str().unwrap_or("/__mini/bootstrap"))),
                             escape(token),
                             notice(r),
                             o = escape(&origin)
                         ),
                         None => format!(
-                            "<p>{}</p><p><a href=\"{o}\" data-full>{o}</a> · <a href=\"/grain/{id}/pane\">open in a pane</a></p>{}",
+                            "<p>{}</p><p><a href=\"{u}\" data-full>{o}</a> · <a href=\"/grain/{id}/pane\">open in a pane</a></p>{}",
                             escape(value["detail"].as_str().unwrap_or("")),
                             notice(r),
+                            u = url(&origin),
                             o = escape(&origin)
                         ),
                     };
@@ -237,7 +239,7 @@ pub(super) fn pane(site: &Site, n: &str) -> Page {
             status: 200,
             title: format!("{id}"),
             stamp: Stamp::None,
-            body: format!("<iframe class=\"grain\" src=\"{o}\" title=\"{id}\" sandbox=\"allow-scripts allow-forms allow-same-origin allow-popups\"></iframe><p class=note><a href=\"{o}\" data-full>{o}</a></p>", o = escape(&origin)),
+            body: format!("<iframe class=\"grain\" src=\"{u}\" title=\"{id}\" sandbox=\"allow-scripts allow-forms allow-same-origin allow-popups\"></iframe><p class=note><a href=\"{u}\" data-full>{o}</a></p>", u = url(&origin), o = escape(&origin)),
         },
         None => Page { status: 200, title: format!("Grain {id}"), stamp: Stamp::None, body: super::body::outcome_html(&ending, &[]) },
     }
