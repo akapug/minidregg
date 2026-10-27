@@ -3310,6 +3310,15 @@ fn run(mut args: Args) -> Result<()> {
             client_consent::resident(consent, settings)
         }
         #[cfg(unix)]
+        "codec-resident" => {
+            // HOT-PATH 2a: one storeless codec Host per image+settings binding for every `mini`
+            // process of this user, started by the first `local_frame` that finds none listening.
+            let host = path(args.required("host")?);
+            let settings = path(args.required("settings")?);
+            args.finish()?;
+            client_consent::codec_resident(host, settings)
+        }
+        #[cfg(unix)]
         "serve-operator" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
