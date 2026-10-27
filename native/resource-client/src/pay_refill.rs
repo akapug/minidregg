@@ -36,7 +36,7 @@ fn kinded(kind: &str, body: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn inspect(ctx: &Context, stem: &str, kind: &str, bytes: &[u8]) -> Result<Value> {
-    let body = invoke(ctx, stem, 8, &kinded(kind, bytes)?)?;
+    let body = invoke(ctx, stem, mini_sdk::host_operations::INSPECT, &kinded(kind, bytes)?)?;
     serde_json::from_slice(&body).map_err(|error| format!("invalid {kind} inspection: {error}"))
 }
 
@@ -99,7 +99,7 @@ fn submit(mut args: Args) -> Result<()> {
     let ctx = Context { host, config, socket, dir };
     let signing = crate::fsio::read_secret_in_private_dir(&key_path)?;
 
-    let view_bytes = invoke(&ctx, "pay-view", 107, &[])?;
+    let view_bytes = invoke(&ctx, "pay-view", mini_sdk::host_operations::PAY_VIEW, &[])?;
     let view = inspect(&ctx, "pay-view-inspect", "pay-view", &view_bytes)?;
     let authority_root = view
         .get("authorityRoot")
@@ -108,9 +108,9 @@ fn submit(mut args: Args) -> Result<()> {
     let command = json!({"subject":subject,"capability":capability,"account":account,
         "task":task,"amount":amount,"gain":gain,"nonce":crate::fsio::random_nonce()?,
         "expectedAuthorityRoot":authority_root});
-    let command_bytes = invoke(&ctx, "command", 7, &kinded("pay-refill", command.to_string().as_bytes())?)?;
+    let command_bytes = invoke(&ctx, "command", mini_sdk::host_operations::AUTHOR, &kinded("pay-refill", command.to_string().as_bytes())?)?;
     retain(&ctx.dir, "command.bin", &command_bytes)?;
-    let plan = invoke(&ctx, "plan", 113, &command_bytes)?;
+    let plan = invoke(&ctx, "plan", mini_sdk::host_operations::PAY_REFILL_PLAN, &command_bytes)?;
     retain(&ctx.dir, "plan.bin", &plan)?;
     let plan_view = inspect(&ctx, "plan-inspect", "pay-plan", &plan)?;
     if plan_view.pointer("/command/canonical").and_then(Value::as_str) != Some(&hex(&command_bytes)) {
@@ -122,9 +122,9 @@ fn submit(mut args: Args) -> Result<()> {
         .ok_or("refill plan lacks a canonical header")?;
     let header = crate::decode_hex(header)?;
     let signature = signing.sign(&header).to_bytes();
-    let ingress = invoke(&ctx, "ingress", 114, &pair(&plan, &signature)?)?;
+    let ingress = invoke(&ctx, "ingress", mini_sdk::host_operations::PAY_REFILL_ASSEMBLE, &pair(&plan, &signature)?)?;
     retain(&ctx.dir, "ingress.bin", &ingress)?;
-    let result = invoke(&ctx, "submit", 115, &ingress)?;
+    let result = invoke(&ctx, "submit", mini_sdk::host_operations::PAY_REFILL_SUBMIT, &ingress)?;
     outcome(&ctx, "outcome", &result)
 }
 
@@ -137,7 +137,7 @@ fn lookup(mut args: Args) -> Result<()> {
     let ingress = bounded(&dir.join("ingress.bin"), LIMIT)?;
     let stem = format!("lookup-{}", crate::fsio::random_nonce()?);
     let ctx = Context { host, config, socket, dir };
-    let result = invoke(&ctx, &stem, 116, &ingress)?;
+    let result = invoke(&ctx, &stem, mini_sdk::host_operations::PAY_REFILL_LOOKUP, &ingress)?;
     outcome(&ctx, &stem, &result)
 }
 

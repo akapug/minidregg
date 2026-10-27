@@ -207,12 +207,12 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         &original.host,
         &original.operator_socket,
         &original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &request,
     )?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan = expect_reply(&frame, 78)?;
+    let plan = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?;
     create_private(&directory.join("plan.bin"), plan)?;
     let inspection = source_inspect(
         &original.host,
@@ -344,12 +344,12 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &pinned.request,
     )?;
     create_private(&directory.join("payer-current-plan.frame"), &current)?;
     sync_directory_ancestors(&directory)?;
-    if expect_reply(&current, 78)? != pinned.plan {
+    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime payer plan changed at current verified image".into());
     }
     let slots = retained
@@ -464,12 +464,12 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &pinned.request,
     )?;
     create_private(&directory.join("seal-current-plan.frame"), &current)?;
     sync_directory_ancestors(&directory)?;
-    if expect_reply(&current, 78)? != pinned.plan {
+    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime paid plan changed at current verified image".into());
     }
     let app_slots = retained
@@ -512,13 +512,13 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        79,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE,
         &payload,
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let ingress = expect_reply(&frame, 79)?;
+    let ingress = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
@@ -624,7 +624,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
             &pinned.original.host,
             &pinned.original.operator_socket,
             &pinned.original.config,
-            76,
+            mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT,
             &ingress,
         )
         .map_err(|error| format!("lifetime paid op76 uncertain; use exact lookup: {error}"))
@@ -632,7 +632,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let committed = expect_reply(&frame, 76)?;
+    let committed = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
     create_private(&directory.join("committed.bin"), committed)?;
     let inspection = source_inspect(
         &pinned.original.host,
@@ -686,13 +686,13 @@ pub(crate) fn lifetime_paid_lookup(directory: &Path) -> Result<()> {
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        77,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP,
         &ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let outcome_bytes = expect_reply(&frame, 77)?;
+    let outcome_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP)?;
     create_private(
         &directory.join(format!("{stem}.outcome.bin")),
         outcome_bytes,

@@ -39,8 +39,8 @@ const SSH_BLOB_PREFIX: [u8; 19] = [
 const MEMO_LENGTH: usize = 400;
 /// The template's value: the operator has not published the enrollment address yet.
 const ADDRESS_PLACEHOLDER: &str = "EMBER_ENROL_ADDRESS";
-const QUOTE_OP: u8 = 121;
-const ENROLMENT_VIEW_OP: u8 = 112;
+const QUOTE_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE;
+const ENROLMENT_VIEW_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_VIEW;
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 // ---------------------------------------------------------------- the memo (PayEnrolMemo)

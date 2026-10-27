@@ -122,7 +122,7 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
         &directory.join("expected-selector.bin"),
         transport::HOST_MAX_FRAME - 1,
     )?;
-    let fresh_frame = session_invoke(&host, &operator_socket, &config, 48, &expected)?;
+    let fresh_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_PAID_DISPATCH_PLAN, &expected)?;
     create_private(&directory.join("fresh-paid-plan.frame"), &fresh_frame)?;
     sync_directory_ancestors(&directory)?;
     exact_current_plan(&fresh_frame, &plan)?;

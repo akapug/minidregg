@@ -116,7 +116,7 @@ pub(crate) fn stale_refusal(
             let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
             payload.extend_from_slice(kind);
             payload.extend_from_slice(encoded);
-            session_invoke(host, socket, config, 8, &payload)
+            session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &payload)
                 .ok()
                 .filter(|frame| frame.first() == Some(&8))
                 .and_then(|frame| serde_json::from_slice::<Value>(&frame[1..]).ok())
@@ -232,7 +232,7 @@ pub(crate) fn inspect(
     input: &Path,
     output: &Path,
 ) -> Result<Value> {
-    transform(host, socket, config, 8, Some(kind), input, output)?;
+    transform(host, socket, config, mini_sdk::host_operations::INSPECT, Some(kind), input, output)?;
     serde_json::from_slice(&bounded(output, 8 * transport::HOST_MAX_FRAME)?)
         .map_err(|error| format!("invalid enrollment Host inspection: {error}"))
 }
@@ -383,7 +383,7 @@ fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     let retained = bounded(&directory.join("plan.frame"), transport::HOST_MAX_FRAME)?;
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
     let request = pair(&observation, &pin.command)?;
-    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &request);
+    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_PLAN, &request);
     let _ = take_host_decision();
     if current.as_ref().is_ok_and(|frame| *frame == retained) {
         return Ok(true);
@@ -397,7 +397,7 @@ fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     if pin.pinned_at.is_none() {
         return Ok(false);
     }
-    match crate::client_consent::operator_plan(&pin.host, &pin.config, 86, &request, &pin.plan) {
+    match crate::client_consent::operator_plan(&pin.host, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_PLAN, &request, &pin.plan) {
         Ok(()) => Ok(true),
         Err(_) => {
             let _ = crate::client_consent::take_stale_observation();
@@ -631,7 +631,7 @@ pub(crate) fn signed_factory_observation(
         input.host,
         input.socket,
         input.config,
-        7,
+        mini_sdk::host_operations::AUTHOR,
         Some("intent"),
         &input.directory.join("query.json"),
         &input.directory.join("query.bin"),
@@ -661,7 +661,7 @@ pub(crate) fn signed_factory_observation(
         input.config,
         &observation,
         "challenge",
-        4,
+        mini_sdk::host_operations::OBSERVATION_CHALLENGE,
         &request,
     )?;
     let challenge_json = inspect(
@@ -684,7 +684,7 @@ pub(crate) fn signed_factory_observation(
         input.host,
         input.socket,
         input.config,
-        9,
+        mini_sdk::host_operations::SIGNATURES,
         None,
         &observation.join("signatures.json"),
         &observation.join("signatures.bin"),
@@ -696,7 +696,7 @@ pub(crate) fn signed_factory_observation(
         input.config,
         &observation,
         "signed-observation",
-        10,
+        mini_sdk::host_operations::OBSERVATION_ASSEMBLE,
         &pair(&challenge, &signature_bytes)?,
     )?;
     let _view = staged_invoke(
@@ -705,7 +705,7 @@ pub(crate) fn signed_factory_observation(
         input.config,
         &observation,
         "view",
-        5,
+        mini_sdk::host_operations::AUTHORIZED_QUERY,
         &signed,
     )?;
     let view_json = inspect(
@@ -1072,7 +1072,7 @@ fn plan(mut args: Args) -> Result<()> {
                 &host,
                 &public_socket,
                 &retained_config,
-                7,
+                mini_sdk::host_operations::AUTHOR,
                 Some(COMMAND_KIND),
                 &directory.join("source.json"),
                 &directory.join("command.bin"),
@@ -1098,7 +1098,7 @@ fn plan(mut args: Args) -> Result<()> {
                 &retained_config,
                 &directory,
                 "plan",
-                86,
+                mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_PLAN,
                 &pair(&signed, &command)?,
             )?;
             let plan_view = inspect(
@@ -1650,7 +1650,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
         if evidence["lookupFrameSha256"] != digest(&frame) || evidence["ingressSha256"] != digest(&ingress) {
             return Err("retained admission frame or ingress changed".into());
         }
-        retain_exact(&state.join("welcome-confirmed.bin"), reply(&frame,89)?)?;
+        retain_exact(&state.join("welcome-confirmed.bin"), reply(&frame,mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP)?)?;
         let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join("welcome-confirmed.bin"),&state)?;
         if evidence["receipt"] != match_join_receipt(&outcome,admitted)? {
             return Err("retained admission receipt changed".into());
@@ -1659,14 +1659,14 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
     } else {
         // This path has no submit operation. A transport failure, absent result or
         // refusal leaves retained ingress available for another read-only lookup.
-        let frame = session_invoke(Path::new(""),&socket,&config,89,&ingress)
+        let frame = session_invoke(Path::new(""),&socket,&config,mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP,&ingress)
             .map_err(|e| format!("join receipt lookup unresolved; retry this exact welcome (no submission): {e}"))?;
         let stem = format!("welcome-lookup-{}",crate::fsio::random_nonce()?);
-        retained_frame(&state,&stem,&frame,89)?;
+        retained_frame(&state,&stem,&frame,mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP)?;
         let outcome = local_join_inspect(verifier,&verifier_pin,&config,"outcome",&state.join(format!("{stem}.bin")),&state)?;
         let receipt = match_join_receipt(&outcome,admitted)?;
         retain_exact(&state.join("welcome-confirmed.frame"),&frame)?;
-        retain_exact(&state.join("welcome-confirmed.bin"),reply(&frame,89)?)?;
+        retain_exact(&state.join("welcome-confirmed.bin"),reply(&frame,mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP)?)?;
         let evidence = json!({"type":"minidregg-authenticated-enrollment-receipt-v1",
             "receipt":receipt,"ingressSha256":digest(&ingress),"lookupFrameSha256":digest(&frame)});
         save_json_staged(&evidence_path,&evidence)?;
@@ -1737,7 +1737,7 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         return Err("enrollment Plan inspection changed before signing".into());
     }
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
-    crate::client_consent::operator_plan(&pin.host, &pin.config, 86,
+    crate::client_consent::operator_plan(&pin.host, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_PLAN,
         &pair(&observation, &pin.command)?, &pin.plan).map_err(|error| format!(
             "{error}; a plan the source has moved under (a tick or certify since it was planned) is not signed: `mini enroll --action plan` with this exact --dir retires it and plans the same request again (a home-identity member then signs possession over the new plan)"
         ))?;
@@ -1783,7 +1783,7 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &pin.config,
         &directory,
         "ingress",
-        87,
+        mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_ASSEMBLE,
         &assembly,
     )?;
     let view = inspect(
@@ -1904,8 +1904,8 @@ fn lookup_exact(directory: &Path, pin: &Pin, ingress: &[u8]) -> Result<()> {
             )
             .count()
     );
-    let frame = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 89, ingress)?;
-    let value = outcome(directory, pin, &stem, &frame, 89)?;
+    let frame = session_invoke(&pin.host, &pin.operation_socket, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP, ingress)?;
+    let value = outcome(directory, pin, &stem, &frame, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_LOOKUP)?;
     confirmed_lookup(&value)?;
     result(directory, pin, &value)
 }
@@ -1922,7 +1922,7 @@ fn refused_without_record(directory: &Path, pin: &Pin, frame: &[u8], ingress: &[
     let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
     payload.extend_from_slice(kind);
     payload.extend_from_slice(encoded);
-    let decoded = session_invoke(&pin.host, &pin.public_socket, &pin.config, 8, &payload)
+    let decoded = session_invoke(&pin.host, &pin.public_socket, &pin.config, mini_sdk::host_operations::INSPECT, &payload)
         .ok()
         .filter(|reply| reply.first() == Some(&8))
         .and_then(|reply| serde_json::from_slice::<Value>(&reply[1..]).ok());
@@ -1970,12 +1970,12 @@ fn submit(directory: &Path) -> Result<()> {
         &json!({"format":FORMAT,"operation":88,
         "ingressSha256":digest(&ingress),"status":"may-have-submitted"}),
     )?;
-    match session_invoke(&pin.host, &pin.operation_socket, &pin.config, 88, &ingress) {
+    match session_invoke(&pin.host, &pin.operation_socket, &pin.config, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_SUBMIT, &ingress) {
         Ok(frame) if frame.first() == Some(&crate::RESPONSE_NO_RECORD) => {
             refused_without_record(&directory, &pin, &frame, &ingress)
         }
         Ok(frame) => {
-            let value = outcome(&directory, &pin, "submit", &frame, 88)?;
+            let value = outcome(&directory, &pin, "submit", &frame, mini_sdk::host_operations::PARTICIPANT_KEY_ENROLLMENT_SUBMIT)?;
             if confirmed(&value).is_ok() {
                 return result(&directory, &pin, &value);
             }
@@ -2203,7 +2203,7 @@ mod tests {
             Path::new("/missing-config"),
             &root,
             "challenge",
-            4,
+            mini_sdk::host_operations::OBSERVATION_CHALLENGE,
             b"query",
         )
         .unwrap();

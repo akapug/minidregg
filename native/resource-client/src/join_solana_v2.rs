@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use std::time::{Duration, Instant};
 
-const STATUS_OP: u8 = 181;
-const QUOTE_OP: u8 = 182;
+const STATUS_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_VIEW;
+const QUOTE_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_QUOTE;
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value

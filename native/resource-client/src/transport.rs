@@ -2442,11 +2442,11 @@ mod tests {
             write_frame(&mut stream, &[13, 1]).unwrap();
         });
         assert_eq!(
-            invoke_pinned(&socket, &config, &host_hex, 13, b"4").unwrap(),
+            invoke_pinned(&socket, &config, &host_hex, mini_sdk::host_operations::FN_ACK, b"4").unwrap(),
             vec![13, 1]
         );
         thread.join().unwrap();
-        assert!(invoke_pinned(&socket, &config, &"AB".repeat(32), 13, b"4").is_err());
+        assert!(invoke_pinned(&socket, &config, &"AB".repeat(32), mini_sdk::host_operations::FN_ACK, b"4").is_err());
         fs::remove_file(socket).unwrap();
         fs::remove_file(config).unwrap();
         fs::remove_dir(directory).unwrap();
@@ -2516,8 +2516,8 @@ mod tests {
                 Some([vec![1, 6, 0, 0, 0], b"config".to_vec(), vec![2, 42]].concat())
             );
         });
-        assert_eq!(invoke(&socket, &config, 2, &[42]).unwrap(), vec![2, 7, 8]);
-        assert!(invoke(&socket, &config, 2, &[42])
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::SUBMIT, &[42]).unwrap(), vec![2, 7, 8]);
+        assert!(invoke(&socket, &config, mini_sdk::host_operations::SUBMIT, &[42])
             .unwrap_err()
             .contains("uncertain"));
         thread.join().unwrap();
@@ -2559,12 +2559,12 @@ done"#;
             };
             let _ = supervise(&listener, None, b"config", &[0; 32], false, &mut start);
         });
-        assert_eq!(invoke(&socket, &config, 3, &[1, 2]).unwrap(), vec![3]);
-        assert!(invoke(&socket, &config, 9, &[])
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[1, 2]).unwrap(), vec![3]);
+        assert!(invoke(&socket, &config, mini_sdk::host_operations::SIGNATURES, &[])
             .unwrap_err()
             .contains("uncertain"));
-        assert_eq!(invoke(&socket, &config, 3, &[]).unwrap(), vec![3]);
-        assert_eq!(invoke(&socket, &config, 5, &[7]).unwrap(), vec![5]);
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[]).unwrap(), vec![3]);
+        assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::AUTHORIZED_QUERY, &[7]).unwrap(), vec![5]);
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2);
         let _ = fs::remove_dir_all(directory);
     }
@@ -2674,7 +2674,7 @@ done"#;
         );
         let mut staller = UnixStream::connect(&service.socket).unwrap();
         staller.write_all(&[9, 0, 0]).unwrap();
-        let (answer, waited) = timed_invoke(&service, 3);
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::LOOKUP);
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         let refusal = read_frame(&mut DeadlinePipe {
@@ -2703,7 +2703,7 @@ done"#;
         let slow = {
             let socket = service.socket.clone();
             let config = service.config.clone();
-            thread::spawn(move || invoke(&socket, &config, 8, &[]))
+            thread::spawn(move || invoke(&socket, &config, mini_sdk::host_operations::INSPECT, &[]))
         };
         thread::sleep(Duration::from_millis(200));
         let queued = {
@@ -2711,18 +2711,18 @@ done"#;
             let config = service.config.clone();
             thread::spawn(move || {
                 let started = Instant::now();
-                (invoke(&socket, &config, 3, &[]), started.elapsed())
+                (invoke(&socket, &config, mini_sdk::host_operations::LOOKUP, &[]), started.elapsed())
             })
         };
         thread::sleep(Duration::from_millis(200));
-        let (busy, waited) = timed_invoke(&service, 5);
+        let (busy, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY);
         assert_eq!(busy.unwrap_err(), "socket rejected request: busy: host queue full");
         assert!(waited < Duration::from_secs(1), "busy refusal waited {waited:?}");
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
         let (answer, waited) = queued.join().unwrap();
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(3), "queued client waited {waited:?}");
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
     }
 
     /// Idle connections up to the bound cost the others nothing; one beyond
@@ -2743,7 +2743,7 @@ done"#;
             .map(|_| UnixStream::connect(&service.socket).unwrap())
             .collect();
         thread::sleep(Duration::from_millis(100));
-        let (answer, waited) = timed_invoke(&service, 3);
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::LOOKUP);
         assert_eq!(answer.unwrap(), vec![3]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         // The honest connection's slot is released just after its reply is
@@ -2754,7 +2754,7 @@ done"#;
             .collect();
         thread::sleep(Duration::from_millis(100));
         assert_eq!(
-            timed_invoke(&service, 3).0.unwrap_err(),
+            timed_invoke(&service, mini_sdk::host_operations::LOOKUP).0.unwrap_err(),
             "socket rejected request: busy: connection limit"
         );
         for mut stream in idle.into_iter().chain(extra) {
@@ -2767,7 +2767,7 @@ done"#;
             assert_eq!(refusal, b"\xfeinvalid socket frame: frame read deadline");
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(timed_invoke(&service, 3).0.unwrap(), vec![3]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::LOOKUP).0.unwrap(), vec![3]);
     }
 
     /// A client that sends a whole request and never reads the reply does not
@@ -2777,7 +2777,7 @@ done"#;
         let service = fake_service("noread", SERVE_BOUNDS);
         let mut silent = UnixStream::connect(&service.socket).unwrap();
         write_frame(&mut silent, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[3]].concat()).unwrap();
-        let (answer, waited) = timed_invoke(&service, 5);
+        let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY);
         assert_eq!(answer.unwrap(), vec![5]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
         drop(silent);
@@ -2797,14 +2797,14 @@ done"#;
                 queue_residence: Duration::from_secs(60),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(200));
         let mut abandoned = UnixStream::connect(&service.socket).unwrap();
         write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[7]].concat()).unwrap();
         thread::sleep(Duration::from_millis(200));
         drop(abandoned);
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(service.forwarded(), vec![8, 5]);
     }
 
@@ -2821,13 +2821,13 @@ done"#;
                 queue_residence: Duration::from_millis(300),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(200));
-        let (late, waited) = timed_invoke(&service, 7);
+        let (late, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHOR);
         assert_eq!(late.unwrap_err(), "socket rejected request: busy: queue residence deadline");
         assert!(waited < Duration::from_secs(2), "refusal waited {waited:?}");
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(service.forwarded(), vec![8, 5]);
     }
 
@@ -2846,7 +2846,7 @@ done"#;
                 queue_residence: Duration::from_millis(500),
             },
         );
-        let slow = service.invoke_later(8);
+        let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(100));
         let queued: Vec<_> = [1u8, 2, 3, 4]
             .into_iter()
@@ -2871,7 +2871,7 @@ done"#;
                 }
             }
         }
-        assert_eq!(timed_invoke(&service, 10).0.unwrap(), vec![10]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::OBSERVATION_ASSEMBLE).0.unwrap(), vec![10]);
         outcomes.push((10, true));
         let forwarded = service.forwarded();
         assert!(!forwarded.contains(&6), "abandoned request reached the Host");
@@ -2941,14 +2941,14 @@ done"#;
             },
         );
         let oversized = vec![b' '; AUTHOR_BODY_MAX + 1];
-        let refused = invoke(&service.socket, &service.config, 7, &oversized).unwrap_err();
+        let refused = invoke(&service.socket, &service.config, mini_sdk::host_operations::AUTHOR, &oversized).unwrap_err();
         assert_eq!(
             refused,
             "socket rejected request: author request body exceeds its bound"
         );
-        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+        assert_eq!(timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY).0.unwrap(), vec![5]);
         assert_eq!(
-            invoke(&service.socket, &service.config, 7, &vec![b' '; 1024]).unwrap(),
+            invoke(&service.socket, &service.config, mini_sdk::host_operations::AUTHOR, &vec![b' '; 1024]).unwrap(),
             vec![7]
         );
         assert_eq!(service.forwarded(), vec![5, 7]);
@@ -3379,15 +3379,15 @@ done"#;
     fn dispatch_response_tags_require_exact_no_record_verdict() {
         let mut refused = vec![164];
         refused.extend_from_slice(b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1");
-        assert!(response_operation_matches(34, &refused));
-        assert!(response_operation_matches(164, &[34, 1]));
-        assert!(response_operation_matches(34, &[34, 1]));
-        assert!(!response_operation_matches(152, &refused));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &refused));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_BOUND_DISPATCH, &[34, 1]));
+        assert!(response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[34, 1]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_STREAM_RENEW, &refused));
         refused.push(0);
-        assert!(!response_operation_matches(34, &refused));
-        assert!(!response_operation_matches(34, &[164]));
-        assert!(!response_operation_matches(154, &[34, 1]));
-        assert!(!response_operation_matches(34, &[]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &refused));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[164]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_ROUTE_INSPECT, &[34, 1]));
+        assert!(!response_operation_matches(mini_sdk::host_operations::APPLICATION_DISPATCH_SUBMIT, &[]));
     }
 
     #[test]
@@ -3868,13 +3868,13 @@ done"#;
         }
         // A catalog route must not acquire permission merely by reaching the
         // union gate of the private Host.
-        assert!(invoke(&socket,&config,16,b"catalog").unwrap_err()
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::FN_ORIGIN_OUTBOX,b"catalog").unwrap_err()
             .contains("operation unavailable"));
-        assert!(invoke(&socket,&config,187,b"unknown").unwrap_err()
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::NEXT_KEY_ADOPTION_PLAN,b"unknown").unwrap_err()
             .contains("operation unavailable"));
         count += 1;
-        assert_eq!(invoke(&socket,&config,185,b"ingress").unwrap(),vec![185,count]);
-        assert!(invoke(&socket,&config,9,&[]).unwrap_err().contains("uncertain"));
+        assert_eq!(invoke(&socket,&config,mini_sdk::host_operations::PAY_CLAIM_SUBMIT,b"ingress").unwrap(),vec![185,count]);
+        assert!(invoke(&socket,&config,mini_sdk::host_operations::SIGNATURES,&[]).unwrap_err().contains("uncertain"));
         assert_eq!(service.join().unwrap().unwrap_err(),"fixture completed");
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3949,7 +3949,7 @@ mod bootstrap_deadline_tests {
                 &socket,
                 &scratch.0.join("config"),
                 &"11".repeat(32),
-                121,
+                mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
                 b"{}",
                 Instant::now() + Duration::from_secs(2)
             )
@@ -3960,7 +3960,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             Instant::now() + Duration::from_secs(2)
         )
@@ -3983,7 +3983,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             start + Duration::from_millis(60)
         )
@@ -4005,7 +4005,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             b"{}",
             start + Duration::from_millis(60),
         )
@@ -4030,7 +4030,7 @@ mod bootstrap_deadline_tests {
             &socket,
             &scratch.0.join("config"),
             &"11".repeat(32),
-            121,
+            mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             &vec![b'x'; HOST_MAX_FRAME - 1],
             start + Duration::from_millis(60),
         )

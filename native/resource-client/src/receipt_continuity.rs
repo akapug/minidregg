@@ -607,7 +607,7 @@ impl HostProof<'_> {
         let socket = SOCKET
             .get()
             .ok_or_else(|| fail("continuity requires a pinned Host socket"))?;
-        let frame = crate::session_invoke(&host, socket, &config, 151, &bytes)?;
+        let frame = crate::session_invoke(&host, socket, &config, mini_sdk::host_operations::RECEIPT_CONTINUITY, &bytes)?;
         if frame.first() != Some(&151) || frame.len() as u64 > MAX_JSON {
             return Err(fail("Host refused continuity or exceeded hop bound"));
         }

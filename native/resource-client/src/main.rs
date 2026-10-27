@@ -1366,7 +1366,7 @@ fn socket_process(
         // outcome`). A failed decode leaves the decision undecoded; it is
         // never reconstructed here. The class is the marker's (`is_refusal`).
         let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
-            .and_then(|request| session_invoke(host, socket, config, 8, &request))
+            .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
@@ -2530,7 +2530,7 @@ fn continuity(
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
     sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
-    let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if is_outcome_frame(frame[0]) {
         return Err("Host refused provider continuity; complete frame retained".into());
@@ -2553,7 +2553,7 @@ fn continuity(
 /// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config.
 #[cfg(unix)]
 fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
-    let frame = transport::invoke(socket, config, 112, &[])?;
+    let frame = transport::invoke(socket, config, mini_sdk::host_operations::PAY_ENROLLMENT_VIEW, &[])?;
     let body = match frame.as_slice() {
         [112, body @ ..] => body,
         [code, rest @ ..] => {
@@ -2568,7 +2568,7 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
     let mut request = (kind.len() as u16).to_le_bytes().to_vec();
     request.extend_from_slice(kind);
     request.extend_from_slice(body);
-    let inspected = transport::invoke(socket, config, 8, &request)?;
+    let inspected = transport::invoke(socket, config, mini_sdk::host_operations::INSPECT, &request)?;
     let json = match inspected.as_slice() {
         [8, json @ ..] => json,
         _ => return Err("the Host could not decode its own enrollment view".into()),

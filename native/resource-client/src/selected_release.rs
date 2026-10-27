@@ -163,7 +163,7 @@ pub(super) fn submit(
     create_private(&directory.join("attempt.json"), &manifest_bytes)?;
     sync_directory_ancestors(&directory)?;
     let attempt = retained(&directory)?;
-    invoke(&directory, &attempt, 20, "submit").map(|_| ())
+    invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_SUBMIT, "submit").map(|_| ())
 }
 
 pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
@@ -172,7 +172,7 @@ pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result
     if let Some(socket) = override_socket {
         attempt.socket = absolute(socket)?;
     }
-    invoke(&directory, &attempt, 21, "lookup").map(|_| ())
+    invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_LOOKUP, "lookup").map(|_| ())
 }
 
 /// Whole-action recovery consumes the existing source-authorized absent gate.
@@ -184,12 +184,12 @@ pub(super) fn recover(directory: &Path, override_socket: Option<&Path>) -> Resul
     if let Some(socket) = override_socket {
         attempt.socket = absolute(socket)?;
     }
-    let lookup = invoke(&directory, &attempt, 21, "lookup")?;
+    let lookup = invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_LOOKUP, "lookup")?;
     // invoke retains the exact reply frame and derives this outcome by the
     // pinned Host's native decoder. Reuse that checked value immediately;
     // cached presentation alone never authorizes a submit.
     if lookup["type"] == "absent" {
-        invoke(&directory, &attempt, 20, "submit")?;
+        invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_SUBMIT, "submit")?;
     }
     Ok(())
 }

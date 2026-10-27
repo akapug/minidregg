@@ -513,7 +513,7 @@ pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_
     let method = table.iter().find(|method| method["name"].as_str() == Some(method_name))
         .ok_or("instance has no method with that name")?;
     let program = member(method,"program")?;
-    let show = method_operation(workspace,132,program.as_bytes())?;
+    let show = method_operation(workspace,mini_sdk::host_operations::NOCK_PROGRAM_SHOW,program.as_bytes())?;
     let slots = instance["sampleSlots"].as_array().ok_or("signed view lacks source sample slots")?;
     let mut values = Vec::new();
     for slot in show.pointer("/abi/sample").and_then(Value::as_array).ok_or("program lacks ABI sample")? {
@@ -527,7 +527,7 @@ pub(super) fn call(root: &Path, workspace: &Value, id: &str, name: &str, method_
     }
     let request = json!({"programId":program,"caller":member(workspace,"subject")?,"room":"0",
         "targets":[instance_reference["target"]],"values":values});
-    let dry = method_operation(workspace,134,request.to_string().as_bytes())?;
+    let dry = method_operation(workspace,mini_sdk::host_operations::NOCK_DRY_RUN,request.to_string().as_bytes())?;
     if dry["verdict"].as_str() != Some("ok") { return Err(format!("method did not finish: {dry}")); }
     let actions = method_actions(instance,method,&dry)?;
     let mut targets=vec![json!({"name":name,"payload":{"type":"worldNamed","actions":actions}})];
@@ -610,7 +610,7 @@ pub(super) fn program_create(root: &Path, workspace: &Value, name: &str,
     let mut payload=length.to_le_bytes().to_vec();
     payload.extend_from_slice(&code);
     payload.extend_from_slice(&serde_json::to_vec(&source["abi"]).map_err(|e|e.to_string())?);
-    let verdict=method_operation(workspace,131,&payload)?;
+    let verdict=method_operation(workspace,mini_sdk::host_operations::NOCK_PROGRAM_CHECK,&payload)?;
     if verdict["verdict"].as_str()!=Some("admissible") {
         return Err(format!("program admission refused: {verdict}"));
     }
