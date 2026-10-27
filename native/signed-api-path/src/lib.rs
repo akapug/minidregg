@@ -150,3 +150,40 @@ mod tests {
         assert!(route("/repo.git/", &"a".repeat(MAX_RELATIVE_PATH)).is_err());
     }
 }
+
+#[cfg(test)]
+mod exact_prefix_tests {
+    use super::*;
+
+    #[test]
+    fn near_miss_prefixes_are_not_under_the_signed_prefix() {
+        // The slash terminator makes /api and /apix different prefixes.
+        assert!(is_under("/api/", "api/v1"));
+        assert!(!is_under("/api/", "apix/v1"));
+        assert!(!is_under("/api/", "api"));
+        assert!(!is_under("/api/", "API/v1"));
+        assert!(!is_under("/api/", "other/api/v1"));
+        assert!(!is_under("/api/", "api//v1"));
+        assert!(!is_under("/api/", "api/v1/"));
+        // A prefix without its terminating slash is not a signed prefix at all.
+        assert!(checked_prefix("/api").is_err());
+        assert!(route("/api", "v1").is_err());
+        assert!(!is_under("/api", "api/v1"));
+        // Nested prefixes route exactly and do not leak into siblings.
+        assert_eq!(route("/api/v2/", "x"), Ok("api/v2/x".into()));
+        assert!(!is_under("/api/v2/", "api/v1/x"));
+        assert!(!is_under("/api/v2/", "api/v22/x"));
+    }
+
+    #[test]
+    fn percent_escapes_and_trailing_slashes_are_refused_not_decoded() {
+        assert!(route("/api/", "a%2Fb").is_err());
+        assert!(route("/api/", "%2e%2e").is_err());
+        assert!(route("/api/", "a%00").is_err());
+        assert!(route("/api/", "dir/").is_err());
+        assert_eq!(route("/api/", ""), Ok("api/".into()));
+        assert!(checked_prefix("/api%2f/").is_err());
+        assert!(!is_under("/api/", "api/%2e%2e/secret"));
+        assert!(!is_under("/api/", "api/a%2fb"));
+    }
+}
