@@ -791,7 +791,7 @@ pub(crate) fn reserve_intent(subject: &str, nonce: &str, name: &str, tool_ref: &
     tool_intent(subject, nonce, name, tool_ref, view, json!({"type":"reserve","amount":amount}))
 }
 
-/// One grain operation on the tool task (reserve, cancel) from a signed read of it.
+/// One grain operation on the tool task (reserve, settle) from a signed read of it.
 pub(crate) fn tool_intent(subject: &str, nonce: &str, name: &str, tool_ref: &Value, view: &Value, operation: Value) -> Result<Value> {
     let peer = birth_peer(tool_ref, view)?;
     Ok(json!({"grain":{"task":peer["task"],"subject":subject,"capability":peer["capability"],"observeCapability":peer["observeCapability"],
@@ -829,16 +829,17 @@ fn reserve_tool(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &V
 }
 
 /// Release this install's tool reservation after its birth was definitely refused, so one failed
-/// install never holds the world's tool task: a retained cancel (recovered exactly), then both
-/// attempt directories are retired so a later install reserves afresh. Nothing to do without a
-/// confirmed reservation.
-fn cancel_reservation(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &Value) -> Result<()> {
+/// install never holds the world's tool task: a retained settle with charge 0 (status 3 -> 1,
+/// the reserve returned to `remaining`; never `cancel`, which cancels the task itself), recovered
+/// exactly, then both attempt directories are retired so a later install reserves afresh.
+/// Nothing to do without a confirmed reservation.
+fn release_reservation(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &Value) -> Result<()> {
     use crate::workspace::{self as w, member_path};
     let reserve = root.join("attempts").join(format!("apps-reserve-{}", w::ref_file(name)));
     if !reserve.exists() || w::accepted_outcome(&reserve)?.is_none() {
         return Ok(());
     }
-    let cancel = root.join("attempts").join(format!("apps-reserve-cancel-{}", w::ref_file(name)));
+    let cancel = root.join("attempts").join(format!("apps-reserve-release-{}", w::ref_file(name)));
     let confirmed = if cancel.exists() {
         if w::accepted_outcome(&cancel)?.is_none() && cancel.join("call.bin").is_file() {
             crate::retry(&cancel, "lookup", false)?;
@@ -846,20 +847,20 @@ fn cancel_reservation(root: &Path, ws: &Value, name: &str, subject: &str, tool_r
         w::accepted_outcome(&cancel)?.is_some()
     } else {
         let (view, _, _) = w::signed_view(root, ws, tool_ref, "resource")?;
-        let intent = tool_intent(subject, &w::random_nonce()?, name, tool_ref, &view, json!({"type":"cancel"}))?;
-        let intent_path = root.join("sources").join(format!("apps-reserve-cancel-{}.json", w::ref_file(name)));
+        let intent = tool_intent(subject, &w::random_nonce()?, name, tool_ref, &view, json!({"type":"settle","charge":"0"}))?;
+        let intent_path = root.join("sources").join(format!("apps-reserve-release-{}.json", w::ref_file(name)));
         let _ = fs::remove_file(&intent_path);
         crate::create_private(&intent_path, &serde_json::to_vec_pretty(&intent).map_err(|e| e.to_string())?)?;
-        eprintln!("apps tool reservation cancel attempt: {}", cancel.display());
+        eprintln!("apps tool reservation release attempt: {}", cancel.display());
         crate::submit(&w::workspace_host(ws)?, &member_path(ws, "config")?, &intent_path, std::ffi::OsStr::new("grain-intent"), &member_path(ws, "key")?, &cancel, false)?;
         w::accepted_outcome(&cancel)?.is_some()
     };
     if !confirmed {
-        return Err(format!("toolReservationCancelUndecided: inspect {}", cancel.display()));
+        return Err(format!("toolReservationReleaseUndecided: inspect {}", cancel.display()));
     }
     let stamp = w::random_nonce()?;
     for dir in [&reserve, &cancel] {
-        let retired = dir.with_file_name(format!("{}.cancelled-{stamp}", dir.file_name().and_then(|n| n.to_str()).unwrap_or("attempt")));
+        let retired = dir.with_file_name(format!("{}.released-{stamp}", dir.file_name().and_then(|n| n.to_str()).unwrap_or("attempt")));
         fs::rename(dir, &retired).map_err(|e| format!("cannot retire {}: {e}", dir.display()))?;
     }
     Ok(())
@@ -963,7 +964,7 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
     if attempt.exists() && w::attempt_definitely_unadmitted(&attempt)? {
         let retired = w::release_unadmitted_attempt(&authoring, &attempt, &reservation)?;
         eprintln!("apps birth attempt definitely unadmitted; retained as {}", retired.display());
-        cancel_reservation(root, ws, name, &subject, &tool_ref)?;
+        release_reservation(root, ws, name, &subject, &tool_ref)?;
         reserve_tool(root, ws, name, &subject, &tool_ref, &birth_reserve_amount(&config.tariff)?)?;
     }
     let author_dir = if attempt.exists() {
@@ -995,7 +996,7 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
         eprintln!("apps birth attempt: {}", attempt.display());
         if let Err(refusal) = crate::submit(&host, &host_config, &intent_path, std::ffi::OsStr::new("binary"), &member_path(ws, "key")?, &attempt, false) {
             if w::attempt_definitely_unadmitted(&attempt).unwrap_or(false) {
-                if let Err(cancel) = cancel_reservation(root, ws, name, &subject, &tool_ref) {
+                if let Err(cancel) = release_reservation(root, ws, name, &subject, &tool_ref) {
                     return Err(format!("{refusal}; and the tool reservation was not released: {cancel}"));
                 }
             }
