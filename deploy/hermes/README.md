@@ -129,8 +129,13 @@ fields in its `providerTask`:
 - **The runner.** The friend's grant names the provider task's `subject` (the
   runner). Tell the friend that number.
 
-Then run `systemctl enable --now mini-hermes`. The unit is
-`deploy/hermes/mini-hermes.service`. It has no key and no `EnvironmentFile`.
+Then install the controller with
+`deploy/grain-host/install-controller --system --service-user ACCOUNT ...`
+(the system shape: `mini-grain-controller@TASK.service` plus the root
+registration `/etc/mini/controllers/TASK.json`) and start that unit. The unit
+has no key and no `EnvironmentFile`. The old `mini-hermes.service` is retired:
+its name failed the controller's own unit proof, so no sandboxed Hermes
+prompt could run under it.
 
 ## What a friend does
 
