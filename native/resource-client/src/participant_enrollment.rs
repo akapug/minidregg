@@ -336,7 +336,10 @@ fn pin_plan_height(host: &Path, config: &Path, plan: &Path, height: &str, output
     ];
     match crate::local_process(host, config, &arguments) {
         Ok(_) => Ok(Some(private_bytes(output, LIMIT)?)),
-        Err(error) if error.contains("usage") => Ok(None),
+        // A Host without the verb answers an unknown subcommand with its own verb listing
+        // (`minidregg-host CONFIG.json profile|describe|...`) and exit 1; a Host that has the verb
+        // and refused prints its refusal, never the listing.
+        Err(error) if error.contains("minidregg-host CONFIG.json ") && !error.contains("pin-enrollment-plan-height") => Ok(None),
         Err(error) => Err(format!("pin-enrollment-plan-height: {error}")),
     }
 }
