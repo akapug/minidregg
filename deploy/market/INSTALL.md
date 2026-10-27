@@ -59,6 +59,22 @@ systemctl start mini-market.service          # the first index refresh, so the c
 sudo -u mini-core XDG_RUNTIME_DIR=/run/user/$(id -u mini-core) systemctl --user enable --now mini-apps-worker@STORE.service
 ```
 
+**Step 0, once per world, by the operator (ruling 2026-10-27): the metered tasks.** The demo's
+genesis has no metered parent/tool tasks (7901/7902 are the workroom fixture's), so the apps world
+births its own, as the operator (`mini-core`), from the operator's sponsor workspace, idempotently:
+
+```
+sudo -u mini-core /var/lib/mini/candidate/current/bin/mini apps bootstrap --dir /var/lib/mini/store/node/sponsor [--budget 100000]
+```
+
+It births two `grain` resources under the operator's own capabilities (ids from the operator's
+namespace; budget an explicit allocation), registers them as the sponsor's references `tool` and
+`parent`, and prints `toolTask`, `parentTask`, the two sponsor import lines (already satisfied for
+the sponsor workspace it ran in) and the exact `appsConfig` object to write to `/etc/mini/apps.json`.
+A second run finds the references and prints the same report; a changed budget or names refuse by
+name (one bootstrap per world). The sponsor's `delegate` in `apps_member_grants` then works against
+those references.
+
 `/etc/mini/apps.json` (root 0644, world-readable; `mini-apps-config-v1`) tells members what the
 world is: `{"protocol":"mini-apps-config-v1","managementSubject":"8","toolRef":"tool","parentRef":"parent","tariff":{"base":"2","perBirth":"1"}}`.
 A member's `apps install` births the application as their own op 30, whose admitted shape names the
@@ -71,10 +87,9 @@ world's metered parent (7901) and tool (7902) tasks. The frame grants them at en
    `perBirth` 1 per resource, three resources), so 1000 is ample and the member's own purse bounds
    the total. Who pays the reserve is L1b's ruling; the sponsor's account meanwhile.
 2. **The sponsor's references** are named exactly as `apps.json`'s `toolRef` and `parentRef`
-   (default `tool`, `parent`). The sponsor must hold them before the first enrolment: in the
-   sponsor's workspace, `import tool object 7902 81 81` and `import parent object 7901 73 73`
-   (the plan's management capabilities on the tool and parent tasks; if the sponsor is not the
-   subject that holds them, the operator delegates them to the sponsor first).
+   (default `tool`, `parent`). `mini apps bootstrap` (step 0) registers them in the workspace it runs
+   in; a sponsor workspace other than that one imports them with the two lines the bootstrap
+   prints (`import tool object <toolTask> <cap> <cap>`, `import parent object <parentTask> <cap> <cap>`).
 3. **Delivery to the member**: the frame copies each grant's `recipient-reference.json` to the
    member's `HOME/inbox/<toolRef>.json` and `HOME/inbox/<parentRef>.json` (member-owned; the
    shell's `inbox` lists that directory). `mini apps install` (with `--home`, which the shell passes)
