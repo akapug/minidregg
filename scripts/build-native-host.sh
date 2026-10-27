@@ -1299,6 +1299,7 @@ scripts/build-mini-kernels.sh > "$output_dir/mini-kernels.log" 2>&1 || {
 cp .lake/native/SHA256SUMS "$output_dir/mini-kernels-sha256.txt"
 wrapper_root="$output_dir/seated-lean-toolchain"
 mkdir -p "$wrapper_root/bin"
+cp "$root/scripts/lean-seat-lock.sh" "$wrapper_root/lean-seat-lock.sh"
 ln -s "$toolchain/include" "$wrapper_root/include"
 ln -s "$toolchain/lib" "$wrapper_root/lib"
 ln -s "$toolchain/src" "$wrapper_root/src"
@@ -1358,19 +1359,12 @@ fi
 # iff (the weights of the live tickets ahead of it) + WEIGHT <= the free seats, so a heavy compiler is never
 # starved by a stream of light ones and two half-seated compilers never deadlock.
 seats=() locked=0
-lockdir=$MINIDREGG_LEAN_SEAT_ROOT/.alloc-lock
+lockfile=$MINIDREGG_LEAN_SEAT_ROOT/alloc.lock
 waiters=$MINIDREGG_LEAN_SEAT_ROOT/waiters
-lock() {
-  local tries=0 owner
-  until mkdir "$lockdir" 2>/dev/null; do
-    owner=$(cat "$lockdir/pid" 2>/dev/null || true)
-    if [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null; then rm -f "$lockdir/pid"; rmdir "$lockdir" 2>/dev/null || true; continue; fi
-    tries=$((tries + 1)); (( tries < 600 )) || return 1
-    sleep 0.05
-  done
-  echo "$$" > "$lockdir/pid"; locked=1
-}
-unlock() { if (( locked )); then rm -f "$lockdir/pid"; rmdir "$lockdir" 2>/dev/null || true; locked=0; fi; }
+# the lock functions live in lean-seat-lock.sh (copied beside bin/), where scripts/test-lean-seat-lock.sh tests them
+source "${BASH_SOURCE[0]%/*}/../lean-seat-lock.sh"
+lock() { lean_seat_lock; }
+unlock() { lean_seat_unlock; }
 release() {
   local d
   for d in ${seats[@]+"${seats[@]}"}; do rm -f "$d/owner.txt"; rmdir "$d" 2>/dev/null || true; done
