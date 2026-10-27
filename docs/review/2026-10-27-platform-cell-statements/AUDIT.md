@@ -525,3 +525,21 @@ instance of the existing `judgeWritten_ok delivery.judged` (`:5207`), so it adds
 pole: an object whose law refuses the write makes `deliver` return `.error (.objectWrite _)`. Also
 inhabit the premise `committed.written = some _`: `SatisfiablePole`'s `commit {write: {}}` may build
 `none`.
+
+**Deputy's additions.** (a) *Issuer well as `config.asset`:* this is the kernel's convention, not invented
+here. `CanonicalResourceKernel.lean:63` says "an asset is named by its issuer-well account", and `:150`
+says "the asset identifier is its issuer-well identifier". `AccountId` and `AssetId` are both `Nat` (`:64-65`), and
+`ObjectiveActivity.lean:3721` already refuses `request.account = config.asset` as the issuer well.
+(b) *`TeethPole`* is quantified over the context but fixed in its numbers (purse 10, reserve 3, amounts 8
+and 1). It is a non-vacuity witness, which law 9 permits, not the general teeth. The general shape is
+`RefusedStatement` with `VerdictStatement`'s refusal clauses, so that is adequate. Its docstring's
+"purse, recipient and state untouched" is not in the Prop; that claim belongs to
+`DeliveryRefusedStatement`, so the docstring should point there.
+(c) *Changed conclusions.* `Delivery.yield_reserves_deposit` now reads the purse after the effect transfer
+too. That is **stronger**: a transfer only lowers the purse, so the old conclusion follows. Justified.
+`commitYield_spec`'s write clause went from `stateWrite … = .ok committed.written` to
+"∃ built, stateWrite = .ok built ∧ committed.written = some w → built = some w". That is **weaker than
+needed**: it is justified only for a refused transfer, which drops the built write, but it gives up equality
+for every other plan, and for `none`. Restate it as `committed.written = built ∨
+(committed.await.source = .performed (.refused _) ∧ committed.written = none)` so consumers of the
+equality keep it.
