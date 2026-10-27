@@ -5,8 +5,12 @@
 //!
 //! | variable | meaning |
 //! |---|---|
+//! | `MINI_DISCORD_MODE` | `http` (default: Discord POSTs to the Interactions Endpoint URL) or `gateway` (the bot takes `INTERACTION_CREATE` over the gateway WebSocket; for an application with no endpoint URL) |
+//! | `MINI_DISCORD_BOT_TOKEN_FILE` | gateway mode: the bot token's file (systemd `LoadCredential=`); never in the environment |
+//! | `MINI_DISCORD_GATEWAY_URL` | gateway mode: default `wss://gateway.discord.gg/?v=10&encoding=json` |
+//! | `MINI_DISCORD_CA_FILE` | gateway mode: trust anchors (default `/etc/ssl/certs/ca-certificates.crt`) |
 //! | `MINI_DISCORD_APPLICATION_ID` | the Discord application (snowflake) |
-//! | `MINI_DISCORD_PUBLIC_KEY` | the application's Ed25519 public key, hex |
+//! | `MINI_DISCORD_PUBLIC_KEY` | HTTP mode: the application's Ed25519 public key, hex |
 //! | `MINI_DISCORD_LISTEN` | loopback address Caddy proxies to (default `127.0.0.1:8793`) |
 //! | `MINI_DISCORD_ROSTER` | `discord_user_id -> session NAME` (default `/etc/mini/discord-roster.json`) |
 //! | `MINI_DISCORD_ROSTER_OWNER_UID` | the uid that must own the roster (default 0) |
@@ -24,7 +28,7 @@
 
 use std::net::TcpListener;
 
-use minidregg_discord_entrance::server::{App, Config};
+use minidregg_discord_entrance::server::{App, Config, Mode};
 
 fn main() {
     if std::env::args().len() > 1 {
@@ -39,6 +43,7 @@ fn main() {
         }
     };
     let listen = cfg.listen.clone();
+    let gateway_cfg = cfg.clone();
     let app = match App::new(cfg) {
         Ok(a) => a,
         Err(e) => {
@@ -46,6 +51,16 @@ fn main() {
             std::process::exit(78);
         }
     };
+    if gateway_cfg.mode == Mode::Gateway {
+        eprintln!("mini-discord: taking interactions over the gateway ({})", gateway_cfg.gateway_url);
+        match minidregg_discord_entrance::gateway::serve(app, &gateway_cfg) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("mini-discord: gateway: {e}");
+                std::process::exit(78);
+            }
+        }
+    }
     let listener = match TcpListener::bind(&listen) {
         Ok(l) => l,
         Err(e) => {

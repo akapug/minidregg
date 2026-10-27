@@ -13,11 +13,23 @@
   Discord user cannot inspect it even if mapped to the same session.
 - `/mini line:link CODE` is how a Discord user gets on the roster (below, "Linking").
 
-It is a Discord **interactions endpoint**: Discord POSTs each signed slash command to an HTTPS URL and the
-endpoint answers. There is no gateway, no websocket and no bot token in the entrance.
+It takes interactions one of two ways (`MINI_DISCORD_MODE`):
+
+- **HTTP** (the default): an interactions endpoint. Discord POSTs each signed slash command to the
+  application's Interactions Endpoint URL and the entrance answers. No bot token, no gateway.
+- **Gateway**: for an application whose endpoint URL is unset (the demo's Dragon's Egg, whose owning
+  account can no longer set it). The bot connects out to `wss://gateway.discord.gg` with its token and
+  intents 0, takes `INTERACTION_CREATE` there, and answers through
+  `POST https://discord.com/api/v10/interactions/{id}/{token}/callback`. The token is a systemd
+  credential (`MINI_DISCORD_BOT_TOKEN_FILE`), never in the environment. No signature check is needed: the
+  TLS connection the bot opened is the authentication. Install: `INSTALL.md`.
+
+Both modes feed the same handler: everything below (roster, line rules, deferral, custody, the runner)
+is identical.
 
 ```
-Discord ──HTTPS──▶ Caddy on the box (demo.dregg.online/interactions) ──HTTP──▶ 127.0.0.1:8793 mini-discord
+Discord ──HTTPS──▶ Caddy on the box (/interactions) ──HTTP──▶ 127.0.0.1:8793 mini-discord      (HTTP mode)
+Discord ◀──WSS (bot connects out)── mini-discord; replies: POST discord.com/…/interactions/ID/TOKEN/callback (gateway mode)
                                                                   │  roster: discord id -> NAME
                                                                   ▼
                   mini-session-run (root, socket-activated) ──▶ mini-shell-ssh … as mini-s-NAME, SSH_ORIGINAL_COMMAND=<line>
@@ -26,9 +38,10 @@ mini-discord ──curl PATCH /webhooks/APP/TOKEN/messages/@original──▶ Di
 
 ## What one command does
 
-1. **Signature.** `X-Signature-Ed25519` must verify (`verify_strict`) over `X-Signature-Timestamp || body`
-   under the application's public key, and the timestamp must be within 300 s; otherwise **401**.
-2. **PING** gets PONG.
+1. **Signature** (HTTP mode). `X-Signature-Ed25519` must verify (`verify_strict`) over
+   `X-Signature-Timestamp || body` under the application's public key, and the timestamp must be within
+   300 s; otherwise **401**. Gateway mode skips this: events arrive on the bot's own TLS connection.
+2. **PING** gets PONG (HTTP mode; the gateway sends none).
 3. **Roster.** The roster file must be owned by root and not writable by group or others; a file that fails any
    check answers no one. An unlinked Discord user is told where the door is (`MINI_DISCORD_DOOR_URL`) and
    nothing runs.
@@ -96,6 +109,9 @@ operator name, and a Discord id already on the roster is refused (`deploy/door/R
 
 ## Making it live on the demo box
 
+**The demo runs gateway mode with Dragon's Egg: `INSTALL.md`.** The steps below are HTTP mode, for an
+application whose endpoint URL we can set.
+
 dregg-infra's `install.sh` installs the binary from the candidate, the unit (`mini-discord.service` here) with
 its split drop-in, and the runner. ember's part:
 
@@ -138,10 +154,13 @@ posts and reads for the mirror; the mirror's environment never holds them, and i
 ## Tests
 
 ```sh
-cargo nextest run -p minidregg-discord-entrance -E 'binary(endpoint) | test(session::) | test(door::)'
+cargo nextest run -p minidregg-discord-entrance -E 'binary(endpoint) | binary(gateway) | test(session::) | test(door::)'
 ```
 
-They exercise signed HTTP interactions, deferral-before-custody, persisted restart and UNKNOWN handling,
+`binary(gateway)` drives gateway mode against a fake gateway: HELLO, IDENTIFY (token, intents 0), READY,
+an INTERACTION_CREATE answered through the callback and a deferred follow-up, the heartbeat's sequence,
+RECONNECT then RESUME, INVALID_SESSION then a fresh IDENTIFY, and a missed ACK then RESUME. The others
+exercise signed HTTP interactions, deferral-before-custody, persisted restart and UNKNOWN handling,
 actor-bound status, revocation, linking, retention, and the runner socket protocol against a stand-in. The
 mirror's tests start a real key broker and need Linux. `tests/native-world.py` composes a fake signed Discord
 with the actual entrance and a fresh native Host/Store; it predates the broker-held mirror secrets and does not
