@@ -63,7 +63,7 @@ Lean re-checks the floor and memo grammar, and the kernel nullifier makes exactl
   - Exit codes: 0 ok, 2 usage, 3 Missing, 4 Conflict, 5 retired, 1 everything else (`main.rs:290-295`).
   - Crash and hold verbs fork their own child (`main.rs:303-306`).
 - `build.rs` (62 lines): on Linux without `libsqlite3.so`, copies `libsqlite3.so.0` into `OUT_DIR` as a linker alias.
-- Tests: `tests/lifecycle.rs` (311 lines) and `tests/durable_anchor.rs` (285 lines) drive the real binary through crash phases, concurrency, corruption, coprocess identity, and serve-versus-one-shot equality.
+- Tests: `native/hyperdocument-link-sqlite-store/tests/lifecycle.rs` (311 lines) and `native/hyperdocument-link-sqlite-store/tests/durable_anchor.rs` (285 lines) drive the real binary through crash phases, concurrency, corruption, coprocess identity, and serve-versus-one-shot equality.
 
 ### 1b. hyperdocument-link-store (LS) — 713 lines
 
@@ -74,7 +74,7 @@ Lean re-checks the floor and memo grammar, and the kernel nullifier makes exactl
 - `src/main.rs` (71 lines): the `minidregg-link-store read|stage|install|publish|discard-stage` CLI.
 - `src/bin/forward_link_e2e_bench.rs` (314 lines): a child process per lifecycle stage, with p50/p95/p99 timings.
 - `fixtures/hyperdocument-link-recovery-v1.bin`: 14 bytes, `a24a1ed8 01 "HYPERLNK" 6e`.
-- `tests/lifecycle.rs` (106 lines).
+- `native/hyperdocument-link-sqlite-store/tests/lifecycle.rs` (106 lines).
 - Last commit 2026-08-11 (`git log`). There is a 37 MB untracked `target/` inside the crate.
 
 ### 1c. pay-watcher (PW) — 2,380 src lines, 1,340 test lines, 707-line generator, ~63K lines of generated JSON fixtures
@@ -148,7 +148,7 @@ Lean re-checks the floor and memo grammar, and the kernel nullifier makes exactl
 ### 2b. LS
 
 - Assumes Lean's `Assurance/HyperdocumentLinkLocalFileStore.lean` authored the fixture. That module models the store abstractly ("This is the entire callable native storage boundary", `:203`).
-- No runtime caller. The only references are `scripts/test-hyperdocument-link-local-store.sh:5-6`, `scripts/run-forward-link-e2e-benchmark.sh:49` and SQ's test `include_bytes!`.
+- No runtime caller. The only references are `test-hyperdocument-link-local-store.sh [deleted 52c252e3]:5-6`, `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]:49` and SQ's test `include_bytes!`.
 
 ### 2c. PW
 
@@ -245,7 +245,7 @@ Exactly-once and lost replies:
 
 ### LS
 
-8. **It cannot build.** `cargo metadata --manifest-path native/hyperdocument-link-store/Cargo.toml` fails: "current package believes it's in a workspace when it's not". `scripts/test-hyperdocument-link-local-store.sh` and `scripts/run-forward-link-e2e-benchmark.sh` therefore fail as soon as they reach cargo. The crate has no `[workspace]` table to opt out, and it is not a member.
+8. **It cannot build.** `cargo metadata --manifest-path Cargo.toml [deleted 52c252e3]` fails: "current package believes it's in a workspace when it's not". `test-hyperdocument-link-local-store.sh [deleted 52c252e3]` and `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]` therefore fail as soon as they reach cargo. The crate has no `[workspace]` table to opt out, and it is not a member.
 9. **A partial staged file wedges it.** If a crash lands after `create_new` but before `write_all` completes (`lib.rs:159-176`), a later `stage(bytes)` reads the truncated staged file and returns `Conflict` (`:152-156`). It keeps doing so until someone runs `discard-stage`, and no caller does that automatically.
 
 ### PW

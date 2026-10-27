@@ -34,7 +34,7 @@ D27's widening missed.
   bound, and decodes to itself; the hypothesis-removal witness at A = 1,000).
   Certified on hbox with its includers (`certify-20260927T202620Z-2421499`,
   4 books, none over 10 s). Registry: PRF-091's extension.
-- Native case `tests/test_native_hybrid_author.py`
+- Native case `test_native_hybrid_author.py [not in tree]`
   `test_v2_source_through_hybrid_author` (result in §5). It found a second
   gap: the route injected the carrier under the codec's payload bound, not
   the profile's A, so a carrier past A was refused by the owner's admission
@@ -108,7 +108,7 @@ has PKT-codex-003.
 | hybrid-author's refusals were bare | every arm named: `UNKNOWN-GROUP`, `AUTHOR-NOT-ENROLLED`, `CONFLICT`, `ARTICLE-EXCEEDS-PROFILE-BOUND`, … | PKT-147 (PRF-170) |
 
 Exit codes everywhere: 0 accepted (or duplicate), 1 refused (named),
-3 uncertain, 4 fault. fn's plain guide for all of this is `docs/agents.md`.
+3 uncertain, 4 fault. fn's plain guide for all of this is `agents.md [not in tree]`.
 
 ## 3. Packets (fn work, not done, with the interface you would get)
 

@@ -221,7 +221,7 @@ the trace and codeword. `proof_field_words` counts logical BabyBear words, inclu
 extension element and nine per wide digest. It is not serialized bytes or Rust allocation size.
 
 Source snapshot: `b4e20d4447cc` plus the in-progress fix-forward working tree containing
-`prover/src/bin/reference_bench.rs` and the reference protocol.
+`reference_bench.rs [deleted cddc604f]` and the reference protocol.
 
 ### persvati
 

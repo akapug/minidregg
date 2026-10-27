@@ -48,7 +48,7 @@ directory fsync) before it answers. A committed record may live only in
 database is the database file together with its `-wal`** (and `-shm`, which is
 rebuildable). A process killed right after `COMMIT` leaves the record in
 `-wal`; the next open recovers it exactly
-(`tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
+(`native/hyperdocument-link-sqlite-store/tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
 This is the behaviour of the linked SQLite and the host's `fsync` as observed
 by tests that kill processes; it is not a proof about media under power loss.
 

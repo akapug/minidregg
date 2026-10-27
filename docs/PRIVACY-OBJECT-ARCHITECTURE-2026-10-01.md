@@ -60,7 +60,7 @@ These answers determine the protocol requirements. “Use a DAG,” “add MLS,�
 
 **READ S2, `native/resource-client/src/chat.rs:1349` onward:** room chat prepares a stream append through the workspace proposal/submission path. Private-room selection seals the payload and removes the clear topic; stale-target handling reparses the current position and retries under bounded client behavior.
 
-**READ S1, `native/resource-client/src/channel.rs:711–779`:** `channel say` queues a local outbox file. The member loop moves it into its transport queue, fragments/seals it and receives completed messages into `inbox.jsonl`. It separately compares observed tick roots with published epoch records. `Kernel/DomainEpochStream.lean` connects the special epoch append to the stream receiving law.
+**READ S1, `channel.rs [deleted 17d61469]:711–779`:** `channel say` queues a local outbox file. The member loop moves it into its transport queue, fragments/seals it and receives completed messages into `inbox.jsonl`. It separately compares observed tick roots with published epoch records. `Kernel/DomainEpochStream.lean` connects the special epoch append to the stream receiving law.
 
 **Architectural consequence:** delivery of a channel message is not yet an admitted object invocation or a durable room-stream append. The architectural work is the bridge between these paths: which signed command travels, what an epoch record certifies, who submits the semantic operation, when the sender may forget it, and which receipt the recipient can rely on. Giving both surfaces a `say` verb does not establish that bridge.
 
