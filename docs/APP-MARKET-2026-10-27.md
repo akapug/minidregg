@@ -86,6 +86,56 @@ it is showing.
   the tests and `--dry` use. In the shell they are `apps search` / `apps show` (one row of the verb
   table, §5a); L12's market pane renders the same JSON (`--json`).
 
+## 2a. The featured set: apps an agent can drive beneath the HTML
+
+Ember's ruling (2026-10-27): the market ships a curated set chosen for an easy but powerful data
+model and a scriptable surface beneath the human-visible page, because agents work there. The set
+is the GLM scout's recommendation (`docs/review/2026-10-27-spk-selection/SELECTION.md` on
+`lane/glm-spk-selection`, 98 apps scored, 52 packages read) kept whole: every pick runs the
+bundled `sandstorm-http-bridge` the qualified apps already prove. `mini apps search` lists these
+first, each with its agent hook (`apps.rs` `FEATURED`), then the rest of the store; L12's pane
+reads the same JSON (`featured {rank, agentHook}`).
+
+**How a resident reaches the hook.** The hook is plain HTTP on the grain's own origin. A member's
+resident (Hermes) holds an api route the member issued (`mini apps share`, bearer token,
+`kind api`) or an agent route on the grain (`grain_agent_route.rs`, served by `agent_api_server.rs` on the resident's own socket); either way each request is a Mini turn checked by the custodian under the resident's
+delegated capability, exactly as a browser's, and lands in the app as the same HTTP the page
+would send. Nothing beneath the HTML bypasses the grain's authority or its receipts.
+
+| # | app | the two-minute stranger story | the agent hook beneath the HTML | bridge needs |
+|---|---|---|---|---|
+| 1 | Etherpad | write together in a pad; watch a friend's cursor | `/api`: create pads, append, read text/HTML, revisions | served (`saveIdentityCaps`); **qualified on w3 and w5** |
+| 2 | EtherCalc | type into a sheet beside a second browser | `PUT /_/<sheet>` CSV, `POST` SocialCalc commands, `GET …/csv` | served |
+| 3 | HedgeDoc | markdown on the left, the rendered note on the right, a share link | `POST /new` with markdown makes a note; `GET /<note>/download` | served |
+| 4 | Davros | drop files and folders in, play an mp4 in the browser | a file tree over HTTP: `PUT`/`GET` by path under `/remote.php/webdav/` | served for GET/PUT; PROPFIND/MKCOL/MOVE/COPY/LOCK need the DAV verbs (§2b) |
+| 5 | Datasette | upload a SQLite file, click through its tables | `/<db>.json?sql=…` answers JSON (0.63 has no HTTP write; the upload is the page's) | served |
+| 6 | sntfy | a live feed you can post to | `POST /<topic>` publishes, `GET /<topic>/json?poll=1` reads: the fleet's notification primitive | served |
+| 7 | DokuWiki | edit a page, see history and diffs | flat-text pages: `GET doku.php?id=…&do=export_raw`, `POST do=save` with the form's `sectok` | served |
+| 8 | WBO | draw on a whiteboard with someone else, live | board events as JSON over its WebSocket; `GET /boards/<name>.json` | served (WebSockets) |
+| 9 | SandCal | add an event on a calendar grid | events as forms and iCalendar over HTTP | served; CalDAV clients need REPORT/PROPFIND (§2b) |
+| 10 | Gogs | make a repo, edit a file in the web UI | `REST /api/v1` (repos, issues) | served for REST; `git clone`/`push` needs streamed bodies (§2b) |
+| 11 | Hledger Web | record a transaction, see balances | a plain-text journal: `POST /add`, `GET /journal`, the JSON API | served |
+| 12 | Hacker Slides | write markdown, present the deck at its publishing origin | the deck is `slides.md`; published at `https://<grain>-www.demo.dregg.online` (§5a) | served (`HackSessionContext`); **qualified on w3 and w5** |
+| 13 | Wekan | a kanban board the visitor may already know | `REST /api` (boards, lists, cards) and DDP | served; class L (bundled mongod) |
+
+Simple Todos stays qualified as the Meteor exhibit and the co-edit row's app; it is not featured.
+Qualification is `scripts/spk-platform/featured-qualify.sh` on a standing world: every app through
+create, install, share, start, enrol and page load, then ONE write beneath the HTML by a script
+standing in for a resident; its rows are recorded in §0.
+
+## 2b. What the bridge grows for the set's full surface
+
+All 13 run on today's bridge; three widenings unlock the rest of their surface, in order:
+
+1. **The WebDAV/CalDAV verbs** (PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT). The
+   in-app bridge serves them through `WebSession`; ours stops at `dispatch_web_input.rs::call_for`
+   (GET/HEAD/POST/PUT/PATCH/DELETE and the WebSocket open). The method is part of each request's
+   Mini record, so this is a Lean-and-Rust change to the dispatched HTTP record, not a
+   one-line map: Davros' tree operations, SandCal and Radicale over CalDAV.
+2. **Streamed request and response bodies** (`ByteStream`/`RequestStream`, fail-closed in
+   `spk-rpc/src/protocol.rs`): git's pack protocol in Gogs, large Davros moves, Datasette exports.
+3. **Powerbox request/offer**: none of the 13; the way back in for TT-RSS and Collections.
+
 ## 3. Install: the member turn, and what admits it
 
 `mini apps install <appId|packageId> [--class S|M|L] --dir WORKSPACE` is a member verb. Admission
