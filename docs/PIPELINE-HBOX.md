@@ -153,13 +153,16 @@ to `JOURNEY_ROWS` only when `PIPELINE_NIGHTLY=1`.
 
 The nightly is the 1000-create run plus the full growth soak, against the `main` set, into its own results root
 (never `$JOURNEY_ROOT`: run_tip moves an existing `TIP/` aside, which would hide the standing run from landing.sh).
-With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides) and `growth` is in the row set:
+With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides), and `growth` and `kernel` (the
+kernel journey: `journey.sh` `JOURNEY_SET=kernel` without G, the steps no public surface needs; docs/JOURNEY.md
+"Two journeys") are in the row set:
 
 ```
 cd /tank/dregg-build/pipeline && T=$(readlink artifacts/main) && tree=journeys/.trees/$T && \
   PIPELINE_ROOT=$PWD PIPELINE_NIGHTLY=1 PIPELINE_ROW_TIMEOUT_S=7200 setsid nohup bash $tree/scripts/pipeline/journey-runner \
     --tip $T --row births --results-root $PWD/nightly > logs/nightly-births-$T.log 2>&1 < /dev/null & echo $! > logs/nightly-births.pid
-# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished
+# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished,
+# and with --row kernel (logs/nightly-kernel-$T.log, logs/nightly-kernel.pid)
 ```
 
 Results: `nightly/<tip>/{results.tsv,table.txt,rows/}`. The nightly blocks nothing; it is the measurement a Store

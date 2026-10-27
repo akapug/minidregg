@@ -164,6 +164,10 @@ phase() {
     BROKER_SOCKET="${roots[$index]}/runtime-${stores[$index]}/broker.sock" \
     "$here/grain-journey.sh" phase "$run/$world" "$@"
 }
+# The edge phase (ruling D9) runs when a Caddy is at hand: CADDY, else caddy on PATH. Without one the
+# result log says so on its own line; journey.d/m6.sh requires the phase, the pipeline row records it.
+CADDY=${CADDY:-$(command -v caddy 2>/dev/null || :)}
+export CADDY
 if [[ $mode == full ]]; then
   # Both brokers are already up; both Stores/apps stay up during the restart.
   for index in 0 1; do
@@ -174,6 +178,8 @@ if [[ $mode == full ]]; then
     resident=$(jq -er .residentConfig "$run/$world/evidence/prepared-resident.json")
     "$run/bin/spk-host" resident-validate "$resident" >"$run/$world/evidence/resident-validate.stdout"
     phase "$index" start-a floor-a enroll-a get-a
+    if [[ -n $CADDY ]]; then phase "$index" edge-a
+    else echo "edge not-run world=$world: no CADDY and no caddy on PATH" | tee -a "$run/result.log"; fi
   done
   for index in 0 1; do
     phase "$index" post-a stop-a

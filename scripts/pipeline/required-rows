@@ -70,6 +70,12 @@ known-red jpay/JPAY6 01a13c42-dc55 Host/ClientConsentCore.lean consent allowlist
 known-red jpay 01a13c42-dc55 the jpay parent row is FAIL only through its sub-row JPAY6 (JPAY1-4 PASS)
 known-red m6grain 01a14736-3181 the standing run executes install-user-world from its private extract /run/user/1000/pjs.*, outside /etc/sudoers.d/mini-operator paths (journeys/.trees/*, claude-lanes/*/src)
 known-red m7 01a14736-31a4 no M7 reference: no other READY set on hbox has the compiled inputs of the batch-1 epoch
+# The journey split (DEMO-PREFIX L9; journey.sh SPINE/DEMO_STEPS/KERNEL_STEPS). Every line above stays required.
+# `demo` is new: the demo journey's steps no other row runs (documents, web, rooms, chat, Hermes in a room, PAY
+# enrollment, keys over the proxy, disclosure). It becomes required the first time main runs it green. The
+# kernel journey (`kernel`) and growth (`growth`) run only in the nightly (PIPELINE_NIGHTLY=1), so a landing has
+# no line for them and they cannot be listed here; their reds go to the morning queue (docs/PIPELINE-HBOX.md).
+pending demo when-green-at-main the demo journey (journey.sh JOURNEY_SET=demo minus the steps rows m3-m8, jpay, jserve and journey run)
 pending births when-green-at-main required when green at main. THE BAR (cv 01a0f9c0-521b): write p99 <= 5 s, cold reopen <= 60 s, judged per landing on 64 creates (journey-rows row_births); the nightly runs 1000 (docs/PIPELINE-HBOX.md Nightly); growth (updates) is nightly-only
 pending HERMES-LIVE real inference + BYOK; needs Ember's providers.json (MATURATION-MAP 2.6)
 pending jcertify certifier unit; 320 records PASS on dregg-infra edge/mini-certify (MATURATION-MAP 1)

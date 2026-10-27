@@ -12,10 +12,11 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure births jserve perf)
+JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure births jserve perf)
 # growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
 # it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
-if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then JOURNEY_ROWS+=(growth); fi
+# kernel (journey.sh JOURNEY_SET=kernel without G: the steps no public surface needs) is nightly too.
+if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then JOURNEY_ROWS+=(growth kernel); fi
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
@@ -38,6 +39,41 @@ row_journey() {
   echo "frontier $(jq -r .frontier "$RUN/j/journey-result.json")" >&2
   return $rc
 }
+
+# journey_set_row SET OWNED...: one journey of journey.sh's partition (JOURNEY_SET; `journey.sh --list-set`)
+# on one fresh Store, minus the steps another row already runs (OWNED; the spine J0-J8 always runs: every
+# step depends on part of it). One sub-row per step that is not the spine (the `journey` row reports those).
+journey_set_row() {
+  local set=$1 js=$SRC/native/resource-client/journey.sh steps id spine="J0 J1 J2 J3 J4 J5 J6 J7 J8"; shift
+  [ -f "$js" ] || return 99
+  bash "$js" --list-set "$set" >"$OUT/set.txt" 2>"$OUT/set.err" || return 99   # a tree before the split
+  steps=""
+  while read -r id; do
+    case " $* " in *" $id "*) continue ;; esac
+    steps="$steps $id"
+  done <"$OUT/set.txt"
+  # the journey's own wall budget ends 400 s inside the runner's row timeout, so a slow run is a named red
+  JOURNEY_STEPS="${steps# }" JOURNEY_GROWTH_LEVELS=10 JOURNEY_BUDGET_S=$(( ${PIPELINE_ROW_TIMEOUT_S:-5400} - 400 )) \
+    bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+  local rc=$?
+  [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
+  cp "$RUN/j/journey-result.json" "$OUT/"
+  jq -r --arg spine " $spine " '.steps[] | select($spine | contains(" " + .id + " ") | not) |
+    [.id, .status, (.wallSeconds|tostring), (.detail // "" | gsub("[\t\n]"; " "))] | @tsv' \
+    "$RUN/j/journey-result.json" >"$OUT/subrows.tsv"
+  jq -r '.steps[] | select(.status != "PASS") | .id' "$RUN/j/journey-result.json" | while read -r id; do
+    [ -d "$RUN/j/steps/$id" ] && cp -r "$RUN/j/steps/$id" "$OUT/step-$id" 2>/dev/null
+  done
+  echo "$set journey: $(jq -r '[.steps[] | select(.status == "PASS")] | length' "$RUN/j/journey-result.json")/$(jq -r '.steps | length' "$RUN/j/journey-result.json") PASS, frontier $(jq -r .frontier "$RUN/j/journey-result.json")" >&2
+  return $rc
+}
+# The demo journey: the steps the public demo's surfaces need that no other row runs (M3-M8 have their
+# rows, JPAY1-4/6 the jpay row, JSERVE its row; the rotation and audit steps run in `journey`).
+row_demo() {
+  journey_set_row demo M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAY4 JPAY6 JSERVE JROT JROTL JRLANE JGATE JAUDIT
+}
+# The kernel journey (nightly): kernel semantics no public surface exercises directly; G is row_growth's.
+row_kernel() { journey_set_row kernel G; }
 
 # The native Objective acceptance (Accepted receipt + every refusal) on its own two scratch worlds.
 row_objective() {

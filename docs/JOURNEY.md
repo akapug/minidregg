@@ -1,32 +1,42 @@
 # The journey is the definition of done
 
-`native/resource-client/journey.sh MANIFEST.json NEW_RUN_ROOT` is the one
-definition of done for the October 13 shellserver. It starts a fresh private
-Store from the binaries the manifest pins (sha256-checked), runs J0–J8 ([the steps](#the-steps-j0j8-and-growth),
-below), the growth measurement (G, between J6 and
-J7), the 32-field typed-state check (K4), list items 3–7 (M3–M7) and the lane journeys
-that joined since (the `STEPS` array in `native/resource-client/journey.sh:189` is the
-list; each step's header comment names its hook in `journey.d/`; `JOURNEY_STEPS` selects a
-subset). The continuous runner (`scripts/pipeline/journey-rows:15`) runs the rows
-`journey` (J0–J8, `JROT`, `JROTL`, and `JRLANE` and any seat step when present),
-`objective` (`native/resource-client/objective-native-acceptance.py all`: the native
-Objective Accepted receipt and its refusals,
-[native admission](OBJECTIVE-BEND.md#native-admission-by-re-execution)), `rooms`, `activity`
-(`objective-activity-native-acceptance.py`: the signed activity turns,
-[activities](OBJECTIVE-BEND-EVENTS.md#the-kernel)), `seats`
-(`objective-seat-native-acceptance.py`, [seats](SEATS.md)) and `objectrecord`; the call and
-send drivers (`objective-call-native-journey.py`, `objective-send-native-journey.py`) are not
-rows. It prints
-one row per step (PASS / FAIL / UNBUILT, wall seconds, the artifact that decided
-it), writes `journey-result.json`, and exits 0 only when every step passes. The
-frontier is the first step that did not pass; it is read from a run, never
-written by hand. Items 3–7 are UNBUILT until their lane adds
-`native/resource-client/journey.d/m3.sh` … `m7.sh`; the hook contract (exported
-variables, exit code, last-line artifact) is in the script's header, so landing
-a hook turns a stub green without changing the script. The seven older
-acceptance scripts are deprecated as gates: nothing they print is status, and a
-behaviour of theirs that still matters becomes a journey step instead. They are
-kept in this lane and not deleted:
+`native/resource-client/journey.sh MANIFEST.json NEW_RUN_ROOT` is the one definition of done. It starts a
+fresh private Store from the binaries the manifest pins (sha256-checked), walks its steps in order, prints one
+row per step (PASS / FAIL / UNBUILT / UNMEASURED / UNCONFIGURED, wall seconds, the artifact that decided it),
+writes `journey-result.json`, and exits 0 only when every step passes. The frontier is the first step that did
+not pass; it is read from a run, never written by hand. The `STEPS` array in `journey.sh` is the list; each
+step's header comment names its hook in `journey.d/`; a hook's presence turns an UNBUILT stub into a real step,
+and its contract (exported variables; exit 0 PASS, 5 UNCONFIGURED, anything else FAIL; last-line artifact) is in
+the script's header.
+
+## Two journeys
+
+Since 2026-10-26 the steps are partitioned (`SPINE`, `DEMO_STEPS`, `KERNEL_STEPS` beside `STEPS` in
+`journey.sh`; a step in no set or in two refuses every run, so a new step must be placed):
+
+| journey | steps | where it runs |
+|---|---|---|
+| spine | J0–J8, the tree-neutral journey below | in both journeys |
+| **demo** (`JOURNEY_SET=demo`) | what the public demo's surfaces need: malformed and hostile requests (J12X, JSERVE), thin consent, the clock and the tail bound (KC, KT), rooms and their exports, templates, private rooms, chat with the Discord bridge, Hermes as librarian, a week of credit (J17), documents through the shell and the web (K12C/T/M/H/R/I, WEB, J12, J12W, JNAMES, JDV, JPD), M3–M8, PAY (JPAY1–4, JPAYE1–3, JPAY6), keys over the proxy, rotation, the refusal lane, the fn gateway, disclosure, the Store audit | `scripts/check-journey.sh` (local gate `journey`, 2.5 h budget inside the gate's 3 h); the pipeline rows `journey` + `demo` + the per-item rows |
+| **kernel** (`JOURNEY_SET=kernel`) | kernel semantics no public surface exercises directly: kind revision (P7KR), G, 32 fields, concurrent births, joint index, per-author streams, channels, fields and narrowed reads, the sealed market, element trees and run edits, wells, the story, Nock (JN2, JN3, JN3P, JN5, JSYNC), plan binding, law clauses, jobs, field closure, affordances, inspect, law-sat | the nightly: pipeline rows `kernel` and `growth` (`PIPELINE_NIGHTLY=1`, docs/PIPELINE-HBOX.md) |
+
+`journey.sh --list-set demo|kernel|all` prints a journey's steps. `JOURNEY_STEPS` still runs any subset.
+
+The continuous runner (`scripts/pipeline/journey-rows`) runs, per landing, `journey` (J0–J8, JROT, JROTL, and
+JRLANE, JGATE, JAUDIT and any seat step), `demo` (the demo journey minus the steps another row runs), the
+per-item rows (`m3`, `m4`, `hermes`, `m6grain`, `m7`, `m8`, `jpay`, `jserve`), and the Objective and platform
+rows (`objective`, `rooms`, `activity`, `seats`, `bounty`, `call`, `send`, `domain`, `upgrade`, `hostupgrade`,
+`objectrecord`, `welcomecontinuity`, `sshe2e`, `fleetsign`, `exchange`, `chargedfailure`, `births`, `perf`);
+`scripts/pipeline/required-rows` says which a landing requires.
+
+**M6** (`journey.d/m6.sh`, ruling D9) is a thin delegate to the `m6grain` row's scenario,
+`scripts/spk-platform/two-world-journey.sh full`, with its edge phase required: a Caddy on loopback in front of
+each world's route socket, through which the authenticated GET answers 200, the anonymous one is refused and a
+WebSocket opens with 101 (`grain-journey.sh` phase `edge`). It needs the journey to run as the operator uid with
+linger, a subuid range, uidmap, `sudo -n` for this tree's `install-user-world`, a Caddy, openssl and the pinned
+sntfy; without one it is UNCONFIGURED naming it. Its first run is on a Debian 13 grain host.
+
+The older acceptance scripts are not gates; a behaviour of theirs that still matters is a journey step:
 
 | script | what it checks | where that lives in the journey |
 |---|---|---|
