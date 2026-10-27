@@ -55,13 +55,13 @@ structure Confirmed (config : Config) where
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
-        confirmed.readback.derived confirmed.readback.ready) :=
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) :=
   NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt :=
   let old := confirmed.old
   let candidate := NativeHostReplay.exactCandidate old
-    confirmed.readback.derived confirmed.readback.ready
+    confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -78,7 +78,7 @@ post-CAS image is the `config`-validated successor of `old` extended by it. -/
 theorem Confirmed.validated_successor {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.derived.intent = confirmed.admitted.intent ∧
       validateLoaded config (NativeHostReplay.exactCandidate confirmed.old
-        confirmed.readback.derived confirmed.readback.ready) = .ok confirmed.readback.after :=
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) = .ok confirmed.readback.after :=
   ⟨confirmed.derivedExact, confirmed.readback.validated⟩
 
 inductive Result (config : Config) where

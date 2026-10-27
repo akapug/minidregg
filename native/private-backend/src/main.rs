@@ -1,5 +1,4 @@
 use mini_private_backend::{codec::*, custody::*};
-use std::os::unix::fs::OpenOptionsExt;
 use std::{
     io::{Read, Write},
     path::Path,
@@ -83,25 +82,6 @@ fn run() -> std::io::Result<()> {
    println!("current recipient epoch adopted");Ok(())
   }
   Some("anchor") if a.len()==4=>run_anchor(Path::new(&a[2]),Path::new(&a[3])),
-  Some("provision-test") if a.len()==4=>{
-   let n:usize=a[3].parse().map_err(|_|bad("count"))?;
-   if n==0||n>10000{return Err(bad("count bound"));}
-   let mut random=std::fs::File::open("/dev/urandom")?;
-   let mut rows=vec![vec![0;32];n];for row in &mut rows{random.read_exact(row)?;}
-   let p=Pool::provision(Path::new(&a[2]),&rows)?;println!("provisioned {} rows; poolNatDigits={:?}",p.len(),p.id.digits());Ok(())
-  }
-  Some("reserve") if a.len()==8=>{
-   let pool=Pool::open(Path::new(&a[2]))?;
-   let row:u64=a[3].parse().map_err(|_|bad("row"))?;
-   // Source receiving will supply these exact native bytes, not this test fixture.
-   let g=Generation{invocation:Nat::new(7),command:vec![9],attempt:Nat::new(0),generation:Nat::new(1),configuration:Nat::new(2)};
-   let crash=match a[7].as_str(){"none"=>Cut::None,"before-anchor"=>Cut::BeforeAnchor,"after-anchor"=>Cut::AfterAnchor,"after-snapshot"=>Cut::AfterSnapshot,"after-secret-read"=>Cut::AfterSecretRead,_=>return Err(bad("crash cut"))};
-   let secret=reserve_release(&pool,row,g,Purpose::HolderPad,Path::new(&a[4]),Path::new(&a[5]),crash)?;
-   // Explicit test output destination. CLI never prints secret material.
-   let mut f=std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&a[6])?;f.write_all(&secret)?;f.sync_all()?;println!("released once after durable reservation");Ok(())
-  }
-  Some("recover") if a.len()==4=>{let j=recover_snapshot(Path::new(&a[2]),Path::new(&a[3]))?;println!("recovered {} permanent tombstones",j.spent.len());Ok(())}
-  Some("journal-empty")=>{for b in Journal::default().encode(){print!("{b:02x}");}println!();Ok(())}
-  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | provision-test POOL COUNT | reserve POOL ROW SOCKET LOCAL OUTPUT CUT | recover SOCKET LOCAL | journal-empty | adopt-current-recipient CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL"))
+  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | adopt-current-recipient CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL"))
  }
 }

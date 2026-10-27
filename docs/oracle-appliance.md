@@ -62,6 +62,17 @@ some conversational context when its worker exits, so a new turn after eviction
 requires a fresh conversation ID and supplied context. The service reports this
 explicitly rather than silently answering without the earlier context.
 
+A completed Linux run exercised arithmetic queries in 32 tenant workspaces with
+one observed resident Engine worker. Peak total cgroup memory was 750,977,024 bytes (about 716 MiB)
+under the 2 GiB limit. All 32 exact retries returned their retained replies;
+conflicting reuse was refused. Restart replay and stale-conversation refusal
+started no Engine, and both shutdowns completed. This was a runtime qualification
+under shared host load, not a complete Mini receiving journey. The
+[qualification report](https://github.com/emberian/veri7vn/blob/dev/project/lanes/U7-tenancy-qualification.md)
+records the sampling limits and evidence.
+Switching tenants still pays worker startup: first calls took 7.51–103.05 seconds
+on that contended host, while exact retries took 1.22–25.98 milliseconds.
+
 The new browser page offers questions, operation discovery and direct calls
 through the same routes agents use. It retains exact request bytes for manual
 retry and makes conversation resets explicit. These changes are signed in
@@ -104,13 +115,21 @@ must account for that failure rather than resend the original operation.
 
 The fresh v7 run installed both appliances and admitted a real agent session.
 Lifetime-grant planning then refused: its source creates three grants while the
-ordinary birth validator requires two. A dedicated lifetime-grant source and
-receiver repair is being checked. No grant was submitted, application started,
+ordinary birth validator requires two. The repair is available on
+`lane/oracle-lifetime-grant`: a dedicated frame admits exactly the source's owner,
+controller and read-only participant observer; ordinary births retain their
+existing restriction. `lane/oracle-grant-factory` adds the separate fresh-world
+policy permission for the allocated grant resource. Earlier scoped checks passed
+for the production modules, observer boundary and factory predicate. The corrected
+source fixture, current dependency closure and codec census still need the
+central integrator's validation. No grant was submitted, application started,
 or Oracle/browser call made in that run. Cleanup passed and the stopped Store
 is preserved. The next positive journey uses a fresh world on a coherent repaired
 Mini build. Agent discovery/calls and the complete restart journey remain open.
 The [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
-both stopped runs and their exact evidence.
+both stopped runs and their exact evidence. The
+[factory evidence](evidence/oracle-grant-factory-2026-10-27.json) records its
+682 predicate checks and their limits.
 
 The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or

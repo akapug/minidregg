@@ -72,6 +72,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "unpin", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "react", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "chat", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "feedback", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "reports", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 pub(crate) const HELP: &str = "\
@@ -177,6 +179,12 @@ pub(crate) enum Line {
     /// `room ls [--in ROOM] [--since H] [--import] [--json]`: the cells under
     /// the room the Host's signed `since` view names, with the roster's streams.
     Ls { room: Option<String>, since: u64, import: bool, json: bool },
+    /// `feedback [--from ATTEMPT] [--clause C] [--page P] TEXT`: one report, a signed turn in
+    /// this member's own stream of its `feedback` room.
+    Feedback { text: String, from: Option<String>, clause: Option<String>, page: Option<String>, via: Option<String> },
+    /// `reports [--since H] [-n N] [--digest] [--json]`: the operator reads every `feedback-NAME`
+    /// room it founded.
+    Reports { since: Option<u64>, count: usize, digest: bool, json: bool },
     /// `summon`, `ask`, `dismiss` (PLACE §2.7): `crate::hermes`.
     Hermes(crate::hermes::Line),
     Join { room: String, invitation: String },
@@ -239,7 +247,7 @@ fn emoji(value: &str) -> Result<String, String> {
 /// Map a raw shell line to a chat line. `None`: not a chat verb. Chat verbs
 /// take the rest of the line as text, so apostrophes and `#` need no quoting.
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
-    use crate::shell_grammar::{parse_line, usage, CHAT, PIN, REACT, ROOM, SAY, TAIL, TOPIC, UNPIN};
+    use crate::shell_grammar::{parse_line, usage, CHAT, FEEDBACK, PIN, REACT, REPORTS, ROOM, SAY, TAIL, TOPIC, UNPIN};
     let (verb, rest) = split(line)?;
     if verb == "room" && split(rest).is_some_and(|(action, _)| action == "ls") {
         return Some(parse_line(&ROOM, line).and_then(parse_ls));
@@ -266,9 +274,56 @@ pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
         "unpin" => parse_line(&UNPIN, line).map(|_| Line::Unpin),
         "react" => parse_line(&REACT, line).and_then(|p| number(p.arg(0), "react").and_then(|number| emoji(p.arg(1)).map(|emoji| Line::React { number, emoji }))),
         "chat" => parse_line(&CHAT, line).and_then(parse_chat).map_err(|e| if e.is_empty() { usage(&CHAT) } else { e }),
+        "feedback" => parse_line(&FEEDBACK, line).and_then(parse_feedback).map_err(|e| if e.is_empty() { usage(&FEEDBACK) } else { e }),
+        "reports" => parse_line(&REPORTS, line).and_then(parse_reports).map_err(|e| if e.is_empty() { usage(&REPORTS) } else { e }),
         _ => return None,
     };
     Some(parsed)
+}
+
+/// The bounds of one report. The whole entry is one post (`MAX_PAYLOAD`); these keep a report with
+/// every context field inside it with room to spare.
+const FEEDBACK_TEXT: usize = 3000;
+const FEEDBACK_CLAUSE: usize = 400;
+const FEEDBACK_PAGE: usize = 200;
+/// The room every member's reports go to, as the member names it locally; the operator founds
+/// `feedback-NAME` and the member joins it under this name (`chat join feedback INVITATION`).
+pub(crate) const FEEDBACK_ROOM: &str = "feedback";
+/// The operator's per-member room names.
+pub(crate) const FEEDBACK_PREFIX: &str = "feedback-";
+
+fn one_line(label: &str, value: &str, max: usize) -> Result<String, String> {
+    let v = value.trim();
+    if v.is_empty() || v.len() > max || v.chars().any(char::is_control) {
+        return Err(format!("{label} is 1..{max} bytes of one line"));
+    }
+    Ok(v.to_owned())
+}
+
+fn parse_feedback(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    let value = |name: &str| p.flag(name).flatten().map(str::to_owned);
+    let text = free_text(p.opt(0).unwrap_or(""));
+    if text.is_empty() {
+        return Err(String::new());
+    }
+    if text.len() > FEEDBACK_TEXT {
+        return Err(format!("a report is at most {FEEDBACK_TEXT} bytes; this one is {}", text.len()));
+    }
+    let from = value("--from");
+    let clause = value("--clause").map(|v| one_line("--clause", &v, FEEDBACK_CLAUSE)).transpose()?;
+    let page = value("--page").map(|v| one_line("--page", &v, FEEDBACK_PAGE)).transpose()?;
+    let via = match value("--via") {
+        Some(v) if v == "discord" => Some(v),
+        Some(_) => return Err("--via names a bridge network: discord".into()),
+        None => None,
+    };
+    Ok(Line::Feedback { text, from, clause, page, via })
+}
+
+fn parse_reports(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    let since = p.flag("--since").flatten().map(|v| v.parse::<u64>().map_err(|_| "--since takes a height".to_owned())).transpose()?;
+    let count = p.flag("-n").flatten().map(|v| v.parse::<usize>().ok().filter(|n| *n > 0).ok_or_else(|| "-n takes a count".to_owned())).transpose()?.unwrap_or(50);
+    Ok(Line::Reports { since, count, digest: p.has("--digest"), json: p.has("--json") })
 }
 
 fn parse_say(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
@@ -827,8 +882,37 @@ pub(crate) enum Kind {
     Withdraw,
     /// A resident's state for the request it replies to (`ref`).
     RequestStatus { status: String, text: String },
+    /// A member's report (`feedback`), with the context the client recorded.
+    Feedback(Report),
     Raw(String),
     Unavailable,
+}
+
+/// One report as the member's client wrote it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Report {
+    pub text: String,
+    pub client: String,
+    pub sha: String,
+    pub from: Option<String>,
+    pub standing: Option<String>,
+    pub clause: Option<String>,
+    pub page: Option<String>,
+    pub via: Option<String>,
+}
+
+impl Report {
+    /// `(mini 0.1.0 candidate abc; from w-1 [refused]; clause: ...; page: /x; via discord)`
+    fn context(&self) -> String {
+        let mut parts = vec![format!("{} {}", self.client, self.sha)];
+        if let Some(f) = &self.from {
+            parts.push(format!("from {f}{}", self.standing.as_ref().map(|s| format!(" [{s}]")).unwrap_or_default()));
+        }
+        if let Some(c) = &self.clause { parts.push(format!("clause: {c}")); }
+        if let Some(p) = &self.page { parts.push(format!("page: {p}")); }
+        if let Some(v) = &self.via { parts.push(format!("via {v}")); }
+        parts.join("; ")
+    }
 }
 
 /// The request states a resident publishes, in lifecycle order. The last
@@ -857,6 +941,11 @@ pub(crate) fn kind_of(entry: &Entry) -> Kind {
                 };
                 Kind::Say { text: t, via }
             }
+            None => Kind::Raw(text.clone()),
+        },
+        Some("feedback") => match s("text") {
+            Some(t) => Kind::Feedback(Report { text: t, client: s("client").unwrap_or_default(), sha: s("sha").unwrap_or_default(),
+                from: s("from"), standing: s("standing"), clause: s("clause"), page: s("page"), via: s("via") }),
             None => Kind::Raw(text.clone()),
         },
         Some("topic") => s("text").map(Kind::Topic).unwrap_or_else(|| Kind::Raw(text.clone())),
@@ -1268,6 +1357,7 @@ pub(crate) fn render_entry(feed: &Feed, n: usize, names: &Names) -> String {
         Kind::Withdraw => format!(" withdrew request {}", reference(e)),
         Kind::RequestStatus { status, text } => format!(" request {} is {status}{}", reference(e),
             if text.is_empty() { String::new() } else { format!(": {}", clip(&text, 200)) }),
+        Kind::Feedback(r) => format!(" reported: {} ({})", clip(&r.text, 400), clip(&r.context(), 400)),
         Kind::Raw(text) => format!(": {}", clip(&text, 400)),
         Kind::Unavailable => match e.payload {
             Payload::Binary => ": [payload is not text]".into(),
@@ -1293,6 +1383,7 @@ fn entry_json(feed: &Feed, n: usize, names: &Names) -> Value {
         Kind::React(x) => ("react", Some(x), None),
         Kind::Withdraw => ("withdraw", None, None),
         Kind::RequestStatus { status, text } => ("request-status", Some(format!("{status}: {text}")), None),
+        Kind::Feedback(r) => ("feedback", Some(r.text), None),
         Kind::Raw(t) => ("raw", Some(t), None),
         Kind::Unavailable => ("unavailable", None, None),
     };
@@ -1515,6 +1606,87 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
     Ok(json!({"id":id,"outcome":recovered["outcome"],"operationRecord":path}))
 }
 
+/// The client's version and the candidate it was built from, as a report records them. The sha
+/// is the build's (`MINI_BUILD_SHA` at compile time), or the box's (`MINI_CANDIDATE_SHA` in the
+/// environment); a client built with neither says so rather than guess.
+fn client_identity() -> (String, String) {
+    let sha = std::env::var("MINI_CANDIDATE_SHA").ok().filter(|v| !v.is_empty())
+        .or_else(|| option_env!("MINI_BUILD_SHA").map(str::to_owned))
+        .map(|v| v.chars().filter(char::is_ascii_alphanumeric).take(40).collect::<String>())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "sha-unrecorded".to_owned());
+    (format!("mini {}", env!("CARGO_PKG_VERSION")), sha)
+}
+
+/// What this client retained of attempt `id`, in a word, for a report made from it.
+fn attempt_standing(session: &Session, id: &str) -> &'static str {
+    use crate::workspace::AttemptOutcome;
+    let dir = session.workspace.join("attempts").join(id);
+    if !dir.is_dir() {
+        return "not retained here";
+    }
+    match crate::workspace::retained_attempt_outcome(&dir) {
+        Ok(AttemptOutcome::Confirmed(_)) => "admitted",
+        Ok(AttemptOutcome::Charged(_)) => "charged",
+        Ok(AttemptOutcome::Refused) => "refused",
+        Ok(AttemptOutcome::Pending) => "undecided",
+        Err(_) => "unreadable",
+    }
+}
+
+/// `reports`: every report in every `feedback-NAME` room this session founded, by height.
+fn reports(session: &Session, since: Option<u64>, count: usize, digest: bool, as_json: bool) -> Result<(), Done> {
+    let mut names_of_rooms: Vec<String> = fs::read_dir(chat_dir(session).join("rooms"))
+        .map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".json") && !n.ends_with(".cache.json"))
+            .map(|n| n.trim_end_matches(".json").to_owned())
+            .filter(|n| n.starts_with(FEEDBACK_PREFIX))
+            .collect())
+        .unwrap_or_default();
+    names_of_rooms.sort();
+    if names_of_rooms.is_empty() {
+        return Err(usage(format!("this session founded no {FEEDBACK_PREFIX}NAME room (the operator's session reads reports)")));
+    }
+    let names = names(session);
+    let mut rows: Vec<(u64, String, String, Report)> = Vec::new();
+    let mut unreadable = 0usize;
+    for name in &names_of_rooms {
+        let room = load_room(session, name).map_err(error)?;
+        match read_room(session, &room) {
+            Ok((feed, _, _)) => {
+                for e in &feed.feed {
+                    if since.is_some_and(|h| e.height <= h) { continue; }
+                    if let Kind::Feedback(r) = kind_of(e) {
+                        rows.push((e.height, name.clone(), e.author.clone(), r));
+                    }
+                }
+            }
+            Err((_, text)) => {
+                unreadable += 1;
+                eprintln!("reports: {name} unreadable: {}", text.lines().next().unwrap_or(""));
+            }
+        }
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let skip = rows.len().saturating_sub(count);
+    for (height, room, author, r) in rows.into_iter().skip(skip) {
+        let who = names.of(&author);
+        if as_json {
+            println!("{}", json!({"height":height,"room":room,"author":author,"name":who,"text":r.text,"client":r.client,
+                "sha":r.sha,"from":r.from,"standing":r.standing,"clause":r.clause,"page":r.page,"via":r.via}));
+        } else if digest {
+            let flat: String = r.text.split_whitespace().collect::<Vec<_>>().join(" ");
+            println!("h{height} {who}: {}", flat.chars().take(120).collect::<String>());
+        } else {
+            println!("h{height} {who} [{room}]: {}\n    ({})", r.text, r.context());
+        }
+    }
+    if unreadable == names_of_rooms.len() {
+        return Err(error("no feedback room could be read"));
+    }
+    Ok(())
+}
+
 fn said(room: &Room, what: &str, result: &Value) {
     let tx = result.pointer("/outcome/transactionId").and_then(Value::as_str).unwrap_or("");
     let again = match result["replanned"].as_u64().unwrap_or(0) {
@@ -1567,6 +1739,24 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             said(&room, "said", &result);
             Ok(())
         }
+        Line::Feedback { text, from, clause, page, via } => {
+            let room = load_room(session, FEEDBACK_ROOM).map_err(|_| error(format!(
+                "this session has no {FEEDBACK_ROOM} room yet: the operator opens one for you (chat new {FEEDBACK_PREFIX}NAME, chat invite) and you take its invitation with `chat join {FEEDBACK_ROOM} INVITATION`")))?;
+            let (client, sha) = client_identity();
+            let mut payload = json!({"type":"feedback","text":text,"client":client,"sha":sha});
+            if let Some(id) = &from {
+                payload["from"] = json!(id);
+                payload["standing"] = json!(attempt_standing(session, id));
+            }
+            if let Some(c) = clause { payload["clause"] = json!(c); }
+            if let Some(p) = page { payload["page"] = json!(p); }
+            if let Some(v) = via { payload["via"] = json!(v); }
+            let topic = cached_topic(session, &room);
+            let result = append(session, &room, payload, None, None, topic)?;
+            said(&room, "report recorded", &result);
+            Ok(())
+        }
+        Line::Reports { since, count, digest, json: as_json } => reports(session, since, count, digest, as_json),
         Line::Topic(None) => {
             let room = current_room(session).map_err(error)?;
             let (feed, _, _) = read_room(session, &room)?;
@@ -2592,5 +2782,63 @@ mod exact_operation_parse_tests {
         let (code, message) = adopt_decision(Some("8"), "7", "lab").unwrap_err();
         assert_eq!(code, EXIT_USAGE);
         assert!(message.contains("names founder 8"));
+    }
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+
+    fn entry(height: u64, author: &str, payload: &str) -> Entry {
+        Entry { height, author: author.into(), cell: "5".into(), sequence: 1, topic: String::new(), to: None, re: None,
+            payload: Payload::Verified(payload.into()), owner: author.into() }
+    }
+
+    /// The line the web form and the footer link assemble reaches `Line::Feedback` whole: the
+    /// quoted clause with spaces and quotes in it, the attempt, the page, then the text.
+    #[test]
+    fn feedback_parses_its_context_flags_and_free_text() {
+        let line = r#"feedback --from w-abc --clause "refused: law-denied: field 2 \"monotone\" (before 2)" --page /doc/paper it's broken, #1"#;
+        assert_eq!(
+            plan(line).unwrap().unwrap(),
+            Line::Feedback {
+                text: "it's broken, #1".into(),
+                from: Some("w-abc".into()),
+                clause: Some(r#"refused: law-denied: field 2 "monotone" (before 2)"#.into()),
+                page: Some("/doc/paper".into()),
+                via: None,
+            }
+        );
+        assert_eq!(
+            plan(r#"feedback --via discord "--clause fake the button is gone""#).unwrap().unwrap(),
+            Line::Feedback { text: "--clause fake the button is gone".into(), from: None, clause: None, page: None, via: Some("discord".into()) },
+            "a quoted text is never read as a flag"
+        );
+        // Bounds: no text, an oversize text, a clause with a newline-like control, a foreign network.
+        assert!(plan("feedback").unwrap().is_err());
+        assert!(plan(&format!("feedback {}", "x".repeat(FEEDBACK_TEXT + 1))).unwrap().is_err());
+        assert!(plan(&format!("feedback {}", "x".repeat(FEEDBACK_TEXT))).unwrap().is_ok());
+        assert!(plan(&format!("feedback --clause {} hi", format!("\"{}\"", "c".repeat(FEEDBACK_CLAUSE + 1)))).unwrap().is_err());
+        assert!(plan("feedback --via slack hi").unwrap().is_err());
+        assert!(plan("feedback --from ../x hi").unwrap().is_err());
+        // The largest legal report is one post.
+        let biggest = json!({"type":"feedback","text":"t".repeat(FEEDBACK_TEXT),"client":"mini 0.1.0","sha":"s".repeat(40),
+            "from":"f".repeat(64),"standing":"not retained here","clause":"c".repeat(FEEDBACK_CLAUSE),"page":"p".repeat(FEEDBACK_PAGE),"via":"discord"});
+        assert!(serde_json::to_string(&biggest).unwrap().len() <= MAX_PAYLOAD);
+    }
+
+    /// The operator sees a report with its context, in the tail and in the digest's source.
+    #[test]
+    fn a_report_reads_back_with_its_context() {
+        let payload = r#"{"type":"feedback","text":"the save button is gone","client":"mini 0.1.0","sha":"abc123","from":"w-abc","standing":"refused","clause":"refused: law-denied: field 2","page":"/doc/paper"}"#;
+        let feed = merge(vec![entry(7, "42", payload)], Some("1".into()));
+        let names = Names { me: "1".into(), pet: BTreeMap::from([("42".to_owned(), "alice".to_owned())]) };
+        let line = render_entry(&feed, 1, &names);
+        for part in ["h7 alice", "reported: the save button is gone", "mini 0.1.0 abc123", "from w-abc [refused]", "clause: refused: law-denied: field 2", "page: /doc/paper"] {
+            assert!(line.contains(part), "{part} missing from {line}");
+        }
+        assert_eq!(entry_json(&feed, 1, &names)["kind"], "feedback");
+        // A feedback entry without text is raw, not a half-report.
+        assert!(matches!(kind_of(&entry(8, "42", r#"{"type":"feedback"}"#)), Kind::Raw(_)));
     }
 }

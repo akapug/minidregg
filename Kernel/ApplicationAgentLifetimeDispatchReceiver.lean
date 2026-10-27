@@ -35,12 +35,12 @@ structure Permit (config : Config) where
 def Permit.verified {config : Config} (permit : Permit config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) :=
   NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate permit.old
-    permit.readback.derived permit.readback.ready
+    permit.readback.derived permit.readback.ready permit.readback.tag
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.height + 1,
@@ -58,7 +58,7 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
 theorem Permit.validated_successor {config : Config} (permit : Permit config) :
     permit.readback.derived.intent = permit.admitted.intent ∧
       validateLoaded config (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) = .ok permit.readback.after :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
   ⟨permit.derivedExact, permit.readback.validated⟩
 
 private def permitCodec : LawfulCodec

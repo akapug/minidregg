@@ -377,8 +377,7 @@ fn render(site: &Site, edit: &Edit) -> Page {
         edit.status.as_str(),
         "saved" | "unchanged" | "refused" | "failed"
     );
-    let mut body = format!("<style>.editing{{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:2rem}}body{{max-width:90rem}}textarea{{display:block;box-sizing:border-box;width:100%;min-height:22rem;font:15px/1.6 ui-monospace,monospace;padding:1rem}}button{{padding:.6rem 1rem;margin:.5rem 0;font:inherit}}.inspector{{border-left:1px solid #ddd;padding-left:1rem}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}code{{overflow-wrap:anywhere}}details{{margin:.5rem 0}}@media(max-width:800px){{.editing{{display:block}}.inspector{{border:0;padding:0}}}}</style>\
-        <p><a href=\"{base}/doc/{name}\">Read current document</a> · <a href=\"{url}\">Permalink to this draft and save</a></p>\
+    let mut body = format!("<p><a href=\"{base}/doc/{name}\">Read current document</a> · <a href=\"{url}\">Permalink to this draft and save</a></p>\
         <div class=editing><section><p class=note>Editing the document as read at height {}. Unchanged transclusion markers preserve their source links.</p>",escape(&edit.height));
     if !edit.message.is_empty() {
         body.push_str(&format!(

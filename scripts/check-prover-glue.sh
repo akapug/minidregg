@@ -32,9 +32,10 @@ done
 # lake may rebuild them here, which is what the build does anyway).
 # Build imported libraries, leaving emitter elaboration to the scratch cwd.
 mapfile -t dependencies < <(python3 - "${modules[@]}" <<'PYDEPS'
-import re, sys
-print("\n".join(sorted({m for p in sys.argv[1:] for m in
-    re.findall(r"^import\s+(\S+)", open(p + ".lean").read(), re.M)})))
+import sys
+sys.path.insert(0, "scripts")
+from lean_imports import file_imports
+print("\n".join(sorted({m for p in sys.argv[1:] for m in file_imports(p + ".lean")})))
 PYDEPS
 )
 lake build "${dependencies[@]}" >/dev/null

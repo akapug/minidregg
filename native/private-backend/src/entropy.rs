@@ -60,7 +60,7 @@ impl Entropy {
 /// Process-wide root for tests. `MINI_PRIVATE_TEST_ENTROPY=<64 hex>` replays a
 /// run; otherwise the key comes from the OS and is printed once so a failing run
 /// can be reproduced. Neither path derives anything from a party's input value.
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) fn test_root() -> Entropy {
     use std::sync::OnceLock;
     static ROOT: OnceLock<[u8; 32]> = OnceLock::new();

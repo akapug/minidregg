@@ -2,7 +2,7 @@
 
 `StandingDues.obend` + `preview-cohort.json` (49 rows). Evidence class: **executed in the
 effect-free preview** (`tests/objective-bend-source/check-preview.ts`); **not admitted natively**.
-Native: needs the activity kernel's `pay` Plan and event Response (the kernel performs only `await` Plans); Phase 3. Attempts: `docs/evidence/2026-10-27-world-native/`.
+Native: re-expressed on the activity kernel's protocol (one `Opening` input, `resumed {outcome, view}`, `await` and `transfer` Plans: the kernel pays from the activity's purse at the yield); native admission runs `scripts/world-native-admit.sh dues --route activity --scenario dues` on a candidate carrying the effect Plan. Attempts: `docs/evidence/2026-10-27-world-native/`.
 
 ## What it does
 A payer owes a room `amount` every `period` heights from `start`, for `periods` periods.
@@ -20,9 +20,11 @@ Period k falls due at `cursorAt(k) = start + k * period`.
   deposit in the same step that advances the cursor; a short deposit refuses the draw and `lapse`
   ends the lease; `settle` refunds the unspent balance to the payer once. `top-up` only by the
   payer. Law `duesLaw`: paid = k * amount, and deposited = held + paid + refunded.
-* An activity `dues(terms, deposit)` yields `await{phase, period, due}` and `pay{from,to,amount,
-  escrow}` Plans and is resumed with typed events or kernel acknowledgements. A refused
-  transfer leaves the period owed.
+* An activity `dues(Opening{terms, deposit, keeper, fresh})` yields the kernel's `await{write, on:
+  reply{decider: keeper}, patience}` and `transfer{to: room, amount, write: {paid: add amount}}`
+  Plans and is resumed with `resumed {outcome, view}`: a reply carries the typed event, a transfer
+  is answered `settled` (paid from the purse, the ledger written) or `refused` (nothing moves, the
+  period stays owed). The payer funds the purse with the birth deposit.
 
 ## Cohort
 Happy path (on time, full term, lease draw, lapse, settle, top-up); refusals: early, double

@@ -71,6 +71,9 @@ ROLES = {
     # The web front end (deploy/web-frontend/INSTALL.md): the gateway and its root session helper.
     "web": "mini-web",
     "webSpawn": "mini-web-spawn",
+    # The research-labelled four-party private compute demo (native/private-backend, feature `demo`):
+    # the `mini private-compute` verb and the jprivate row run it.
+    "privateCompute": "mini-private-compute",
 }
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
@@ -83,7 +86,11 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("discord", "discord-entrance"), ("door", "discord-entrance"), ("doorProcess", "discord-entrance"), ("discordMirror", "discord-entrance"),
               ("payWatcher", "pay-watcher"),
               ("keys", "mini-keys"), ("launchGate", "launch-gate"),
-              ("web", "mini-web"), ("webSpawn", "mini-web-spawn"))
+              ("web", "mini-web"), ("webSpawn", "mini-web-spawn"),
+              ("privateCompute", "private-backend"))
+# Cargo features a Rust role's binary requires (its [[bin]] required-features), printed as the fourth
+# column of `--rust-roles`; both builders pass it as `--features`.
+RUST_ROLE_FEATURES = {"privateCompute": "demo"}
 # Journey fixtures: built from the tip they test by the journey tooling (lane-build.sh rust puts them in
 # LANE_DIR/fixtures, pack copies them to OUT/fixtures/ with their own SHA256SUMS; journey-runner reads
 # $set/fixtures/<binary>; scripts/check-journey.sh builds them from the tree), never in bin/, the
@@ -405,7 +412,7 @@ def main():
     parser.add_argument("--into-existing", action="store_true")
     if sys.argv[1:] == ["--rust-roles"]:
         for role, crate in RUST_ROLES:
-            print(role, crate, ROLES[role])
+            print(role, crate, ROLES[role], *([RUST_ROLE_FEATURES[role]] if role in RUST_ROLE_FEATURES else []))
         return
     if sys.argv[1:] == ["--fixture-roles"]:
         for role, crate, binary in FIXTURES:

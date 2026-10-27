@@ -79,7 +79,7 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
     | return .error refused
   let .ok ready := prepare profile config ingress.spec | return .error refused
   if baseTariff : pins.tariff = config.tariff then
-    let some decoded := ResourceBirthPolicyController.Concrete.decodeIngress
+    let some decoded := ResourceBirthPolicyController.Concrete.decodeLifetimeGrantIngress
         ingress.birthIngress | return .error refused
     let .ok birth ← ResourceBirthPolicyController.Concrete.admitDecodedNative
         profile config.deployment pins native durable height decoded ready.sourced
@@ -118,6 +118,16 @@ def admitNative (profile : CanonicalRuntimeProfile.Profile F)
       else return .error refused
     else return .error refused
   else return .error refused
+
+/-- This is the actual installed descriptor retained by native admission,
+not a caller-provided selector or an authored plan. The independent app gate
+and exact source comparison above bind the third capability to its participant. -/
+theorem Accepted.observer_authority_exact {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (accepted : Accepted profile config pins durable height ingress) :
+    ObserverAuthorityBound ingress.spec accepted.birth.descriptor.grants := by
+  rw [accepted.sourceDescriptor]
+  exact accepted.sourceReady.observer_authority_exact profile
+    accepted.birth.prepared.authority.snapshot.authState height
 
 theorem Accepted.same_loaded_image {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
     (accepted : Accepted profile config pins durable height ingress) :

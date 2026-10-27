@@ -187,10 +187,10 @@ cargo_home=$(CDPATH='' cd -- "$cargo_home" && pwd -P)
 export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$out/work/target=/target"
 export CARGO_INCREMENTAL=0
 build_rust() {
-  crate=$1 bin=$2
+  crate=$1 bin=$2 features=${3:-}
   (cd "$bsrc" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
     --manifest-path "$bsrc/native/$crate/Cargo.toml" \
-    --target-dir "$out/work/target" --bin "$bin" \
+    --target-dir "$out/work/target" --bin "$bin" ${features:+--features "$features"} \
     >"$out/logs/cargo-$crate-$bin.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-$crate-$bin.log" >&2; candidate_die "cargo build failed: $crate/$bin"; }
   # The binary must name the pinned compiler (ELF .comment "rustc version ...").
@@ -203,8 +203,8 @@ python3 "$src/deploy/candidate/package.py" --rust-roles >"$out/work/rust-roles.t
   || candidate_die "package.py --rust-roles failed"
 build_rust resource-client mini
 if [ "$client_only" = 0 ]; then
-  while read -r role crate bin; do
-    [ "$role" = mini ] || build_rust "$crate" "$bin" </dev/null
+  while read -r role crate bin features; do
+    [ "$role" = mini ] || build_rust "$crate" "$bin" "$features" </dev/null
   done <"$out/work/rust-roles.txt"
 fi
 

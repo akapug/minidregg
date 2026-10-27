@@ -430,6 +430,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_agent_lifetime_issue_args_v1 : String := "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v3"
 @[persisted_codec_tag] abbrev native_host_genesis_log_v1 : String := "DREGG.NATIVE-HOST.GENESIS-LOG/v1"
 @[persisted_codec_tag] abbrev resource_birth_signed_ingress_byte_v2 : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
+@[persisted_codec_tag] abbrev agent_lifetime_grant_birth_signed_ingress_v1 : String := "DREGG/AGENT-LIFETIME-GRANT-BIRTH/SIGNED-INGRESS/v1"
 @[persisted_codec_tag] abbrev pay_claim_quote_request_v1 : String := "DREGG/PAY/CLAIM-QUOTE/REQUEST/v1"
 @[persisted_codec_tag] abbrev application_agent_dispatch_committed_permit_v2 : String := "DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2"
 @[persisted_codec_tag] abbrev fn_selected_source_publication_effects_v1 : String := "DREGG/FN/SELECTED-SOURCE-PUBLICATION-EFFECTS/v1"
@@ -608,7 +609,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev nativeprotocolframes_callframe_4cd7d6ce : String := "DREGG/NATIVE-HOST/SIGNED-CALL/v4"
 @[persisted_codec_tag] abbrev nativeprotocolframes_draftframe_7af8fd37 : String := "DREGG/NATIVE-HOST/DRAFT/v5"
 @[persisted_codec_tag] abbrev nativeprotocolframes_signingplanframe_6d288d35 : String := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6"
-@[persisted_codec_tag] abbrev nativeprotocolframes_outcomeframe_11a5eba7 : String := "DREGG/NATIVE-HOST/OUTCOME/v6"
+@[persisted_codec_tag] abbrev nativeprotocolframes_outcomeframe_11a5eba7 : String := "DREGG/NATIVE-HOST/OUTCOME/v7"
 @[persisted_codec_tag] abbrev nativeprotocolframes_intentframe_ad208d3e : String := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v7"
 @[persisted_codec_tag] abbrev nativeprotocolframes_challengeframe_5b33ffe4 : String := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v10"
 @[persisted_codec_tag] abbrev nativeprotocolframes_signedframe_c007c7c1 : String := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v10"

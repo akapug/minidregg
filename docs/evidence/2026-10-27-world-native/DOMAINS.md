@@ -12,14 +12,14 @@ on the Host, `dues-activity-route/`.
 | activity | `tally(Start)` Activity | `sum Plan: await` only; `Resumed: resumed{outcome,view}` (Tally.obend, `sum Plan`, `sum Resumed`) | **admitted** (203ed84c, `tally-activity-route/`) |
 | call | methods `(View, args)` Activity | `PlanN: call` only; `Returned: returned` (Calls.obend:26-36) | **admitted** on the call route (203ed84c, `call/`) |
 | send | methods Activity | `PlanS: send`, `PlanN`, `Queued`/`Acked` (Sends.obend:32-51) | **admitted** on the send route (203ed84c, `send/`) |
-| ballot | `serve(Poll)` Activity | `Plan: await \| publish` (SealedBallot.obend:211); `Response: event\|settled\|refused` (:215) | gap: `publish` Plan, event Response |
-| bounty (Board) | `serve(State)` | `Plan: await \| disburse` (BountyBoard.obend:231); `Response: event...` (:235) | gap: `disburse`, event |
+| ballot | `serve(Poll)` Activity | `Plan: await \| publish` (SealedBallot.obend:211); `Response: event\|settled\|refused` (:215) | re-expressed on the kernel (`commit`; un-effects); native pending a candidate with the effect Plan |
+| bounty (Board) | `serve(State)` | `Plan: await \| disburse` (BountyBoard.obend:231); `Response: event...` (:235) | re-expressed on the kernel (`transfer`; un-effects); native pending a candidate with the effect Plan |
 | bounty (Escrow) | pure `Plan` list for the seat kernel | `Plan: nil\|cons Action` (BountyEscrow.obend) | seat-kernel route (README: executed natively there) |
-| commons | `serve(State)` | `Plan: await \| admit` (ResidentServiceCommons.obend:684); `Response: admitted\|refused\|event` (:722) | gap: `admit`, event |
-| drex | `batch(Market)` | `Plan: nil\|cons Action` (DrexBatch.obend:159); `Response: tick\|settled\|refused` (:246) | gap: action list Plan, tick Response |
-| dues | `dues(Terms, Nat)` | `Plan: await \| pay` (StandingDues.obend, `sum Plan`); `Response: event\|settled\|refused` | gap: `pay`, event; also two-argument entry |
-| play | `serve(Game)` | `Plan: await \| disburse` (CommitReveal.obend:242); `Response: event...` (:246) | gap: `disburse`, event |
-| story | `serve(Story)` | `Plan: await \| publish` (CoAuthor.obend:308); `Response: event...` (:312) | gap: `publish`, event |
+| commons | `serve(State)` | `Plan: await \| admit` (ResidentServiceCommons.obend:684); `Response: admitted\|refused\|event` (:722) | re-expressed on the kernel (`commit`; un-effects); native pending a candidate with the effect Plan |
+| drex | `batch(Market)` | `Plan: nil\|cons Action` (DrexBatch.obend:159); `Response: tick\|settled\|refused` (:246) | out of scope of the effect Plan (an action list is not a kernel Plan) |
+| dues | `dues(Terms, Nat)` | `Plan: await \| pay` (StandingDues.obend, `sum Plan`); `Response: event\|settled\|refused` | re-expressed (`transfer`, one `Opening` input; un-effects); native: `--scenario dues` on a candidate with the effect Plan |
+| play | `serve(Game)` | `Plan: await \| disburse` (CommitReveal.obend:242); `Response: event...` (:246) | re-expressed on the kernel (`transfer`; un-effects); native pending a candidate with the effect Plan |
+| story | `serve(Story)` | `Plan: await \| publish` (CoAuthor.obend:308); `Response: event...` (:312) | re-expressed on the kernel (`commit`; un-effects); native pending a candidate with the effect Plan |
 | seats | `Broker` returns `Plan` | `Plan: nil\|cons Action` (Broker.obend:94) | seat-kernel route, not the activity kernel |
 | automatafl | pure transition | no Activity | Route A (objective-invoke) or none; README: no native claim |
 | collective | pure functions | no Activity | Route A candidates |
