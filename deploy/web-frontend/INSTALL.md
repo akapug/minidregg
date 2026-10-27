@@ -38,6 +38,10 @@ systemctl daemon-reload
 systemctl enable --now mini-web-spawn.socket mini-web-spawn.service mini-web.service
 ```
 
+The unit passes `--registry /var/lib/mini/candidate/current/protocol/host-operations.json`: the public
+`/registry` page renders the operation registry (bytes, receivers, effects, markers, consent plans)
+from the candidate's own file, read-only.
+
 `MINI_WEB_FRAME_SRC` is the CSP `frame-src` for grains opened in a pane (L13's per-grain origins,
 e.g. `https://*.demo.dregg.online`); empty means `'none'`.
 

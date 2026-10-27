@@ -4,7 +4,9 @@
 # gateway, the member's body and shell behind it.
 #
 #   as a journey hook (JWF)     journey.sh exports MINI HOST CONFIG SOCKET NEWCOMER_WS NEWCOMER_SUBJECT
-#                               JOURNEY_STEP_DIR; the newcomer is the member.
+#                               JOURNEY_STEP_DIR; carol (K12C's docuverse author) is the member when her
+#                               workspace exists, else the newcomer (whose spine workspace cannot birth a
+#                               document: the three document rows then say why).
 #   jweb-frontend.sh --dry      the same, from the environment (MINI HOST CONFIG SOCKET WS SUBJECT STEP_DIR);
 #                               for a Mac with a running journey world.
 #   jweb-frontend.sh --box NAME ON THE DEMO BOX, as root: the real helper and gateway units; writes a login
@@ -51,6 +53,11 @@ case $mode in
 hook|--dry)
   if [ "$mode" = hook ]; then
     D=${JOURNEY_STEP_DIR:?}; WS=${NEWCOMER_WS:?}; SUBJECT=${NEWCOMER_SUBJECT:?}
+    # The document rows birth a document, which the spine's newcomer cannot (no birth context, and
+    # `shared` is under J8's deny-all law); after K12C the docuverse's carol can, so she is the member.
+    if [ -f "${JOURNEY_WORLD:?}/carol-workspace/workspace.json" ]; then
+      WS=$JOURNEY_WORLD/carol-workspace; SUBJECT=$(jq -r .subject "$WS/workspace.json")
+    fi
   else
     D=${STEP_DIR:?STEP_DIR}; WS=${WS:?WS}; SUBJECT=${SUBJECT:?SUBJECT}
   fi
