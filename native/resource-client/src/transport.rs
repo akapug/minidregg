@@ -866,6 +866,13 @@ impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
     }
 }
 
+/// Before any byte reaches a Host: every custody name this process committed is durable
+/// (`mini_sdk::durable::flush_directory_syncs`; a no-op unless the process defers directory syncs).
+/// A request whose preceding custody cannot be made durable is never sent.
+pub(crate) fn durability_barrier() -> Result<(), String> {
+    mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
+}
+
 /// A failed write or read leaves the request's execution status unknown. Callers
 /// retain the original signed call and use historical lookup before resubmission.
 pub fn invoke(
@@ -940,6 +947,7 @@ pub(crate) fn invoke_pinned_deadline(
     frame.extend_from_slice(&expected);
     frame.push(operation);
     frame.extend_from_slice(payload);
+    durability_barrier()?;
     let started = Instant::now();
     let mut stream = connect_unix_deadline(socket, deadline)
         .map_err(|e| format!("cannot connect within deadline: {e}"))?;
@@ -1124,6 +1132,7 @@ fn invoke_inner(
     }
     frame.push(operation);
     frame.extend_from_slice(payload);
+    durability_barrier()?;
     let started = std::time::Instant::now();
     let reply = match endpoint(socket)? {
         Endpoint::Unix(path) => exchange_unix(path, &frame)?,
@@ -1152,6 +1161,7 @@ fn invoke_inner(
 /// One framed request on a fresh unix-socket connection and its framed reply.
 /// A failure after the write leaves the request's status uncertain.
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
+    durability_barrier()?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
     stream
