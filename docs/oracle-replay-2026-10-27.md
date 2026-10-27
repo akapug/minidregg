@@ -76,10 +76,15 @@ cargo test -p minidregg-spk-host --lib stop_inspection
 cargo test -p minidregg-resource-client stop_inspection
 ```
 
-`scripts/oracle-stop-inspection-probe.py` compares a cold inspection with two
-served reads of the exact same inputs, requires identical response bytes, and
+`scripts/oracle-stop-inspection-probe.py` measures resident inspections before
+starting the bounded cold comparison. It requires identical response bytes and
 checks malformed input, a changed claim and required public-socket denial,
-then requires the original valid inspection to succeed again. It records times and source/config hashes. Run it against an isolated qualification
+then requires the original valid inspection to succeed again. Public denial
+uses a valid configuration and Host-image envelope, so a malformed envelope
+cannot substitute for the routing check. It records times and source/config
+hashes after each measurement. If the cold comparison reaches its deadline,
+the report remains failed while preserving completed resident checks and their
+times. Run it against an isolated qualification
 Store with the exact new Host pinned at its private endpoint. It does not submit
 a lifecycle operation or mutate a retained Store. To check refresh, inspect one
 completed STOP, then START and STOP the same disposable app again while keeping
@@ -93,6 +98,7 @@ Store's pinned executable to perform this comparison.
 
 Source registry and diff checks pass. On the isolated Linux snapshot, the three
 STOP inspection Rust tests and one resource-client operator/public routing test
-pass. Lean build, receiving comparisons and measured speedup are pending in the
-combined qualification lane; removing cold subprocess calls alone is not a
-measured latency result.
+pass. The final combined `Host.Main` Lean compile passed in the isolated bounded
+driver (101.8 seconds); native linking and receiving qualification are separate
+checks. Receiving comparisons and measured speedup remain pending; removing
+cold subprocess calls alone is not a measured latency result.

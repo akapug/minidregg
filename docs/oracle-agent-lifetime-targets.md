@@ -116,3 +116,18 @@ qualification are tracked separately. Receiving controls should show a valid
 request succeeds with its admitted indices, wrong event22/event27 indices refuse,
 and changed or revoked current authority and stale plans cannot deliver. Do not
 report matcher checks as those receiving results.
+
+`scripts/oracle-agent-authority-probe.py` consumes the fixed installer's hashed
+controller export and one successful native application attempt. It reinspects
+the retained reserve plan with the pinned Host and authenticates that reserve's
+original receipt through exact read-only lookup. It then authors two canonical
+variants of the same request, changing only one history index each, and requires
+the resident Host's specific source-index refusals. A malformed request, transport
+failure, fixed-target rejection or settled parent cannot count as a passing
+negative control. The original accepted reserve is the positive control; the
+probe does not reserve the already-settled parent again.
+
+This helper submits no transaction and does not revoke authority. Its report
+explicitly leaves `revocationTested` and `unsubmittedStalePlanTested` false.
+Those additional receiving experiments remain outstanding until an actual
+current-authority transition and a fresh unsubmitted plan are exercised.
