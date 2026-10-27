@@ -46,8 +46,99 @@ case "${SOCKET:-/}" in /*) ;; *) echo 'public socket path must be absolute' >&2;
 journey_check_sun_len "${SOCKET:-$ROOT/public/mini.sock}" "the public socket of $ROOT"
 mkdir -m 700 "$ROOT"
 ROOT=$(CDPATH='' cd -- "$ROOT" && pwd)
-mkdir -m 700 "$ROOT/public" "$ROOT/namespace" "$ROOT/attempts"
 SOCKET=${SOCKET:-$ROOT/public/mini.sock}
+
+# ---- the world template --------------------------------------------------------------------
+# NEWPARTICIPANT_TEMPLATE_DIR, if set, holds one tar per VARIANT of this fixture: the four binaries'
+# digests and every knob above (domain, sponsor, budgets, evaluators, tail, the Objective policy, the
+# clock observer, the extra genesis inputs by content, the serve mode, this script and genesis.sh).
+# The first caller of a variant builds the world below and leaves it there; every later caller
+# restores it: the files copied, the template's absolute paths rewritten to this ROOT and SOCKET,
+# `mini serve` started (about 2 s instead of genesis, bootstrap and three workspace inits). A
+# restored world IS the world the knobs describe (same genesis, same keys, same records), so nothing
+# a caller asserts changes; what it shares with other callers of the same candidate is test keys.
+# The Store (sqlite files and the head anchor) holds no path; every text file naming one is rewritten.
+TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR:-}
+TEMPLATE_VARIANT= TEMPLATE_TAR= TEMPLATE_META=
+variant_digest() {
+  # contents only (`sha256sum -` names no path): a caller's spec file lives under its own run root
+  { for b in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$HERE/genesis-params.example.json" "$HERE/genesis.sh" "$0"; do sha256sum <"$b"; done
+    printf 'domain=%s subject=%s budget=%s balance=%s disabled=%s tail=%s objective=%s observer=%s serve=%s now=%s step=%s socket-in-root=%s\n' \
+      "$DOMAIN" "$SUBJECT" "$OWNER_BUDGET" "$SPONSOR_BALANCE" "$DISABLED_EVALUATORS" "${MINI_TAIL_BOUND:-256}" \
+      "${OBJECTIVE_INVOCATION_POLICY:-}" "${NEWPARTICIPANT_CLOCK_OBSERVER:-}" "${NEWPARTICIPANT_SERVE:-serve}" \
+      "${GENESIS_NOW:-}" "${MAX_STEP_SECONDS:-}" "$(case $SOCKET in "$ROOT"/*) echo yes;; *) echo no;; esac)"
+    for f in "${EXTRA_GENESIS_ENROLLMENTS:-}" "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" "${EXTRA_CLOCK_TICKERS:-}" "${NEWPARTICIPANT_PROVIDER_SERVICES:-}"; do
+      [ -n "$f" ] && { printf '%s ' "$(basename "$f")"; sha256sum <"$f"; }
+    done
+  } | sha256sum | cut -c1-32
+}
+start_serve() {
+  SERVE=${NEWPARTICIPANT_SERVE:-serve}
+  case $SERVE in serve|serve-operator) ;; *) echo 'NEWPARTICIPANT_SERVE must be serve or serve-operator' >&2; exit 2;; esac
+  nohup "$MINI" "$SERVE" --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    >"$ROOT/public/serve.log" 2>&1 </dev/null &
+  SERVER_PID=$!
+  printf '%s\n' "$SERVER_PID" >"$ROOT/public/server.pid"
+  ready=0
+  attempt=0
+  while [ "$attempt" -lt 1200 ]; do
+    if [ -S "$SOCKET" ]; then ready=1; break; fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { echo 'Mini server exited' >&2; exit 1; }
+    attempt=$((attempt + 1))
+    sleep 0.1
+  done
+  [ "$ready" -eq 1 ] || {
+    echo 'Mini public socket did not appear within 120 seconds' >&2
+    tail -40 "$ROOT/public/serve.log" >&2
+    exit 1
+  }
+}
+stop_serve() {  # the fixture's own server, by its PID file, for the template capture
+  pid=$(cat "$ROOT/public/server.pid")
+  kill -TERM "$pid" 2>/dev/null || true
+  attempt=0
+  while kill -0 "$pid" 2>/dev/null; do
+    attempt=$((attempt + 1)); [ "$attempt" -lt 600 ] || { echo 'Mini server did not stop for the template capture' >&2; exit 1; }
+    sleep 0.1
+  done
+  rm -f "$SOCKET"
+}
+fixture_digests() {
+  sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" \
+    "$ROOT/genesis.json" "$ROOT/sponsor/refs/factory.json" \
+    >"$ROOT/source-binaries-and-fixture.sha256"
+}
+restore_template() {  # the template's files into ROOT, its paths rewritten, the service up
+  t_root=$(jq -r .root "$TEMPLATE_META"); t_socket=$(jq -r .socket "$TEMPLATE_META")
+  tar -xf "$TEMPLATE_TAR" -C "$ROOT"
+  # every text file that names the template's root or socket; the Store, the anchor, keys and
+  # retained frames hold no path (grep finds none in them, and they are skipped by name anyway)
+  grep -rlF -e "$t_root" -e "$t_socket" "$ROOT" 2>/dev/null | while IFS= read -r f; do
+    case $f in *.sqlite3|*.sqlite3-*|*head-anchor*|*.bin|*.key|*.key.*|*.pub|*.frame) continue ;; esac
+    sed -i -e "s#$t_socket#$SOCKET#g" -e "s#$t_root#$ROOT#g" "$f"
+  done
+  rm -f "$ROOT/public/serve.log" "$ROOT/public/server.pid" "$ROOT/public/mini.config"
+  CONFIG="$ROOT/deployment/pinned-config.json"
+  [ -s "$CONFIG" ] || { echo "template at $TEMPLATE_TAR has no pinned config" >&2; exit 1; }
+  jq -e --arg root "$ROOT/store" '.storageRoot == $root' "$CONFIG" >/dev/null || { echo 'template restore did not rewrite storageRoot' >&2; exit 1; }
+  start_serve
+  "$MINI" workspace --action read --dir "$ROOT/sponsor" --name factory >"$ROOT/factory-read.json"
+  fixture_digests
+  printf '%s\n' "restored from template $TEMPLATE_VARIANT ($TEMPLATE_TAR)" >"$ROOT/template-restored.txt"
+  printf '%s\n' "$ROOT/handoff.json"
+}
+if [ -n "$TEMPLATE_DIR" ]; then
+  case "$TEMPLATE_DIR" in /*) ;; *) echo 'NEWPARTICIPANT_TEMPLATE_DIR must be absolute' >&2; exit 2;; esac
+  mkdir -p -m 700 "$TEMPLATE_DIR"
+  TEMPLATE_VARIANT=$(variant_digest)
+  TEMPLATE_TAR=$TEMPLATE_DIR/$TEMPLATE_VARIANT.tar
+  TEMPLATE_META=$TEMPLATE_DIR/$TEMPLATE_VARIANT.json
+  if [ -s "$TEMPLATE_TAR" ] && [ -s "$TEMPLATE_META" ]; then
+    restore_template
+    exit 0
+  fi
+fi
+mkdir -m 700 "$ROOT/public" "$ROOT/namespace" "$ROOT/attempts"
 
 "$MINI" keygen --secret "$ROOT/sponsor.key" --public "$ROOT/sponsor.pub" \
   >"$ROOT/sponsor-keygen.json"
@@ -104,11 +195,35 @@ cat >"$ROOT/pay/genesis-enrollments.json" <<EOF
 EOF
 # A caller's own EXTRA_GENESIS_ENROLLMENTS (hosted agent-grain subjects) is kept;
 # the observer is appended to it.
+# NEWPARTICIPANT_EXTRA_SUBJECTS, if set, is an absolute path to a JSON array of further genesis
+# enrollments WITHOUT their public keys: this fixture makes each subject's key here, at
+# ROOT/extra/SUBJECT.key (its public half beside it, `mini keygen`'s next key too), and fills
+# `.key.publicKey` in. A caller that made its own keys passes EXTRA_GENESIS_ENROLLMENTS instead;
+# the difference is that a world described this way is the same world every time (no per-run key
+# in its genesis), so it has a template.
+if [ -n "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" ]; then
+  case "$NEWPARTICIPANT_EXTRA_SUBJECTS" in /*) ;; *) echo 'NEWPARTICIPANT_EXTRA_SUBJECTS must be absolute' >&2; exit 2;; esac
+  jq -e 'type == "array" and length <= 8 and all(.[]; .key.subject | type == "string")' "$NEWPARTICIPANT_EXTRA_SUBJECTS" >/dev/null ||
+    { echo 'NEWPARTICIPANT_EXTRA_SUBJECTS: an array of at most 8 enrollments, each with .key.subject' >&2; exit 2; }
+  mkdir -m 700 "$ROOT/extra"
+  : >"$ROOT/extra/public-keys.tsv"
+  for s in $(jq -r '.[].key.subject' "$NEWPARTICIPANT_EXTRA_SUBJECTS"); do
+    case $s in ""|0?*|*[!0-9]*) echo "extra subject must be canonical decimal: $s" >&2; exit 2;; esac
+    "$MINI" keygen --secret "$ROOT/extra/$s.key" --public "$ROOT/extra/$s.pub" >"$ROOT/extra/$s-keygen.json"
+    printf '%s\t%s\n' "$s" "$(od -An -tx1 -v "$ROOT/extra/$s.pub" | tr -d ' \n')" >>"$ROOT/extra/public-keys.tsv"
+  done
+  jq --rawfile keys "$ROOT/extra/public-keys.tsv" '
+    ($keys | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $pub
+    | map(.key.publicKey = $pub[.key.subject])' "$NEWPARTICIPANT_EXTRA_SUBJECTS" >"$ROOT/pay/genesis-extra-subjects.json"
+else
+  printf '[]\n' >"$ROOT/pay/genesis-extra-subjects.json"
+fi
 if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then
-  jq -s '.[0] + .[1]' "$EXTRA_GENESIS_ENROLLMENTS" "$ROOT/pay/genesis-enrollments.json" \
+  jq -s '.[0] + .[1] + .[2]' "$EXTRA_GENESIS_ENROLLMENTS" "$ROOT/pay/genesis-extra-subjects.json" "$ROOT/pay/genesis-enrollments.json" \
     >"$ROOT/pay/genesis-enrollments-all.json"
 else
-  cp "$ROOT/pay/genesis-enrollments.json" "$ROOT/pay/genesis-enrollments-all.json"
+  jq -s '.[0] + .[1]' "$ROOT/pay/genesis-extra-subjects.json" "$ROOT/pay/genesis-enrollments.json" \
+    >"$ROOT/pay/genesis-enrollments-all.json"
 fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
 {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}
@@ -146,25 +261,7 @@ CONFIG="$ROOT/deployment/pinned-config.json"
 
 # NEWPARTICIPANT_SERVE=serve-operator serves the private operator socket (a
 # hosted resident's preflight requires it); the default is the public serve.
-SERVE=${NEWPARTICIPANT_SERVE:-serve}
-case $SERVE in serve|serve-operator) ;; *) echo 'NEWPARTICIPANT_SERVE must be serve or serve-operator' >&2; exit 2;; esac
-nohup "$MINI" "$SERVE" --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
-  >"$ROOT/public/serve.log" 2>&1 </dev/null &
-SERVER_PID=$!
-printf '%s\n' "$SERVER_PID" >"$ROOT/public/server.pid"
-ready=0
-attempt=0
-while [ "$attempt" -lt 1200 ]; do
-  if [ -S "$SOCKET" ]; then ready=1; break; fi
-  kill -0 "$SERVER_PID" 2>/dev/null || { echo 'Mini server exited' >&2; exit 1; }
-  attempt=$((attempt + 1))
-  sleep 0.1
-done
-[ "$ready" -eq 1 ] || {
-  echo 'Mini public socket did not appear within 120 seconds' >&2
-  tail -40 "$ROOT/public/serve.log" >&2
-  exit 1
-}
+start_serve
 
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$ROOT/sponsor.key" --subject "$SUBJECT" \
@@ -198,9 +295,7 @@ jq -e '.payObserver == {"subject":"30","capability":"4030","controlCapability":"
   "$ROOT/genesis.json" >/dev/null
 [ -s "$ROOT/deployment/pay-ledger-genesis.json" ] || { echo 'bootstrap retained no genesis pay ledger' >&2; exit 1; }
 
-sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" \
-  "$ROOT/genesis.json" "$ROOT/sponsor/refs/factory.json" \
-  >"$ROOT/source-binaries-and-fixture.sha256"
+fixture_digests
 cat >"$ROOT/handoff.json" <<EOF
 {"type":"minidregg-newparticipant-fixture-v1",
  "root":"$ROOT","host":"$HOST","mini":"$MINI",
@@ -213,4 +308,16 @@ cat >"$ROOT/handoff.json" <<EOF
    "workspace":"$ROOT/pay/observer"},
  "status":"fresh-genesis-and-sponsor-workspace; no newcomer admitted"}
 EOF
+# The first world of a variant is the template: captured with its server stopped (a quiescent Store),
+# published atomically (meta, then tar), the server started again for this caller.
+if [ -n "$TEMPLATE_TAR" ] && [ ! -s "$TEMPLATE_TAR" ]; then
+  stop_serve
+  tmp_tar=$TEMPLATE_TAR.$$.tmp tmp_meta=$TEMPLATE_META.$$.tmp
+  (cd "$ROOT" && tar -cf "$tmp_tar" --exclude=./public/serve.log --exclude=./public/server.pid --exclude=./public/mini.config \
+     --exclude=./template-restored.txt .)
+  jq -n --arg root "$ROOT" --arg socket "$SOCKET" --arg variant "$TEMPLATE_VARIANT" \
+    '{type:"minidregg-newparticipant-template-v1",root:$root,socket:$socket,variant:$variant}' >"$tmp_meta"
+  mv "$tmp_meta" "$TEMPLATE_META" && mv "$tmp_tar" "$TEMPLATE_TAR"
+  start_serve
+fi
 printf '%s\n' "$ROOT/handoff.json"

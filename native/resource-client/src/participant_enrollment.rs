@@ -317,6 +317,38 @@ struct Pin {
     next_cosign: Vec<u8>,
     /// The name's namespace reservation this plan holds (released only on a decided no-record refusal).
     reservation: participant_namespace::Reservation,
+    /// The observation height the plan's sponsor deadline is pinned to (`pin-enrollment-plan-height`),
+    /// or `None` when the Host that planned it had no pin (the unpinned plan is accepted as before).
+    pinned_at: Option<String>,
+}
+
+/// The pinned form of an enrollment plan: the Host's `pin-enrollment-plan-height PLAN HEIGHT OUT`
+/// moves only the sponsor header's deadline to `height` (Kernel/NativePlanHeight
+/// `pinEnrollment_only_sponsor_deadline`), the height of the observation the plan was made over,
+/// so the local consent provider re-derives the same pinned bytes (`NativeSpecializedConsent.
+/// pinnedExpectedBytes`) and the plan is accepted at that height, however many ticks later it is
+/// sealed and submitted. `Ok(None)`: this Host has no such verb (older image); the plan stays
+/// unpinned and is accepted exactly as before.
+fn pin_plan_height(host: &Path, config: &Path, plan: &Path, height: &str, output: &Path) -> Result<Option<Vec<u8>>> {
+    decimal(height, "observation height")?;
+    let arguments = [
+        OsStr::new("pin-enrollment-plan-height"), plan.as_os_str(), OsStr::new(height), output.as_os_str(),
+    ];
+    match crate::local_process(host, config, &arguments) {
+        Ok(_) => Ok(Some(private_bytes(output, LIMIT)?)),
+        // A Host without the verb answers an unknown subcommand with its own verb listing
+        // (`minidregg-host CONFIG.json profile|describe|...`) and exit 1; a Host that has the verb
+        // and refused prints its refusal, never the listing.
+        Err(error) if error.contains("minidregg-host CONFIG.json ") && !error.contains("pin-enrollment-plan-height") => Ok(None),
+        Err(error) => Err(format!("pin-enrollment-plan-height: {error}")),
+    }
+}
+
+/// The height of the factory observation retained under `directory` (`Challenge.height`, the
+/// height the signer saw).
+fn observation_height(directory: &Path) -> Result<String> {
+    let challenge = json_private(&directory.join("observation/challenge.json"))?;
+    Ok(field(&challenge, "height")?.to_owned())
 }
 
 /// The marker a `submit` leaves when the Host refused the sealed plan with NO RECORD (253): the
@@ -352,7 +384,26 @@ fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
     let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &pair(&observation, &pin.command)?);
     let _ = take_host_decision();
-    Ok(matches!(current, Ok(frame) if frame == retained))
+    let Ok(frame) = current else { return Ok(false) };
+    if frame == retained {
+        return Ok(true);
+    }
+    // A pinned plan: the Host's fresh plan differs only by its deadline when the source merely
+    // moved; pinned to the same observation height it is the retained pinned plan again (what the
+    // consent provider accepts, `checkExactOrPinned`). Anything else is a dead plan.
+    let Some(height) = &pin.pinned_at else { return Ok(false) };
+    let body = reply(&frame, 86)?;
+    let fresh = directory.join("plan-current.bin");
+    let fresh_pinned = directory.join("plan-current-pinned.bin");
+    for stale in [&fresh, &fresh_pinned] {
+        if stale.exists() { fs::remove_file(stale).map_err(|error| error.to_string())?; }
+    }
+    retain_exact(&fresh, body)?;
+    let pinned_now = pin_plan_height(&pin.host, &pin.config, &fresh, height, &fresh_pinned)?;
+    for temporary in [&fresh, &fresh_pinned] {
+        let _ = fs::remove_file(temporary);
+    }
+    Ok(pinned_now.is_some_and(|bytes| bytes == pin.plan))
 }
 
 /// The next free `replanned/NN` of a directory.
@@ -467,7 +518,12 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     pinned(&request, "hostSha256", field(&pin, "hostSha256")?)?;
     pinned(&request, "configSha256", field(&pin, "configSha256")?)?;
     let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
-    let plan = private_bytes(&directory.join("plan.bin"), LIMIT)?;
+    let pinned_at = match pin.get("pinnedAtHeight") {
+        Some(Value::String(height)) => Some(height.clone()),
+        _ => None,
+    };
+    let plan = private_bytes(
+        &directory.join(if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }), LIMIT)?;
     pinned(&pin, "commandSha256", &digest(&command))?;
     pinned(&pin, "planSha256", &digest(&plan))?;
     let name = field(&pin, "name")?;
@@ -540,6 +596,7 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         plan,
         command,
         reservation,
+        pinned_at,
     })
 }
 
@@ -968,7 +1025,7 @@ fn plan(mut args: Args) -> Result<()> {
     // re-plannable unit: nothing is bound or submitted until the Plan is
     // validated, so a Host stale-root (a tick, certify or write between the
     // observation and its use) retires them under replanned/ and observes again.
-    let (command, plan, plan_view) = crate::replan::replan(
+    let (command, plan, plan_view, pinned_at) = crate::replan::replan(
         "enroll plan",
         || {
             let (signed, factory_root, authority_root) = signed_factory_observation(
@@ -1045,10 +1102,31 @@ fn plan(mut args: Args) -> Result<()> {
                 &retained_config,
                 PLAN_KIND,
                 &directory.join("plan.bin"),
-                &directory.join("plan.json"),
+                &directory.join("plan-unpinned.json"),
             )?;
             validate_plan(&plan_view, &command, &plan)?;
-            Ok((command, plan, plan_view))
+            // The plan is pinned to the observation's height before anything signs it, so it
+            // survives the ticks between plan, possession and seal (`pin_plan_height`).
+            let height = observation_height(&directory)?;
+            match pin_plan_height(&host, &retained_config, &directory.join("plan.bin"), &height, &directory.join("plan-pinned.bin"))? {
+                Some(pinned_plan) => {
+                    let pinned_view = inspect(
+                        &host,
+                        &public_socket,
+                        &retained_config,
+                        PLAN_KIND,
+                        &directory.join("plan-pinned.bin"),
+                        &directory.join("plan.json"),
+                    )?;
+                    validate_plan(&pinned_view, &command, &pinned_plan)?;
+                    Ok((command, pinned_plan, pinned_view, Some(height)))
+                }
+                None => {
+                    eprintln!("mini: enroll plan: this Host has no pin-enrollment-plan-height; the plan is unpinned and does not survive a tick before it is sealed");
+                    fs::copy(directory.join("plan-unpinned.json"), directory.join("plan.json")).map_err(|error| error.to_string())?;
+                    Ok((command, plan, plan_view, None))
+                }
+            }
         },
         // The Host's own stale-root, or the local consent provider's proven stale observation (the
         // source moved between the Host's challenge and the local check; nothing was signed): both
@@ -1081,7 +1159,7 @@ fn plan(mut args: Args) -> Result<()> {
         "name":name,"sponsor":sponsor,"subject":subject,
         "keyId":reservation.ids["keyId"],"publicKey":public_key,
         "requestSha256":digest(&request_bytes),"commandSha256":command_sha,
-        "planSha256":digest(&plan),"reservationDigest":reservation.request_digest,
+        "planSha256":digest(&plan),"pinnedAtHeight":pinned_at,"reservationDigest":reservation.request_digest,
         "reservationRecord":reservation.record_path}),
     )?;
     print_json(&plan_custody(&subject, reservation.ids["keyId"].as_str(), &public_key, &plan_view))
@@ -2180,6 +2258,7 @@ mod tests {
             reservation: participant_namespace::Reservation {
                 request_digest: "00".repeat(32), ids: Default::default(), record_path: PathBuf::new(),
             },
+            pinned_at: None,
         };
         let installed = json!({"type":"confirmed","confirmation":"installed",
             "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
