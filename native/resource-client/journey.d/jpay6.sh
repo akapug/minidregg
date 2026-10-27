@@ -81,6 +81,17 @@ HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", 
 GRAIN, TEST_PROVIDER, REPO, STANDIN, LAUNCH_GATE = (os.environ[k] for k in
     ("GRAIN", "TEST_PROVIDER", "REPO", "HERMES_STANDIN", "LAUNCH_GATE"))
 MODEL = "mini-hermes-protocol-fixture"
+# The provider topology: "isolated" (production: the worker has --network none
+# and reaches the controller's private Unix gateway through the pinned
+# grain-provider-bridge in its runtime root) or "fixture-host" (the worker
+# shares the host network and dials the loopback gateway directly).
+TOPOLOGY = os.environ.get("JPAY6_PROVIDER_TOPOLOGY", "isolated")
+if TOPOLOGY not in ("isolated", "fixture-host"):
+    sys.exit("jpay6: JPAY6_PROVIDER_TOPOLOGY must be isolated or fixture-host")
+ISOLATED = TOPOLOGY == "isolated"
+BRIDGE = os.environ.get("GRAIN_PROVIDER_BRIDGE", os.path.join(os.path.dirname(GRAIN), "grain-provider-bridge"))
+if ISOLATED and not os.access(BRIDGE, os.X_OK):
+    sys.exit(f"jpay6: the isolated topology needs grain-provider-bridge (GRAIN_PROVIDER_BRIDGE): {BRIDGE}")
 RATE_IN, RATE_OUT = 20_000_000, 40_000_000       # credit per million tokens
 USER_FEE, POOL_FEE, HOMELAB_FEE = 5, 7, 3
 METERED_CHARGE = POOL_FEE + (1 * RATE_IN + 2 * RATE_OUT + 999_999) // 1_000_000
@@ -470,7 +481,7 @@ UPORT, GPORT = free_port(), free_port()
 STATE, RUNTIME, WORK = path("runtime-state"), path("runtime-root"), path("worker-work")
 for d in (STATE, RUNTIME, WORK, path("launcher")): os.makedirs(d, mode=0o700)
 os.chmod(RUNTIME, 0o755)
-for source, name in ((GRAIN, "grain-runtime"), (STANDIN, "hermes-acp")):
+for source, name in ((GRAIN, "grain-runtime"), (STANDIN, "hermes-acp")) + (((BRIDGE, "grain-provider-bridge"),) if ISOLATED else ()):
     data = open(source, "rb").read()
     open(os.path.join(RUNTIME, name), "wb").write(data); os.chmod(os.path.join(RUNTIME, name), 0o755)
 # The physical bwrap (MINI_BWRAP selects; see resolve-bwrap) and the launcher materialized for it.
@@ -611,9 +622,9 @@ runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOC
                                            "publicKey": keys[FRIEND].verify_key.encode().hex()},
                             "model": MODEL, "providers": TABLE, "credentialBroker": str(KEYS_CLIENT),
                             "gatewayBind": f"127.0.0.1:{GPORT}", "maxRequestBytes": 1048576,
-                            "maxResponseBytes": 8388608, "timeoutSeconds": 600, "localFixtureHostNetwork": True},
+                            "maxResponseBytes": 8388608, "timeoutSeconds": 600, "localFixtureHostNetwork": not ISOLATED},
            "commands": [{"name": "hermes-acp", "program": LAUNCHER,
-                         "args": ["--workspace", WORK, "--runtime-root", RUNTIME, "--network", "host", "--",
+                         "args": ["--workspace", WORK, "--runtime-root", RUNTIME, "--network", "none" if ISOLATED else "host", "--",
                                   "/agent/hermes-acp"],
                          "systemdScope": True, "wallTimeSeconds": 1500, "reserve": "3", "charge": "1"}]}
 json.dump(runtime, open(path("runtime-config.json"), "w"), indent=1)
@@ -663,6 +674,16 @@ try:
     wait_for("soft attach", lambda: journal().get("connection") == "soft" and journal().get("pending") is None, 900)
     row("controller attaches under the managed worker law this Host authors (refill arm re-emitted)",
         "connection soft", f"connection={journal().get('connection')}", journal().get("connection") == "soft")
+    cfg = json.load(open(path("runtime-config.json")))
+    args = cfg["commands"][0]["args"]
+    net = args[args.index("--network") + 1]
+    row(f"provider topology {TOPOLOGY}: worker network and gateway shape",
+        "isolated: --network none, Unix gateway, bridge in the runtime root" if ISOLATED else "fixture-host: --network host, loopback gateway",
+        f"network={net} localFixtureHostNetwork={cfg['providerTask']['localFixtureHostNetwork']} "
+        f"bridge={os.path.exists(os.path.join(RUNTIME, 'grain-provider-bridge'))}",
+        (net == "none" and cfg["providerTask"]["localFixtureHostNetwork"] is False
+         and os.access(os.path.join(RUNTIME, "grain-provider-bridge"), os.X_OK)) if ISOLATED
+        else (net == "host" and cfg["providerTask"]["localFixtureHostNetwork"] is True))
     def upstream_auth():
         lines = [l for l in open(path("upstream.log")).read().splitlines() if l.startswith("completion")]
         return lines[-1].rsplit("auth=", 1)[-1] if lines and "auth=" in lines[-1] else "-"
