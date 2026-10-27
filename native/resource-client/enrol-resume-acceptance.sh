@@ -54,7 +54,20 @@ nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" >>"$ROO
 printf '%s\n' "$!" >"$ROOT/public/server.pid"
 trap 'kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 waited=0; until [ -S "$SOCKET" ]; do waited=$((waited + 1)); [ "$waited" -lt 1200 ] || { echo 'socket did not appear' >&2; exit 1; }; sleep 0.1; done
-tick() { step "$1" ok "$MINI" clock --action tick --workspace "$ROOT/clock"; }
+# A tick asserts the wall clock's second; the Host refuses one that does not advance past the last
+# tick's (ClockTickReceiver.decideTick: clockNotAdvancing, no record). Every tick here, and step 6's
+# ticker, therefore waits for a second later than the last tick's (`$ROOT/last-tick`), so two ticks
+# never share a second and each is a commit.
+next_second() {
+  last=$(cat "$ROOT/last-tick" 2>/dev/null || echo 0)
+  while [ "$(date +%s)" -le "$last" ]; do sleep 0.1; done
+}
+tick() {
+  next_second
+  step "$1" ok "$MINI" clock --action tick --workspace "$ROOT/clock"
+  date +%s >"$ROOT/last-tick"
+}
+tick_height() { jq -er '.acceptedCount' "$LOG/$1.stdout"; }
 NS=$(jq -r .namespaceRoot "$ROOT/sponsor/workspace.json")
 A="$ROOT/attempts/newcomer"
 plan() { step "$1" "$2" "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
@@ -129,7 +142,7 @@ step lookup ok "$MINI" enroll --action lookup --dir "$A"
 # 6. Five members back to back under a running ticker (a tick every 15 s, a box's one-minute ticker
 #    compressed, racing the composed world's enrolments): a seal or submit refused because a tick landed
 #    after the plan re-plans the same request (bounded at six); five admissions.
-( while :; do "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; sleep 15; done ) &
+( while :; do next_second; "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; date +%s >"$ROOT/last-tick"; sleep 15; done ) &
 printf '%s\n' "$!" >"$ROOT/ticker.pid"
 trap 'kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 for i in 1 2 3 4 5; do
@@ -172,6 +185,10 @@ step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/spon
 tick tick-4
 step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
 tick tick-5
+# the plan crossed two commits: two distinct heights, both past the height the plan was pinned at
+h4=$(tick_height tick-4); h5=$(tick_height tick-5); pinned_at=$(jq -er .pinnedAtHeight "$B/pin.json")
+[ "$h4" != "$h5" ] && [ "$h4" -gt "$pinned_at" ] && [ "$h5" -gt "$h4" ] \
+  || { echo "step 7: the ticks did not cross two heights past the pin (pinned $pinned_at, ticks $h4, $h5)" >&2; exit 1; }
 step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
 [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
 [ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
