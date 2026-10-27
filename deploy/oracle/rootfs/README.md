@@ -5,6 +5,25 @@ contains Python and its dependencies, not Oracle's knowledge stores or Mini
 host authority. The package stager adds the separately pinned Oracle source,
 bridge, and large-data inventory.
 
+The v5 runtime adds Pillow 11.3.0 in a **new** rootfs. Use
+`inputs-v5.lock.json` and `requirements-v5.lock`; retain the latter as
+`inputs/requirements.lock` when invoking the existing assembler. The original
+input locks, rootfs and v4 package remain unchanged. The added official PyPI
+wheel is CPython 3.12, Linux x86-64, manylinux 2.27/2.28, SHA-256
+`676b2815362456b5b3216b4fd5bd89d362100dc6f4945154ff172e206a22c024`.
+Its exact URL and the retained release-metadata hash are in the v5 input lock;
+assembly remains offline and preserves wheel licenses.
+
+`check-visual.py` runs inside that rootfs and checks PNG/JPEG decoding,
+RGB/RGBA conversion, NumPy pixels, Lanczos resizing, Gaussian blur, alpha
+compositing and PNG output. It does not qualify OCR or font operations: no
+pinned OCR model, glyph store or font inventory is added. The actual Linux
+checks and 1,010 ELF dependency listings pass, with no missing libraries.
+`receipt-v5-2026-10-27.json` records the new inventory/archive and evidence
+hashes. The new rootfs contains 9,042 regular files totaling 386,918,264 bytes.
+It is ready for packaging, but this receipt does not claim a signed v5 package
+or a completed Mini journey.
+
 The October 27 build uses the public Ubuntu 24.04 image
 `ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea`.
 It adds **Python 3.12.3**, glibc **2.39**, SQLite **3.45.1**, and the eight exact
@@ -78,6 +97,10 @@ sudo env -i LANG=C.UTF-8 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
 sudo env -i LANG=C.UTF-8 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
   PATH=/usr/sbin:/usr/bin:/bin /usr/sbin/chroot "$NEW_ROOTFS" \
   /usr/bin/python3.12 -B - < deploy/oracle/rootfs/check-math.py
+# For the v5 Pillow-enabled rootfs:
+sudo env -i LANG=C.UTF-8 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  PATH=/usr/sbin:/usr/bin:/bin /usr/sbin/chroot "$NEW_ROOTFS" \
+  /usr/bin/python3.12 -B - < deploy/oracle/rootfs/check-visual.py
 sudo python3.12 deploy/oracle/rootfs/check-elf.py \
   --rootfs "$NEW_ROOTFS" --bridge "$LINUX_BRIDGE" --out "$NEW_ELF_RECEIPT"
 python3.12 -B deploy/oracle/stage.py inventory \

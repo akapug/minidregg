@@ -402,7 +402,7 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "path":{"type":"string","maxLength":8192},
                 "query":{"type":"string","maxLength":8192},
                 "headers":{"type":"array","maxItems":128,"items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}},
-                "bodyHex":{"type":"string","maxLength":49152}},
+                "bodyHex":{"type":"string","maxLength":131072,"description":"At most 65536 decoded bytes; MCP also caps the entire JSON request line at 65536 bytes, so hex bodies through MCP must be smaller."}},
                 "required":["application","method","path","query","headers","bodyHex"],
                 "additionalProperties":false}}));
     }

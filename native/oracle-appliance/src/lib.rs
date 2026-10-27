@@ -15,7 +15,7 @@ use tokio::{
 };
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
-pub const MAX_REQUEST: usize = 16 * 1024;
+pub const MAX_REQUEST: usize = 64 * 1024;
 pub const MAX_REPLY: usize = 2 * 1024 * 1024;
 const MAX_HEADERS: usize = 16 * 1024;
 const MAX_IN_FLIGHT: usize = 8;
@@ -257,6 +257,61 @@ fn accepts_json(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<boo
     Ok(best.is_some_and(|(_, quality)| quality > 0.0))
 }
 
+fn operation_id(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 160
+        && value.as_bytes()[0].is_ascii_alphanumeric()
+        && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
+
+fn query_text(value: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut input = value.bytes();
+    while let Some(byte) = input.next() {
+        match byte {
+            b'%' => {
+                let a = (input.next()? as char).to_digit(16)?;
+                let b = (input.next()? as char).to_digit(16)?;
+                bytes.push((a * 16 + b) as u8);
+            }
+            b'+' => bytes.push(b' '),
+            b if b.is_ascii_graphic() && b != b'#' => bytes.push(b),
+            _ => return None,
+        }
+        if bytes.len() > 256 { return None; }
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    (!text.chars().any(char::is_control)).then_some(text)
+}
+
+fn get_path_error(path: &str) -> Option<Reply> {
+    if matches!(path, "health" | "capabilities" | "operations") {
+        return None;
+    }
+    if let Some(id) = path.strip_prefix("operations/") {
+        return (!operation_id(id)).then(|| Reply::error(400, "invalid_operation_id"));
+    }
+    if let Some(query) = path.strip_prefix("operations?") {
+        if query.is_empty() { return None; }
+        let mut seen = std::collections::HashSet::new();
+        for field in query.split('&') {
+            let valid = field.split_once('=').is_some_and(|(key, value)| {
+                if !seen.insert(key) { return false; }
+                match key {
+                    "q" => query_text(value).is_some(),
+                    "availability" => matches!(value, "live_direct" | "text_only" | "unavailable"),
+                    "offset" | "limit" => !value.is_empty() && value.len() <= 9
+                        && value.bytes().all(|b| b.is_ascii_digit())
+                        && value.parse::<u32>().is_ok_and(|n| if key == "offset" { n <= 999_999_999 } else { (1..=50).contains(&n) }),
+                    _ => false,
+                }
+            });
+            if !valid { return Some(Reply::error(400, "invalid_operations_query")); }
+        }
+        return None;
+    }
+    Some(Reply::error(404, "route_not_found"))
+}
+
 struct MainView(Config);
 impl grain_capnp::ui_view::Server for MainView {
     async fn get_view_info(
@@ -322,8 +377,8 @@ impl web::web_session::Server for Session {
             Reply::error(400, "context_unsupported")
         } else if !accepts_json(params.get_context()?)? {
             Reply::error(406, "json_not_acceptable")
-        } else if !matches!(path, "health" | "capabilities") {
-            Reply::error(404, "route_not_found")
+        } else if let Some(error) = get_path_error(path) {
+            error
         } else if params.get_ignore_body() {
             Reply::error(405, "head_unsupported")
         } else {
@@ -337,13 +392,14 @@ impl web::web_session::Server for Session {
         mut results: web::web_session::PostResults,
     ) -> capnp::Result<()> {
         let params = params.get()?;
+        let path = params.get_path()?.to_str()?;
         let content = params.get_content()?;
         let bytes = content.get_content()?;
         let reply = if !plain_context(params.get_context()?)? {
             Reply::error(400, "context_unsupported")
         } else if !accepts_json(params.get_context()?)? {
             Reply::error(406, "json_not_acceptable")
-        } else if params.get_path()?.to_str()? != "query" {
+        } else if !matches!(path, "query" | "invoke") {
             Reply::error(404, "route_not_found")
         } else if bytes.len() > MAX_REQUEST {
             Reply::error(413, "request_too_large")
@@ -352,7 +408,7 @@ impl web::web_session::Server for Session {
         {
             Reply::error(415, "json_required")
         } else {
-            exchange(&self.0, "POST", "query", bytes).await?
+            exchange(&self.0, "POST", path, bytes).await?
         };
         write_reply(results.get(), reply)
     }

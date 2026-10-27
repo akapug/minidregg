@@ -38,18 +38,30 @@ synthetic identity used by the probe establish isolated user identities. Use
 separate grains/workspaces for separate tenants.
 
 The signed API path is `/`. Sandstorm operation paths are relative and map only
-as follows; query suffixes and alternative spellings are refused:
+as follows:
 
 | Sandstorm operation | Private HTTP request |
 | --- | --- |
 | `GET health` | `GET /health` |
 | `GET capabilities` | `GET /capabilities` |
 | `POST query` | `POST /query` |
+| `GET operations` | `GET /operations` |
+| `GET operations/<id>` | `GET /operations/<id>` |
+| `POST invoke` | `POST /invoke` |
 
-Query content must have MIME type `application/json`, empty content encoding,
-and at most 16 KiB. The bridge forwards the exact JSON bytes, including the
+Only the operation listing accepts a query string: `q` (at most 256 decoded
+UTF-8 bytes), `availability` (`live_direct`, `text_only`, `unavailable`),
+`offset` (0–999999999), and `limit` (1–50). Fields cannot repeat. Operation IDs
+match `[A-Za-z0-9][A-Za-z0-9._-]{0,159}`; detail requests have no query string.
+Malformed percent escapes, controls and alternative routes are refused before
+HTTP delivery. Valid request targets are forwarded without rewriting.
+
+Query and invoke content must have MIME type `application/json`, empty content encoding,
+and at most 64 KiB. The v5 launcher selects the matching adapter request limit.
+The bridge forwards the exact JSON bytes, including the
 adapter's `request_id`, `conversation_id` and `text`, without rewriting or
-interpreting them. Accept permits JSON through `application/json`,
+interpreting them; `/invoke` uses the adapter's structured operation envelope.
+Accept permits JSON through `application/json`,
 `application/*` or `*/*`, using the most specific matching range and its quality.
 An explicit JSON exclusion overrides a wildcard; no acceptable JSON range
 returns 406 before HTTP delivery. An absent Accept list permits JSON. Request

@@ -182,6 +182,7 @@ arguments, confirms connected supervisor fd 3, and starts:
 /usr/bin/python3.12 -B /opt/oracle/adapter/serve.py
   --runtime /opt/oracle --data-root /opt/oracle/root
   --workspace /var/oracle-workspace --port 7070
+  --max-request-bytes 65536
 /opt/oracle-bin/minidregg-oracle-appliance --port 7070
 ```
 
@@ -235,6 +236,13 @@ the same request ID with different bytes conflicts; a lost reply may still have
 executed. The bridge's original HTTP status header and complete JSON reply
 preserve busy/failure outcomes. Mini may omit large bodies from model text
 presentation while retaining the exact native response.
+
+The v5 source also exposes relative `GET operations` (bounded filters and
+pagination), `GET operations/<id>`, and `POST invoke` for structured operations.
+The request ceiling is 65,536 bytes in both the bridge and signed launcher.
+See the [bridge route contract](../../docs/oracle-appliance-bridge.md) for exact
+query fields and ID grammar. These are prepared v5 changes; the immutable v4
+receipt does not claim these routes.
 
 ## Narrow verification
 

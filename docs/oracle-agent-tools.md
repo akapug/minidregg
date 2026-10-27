@@ -77,13 +77,30 @@ callable operations.
 
 Request and conversation IDs contain 1–80 ASCII letters, digits, `_` or `-`.
 Operation IDs contain 1–160 ASCII letters, digits, `.`, `_` or `-`, starting with
-a letter or digit. The encoded invocation is limited to 16 KiB. Calls cannot
+a letter or digit. The encoded invocation body is limited to 65,536 bytes,
+including IDs, field names, JSON escaping and operation arguments. The appliance
+must also report a sufficient `limits.request_bytes`; the v5 packaging selects
+65,536, while older standalone services default to 16,384. Calls cannot
 select a host URL, filesystem path, HTTP header, arbitrary method, socket or grant
 for transport; operation-specific inputs still follow the live input schema.
 The controller constructs `GET operations`, `GET operations/ID`, or
 `POST invoke` relative to the route's signed prefix. It percent-encodes search
 text and serializes invocation JSON deterministically. The existing HTTP parser
 and lifetime-dispatch code then consume those exact bytes.
+
+Input limits apply at each layer:
+
+- MCP accepts a complete JSON request line of at most 65,536 bytes, including
+  its tool envelope and newline. Compact Oracle arguments avoid HTTP-body hex
+  expansion, but must still leave room for that envelope. The generic
+  `mini_application_api` tool carries a hex body, so its practical MCP body
+  limit is below 32 KiB after envelope and other HTTP fields.
+- The model-free foreground interface accepts a 262,144-byte request frame,
+  and can carry the full 65,536-byte invocation body with its tool envelope.
+- The controller's canonical HTTP-input object is capped at 196,608 bytes,
+  allowing the hex-encoded 65,536-byte body plus bounded metadata. The actual
+  serialized native forward frame remains capped at 262,144 bytes and is
+  checked before socket I/O. Current grant and schema checks remain unchanged.
 
 The controller wires these tools through both MCP and the existing model-free
 foreground tool interface. Foreground calls retain the original tool name and
@@ -121,7 +138,7 @@ agent-facing deployment is qualified.
 cargo test -p minidregg-grain-runtime --bin grain-runtime oracle_ -j 2
 ```
 
-The 27 October source checks passed on macOS: six `oracle_` tests, ten
+The 27 October source checks passed on macOS: seven `oracle_` tests, twenty `application_api_tools::tests`, ten
 `mcp::tests` (including the Oracle catalog test), and three `journal_io::tests`.
 The journal's private subprocess helper is intentionally ignored as a standalone
 test and is invoked by its process-death test. The full grain-runtime test binary

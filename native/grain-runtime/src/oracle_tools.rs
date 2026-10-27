@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 pub(crate) const PROTOCOL: &str = "oracle-operations-v1";
-const MAX_BODY_BYTES: usize = 16_384;
+use crate::application_api_tools::MAX_BODY_BYTES;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -202,7 +202,7 @@ pub(crate) fn http_arguments(
                 "conversation_id":conversation,"operation_id":operation,"arguments":inputs}))
             .map_err(|e| e.to_string())?;
             if body.len() > MAX_BODY_BYTES {
-                return Err("Oracle invocation exceeds 16 KiB".into());
+                return Err("Oracle invocation exceeds 65536 bytes".into());
             }
             Ok(http(
                 application,
@@ -353,6 +353,27 @@ mod tests {
             .is_err());
         }
     }
+    #[test]
+    fn oracle_full_native_body_composes_with_the_existing_api() {
+        let mut value = call();
+        value["arguments"] = json!({"text":""});
+        let empty = http_arguments("mini_oracle_call", &value, &profiles()).unwrap();
+        let overhead = empty["bodyHex"].as_str().unwrap().len() / 2;
+        value["arguments"]["text"] = json!("x".repeat(MAX_BODY_BYTES - overhead));
+        let http = http_arguments("mini_oracle_call", &value, &profiles()).unwrap();
+        let input =
+            crate::application_api_tools::parse_input(&http, &["oracle-app".into()]).unwrap();
+        assert_eq!(input.body.len(), 65_536);
+        let frame =
+            crate::application_api_tools::lifetime_dispatch_request(7, &"a".repeat(64), &input)
+                .unwrap();
+        assert_eq!(frame["bodyHex"], http["bodyHex"]);
+        value["arguments"]["text"] = json!("x".repeat(MAX_BODY_BYTES - overhead + 1));
+        assert!(http_arguments("mini_oracle_call", &value, &profiles())
+            .unwrap_err()
+            .contains("65536 bytes"));
+    }
+
     #[test]
     fn oracle_unknown_operation_is_forwarded_for_live_runtime_decision() {
         let mut value = call();

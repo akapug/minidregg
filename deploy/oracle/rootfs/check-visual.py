@@ -30,7 +30,7 @@ Image.new("RGB", (64, 48), (210, 40, 80)).save(jpeg, format="JPEG", quality=95)
 assert len(jpeg.getvalue()) <= 8192
 decoded_jpeg = Image.open(BytesIO(jpeg.getvalue()))
 decoded_jpeg.load()
-assert decoded_jpeg.format == "JPEG" and decoded_jpeg.n_frames == 1
+assert decoded_jpeg.format == "JPEG" and getattr(decoded_jpeg, "n_frames", 1) == 1
 pixel = decoded_jpeg.convert("RGB").getpixel((32, 24))
 assert max(abs(a - b) for a, b in zip(pixel, (210, 40, 80))) <= 3
 

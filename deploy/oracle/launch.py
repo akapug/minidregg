@@ -104,7 +104,8 @@ def main():
     return supervise(
         ["/usr/bin/python3.12", "-B", "/opt/oracle/adapter/serve.py",
          "--runtime", "/opt/oracle", "--data-root", "/opt/oracle/root",
-         "--workspace", "/var/oracle-workspace", "--port", "7070"],
+         "--workspace", "/var/oracle-workspace", "--port", "7070",
+         "--max-request-bytes", "65536"],
         ["/opt/oracle-bin/minidregg-oracle-appliance", "--port", "7070"],
     )
 
