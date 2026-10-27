@@ -1,0 +1,29 @@
+Running as unit: spk-sandbox-floor-audit-20261027T064235Z-floor.service; invocation ID: 216ec06c34a34628902b2a79598b242a
+
+running 1 test
+namespace-map helper=/usr/bin/newuidmap pid=500887 operator=1000 app=100000
+namespace-map helper=/usr/bin/newgidmap pid=500887 operator=1000 app=100000
+bwrap: execvp /spk-sandbox-probe: Permission denied
+
+bwrap-wait-status=0x100 exited=true code=1 signaled=false signal=0
+output-summary kept=52 discarded=0
+audit child panicked: panicked at native/spk-host/src/resident_launch.rs:623:13:
+bwrap did not start the probe under the resident unit's hardening (status 0x100); see the app output
+
+thread 'resident_launch::tests::operator_probe_holds_inside_production_resident_sandbox' (500884) panicked at native/spk-host/src/resident_launch.rs:575:9:
+the audit child failed (wait status 0x100); its report is on stderr above
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test resident_launch::tests::operator_probe_holds_inside_production_resident_sandbox ... FAILED
+
+failures:
+
+failures:
+    resident_launch::tests::operator_probe_holds_inside_production_resident_sandbox
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 344 filtered out; finished in 0.06s
+
+Finished with result: exit-code
+Main processes terminated with: code=exited, status=101/n/a
+Service runtime: 110ms
+CPU time consumed: 55ms
+Memory peak: 3.3M (swap: 0B)

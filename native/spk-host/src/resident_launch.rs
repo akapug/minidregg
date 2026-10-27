@@ -549,6 +549,35 @@ mod tests {
         }
     }
 
+    /// The resident enters its user namespace as a fresh, single-threaded process
+    /// (`spk-host resident-bootstrap`). The libtest harness runs every test on a
+    /// spawned thread, and the kernel refuses setns(CLONE_NEWUSER) from a thread
+    /// group of more than one (EINVAL), so the audit body runs in a forked child,
+    /// single-threaded by construction: the production shape, not a harness
+    /// setting (`--test-threads=1` still spawns the test thread). A panic in the
+    /// child is reported on the real stderr and becomes a nonzero exit; the test
+    /// thread waits and asserts it.
+    fn in_single_threaded_child(body: impl FnOnce()) {
+        use std::io::Write as _;
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork: {}", io::Error::last_os_error());
+        if pid == 0 {
+            std::panic::set_hook(Box::new(|info| {
+                let _ = writeln!(std::io::stderr(), "audit child panicked: {info}");
+            }));
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            unsafe { libc::_exit(if outcome.is_ok() { 0 } else { 1 }) }
+        }
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid, "waitpid: {}", io::Error::last_os_error());
+        assert!(
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+            "the audit child failed (wait status {status:#x}); its report is on stderr above"
+        );
+    }
+
     /// Launch the probe as the app; return its wait status and parsed report lines.
     fn run_probe(prepared: PreparedResident, log: &Path) -> (i32, Vec<Value>) {
         let (mut child, _host_rpc, output) = prepared.spawn_for_audit().unwrap();
@@ -582,29 +611,31 @@ mod tests {
     #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
     fn operator_probe_holds_inside_production_resident_sandbox() {
         let audit = audit_inputs("app-output-floor.log");
-        crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
-            .unwrap();
-        let prepared =
-            PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
-        let (status, lines) = run_probe(prepared, &audit.spec.app_output);
-        // bwrap must START under the unit's hardening before any floor check
-        // means anything (bwrap >= 0.11 dies at its first mount if a unit
-        // seccomp layer returns ENOSYS for openat2).
-        assert!(
-            !lines.is_empty(),
-            "bwrap did not start the probe under the resident unit's hardening (status {status:#x}); see the app output"
-        );
-        assert_eq!(verdict(&lines), Some("floor-held"));
-        for check in [
-            "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",
-            "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
-            "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
-            "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
-            "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
-        ] {
-            assert_eq!(held(&lines, check), Some(true), "{check}");
-        }
-        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            // bwrap must START under the unit's hardening before any floor check
+            // means anything (bwrap >= 0.11 dies at its first mount if a unit
+            // seccomp layer returns ENOSYS for openat2).
+            assert!(
+                !lines.is_empty(),
+                "bwrap did not start the probe under the resident unit's hardening (status {status:#x}); see the app output"
+            );
+            assert_eq!(verdict(&lines), Some("floor-held"));
+            for check in [
+                "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",
+                "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
+                "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
+                "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
+                "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
+            ] {
+                assert_eq!(held(&lines, check), Some(true), "{check}");
+            }
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        });
     }
 
     /// Negative control: the same gate and probe with the pre-floor argument
@@ -613,31 +644,33 @@ mod tests {
     #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
     fn operator_probe_breaches_under_pre_floor_arguments() {
         let audit = audit_inputs("app-output-pre-floor.log");
-        crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
-            .unwrap();
-        let mut prepared =
-            PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
-        let mut legacy: Vec<String> = [
-            "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid",
-            "--unshare-ipc", "--unshare-uts", "--unshare-cgroup", "--unshare-net",
-            "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
-            "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
-            "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
-            "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        legacy.extend(["--setenv", "SPK_PROBE", "pre-floor", "--", "/spk-sandbox-probe"].map(str::to_owned));
-        prepared.launch.args = legacy;
-        let (status, lines) = run_probe(prepared, &audit.spec.app_output);
-        assert_eq!(verdict(&lines), Some("floor-breached"));
-        for check in [
-            "seccomp-filter-active", "fd-census-self", "socket-netlink-refused",
-            "userns-unshare-refused",
-        ] {
-            assert_eq!(held(&lines, check), Some(false), "{check} did not fail");
-        }
-        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1, "status {status}");
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let mut prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let mut legacy: Vec<String> = [
+                "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid",
+                "--unshare-ipc", "--unshare-uts", "--unshare-cgroup", "--unshare-net",
+                "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
+                "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
+                "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
+                "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
+            ]
+            .map(str::to_owned)
+            .to_vec();
+            legacy.extend(["--setenv", "SPK_PROBE", "pre-floor", "--", "/spk-sandbox-probe"].map(str::to_owned));
+            prepared.launch.args = legacy;
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            assert_eq!(verdict(&lines), Some("floor-breached"));
+            for check in [
+                "seccomp-filter-active", "fd-census-self", "socket-netlink-refused",
+                "userns-unshare-refused",
+            ] {
+                assert_eq!(held(&lines, check), Some(false), "{check} did not fail");
+            }
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1, "status {status}");
+        });
     }
 
     #[test]

@@ -1,0 +1,31 @@
+Running as unit: spk-sandbox-floor-audit-20261027T064235Z-pre-floor.service
+
+running 1 test
+namespace-map helper=/usr/bin/newuidmap pid=500911 operator=1000 app=100000
+namespace-map helper=/usr/bin/newgidmap pid=500911 operator=1000 app=100000
+bwrap: execvp /spk-sandbox-probe: Permission denied
+
+bwrap-wait-status=0x100 exited=true code=1 signaled=false signal=0
+output-summary kept=52 discarded=0
+audit child panicked: panicked at native/spk-host/src/resident_launch.rs:665:13:
+assertion `left == right` failed
+  left: None
+ right: Some("floor-breached")
+
+thread 'resident_launch::tests::operator_probe_breaches_under_pre_floor_arguments' (500908) panicked at native/spk-host/src/resident_launch.rs:575:9:
+the audit child failed (wait status 0x100); its report is on stderr above
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test resident_launch::tests::operator_probe_breaches_under_pre_floor_arguments ... FAILED
+
+failures:
+
+failures:
+    resident_launch::tests::operator_probe_breaches_under_pre_floor_arguments
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 344 filtered out; finished in 0.05s
+
+Finished with result: exit-code
+Main processes terminated with: code=exited, status=101/n/a
+Service runtime: 88ms
+CPU time consumed: 47ms
+Memory peak: 3.1M (swap: 0B)
