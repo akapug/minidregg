@@ -99,26 +99,27 @@ esac
 BASE=http://127.0.0.1:$PORT
 JAR=$R/jar
 # curl talks to the loopback gateway; the browser's Origin and fetch-site headers are supplied as a browser would.
-req() { # METHOD PATH [curl args...] -> body on stdout; status in $STATUS, headers in $R/h
+req() { # METHOD PATH [curl args...] -> body on stdout; status via st (a file: req runs in a subshell), headers in $R/h
   local method=$1 path=$2; shift 2
-  STATUS=$(curl -s -o "$R/body" -D "$R/h" -w '%{http_code}' -X "$method" -b "$JAR" -c "$JAR" -H "Origin: $ORIGIN" -H 'Sec-Fetch-Site: same-origin' "$@" "$BASE$path")
+  curl -s -o "$R/body" -D "$R/h" -w '%{http_code}' -X "$method" -b "$JAR" -c "$JAR" -H "Origin: $ORIGIN" -H 'Sec-Fetch-Site: same-origin' "$@" "$BASE$path" >"$R/status"
   cat "$R/body"
 }
+st() { cat "$R/status" 2>/dev/null; }
 csrf_of() { grep -o 'name="csrf" value="[^"]*"' "$R/body" | head -1 | sed 's/.*value="//; s/"$//'; }
 
 page=$(req GET "/login/$CODE")
-row login-confirm "$([ "$STATUS" = 200 ] && grep -q 'action="/login"' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+row login-confirm "$([ "$(st)" = 200 ] && grep -q 'action="/login"' <<<"$page" && echo 1 || echo 0)" "$(st)"
 req POST /login --data-urlencode "code=$CODE" >/dev/null
 has_cookie=$(grep -c "$COOKIE_NAME" "$JAR" || true)
 req POST /login --data-urlencode "code=$CODE" -b /dev/null -c /dev/null >"$R/second"
-row login "$([ "$has_cookie" -ge 1 ] && [ "$STATUS" = 403 ] && echo 1 || echo 0)" "cookie=$has_cookie second=$STATUS"
+row login "$([ "$has_cookie" -ge 1 ] && [ "$(st)" = 403 ] && echo 1 || echo 0)" "cookie=$has_cookie second=$(st)"
 page=$(req GET /)
-row stage-member "$([ "$STATUS" = 200 ] && grep -q "$SUBJECT\|alice\|mini-s-" <<<"$page" && ! grep -q 'public reader' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+row stage-member "$([ "$(st)" = 200 ] && grep -q "$SUBJECT\|alice\|mini-s-" <<<"$page" && ! grep -q 'public reader' <<<"$page" && echo 1 || echo 0)" "$(st)"
 CSRF=$(csrf_of)
 req POST /doc/new --data-urlencode "csrf=nope" --data-urlencode "name=x" --data-urlencode "law=note" >/dev/null
-row csrf-refused "$([ "$STATUS" = 403 ] && echo 1 || echo 0)" "$STATUS"
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$JAR" -H 'Origin: https://evil.example' --data-urlencode "csrf=$CSRF" --data-urlencode "name=x" --data-urlencode "law=note" "$BASE/doc/new")
-row origin-refused "$([ "$STATUS" = 403 ] && echo 1 || echo 0)" "$STATUS"
+row csrf-refused "$([ "$(st)" = 403 ] && echo 1 || echo 0)" "$(st)"
+evil=$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$JAR" -H 'Origin: https://evil.example' --data-urlencode "csrf=$CSRF" --data-urlencode "name=x" --data-urlencode "law=note" "$BASE/doc/new")
+row origin-refused "$([ "$evil" = 403 ] && echo 1 || echo 0)" "$evil"
 req POST /term --data-urlencode "csrf=$CSRF" --data-urlencode cols=100 --data-urlencode rows=30 >/dev/null
 TERM_PATH=$(grep -i '^location:' "$R/h" | awk '{print $2}' | tr -d '\r')
 page=$(req GET "$TERM_PATH")
@@ -129,14 +130,14 @@ out=$(python3 -I "$HERE/jweb-frontend-ws.py" "127.0.0.1" "$PORT" "$WSPATH" "$ORI
 row term-whoami "$([ "$ws_rc" = 0 ] && echo 1 || echo 0)" "$(tail -c 200 <<<"$out" | tr '\n' ' ' | cut -c1-160) $(tail -1 "$R/ws.err")"
 DOC="jwf$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 page=$(req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$DOC" --data-urlencode "law=note")
-row doc-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$STATUS $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+row doc-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 TEXT="hello from the browser $(date +%s)"
 page=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$TEXT")
 RID=$(grep -o '/receipts/w-[0-9a-f]*' <<<"$page" | head -1 | cut -d/ -f3)
 docpage=$(req GET "/doc/$DOC")
-row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$STATUS receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
-row receipt "$([ "$STATUS" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" --socket "$SOCKET" shell --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
@@ -145,18 +146,17 @@ missing=""; count=0
 for v in $verbs; do
   count=$((count + 1))
   page=$(req GET "/verb/$v")
-  [ "$STATUS" = 200 ] && grep -q "action=\"/verb/$v\"" <<<"$page" || missing="$missing $v"
+  [ "$(st)" = 200 ] && grep -q "action=\"/verb/$v\"" <<<"$page" || missing="$missing $v"
 done
 row verb-parity "$([ "$count" -gt 40 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs in help; without a form:${missing:- none}"
 page=$(req GET /verb)
-row verb-index "$([ "$STATUS" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+row verb-index "$([ "$(st)" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$(st)"
 page=$(req POST /verb/whoami --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
-row verb-run "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$SUBJECT" <<<"$page" && echo 1 || echo 0)" "$STATUS whoami through the derived form"
+row verb-run "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$SUBJECT" <<<"$page" && echo 1 || echo 0)" "$(st) whoami through the derived form"
 req POST /logout --data-urlencode "csrf=$CSRF" >/dev/null
-logout_status=$STATUS
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE_NAME=$COOKIE_VALUE" "$BASE/term")
-row logout "$([ "$logout_status" = 303 ] && [ "$STATUS" = 401 ] && echo 1 || echo 0)" "logout=$logout_status then /term=$STATUS"
-page=$(curl -s -o "$R/body" -w '%{http_code}' "$BASE/"; cat "$R/body")
-STATUS=$(head -c 3 <<<"$page")
-row public-reader "$(grep -q 'public reader' "$R/body" && echo 1 || echo 0)" "$STATUS $(grep -o 'class="headline">[^<]*' "$R/body" | head -1 | cut -c18-120)"
+logout_status=$(st)
+after=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE_NAME=$COOKIE_VALUE" "$BASE/term")
+row logout "$([ "$logout_status" = 303 ] && [ "$after" = 401 ] && echo 1 || echo 0)" "logout=$logout_status then /term=$after"
+pub=$(curl -s -o "$R/body" -w '%{http_code}' "$BASE/")
+row public-reader "$(grep -q 'public reader' "$R/body" && echo 1 || echo 0)" "$pub $(grep -o 'class="headline">[^<]*' "$R/body" | head -1 | cut -c18-120)"
 verdict
