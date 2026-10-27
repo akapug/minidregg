@@ -105,24 +105,36 @@ try:
         # the shell's lost-reply switch reaches the activity path: the birth is written, its answer never read
         first_charge = int(re.search(r'charge (\d+)', run_out).group(1)) if run_out else -1
         b0 = w.watched('account-before-lost')
+        acct0 = lambda v: w.balance(v, w.SPONSOR_ACCOUNT)
         rc, out, err = shell('run-lost', 'bend run tally lost --lose-reply-once')
         w.check('lost-reply-is-undecided', rc == 4 and err.startswith('undecided:') and 'deliberately not read' in err, {'rc': rc, 'err': err[-400:]})
         w.check('undecided-names-the-two-shell-lines', '`bend lookup tally`' in err and '`bend retry tally`' in err and 'mini activity' not in err, err[-400:])
         w.check('nothing-is-claimed-admitted', 'admitted' not in out, out)
         mid = w.watched('account-after-lost')
         rc, looked, err = shell('lookup', 'bend lookup tally')
-        w.check('lookup-gives-the-decided-outcome', rc == 0 and looked.startswith('admitted: bend lookup tally') and 'state {total=0}' in looked, {'rc': rc, 'out': looked, 'err': err[-300:]})
+        # The Host either committed the unread birth (lookup finds it: decided, and the retry replays the
+        # same receipt) or dropped it with the connection (lookup: absent, undecided, nothing submitted; the
+        # one exact retry then installs it). Either way: one effect. The branch taken is recorded.
+        rc, looked, err = shell('lookup', 'bend lookup tally')
+        found = rc == 0
+        w.check('lookup-is-decided-or-absent-and-never-submits',
+                (found and looked.startswith('admitted: bend lookup tally') and 'state {total=0}' in looked)
+                or (rc == 4 and 'Host outcome absent' in err and '`bend retry tally`' in err), {'rc': rc, 'out': looked, 'err': err[-300:]})
+        mid2 = w.watched('account-after-lookup')
+        w.check('lookup-charged-nothing-more', acct0(mid2) == acct0(mid), {'afterLost': acct0(mid), 'afterLookup': acct0(mid2)})
         rc, retried, err = shell('retry', 'bend retry tally')
         rr = re.search(r'receipt (tx \d+ event \d+)', retried)
         rl = re.search(r'receipt (tx \d+ event \d+)', looked)
-        w.check('retry-is-the-same-receipt', rc == 0 and rr is not None and rl is not None and rr.group(1) == rl.group(1)
-                and '(replayed)' in retried, {'lookup': looked[:200], 'retry': retried[:200]})
+        w.check('retry-admitted-once-with-the-same-receipt-if-already-decided',
+                rc == 0 and rr is not None and retried.startswith('admitted: bend retry tally')
+                and ((found and rl is not None and rr.group(1) == rl.group(1) and '(replayed)' in retried) or (not found and '(installed)' in retried)),
+                {'branch': 'committed' if found else 'dropped', 'lookup': looked[:160], 'retry': retried[:200]})
         registry = json.loads((w.sponsor / 'bend' / 'objects' / 'lost.json').read_text())
         s = w.state('lost', 'lost-after-retry', registry['transaction'])
         end = w.watched('account-after-retry')
         w.check('one-record', w.total_of(s) == 0 and s['record'].get('phase', {}).get('await') is not None, s['record'].get('phase'))
-        acct = lambda v: w.balance(v, w.SPONSOR_ACCOUNT)
-        w.check('one-charge', acct(mid) == acct(end) and acct(b0) - acct(end) == first_charge,
+        acct = acct0
+        w.check('one-charge', acct(b0) - acct(end) == first_charge,
                 {'before': acct(b0), 'afterLost': acct(mid), 'afterRetry': acct(end), 'firstRunCharge': first_charge})
         w.check('purse-is-one-deposit', s['purse'] == 7 * AW.PRICE, s['purse'])
 
