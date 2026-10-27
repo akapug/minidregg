@@ -9,8 +9,12 @@
 #   sandbox-floor-audit.sh TEST_ELF PROBE_ELF BWRAP EVIDENCE_DIR [APP_UID APP_GID]
 #
 # TEST_ELF is the spk-host lib test executable (`cargo test --lib --no-run`), PROBE_ELF
-# the built `spk-sandbox-probe`. APP_UID/APP_GID default to the first identity of the
-# operator's /etc/subuid grant (the one newuidmap maps). The script builds a throwaway
+# the built `spk-sandbox-probe`. Each audit test forks a single-threaded child for the
+# namespace entry (the harness thread would make setns(CLONE_NEWUSER) EINVAL), so no
+# --test-threads setting is involved. APP_UID/APP_GID default to the first identity of the
+# operator's /etc/subuid grant (the one newuidmap maps). SPK_AUDIT_ROOT (default /run)
+# is the exec-capable parent of the throwaway audit directory; the operator's sudoers
+# rule is anchored on it. The script builds a throwaway
 # image (the probe plus the shared objects `ldd` names, at their own paths), mounts a
 # 16 MiB tmpfs owned by the app UID as the separate /var, runs the two audit tests in
 # transient user units, and removes everything it created. Evidence: the unit
@@ -31,7 +35,20 @@ APP_GID=${6:-$FIRST_SUBUID}
 mkdir -p "$EVIDENCE"
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-DIR=/run/spk-sandbox-floor-audit-$STAMP
+# The image must be executable from inside the sandbox, and a bind mount made in
+# an unprivileged user namespace cannot clear a `noexec` locked on its source
+# mount. Debian 13 mounts /run noexec (dregg-build, 2026-10-27: `bwrap: execvp
+# /spk-sandbox-probe: Permission denied` with nothing else wrong), Ubuntu does
+# not (persvati, 2026-09-30). SPK_AUDIT_ROOT selects the parent directory; the
+# operator's sudoers rule must be anchored on "$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*".
+ROOT=${SPK_AUDIT_ROOT:-/run}
+ROOT_MOUNT=$(findmnt -no SOURCE,FSTYPE,OPTIONS -T "$ROOT")
+if echo "$ROOT_MOUNT" | tr ' ,' '\n\n' | grep -qx noexec; then
+  echo "$ROOT is on a noexec mount ($ROOT_MOUNT): the sandbox cannot exec an image under it." >&2
+  echo "Set SPK_AUDIT_ROOT to an exec-capable directory (/var/tmp, for one) and anchor the operator's sudoers rule on \$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*." >&2
+  exit 2
+fi
+DIR=$ROOT/spk-sandbox-floor-audit-$STAMP
 UNIT=spk-sandbox-floor-audit-$STAMP
 
 cleanup() {
@@ -67,6 +84,7 @@ BWRAP_SHA=$(sha256sum "$BWRAP" | cut -d' ' -f1)
   echo "image_files:"
   (cd "$DIR/image" && sudo -n find . -type f -exec sha256sum {} +) | sort -k2
   echo "var_mount=$(findmnt -no SOURCE,FSTYPE,OPTIONS "$DIR/var")"
+  echo "audit_root=$ROOT root_mount=$ROOT_MOUNT"
   echo "unprivileged_userns_clone=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo absent)"
   echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
 } > "$EVIDENCE/environment.txt"
@@ -91,7 +109,7 @@ run() {
     --setenv=SPK_AUDIT_DIR="$DIR" --setenv=SPK_AUDIT_BWRAP="$BWRAP" \
     --setenv=SPK_AUDIT_BWRAP_SHA256="$BWRAP_SHA" \
     --setenv=SPK_AUDIT_UID="$APP_UID" --setenv=SPK_AUDIT_GID="$APP_GID" \
-    -- "$TEST_ELF" --ignored --exact "$test" --nocapture --test-threads=1 \
+    -- "$TEST_ELF" --ignored --exact "$test" --nocapture \
     > "$EVIDENCE/$name.transcript" 2>&1
   local status=$?
   set -e
