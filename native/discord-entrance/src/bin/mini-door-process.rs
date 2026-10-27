@@ -1,0 +1,1120 @@
+//! `mini-door-process`: the door's root processor (deploy/door/README.md).
+//!
+//! A oneshot, every minute (`mini-door-process.timer`). It is the ONLY writer of door accounts,
+//! hosted keys, the door's roster entries (and so `authorized_keys`) and the Discord roster,
+//! and it acts only on requests of the exact schema in `door` that the unprivileged writers put
+//! in their spools. It does nothing itself that the box's scripts already do: a door account is
+//! a roster entry in the box's per-box roster (`$INFRA/friends/door/NAME.pub`), made real by
+//! `render-authorized-keys.sh`, keyed by the session's own `keygen mini.key` run as
+//! `mini-s-NAME`, and enrolled by `mini-reenroll NAME` (free) or by the stranger's payment to
+//! that hosted key (`mini join --memo-version v2`, paid).
+//!
+//! Every request's phase is retained before the next step, and every step is idempotent, so a
+//! crash anywhere is finished by the next tick. A refusal is final and is shown on the
+//! stranger's status page.
+//!
+//!   mini-door-process [--root DIR]      DIR prefixes every box path (tests and the dry journey)
+
+use std::collections::HashMap;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use minidregg_discord_entrance::door::{self, Link, Request, Route};
+use minidregg_discord_entrance::now_s;
+use serde_json::{json, Value};
+
+const DOOR_USER: &str = "mini-door";
+const DISCORD_USER: &str = "mini-discord";
+const TENANT_GROUP: &str = "mini-sessions";
+/// A stranger who never finishes paying: the request is closed after this long.
+const PAID_TTL_S: u64 = 7 * 86_400;
+
+/// Every box path, under an optional root prefix.
+#[derive(Clone)]
+struct Paths {
+    root: PathBuf,
+}
+
+impl Paths {
+    fn at(&self, path: &str) -> PathBuf {
+        self.root.join(path.trim_start_matches('/'))
+    }
+    fn etc(&self) -> PathBuf { self.at("/etc/mini") }
+    fn lib(&self) -> PathBuf { self.at("/usr/local/lib/mini") }
+    fn friends(&self) -> PathBuf { self.lib().join("infra/friends") }
+    fn door_friends(&self) -> PathBuf { self.friends().join("door") }
+    fn candidate(&self) -> PathBuf { self.at("/var/lib/mini/candidate/current") }
+    fn node(&self) -> PathBuf { self.at("/var/lib/mini/store/node") }
+    fn sessions(&self) -> PathBuf { self.at("/var/lib/mini/sessions") }
+    fn home(&self, name: &str) -> PathBuf { self.sessions().join(name) }
+    fn queue(&self) -> PathBuf { self.at("/var/lib/mini-door/queue") }
+    fn links(&self) -> PathBuf { self.at("/var/lib/mini-discord/door-links") }
+    fn status(&self) -> PathBuf { self.at("/var/lib/mini-door-status") }
+    fn state(&self) -> PathBuf { self.at("/var/lib/mini-door-process") }
+    fn config(&self) -> PathBuf { self.node().join("deployment/pinned-config.json") }
+    fn socket(&self) -> PathBuf { self.node().join("public/mini.sock") }
+}
+
+/// `/etc/mini/door.json`.
+#[derive(Clone, Debug)]
+struct DoorConfig {
+    funding: u128,
+    free_cap: usize,
+    daily_cap: usize,
+    per_run: usize,
+    sponsor_floor: u128,
+    link_ttl_s: u64,
+    login_host: String,
+    pay: Option<PayConfig>,
+}
+
+#[derive(Clone, Debug)]
+struct PayConfig {
+    enrol_pin: PathBuf,
+    birth_context: Option<PathBuf>,
+    network: String,
+}
+
+impl DoorConfig {
+    fn load(path: &Path) -> Result<Self, String> {
+        let v: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
+            .map_err(|e| format!("door config: {e}"))?;
+        let known = ["version", "funding", "freeCap", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay"];
+        if let Some(k) = v.as_object().ok_or("door config is not an object")?.keys().find(|k| !known.contains(&k.as_str())) {
+            return Err(format!("door config has an unknown key {k}"));
+        }
+        if v["version"] != 1 {
+            return Err("door config version must be 1".into());
+        }
+        let nat = |k: &str, d: u64| -> Result<u64, String> {
+            match &v[k] { Value::Null => Ok(d), n => n.as_u64().ok_or(format!("{k} is not a natural")) }
+        };
+        let big = |k: &str, d: u128| -> Result<u128, String> {
+            match &v[k] { Value::Null => Ok(d), Value::String(s) => s.parse().map_err(|_| format!("{k} is not a decimal")), _ => Err(format!("{k} is a decimal string")) }
+        };
+        let pay = match &v["pay"] {
+            Value::Null => None,
+            p => Some(PayConfig {
+                enrol_pin: PathBuf::from(p["enrolPin"].as_str().ok_or("pay.enrolPin")?),
+                birth_context: p["birthContext"].as_str().map(PathBuf::from),
+                network: match p["network"].as_str() {
+                    Some(n @ ("mainnet" | "devnet")) => n.to_owned(),
+                    _ => return Err("pay.network is mainnet or devnet".into()),
+                },
+            }),
+        };
+        let login_host = v["loginHost"].as_str().unwrap_or("demo.dregg.online").to_owned();
+        if login_host.is_empty() || !login_host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+            return Err("loginHost is a host name".into());
+        }
+        Ok(DoorConfig {
+            funding: big("funding", 1000)?,
+            free_cap: nat("freeCap", 50)? as usize,
+            daily_cap: nat("dailyCap", 20)? as usize,
+            per_run: nat("perRun", 4)?.max(1) as usize,
+            sponsor_floor: big("sponsorFloor", 20_000)?,
+            link_ttl_s: nat("linkTtlHours", 168)?.saturating_mul(3600),
+            login_host,
+            pay,
+        })
+    }
+}
+
+/// One finished command.
+struct Ran {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl Ran {
+    /// The first `error:|refused:|undecided:|usage:` line, or the last stderr line.
+    fn why(&self) -> String {
+        self.stderr
+            .lines()
+            .find(|l| ["error:", "refused:", "undecided:", "usage:"].iter().any(|w| l.starts_with(w)))
+            .or_else(|| self.stderr.lines().last())
+            .unwrap_or("no diagnostic")
+            .chars()
+            .take(300)
+            .collect()
+    }
+}
+
+/// What the processor asks of the box. The real implementation runs the box's own scripts and
+/// the session's own lines; the tests substitute a fake.
+trait BoxOps {
+    fn uid(&self, user: &str) -> Option<u32>;
+    fn gid(&self, group: &str) -> Option<u32>;
+    /// `render-authorized-keys.sh --on-box --roster $INFRA/friends` (an operator render: it
+    /// creates a missing hosted account and its home).
+    fn render(&self) -> Ran;
+    /// One `mini shell` line in NAME's session, as `mini-s-NAME`.
+    fn tenant_line(&self, name: &str, line: &str) -> Ran;
+    /// One `mini` client command as `mini-s-NAME`.
+    fn tenant_mini(&self, name: &str, args: &[String]) -> Ran;
+    /// `mini-reenroll NAME` with the door's funding.
+    fn reenroll(&self, name: &str, funding: u128) -> Ran;
+    /// The sponsor's signed `credit` read.
+    fn sponsor_credit(&self) -> Ran;
+    /// Hand NAME's account a file in its own home (written by root, then given to the tenant).
+    fn give(&self, name: &str, path: &Path, bytes: &[u8]) -> Result<(), String>;
+}
+
+struct RealBox {
+    p: Paths,
+}
+
+fn run(mut cmd: Command) -> Ran {
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    match cmd.output() {
+        Ok(o) => Ran {
+            ok: o.status.success(),
+            stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+        },
+        Err(e) => Ran { ok: false, stdout: String::new(), stderr: format!("error: cannot run {cmd:?}: {e}") },
+    }
+}
+
+fn lookup(file: &str, name: &str, field: usize) -> Option<u32> {
+    std::fs::read_to_string(file).ok()?.lines().find_map(|l| {
+        let f: Vec<&str> = l.split(':').collect();
+        (f.first() == Some(&name)).then(|| f.get(field)?.parse().ok()).flatten()
+    })
+}
+
+impl RealBox {
+    fn as_tenant(&self, name: &str) -> Command {
+        let mut cmd = Command::new("/usr/bin/timeout");
+        cmd.args(["--kill-after=5", "300", "/usr/bin/setpriv"])
+            .arg(format!("--reuid=mini-s-{name}"))
+            .arg(format!("--regid={TENANT_GROUP}"))
+            .args(["--init-groups", "--reset-env", "--", "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "LANG=C.UTF-8"]);
+        cmd.env_clear();
+        cmd
+    }
+}
+
+impl BoxOps for RealBox {
+    fn uid(&self, user: &str) -> Option<u32> { lookup("/etc/passwd", user, 2) }
+    fn gid(&self, group: &str) -> Option<u32> { lookup("/etc/group", group, 2) }
+    fn render(&self) -> Ran {
+        let mut cmd = Command::new(self.p.lib().join("infra/render-authorized-keys.sh"));
+        cmd.arg("--on-box").arg("--roster").arg(self.p.friends());
+        run(cmd)
+    }
+    fn tenant_line(&self, name: &str, line: &str) -> Ran {
+        let home = self.p.home(name);
+        let mut cmd = self.as_tenant(name);
+        cmd.arg(format!("SSH_ORIGINAL_COMMAND={line}"))
+            .arg(self.p.lib().join("mini-shell-ssh"))
+            .arg(self.p.candidate().join("bin/mini"))
+            .arg(self.p.candidate().join("bin/minidregg-host"))
+            .arg(self.p.config())
+            .arg(self.p.socket())
+            .arg(home.join("workspace"))
+            .arg(&home);
+        run(cmd)
+    }
+    fn tenant_mini(&self, name: &str, args: &[String]) -> Ran {
+        let mut cmd = self.as_tenant(name);
+        cmd.arg(self.p.candidate().join("bin/mini")).args(args);
+        run(cmd)
+    }
+    fn reenroll(&self, name: &str, funding: u128) -> Ran {
+        let mut cmd = Command::new(self.p.lib().join("mini-reenroll"));
+        cmd.env_clear().env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin").env("MINI_REENROLL_FUNDING", funding.to_string()).arg(name);
+        run(cmd)
+    }
+    fn sponsor_credit(&self) -> Ran {
+        let node = self.p.node();
+        let mut cmd = Command::new("/usr/sbin/runuser");
+        cmd.env_clear()
+            .args(["-u", "mini-core", "--", "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "SSH_ORIGINAL_COMMAND=credit"])
+            .arg(self.p.lib().join("mini-shell-ssh"))
+            .arg(self.p.candidate().join("bin/mini"))
+            .arg(self.p.candidate().join("bin/minidregg-host"))
+            .arg(self.p.config())
+            .arg(self.p.socket())
+            .arg(node.join("sponsor"))
+            .arg(node.join("sponsor-home"));
+        run(cmd)
+    }
+    fn give(&self, name: &str, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        let uid = self.uid(&format!("mini-s-{name}")).ok_or("no hosted account")?;
+        let gid = self.gid(TENANT_GROUP).ok_or("no tenant group")?;
+        let parent = path.parent().ok_or("no parent")?;
+        for dir in [parent] {
+            if !dir.exists() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            chown(dir, uid, gid)?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        }
+        write_atomic(path, bytes, 0o600)?;
+        chown(path, uid, gid)
+    }
+}
+
+fn chown(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    if unsafe { libc::lchown(c.as_ptr(), uid, gid) } != 0 {
+        return Err(format!("chown {}: {}", path.display(), std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Temp file, fsync, rename, fsync the directory.
+fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    use std::io::Write;
+    let dir = path.parent().ok_or("no parent")?;
+    let tmp = dir.join(format!(".{}.tmp", path.file_name().and_then(|n| n.to_str()).unwrap_or("x")));
+    let _ = std::fs::remove_file(&tmp);
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).custom_flags(libc::O_NOFOLLOW)
+        .open(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(|e| e.to_string())
+}
+
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+fn b58(bytes: &[u8]) -> String {
+    const A: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits: Vec<u8> = Vec::new();
+    for &b in bytes {
+        let mut carry = b as u32;
+        for d in digits.iter_mut() {
+            carry += (*d as u32) << 8;
+            *d = (carry % 58) as u8;
+            carry /= 58;
+        }
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+    let zeros = bytes.iter().take_while(|b| **b == 0).count();
+    std::iter::repeat('1').take(zeros).chain(digits.iter().rev().map(|d| A[*d as usize] as char)).collect()
+}
+
+fn b64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+        for i in 0..=chunk.len() {
+            out.push(T[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+        for _ in chunk.len()..3 {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    (text.len() % 2 == 0).then(|| (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok()).collect())?
+}
+
+struct Processor<O: BoxOps> {
+    p: Paths,
+    cfg: DoorConfig,
+    ops: O,
+    now: u64,
+    /// The sponsor's balance as read this run (read at most once).
+    sponsor: Option<Result<u128, String>>,
+    log: Vec<String>,
+}
+
+impl<O: BoxOps> Processor<O> {
+    fn say(&mut self, line: String) {
+        eprintln!("mini-door-process: {line}");
+        self.log.push(line);
+    }
+
+    fn request_path(&self, id: &str) -> PathBuf { self.p.state().join("requests").join(format!("{id}.json")) }
+
+    fn requests(&self) -> Vec<Value> {
+        let Ok(entries) = std::fs::read_dir(self.p.state().join("requests")) else { return Vec::new() };
+        let mut out: Vec<Value> = entries.filter_map(|e| read_json(&e.ok()?.path())).collect();
+        out.sort_by_key(|v| (v["at"].as_u64().unwrap_or(0), v["id"].as_str().unwrap_or("").to_owned()));
+        out
+    }
+
+    fn save(&mut self, r: &mut Value) -> Result<(), String> {
+        r["updated"] = json!(self.now);
+        let id = r["id"].as_str().ok_or("request without id")?.to_owned();
+        write_atomic(&self.request_path(&id), &serde_json::to_vec_pretty(r).map_err(|e| e.to_string())?, 0o600)?;
+        self.publish_status(r)
+    }
+
+    /// The stranger's view: root-owned, readable by the form's group, never the secrets.
+    fn publish_status(&self, r: &Value) -> Result<(), String> {
+        let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
+        for k in ["detail", "linkCode", "sign", "payment"] {
+            if !r[k].is_null() {
+                v[k] = r[k].clone();
+            }
+        }
+        if matches!(r["phase"].as_str(), Some("enrolled" | "sign" | "signed" | "awaiting-payment" | "paid" | "keyed" | "account")) {
+            v["login"] = json!(format!("mini-s-{}@{}", r["name"].as_str().unwrap_or(""), self.cfg.login_host));
+        }
+        self.publish(&format!("{}.json", r["id"].as_str().unwrap_or("x")), &v)
+    }
+
+    fn publish(&self, name: &str, v: &Value) -> Result<(), String> {
+        let path = self.p.status().join(name);
+        write_atomic(&path, &serde_json::to_vec_pretty(v).map_err(|e| e.to_string())?, 0o640)?;
+        if let Some(gid) = self.ops.gid(DOOR_USER) {
+            if self.p.root == Path::new("/") {
+                chown(&path, 0, gid)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn refuse(&mut self, r: &mut Value, why: &str) -> Result<(), String> {
+        r["phase"] = json!("refused");
+        r["detail"] = json!(why);
+        self.say(format!("request {} refused: {why}", r["id"].as_str().unwrap_or("")));
+        self.save(r)
+    }
+
+    fn reject_file(&mut self, file: &Path, why: &str) {
+        let dir = self.p.state().join("rejected");
+        let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("x").to_owned();
+        let record = json!({"file":name,"reason":why,"at":self.now});
+        let _ = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|_| write_atomic(&dir.join(format!("{}-{name}", self.now)), record.to_string().as_bytes(), 0o600));
+        let _ = std::fs::remove_file(file);
+        self.say(format!("rejected {name}: {why}"));
+    }
+
+    // ── names, keys and caps ───────────────────────────────────────────────────────────────
+
+    fn roster_keys(&self) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for dir in [self.p.friends(), self.p.door_friends()] {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for e in entries.flatten() {
+                let path = e.path();
+                let Some(name) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".pub")) else { continue };
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+                        if let Some(blob) = line.split_whitespace().nth(1) {
+                            out.insert(blob.to_owned(), name.to_owned());
+                        }
+                    }
+                }
+                out.insert(format!("name:{name}"), name.to_owned());
+            }
+        }
+        out
+    }
+
+    fn day(&self) -> u64 { self.now / 86_400 }
+
+    /// Accounts the door has made or is making (not refused, past `queued`), other than `except`.
+    fn counted(&self, route: Option<&str>, today: bool, except: Option<&str>) -> usize {
+        self.requests().iter().filter(|r| {
+            r["phase"] != "refused"
+                && except.is_none_or(|id| r["id"] != id)
+                && route.is_none_or(|w| r["route"] == w)
+                && (!today || r["day"].as_u64() == Some(self.day()))
+                && r["phase"] != "queued"
+        }).count()
+    }
+
+    fn sponsor_balance(&mut self) -> Result<u128, String> {
+        if self.sponsor.is_none() {
+            let ran = self.ops.sponsor_credit();
+            let parsed = if ran.ok {
+                ran.stdout.lines().find_map(|l| l.strip_prefix("credit ")?.split_whitespace().next()?.parse::<u128>().ok())
+                    .ok_or_else(|| "the sponsor's credit read printed no balance".to_owned())
+            } else {
+                Err(format!("the sponsor's credit read failed: {}", ran.why()))
+            };
+            self.sponsor = Some(parsed);
+        }
+        self.sponsor.clone().unwrap()
+    }
+
+    /// Why the free route is closed, if it is.
+    fn free_closed(&mut self, except: Option<&str>) -> Option<String> {
+        if self.counted(Some("free"), false, except) >= self.cfg.free_cap {
+            return Some(format!("all {} free accounts are taken", self.cfg.free_cap));
+        }
+        if self.counted(None, true, except) >= self.cfg.daily_cap {
+            return Some(format!("today's {} accounts are taken; try tomorrow", self.cfg.daily_cap));
+        }
+        match self.sponsor_balance() {
+            Ok(b) if b >= self.cfg.sponsor_floor.saturating_add(self.cfg.funding) => None,
+            Ok(b) => Some(format!("sponsorBelowFloor: the sponsor's balance {b} is below the floor {} plus one account's funding {}", self.cfg.sponsor_floor, self.cfg.funding)),
+            Err(e) => Some(e),
+        }
+    }
+
+    // ── intake ─────────────────────────────────────────────────────────────────────────────
+
+    fn intake(&mut self) -> Result<(), String> {
+        let Some(owner) = self.ops.uid(DOOR_USER) else { return Err(format!("no account {DOOR_USER}")) };
+        let files = door::spool_list(&self.p.queue())?;
+        for file in files {
+            let bytes = match door::spool_read(&file, owner) {
+                Ok(b) => b,
+                Err(e) => { self.reject_file(&file, &e); continue; }
+            };
+            let request = match Request::parse(&bytes) {
+                Ok(r) => r,
+                Err(e) => { self.reject_file(&file, &e); continue; }
+            };
+            if file.file_name().and_then(|n| n.to_str()) != Some(request.file_name().as_str()) {
+                self.reject_file(&file, "the file name does not match its request");
+                continue;
+            }
+            self.admit(request, &file)?;
+        }
+        Ok(())
+    }
+
+    fn admit(&mut self, request: Request, file: &Path) -> Result<(), String> {
+        let existing = read_json(&self.request_path(request.id()));
+        match request {
+            Request::Join { id, at, name, ssh_key, discord, route } => {
+                if existing.is_some() {
+                    self.reject_file(file, "a request with this id exists");
+                    return Ok(());
+                }
+                let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"phase":"queued"});
+                std::fs::remove_file(file).map_err(|e| e.to_string())?;
+                let keys = self.roster_keys();
+                let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
+                let taken_by_request = self.requests().iter().any(|o| o["name"] == name && o["phase"] != "refused");
+                if keys.contains_key(&format!("name:{name}")) || taken_by_request || self.ops.uid(&format!("mini-s-{name}")).is_some() {
+                    return self.refuse(&mut r, "that name is taken; ask again with another");
+                }
+                if keys.contains_key(&blob) {
+                    return self.refuse(&mut r, "that ssh key already has an account on this box");
+                }
+                if route == Route::Paid && self.cfg.pay.is_none() {
+                    return self.refuse(&mut r, "this box does not take payments");
+                }
+                if self.counted(None, true, None) >= self.cfg.daily_cap {
+                    return self.refuse(&mut r, &format!("today's {} accounts are taken; try tomorrow", self.cfg.daily_cap));
+                }
+                self.say(format!("request {id} accepted for {name} ({})", route.word()));
+                self.save(&mut r)
+            }
+            Request::Sign { id, signature, .. } => {
+                std::fs::remove_file(file).map_err(|e| e.to_string())?;
+                match existing {
+                    Some(mut r) if r["phase"] == "sign" => {
+                        r["signature"] = json!(signature);
+                        r["phase"] = json!("signed");
+                        r["detail"] = Value::Null;
+                        self.save(&mut r)
+                    }
+                    _ => { self.say(format!("sign for {id} ignored: not waiting for a signature")); Ok(()) }
+                }
+            }
+            Request::Paid { id, transaction, .. } => {
+                std::fs::remove_file(file).map_err(|e| e.to_string())?;
+                match existing {
+                    Some(mut r) if r["phase"] == "awaiting-payment" => {
+                        r["transaction"] = json!(transaction);
+                        r["phase"] = json!("paid");
+                        r["detail"] = json!("payment reported; waiting for the box's payment watcher to see it final");
+                        self.save(&mut r)
+                    }
+                    _ => { self.say(format!("paid for {id} ignored: not waiting for a payment")); Ok(()) }
+                }
+            }
+        }
+    }
+
+    // ── progress ───────────────────────────────────────────────────────────────────────────
+
+    fn progress(&mut self) -> Result<(), String> {
+        let mut done = 0;
+        for mut r in self.requests() {
+            if done >= self.cfg.per_run {
+                break;
+            }
+            let phase = r["phase"].as_str().unwrap_or("").to_owned();
+            if matches!(phase.as_str(), "refused" | "enrolled") {
+                continue;
+            }
+            if matches!(phase.as_str(), "sign" | "awaiting-payment") {
+                if self.now.saturating_sub(r["at"].as_u64().unwrap_or(0)) > PAID_TTL_S {
+                    self.refuse(&mut r, "the payment was not finished within 7 days; the account stays, unfunded")?;
+                }
+                continue;
+            }
+            done += 1;
+            // Steps until the request waits for the stranger, finishes, or a step fails.
+            for _ in 0..8 {
+                let before = r["phase"].clone();
+                if let Err(e) = self.step(&mut r) {
+                    r["detail"] = json!(format!("the box will retry: {e}"));
+                    self.say(format!("request {}: {e}", r["id"].as_str().unwrap_or("")));
+                    self.save(&mut r)?;
+                    break;
+                }
+                if r["phase"] == before || matches!(r["phase"].as_str(), Some("refused" | "enrolled" | "sign" | "awaiting-payment")) {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn step(&mut self, r: &mut Value) -> Result<(), String> {
+        let name = r["name"].as_str().ok_or("request without name")?.to_owned();
+        let home = self.p.home(&name);
+        match r["phase"].as_str().unwrap_or("") {
+            "queued" => {
+                if r["route"] == "free" {
+                    let id = r["id"].as_str().unwrap_or("").to_owned();
+                    if let Some(why) = self.free_closed(Some(&id)) {
+                        return self.refuse(r, &why);
+                    }
+                }
+                let entry = self.p.door_friends().join(format!("{name}.pub"));
+                let text = format!("# door request {}\n{} {name}\n", r["id"].as_str().unwrap_or(""), r["sshKey"].as_str().unwrap_or(""));
+                std::fs::create_dir_all(self.p.door_friends()).map_err(|e| e.to_string())?;
+                write_atomic(&entry, text.as_bytes(), 0o644)?;
+                let ran = self.ops.render();
+                if !ran.ok {
+                    return Err(format!("render-authorized-keys.sh: {}", ran.why()));
+                }
+                if self.ops.uid(&format!("mini-s-{name}")).is_none() || !home.is_dir() {
+                    return Err(format!("the render did not create mini-s-{name} and its home"));
+                }
+                r["phase"] = json!("account");
+                self.save(r)
+            }
+            "account" => {
+                if !home.join("keys/mini.key").exists() {
+                    let ran = self.ops.tenant_line(&name, "keygen mini.key");
+                    if !ran.ok {
+                        return Err(format!("keygen: {}", ran.why()));
+                    }
+                }
+                if !home.join("keys/mini.key.pub").exists() {
+                    return Err("keygen left no keys/mini.key.pub".into());
+                }
+                r["phase"] = json!("keyed");
+                self.save(r)
+            }
+            "keyed" if r["route"] == "free" => {
+                // The caps are checked again at the one step that spends the sponsor's credit.
+                let id = r["id"].as_str().unwrap_or("").to_owned();
+                if let Some(why) = self.free_closed(Some(&id)) {
+                    return self.refuse(r, &why);
+                }
+                let ran = self.ops.reenroll(&name, self.cfg.funding);
+                let subject = ran.stdout.lines().find_map(|l| {
+                    let mut w = l.split_whitespace();
+                    (w.next() == Some(name.as_str())).then(|| w.next().map(str::to_owned)).flatten()
+                });
+                let Some(subject) = subject.filter(|s| ran.ok && !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())) else {
+                    return Err(format!("mini-reenroll: {}", ran.why()));
+                };
+                if !home.join("workspace/workspace.json").exists() {
+                    let ran = self.ops.tenant_line(&name, &format!("init mini.key {subject}"));
+                    if !ran.ok {
+                        return Err(format!("init: {}", ran.why()));
+                    }
+                }
+                self.sponsor = None; // the balance moved
+                r["subject"] = json!(subject);
+                self.enrolled(r)
+            }
+            "keyed" => {
+                let pay = self.cfg.pay.clone().ok_or("this box no longer takes payments")?;
+                self.ops.give(&name, &home.join("door/ssh.pub"), format!("{}\n", r["sshKey"].as_str().unwrap_or("")).as_bytes())?;
+                let ran = self.ops.tenant_mini(&name, &self.join_args(&name, &pay, None));
+                if !ran.ok {
+                    return Err(format!("join --solana: {}", ran.why()));
+                }
+                let quote = read_json(&home.join("detached-quote.json")).ok_or("join left no detached quote")?;
+                let message = std::fs::read(home.join("sshsig-message.bin")).map_err(|e| format!("statement: {e}"))?;
+                r["sign"] = json!({"message":b64(&message),"namespace":"dregg-enrol@v2","expiryHour":quote["expiryHour"].as_str().and_then(|h| h.parse::<u64>().ok())});
+                r["phase"] = json!("sign");
+                r["detail"] = Value::Null;
+                self.save(r)
+            }
+            "signed" => {
+                let pay = self.cfg.pay.clone().ok_or("this box no longer takes payments")?;
+                let signature = r["signature"].as_str().unwrap_or("").to_owned();
+                self.ops.give(&name, &home.join("door/ssh.sig"), signature.as_bytes())?;
+                let ran = self.ops.tenant_mini(&name, &self.join_args(&name, &pay, Some(&home.join("door/ssh.sig"))));
+                r["signature"] = Value::Null;
+                if !ran.ok {
+                    let why = ran.why();
+                    // An expired quote is requoted; a signature that does not verify is asked for again.
+                    r["phase"] = json!(if why.contains("expired") { "keyed" } else { "sign" });
+                    r["detail"] = json!(format!("not accepted: {why}"));
+                    return self.save(r);
+                }
+                let payment = read_json(&home.join("latest-payment.json")).ok_or("join left no payment record")?;
+                let recipient = payment["enrolAddress"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its recipient")?;
+                r["payment"] = json!({"recipient":recipient,"amountAtomic":payment["amountAtomic"],"memo":payment["memo"],
+                    "expiryHour":r["sign"]["expiryHour"],"network":pay.network});
+                r["phase"] = json!("awaiting-payment");
+                r["detail"] = Value::Null;
+                self.save(r)
+            }
+            "paid" => {
+                let pay = self.cfg.pay.clone().ok_or("this box no longer takes payments")?;
+                let mut args = self.common_args(&name, &pay);
+                args.extend(["--wait".into(), "--signature".into(), r["transaction"].as_str().unwrap_or("").into(),
+                    "--timeout".into(), "5".into()]);
+                if let Some(context) = &pay.birth_context {
+                    args.extend(["--birth-context".into(), context.display().to_string()]);
+                }
+                let ran = self.ops.tenant_mini(&name, &args);
+                if ran.ok {
+                    return self.enrolled(r);
+                }
+                let why = ran.why();
+                if why.contains("negative journal") || why.contains("differs from retained") || why.contains("obtain a new renewal quote") {
+                    return self.refuse(r, &format!("the payment did not enrol this account: {why}. Ember can comp a journalled payment."));
+                }
+                if self.now.saturating_sub(r["at"].as_u64().unwrap_or(0)) > PAID_TTL_S {
+                    return self.refuse(r, &format!("the payment was not seen within 7 days: {why}"));
+                }
+                r["detail"] = json!(format!("waiting: {why}"));
+                self.save(r)
+            }
+            other => Err(format!("unknown phase {other}")),
+        }
+    }
+
+    fn common_args(&self, name: &str, _pay: &PayConfig) -> Vec<String> {
+        let c = self.p.candidate();
+        vec!["--socket".into(), self.p.socket().display().to_string(), "join".into(), "--memo-version".into(), "v2".into(),
+            "--host".into(), c.join("bin/minidregg-host").display().to_string(), "--config".into(), self.p.config().display().to_string(),
+            "--dir".into(), self.p.home(name).display().to_string()]
+    }
+
+    fn join_args(&self, name: &str, pay: &PayConfig, signature: Option<&Path>) -> Vec<String> {
+        let home = self.p.home(name);
+        let mut args = self.common_args(name, pay);
+        // --enrol (the published pin) is for --solana only.
+        args.extend(["--solana".into(), "--enrol".into(), pay.enrol_pin.display().to_string(), "--key".into(), home.join("keys/mini.key").display().to_string(),
+            "--next-public".into(), home.join("keys/mini.key.next.pub").display().to_string(),
+            "--ssh-public".into(), home.join("door/ssh.pub").display().to_string(), "--name".into(), name.into()]);
+        if let Some(sig) = signature {
+            args.extend(["--ssh-signature".into(), sig.display().to_string()]);
+        }
+        args
+    }
+
+    fn enrolled(&mut self, r: &mut Value) -> Result<(), String> {
+        if r["discord"] == true && r["linkCode"].is_null() {
+            let code = door::new_link_code()?;
+            let mut links = self.links();
+            links["codes"][&code] = json!({"name":r["name"],"request":r["id"],"expires":self.now + self.cfg.link_ttl_s});
+            self.save_links(&links)?;
+            r["linkCode"] = json!(code);
+        }
+        r["phase"] = json!("enrolled");
+        r["detail"] = json!("your account is ready");
+        r["transaction"] = Value::Null;
+        self.say(format!("request {} enrolled {}", r["id"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or("")));
+        self.save(r)
+    }
+
+    // ── Discord links ──────────────────────────────────────────────────────────────────────
+
+    fn links(&self) -> Value {
+        read_json(&self.p.state().join("links.json")).unwrap_or_else(|| json!({"codes":{},"applied":{}}))
+    }
+
+    fn save_links(&self, v: &Value) -> Result<(), String> {
+        write_atomic(&self.p.state().join("links.json"), &serde_json::to_vec_pretty(v).map_err(|e| e.to_string())?, 0o600)
+    }
+
+    fn apply_links(&mut self) -> Result<(), String> {
+        let dir = self.p.links();
+        if !dir.exists() {
+            return Ok(());
+        }
+        let Some(owner) = self.ops.uid(DISCORD_USER) else { return Ok(()) };
+        for file in door::spool_list(&dir)? {
+            let link = match door::spool_read(&file, owner).and_then(|b| Link::parse(&b)) {
+                Ok(l) if file.file_name().and_then(|n| n.to_str()) == Some(l.file_name().as_str()) => l,
+                Ok(_) => { self.reject_file(&file, "the file name does not match its link"); continue; }
+                Err(e) => { self.reject_file(&file, &e); continue; }
+            };
+            let result = self.link(&link);
+            let mut links = self.links();
+            links["applied"][&link.interaction] = json!({"user":link.user,"result":result.clone(),"at":self.now});
+            if result.starts_with("linked") {
+                if let Some(codes) = links["codes"].as_object_mut() {
+                    codes.remove(&link.code);
+                }
+            }
+            self.save_links(&links)?;
+            let _ = std::fs::remove_file(&file);
+            self.say(format!("discord {}: {result}", link.user));
+        }
+        Ok(())
+    }
+
+    fn link(&mut self, link: &Link) -> String {
+        let links = self.links();
+        let Some(entry) = links["codes"].get(&link.code) else { return "refused: unknown or used code".into() };
+        if entry["expires"].as_u64().unwrap_or(0) < self.now {
+            return "refused: the code expired".into();
+        }
+        let name = entry["name"].as_str().unwrap_or("");
+        if !door::is_door_name(name) {
+            return "refused: the code names no door account".into();
+        }
+        let path = self.p.etc().join("discord-roster.json");
+        let mut roster = read_json(&path).unwrap_or_else(|| json!({"version":1,"users":{}}));
+        if roster["version"] != 1 || !roster["users"].is_object() {
+            return "refused: the Discord roster is malformed; nothing changed".into();
+        }
+        if roster["users"].get(&link.user).is_some() {
+            return "refused: this Discord user is already linked".into();
+        }
+        roster["users"][&link.user] = json!(name);
+        match write_atomic(&path, &serde_json::to_vec_pretty(&roster).unwrap_or_default(), 0o644) {
+            Ok(()) => format!("linked to {name}"),
+            Err(e) => format!("error: {e}"),
+        }
+    }
+
+    // ── the form's view of the door ────────────────────────────────────────────────────────
+
+    fn door_state(&mut self) -> Result<(), String> {
+        let free_reason = self.free_closed(None);
+        let address = self.cfg.pay.as_ref().and_then(|p| read_json(&p.enrol_pin)).and_then(|v| v["enrolAddress"].as_str().map(str::to_owned));
+        let paid = self.cfg.pay.is_some() && address.is_some() && self.counted(None, true, None) < self.cfg.daily_cap;
+        let v = json!({"type":door::STATE_TYPE,"free":free_reason.is_none(),"freeReason":free_reason,"paid":paid,
+            "enrolAddress":address,"network":self.cfg.pay.as_ref().map(|p| p.network.clone()),"at":self.now});
+        self.publish("door-state.json", &v)
+    }
+
+    fn run_once(&mut self) -> Result<(), String> {
+        for dir in [self.p.state().join("requests"), self.p.status()] {
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        self.intake()?;
+        self.progress()?;
+        self.apply_links()?;
+        self.door_state()
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let root = match args.as_slice() {
+        [] => PathBuf::from("/"),
+        [flag, dir] if flag == "--root" && dir.starts_with('/') => PathBuf::from(dir),
+        _ => {
+            eprintln!("usage: mini-door-process [--root ABS-DIR]");
+            std::process::exit(64);
+        }
+    };
+    let p = Paths { root };
+    let refuse = |why: String| -> ! {
+        eprintln!("mini-door-process: REFUSED — {why}");
+        std::process::exit(78);
+    };
+    if p.root == Path::new("/") && unsafe { libc::geteuid() } != 0 {
+        refuse("must run as root".into());
+    }
+    let tenancy = std::fs::read_to_string(p.etc().join("tenancy")).unwrap_or_default();
+    if tenancy.trim() != "split" {
+        refuse("the door runs only under split tenancy (/etc/mini/tenancy = split)".into());
+    }
+    let cfg = DoorConfig::load(&p.etc().join("door.json")).unwrap_or_else(|e| refuse(e));
+    let state = p.state();
+    if let Err(e) = std::fs::create_dir_all(&state).and_then(|_| std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700))) {
+        refuse(format!("{}: {e}", state.display()));
+    }
+    // One processor at a time.
+    let lock = std::fs::OpenOptions::new().write(true).create(true).mode(0o600).open(state.join(".lock"))
+        .unwrap_or_else(|e| refuse(format!("lock: {e}")));
+    if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        eprintln!("mini-door-process: another run holds the lock");
+        return;
+    }
+    let mut processor = Processor { ops: RealBox { p: p.clone() }, p, cfg, now: now_s(), sponsor: None, log: Vec::new() };
+    if let Err(e) = processor.run_once() {
+        eprintln!("mini-door-process: {e}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+    const KEY2: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC";
+
+    /// A box: accounts appear when the roster is rendered, keys when keygen runs.
+    struct Fake {
+        p: Paths,
+        me: u32,
+        balance: RefCell<u128>,
+        calls: RefCell<Vec<String>>,
+        fail_reenroll: RefCell<bool>,
+    }
+
+    impl BoxOps for Fake {
+        fn uid(&self, user: &str) -> Option<u32> {
+            match user {
+                DOOR_USER | DISCORD_USER => Some(self.me),
+                u => u.strip_prefix("mini-s-").filter(|n| self.p.home(n).is_dir()).map(|_| self.me + 1000),
+            }
+        }
+        fn gid(&self, _: &str) -> Option<u32> { None }
+        fn render(&self) -> Ran {
+            self.calls.borrow_mut().push("render".into());
+            for e in std::fs::read_dir(self.p.door_friends()).unwrap().flatten() {
+                let name = e.file_name().into_string().unwrap().trim_end_matches(".pub").to_owned();
+                std::fs::create_dir_all(self.p.home(&name)).unwrap();
+            }
+            Ran { ok: true, stdout: String::new(), stderr: String::new() }
+        }
+        fn tenant_line(&self, name: &str, line: &str) -> Ran {
+            self.calls.borrow_mut().push(format!("{name}: {line}"));
+            let home = self.p.home(name);
+            if line == "keygen mini.key" {
+                std::fs::create_dir_all(home.join("keys")).unwrap();
+                for f in ["mini.key", "mini.key.pub", "mini.key.next.pub"] {
+                    std::fs::write(home.join("keys").join(f), [7u8; 32]).unwrap();
+                }
+            } else if line.starts_with("init ") {
+                std::fs::create_dir_all(home.join("workspace")).unwrap();
+                std::fs::write(home.join("workspace/workspace.json"), "{}").unwrap();
+            }
+            Ran { ok: true, stdout: String::new(), stderr: String::new() }
+        }
+        fn tenant_mini(&self, name: &str, args: &[String]) -> Ran {
+            self.calls.borrow_mut().push(format!("{name}: mini {}", args.iter().skip(2).take(1).cloned().collect::<String>()));
+            let home = self.p.home(name);
+            let ok = Ran { ok: true, stdout: String::new(), stderr: String::new() };
+            if args.contains(&"--wait".to_string()) {
+                return ok;
+            }
+            if let Some(i) = args.iter().position(|a| a == "--ssh-signature") {
+                let sig = std::fs::read_to_string(&args[i + 1]).unwrap();
+                if !sig.contains("GOOD") {
+                    return Ran { ok: false, stdout: String::new(), stderr: "error: sshSigInvalid".into() };
+                }
+                std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA"}).to_string()).unwrap();
+                return ok;
+            }
+            std::fs::write(home.join("detached-quote.json"), r#"{"expiryHour":"1001"}"#).unwrap();
+            std::fs::write(home.join("sshsig-message.bin"), b"statement").unwrap();
+            ok
+        }
+        fn reenroll(&self, name: &str, funding: u128) -> Ran {
+            self.calls.borrow_mut().push(format!("reenroll {name} {funding}"));
+            if *self.fail_reenroll.borrow() {
+                return Ran { ok: false, stdout: String::new(), stderr: format!("{name} FAILED at `enroll seal {name}`: refused: x") };
+            }
+            *self.balance.borrow_mut() -= funding;
+            Ran { ok: true, stdout: format!("{name} 4100\n"), stderr: String::new() }
+        }
+        fn sponsor_credit(&self) -> Ran {
+            Ran { ok: true, stdout: format!("credit {}  (asset 0, account 5, signed read at height 9)\n", self.balance.borrow()), stderr: String::new() }
+        }
+        fn give(&self, _name: &str, path: &Path, bytes: &[u8]) -> Result<(), String> {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).map_err(|e| e.to_string())
+        }
+    }
+
+    fn world(tag: &str, pay: bool) -> Processor<Fake> {
+        let root = std::env::temp_dir().join(format!("door-process-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let p = Paths { root: root.clone() };
+        for d in [p.queue(), p.links(), p.status(), p.door_friends(), p.sessions(), p.etc()] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(p.friends().join("ember.pub"), format!("{KEY2} ember\n")).unwrap();
+        let pin = root.join("enrol-v2.json");
+        std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
+        let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
+        let cfg = DoorConfig { funding: 1000, free_cap: 2, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
+            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into() }) };
+        Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
+            p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
+    }
+
+    fn submit(w: &Processor<Fake>, r: &Request) {
+        door::spool_write(&w.p.queue(), &r.file_name(), &r.to_json()).unwrap();
+    }
+
+    fn join(name: &str, key: &str, route: Route, discord: bool) -> Request {
+        Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: key.into(), discord, route }
+    }
+
+    fn status(w: &Processor<Fake>, id: &str) -> Value {
+        read_json(&w.p.status().join(format!("{id}.json"))).unwrap()
+    }
+
+    fn run(w: &mut Processor<Fake>) {
+        w.sponsor = None;
+        w.run_once().unwrap();
+    }
+
+    #[test]
+    fn a_free_join_goes_through_the_roster_render_keygen_reenroll_and_init_once() {
+        let mut w = world("free", false);
+        let r = join("alice", KEY, Route::Free, true);
+        submit(&w, &r);
+        run(&mut w);
+        let s = status(&w, r.id());
+        assert_eq!(s["phase"], "enrolled", "{s}");
+        assert_eq!(s["login"], "mini-s-alice@demo.example");
+        let code = s["linkCode"].as_str().unwrap().to_owned();
+        assert!(door::is_link_code(&code));
+        assert_eq!(*w.ops.calls.borrow(), ["render", "alice: keygen mini.key", "reenroll alice 1000", "alice: init mini.key 4100"]);
+        let entry = std::fs::read_to_string(w.p.door_friends().join("alice.pub")).unwrap();
+        assert!(entry.ends_with(&format!("{KEY} alice\n")), "{entry}");
+        assert!(!w.p.queue().join(r.file_name()).exists(), "the queue file is consumed");
+        // Idempotent: another tick does nothing more.
+        run(&mut w);
+        assert_eq!(w.ops.calls.borrow().len(), 4);
+        // The Discord link: the processor alone writes the roster, once per code.
+        let link = Link { interaction: "777".into(), user: "4242".into(), code: code.clone(), at: 1 };
+        door::spool_write(&w.p.links(), &link.file_name(), &link.to_json()).unwrap();
+        run(&mut w);
+        let roster = read_json(&w.p.etc().join("discord-roster.json")).unwrap();
+        assert_eq!(roster, json!({"version":1,"users":{"4242":"alice"}}));
+        let again = Link { interaction: "778".into(), user: "4343".into(), code, at: 2 };
+        door::spool_write(&w.p.links(), &again.file_name(), &again.to_json()).unwrap();
+        run(&mut w);
+        assert_eq!(read_json(&w.p.etc().join("discord-roster.json")).unwrap()["users"].as_object().unwrap().len(), 1, "a used code links nobody");
+    }
+
+    #[test]
+    fn names_keys_caps_and_the_sponsor_floor_refuse_with_a_reason() {
+        let mut w = world("caps", false);
+        let taken = join("ember", KEY, Route::Free, false); // reserved: the form and schema refuse it already
+        assert!(Request::parse(&serde_json::to_vec(&taken.to_json()).unwrap()).is_err());
+        let dup_key = join("bob", KEY2, Route::Free, false); // the sponsor's key
+        submit(&w, &dup_key);
+        let a = join("alice", KEY, Route::Free, false);
+        submit(&w, &a);
+        run(&mut w);
+        assert!(status(&w, dup_key.id())["detail"].as_str().unwrap().contains("already has an account"));
+        assert_eq!(status(&w, a.id())["phase"], "enrolled");
+        let same_name = join("alice", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIENDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0ND", Route::Free, false);
+        submit(&w, &same_name);
+        run(&mut w);
+        assert!(status(&w, same_name.id())["detail"].as_str().unwrap().contains("name is taken"));
+        // Balance 2000 now: one more 1000 would leave the floor 500 + 1000 unmet after it, so
+        // the next free account is the last; the one after is refused by name.
+        let c = join("carol", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIERERERERERERERERERERERERERERERERERERERERERE", Route::Free, false);
+        submit(&w, &c);
+        run(&mut w);
+        assert_eq!(status(&w, c.id())["phase"], "enrolled");
+        let d = join("dave", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVF", Route::Free, false);
+        submit(&w, &d);
+        run(&mut w);
+        let s = status(&w, d.id());
+        assert_eq!(s["phase"], "refused");
+        assert!(s["detail"].as_str().unwrap().contains("free accounts are taken") || s["detail"].as_str().unwrap().contains("sponsorBelowFloor"), "{s}");
+        let state = read_json(&w.p.status().join("door-state.json")).unwrap();
+        assert_eq!(state["free"], false, "the form stops offering the free route");
+    }
+
+    #[test]
+    fn a_failed_step_is_retried_next_tick_and_never_redone_before_it() {
+        let mut w = world("retry", false);
+        *w.ops.fail_reenroll.borrow_mut() = true;
+        let a = join("alice", KEY, Route::Free, false);
+        submit(&w, &a);
+        run(&mut w);
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "keyed");
+        assert!(s["detail"].as_str().unwrap().contains("retry"), "{s}");
+        *w.ops.fail_reenroll.borrow_mut() = false;
+        run(&mut w);
+        assert_eq!(status(&w, a.id())["phase"], "enrolled");
+        let calls = w.ops.calls.borrow();
+        assert_eq!(calls.iter().filter(|c| *c == "render").count(), 1);
+        assert_eq!(calls.iter().filter(|c| c.contains("keygen")).count(), 1);
+    }
+
+    #[test]
+    fn a_paid_join_lands_on_the_hosted_key_through_sign_pay_and_wait() {
+        let mut w = world("paid", true);
+        let a = join("alice", KEY, Route::Paid, false);
+        submit(&w, &a);
+        run(&mut w);
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "sign", "{s}");
+        assert_eq!(s["sign"]["message"], b64(b"statement"));
+        assert_eq!(s["sign"]["expiryHour"], 1001);
+        assert!(!w.ops.calls.borrow().iter().any(|c| c.starts_with("reenroll")), "the sponsor funds nothing");
+        // A bad signature is asked for again; a good one yields the payment material.
+        let armour = |body: &str| format!("-----BEGIN SSH SIGNATURE-----\n{body}\n-----END SSH SIGNATURE-----\n");
+        submit(&w, &Request::Sign { id: a.id().into(), at: 1, signature: armour("BAD") });
+        run(&mut w);
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "sign");
+        assert!(s["detail"].as_str().unwrap().contains("sshSigInvalid"));
+        submit(&w, &Request::Sign { id: a.id().into(), at: 2, signature: armour("GOOD") });
+        run(&mut w);
+        let s = status(&w, a.id());
+        assert_eq!(s["phase"], "awaiting-payment", "{s}");
+        assert_eq!(s["payment"]["recipient"], b58(&[10u8; 32]));
+        assert_eq!(s["payment"]["memo"], "enrol:v2:AAAA");
+        let tx = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+        submit(&w, &Request::Paid { id: a.id().into(), at: 3, transaction: tx.into() });
+        run(&mut w);
+        assert_eq!(status(&w, a.id())["phase"], "enrolled");
+        let state = read_json(&w.p.status().join("door-state.json")).unwrap();
+        assert_eq!(state["paid"], true);
+        assert_eq!(state["network"], "devnet");
+    }
+
+    #[test]
+    fn a_spool_file_not_of_the_schema_or_not_its_writers_is_rejected_and_never_acted_on() {
+        let mut w = world("reject", false);
+        std::fs::write(w.p.queue().join("join-x.json"), r#"{"kind":"join","name":"alice"}"#).unwrap();
+        let a = join("alice", KEY, Route::Free, false);
+        // A valid request under another file name.
+        door::spool_write(&w.p.queue(), "join-other.json", &a.to_json()).unwrap();
+        run(&mut w);
+        assert!(w.ops.calls.borrow().is_empty());
+        assert_eq!(std::fs::read_dir(w.p.queue()).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(w.p.state().join("rejected")).unwrap().count(), 2);
+        assert!(!w.p.door_friends().join("alice.pub").exists());
+    }
+
+    #[test]
+    fn config_refuses_unknown_keys_and_reads_defaults() {
+        let dir = std::env::temp_dir().join(format!("door-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("door.json");
+        std::fs::write(&p, r#"{"version":1}"#).unwrap();
+        let c = DoorConfig::load(&p).unwrap();
+        assert_eq!((c.funding, c.free_cap, c.daily_cap, c.sponsor_floor), (1000, 50, 20, 20_000));
+        std::fs::write(&p, r#"{"version":1,"comp":true}"#).unwrap();
+        assert!(DoorConfig::load(&p).is_err());
+        std::fs::write(&p, r#"{"version":1,"pay":{"enrolPin":"/x","network":"testnet"}}"#).unwrap();
+        assert!(DoorConfig::load(&p).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

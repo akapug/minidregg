@@ -18,6 +18,14 @@ path = "src/main.rs"
 name = "mini-discord-mirror"
 path = "src/bin/mini-discord-mirror.rs"
 
+[[bin]]
+name = "mini-door"
+path = "src/bin/mini-door.rs"
+
+[[bin]]
+name = "mini-door-process"
+path = "src/bin/mini-door-process.rs"
+
 [[example]]
 name = "fake-discord"
 path = "examples/fake-discord.rs"
