@@ -95,7 +95,7 @@ From the integrator's latest cut report (2026-10-27) and the plan's §2. Box pat
 | The `public` member | **not live**: its `enroll plan` goes stale while the clock writes, so the front page answers 502 to the public reader. Owner: the client lane | plan §2 |
 | Hermes residents on the box | **not live**: the controller is not stood up and `HERMES-LIVE` has not run through the pool route. Owner: L4 | plan §2, §5 R4 |
 | Apps on the box | **not live**: the apps world's metered tasks wait on L13's bootstrap verb; Etherpad and TT-RSS qualify from the real store (`japps --box` 22/22), units and ports staged on the box | plan §2; [APP-MARKET](docs/APP-MARKET-2026-10-27.md) |
-| The oracle | **not live**: the veri7vn appliance is landing as a grain through the same grain gate. Owner: the oracle lane (ember's codex session) | [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); plan §5 R15 |
+| The oracle | **not live**: the veri7vn appliance is landing as a grain through the same grain gate. Owner: the oracle lane (ember's codex session) | [Appliance overview](docs/oracle-appliance.md); [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); plan §5 R15 |
 | Pay-to-enrol | **not live**: mainnet endpoints and the enrolment address are configured on the box; the payment observer is fixed at genesis and arrives with rehearsal #3's re-genesis; 50 DREGG a week from the first open day | [enrol-terms.json](deploy/pay/enrol-terms.json); plan §1 |
 
 A row's state is the run it cites, not this commit. The public-opening contract (plan §1) is
