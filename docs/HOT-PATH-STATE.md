@@ -41,6 +41,21 @@ cells; the root hash re-encodes them), O(cell size) per turn for a cell that gro
 sample (8f66d6cc Host vs 6236826f on the 483 snapshot) decides; fixes then are rulings: diff only the intent's
 written keys (a `TurnOfIntent` statement change) and/or §2(h)'s World checkpoint (a checkpoint epoch change).
 
+## Ruling (2b), the World in the checkpoint: scoped, not started (needs an owner decision)
+
+It is HP-DESIGN §1.4's step 1 ("Checkpoint = World v1 = {cells : CellTable, system : systemStream} under one MAC and
+one tag", checkpoint v3 -> v4; TURN-LOG-3's plan), not a new design; `Kernel/WorldSystemCodec.lean` (`systemStream`,
+`systemStream_roundtrip`) is its system codec and the body's `state.cells` are its cells. Minimal shape: `Body` gains
+`system : List UInt8` (MAC-covered through `bodyStream`), the open builds w0 = (cells decoded from `body.state`,
+`systemStream.decode body.system`), folds only the suffix and decides `representsCheck` (no statement moves; the seal
+family's theorems gain the field as a parameter, mechanically); the genesis fold moves to `store audit`.
+Why it is not a field add: three sites seal or re-derive checkpoints without the full open's World:
+`Compiler/DurableServed.lean:1059` (the LIGHT session appends and seals with no World track at all: it never runs
+`World.admit`), `Compiler/DurableReceiverCore.lean:2080` (`checkpointDifferential`), `Compiler/DurableStoreAudit.lean:213`.
+So the light session must hold and advance the World per append: KN2 x TURN-LOG territory, L size. 31 `Body`/seal
+sites in 8 files (`rg 'sealAt |sealCheckpoint |bodyStream|body\.state'`). Local branch `lane/hot-path-world-checkpoint`
+(integration 006cd214 + the two compaction commits), not pushed, no edits.
+
 ## Box procedure that works (dregg-build, 30 G, co-tenants 10-15 G)
 
 - `lake` has no job limit and `LEAN_NUM_THREADS` does not bound concurrent modules: heavy pairs met every cap.
