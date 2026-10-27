@@ -648,6 +648,8 @@ hermes audit "after the cold audit: dismissed, nothing to do"
 check audit "Hermes sent the provider nothing more" "$PLINES" "$(wc -l <"$PLOG")"
 ok audit bob "tail --in lab -n 100"
 cp "$OUT" "$SD/tail-final.txt"
-checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes" "$OUT"
+# Hermes is dismissed by now, so the tail names it by its subject's short
+# form (s…LAST6), not by its member name.
+checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes\|s…${HS: -6}" "$OUT"
 
 finish
