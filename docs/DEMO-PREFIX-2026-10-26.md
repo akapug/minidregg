@@ -106,11 +106,12 @@ outbound 443 only, no inbound route. The box side is staged for rehearsal #2.
 
 **Integration round 2** (`integration/2026-10-26`, integrator lane): final at **45f45d15**: round 1's
 branches plus L3 fence 5aaf1a32, L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market fc4e2c7d, L12
-web-frontend db7f3171, L1 lean-critical 181e44e6, coordination 179a21c2, m7 c851d8c4; building on
-`dregg-build` with PID files (the first attempt was refused by a leftover artifact from the previous
-build, moved aside). Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
+web-frontend db7f3171, L1 lean-critical 181e44e6, coordination 179a21c2, m7 c851d8c4; built on `dregg-build`
+(`/build/candidates/45f45d15…`, 21 roles including the web gateway and its root helper; host 1,598 s,
+consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows and the composed scenario
+are running there. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
 23 / UNCONFIGURED 4; the new reds are journey drivers still speaking the pre-L2 wire (an L2 successor
-lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already has L12 cab76d29. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
+lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already has L12 3bb0a248 and L2's driver successor 2c15e48c. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
 `scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
 ACP resident, the rehearsal #2 candidate → infra ships #2 (door on 8796, mini-keys split shape,
 Hermes controller via `grain create`, frame grain units without `RestrictSUIDSGID`, gateway Discord).
@@ -130,12 +131,14 @@ fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theore
 codec resident, image hashed once); coordination 179a21c2 (`docs/COORDINATION-2026-10-27.md`,
 −116,631 lines of gate bookkeeping; the per-module Lean RSS table; a nightly on `dregg-build` at 00:00 UTC;
 the Lake artifact cache verified: an unchanged worktree rebuilds in 14 s). Working: **L1** (above); **L12 web front end**
-(`lane/web-frontend` cab76d29: the gateway + root helper + body, xterm.js vendored; browser-only join;
+(`lane/web-frontend` 3bb0a248: the gateway + root helper + body, xterm.js vendored; browser-only join;
 the public front page with the operations room, receipts and laws; `/tour` with its rows; truthful outcome
 classes; the lost-reply switch `submit --lose-reply-once`; `delegate --until`; and **A0 complete**: every
 verb of the four tables is grammar data (69 verbs, 201 leaves), the shell parses through it, help and
-completion read it, the body renders every form from it, shell.rs about −1,400 net; 129 tests green on the
-build box, face-coverage 201/201; next: per-leaf outcome rows, then the rename to parity); **L13 app market**
+completion read it, the body renders every form from it, shell.rs about −1,400 net; **parity** measured: 203 leaves
+dry-run through the real handlers, 0 usage and 0 world refusals; the web journey 23/24 on the build box
+with its own provisioned member (the one red needs the round-2 Host's 253 byte); the tour's lose-reply,
+exact-retry and `can --any` paste-back rows PASS; `/receipts/ID` anchored honestly pending A10); **L13 app market**
 (dfc696de: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify from the real
 store, `japps --box` 22/22; the apps worker with every reply decided or carrying its exact retry; the
 request law `Kernel/AppsRequest.lean`; units and ports staged on the box; v1 = one guest subject per
