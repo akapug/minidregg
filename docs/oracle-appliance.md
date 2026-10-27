@@ -93,7 +93,13 @@ actual worker-policy installation and native controller enrollment now pass.
 Historical lookup now passes through the selected public socket. A subsequent
 recovery guard checked the wrong field of the signed query response and refused
 before birth. The corrected runtime preserves all original root and balance
-checks and is undergoing exact recovery of the retained request and reservation.
+checks. Its next attempt reached session creation, which the fixture's factory
+policy refused before submission. Tool cleanup completed, but the parent hold
+still needs definite-error settlement; no request was resent or acknowledged.
+The fresh world's policy now explicitly admits its allocated tool under the
+existing grain-backed birth restriction. The
+[recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
+the retained failure from the prepared v7 journey.
 Agent discovery/calls and the complete restart journey still need to pass.
 Do not resend that uncertain request as a new operation.
 The [v5 evidence](evidence/oracle-u3-acceptance-2026-10-27.json) holds exact state.
