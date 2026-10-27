@@ -131,8 +131,10 @@ both stopped runs and their exact evidence. The
 [factory evidence](evidence/oracle-grant-factory-2026-10-27.json) records its
 682 predicate checks and their limits. A subsequent
 [provisioning simplification](evidence/oracle-provisioning-configuration-2026-10-27.md)
-replaces source-text configuration rewrites with explicit values and aligns the
-new genesis platform policy; its revised composition checks await central validation.
+replaces source-text configuration and enrollment rewrites with explicit inputs
+and fixed provisioner phases. The workroom uses the shared genesis template;
+its composition checks and fresh hosted qualification are listed in
+[ROWS-OWED](ROWS-OWED.md#oracle-appliance) for central validation.
 
 The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or

@@ -138,10 +138,61 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 
 | row | proves | command | world | owner | last known |
 |---|---|---|---|---|---|
-| focused harness checks | generated operator/genesis JSON; allocation guard | `python3 -B scripts/test-oracle-agent-lifetime-journey.py HarnessTests.test_complete_grain_store_overlay_before_bootstrap HarnessTests.test_actual_factory_allocation_guard` | none | codex | not run since the refactor |
+| focused harness checks | generated operator/genesis JSON; allocation guard | `python3 -B scripts/test-oracle-agent-lifetime-journey.py HarnessTests.test_complete_grain_store_configuration_before_bootstrap HarnessTests.test_actual_factory_allocation_guard` | none | codex | not run since the refactor |
 | lifetime-grant fixtures | the three-capability grant; ordinary template refuses it | `lake env lean tests/lean/LifetimeGrantObserverAdversary.lean`, `...LifetimeGrantSourceAdversary.lean`, `Host/NativeLifecycleConsent.lean`, then `scripts/codec-shapes-regen.py` (integrator's, central build) | none | codex / integrator | per-file exit0 on c77ef2f9 epoch; source adversary not rerun |
 | joracle | the oracle lands as a grain via the market; one bounded question answered on its origin; stopped | `MINI_IMPORT_PROFILE=operator-appliance-v1` WORLD, then `joracle.sh --box WORLD.env OUT RUNTIME.spk DATA_SOURCE_DIR INVENTORY.json` (dataset 14.01 GiB, inventory `32bb3cf1...`) | WORLD | oracle-grain lane | result in the lane report only; not on record here |
-| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-agent-lifetime-journey.sh RUNTIME CONTROLLER.json APPLICATION CASES.json NEW_EVIDENCE_DIR` (`ORACLE_CONTROLLER_*`) on a fresh world from a candidate carrying oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | not run |
+| Oracle v7 fresh world | a fresh Store qualified through agent calls (grant issue, dispatch, answer), authority refusals, browser use, restart and exact retry; old stopped Stores preserved | `scripts/oracle-shared-data-journey.sh BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON` with the inputs below; candidate includes oracle-grant-factory + oracle-lifetime-grant (genesis v8, outcome v7) | genesis | codex | not run |
+
+### Oracle appliance
+
+Owner: `lane/oracle-grant-factory` (provisioning), with the integrated
+`lane/oracle-lifetime-grant` repair. These are central-validator instructions;
+lanes have not run new validation. Use the newest coherent main build and its
+resource wrapper. Record actual outcomes here or link the validator run.
+
+- Elaborate `tests/lean/LifetimeGrantObserverAdversary.lean`,
+  `tests/lean/LifetimeGrantSourceAdversary.lean`, and direct importer
+  `Host/NativeLifecycleConsent.lean` after the coherent dependency build.
+  Run `python3 scripts/codec-shapes-regen.py` through the normal codec workflow.
+  Build matching Host and consent binaries. See
+  [grant evidence](evidence/oracle-lifetime-grant-2026-10-27.md); the earlier
+  scoped results are not qualification of this main.
+- Run the focused provisioning checks below. They cover emitted configuration
+  and fixed phases; their mock transport does not admit a native birth.
+- Run a **fresh** `scripts/oracle-shared-data-journey.sh` with signed Oracle v7,
+  its matching published data inventory, matching Host/consent/native helpers
+  (genesis-source v8 / outcome v7), and current SPK host/runtime/broker/helpers.
+  Supply `ORACLE_STOP_BENCHMARK_JSON` for the same Host, set
+  `ORACLE_POOLED_TENANT_PROBE=1` and `ORACLE_BROWSER_B=1`, and supply the qualified
+  `ORACLE_CADDY_BIN`, `ORACLE_CADDY_SHA256` and private `ORACLE_BROWSER_PORT`.
+  The script takes `BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE
+  INVENTORY_JSON`; use retained immutable inputs, a new run root and the normal
+  bounded operator unit. Preserve both old stopped Stores and their evidence.
+  Acceptance includes grant issue, actual agent discovery/invocation, authority
+  refusals, private tenant state, the browser path, restart, exact retry,
+  stale-context refusal, STOP/data boundaries and cleanup. Report performance
+  separately; the 32-tenant adapter receipt is not hosted authentication evidence.
+
+```sh
+python3 -B scripts/test-oracle-agent-lifetime-journey.py \
+  HarnessTests.test_complete_grain_store_configuration_before_bootstrap \
+  HarnessTests.test_actual_factory_allocation_guard \
+  HarnessTests.test_fixed_allocation_guard \
+  HarnessTests.test_allocation_old_and_oracle_validate_without_native_work \
+  HarnessTests.test_fixed_agent_birth_phase_preserves_existing_resources
+```
+
+For the shared template, exercise matching duplicate policy
+values and conflicting `grainPlatform`/`operatorPolicy` settings, and the ordinary
+scenario-genesis callers. No second genesis writer should be restored to make
+a fixture pass.
+
+Also exercise `spk-platform/prepare.sh` / `run-base.sh` with the existing signed
+GitWeb fixture and coherent binaries: they now use structured policy and current
+lifecycle settings, with full qualified/generated config equality before
+bootstrap. The composition fixture includes matching and mismatched expected
+configs. Separate application-session source generation remains unchanged;
+the Oracle journey uses `grain-store.sh`.
 
 ## 8. Private compute
 

@@ -29,10 +29,11 @@ if [ "$#" -eq 3 ] && [ "$1" = provision ]; then
   allocation=$run/agent-lifetime/allocation.json
   cp "$repo/deploy/oracle/acceptance/agent-allocation.json" "$allocation"
   chmod 600 "$allocation"
-  # Validate and retain the exact generated source before genesis can run.
-  sh "$repo/scripts/spk-platform/agent-genesis-overlay.sh" \
-    "$repo/scripts/workroom/provision.sh" "$allocation" \
-    "$run/agent-lifetime/provision-preview.sh"
+  # Validate the retained allocation before genesis; no provision source is generated.
+  sh "$repo/scripts/spk-platform/check-agent-allocation.sh" "$allocation"
+  sha256sum "$allocation" "$repo/scripts/spk-platform/check-agent-allocation.sh" \
+    "$repo/scripts/workroom/agent-enrollment.sh" \
+    >"$run/agent-lifetime/enrollment-input-sha256.txt"
   printf '%s\n' "$allocation"
   exit 0
 fi

@@ -25,7 +25,7 @@ test ! -e "$EVIDENCE" || { echo "evidence directory exists" >&2; exit 2; }
 test ! -e "$EVIDENCE.source-stage" || {
   echo "private source stage already exists" >&2; exit 2;
 }
-# Keep exact generated source and hashes on failure; the sibling stays 0700
+# Keep exact staged source and input hashes on failure; the sibling stays 0700
 # and is never copied into a public artifact. Runtime keys stay under EVIDENCE.
 STAGE=$EVIDENCE.source-stage
 mkdir -m 700 "$STAGE"
@@ -91,46 +91,13 @@ fi
 cp "$SOURCE" "$STAGE/provision.sh"
 sha256sum "$SOURCE" "$STAGE/operator-policy.json" "$STAGE/factory-predicate.json" >"$STAGE/configuration-inputs.sha256"
 chmod 700 "$STAGE/provision.sh"
-cat >"$STAGE/member-preboot" <<'EOF'
-"$MINI" keygen --secret "$EVIDENCE/member.key" --public "$EVIDENCE/member.pub" >"$EVIDENCE/member-public.txt"
-MEMBER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/member.pub" | tr -d ' \n')
-jq --arg public "$MEMBER_PUBLIC" --arg balance "$MEMBER_INITIAL_BALANCE" '.enrollments += [{
-  key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-    publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
-  accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
-  factoryObserveCapabilityId:"57",initialBalance:$balance,
-  accountPredicate:{type:"all",predicates:[]}}]' \
-  "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-member.json"
-mv "$EVIDENCE/genesis-with-member.json" "$EVIDENCE/genesis.json"
-EOF
-cat >"$STAGE/member-prebirth" <<'EOF'
-jq '.birth.resources += [{kind:"object",storage:"grain",target:"7503",
-  owner:"9",ownerCapability:"83",controlCapability:"84",budget:"50"}]' \
-  "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-with-member.json"
-mv "$EVIDENCE/birth-with-member.json" "$EVIDENCE/birth-intent.json"
-EOF
-awk -v preboot="$STAGE/member-preboot" -v prebirth="$STAGE/member-prebirth" '
-  /^"\$MINI" bootstrap --host / {
-    while ((getline inserted < preboot) > 0) print inserted
-    close(preboot); boot++
-  }
-  /cat >"\$EVIDENCE\/birth-intent.json" <<EOF/ { seen_birth=1 }
-  seen_birth && /^"\$MINI" submit --host / && !birth_inserted {
-    while ((getline inserted < prebirth) > 0) print inserted
-    close(prebirth); birth_inserted++
-  }
-  { print }
-  END { if (boot != 1 || birth_inserted != 1) exit 2 }
-' "$STAGE/provision.sh" >"$STAGE/provision-member.sh"
-chmod 700 "$STAGE/provision-member.sh"
-sha256sum "$STAGE/provision-member.sh" > "$STAGE/provision.sha256"
-WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902 \
+# The provisioner owns enrollment and first-birth phases. No generated shell
+# source or insertion anchors are needed for the member or agent allocation.
+WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902 WORKROOM_INCLUDE_MEMBER=1 \
   WORKROOM_OPERATOR_POLICY="$STAGE/operator-policy.json" \
   WORKROOM_FACTORY_PREDICATE="$STAGE/factory-predicate.json" \
   MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
-  "$STAGE/provision-member.sh" "$HOST" "$EVIDENCE"
-cp "$STAGE/provision.sha256" "$EVIDENCE/overlay.sha256"
-cp "$STAGE/provision-member.sh" "$EVIDENCE/overlay-provision.sh"
+  "$STAGE/provision.sh" "$HOST" "$EVIDENCE"
 sha256sum -c "$STAGE/configuration-inputs.sha256" >"$STAGE/configuration-inputs-recheck.txt"
 jq -e '.grainBirthTariff == {base:2,perBirth:1}' "$EVIDENCE/operator.json" >/dev/null
 jq -e --argjson expected "$FACTORY_PREDICATE" '.factoryPredicate == $expected' \
