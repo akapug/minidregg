@@ -2,7 +2,7 @@
 
 Every factual sentence on the hand-written pages, and the file and lines it comes from, on
 `lane/W14-WEBSITE-REGEN` over main `df0cd116` (2026-10-05). `status.html` is not listed:
-`gen-status.py` generates it from the README's Honest state section (`README.md:61-89`), each
+`gen-status.py` generates it from the README's What is live table (`README.md:84-113`), each
 row carrying the landing commit or journey row it rests on, and the `website` gate fails when
 it is stale. When a source changes, fix the page and this map in the same commit. Paths are
 relative to the repository root. FRIENDS = `deploy/shell/FRIENDS.md`; OB =
@@ -110,3 +110,38 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 ## join.html
 
 A redirect to https://demo.dregg.online/join (meta refresh and a link); no factual claim beyond the shutdown date (README.md "The demo").
+
+## edition.html
+
+Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/DEMO-EXPERIENCE-2026-10-27.md`; WF = `docs/WEB-FRONTEND-2026-10-27.md`; AM = `docs/APP-MARKET-2026-10-27.md`; HP = `docs/HOT-PATH-2026-10-27.md`. Every row is also a row of the README's What is live table (`README.md:84-113`), which `status.html` renders.
+
+| Claim | Source |
+| --- | --- |
+| the box still serves an earlier rehearsal, every login closed, `/join` closed until the owner opens it | README.md:88 (The box today); docs/DEMO-PREFIX-2026-10-26.md §2 |
+| the door opens on the owner's word; shuts down 11 November 2026 and everything is erased | README.md "The demo"; index.html rows above |
+| one admission path for documents, grants, money, programs, applications; refusal names its clause; the web shows the request that would pass | DE:53 (step 4), DE §0; README.md:22 |
+| the client keeps the exact call before sending; undecided attempt retried byte for byte | native/mini-sdk/src/custody.rs:1-27, 145; DE:55 (step 6) |
+| join: a name, a hosted key, one session link | DE:51 (step 2); WF (door rows) |
+| free route has a fixed number of seats | deploy/door/README.md:95 (`freeCap`) |
+| paid route 50 DREGG a week on Solana mainnet | deploy/pay/enrol-terms.json |
+| every shell command has a web form, 203 leaves; outcomes announced as live regions | README.md:94 (parity row); native/resource-client/src/web/verbs.rs:610; native/resource-client/src/web/body.rs:1240 |
+| export archive of documents, receipts and key, streamed then deleted; one per member per 10 minutes | WF:182, WF:197-199 |
+| research consent: unchecked box at the door, a fact in the member's world, shown and changeable on the export page | WF:185-193; deploy/policy/RETENTION.txt |
+| a built-in tale under a sealed law; a member can install a law and see the next write judged | DE:65-66 (doors 11, 12); Kernel/StoryLaw.lean |
+| the `bend` command is in this edition | docs/DEMO-PREFIX-2026-10-26.md:344; native/resource-client/src/bend.rs |
+| Discord: same subject over the gateway | DE:63 (door 9); native/discord-entrance |
+| agent residents on a shared key; per-member share, $1 a day and $4 in all on the demo's numbers | deploy/hermes/README.md:128-135 |
+| subscriber tier: pay a week, invitation in the inbox, house agent on glm-5.3-flash | WF:183, WF:230; native/resource-client/src/web/subscribe.rs:144 |
+| any Sandstorm package from the real store; 13 featured apps listed first with an agent hook | AM:50-52 |
+| WebDAV, CalDAV and git work; request bodies up to 8 MiB | commit dfdecbbac; AM:91, AM:379 |
+| limits on connections and in-flight requests per member at the gateway; size classes for applications | WF:197-199; deploy/spk-host/README.md:114 |
+| platform cell: kind and install receiver built; genesis seed, replay, Host operations, births priced from the cell not complete | Kernel/PlatformCell.lean; Kernel/PlatformInstallReceiver.lean; docs/DEMO-PREFIX-2026-10-26.md:159-161 |
+| compaction built; a 483-record Store took 160 to 175 s to open before it; the checkpoint-carrying-the-world open is stated and being proved | HP:118-122; commit 2421dc511; commit 107f040d9 |
+| invite reserve of free seats is on main, not yet on the box | deploy/door/README.md:97-100; commit 9e3d6c731 |
+| qualifying apps with one write each toward two to three dozen; two browsers co-editing not working yet | AM:44-52, AM:86-88 |
+| effect Plans: the first keystone proved; transfers and commits being finished | Kernel/ObjectiveActivityEffect.lean; commit b1ff71950; docs/DEMO-PREFIX-2026-10-26.md:39 |
+| per-member request rate in the Host stated and proved, not wired in | Kernel/SubjectRate.lean; docs/PD-HOST-RATE-DESIGN.md:1-5 |
+| not in this edition: fn transport and a second node | docs/DEMO-PREFIX-2026-10-26.md:344 |
+| not in this edition: the oracle as an application | DE:62 (door 8); docs/ORACLE-GRAIN-2026-10-27.md |
+| not in this edition: a networked private-computation service | docs/UNTOUCHED-DEPUTY-STATE.md:25 |
+| Lean owns admission; every keystone enters as a stated theorem before proof work | README.md:22; CLAUDE.md:18 |
