@@ -40,6 +40,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         let _ = fs::remove_file(&part);
     })?;
     fs::rename(&part, &out).map_err(|e| e.to_string())?;
+    // The archive's digest, kept beside it after the archive is downloaded and deleted: the
+    // export page shows it while the next export waits out its cooldown.
+    let mut digest = Sha256::new();
+    std::io::copy(&mut fs::File::open(&out).map_err(|e| e.to_string())?, &mut digest).map_err(|e| e.to_string())?;
+    let mut sum = out.clone().into_os_string();
+    sum.push(".sha256");
+    fs::write(PathBuf::from(sum), format!("{}\n", hex(&digest.finalize()))).map_err(|e| e.to_string())?;
     println!("{}", serde_json::to_string_pretty(&json!({
         "type": "mini-world-export-result-v1", "out": out, "subject": manifest["subject"],
         "worldRoot": manifest["worldRoot"], "height": manifest["height"],

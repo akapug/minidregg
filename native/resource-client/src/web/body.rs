@@ -705,12 +705,21 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["subscribe", "pay"] => super::subscribe::pay(site),
         ["subscribe", "join"] => super::subscribe::join(site),
         ["export"] => {
+            // One export per member per EXPORT_COOLDOWN: it reads the whole world. Inside the
+            // window the page names when the next is allowed and the last archive's digest.
+            let last = site.shell.as_ref().and_then(|shell| last_export(&shell.home.join("exports")));
+            if let Some(refused) = export_refusal(now_secs(), last.as_ref()) {
+                let mut page = export_page(site, Some(refused));
+                page.status = 429;
+                return page;
+            }
             let name = format!("world-{}", now_secs());
             // The run's own words land beside the archive (NAME.log), so a failure is said on the page.
             let started = site.shell.as_ref().is_some_and(|shell| {
                 let dir = shell.home.join("exports");
                 fs::create_dir_all(&dir).is_ok()
                     && fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).is_ok()
+                    && fs::write(dir.join("last-start.txt"), format!("{} {name}\n", now_secs())).is_ok()
                     && verb_detached(site, &format!("export world {name}"), &dir.join(format!("{name}.log")))
             });
             export_page(site, Some(if started { format!("Preparing <code>{name}</code>: every document is read as the Host renders it to you now. Reload this page; the download appears when it is ready.") } else { "The export could not be started (no shell paths for this body).".to_owned() }))
@@ -921,6 +930,46 @@ fn research_consent(site: &Site) -> Option<i128> {
     view["cell"]["entries"].as_array()?.iter().find(|e| e["key"]["field"] == "1")?["value"].as_str()?.parse().ok()
 }
 
+/// One export per member per this many seconds (abuse-limits review: an export reads the whole world).
+const EXPORT_COOLDOWN: u64 = 600;
+
+/// The member's last export: when it started, its name, and its archive's sha256 once written.
+struct LastExport {
+    at: u64,
+    name: String,
+    sha256: Option<String>,
+}
+
+fn last_export(dir: &std::path::Path) -> Option<LastExport> {
+    let line = fs::read_to_string(dir.join("last-start.txt")).ok()?;
+    let mut words = line.split_whitespace();
+    let at = words.next()?.parse().ok()?;
+    let name = words.next()?.to_owned();
+    let sha256 = fs::read_to_string(dir.join(format!("{name}.sha256"))).ok().map(|s| s.trim().to_owned());
+    Some(LastExport { at, name, sha256 })
+}
+
+/// Why a new export is refused now, naming when the next is allowed and the last archive's digest;
+/// None when it may start.
+fn export_refusal(now: u64, last: Option<&LastExport>) -> Option<String> {
+    let last = last?;
+    let next = last.at + EXPORT_COOLDOWN;
+    if now >= next {
+        return None;
+    }
+    let digest = match &last.sha256 {
+        Some(d) => format!("its archive's sha256 is <code>{}</code>", escape(d)),
+        None => "it is still being prepared".to_owned(),
+    };
+    Some(format!(
+        "One export per {} minutes: the next is allowed at {} (in {} s). Your last export is <code>{}</code>; {digest}.",
+        EXPORT_COOLDOWN / 60,
+        super::subscribe::utc(next),
+        next - now,
+        escape(&last.name)
+    ))
+}
+
 /// A finished export's file under HOME/exports, by its name (letters, digits, '-').
 fn export_file(site: &Site, name: &str) -> Option<PathBuf> {
     let shell = site.shell.as_ref()?;
@@ -939,6 +988,9 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
         body.push_str(&format!("<p class=\"note\">{said}</p>\n"));
     }
     body.push_str(&format!("<section><h2>What is kept</h2><p class=\"policy\">{}</p>", escape(super::subscribe::RETENTION.trim_end())));
+    if let Some(waiting) = site.shell.as_ref().and_then(|shell| last_export(&shell.home.join("exports"))).and_then(|last| export_refusal(now_secs(), Some(&last))) {
+        body.push_str(&format!("<p class=\"note\">{waiting}</p>"));
+    }
     let current = research_consent(site);
     let shown = match current {
         Some(1) => "contributed for research (CC0)".to_owned(),
@@ -1353,6 +1405,16 @@ mod redteam;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_second_export_inside_the_window_is_refused_with_the_time_named() {
+        let last = super::LastExport { at: 1_794_268_800, name: "world-1794268800".into(), sha256: Some("ab".repeat(32)) };
+        let refused = super::export_refusal(1_794_268_800 + 60, Some(&last)).expect("inside the window");
+        assert!(refused.contains("the next is allowed at 2026-11-10 00:10 UTC (in 540 s)"), "{refused}");
+        assert!(refused.contains(&"ab".repeat(32)), "the last archive's digest is shown");
+        assert!(super::export_refusal(1_794_268_800 + 600, Some(&last)).is_none(), "after the window a new export starts");
+        assert!(super::export_refusal(1_794_268_800, None).is_none(), "the first export starts");
+    }
+
     #[test]
     fn only_reads_and_local_lines_may_be_stopped_at_the_deadline() {
         let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
