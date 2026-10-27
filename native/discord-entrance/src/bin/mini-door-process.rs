@@ -413,7 +413,7 @@ impl<O: BoxOps> Processor<O> {
     /// The stranger's view: root-owned, readable by the form's group, never the secrets.
     fn publish_status(&self, r: &Value) -> Result<(), String> {
         let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
-        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly"] {
+        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly", "funding"] {
             if !r[k].is_null() {
                 v[k] = r[k].clone();
             }
@@ -688,6 +688,8 @@ impl<O: BoxOps> Processor<O> {
                 let Some(subject) = subject.filter(|s| ran.ok && !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())) else {
                     return Err(format!("mini-reenroll: {}", ran.why()));
                 };
+                // What the box funded this account with, for the stranger's status page.
+                r["funding"] = json!(self.cfg.funding.to_string());
                 if !home.join("workspace/workspace.json").exists() {
                     let ran = self.ops.tenant_line(&name, &format!("init mini.key {subject}"));
                     if !ran.ok {
@@ -886,7 +888,8 @@ impl<O: BoxOps> Processor<O> {
         let address = self.cfg.pay.as_ref().and_then(|p| read_json(&p.enrol_pin)).and_then(|v| v["enrolAddress"].as_str().map(str::to_owned));
         let paid = self.cfg.pay.is_some() && address.is_some() && self.counted(None, true, None) < self.cfg.daily_cap;
         let v = json!({"type":door::STATE_TYPE,"free":free_reason.is_none(),"freeReason":free_reason,"paid":paid,
-            "enrolAddress":address,"network":self.cfg.pay.as_ref().map(|p| p.network.clone()),"at":self.now});
+            "enrolAddress":address,"network":self.cfg.pay.as_ref().map(|p| p.network.clone()),"at":self.now,
+            "funding":self.cfg.funding.to_string()});
         self.publish("door-state.json", &v)
     }
 
@@ -1074,6 +1077,9 @@ mod tests {
         assert_eq!(s["phase"], "enrolled", "{s}");
         assert!(s["login"].is_null(), "no ssh login line: {s}");
         assert_eq!(s["webOnly"], true);
+        assert_eq!(s["funding"], w.cfg.funding.to_string(), "the status names what the box funded");
+        let state = read_json(&w.p.status().join("door-state.json")).unwrap();
+        assert_eq!(state["funding"], w.cfg.funding.to_string(), "the form reads the configured funding, never a literal");
         assert!(s["webLogin"].as_str().unwrap().starts_with("https://demo.example/login/"));
         assert!(w.ops.calls.borrow().contains(&"throwaway-key".to_string()));
         let entry = std::fs::read_to_string(w.p.door_friends().join("bea.pub")).unwrap();

@@ -182,7 +182,12 @@ impl Door {
             <code>ssh-keygen -t ed25519</code>). Without one, your account opens in the browser only, through the one-time link the \
             status page shows; the paid route needs a key (its memo is signed with it).<br><textarea name=key rows=3 maxlength=600></textarea></label></p>");
         if free {
-            body.push_str("<p><label><input type=radio name=route value=free checked> Free: the box funds a small starting balance</label><br>");
+            // The amount is the processor's configured funding (door.json), published in door-state.json.
+            let funded = match state["funding"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+                Some(n) => format!("Free: the box funds {} credits, enough for two apps and their weeks", html(n)),
+                None => "Free: the box funds a starting balance (the amount is published once the door's processor has run)".to_owned(),
+            };
+            body.push_str(&format!("<p><label><input type=radio name=route value=free checked> {funded}</label><br>"));
         } else {
             let why = state["freeReason"].as_str().unwrap_or("closed");
             body.push_str(&format!("<p>The free route is closed ({}).<br>", html(why)));
@@ -215,6 +220,9 @@ impl Door {
         }
         if let Some(login) = v["login"].as_str() {
             body.push_str(&format!("<p>Log in with:</p><pre>ssh -t {}</pre>", html(login)));
+        }
+        if let Some(n) = v["funding"].as_str() {
+            body.push_str(&format!("<p>The box funded your account with <strong>{} credits</strong>.</p>", html(n)));
         }
         if let Some(web) = v["webLogin"].as_str() {
             body.push_str(&format!(
@@ -461,7 +469,7 @@ mod tests {
         for d in ["queue", "status"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
-        std::fs::write(root.join("status/door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
+        std::fs::write(root.join("status/door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"funding":"10000"}"#).unwrap();
         Door { queue: root.join("queue"), status: root.join("status"), trusted: "127.0.0.1".parse().unwrap(),
             max_queued: 2, per_hour: 3, seen: Mutex::new(HashMap::new()) }
     }
@@ -560,6 +568,21 @@ mod tests {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+    }
+
+    #[test]
+    fn the_free_route_and_the_enrolled_status_name_the_configured_funding() {
+        let d = door("funding");
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(page.contains("Free: the box funds 10000 credits"), "the amount comes from door-state.json");
+        let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"enrolled","name":"alice","funding":"10000",
+            "webLogin":"https://demo.example/login/X"}).to_string()).unwrap();
+        let body = String::from_utf8(d.status_page(&id).1).unwrap();
+        assert!(body.contains("funded your account with <strong>10000 credits</strong>"));
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(!page.contains("10000") && page.contains("published once"), "no number without the processor's");
     }
 
     #[test]
