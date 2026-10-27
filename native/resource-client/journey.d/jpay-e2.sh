@@ -106,8 +106,9 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": str(PAY_CONTROL),
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(PAY_CONTROL), "enrolCapability": "4032"}}
+                           "enrolCapability": "4032"}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
