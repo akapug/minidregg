@@ -42,6 +42,10 @@ trap 'stop; journey_shortdir_return' EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
 import hashlib, json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, W = sys.argv[1], sys.argv[2]
 MINI, NOCK_RUN, TPL = os.environ["MINI"], os.environ["NOCK_RUN"], os.environ["NOCK_TEMPLATES"]
 CONFIG = os.path.join(W, "deployment", "pinned-config.json")
@@ -91,7 +95,7 @@ def birth(name, verdict_name):
         "--program", path(f"{verdict_name}.check.json")], capture_output=True, text=True)
     open(path(f"{name}.birth.out"), "w").write(r.stdout); open(path(f"{name}.birth.err"), "w").write(r.stderr)
     outcome = os.path.join(WS, "attempts", f"create-{name}", "outcome.json")
-    o = json.load(open(outcome)) if os.path.exists(outcome) else None
+    o = attempt_answer(outcome) if os.path.exists(outcome) else None
     last = (r.stderr.strip().splitlines() or [""])[-1]
     retained = os.path.join(WS, "sources", f"create-{name}.current", "reply.frame")
     if "retained encoded Host outcome" in last and os.path.exists(retained):

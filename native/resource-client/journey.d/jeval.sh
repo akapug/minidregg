@@ -49,6 +49,10 @@ NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-4000000} NEWPARTICIPA
 set +e
 python3 - "$DIR" "$WA" "$WB" <<'PY'
 import json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, WA, WB = sys.argv[1], sys.argv[2], sys.argv[3]
 MINI, NOCK_RUN, TPL = os.environ["MINI"], os.environ["NOCK_RUN"], os.environ["NOCK_TEMPLATES"]
 SUBJECT = 7
@@ -108,7 +112,7 @@ class World:
         last = last_line(r, attempt)
         outcome = os.path.join(attempt, "outcome.json")
         if "exact outcome evidence was retained" in last and os.path.exists(outcome):
-            o = json.load(open(outcome))
+            o = attempt_answer(outcome)
             last = "outcome " + o.get("type", "?") + " | " + bytes.fromhex(o.get("phase", "")).decode("latin1") \
                 + " | " + bytes.fromhex(o.get("detail", "")).decode("latin1")
         return r.returncode, last

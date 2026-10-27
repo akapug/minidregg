@@ -268,6 +268,9 @@ pub static LOOKUP: Grammar = Grammar { verb: "lookup", leaves: &[
 pub static RETRY: Grammar = Grammar { verb: "retry", leaves: &[
     Leaf { path: &["retry"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini retry --attempt attempts/ID --mode submit (the exact retry of the retained call)" },
 ] };
+pub static ATTEMPT: Grammar = Grammar { verb: "attempt", leaves: &[
+    Leaf { path: &["attempt"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: mini attempt-state --attempt attempts/ID --json (the retained answers, the record's phase and the standing; no Host call)" },
+] };
 pub static PUBLISH: Grammar = Grammar { verb: "publish", leaves: &[
     Leaf { path: &["publish"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID (writes the recipient's reference)" },
 ] };
@@ -476,7 +479,7 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
 ] };
 
 pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
-    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
+    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &ATTEMPT, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {

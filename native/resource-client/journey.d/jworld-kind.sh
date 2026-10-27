@@ -5,6 +5,7 @@
 # NEWCOMER_WS and NEWCOMER_SUBJECT from a source-matched v6 candidate.
 # Exit zero requires both descriptor behavior AND current exported-law admission.
 set -euo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}"
 : "${SPONSOR_WS:?}" "${NEWCOMER_WS:?}" "${NEWCOMER_SUBJECT:?}"
@@ -150,7 +151,7 @@ say dan 'retry wk-stale'
 if [ "$RC" != 3 ] && [ "$RC" != 4 ]; then printf 'stale-export\trefused/contention\t%s\tFAIL\n' "$RC" >>"$ROWS"; exit 1; fi
 check stale-call-unchanged test "$STALE_CALL" = "$(sha256sum "$NEWCOMER_WS/attempts/wk-stale/call.bin" | cut -d' ' -f1)"
 # Require a decoded native decision, not a transport failure with the same exit.
-check stale-native-decision jq -e '.type=="refused" or .type=="contention"' "$NEWCOMER_WS/attempts/wk-stale/retry-0001.json" >/dev/null
+check stale-native-decision attempt_answer "$NEWCOMER_WS/attempts/wk-stale/retry-0001.json" | jq -e '.type=="refused" or .type=="contention"' >/dev/null
 printf 'stale-export\trefused/contention\t%s\tPASS\n' "$RC" >>"$ROWS"
 ok still-no-second-vote dan 'instance show wk-two'
 check refused-vote-absent jq -e --arg subject "$NEWCOMER_SUBJECT" 'all(.value.entries[]; .field!="3" or .key!=$subject)' "$OUT" >/dev/null

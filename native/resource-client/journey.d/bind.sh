@@ -14,6 +14,7 @@
 # Runs as a journey hook (exported: MINI SOCKET SPONSOR_WS NEWCOMER_WS
 # JOURNEY_STEP_DIR). Exit 0 = both poles held. Last stdout line = the result.
 set -euo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 mkdir -p "$D/req"
 res=$D/bind-result.tsv
@@ -22,7 +23,7 @@ res=$D/bind-result.tsv
 scalar() {  # NAME ACTION FIELD VALUE
   printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"%s","payload":{"type":"scalar","actions":[{"type":"%s","key":{"type":"object","field":"%s"},"value":"%s"}]}}]}\n' "$1" "$2" "$3" "$4"
 }
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
 "$MINI" workspace --action create --dir "$SPONSOR_WS" --name bind-solo --storage declared \

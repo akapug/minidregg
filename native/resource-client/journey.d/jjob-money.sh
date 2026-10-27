@@ -31,6 +31,10 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 set +e
 python3 - "$DIR" "$HERE" <<'PY'
 import json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, HERE = sys.argv[1], sys.argv[2]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
 W = os.path.join(DIR, "w")
@@ -200,7 +204,7 @@ def propose_submit(ws, pid, request):
     r1 = run(MINI, "workspace", "--action", "propose", "--dir", ws, "--request", path(f"{pid}.json"), "--proposal-id", pid)
     r2 = run(MINI, "workspace", "--action", "submit", "--dir", ws, "--intent", os.path.join(ws, "proposals", pid, "intent.json"),
              "--attempt", os.path.join(ws, "attempts", pid))
-    try: o = json.load(open(os.path.join(ws, "attempts", pid, "outcome.json")))
+    try: o = attempt_answer(os.path.join(ws, "attempts", pid, "outcome.json"))
     except Exception: o = {}
     return r1, r2, o
 propose_submit(A, "invite-p", {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": "lab",

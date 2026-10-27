@@ -30,6 +30,7 @@
 # NEWCOMER_SUBJECT JOURNEY_STEP_DIR. Exit 0 = every row as expected. Last
 # stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 mkdir -p "$D/req"
 rows=$D/field-rows.tsv
@@ -39,7 +40,7 @@ REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d45
 
 run() { local name=$1; shift; "$@" >"$D/$name.out" 2>"$D/$name.err"; echo $? >"$D/$name.rc"; }
 host_refused() { [ "$(cat "$D/$1.rc")" != 0 ] && grep -q "encoded refusal: $REFUSAL_TAG" "$D/$1.err"; }
-submit_refused() { jq -e '.type == "refused"' "$1" >/dev/null 2>&1; }
+submit_refused() { attempt_answer "$1" | jq -e '.type == "refused"' >/dev/null 2>&1; }
 # The service's stderr: the journey and its hooks restart `mini serve` into
 # fresh serve*.log files (J6, K11), so the operator log is all of them, oldest first.
 oplog() { local f; for f in $(ls -tr "$JOURNEY_WORLD"/public/serve*.log 2>/dev/null); do cat "$f"; done; }
@@ -50,7 +51,7 @@ refusal_text() {
   grep -o 'encoded refusal: [0-9a-f]*' "$D/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
     | tr -c '[:print:]' ' ' | tr -s ' ' | cut -c1-200
 }
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 must() { [ "$(cat "$D/$1.rc")" = 0 ] || { echo "setup $1 failed: $(tail -1 "$D/$1.err")" >&2; exit 1; }; }
 record() { # NAME EXPECT GOT DETAIL [NEEDLE]
   printf '%s\texpect=%s\tgot=%s\t%s\n' "$1" "$2" "$3" "$4" >>"$rows"
