@@ -33,7 +33,11 @@ the whole image, so the build decides, over the decoded records and without exec
 the checkpoint state is admissible for the whole log and that no suffix record carries a prefix
 nullifier or transaction id (then the executing part's prefix-free replay is the protocol's resume:
 preflight reads the consumed set only at the intent's own nullifiers). `reopens` says the build
-succeeds on a Store's own entries, so a refusing `ofOpened` is not a vacuous instance.
+succeeds on a Store's own entries, so a refusing `ofOpened` is not a vacuous instance; `buildSound`
+says what a successful build is on ANY Store that passes the gates: the protocol's resume of the
+whole image from the checkpoint state, so a MAC-valid suffix that reuses a prefix nullifier or
+transaction id (no replay accepts it) makes the build refuse. The deployed `Loaded` carries that
+resume proof as a field, so the law holds by its type.
 
 What changes, said once: the open trusts the MAC'd checkpoint for the prefix's World as v3 already
 trusts it for the prefix's state. A fold that diverges from the genesis replay under the same key
@@ -206,6 +210,8 @@ structure Impl where
   ffState : FastForwardState State4
   /-- The checkpoint height and chain the state part started from (`(0, logStart seed)` from genesis). -/
   stateBase : State4 → Nat × Digest
+  /-- The checkpoint state the state part started from (`State.ofSeed seed` from genesis). -/
+  stateCheckpoint : State4 → State
   /-- The executed state at the head: cells, absent bytes, available charge. -/
   stateHead : State4 → State
   /-- The executed World at the head. -/
@@ -380,6 +386,11 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
       impl.stateWorld state = worldAt rootBytes ⟨seed, pre ++ suf⟩
   /-- A reopened session serves the open's view. -/
   viewOpened : ∀ opened loaded, ofOpened opened = .ok loaded → impl.view loaded = Opened.view logStart opened
+  /-- A successful build serves the protocol's resume of the whole image from the checkpoint state
+  at its height, on any Store that passed the gates (not only Stores this Host wrote). -/
+  buildSound : ∀ opened loaded, ofOpened opened = .ok loaded →
+    resume rootBytes ⟨opened.seed, opened.records⟩ (impl.stateBase opened.state).1
+      (impl.stateCheckpoint opened.state) = some (impl.view loaded).snapshot
   /-- The session build succeeds on a Store's own entries, from genesis or an honest checkpoint
   (the hypotheses of `exact`): its admissibility and disjointness checks refuse only what no
   replay accepts. -/
