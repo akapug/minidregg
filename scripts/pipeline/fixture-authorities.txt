@@ -15,7 +15,10 @@
 # Census (2026-10-07, lane kn2-token-sound): `git log --name-only` since 2026-09-25 over commits
 # that regenerate, re-emit or re-pin, for *Fixture*, *fixture*, *Vectors*, golden/, *.snapshot, expect*.
 Fixtures/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/generate.sh | Fixtures/NativeAcceptedFixtureAuthority.lean | checked
-native/mini-sdk/golden/lean-intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
-native/mini-sdk/golden/intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | - | PENDING
-native/mini-sdk/golden/vectors.json | native/mini-sdk (golden emitter) | - | PENDING
+# lean-intents.json: checked by scripts/pipeline/check-intent-vector-authority.py (gate row intent-vector-authority).
+# intents.json: self -- hand-written inputs, not generated; the emitter reads them and tests/golden.rs requires every echoed text to equal them byte for byte.
+# vectors.json: self -- the `expect` values are the Rust core's, but the TS suite (native/mini-sdk-ts/test/golden.test.ts) recomputes them independently and tests/golden.rs pins Bread's external dregg/0 vector; a change is an authority change.
+native/mini-sdk/golden/lean-intents.json | Kernel/Contracts/IntentVectors.lean (vector emitter) | scripts/pipeline/intent-vector-authority.txt | checked
+native/mini-sdk/golden/intents.json | hand-written (the emitter's INPUT, no generator writes it) | - | self
+native/mini-sdk/golden/vectors.json | native/mini-sdk (MINI_SDK_REGEN=1 golden test) | - | self
 native/objective-emit/fixtures/* | native/objective-emit (differential generator) | - | PENDING

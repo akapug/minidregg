@@ -1,0 +1,85 @@
+# AUTHORITY for native/mini-sdk/golden/lean-intents.json -- HAND-WRITTEN. No generator writes this file.
+# It states what the intent vectors MEAN (which spellings of an intent are admitted, which refused and
+# why, which spellings are the same intent), read from docs/SDK.md and the canonical-intent rules
+# (canonical lowercase hex, canonical decimals, 16-byte salt, integers of magnitude <= 2^53, at least
+# one target on an invocation, closed field sets), never from a run of Kernel/Contracts/IntentVectors.lean.
+# scripts/pipeline/check-intent-vector-authority.py projects the fixture and compares it to this file.
+# Changing it is its own commit with an `Authority-Change: <reason>` trailer.
+#
+# Lines:  frame|idFrame = TEXT          the frames every admitted row's bytes / id preimage begin with
+#         ok NAME                       the row is admitted
+#         refuse NAME | PHRASE          the row is refused, and the reason contains PHRASE
+#         same NAME NAME ...            different spellings of ONE intent: identical bytes
+#         distinct NAME NAME ...        different intents: pairwise different bytes
+frame = DREGG/CONTRACT/INTENT/v1
+idFrame = DREGG/CONTRACT/INTENT-ID/v1
+
+# the six cuts, one admitted example each
+ok observe
+ok invoke-fixture
+ok reserve
+ok install
+ok release
+ok retire
+ok example-invoke
+# edge shapes that are admitted
+ok invoke-family
+ok invoke-payload-escapes-and-key-order
+ok invoke-zero-actor-256bit-root-unicode-kind
+ok invoke-base255-digit-boundaries
+ok invoke-family-room-publish-empty-context
+ok invoke-family-ordinary
+ok invoke-family-activityDispatch
+ok invoke-family-roomRelease
+ok reserve-empty-footprint
+ok release-empty-audience
+ok retire-max-length
+
+# non-canonical or malformed spellings are refused, each for its own reason
+refuse refuse-leading-zero-actor | not a canonical decimal
+refuse refuse-signed-actor | not a canonical decimal
+refuse refuse-noncanonical-root | not a canonical decimal
+refuse refuse-noncanonical-audience | not a canonical decimal
+refuse refuse-numeric-actor | String expected
+refuse refuse-audience-not-a-list | array expected
+refuse refuse-uppercase-salt | canonical lowercase
+refuse refuse-family-bad-context | canonical lowercase
+refuse refuse-short-salt | 16 bytes
+refuse refuse-odd-hex-salt | odd length
+refuse refuse-short-sha256 | 32 bytes
+refuse refuse-empty-targets | at least one target
+refuse refuse-unknown-route | unknown invocation family route
+refuse refuse-unknown-cut | unknown cut
+refuse refuse-family-extra-field | expected exactly the fields
+refuse refuse-missing-field | expected exactly the fields
+refuse refuse-extra-field | expected exactly the fields
+refuse refuse-target-extra-field | expected exactly the fields
+refuse refuse-oversized-length | length must be an integer
+refuse refuse-float-length | length must be an integer
+refuse refuse-negative-length | natural number
+refuse refuse-float-in-payload | admits only integers
+refuse refuse-oversized-integer-in-payload | admits only integers
+refuse refuse-payload-number-1-point-5 | admits only integers
+refuse refuse-payload-number-tiny-fraction | admits only integers
+refuse refuse-payload-number-1e-2 | admits only integers
+refuse refuse-payload-number-2-pow-53-plus-1 | admits only integers
+refuse refuse-payload-number-huge-exponent | admits only integers
+refuse refuse-payload-number-hostile-negative-exponent | admits only integers
+
+# integral values spelled differently are the SAME intent (the bytes carry the integer, not the spelling)
+ok payload-number-100
+ok payload-number-100-point-0
+ok payload-number-1e2
+ok payload-number-1E2
+ok payload-number-negative-zero
+ok payload-number-zero-point-zero
+ok payload-number-negative-fifty-exponent
+ok payload-number-2-pow-53
+ok payload-number-2-pow-53-as-fraction-form
+same payload-number-100 payload-number-100-point-0 payload-number-1e2 payload-number-1E2
+same payload-number-negative-zero payload-number-zero-point-zero
+same payload-number-2-pow-53 payload-number-2-pow-53-as-fraction-form
+# ... and different integers or different routes are different intents
+distinct payload-number-100 payload-number-negative-zero payload-number-negative-fifty-exponent payload-number-2-pow-53
+distinct invoke-family invoke-family-ordinary invoke-family-activityDispatch invoke-family-roomRelease
+distinct observe invoke-fixture reserve install release retire
