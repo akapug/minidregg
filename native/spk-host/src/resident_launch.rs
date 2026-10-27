@@ -581,6 +581,13 @@ mod tests {
         let prepared =
             PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
         let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+        // bwrap must START under the unit's hardening before any floor check
+        // means anything (bwrap >= 0.11 dies at its first mount if a unit
+        // seccomp layer returns ENOSYS for openat2).
+        assert!(
+            !lines.is_empty(),
+            "bwrap did not start the probe under the resident unit's hardening (status {status:#x}); see the app output"
+        );
         assert_eq!(verdict(&lines), Some("floor-held"));
         for check in [
             "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",

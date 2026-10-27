@@ -261,8 +261,11 @@ mod tests {
         assert!(text.contains("# reads (root-declared, read-only): /home/ember/a2/keys/mini.key\n"));
         // Settings that would imply PrivateUsers= or no-new-privileges in a
         // user manager, and so break the namespace bootstrap, stay absent.
+        // RestrictSUIDSGID= also installs a seccomp layer that returns ENOSYS
+        // for openat2, which bwrap >= 0.11 needs (Debian 13, bwrap 0.12).
         for forbidden in ["ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateUsers",
-            "NoNewPrivileges", "SystemCallFilter", "BindReadOnlyPaths", "InaccessiblePaths"] {
+            "NoNewPrivileges", "SystemCallFilter", "BindReadOnlyPaths", "InaccessiblePaths",
+            "RestrictSUIDSGID", "NoExecPaths", "LockPersonality", "MemoryDenyWriteExecute"] {
             assert!(!text.lines().any(|line| line.starts_with(forbidden)), "{forbidden}");
         }
     }

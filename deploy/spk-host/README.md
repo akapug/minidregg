@@ -50,7 +50,23 @@ volume.
   generation) and fd 3.
 
 `scripts/spk-platform/sandbox-floor-audit.sh` measures this floor through
-the production bootstrap and spawn path, run as the operator on Linux.
+the production bootstrap and spawn path, run as the operator on Linux, inside
+a transient unit carrying the resident unit's own properties, and fails by
+name if bwrap does not start under them.
+
+**bwrap version dependence.** bubblewrap 0.11 and later (Debian 13 ships
+0.12.0) resolve every new-root path with `openat2(RESOLVE_IN_ROOT)` and have no
+fallback; 0.10 (hbox) does not use `openat2`. Any unit setting that installs a
+systemd seccomp layer returning ENOSYS for `openat2` kills bwrap at its first
+mount (`bwrap: Can't mkdir parents for /dev: Function not implemented`).
+systemd 257's `RestrictSUIDSGID=yes` does; so the resident and every
+bwrap-launching unit must not carry it (the resident cannot take
+`NoNewPrivileges=yes` or `NoExecPaths=` either, see above; the app's `/var` is
+mounted `nosuid,nodev` and bwrap's own mounts are nosuid). The pinned bwrap
+(`MINI_SPK_BWRAP_SHA256`, or a profiled copy such as
+`/usr/local/libexec/mini-grain-bwrap`) is therefore qualified per version:
+re-run the floor audit on the target host whenever the pinned binary changes.
+The app's own seccomp policy allows `openat2`.
 
 ## Requests, lifecycle, recovery
 
