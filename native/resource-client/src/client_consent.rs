@@ -641,7 +641,11 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir(&dir).unwrap();
         let host = codec_stub(&dir);
-        fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
+        // The stub answers frame i from reply-i: each reply echoes the operation it answers.
+        fs::write(dir.join("reply-1"), framed(b"\x07ok")).unwrap();
+        fs::write(dir.join("reply-2"), framed(b"\x08ok")).unwrap();
+        fs::write(dir.join("reply-3"), framed(b"\x0bok")).unwrap();
+        fs::write(dir.join("reply"), framed(b"\xff unexpected fourth frame")).unwrap();
         let settings = dir.join("settings.json");
         fs::write(&settings, b"{}").unwrap();
         let anchors = dir.join("anchors");
