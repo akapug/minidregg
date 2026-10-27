@@ -828,7 +828,20 @@ row_exchange() {
   product_input MINI_FN_LAUNCHER executable || return $?
   product_input MINI_FN_CORE file || return $?
   product_native || return $?
-  product_tools openssl od ss || return $?
+  product_tools openssl od ss systemd-analyze || return $?
+  # Static check of the fn consumer unit as systemd parses it: a template is
+  # verified through one instance, and any parse warning (an unquoted
+  # Environment= value is split and "ignored") fails the row.
+  local unitdir verify
+  unitdir=$(mktemp -d) || return 1
+  cp "$SRC/deploy/fn/mini-fn-receive@.service" "$unitdir/mini-fn-receive@probe.service"
+  cp "$SRC/deploy/fn/mini-fn-receive@.timer" "$unitdir/mini-fn-receive@probe.timer"
+  verify=$(cd "$unitdir" && systemd-analyze verify "$unitdir/mini-fn-receive@probe.service" "$unitdir/mini-fn-receive@probe.timer" 2>&1); rc=$?
+  rm -rf "$unitdir"
+  printf '%s\n' "$verify" >"$OUT/unit-verify.log"
+  if [ "$rc" != 0 ] || printf '%s\n' "$verify" | grep -Eiq 'invalid|ignoring|unknown|failed|bad'; then
+    echo "fn consumer unit failed systemd-analyze verify: $verify" >&2; return 1
+  fi
   product_exec exchange bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$MINI_FN_LAUNCHER" "$MINI_FN_CORE" "$RUN/x"; rc=$?
   product_keep "$RUN/x/public-summary.json" "$RUN/x/timings.tsv" "$RUN/x/input-sha256.txt"
   if [ -f "$RUN/x/negative/control-attempt/request-0000.outcome.json" ]; then
