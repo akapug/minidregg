@@ -513,7 +513,7 @@ impl Store {
         opened: &DecryptedEnvelope,
         receipts: &[&DraftReceipt],
     ) -> Result<SealedBatchReceipt> {
-        if outcome.progress_claim().signing_bytes != opened.inner().signing_bytes() {
+        if outcome.signing_bytes() != opened.inner().signing_bytes() {
             return Err(bad("outbox original received protocol binding"));
         }
         let mut cursor = Cursor::new(outcome.outbox())?;
@@ -631,9 +631,9 @@ impl ActualProgress {
         opened: &DecryptedEnvelope,
         sealed: &SealedBatchReceipt,
     ) -> Result<Self> {
-        let raw = outcome.progress_claim();
-        if raw.signing_bytes != opened.inner().signing_bytes()
-            || sealed.received_semantic != raw.signing_bytes
+        let raw = outcome.signing_bytes();
+        if raw != opened.inner().signing_bytes()
+            || sealed.received_semantic != raw
             || sealed.original_outbox != outcome.outbox()
         {
             return Err(bad("sealed progress actual protocol binding"));
@@ -973,7 +973,7 @@ mod tests {
             outer_start = fs::metadata(&wp).unwrap().len();
             store.attach_outer(&receipt, vec![8; 32]).unwrap();
             custody.generate_epoch(Nat::new(8)).unwrap();
-            custody.adopt_current_epoch(&Nat::new(7)).unwrap();
+            adopt(&mut custody, 7).unwrap();
         }
         // Simulate an incomplete UNRELEASED outer attachment. Retained sealed
         // bytes from the completed prior event must not be rerandomized.
@@ -1017,15 +1017,26 @@ mod tests {
             vec![42; 32]
         );
         custody.generate_epoch(Nat::new(8)).unwrap();
-        custody.adopt_current_epoch(&Nat::new(8)).unwrap();
+        adopt(&mut custody, 8).unwrap();
         let stale = custody.open_current(&sealed, &p, 9).err().unwrap();
         assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
         // Rotation survives restart and never moves backward.
         drop(custody);
         let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 3).unwrap();
         assert_eq!(custody.current_epoch(), Some(&Nat::new(8)));
-        let back = custody.adopt_current_epoch(&Nat::new(7)).unwrap_err();
+        let back = adopt(&mut custody, 7).unwrap_err();
         assert!(back.to_string().contains("backward"), "{back}");
+    }
+    fn adopt(custody: &mut RecipientKeyCustody, epoch: u32) -> std::io::Result<()> {
+        let public = custody.generate_epoch(Nat::new(epoch as u64)).unwrap().public_key().to_vec();
+        custody.adopt_current(&crate::current_recipient::fixture::verified(epoch, &public))
+    }
+    fn custody_unknown_epoch(public: &[u8]) -> std::io::Error {
+        let kp = path("unknown-epoch");
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 2).unwrap();
+        custody
+            .adopt_current(&crate::current_recipient::fixture::verified(99, public))
+            .unwrap_err()
     }
     fn sealed_at(
         custody: &mut RecipientKeyCustody,
@@ -1055,13 +1066,47 @@ mod tests {
         let none = custody.open_current(&at7, &p, 9).err().unwrap();
         assert!(none.to_string().contains("current epoch not adopted"), "{none}");
         // Adopting an epoch custody does not hold is refused.
-        assert!(custody.adopt_current_epoch(&Nat::new(99)).is_err());
-        custody.adopt_current_epoch(&Nat::new(8)).unwrap();
+        let public = custody.generate_epoch(Nat::new(8)).unwrap().public_key().to_vec();
+        let unknown = custody_unknown_epoch(&public);
+        assert!(unknown.to_string().contains("not a retained epoch"), "{unknown}");
+        adopt(&mut custody, 8).unwrap();
         assert_eq!(custody.open_current(&at8, &p, 9).unwrap().inner().message, vec![42; 32]);
         let stale = custody.open_current(&at7, &p, 9).err().unwrap();
         assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
         let future = custody.open_current(&at9, &p, 9).err().unwrap();
         assert!(future.to_string().contains("future recipient key epoch"), "{future}");
+    }
+    #[test]
+    fn capsule_is_bound_to_the_key_bytes_and_the_record_to_custodys_x25519_key() {
+        let kp = path("bytes-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        let public = custody.generate_epoch(Nat::new(8)).unwrap().public_key().to_vec();
+        let sealed = sealed_at(&mut custody, 8, &path("bytes-w"), &p);
+        assert_eq!(public.len(), 1216);
+        // A record whose 32-byte Suite1 key is not custody's X25519 half is refused.
+        let s = crate::current_recipient::fixture::scope();
+        let wrong = crate::current_recipient::VerifiedCurrentRecipient::from_host_readback(
+            &crate::current_recipient::fixture::readback(&s, 8, &[9; 32], &[4; 32]),
+            &s,
+        )
+        .unwrap();
+        let refused = custody.adopt_current(&wrong).unwrap_err();
+        assert!(refused.to_string().contains("encryption key differs from custody's X25519 key"), "{refused}");
+        assert_eq!(custody.current_epoch(), None);
+        adopt(&mut custody, 8).unwrap();
+        assert!(custody.open_current(&sealed, &p, 9).is_ok());
+        // The digest of the 32-byte Suite1 key is not the digest of the 1216-byte hybrid key.
+        assert_ne!(crate::recipient_seal::recipient_key_id(&public[..32]), crate::recipient_seal::recipient_key_id(&public));
+        let mut confused = sealed.clone();
+        confused.recipient.key_id = crate::recipient_seal::recipient_key_id(&public[..32]);
+        let refused = custody.open_current(&confused, &p, 9).err().unwrap();
+        assert!(refused.to_string().contains("key digest differs from the current recipient key bytes"), "{refused}");
+        // And the other way: a digest over some other hybrid key.
+        let other = crate::crypto_transit::generate_keypair().unwrap();
+        confused.recipient.key_id = crate::recipient_seal::recipient_key_id(&other.public);
+        let refused = custody.open_current(&confused, &p, 9).err().unwrap();
+        assert!(refused.to_string().contains("key digest differs"), "{refused}");
     }
     #[test]
     fn nat_order_is_numeric() {
@@ -1079,7 +1124,7 @@ mod tests {
         {
             let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
             sealed = sealed_at(&mut custody, 7, &path("wrap-w"), &p);
-            custody.adopt_current_epoch(&Nat::new(7)).unwrap();
+            adopt(&mut custody, 7).unwrap();
             seed = custody.journal_secret_for_test(&Nat::new(7));
         }
         let wal = fs::read(&kp).unwrap();
@@ -1312,8 +1357,6 @@ mod tests {
             assert!(!contains(wire, &opened.inner().signing_bytes()));
             assert!(!contains(wire, opened.hiding_nonce()));
         }
-        assert_ne!(progress, outcome.progress_claim().encode().unwrap());
-        assert!(ProgressDigestClaim::decode(&outcome.progress_claim().encode().unwrap()).is_err());
         // A separately retained/sealed wrong body, wrong destination or reversed
         // order may not certify the actual protocol outbox.
         let mut reversed = refs.clone();

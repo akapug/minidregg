@@ -324,68 +324,6 @@ pub struct Outcome {
     semantic: Vec<u8>,
 }
 
-/// Bounded actual backend progress ABI. It is NOT source admission, a funded
-/// receipt, terminal MPC output or a Qualified successor. A native source endpoint
-/// must bind this exact frame to its original typed Pending/Appended authority.
-/// Full recursive outbox remains private WAL state and is fetched per message.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProgressClaim {
-    pub signing_bytes: Vec<u8>,
-    pub outbox_digest: [u8; 32],
-    pub outbox_bytes: u64,
-}
-impl ProgressClaim {
-    pub fn encode(&self) -> Result<Vec<u8>> {
-        let mut b = b"DREGG.PRIVATE.PROTOCOL.PROGRESS\x01".to_vec();
-        bytes(&self.signing_bytes, &mut b);
-        b.extend(self.outbox_digest);
-        b.extend(self.outbox_bytes.to_le_bytes());
-        if b.len() > MAX_CARRIER {
-            return Err(bad("progress capacity"));
-        }
-        Ok(b)
-    }
-    pub fn decode(b: &[u8]) -> Result<Self> {
-        if b.len() > MAX_CARRIER {
-            return Err(bad("progress capacity"));
-        }
-        let mut c = Cursor::new(b)?;
-        let frame = b"DREGG.PRIVATE.PROTOCOL.PROGRESS\x01";
-        if c.take(frame.len())? != frame {
-            return Err(bad("progress domain"));
-        }
-        let signing_bytes = c.bytes()?;
-        let outbox_digest = c.fixed32()?;
-        let outbox_bytes = c.u64()?;
-        c.finish()?;
-        let v = Self {
-            signing_bytes,
-            outbox_digest,
-            outbox_bytes,
-        };
-        let mut body = Cursor::new(&v.signing_bytes)?;
-        if body.take(SIGN.len())? != SIGN {
-            return Err(bad("progress signing domain"));
-        }
-        let party = CommitteeParty::decode(&body.bytes()?)?;
-        let sequence = body.u64()?;
-        let message = body.bytes()?;
-        body.finish()?;
-        let semantic = Envelope {
-            party,
-            sequence,
-            message,
-            credential: vec![],
-        };
-        if semantic.message.is_empty() || semantic.signing_bytes() != v.signing_bytes {
-            return Err(bad("progress semantic binding"));
-        }
-        if v.encode()? != b || v.outbox_bytes > crate::codec::MAX as u64 {
-            return Err(bad("progress canonical/outbox capacity"));
-        }
-        Ok(v)
-    }
-}
 impl Outcome {
     pub fn outbox(&self) -> &[u8] {
         &self.outbox
@@ -393,12 +331,9 @@ impl Outcome {
     pub fn into_outbox(self) -> Vec<u8> {
         self.outbox
     }
-    pub fn progress_claim(&self) -> ProgressClaim {
-        ProgressClaim {
-            signing_bytes: self.semantic.clone(),
-            outbox_digest: crate::custody::hash(&self.outbox),
-            outbox_bytes: self.outbox.len() as u64,
-        }
+    /// The exact received protocol binding this outcome applied.
+    pub fn signing_bytes(&self) -> &[u8] {
+        &self.semantic
     }
 }
 
@@ -890,10 +825,8 @@ mod tests {
                 Receiver::open(&p, f.party.context.clone(), 4, 3, Counter { value: 0 }).unwrap();
             let out = r.receive(&f, &e).unwrap();
             assert_eq!(out.disposition, Disposition::Applied);
-            let frame = out.progress_claim().encode().unwrap();
-            assert_eq!(ProgressClaim::decode(&frame).unwrap(), out.progress_claim());
             assert_eq!(
-                out.progress_claim().signing_bytes,
+                out.signing_bytes(),
                 Envelope::decode(&e).unwrap().signing_bytes()
             );
             original = out.outbox;

@@ -52,6 +52,7 @@ pub struct PrivateSend {
     disclosed: Set,
     pending: BTreeMap<u16, Vec<Field>>,
     started: bool,
+    committed_deal: Option<(Vec<u8>, Vec<Vec<Field>>)>,
     pub dispersed: bool,
     pub delivered: Option<Vec<u8>>,
 }
@@ -98,6 +99,7 @@ impl PrivateSend {
             disclosed: Set::new(),
             pending: BTreeMap::new(),
             started: false,
+            committed_deal: None,
             dispersed: false,
             delivered: None,
         })
@@ -123,6 +125,32 @@ impl PrivateSend {
                 },
             })
             .collect()
+    }
+    /// Step one of a durable deal: record the plaintext and coefficients,
+    /// publishing nothing. A deal that could never emit is refused here.
+    pub fn commit_dealer(&mut self, plaintext: &[u8], coeff: &[Vec<Field>]) -> Result<()> {
+        if self.committed_deal.is_some() {
+            return Err(bad("private sender already committed"));
+        }
+        self.clone().dealer_with_coefficients(plaintext, coeff)?;
+        self.committed_deal = Some((plaintext.to_vec(), coeff.to_vec()));
+        Ok(())
+    }
+    pub fn committed_deal(&self) -> Option<(&[u8], &[Vec<Field>])> {
+        self.committed_deal
+            .as_ref()
+            .map(|(m, c)| (m.as_slice(), c.as_slice()))
+    }
+    /// Step two: emit the committed deal.
+    pub fn emit_dealer(&mut self) -> Result<Vec<Send>> {
+        let (m, c) = self
+            .committed_deal
+            .clone()
+            .ok_or_else(|| bad("private sender emit without commit"))?;
+        self.dealer_with_coefficients(&m, &c)
+    }
+    pub fn dealer_emitted(&self) -> bool {
+        self.started
     }
     /// Caller must journal coefficients+plaintext and exact outbox before send.
     pub fn dealer_with_coefficients(

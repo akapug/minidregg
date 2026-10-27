@@ -195,7 +195,7 @@ pub struct Shape {
 }
 impl Shape {
     fn identity(&self) -> Vec<u8> {
-        let mut b = b"DREGG.TRIPLE.KING.PARTY.WAL.V1".to_vec();
+        let mut b = b"DREGG.TRIPLE.KING.PARTY.WAL.V2".to_vec();
         for v in [
             self.me as u64,
             self.n as u64,
@@ -305,11 +305,12 @@ impl KingMachine {
         let mut acss = vec![];
         let mut sh2t = vec![];
         for s in &shape.sources {
-            acss.push(AcssMachine {
-                state: AcssId::new(shape.me, s.dealer, shape.n, shape.f, &s.degree_f, seeds)?,
-            });
+            acss.push(AcssMachine::new(AcssId::new(
+                shape.me, s.dealer, shape.n, shape.f, &s.degree_f, seeds,
+            )?));
             sh2t.push(Sh2tMachine {
                 state: Sh2tId::new(shape.me, s.dealer, shape.n, shape.f, &s.degree_2f, batch)?,
+                pending: None,
             });
         }
         let k = shape.sources.len();
@@ -371,11 +372,11 @@ impl Machine for KingMachine {
                 }
                 let out = if tag == 0 {
                     let out = self.acss[k].apply(&inner)?;
-                    self.dealt_acss[k] |= inner_tag == 0;
+                    self.dealt_acss[k] |= inner_tag == 4;
                     out
                 } else {
                     let out = self.sh2t[k].apply(&inner)?;
-                    self.dealt_sh2t[k] |= inner_tag == 0;
+                    self.dealt_sh2t[k] |= inner_tag == 6;
                     out
                 };
                 Ok(wrap(tag, k, &out))
@@ -488,54 +489,46 @@ impl KingStore {
     /// Deal this holder's own preparation instances from its own entropy stream:
     /// uniform degree-f ACSS secrets and coefficients, degree-2f Sh2t zero
     /// polynomials (constant term zero, uniform higher coefficients), and the two
-    /// dealing seeds. Each instance is dealt once; a call after a crash between
-    /// the two journal records deals only what is missing, and the sends of what
-    /// was already dealt are in `replay_outboxes`.
+    /// dealing seeds. Each instance is dealt in two journal records: commit the
+    /// seed and inputs (nothing published), then emit. A call after a crash deals
+    /// only what is missing: an instance whose commit survived re-emits the same
+    /// deal from the committed seed and inputs, never from fresh entropy, and
+    /// the sends of what was already emitted are in `replay_outboxes`.
     pub fn deal_preparation(&mut self, e: &mut Entropy) -> Result<Vec<Out>> {
         let k = self.source_of_me()?;
         let f = self.machine().shape.f;
         let mut out = vec![];
         if !self.machine().dealt_acss[k] {
-            let polys = (0..self.machine().acss[k].state.count)
-                .map(|_| (0..=f).map(|_| e.field()).collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-            let seed = e.bytes32();
-            out.extend(self.acss_dealer(k, &polys, seed)?);
+            if !self.machine().acss[k].is_committed() {
+                let polys = (0..self.machine().acss[k].state.count)
+                    .map(|_| (0..=f).map(|_| e.field()).collect::<Vec<_>>())
+                    .collect::<Vec<_>>();
+                let seed = e.bytes32();
+                self.dealer_step(0, k, acss_id_store::commit_event(seed, &polys))?;
+            }
+            out.extend(self.dealer_step(0, k, acss_id_store::EMIT_EVENT.to_vec())?);
         }
         if !self.machine().dealt_sh2t[k] {
-            let polys = (0..self.machine().sh2t[k].state.count())
-                .map(|_| {
-                    let mut p = vec![Field(0)];
-                    p.extend((0..2 * f).map(|_| e.field()));
-                    p
-                })
-                .collect::<Vec<_>>();
-            let seed = e.bytes32();
-            out.extend(self.sh2t_dealer(k, &polys, seed)?);
+            if self.machine().sh2t[k].pending.is_none() {
+                let polys = (0..self.machine().sh2t[k].state.count())
+                    .map(|_| {
+                        let mut p = vec![Field(0)];
+                        p.extend((0..2 * f).map(|_| e.field()));
+                        p
+                    })
+                    .collect::<Vec<_>>();
+                let seed = e.bytes32();
+                self.dealer_step(1, k, sh2t_id_store::commit_event(seed, &polys))?;
+            }
+            out.extend(self.dealer_step(1, k, sh2t_id_store::EMIT_EVENT.to_vec())?);
         }
         Ok(out)
     }
-    /// Journal the dealer inputs of source `k` (this holder must be its dealer).
-    pub fn acss_dealer(
-        &mut self,
-        k: usize,
-        polys: &[Vec<Field>],
-        seed: [u8; 32],
-    ) -> Result<Vec<Out>> {
+    /// Journal one dealer record of instance `k` (tag 0 ACSS, 1 Sh2t).
+    fn dealer_step(&mut self, tag: u8, k: usize, inner: Vec<u8>) -> Result<Vec<Out>> {
         let k = self.machine().source(k as u8)?;
-        let mut e = vec![0, k as u8];
-        bytes(&acss_id_store::dealer_event(seed, polys), &mut e);
-        self.apply(&e)
-    }
-    pub fn sh2t_dealer(
-        &mut self,
-        k: usize,
-        polys: &[Vec<Field>],
-        seed: [u8; 32],
-    ) -> Result<Vec<Out>> {
-        let k = self.machine().source(k as u8)?;
-        let mut e = vec![1, k as u8];
-        bytes(&sh2t_id_store::dealer_event(seed, polys), &mut e);
+        let mut e = vec![tag, k as u8];
+        bytes(&inner, &mut e);
         self.apply(&e)
     }
     pub fn acss_receive(
@@ -825,7 +818,8 @@ mod tests {
                 continue;
             }
             let k = c.byte().unwrap() as usize;
-            if c.bytes().unwrap()[0] == 0 {
+            let inner_tag = c.bytes().unwrap()[0];
+            if inner_tag == if tag == 0 { 4 } else { 6 } {
                 if tag == 0 {
                     per[k].0 += 1;
                 } else {
@@ -834,6 +828,94 @@ mod tests {
             }
         }
         per
+    }
+    /// Byte offset of the end of each complete record of a King WAL.
+    fn record_ends(path: &Path) -> Vec<usize> {
+        let all = fs::read(path).unwrap();
+        let mut c = Cursor::new(&all).unwrap();
+        c.take(b"DREGG.TRANSITION.WAL\x01".len()).unwrap();
+        c.bytes().unwrap();
+        c.take(32).unwrap();
+        let mut pos = c.consumed();
+        let mut ends = vec![];
+        while pos + 8 <= all.len() {
+            let n = u64::from_le_bytes(all[pos..pos + 8].try_into().unwrap()) as usize;
+            pos += 8 + n + 32;
+            ends.push(pos);
+        }
+        ends
+    }
+    fn lone(dir: &Path) -> KingStore {
+        KingStore::open(
+            &dir.join("king.wal"),
+            shape(0),
+            &dir.join("no-anchor"),
+            &dir.join("no-burn"),
+        )
+        .unwrap()
+    }
+    fn shown(o: &[Out]) -> String {
+        format!("{o:?}")
+    }
+    #[test]
+    fn torn_emit_rederives_the_same_deal_never_a_redraw() {
+        let dir = scratch("torn-emit");
+        let root = crate::entropy::test_root();
+        let first = {
+            let mut s = lone(&dir);
+            s.deal_preparation(&mut root.fork(b"first")).unwrap()
+        };
+        let wal = dir.join("king.wal");
+        let ends = record_ends(&wal);
+        assert_eq!(ends.len(), 4, "ACSS commit, ACSS emit, Sh2t commit, Sh2t emit");
+        // The Sh2t emit record loses its last byte.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&wal)
+            .unwrap()
+            .set_len(ends[3] as u64 - 1)
+            .unwrap();
+        let mut s = lone(&dir);
+        assert!(s.journal.torn_tail().is_some());
+        let kept = s.replay_outboxes().unwrap();
+        let again = s.deal_preparation(&mut root.fork(b"different")).unwrap();
+        assert_eq!(
+            shown(&[kept.clone(), again].concat()),
+            shown(&first),
+            "the same deal, from the committed seed and inputs"
+        );
+        assert!(kept.iter().all(|o| matches!(o, Out::Acss { .. })));
+        assert!(s.deal_preparation(&mut root.fork(b"third")).unwrap().is_empty());
+    }
+    #[test]
+    fn torn_commit_published_nothing_so_a_fresh_deal_is_safe() {
+        let dir = scratch("torn-commit");
+        let root = crate::entropy::test_root();
+        let first = {
+            let mut s = lone(&dir);
+            s.deal_preparation(&mut root.fork(b"first")).unwrap()
+        };
+        let wal = dir.join("king.wal");
+        let ends = record_ends(&wal);
+        // The Sh2t commit record is torn mid-record; its emit goes with it.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&wal)
+            .unwrap()
+            .set_len(ends[1] as u64 + 5)
+            .unwrap();
+        let mut s = lone(&dir);
+        assert!(s.journal.torn_tail().is_some());
+        let kept = s.replay_outboxes().unwrap();
+        let again = s.deal_preparation(&mut root.fork(b"different")).unwrap();
+        assert!(!again.is_empty());
+        assert!(again.iter().all(|o| matches!(o, Out::Sh2t { .. })));
+        let acss_first = first
+            .iter()
+            .filter(|o| matches!(o, Out::Acss { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(shown(&kept), shown(&acss_first), "the ACSS deal is untouched");
     }
     /// The checked triples of the four holders are one coherent degree-f sharing
     /// of (a, b, c) with c = a*b.

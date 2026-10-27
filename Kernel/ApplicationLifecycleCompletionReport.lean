@@ -217,6 +217,19 @@ structure Checked (domain semantics : Digest) (publicKey : List UInt8)
   shape : signed.report.validFor begin = true
   keyLength : publicKey.length = 32
   signatureLength : signed.signature.length = 64
+  /-- The frame the custodian signature was checked over (the question the oracle was asked). -/
+  frame : List UInt8
+  frameExact : frame = signingFrame domain semantics signed.report
+
+/-- A `Checked` records the frame its signature was verified over: the report under exactly these
+`domain` and `semantics`, by the pinned key of the right length. The oracle's verdict itself is a runtime
+fact (`CheckedSignature`'s caveat); only `check` mints. -/
+theorem Checked.asked {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleBeginV2Ingress.Ingress}
+    (checked : Checked domain semantics publicKey begin) :
+    checked.signed.report.validFor begin = true ∧ publicKey.length = 32 ∧
+      checked.frame = signingFrame domain semantics checked.signed.report :=
+  ⟨checked.shape, checked.keyLength, checked.frameExact⟩
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (domain semantics : Digest) (publicKey : List UInt8)
@@ -227,7 +240,7 @@ def check (native : CredentialSignatureIO.NativeConfig)
       if shape : signed.report.validFor begin = true then
         match ← CredentialSignatureIO.verify native publicKey
             (signingFrame domain semantics signed.report) signed.signature with
-        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength⟩
+        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength, _, rfl⟩
         | .ok false => return .error "physical custodian signature refused"
         | .error _ => return .error "physical custodian verifier unavailable"
       else return .error "physical report/source mismatch"

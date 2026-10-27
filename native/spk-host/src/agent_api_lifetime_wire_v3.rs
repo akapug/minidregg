@@ -111,10 +111,10 @@ impl Request {
             } => {
                 if !decimal(operation_id)
                     || !sha256(binding_sha256)
-                    || !matches!(
+                    || !(matches!(
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
-                    )
+                    ) || crate::host_operations::dav_method(method))
                     || minidregg_signed_api_path::route("/", path).is_err()
                     || query.len() > 8192
                     || query.contains('#')
@@ -122,13 +122,17 @@ impl Request {
                     || headers.len() > 128
                     || !hex(body_hex)
                     || body_hex.len() / 2 > MAX_BODY
-                    || (matches!(method.as_str(), "GET" | "HEAD" | "DELETE")
-                        && !body_hex.is_empty())
+                    || (matches!(
+                        method.as_str(),
+                        "GET" | "HEAD" | "DELETE" | "COPY" | "MOVE" | "UNLOCK" | "OPTIONS"
+                    ) && !body_hex.is_empty())
                 {
                     return Err(refused("lifetime HTTP request refused"));
                 }
                 for header in headers {
-                    if !allowed_header(&header.name)
+                    if !(allowed_header(&header.name)
+                        || (crate::host_operations::dav_method(method)
+                            && crate::host_operations::dav_header_name(&header.name)))
                         || header.name.len() > 128
                         || header.value.len() > 8192
                         || !control_free(&header.value)

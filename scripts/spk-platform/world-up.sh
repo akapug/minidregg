@@ -91,7 +91,8 @@ sed "s|%h/.local/libexec/mini-spk-broker|$run/bin/mini-spk-broker|" "$repo/deplo
 systemctl --user daemon-reload
 systemctl --user start "mini-spk-broker@$store.service"
 socket=$root/runtime-$store/broker.sock
-for attempt in $(seq 1 100); do [[ ! -S $socket ]] || break; sleep 0.1; done
+# A loaded box starts the broker slowly: wait up to two minutes for its socket.
+for attempt in $(seq 1 1200); do [[ ! -S $socket ]] || break; sleep 0.1; done
 [[ -S $socket && $(stat -c '%u:%a' "$socket") == "$op_uid:600" ]] || { echo 'operator broker socket custody failed' >&2; exit 1; }
 # The Store's services, the workroom's metered tasks and the grain-host profile.
 BIN="$run/bin" GRAINS_ROOT="$root" BROKER_SOCKET="$socket" "$here/grain-journey.sh" phase "$run/w" services workroom profile

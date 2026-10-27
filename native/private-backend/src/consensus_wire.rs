@@ -27,6 +27,9 @@ impl<'a> Cursor<'a> {
         self.i = end;
         Ok(b)
     }
+    pub fn consumed(&self) -> usize {
+        self.i
+    }
     pub fn byte(&mut self) -> Result<u8> {
         Ok(self.take(1)?[0])
     }

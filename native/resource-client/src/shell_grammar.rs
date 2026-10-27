@@ -311,7 +311,7 @@ pub static IMPORT: Grammar = Grammar { verb: "import", leaves: &[
 ] };
 pub static EXPORT: Grammar = Grammar { verb: "export", leaves: &[
     Leaf { path: &["export"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: print proposals/ID/recipient-reference.json" },
-    Leaf { path: &["export", "world"], args: &[opt("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini export-world: your world as one tar at HOME/exports/NAME (default world.tar): every document as the Host renders it to you now and its signed view, every retained attempt with its standing, your room state, your public key and the custody statement, and a manifest with the world root; reads only" },
+    Leaf { path: &["export", "world"], args: &[opt("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini export-world: your world as one tar at HOME/exports/NAME (default world.tar): every document as the Host renders it to you now and its signed view, every retained attempt with its standing, your room state, your public key and the custody statement, and a manifest with the world root; reads only; one per member per 10 minutes, shared with the web /export (HOME/exports/.last-export)" },
 ] };
 pub static INBOX: Grammar = Grammar { verb: "inbox", leaves: &[
     Leaf { path: &["inbox"], args: &[], flags: &[], effect: Effect::Local, about: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
