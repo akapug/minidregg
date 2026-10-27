@@ -110,12 +110,16 @@ what the ssh shell reaches. Nothing listens on a public port except through Cadd
 
 Reused: `web.rs`'s `Site` renders (document, history, diff, board, room, inspect, search, resident),
 `editor.rs`/`create.rs` (pinned diff, durable attempt), the shared-name link repair and the
-escape hygiene L7 landed, `web_admission.rs`'s pool, `parse_request`, `shell::line` and its
-classifier, the door's `mini-session-run` spawn line and its refusals, the demo drop-in floor
-(`host/systemd/placeholders/web-gateway.conf`). Deleted in this series: the TCP loopback face and the
-per-launch path secret, `--read-only`, `--render-static` and `STATIC_HISTORY_PAGES`, `Face::Static`,
-`deploy/web/` (pubread timer, collect scripts, `Caddyfile.docuverse`), and the join page's "static
-snapshot refreshed every few minutes" sentence. Studio stays routed nowhere (its deletion is L2's, D7).
+escape hygiene L7 landed, `web_admission.rs`'s pool (now over TCP and Unix streams), `parse_request`,
+`mini shell` in script mode and its classifier, the door's `mini-session-run` spawn line and its
+refusals, the demo drop-in floor (`host/systemd/placeholders/web-gateway.conf`). Deleted in this
+series (commit "compost"): `--read-only` and its gate branches, `--public-origin`, `--render-static`,
+`render_static`/`write_snapshot`, `Face::Static`, `STATIC_HISTORY_PAGES`, `SNAPSHOT_NOTE`, their
+tests, `deploy/web/` (pubread timer, collect scripts, `Caddyfile.docuverse`), jweb's `ro-*` and
+`static-*` rows, and the join page's "static snapshot" sentences. Kept: the loopback TCP face with its
+per-launch secret, as the developer's and the journeys' direct face over the same `Site` (jweb,
+jdocuverse J24 drive the renders through it; it is one renderer behind two transports, not a twin).
+Studio stays routed nowhere in the body (its deletion is L2's, D7).
 
 ## 4. Files
 

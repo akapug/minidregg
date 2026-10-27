@@ -9,19 +9,17 @@
 //! Host's link-index views; history, a page at a past height and a diff are
 //! K-DOC-HISTORY's `at`-height reads.
 //!
-//! - **Member server** (`--listen 127.0.0.1:PORT`): reads plus the document
-//!   editor and creation POST forms, which use the native client's pinned diff
-//!   and durable attempt and sign under the workspace key. It binds 127.0.0.1
-//!   only, accepts only `Host: 127.0.0.1:PORT` / `localhost:PORT` (the
-//!   DNS-rebinding guard), refuses a foreign `Origin`, and every path sits under
-//!   a per-launch secret printed at start.
-//! - **Read-only server** (`--read-only`): the same reads; every POST and every
-//!   route that opens custody (drafts, editing, creation, resident requests)
-//!   refuses loudly before any read. `--public-origin https://HOST` replaces the
-//!   loopback Host/Origin pair with that one origin, and is accepted only here.
-//! - **Static snapshot** (`--render-static OUT`): the read-only pages the
-//!   workspace's subject may observe, written once as files (no listener, no
-//!   secret) for an edge to serve; see `render_static`.
+//! - **Loopback server** (`--listen 127.0.0.1:PORT`): the developer's and the
+//!   journeys' direct face over one workspace: reads plus the document editor and
+//!   creation POST forms, which use the native client's pinned diff and durable
+//!   attempt and sign under the workspace key. It binds 127.0.0.1 only, accepts
+//!   only `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard),
+//!   refuses a foreign `Origin`, and every path sits under a per-launch secret.
+//! - **Body** (`--body`, `web/body.rs`): the same renders as stage fragments plus
+//!   every verb action, for the web gateway (docs/WEB-FRONTEND-2026-10-27.md),
+//!   over the root-only listener `mini-web-spawn` hands it; `--anonymous` is the
+//!   public reader. The public web is this face through the gateway; there is no
+//!   static snapshot and no separate read-only server.
 
 mod editor;
 #[path = "web_admission.rs"]
@@ -40,11 +38,11 @@ mod body;
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
@@ -62,41 +60,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}\
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let root = absolute(&path(args.required("dir")?))?;
-    let read_only = args.optional("read-only").is_some();
-    let origin = args
-        .optional("public-origin")
-        .map(|value| value.into_string().map_err(|_| "--public-origin must be UTF-8".to_owned()))
-        .transpose()?
-        .map(|value| public_origin(&value))
-        .transpose()?;
-    if let Some(out) = args.optional("render-static") {
-        let depth = match args.optional("history-pages") {
-            Some(value) => value
-                .to_str()
-                .and_then(|text| text.parse::<usize>().ok())
-                .ok_or("--history-pages takes a count")?,
-            None => STATIC_HISTORY_PAGES,
-        };
-        args.finish()?;
-        let workspace = workspace::load(&root)?;
-        let site = Site {
-            mutations: Mutex::new(()),
-            home: None,
-            subject: workspace::member(&workspace, "subject")?.to_owned(),
-            root,
-            workspace,
-            token: String::new(),
-            front: Front { origins: origin.iter().cloned().collect(), read_only: true },
-            base: origin.unwrap_or_default(),
-            face: Face::Static,
-            shell: None,
-        };
-        return render_static(&site, &absolute(&path(out))?, depth);
-    }
     if args.optional("body").is_some() {
-        if read_only || origin.is_some() {
-            return Err("--body takes neither --read-only nor --public-origin: the gateway owns the origin; --anonymous is the public reader".into());
-        }
         return body::run(args, root);
     }
     let listen = args
@@ -105,11 +69,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .map_err(|_| "--listen must be UTF-8".to_owned())?;
     let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?;
     args.finish()?;
-    if origin.is_some() && !read_only {
-        return Err("refused --public-origin without --read-only: a signing, writable mini web behind a public \
-                    origin is the per-member design (cookie sessions under split tenancy), not this server"
-            .into());
-    }
     let address = loopback_address(&listen)?;
     let workspace = workspace::load(&root)?;
     let token = launch_token()?;
@@ -121,10 +80,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     if !matches!(bound, SocketAddr::V4(v4) if *v4.ip() == Ipv4Addr::LOCALHOST) {
         return Err(format!("bound {bound}, which is not 127.0.0.1"));
     }
-    let front = match origin {
-        Some(origin) => Front { origins: vec![origin], read_only },
-        None => Front::loopback(bound.port(), read_only),
-    };
+    let front = Front::loopback(bound.port(), false);
     let site = Site {
         mutations: Mutex::new(()),
         home,
@@ -137,21 +93,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         face: Face::Server,
         shell: None,
     };
-    println!(
-        "mini web: workspace for subject {} at http://127.0.0.1:{}/{}/{}",
-        site.subject,
-        bound.port(),
-        site.token,
-        match site.front.origins.as_slice() {
-            [public] => format!(" (addressed as {public}/{}/)", site.token),
-            _ => String::new(),
-        }
-    );
-    if site.front.read_only {
-        println!("mini web: --read-only: every POST and every draft, editing, creation and resident route refuses");
-    } else {
-        println!("mini web: the path secret changes every launch; document forms use your current authority");
-    }
+    println!("mini web: workspace for subject {} at http://127.0.0.1:{}/{}/", site.subject, bound.port(), site.token);
+    println!("mini web: the path secret changes every launch; document forms use your current authority");
     std::io::stdout().flush().map_err(|error| error.to_string())?;
     let site = Arc::new(site);
     let handler: Arc<dyn Fn(TcpStream, Instant) + Send + Sync> = Arc::new(move |stream, deadline| {
@@ -186,33 +129,13 @@ pub(crate) fn loopback_address(text: &str) -> Result<SocketAddr> {
     }
 }
 
-/// `--public-origin`: exactly `https://HOST[:PORT]`, lowercase, no path. It is
-/// the one origin a read-only server answers to behind the edge, and the base
-/// every static page links under.
-pub(crate) fn public_origin(text: &str) -> Result<String> {
-    let refuse = || format!("--public-origin {text:?} is not https://HOST[:PORT] (lowercase, no path)");
-    let authority = text.strip_prefix("https://").ok_or_else(refuse)?;
-    let (host, port) = authority.split_once(':').unwrap_or((authority, ""));
-    let label = |label: &str| {
-        !label.is_empty()
-            && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-    };
-    if host.split('.').all(label) && (port.is_empty() && !authority.ends_with(':') || port.parse::<u16>().is_ok_and(|p| p > 0 && !port.starts_with('0'))) {
-        Ok(text.to_owned())
-    } else {
-        Err(refuse())
-    }
-}
-
 fn launch_token() -> Result<String> {
     Ok(hex(&crate::fsio::random::<16>()?))
 }
 
-/// Who may address the server, and whether it may write. The `Host` a request
-/// carries must be one of the origins' authorities, and an `Origin`, if any,
-/// one of the origins: the loopback pair, or the one `--public-origin`.
+/// Who may address the loopback server (`Host` one of the origins' authorities,
+/// `Origin`, if any, one of the origins), and whether this face offers writes
+/// (`read_only` is the body's `--anonymous`: the public reader).
 pub(crate) struct Front {
     pub origins: Vec<String>,
     pub read_only: bool,
@@ -233,31 +156,12 @@ impl Front {
     }
 }
 
-/// What a read-only face says when it refuses.
-const READ_ONLY: &str = "this mini web runs --read-only: it answers reads only; drafts, editing, document \
-creation and resident requests happen in the ssh shell (`mini shell`)";
-
-/// Routes that open or change owner-private custody, or act as the member
-/// beyond a read: refused under `--read-only` before any custody is touched.
-fn custody_route(parts: &[&str]) -> bool {
-    matches!(
-        parts,
-        ["new-document", ..] | ["doc", _, "edit", ..] | ["studio", ..] | ["room", _, "new-document"] | ["room", _, "resident"]
-    )
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Face {
     Server,
-    Static,
     /// `--body`: fragments for the web gateway (`web/body.rs`); links under `/`.
     Body,
 }
-
-/// How many of a document's most recent history rows get their own `at` and
-/// diff pages in a static snapshot (each costs signed reads; older rows are
-/// listed without links). `--history-pages N` overrides.
-const STATIC_HISTORY_PAGES: usize = 16;
 
 struct Site {
     // Forms and draft-opening GETs may mutate owner-private custody. Complete
@@ -269,8 +173,8 @@ struct Site {
     subject: String,
     token: String,
     front: Front,
-    /// What every emitted link is prefixed with: `/SECRET` for a server, the
-    /// public origin (or empty) for a static snapshot.
+    /// What every emitted link is prefixed with: `/SECRET` for the loopback
+    /// server, nothing for the body (the gateway serves it at `/`).
     base: String,
     face: Face,
     /// The shell's paths, when this site runs verbs as the member (`--body`).
@@ -385,12 +289,6 @@ pub(crate) fn gate(request: &Request, front: &Front, token: &str) -> Gate {
         return Gate::Refuse(404, "not found".into());
     }
     let parts: Vec<_> = segments.iter().map(String::as_str).collect();
-    if front.read_only && request.method == "POST" {
-        return Gate::Refuse(405, READ_ONLY.into());
-    }
-    if front.read_only && custody_route(&parts) {
-        return Gate::Refuse(403, READ_ONLY.into());
-    }
     if request.method == "POST" {
         if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "preview"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
@@ -473,12 +371,6 @@ pub(crate) fn nav(base: &str, search: bool) -> String {
         format!("<a href=\"{base}/\">published documents</a>")
     }
 }
-
-/// What every static page says about itself (the D8 sentence included).
-const SNAPSHOT_NOTE: &str = "A read-only snapshot of the documents authors published to this box's public \
-reader (<code>delegate ID doc public observe 0</code>). Everything on this box is world-readable. A document \
-leaves the snapshot within one render period of <code>revoke ID doc public</code>. Writing happens in the hosted \
-ssh shell.";
 
 pub(crate) fn wrap(page: &Page, nav: &str, subject: &str) -> String {
     let context = match &page.stamp {
@@ -725,11 +617,9 @@ impl Site {
     }
 
     fn nav(&self) -> String {
-        let links = nav(&self.base, self.face == Face::Server);
         match self.face {
-            Face::Server => links,
+            Face::Server => nav(&self.base, true),
             Face::Body => String::new(),
-            Face::Static => format!("{links}<p class=note data-snapshot>{SNAPSHOT_NOTE}</p>"),
         }
     }
 
@@ -965,10 +855,7 @@ impl Site {
                     "<p class=note>{0} is not a document; its fields are below{2}.</p>\n{1}",
                     escape(name),
                     render_fields(&entries, false),
-                    match self.face {
-                        Face::Server | Face::Body => format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name)),
-                        Face::Static => String::new(),
-                    }
+                    format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name))
                 ),
             };
         }
@@ -1013,10 +900,7 @@ impl Site {
         } else {
             let n = escape(name);
             let edit = if self.front.read_only { String::new() } else { format!("<a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | ") };
-            let inspect = match self.face {
-                Face::Server | Face::Body => format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>"),
-                Face::Static => String::new(),
-            };
+            let inspect = format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>");
             body.push_str(&format!("<p class=note>{edit}<a href=\"{base}/doc/{n}/history\">history</a>{inspect}</p>\n"));
         }
         // The document is the one renderer's HTML, byte for byte what
@@ -1170,179 +1054,6 @@ impl Site {
             body,
         }
     }
-}
-
-/// A segment the gate would route (`[A-Za-z0-9-]+`): the only reference names
-/// a static snapshot turns into paths.
-fn routable(name: &str) -> bool {
-    !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-}
-
-/// `--render-static OUT`: every page the workspace's subject may observe, as
-/// files, for an edge's file server. Runs as the operator's `public` reader
-/// (deploy/web/): the documents in it are the ones authors delegated `observe`
-/// to that subject. A reference the Host refuses is not published; a client
-/// failure (no Host, a broken socket) fails the whole render and leaves the
-/// previous snapshot current.
-///
-/// Layout: `OUT/<sha256>/index.html`, `doc/N/index.html`,
-/// `doc/N/history/index.html`, and for the `depth` most recent history rows
-/// `at/H/doc/N/index.html` and `doc/N/diff/H-1/H/index.html`. The tree's name
-/// is the SHA-256 of its paths and bytes, so the same Store renders the same
-/// bytes under the same name; `OUT/current` is flipped to it by one rename,
-/// and only the snapshot it replaced is kept beside it.
-fn render_static(site: &Site, out: &Path, depth: usize) -> Result<()> {
-    let started = Instant::now();
-    let mut pages: BTreeMap<String, String> = BTreeMap::new();
-    let mut published: Vec<(String, String)> = Vec::new();
-    let mut reads = 0usize;
-    let page_or_fail = |page: Page, what: &str| -> Result<Page> {
-        if page.status == 502 {
-            return Err(format!("mini web: render-static stopped at {what}: {}", page.body));
-        }
-        Ok(page)
-    };
-    let nav = site.nav();
-    let file = |page: &Page| wrap(page, &nav, &site.subject);
-    for name in site.names() {
-        if !routable(&name) {
-            eprintln!("mini web: reference {name:?} is not a routable name; not published");
-            continue;
-        }
-        let page = page_or_fail(site.doc(&name, None), &format!("doc {name}"))?;
-        reads += 3;
-        if page.status != 200 {
-            eprintln!("mini web: {name} is not observable by this subject (status {}); not published", page.status);
-            continue;
-        }
-        let kind = workspace::reference(&site.root, &name)
-            .ok()
-            .and_then(|reference| reference["kind"].as_str().map(str::to_owned))
-            .unwrap_or_else(|| "?".to_owned());
-        pages.insert(format!("doc/{name}/index.html"), file(&page));
-        let history = match workspace::doc_history(&site.root, &site.workspace, &name) {
-            Ok(history) => history,
-            Err(error) if refusal_text(&error).is_some() => Value::Null,
-            Err(error) => return Err(format!("mini web: render-static stopped at history of {name}: {error}")),
-        };
-        reads += 1;
-        let heights: Vec<String> = history["rows"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|row| row["height"].as_str())
-            .filter(|height| routable(height) && height.parse::<u64>().is_ok_and(|h| h > 0))
-            .map(str::to_owned)
-            .collect();
-        let linked: BTreeSet<String> = heights.iter().rev().take(depth).cloned().collect();
-        for height in &linked {
-            let below = (height.parse::<u64>().unwrap_or(1) - 1).to_string();
-            let at = page_or_fail(site.doc(&name, Some(height)), &format!("{name} at {height}"))?;
-            pages.insert(format!("at/{height}/doc/{name}/index.html"), file(&at));
-            let diff = page_or_fail(site.diff(&name, &below, height), &format!("{name} diff {below}..{height}"))?;
-            pages.insert(format!("doc/{name}/diff/{below}/{height}/index.html"), file(&diff));
-            reads += 3;
-        }
-        let history_page = Page {
-            status: 200,
-            title: format!("history of {name}"),
-            stamp: Stamp::None,
-            body: if history.is_null() {
-                "<p class=note>The history of this document is not observable by the public reader.</p>\n".to_owned()
-            } else {
-                render_history(&site.base, &name, &history, &|height| linked.contains(height))
-            },
-        };
-        pages.insert(format!("doc/{name}/history/index.html"), file(&history_page));
-        published.push((name, kind));
-    }
-    let base = &site.base;
-    let mut rows = String::new();
-    for (name, kind) in &published {
-        rows.push_str(&format!(
-            "<tr data-ref=\"{n}\"><td><a href=\"{base}/doc/{n}\">{n}</a></td><td>{k}</td>\
-             <td><a href=\"{base}/doc/{n}/history\">history</a></td></tr>\n",
-            n = escape(name),
-            k = escape(kind),
-        ));
-    }
-    let index = Page {
-        status: 200,
-        title: "Published documents".into(),
-        stamp: Stamp::None,
-        body: format!(
-            "<table data-refs=\"{}\"><tr><th>name</th><th>kind</th><th>views</th></tr>\n{rows}</table>\n",
-            published.len()
-        ),
-    };
-    pages.insert("index.html".into(), file(&index));
-    let name = write_snapshot(out, &pages)?;
-    eprintln!(
-        "mini web: render-static {} page(s) for {} document(s), about {reads} signed read(s), in {:.1} s -> {}",
-        pages.len(),
-        published.len(),
-        started.elapsed().as_secs_f64(),
-        out.join(&name).display()
-    );
-    println!("{name}");
-    Ok(())
-}
-
-/// Write `pages` as `OUT/<digest>/...` (world-readable: the edge serves it),
-/// flip `OUT/current` to it by one rename, and keep only the snapshot it
-/// replaced. Returns the digest.
-fn write_snapshot(out: &Path, pages: &BTreeMap<String, String>) -> Result<String> {
-    use sha2::{Digest, Sha256};
-    use std::os::unix::fs::{symlink, PermissionsExt};
-    let mut digest = Sha256::new();
-    for (path, bytes) in pages {
-        digest.update((path.len() as u64).to_be_bytes());
-        digest.update(path.as_bytes());
-        digest.update((bytes.len() as u64).to_be_bytes());
-        digest.update(bytes.as_bytes());
-    }
-    let name = hex(&digest.finalize());
-    let io = |what: &str, path: &Path, error: std::io::Error| format!("{what} {}: {error}", path.display());
-    let open = |path: &Path, mode: u32| fs::set_permissions(path, fs::Permissions::from_mode(mode));
-    fs::create_dir_all(out).map_err(|e| io("cannot create", out, e))?;
-    let current = out.join("current");
-    let previous = fs::read_link(&current).ok();
-    let target = out.join(&name);
-    if !target.is_dir() {
-        let staging = out.join(format!(".staging-{name}-{}", std::process::id()));
-        for (path, bytes) in pages {
-            let file = staging.join(path);
-            let mut dir = file.parent().map(Path::to_path_buf);
-            fs::create_dir_all(dir.as_ref().unwrap()).map_err(|e| io("cannot create", &file, e))?;
-            while let Some(d) = dir.filter(|d| d.starts_with(&staging)) {
-                open(&d, 0o755).map_err(|e| io("cannot chmod", &d, e))?;
-                dir = d.parent().map(Path::to_path_buf);
-            }
-            fs::write(&file, bytes).map_err(|e| io("cannot write", &file, e))?;
-            open(&file, 0o644).map_err(|e| io("cannot chmod", &file, e))?;
-        }
-        fs::rename(&staging, &target).map_err(|e| io("cannot publish", &target, e))?;
-    }
-    if previous.as_deref() != Some(Path::new(&name)) {
-        let link = out.join(format!(".current-{}", std::process::id()));
-        let _ = fs::remove_file(&link);
-        symlink(&name, &link).map_err(|e| io("cannot link", &link, e))?;
-        fs::rename(&link, &current).map_err(|e| io("cannot flip", &current, e))?;
-    }
-    // Prune snapshots this renderer wrote (64-hex directories) other than the
-    // current one and the one it replaced.
-    let keep: Vec<std::ffi::OsString> = [Some(name.clone().into()), previous.map(|p| p.into_os_string())]
-        .into_iter()
-        .flatten()
-        .collect();
-    for entry in fs::read_dir(out).map_err(|e| io("cannot list", out, e))?.flatten() {
-        let file = entry.file_name();
-        let snapshot = file.to_str().is_some_and(|f| f.len() == 64 && f.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
-        if snapshot && !keep.contains(&file) && entry.path().is_dir() {
-            fs::remove_dir_all(entry.path()).map_err(|e| io("cannot prune", &entry.path(), e))?;
-        }
-    }
-    Ok(name)
 }
 
 fn reason(status: u16) -> &'static str {
@@ -1650,111 +1361,6 @@ moved 1002: after the start -> after 1001
             assert!(matches!(gate(&request("POST",target,&[("host","127.0.0.1:8080")]), &loopback(), "secret"),Gate::Route(_)));
         }
         assert!(matches!(gate(&request("POST","/secret/room/lab/new-document",&[("host","127.0.0.1:8080")]), &loopback(), "secret"),Gate::Refuse(405,_)));
-    }
-
-    const POST_ROUTES: &[&str] = &[
-        "/s3cret/doc/paper/edit/0123", "/s3cret/doc/paper/edit/0123/lookup", "/s3cret/doc/paper/edit/0123/action",
-        "/s3cret/new-document/0123", "/s3cret/new-document/0123/lookup", "/s3cret/new-document/0123/finish",
-        "/s3cret/studio/new", "/s3cret/studio/7/manifest", "/s3cret/studio/7/preview",
-    ];
-
-    /// `--read-only`: every POST route the member server accepts is a 405 with
-    /// the loud refusal, every custody-opening GET a 403, before any read;
-    /// plain reads still route.
-    #[test]
-    fn web_read_only_refuses_every_post_and_custody_route() {
-        let host = [("Host", "127.0.0.1:8080")];
-        let writable = loopback();
-        let read_only = Front::loopback(8080, true);
-        for target in POST_ROUTES {
-            assert!(matches!(gate(&request("POST", target, &host), &writable, "s3cret"), Gate::Route(_)), "{target}");
-            match gate(&request("POST", target, &host), &read_only, "s3cret") {
-                Gate::Refuse(405, text) => assert!(text.contains("--read-only") && text.contains("ssh shell"), "{text}"),
-                other => panic!("{target}: {other:?}"),
-            }
-        }
-        for target in ["/s3cret/new-document", "/s3cret/new-document/0123", "/s3cret/doc/paper/edit",
-            "/s3cret/doc/paper/edit/0123", "/s3cret/studio", "/s3cret/studio/7/module/0",
-            "/s3cret/room/lab/new-document", "/s3cret/room/lab/resident"] {
-            for method in ["GET", "HEAD"] {
-                assert!(matches!(gate(&request(method, target, &host), &read_only, "s3cret"), Gate::Refuse(403, _)), "{method} {target}");
-            }
-        }
-        for target in ["/s3cret/", "/s3cret/doc/paper", "/s3cret/doc/paper/history", "/s3cret/doc/paper/diff/1/2",
-            "/s3cret/at/2/doc/paper", "/s3cret/doc/paper/inspect", "/s3cret/room/lab", "/s3cret/board/b", "/s3cret/search"] {
-            assert!(matches!(gate(&request("GET", target, &host), &read_only, "s3cret"), Gate::Route(_)), "{target}");
-        }
-        // The wrong secret is still a 404 first, so a refusal reveals nothing.
-        assert!(matches!(gate(&request("POST", "/wrong/new-document/1", &host), &read_only, "s3cret"), Gate::Refuse(404, _)));
-    }
-
-    #[test]
-    fn web_public_origin_is_https_host_only() {
-        assert_eq!(public_origin("https://demo.dregg.online").unwrap(), "https://demo.dregg.online");
-        assert!(public_origin("https://demo.dregg.online:8443").is_ok());
-        for refused in ["http://demo.dregg.online", "https://demo.dregg.online/", "https://Demo.dregg.online",
-            "https://demo.dregg.online:", "https://demo.dregg.online:0", "https://demo..online", "https://-x.online",
-            "https://demo.dregg.online/doc", "https://a@b", "demo.dregg.online", "https://"] {
-            assert!(public_origin(refused).is_err(), "{refused}");
-        }
-    }
-
-    /// A read-only server behind the edge answers its one public origin and
-    /// nothing else: the loopback Host and an `http://` Origin are refused.
-    #[test]
-    fn web_public_origin_replaces_the_loopback_pair() {
-        let front = Front { origins: vec!["https://demo.dregg.online".into()], read_only: true };
-        let public = [("Host", "demo.dregg.online"), ("Origin", "https://demo.dregg.online")];
-        assert!(matches!(gate(&request("GET", "/s3cret/doc/a", &public), &front, "s3cret"), Gate::Route(_)));
-        assert!(matches!(gate(&request("GET", "/s3cret/doc/a", &[("Host", "127.0.0.1:8080")]), &front, "s3cret"), Gate::Refuse(421, _)));
-        assert!(matches!(
-            gate(&request("GET", "/s3cret/doc/a", &[("Host", "demo.dregg.online"), ("Origin", "http://demo.dregg.online")]), &front, "s3cret"),
-            Gate::Refuse(403, _)
-        ));
-        assert!(matches!(gate(&request("POST", "/s3cret/doc/a/edit/1", &public), &front, "s3cret"), Gate::Refuse(405, _)));
-    }
-
-    /// Static pages carry the snapshot note (the D8 sentence) and no search,
-    /// edit or secret link; links sit under the public origin.
-    #[test]
-    fn web_render_static_chrome_says_world_readable_and_links_under_origin() {
-        let html = wrap(&simple(200, "Published documents", "x"),
-            &format!("{}<p class=note data-snapshot>{SNAPSHOT_NOTE}</p>", nav("https://demo.dregg.online", false)), "9");
-        assert!(html.contains("Everything on this box is world-readable."));
-        assert!(html.contains("<a href=\"https://demo.dregg.online/\">published documents</a>"));
-        assert!(!html.contains("/search"));
-        let history = json!({"rows":[{"height":"5","subject":"7","transaction":"1","changes":[]},
-            {"height":"9","subject":"7","transaction":"2","changes":[]}]});
-        let page = render_history("https://demo.dregg.online", "paper", &history, &|h| h == "9");
-        assert!(page.contains("<a href=\"https://demo.dregg.online/at/9/doc/paper\">show</a>"));
-        assert!(!page.contains("/at/5/"));
-    }
-
-    /// Same pages, same bytes, same name; `current` flips by rename; only the
-    /// replaced snapshot is kept; files are readable by the edge.
-    #[test]
-    fn web_render_static_snapshot_is_deterministic_and_flips_current() {
-        use std::os::unix::fs::PermissionsExt;
-        let out = std::env::temp_dir().join(format!("mini-web-static-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&out);
-        let pages = |text: &str| BTreeMap::from([
-            ("index.html".to_owned(), format!("<p>{text}</p>")),
-            ("doc/paper/index.html".to_owned(), "paper".to_owned()),
-        ]);
-        let first = write_snapshot(&out, &pages("one")).unwrap();
-        assert_eq!(write_snapshot(&out, &pages("one")).unwrap(), first);
-        assert_eq!(fs::read_link(out.join("current")).unwrap(), Path::new(&first));
-        assert_eq!(fs::read_to_string(out.join("current/doc/paper/index.html")).unwrap(), "paper");
-        let mode = fs::metadata(out.join(&first).join("doc/paper/index.html")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o644);
-        assert_eq!(fs::metadata(out.join(&first).join("doc")).unwrap().permissions().mode() & 0o777, 0o755);
-        let second = write_snapshot(&out, &pages("two")).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(fs::read_link(out.join("current")).unwrap(), Path::new(&second));
-        let third = write_snapshot(&out, &pages("three")).unwrap();
-        assert!(!out.join(&first).exists(), "two snapshots back is pruned");
-        assert!(out.join(&second).is_dir() && out.join(&third).is_dir());
-        fs::remove_dir_all(&out).unwrap();
     }
 
     #[test]
