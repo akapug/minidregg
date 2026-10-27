@@ -47,6 +47,73 @@ pid, ipc, uts and cgroup namespace, `--clearenv`, read-only `/usr` and
 | Host paths | `/usr`, `/agent` read-only, `/workspace` read-write | unchanged plus `/scratch`; no `/etc`, `/home`, `/var`, `/run` except the two Mini sockets |
 | Secrets | the launcher refuses any mount that exposes controller state, custody keys, the task or Host config or the key broker | unchanged |
 
+**Why a shell inside the sandbox sees no host path.** DreggNet shipped a
+hosted raw shell and withdrew it after a red-team CRITICAL: `bash -c` on the
+operator's box could `cat` the operator's key files and a co-tenant's home by
+absolute path, then `curl` them out
+(`~/dev/DreggNet/docs/HOSTED-ISOLATION.md:7-41`). Scrubbing the environment
+and re-rooting `$HOME` stopped `~`-relative reads only. Its per-tenant bwrap
+redesign was never deployed. Here the confinement is the mount namespace
+itself, not anything inside the process. The worker's entire filesystem is what
+`deploy/grain-host/bwrap` builds (the exact arguments, in order):
+
+```
+/usr/bin/bwrap --die-with-parent --unshare-user --unshare-pid --unshare-ipc
+  --unshare-uts --unshare-cgroup --clearenv
+  --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib
+  --symlink usr/lib64 /lib64 --dev /dev --proc /proc
+  --ro-bind RUNTIME_ROOT /agent --bind WORKSPACE /workspace
+  --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
+  --disable-userns --cap-drop ALL --new-session              # sandbox tools only
+  --size 67108864 --tmpfs /tmp --size SCRATCH --tmpfs /scratch   # sandbox tools only
+  --dir /run --ro-bind PROVIDER_GATEWAY_SOCKET /run/mini-provider.sock
+  --ro-bind MCP_BROKER_SOCKET /run/mini-grain.sock
+  --unshare-net
+  -- /agent/grain-provider-bridge --socket /run/mini-provider.sock --port P
+     --seconds S -- /agent/hermes-acp --mini-sandbox-tools=…
+```
+
+So:
+- **There is no host root.** The new root is an empty tmpfs that bwrap
+  populates. Outside the listed binds nothing exists: no `/etc` (no `passwd`,
+  `shadow`, `ssl`, `resolv.conf`), no `/home`, `/root`, `/var`, `/srv`, `/opt`,
+  `/sys` and no host `/run`. `cat /etc/passwd` or `cat
+  /var/lib/mini/hermes/homes/hermes/keys/mini.key` fails with "No such file or
+  directory". The path is not refused; it does not exist.
+- **The binds.**
+  - `/usr` is the host's, read-only: system binaries and libraries, the same
+    world-readable files every user of the box can read, holding no secret.
+  - `/agent` is the operator-built runtime root (Hermes, its venv, the keyless
+    `grain-runtime` MCP server and the bridge), read-only.
+  - `/workspace` is this resident's own home and nobody else's.
+  - `/scratch` and `/tmp` are fresh tmpfs instances in this mount namespace.
+  - The launcher refuses to start (exit 77) if any bind contains the controller
+    state directory, a custody key, the task or Host config, or the key-broker
+    socket.
+- **Other residents stay invisible.** Another resident's workspace is never
+  bound. Its `/scratch` is a tmpfs inside another mount namespace, with no path
+  to it from here. `--unshare-pid` with a fresh `/proc` shows only this
+  sandbox's processes, so neither `/proc/PID/root` nor `/proc/PID/environ` of a
+  host or co-tenant process exists.
+- **No network.** `--unshare-net` leaves only loopback. A connect to any
+  address fails with `ENETUNREACH`. The only listener is the provider bridge on
+  loopback, which forwards to the gateway's Unix socket.
+- **No privilege inside.** `--cap-drop ALL` clears the namespace
+  capabilities. `--disable-userns` forbids nested user namespaces, so the
+  kernel's unprivileged-namespace surface is closed to the sandbox.
+  `--new-session` detaches it from any controlling terminal (no `TIOCSTI`).
+  `--die-with-parent` and the gate's `PR_SET_PDEATHSIG` mean nothing survives
+  the worker.
+- **Bounded by the class slice.** The unit's `MemoryMax`, `TasksMax`,
+  `CPUWeight`, `CPUQuota`, `LimitFSIZE` and `RuntimeMaxSec` are set by
+  systemd on the transient unit that holds the whole sandbox (table above).
+  tmpfs pages count against `MemoryMax`.
+- **What is not here:** no Landlock and no seccomp filter. The mount, pid, net,
+  ipc and user namespaces are the confinement, and an in-process rule would
+  only duplicate them. A kernel bug in a namespace primitive is the residual
+  risk, narrowed by `--disable-userns` and `--cap-drop ALL`. The planted-escape
+  rows in §6 are the regression check.
+
 **What a shell inside the sandbox can reach.** It can reach the same two
 sockets Hermes already reaches: `/run/mini-grain.sock` (the MCP broker, which
 forwards to the controller) and the provider bridge on loopback. The controller
@@ -166,7 +233,29 @@ dismissal, no worker of that task runs, so no scratch exists.
   for the amount, a new `ProviderMetering` leg, and its statement first. That
   is not built here.
 
-## 6. The journey row (J14_TOOLS=1)
+## 6. Code execution: in-sandbox Python or a Jupyter grain
+
+The other way to give an agent Python is the IPython Notebook SPK, which is
+being qualified as an app. It would be a Jupyter grain that a resident drives
+through `mini_application_api`.
+
+| | In-sandbox `execute_code` / `terminal` | Jupyter grain via `mini_application_api` |
+|---|---|---|
+| State | none past the prompt (scratch dies with the worker) | a kernel and `.ipynb` that persist in the grain's volume |
+| Record | only what the agent exports through Mini | every cell execution is an app dispatch: admitted, paid, receipted |
+| Containment | the worker sandbox above, under the resident's class | the SPK grain's own sandbox and class slice (spk-host), separate from the resident |
+| Cost | compute turns from the gate's CPU record | the app's dispatch tariff; frames unmetered by design |
+| Sharing | none (one resident, one prompt) | members open the same notebook; the work survives the resident |
+| Readiness | built here; needs only the runtime-root rebuild | the SPK is from 2016 and 178 MB, and stays unopened until its ceilings and a restart row pass (DREGGCLOUD.md:32) |
+| Fit | files and quick scripts: compute a number, transform a file, check a claim | long or shared analyses, results a room should keep |
+
+Both are wanted, and they compose: a resident uses the sandbox for quick
+scripts and files, and `mini_application_api` against a room's Jupyter grain
+when the work should persist or be shared. That needs no change here, because
+`mini_application_api` is already in the task catalogue. Only the Jupyter grain
+itself is still to be qualified.
+
+## 7. The journey row (J14_TOOLS=1)
 
 On top of J14's room: the founder sets `hermes/tools 7` and `hermes/compute
 10`; the controller ceiling allows all three toolsets; the scripted librarian
@@ -175,10 +264,22 @@ On top of J14's room: the founder sets `hermes/tools 7` and `hermes/compute
    /scratch/sum.py`; the tool result must read `338350`;
 2. `mini_doc_append` of `sum of squares 1..100 = 338350` to paper (one paid
    turn, receipted);
-3. planted: `terminal python3 -c "socket.create_connection(('1.1.1.1',443))"`
-   → `Network is unreachable`; `read_file /etc/shadow` and `terminal ls /home`
-   → no such file; `write_file /workspace/../x` resolves inside `/workspace`
-   only (the bind is the root).
+3. planted escapes, each run through the terminal and each required to fail
+   inside the sandbox:
+   - `cat /etc/passwd /etc/shadow` → no such file (no `/etc`);
+   - `ls -la HOST_KEYS_DIR` (the run's real controller keys directory, an
+     absolute host path) → no such file;
+   - `ls HOST_STATE_DIR` (the controller state with `admin.sock` and the
+     custody keys) → no such file;
+   - `ls /proc` → only the sandbox's own PIDs; `cat /proc/1/environ` holds no
+     `MINI_` variable;
+   - another resident's scratch: `ls OTHER_TASK_STATE/../workspace` and a
+     marker file planted in a second, concurrently running worker's `/scratch`
+     → neither path exists here;
+   - `python3 -c "import socket; socket.create_connection(('1.1.1.1',443),3)"`
+     → `Network is unreachable`; the same to the host's operator socket path →
+     no such file;
+   - `unshare -U true` → refused (`--disable-userns`).
 
 Rows: the session catalogue equals Mini ∪ the seven names; paper gains exactly
 the one line, authored by Hermes; the three planted results are refusals inside
@@ -188,7 +289,7 @@ fell by the doc turn plus `k ≥ 1` compute turns, whose count equals the gate's
 neither `sum.py` nor any `/scratch` path exists under the task's state or
 workspace on the host.
 
-## 7. Files
+## 8. Files
 
 - `deploy/grain-host/bwrap`: `MINI_GRAIN_SCRATCH_MIB`, the class limits,
   bounded `/tmp`, `LimitFSIZE`, `--meter` to the gate.

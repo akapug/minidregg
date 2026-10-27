@@ -143,7 +143,10 @@ sandbox=(
   --chdir /workspace --setenv HOME /workspace --setenv PATH /usr/bin:/bin
 )
 if [[ -n $scratch_mib ]]; then
-  sandbox+=(--size 67108864 --tmpfs /tmp --size $(( 10#$scratch_mib * 1048576 )) --tmpfs /scratch)
+  # A shell runs in here: no nested user namespaces, no capabilities, no
+  # controlling terminal (docs/HERMES-TOOLS-2026-10-27.md §2).
+  sandbox+=(--disable-userns --cap-drop ALL --new-session
+    --size 67108864 --tmpfs /tmp --size $(( 10#$scratch_mib * 1048576 )) --tmpfs /scratch)
 else
   sandbox+=(--tmpfs /tmp)
 fi
