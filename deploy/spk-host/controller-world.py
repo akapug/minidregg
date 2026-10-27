@@ -222,7 +222,7 @@ def occupied_ids():
         require(isinstance(h, dict) and h.get('removed') is True and isinstance(h.get('receipt'), dict), 'removed controller receipt malformed')
         r = h['receipt']; store = r.get('store')
         require(isinstance(store, str) and re.fullmatch('[0-9a-f]{16}', store) and path.name == store + '.json'
-                and r.get('protocol') == 'mini-spk-controller-v1' and r.get('name') == 'mini-c-' + store
+                and r.get('protocol') in ('mini-spk-controller-v1', 'mini-spk-controller-v2') and r.get('name') == 'mini-c-' + store
                 and ident(r.get('uid')) and ident(r.get('gid')), 'removed controller identity malformed')
         if store in reservations:
             require((r['uid'], r['gid']) == (reservations[store]['controllerUid'], reservations[store]['controllerGid']), 'removed controller reservation changed')
@@ -651,6 +651,7 @@ def consent_readiness(base, r, stage):
     observed = manager_properties(record['serviceUnit'])
     require(observed.get('ActiveState') == 'active' and observed.get('MainPID', '0').isdigit()
             and int(observed['MainPID']) > 0, 'consent service is not active')
+    require(re.fullmatch('[0-9a-f]{32}', observed.get('InvocationID', '')) is not None, 'consent invocation identity missing')
     pid = int(observed['MainPID'])
     proc = Path('/proc') / str(pid)
     require(proc.stat().st_uid == r['operatorUid'], 'consent process UID differs')
@@ -660,6 +661,8 @@ def consent_readiness(base, r, stage):
     ticks = int(raw_stat[raw_stat.rfind(')') + 2:].split()[19])
     m = metadata(Path(record['socket']), r['uid'], 0o600)
     require(stat.S_ISSOCK(m.st_mode), 'consent endpoint is not a socket')
+    again = (proc / 'stat').read_text()
+    require(int(again[again.rfind(')') + 2:].split()[19]) == ticks, 'consent process start changed')
     after = manager_properties(record['serviceUnit'])
     require(after.get('MainPID') == str(pid) and after.get('InvocationID') == observed.get('InvocationID')
             and after.get('ActiveState') == 'active', 'consent process changed during readiness')
@@ -841,10 +844,46 @@ def reserve_export(store, helper, attempt_text):
     return {'protocol': 'mini-spk-controller-evidence-v1', 'store': store, 'files': files}
 
 
+def preserve_consent_state(base, r):
+    if not has_consent(r):
+        return None
+    source = base / 'consent/anchors'
+    if not source.exists():
+        require(not source.is_symlink(), 'consent anchor directory is a dangling link')
+        return {'notCreated': True}
+    metadata(source, r['operatorUid'], 0o700)
+    limits = {'binding': 1024, 'frontier': 12_103_784, 'lock': 1}
+    children = list(source.iterdir())
+    require(len(children) <= 3 and all(p.name in limits for p in children), 'unexpected consent anchor files')
+    # Also retain partial initialization (binding without frontier); never turn a
+    # failed verifier into a fresh unanchored verifier by discarding its bytes.
+    data = {p.name: read_file(p, r['operatorUid'], limits[p.name], allow_empty=p.name == 'lock', required_mode=0o600)
+            for p in children}
+    require(not data.get('lock'), 'consent lock contents differ')
+    target = HISTORY / (r['store'] + '-consent')
+    if not target.exists():
+        mkdir(target)
+    ancestry(target, {0}); metadata(target, 0, 0o700)
+    require(set(p.name for p in target.iterdir()) <= set(data), 'retained consent archive differs')
+    for name, content in data.items():
+        path = target / name
+        if path.exists() or path.is_symlink():
+            require(read_file(path, 0, limits[name], allow_empty=name == 'lock', required_mode=0o600) == content,
+                    'retained consent archive bytes differ')
+        else:
+            write_new(path, content)
+    return {'directory': str(target), 'files': {name: {'sha256': sha(content), 'size': len(content)}
+                                               for name, content in data.items()}}
+
+
 def remove(store, helper):
     _, base, r = load(store, helper)
     stage = checked_units(base, r, partial=True)
     service(store, helper, 'stop')
+    if not HISTORY.exists():
+        mkdir(HISTORY)
+    ancestry(HISTORY, {0})
+    consent_archive = preserve_consent_state(base, r)
     # Only restore ACLs on the exact recorded objects and exact unchanged ACL.
     for path in sorted(base.glob('acl-[0-9][0-9][0-9].json'), reverse=True):
         intent = json.loads(read_file(path, 0, 16384))
@@ -875,7 +914,7 @@ def remove(store, helper):
     if not HISTORY.exists():
         mkdir(HISTORY)
     ancestry(HISTORY, {0})
-    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True}))
+    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True, 'consentArchive': consent_archive}))
     shutil.rmtree(base)
     return {'store': store, 'removedController': r['name'], 'receipt': str(HISTORY / (store + '.json'))}
 

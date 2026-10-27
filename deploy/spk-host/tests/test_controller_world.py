@@ -128,6 +128,93 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertIn('ReadWritePaths=', runtime)
         self.assertIn('RuntimeMaxSec=10800', runtime)
 
+    def consent_record(self):
+        r = self.record()
+        r['protocol'] = 'mini-spk-controller-v2'
+        r['units'] = c.names(r['store'], True)
+        return r
+
+    def test_v2_consent_units_keep_exact_pins_and_operator_boundary(self):
+        r = self.consent_record(); r['uid'] = r['gid'] = 100032
+        r['operatorUid'] = r['operatorGid'] = 1000
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        base = Path('/var/lib/mini-spk-worlds/abababababababab/controller')
+        units = c.unit_bytes(r, base, Path('/operator/private.sock'), pins)
+        runtime, _, _, listener, service = [units[n].decode() for n in r['units']]
+        self.assertIn('User=1000\nGroup=1000', service)
+        self.assertIn('SocketUser=100032', listener)
+        self.assertIn('SocketMode=0600', listener)
+        self.assertIn('--anchors ' + str(base / 'consent/anchors'), service)
+        self.assertIn('ReadWritePaths=' + str(base / 'consent/anchors') + '\n', service)
+        self.assertNotIn('ReadWritePaths=/operator', service)
+        self.assertIn('--consent-sha256 ' + pins['providerSha256'], service)
+        self.assertIn('--config-sha256 ' + pins['configSha256'], service)
+        for key, value in c.consent_environment(r, base, pins).items():
+            self.assertIn(f'Environment={key}={value}\n', runtime)
+        self.assertIn('MINI_CONSENT_PEER_UID=0', runtime)
+        self.assertNotIn('MINI_THIN_CONSENT', runtime)
+        with self.assertRaises(ValueError): c.unit_bytes(r, base, Path('/operator/private.sock'))
+        legacy = self.record()
+        self.assertEqual(c.binary_names(legacy), c.BINS)
+        self.assertEqual(len(c.unit_bytes(legacy, base, Path('/operator/private.sock'))), 3)
+        self.assertEqual(c.consent_environment(legacy, base, {}), {})
+        self.assertIn(c.CONSENT_BIN, c.binary_names(r))
+
+    def test_v2_checks_both_config_copies_and_provider_before_use(self):
+        r = self.consent_record()
+        config = b'{"exact":"host-settings"}'
+        binaries = {name: ('binary:' + name).encode() for name in c.binary_names(r)}
+        unit_data = {name: ('unit:' + name).encode() for name in r['units']}
+        stage = {'units': {n:c.sha(v) for n,v in unit_data.items()},
+                 'binaries': {n:c.sha(v) for n,v in binaries.items()},
+                 'consent': {'providerSha256':c.sha(binaries[c.CONSENT_BIN]), 'configSha256':c.sha(config)}}
+        paths = {self.root/'stage.json':c.encoded(stage),
+                 **{c.UNITS/n:v for n,v in unit_data.items()},
+                 **{self.root/'bin'/n:v for n,v in binaries.items()},
+                 self.root/'consent/config.json':config, self.root/'host-config.json':config}
+        def read(path, owner, maximum, *args, **kwargs): return paths[path]
+        with patch.object(c, 'read_file', side_effect=read), patch.object(c, 'metadata'):
+            self.assertEqual(c.checked_units(self.root, r)['consent'], stage['consent'])
+            for path in (self.root/'host-config.json', self.root/'consent/config.json',
+                         self.root/'bin'/c.CONSENT_BIN):
+                old = paths[path]; paths[path] = b'changed'
+                with self.subTest(path=path), self.assertRaises(ValueError): c.checked_units(self.root, r)
+                paths[path] = old
+
+    def test_v2_readiness_does_not_claim_native_admission(self):
+        r = self.consent_record()
+        pins = {'providerSha256':'12'*32,'configSha256':'34'*32}
+        record = c.consent_record(self.root, r, {'consent':pins})
+        self.assertEqual(record['serviceUid'], r['operatorUid'])
+        self.assertEqual(record['controllerUid'], r['uid'])
+        self.assertEqual(record['activationPeerUid'], 0)
+        with patch.object(c, 'manager_properties', return_value={'ActiveState':'failed','MainPID':'0'}):
+            with self.assertRaises(ValueError): c.consent_readiness(self.root, r, {'consent':pins})
+
+    def test_consent_archive_preserves_partial_initialization_and_refuses_drift(self):
+        r = self.consent_record()
+        source = self.root/'consent/anchors'; source.mkdir(parents=True, mode=0o700)
+        (source/'binding').write_bytes(b'fixed-binding'); (source/'binding').chmod(0o600)
+        (source/'lock').write_bytes(b''); (source/'lock').chmod(0o600)
+        history = self.root/'history'; history.mkdir(mode=0o700)
+        original_read, original_mkdir, original_write = c.read_file, c.mkdir, c.write_new
+        def read(path, owner, *args, **kwargs): return original_read(path, self.uid, *args, **kwargs)
+        def mkdir(path, *args, **kwargs): return original_mkdir(path, self.uid, self.gid, kwargs.get('mode', 0o700))
+        def write(path, data, *args, **kwargs): return original_write(path, data, self.uid, self.gid)
+        original_meta = c.metadata
+        def meta(path, owner=None, mode=None): return original_meta(path, self.uid if owner == 0 else owner, mode)
+        with patch.object(c, 'HISTORY', history), patch.object(c, 'ancestry'), patch.object(c, 'metadata', side_effect=meta), \
+                patch.object(c, 'read_file', side_effect=read), patch.object(c, 'mkdir', side_effect=mkdir), patch.object(c, 'write_new', side_effect=write):
+            receipt = c.preserve_consent_state(self.root, r)
+            self.assertEqual(set(receipt['files']), {'binding','lock'})
+            self.assertEqual((Path(receipt['directory'])/'binding').read_bytes(), b'fixed-binding')
+            self.assertEqual(c.preserve_consent_state(self.root, r), receipt)
+            (source/'binding').write_bytes(b'changed-binding')
+            with self.assertRaises(ValueError): c.preserve_consent_state(self.root, r)
+            (source/'unknown').write_bytes(b'unknown')
+            with self.assertRaises(ValueError): c.preserve_consent_state(self.root, r)
+        self.assertIsNone(c.preserve_consent_state(self.root, self.record()))
+
     def test_tool_uses_owned_exclusive_regular_request_file(self):
         r = self.record(); (self.root / 'tool-requests').mkdir(mode=0o700)
         args = self.file('arguments.json', b'{"family":"oracle-session"}')
