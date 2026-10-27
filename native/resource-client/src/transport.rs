@@ -773,29 +773,9 @@ pub(crate) fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists
     )
 }
 
+/// `mini_sdk::private::clear_stale_socket`.
 pub(crate) fn clear_stale_socket(path: &Path) -> Result<(), String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("cannot inspect socket {}: {error}", path.display())),
-    };
-    if !metadata.file_type().is_socket() || !mini_sdk::private::owned(&metadata) {
-        return Err("socket path is not an owned Unix socket".to_owned());
-    }
-    match UnixStream::connect(path) {
-        Ok(_) => Err("another service still listens on socket".to_owned()),
-        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-            let current = fs::symlink_metadata(path)
-                .map_err(|error| format!("cannot recheck stale socket: {error}"))?;
-            if !current.file_type().is_socket()
-                || (current.dev(), current.ino()) != (metadata.dev(), metadata.ino())
-            {
-                return Err("socket path changed during stale recovery".to_owned());
-            }
-            fs::remove_file(path).map_err(|error| format!("cannot remove stale socket: {error}"))
-        }
-        Err(error) => Err(format!("cannot prove socket stale: {error}")),
-    }
+    Ok(mini_sdk::private::clear_stale_socket(path)?)
 }
 
 pub(crate) fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
@@ -1973,64 +1953,9 @@ fn serve_connection(
     }
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd"
-))]
+/// The peer's uid from the kernel (`mini_sdk::private::peer_uid`).
 pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
-    unsafe extern "C" {
-        fn getpeereid(socket: i32, uid: *mut u32, gid: *mut u32) -> i32;
-    }
-    let mut uid = 0;
-    let mut gid = 0;
-    if unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
-        return Err(format!(
-            "operator peer credential: {}",
-            io::Error::last_os_error()
-        ));
-    }
-    Ok(uid)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
-    #[repr(C)]
-    struct Ucred {
-        pid: i32,
-        uid: u32,
-        gid: u32,
-    }
-    unsafe extern "C" {
-        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut Ucred, length: *mut u32) -> i32;
-    }
-    let mut credential = Ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut length = std::mem::size_of::<Ucred>() as u32;
-    if unsafe { getsockopt(stream.as_raw_fd(), 1, 17, &mut credential, &mut length) } != 0
-        || length as usize != std::mem::size_of::<Ucred>()
-    {
-        return Err(format!(
-            "operator peer credential: {}",
-            io::Error::last_os_error()
-        ));
-    }
-    Ok(credential.uid)
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd"
-)))]
-pub(crate) fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
-    Err("operator peer credentials are unavailable on this platform".into())
+    Ok(mini_sdk::private::peer_uid(stream)?)
 }
 
 #[cfg(test)]

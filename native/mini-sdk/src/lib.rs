@@ -26,9 +26,10 @@
 //! # Offline core and `native`
 //!
 //! With default features the crate is the OFFLINE CORE and builds on `wasm32-unknown-unknown`:
-//! no Lean link, no processes, no filesystem, no sockets. Feature `native` adds the
-//! consent-process client, the local Host codec client, the operator-socket client, the
-//! filesystem custody store, and the end-to-end [`flow`].
+//! no Lean link, no processes, no filesystem, no sockets. Feature `native` adds the member's
+//! local processes (the storeless codec, [`local`], and the consent provider with its retained
+//! anchors and resident provider, [`consent`]), the operator-socket client and the filesystem
+//! custody store.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 pub mod confirm;
@@ -52,6 +53,8 @@ pub mod durable;
 #[cfg(feature = "native")]
 pub mod fsread;
 #[cfg(feature = "native")]
+pub mod local;
+#[cfg(feature = "native")]
 pub mod lock;
 #[cfg(feature = "native")]
 pub mod private;
@@ -59,12 +62,6 @@ pub mod private;
 pub mod random;
 #[cfg(feature = "native")]
 pub mod secret;
-#[cfg(feature = "native")]
-pub mod flow;
-#[cfg(feature = "native")]
-pub mod frame;
-#[cfg(feature = "native")]
-pub mod host;
 #[cfg(feature = "lean-codec")]
 pub mod lean_codec;
 #[cfg(feature = "native")]
