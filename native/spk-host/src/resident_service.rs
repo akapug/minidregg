@@ -1963,6 +1963,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     agent_fds.push(checkpoint.as_raw_fd());
     let route_control_index = agent_fds.len();
     agent_fds.push(route_control.as_raw_fd());
+    // The grain's publishing socket (apps/<app>/www.sock): anonymous GET/HEAD of
+    // the app's /var/www, read through the app-identity worker's descriptor.
+    let www = crate::www_publish::WwwListener::bind(&crate::www_publish::socket_for_journal(&config.journal_dir)?)?;
+    let www_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.listener));
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
@@ -2006,6 +2011,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         };
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
+        }
+        if index == www_index {
+            if let Err(error) = www.accept_one(|| resident.open_www()) {
+                eprintln!("spk-host: publishing connection refused: {error}");
+            }
+            return Ok(None);
         }
         if index == checkpoint_index {
             checkpoint.poll_once(&journal, || {

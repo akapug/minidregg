@@ -378,6 +378,9 @@ impl ResidentProcess {
     pub(crate) fn child_pid(&self) -> u32 {
         self.child.pid()
     }
+    pub(crate) fn open_www(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
+        self.child.open_www()
+    }
 }
 
 impl PreparedResident {
