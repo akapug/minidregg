@@ -310,6 +310,7 @@ impl KingMachine {
             });
             sh2t.push(Sh2tMachine {
                 state: Sh2tId::new(shape.me, s.dealer, shape.n, shape.f, &s.degree_2f, batch)?,
+                pending: None,
             });
         }
         let k = shape.sources.len();
