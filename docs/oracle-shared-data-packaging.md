@@ -6,21 +6,23 @@ and grain lifecycle. It does not contain SPK chunks, reconstruct stores in each
 grain's mutable volume, or supply a host path to mount.
 
 The input is an immutable appliance with its original `APPLIANCE.json`. The
-explicit selection in `deploy/oracle/data-selection.json` names 26 public data
+explicit selection in `deploy/oracle/data-selection-v5.json` names 26 public data
 files: SQLite stores, the WordNet archive and Gutenberg source texts. For the
-October 27 final-v3 candidate, they total 15,046,949,326 bytes; 89,636,654 bytes of Oracle
+October 27 candidate-u3-v3, they total 15,046,949,326 bytes; 90,144,917 bytes of Oracle
 code and other assets remain in the runtime before Python and the app bridge.
 The original appliance and its receipt are preserved.
 
-The [v4 package receipt](../deploy/oracle/runtime-v4-receipt.json) records the
-actual signed artifact: 91,944,584 compressed bytes and 501,347,632 decoded bytes,
-with all 15,155 members independently checked. It fits Mini's existing standard
+The [v5 package receipt](../deploy/oracle/runtime-v5-receipt.json) records the
+actual signed artifact: 96,985,616 compressed bytes and 519,614,440 decoded bytes,
+with all 15,358 members independently checked. It fits Mini's existing standard
 256/768 MiB limits. The receipt is packaging evidence; the separate acceptance
 journey establishes what runs through Mini's current admission and calling path.
-The immutable v3 package is preserved. V4 changes JSON Accept negotiation and
-the signed WordNet data path; Oracle source and the public dataset are unchanged.
+Earlier immutable packages are preserved. V5 adds structured operation routes,
+pinned sibling providers and Pillow, and repaired Oracle source. The 2,627,008-byte
+`root/relstore/date_precision_v1.json` sidecar stays in the signed runtime;
+the public dataset inventory is unchanged.
 The host also needs the native response-header serialization fix pinned by the
-v4 composed transport tests.
+composed transport tests.
 
 ## Signed attachment and path layout
 
@@ -104,7 +106,7 @@ The preparation steps use explicit operator inputs:
 ```sh
 python3 -B deploy/oracle/stage.py data-inventory \
   --appliance "$APPLIANCE" --appliance-sha256 "$APPLIANCE_RECEIPT_SHA256" \
-  --selection deploy/oracle/data-selection.json --out "$NEW_DATA_INVENTORY"
+  --selection deploy/oracle/data-selection-v5.json --out "$NEW_DATA_INVENTORY"
 
 python3 -B deploy/oracle/stage.py stage \
   --appliance "$APPLIANCE" --appliance-sha256 "$APPLIANCE_RECEIPT_SHA256" \
@@ -136,8 +138,8 @@ inventory, including data declaration and symlink targets. Its receipt includes
 the shared-data inventory digest and exact raw package SHA-256. Mini must import
 that exact package hash; a pathname alone is not its identity.
 
-The v3 and v4 post-pack checks passed with `standard-v1`. Actual installation also needs
-time to materialize 15,155 members: the first v3 Mini attempt exceeded the standard
+The v3, v4 and v5 post-pack checks passed with `standard-v1`. Actual installation also needs
+time to materialize the members: the first v3 Mini attempt exceeded the standard
 120-second intake deadline after preparing INSTALL. Use the operator-owned
 broker configuration key `importProfile` with value `operator-appliance-v1`
 for this runtime, giving intake 1,800 seconds. The acceptance harness sets this
@@ -160,8 +162,8 @@ START had occurred. The acceptance lane retained that attempt's evidence and
 resumed the exact prepared record under the operator profile, with unchanged
 package and inventory identities. Later v3 attempts reached START and enrollment,
 then exposed the host's refusal to serialize the bridge's status header. The
-host repair and v4 bridge pass composed transport fixtures; a complete v4 Mini
-receiving journey remains separate evidence.
+host repair and subsequent bridges pass composed transport fixtures; a complete
+v5 Mini receiving journey remains separate evidence.
 
 The packaging tests exercise explicit public-data selection, preserved lookup
 paths, signed symlink and attachment bytes, source-mutation refusal, genuine SPK

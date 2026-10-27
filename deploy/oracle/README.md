@@ -10,14 +10,15 @@ per-member limit. The split recipe keeps 26 public data files outside the SPK an
 signs explicit links to the fixed `/opt/oracle-data` mount. It does not chunk or
 reconstruct stores. See the [shared-data contract and recipe](../../docs/oracle-shared-data-packaging.md).
 
-The [v4 runtime receipt](runtime-v4-receipt.json) records the actual signed Linux
-artifact and independent verification of all 15,155 members. Its 91.9 MB
+The [v5 runtime receipt](runtime-v5-receipt.json) records the actual signed Linux
+artifact and independent verification of all 15,358 members. Its 97.0 MB
 compressed size fits the existing 256 MiB limit; the 15 GB public stores remain
 in their separately pinned shared dataset. Mini acceptance and public deployment
-are separate outcomes. V4 adds JSON Accept negotiation and the fixed WordNet
-data path; the [v3 receipt](runtime-v3-receipt.json) remains historical evidence.
+are separate outcomes. V5 adds structured discovery/invocation, pinned sibling
+providers and Pillow, plus the repaired source and date metadata. The
+[v4 receipt](runtime-v4-receipt.json) and older artifacts remain preserved.
 The host must also include the native status-header serialization fix recorded
-in the v4 receipt.
+in the receipt.
 
 The [actual receiving run](../../docs/oracle-shared-data-2026-10-27.md) reached
 admitted Oracle queries in two grains, shared read-only data, and separate
@@ -75,7 +76,7 @@ small pinned packer from `pack/` in independent source snapshots.
 ```sh
 python3 -B deploy/oracle/stage.py data-inventory \
   --appliance "$APPLIANCE" --appliance-sha256 "$APPLIANCE_RECEIPT_SHA256" \
-  --selection deploy/oracle/data-selection.json --out "$NEW_DATA_INVENTORY"
+  --selection deploy/oracle/data-selection-v5.json --out "$NEW_DATA_INVENTORY"
 
 python3 -B deploy/oracle/stage.py stage \
   --rootfs "$ROOTFS" --rootfs-manifest "$ROOTFS_LOCK" --rootfs-sha256 "$ROOTFS_LOCK_SHA256" \
@@ -143,9 +144,9 @@ path or grant itself access to another dataset.
 
 ## Operator import and recovery
 
-Keep `--profile standard-v1` for the post-pack verification above: the v4
+Keep `--profile standard-v1` for the post-pack verification above: the v5
 artifact passed those archive bounds. That check does not establish how long
-Mini needs to materialize its 15,155 members. For this runtime, select
+Mini needs to materialize its 15,358 members. For this runtime, select
 `"importProfile": "operator-appliance-v1"` in the operator-owned broker
 `config.json`. The intake deadline is then 1,800 seconds instead of the default
 120 seconds. This is a physical intake budget selected by the operator, not a
@@ -237,12 +238,12 @@ executed. The bridge's original HTTP status header and complete JSON reply
 preserve busy/failure outcomes. Mini may omit large bodies from model text
 presentation while retaining the exact native response.
 
-The v5 source also exposes relative `GET operations` (bounded filters and
+The signed v5 runtime also exposes relative `GET operations` (bounded filters and
 pagination), `GET operations/<id>`, and `POST invoke` for structured operations.
 The request ceiling is 65,536 bytes in both the bridge and signed launcher.
 See the [bridge route contract](../../docs/oracle-appliance-bridge.md) for exact
-query fields and ID grammar. These are prepared v5 changes; the immutable v4
-receipt does not claim these routes.
+query fields and ID grammar. Its receiving journey has separate acceptance
+evidence; the immutable v4 receipt does not claim these routes.
 
 ## Narrow verification
 
