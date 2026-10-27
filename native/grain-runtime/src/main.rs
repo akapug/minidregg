@@ -56,6 +56,7 @@ mod publication_refusal_tests;
 mod resource_tools;
 mod shared_app_refs;
 mod foreground_session_recovery;
+mod birth_refusal;
 mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -552,6 +553,8 @@ struct Journal {
     birth_operation: Option<BirthOperation>,
     #[serde(default)]
     birth_pending: Option<BirthPending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    birth_refusal: Option<birth_refusal::BirthRefusal>,
     #[serde(default)]
     born_resources: Vec<BornResourceRecord>,
     #[serde(default)]
@@ -2375,6 +2378,7 @@ impl Journal {
             birth_next_ordinal: BTreeMap::new(),
             birth_operation: None,
             birth_pending: None,
+            birth_refusal: None,
             born_resources: Vec::new(),
             workspace_proposals: Vec::new(),
             workspace_attempt: None,
@@ -6754,15 +6758,8 @@ impl Runtime {
             reported: false,
         }))
     }
-    fn confirmed_birth_record(
-        &self,
-        pending: &Pending,
-        origin: &BirthPending,
-        outcome_path: &Path,
-    ) -> Result<Option<BornResourceRecord>> {
-        if pending.operation != "tool birth" {
-            return Ok(None);
-        }
+    fn verify_birth_origin(&self, pending: &Pending, origin: &BirthPending) -> Result<()> {
+        if pending.operation != "tool birth" { return Err("not a native birth attempt".into()); }
         origin.validate_members()?;
         let tool = self.config.tool_task.as_ref().ok_or("tool task absent")?;
         if pending.operation_id != origin.operation_id
@@ -6907,6 +6904,13 @@ impl Runtime {
                 );
             }
         }
+        Ok(())
+    }
+    fn confirmed_birth_record(
+        &self, pending: &Pending, origin: &BirthPending, outcome_path: &Path,
+    ) -> Result<Option<BornResourceRecord>> {
+        if pending.operation != "tool birth" { return Ok(None); }
+        self.verify_birth_origin(pending, origin)?;
         let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
         let outcome: Value = serde_json::from_slice(&outcome_bytes)
             .map_err(|e| format!("resource birth outcome: {e}"))?;
@@ -10551,10 +10555,18 @@ impl Runtime {
         // proves no Mini birth submit could have started may return the
         // consumed tail ordinal. The ordinal and marker change in one journal
         // rename below; an interrupted save leaves the old marker intact.
-        persist_retired_no_birth_operation(
+        let mut terminal_refusal = self.journal.birth_refusal.clone();
+        if let Some(refusal) = terminal_refusal.as_mut() {
+            refusal.retain_terminal(self.journal.birth_operation.as_ref().unwrap(), terminal)?;
+            refusal.bind_terminal_files(&self.config.state_dir, self.journal.next_operation_id.checked_sub(1).ok_or("terminal query ID absent")?)?;
+        }
+        let previous = std::mem::replace(&mut self.journal.birth_refusal, terminal_refusal);
+        let result = persist_retired_no_birth_operation(
             &self.config.state_dir.join("journal.json"),
             &mut self.journal,
-        )
+        );
+        if result.is_err() { self.journal.birth_refusal = previous; }
+        result
     }
 
     fn create_resource(
@@ -10641,7 +10653,8 @@ impl Runtime {
                 );
             }
         }
-        if self.journal.birth_operation.is_some()
+        if self.journal.birth_refusal.is_some()
+            || self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
@@ -10972,6 +10985,9 @@ impl Runtime {
                     .ok()
                     .flatten();
                 if explicit || prepared.is_some() {
+                    if let Some(refusal) = prepared {
+                        self.retain_birth_refusal(&origin, refusal)?;
+                    }
                     // Keep birth_operation through the signed zero settlement.
                     self.journal.birth_pending = None;
                     self.journal.tool_pending = None;
@@ -13049,6 +13065,12 @@ impl Runtime {
             Ok(result)
         })();
         self.foreground_operation = None;
+        let definite_refusal = if outcome.is_err() { self.completed_birth_refusal_result() } else { Ok(None) };
+        let (outcome, completion_charge) = match definite_refusal {
+            Ok(Some(result)) => (Ok(result), "0"),
+            Ok(None) => (outcome, profile.charge.as_str()),
+            Err(error) => (Err(error), profile.charge.as_str()),
+        };
         let result = match outcome {
             Ok(value) => value,
             Err(error) => {
@@ -13097,29 +13119,7 @@ impl Runtime {
                 ));
             }
         };
-        let result_path = self
-            .config
-            .state_dir
-            .join(format!("foreground-{operation_id:016}.result.json"));
-        let (result, result_bytes) = bounded_foreground_result(result)?;
-        write_new(&result_path, &result_bytes)?;
-        let attempt = self.journal.foreground_attempt.as_mut().unwrap();
-        attempt.result_sha256 = Some(sha256_bytes(&result_bytes)?);
-        attempt.result_path = Some(result_path);
-        self.save()?;
-        if !self.claim_completion(&profile.charge)? {
-            self.disconnect()?;
-            return Err("hard disconnect before foreground settlement".into());
-        }
-        self.transition(
-            json!({"type":"settle","charge":profile.charge}),
-            "settle",
-            "foreground tool complete",
-        )?;
-        self.journal.prompt_witness = None;
-        self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Definite;
-        self.save()?;
-        self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
+        let result = self.complete_foreground_result(result, completion_charge)?;
         self.finish_reconnected_mode()?;
         let _queued = self.output.as_ref().is_some_and(|output| {
             output.try_tool_event_for(
