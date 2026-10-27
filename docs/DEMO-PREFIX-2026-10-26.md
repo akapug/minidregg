@@ -33,8 +33,10 @@ The bar: a stranger with the URL exercises every surface, for as long as the dem
 (`docs/DEMO-EXPERIENCE-2026-10-27.md` is what that product is). There is no "week-1" scope and no
 degraded first edition; half-built prototypes are compost for the one design.
 
-**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships on the day
-with its reds named; the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
+**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships when ember says, from the
+newest green candidate, with its reds named; it tests a CONVERGED sprint, never green alone (ember,
+2026-10-27 late evening: no rehearsal this sprint; the next carries ALL outstanding work, including the
+one re-genesis of the platform cell, the activity effects and checkpoint v4, after a harness restart); the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
 `jtour`: the web journey's rows driven against the box's own Host (the twelve steps of the experience
 document, parity over every verb leaf, the lost reply and its exact retry, the paste-the-yes), and
 (b) the composed scenario over N forced-ssh members (rooms, churn, documents, apps, connector,
