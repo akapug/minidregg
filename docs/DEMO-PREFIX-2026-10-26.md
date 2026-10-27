@@ -44,13 +44,17 @@ four parts, measured on the demo box itself:
    money or write path reruns without a record; provider failures (non-200, timeout,
    malformed, crash-after-send) leave a decided purse; a failed first CREATE on a grain is
    recoverable; restart, certifier failure and backup drills pass.
-4. **Performance and week scale**: the growth judge's criterion is write **maximum ≤ 5 s**
-   (not p99: `native/resource-client/journey.sh:858-866`) and cold reopen ≤ 60 s at 1000
-   records, measured on the demo box (not a loaded build box), plus a 10k-record soak (a
-   week of minute ticks alone is ~10,080 records) with the numbers written down.
+4. **Performance is measured and published, never a gate** (ember, 2026-10-27: "growth / perf
+   isn't a good reason to avoid deploying this demo right now, we'll do more focused performance
+   engineering later"). The growth judge's numbers (write MAX, p99, reopen at 1000 records; the
+   journey's criterion is MAX ≤ 5 s, `native/resource-client/journey.sh:858-866`) and a 10k-record
+   soak are measured on the demo box and written on the join page and in the plan; they do not
+   block a rehearsal or the opening. L11 continues as engineering, off the critical path.
 
-The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; it
-must be green for the candidate that opens. "Every surface in ~two weeks" is a target the
+The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; for the
+candidate that opens, its composed phases and its non-performance journey rows must be green
+(growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
+tested rule). "Every surface in ~two weeks" is a target the
 council unanimously called not yet evidence-backed; the date is re-estimated after Phase 0's
 evidence spike (§3), not promised now.
 
