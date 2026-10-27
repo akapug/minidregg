@@ -547,16 +547,20 @@ def mini_key(label, *words, secret=None):
 mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", secret=POOL_KEY)
 # The friend's own provider key, in the friend's own namespace (their
 # workspace's subject and signing key), granted to the provider runner 9.
+# Workspace init and `key set` check the friend's key commitment at the Host
+# (op 144), so the Host serves for these three steps.
+keyserve = Serve()
 FRIEND_WS = path("friend-workspace")
 ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
                      "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--no-prerotation",
-                     "--dir", FRIEND_WS],
+                     "--socket", SOCKET, "--dir", FRIEND_WS],
                     capture_output=True)
 if ws.returncode != 0:
     fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
 mini_key("friend", "--action", "set", "--dir", FRIEND_WS, "--provider", "friendkey", secret=FRIEND_KEY)
 mini_key("friend-grant", "--action", "grant", "--dir", FRIEND_WS, "--provider", "friendkey",
          "--runner", str(PROVIDER), "--per-call", "64", "--per-day", "10", "--until", "1000000")
+keyserve.stop()
 pinned = json.load(open(CONFIG))
 added = []
 if "providerServices" not in pinned:
