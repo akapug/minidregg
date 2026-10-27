@@ -5,6 +5,12 @@ Fresh v6 qualification may set `ORACLE_BROWSER_B=1`, an explicit
 `ORACLE_CADDY_BIN` / `ORACLE_CADDY_SHA256` pair. Defaults keep both API routes
 and do not run a browser probe. Retained v5 continuation refuses this switch.
 
+Fresh pooled-package qualification can also set `ORACLE_POOLED_TENANT_PROBE=1`.
+The owner and delegated agent reuse a request ID with different requests in
+grain A. The owner must receive its own answer and the agent's original reply
+must survive restart. This uses their existing routes and tests two distinct
+principals and source sessions; it does not test same-principal separation.
+
 B receives an ordinary source web session, ticket and enrollment. Its native
 route pins `localhost:PORT`; the HTTP helpers use that same Host and Origin.
 Caddy binds only `127.0.0.1`, uses a fixture certificate for localhost, and
