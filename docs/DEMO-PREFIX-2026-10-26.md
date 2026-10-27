@@ -335,7 +335,11 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(ember, same morning). **The app market ships a curated, agent-hackable set** (ember, same afternoon: "a
+more comprehensive selection of SPK apps than just etherpad … easy but powerful datamodels … because
+agents will be running ham beneath the human-visible html layer"): 10 to 14 apps chosen for the data
+model and API a resident can drive beneath the HTML, each proven by the lifecycle rows plus one
+beneath-HTML write; selection evidence `docs/review/2026-10-27-spk-selection/`; L13 owns it. **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
 (the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
 through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
 resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the
