@@ -26,6 +26,9 @@ pub(super) struct Shell {
     pub home: PathBuf,
     /// The public reader's subject: who a member publishes to (`delegate ID DOC SUBJECT observe 0`).
     pub public_subject: Option<String>,
+    /// The published document the public reader's front page shows (`--front-doc`, from the
+    /// operator's `/etc/mini/front-doc` through `mini-web-spawn`); `None`: the front page is the index.
+    pub front_doc: Option<String>,
 }
 
 pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
@@ -43,6 +46,10 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         .optional("public-subject")
         .map(|v| v.to_string_lossy().into_owned())
         .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    let front_doc = args
+        .optional("front-doc")
+        .map(|v| v.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
     args.finish()?;
     let workspace = workspace::load(&root)?;
     let site = Arc::new(Site {
@@ -55,7 +62,7 @@ pub(super) fn run(mut args: Args, root: PathBuf) -> Result<()> {
         front: Front { origins: Vec::new(), read_only: anonymous },
         base: String::new(),
         face: Face::Body,
-        shell: Some(Shell { host, config, home, public_subject }),
+        shell: Some(Shell { host, config, home, public_subject, front_doc }),
     });
     let listener = unsafe { UnixListener::from_raw_fd(fd) };
     eprintln!("mini web --body: subject {} serving fd {fd}{}", site.subject, if anonymous { " (anonymous)" } else { "" });
@@ -189,6 +196,11 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
+                if parts.is_empty() {
+                    if let Some(page) = front_doc_page(site) {
+                        return page;
+                    }
+                }
             }
             let mut page = site.index();
             if site.front.read_only {
@@ -278,6 +290,26 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["stream", ..] => simple(404, "Not here", "not a page"),
         _ => site.route(&parts.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
     }
+}
+
+/// The public front page as the operator's published document (`--front-doc`), rendered through
+/// the same page path as `/doc/NAME`, so it carries the same shell and styles as every page. `None`
+/// (no setting, or the document is not published to the public reader, or its read fails): the caller
+/// serves today's index. `/doc` stays the index, linked from here.
+fn front_doc_page(site: &Site) -> Option<Page> {
+    let name = site.shell.as_ref()?.front_doc.as_deref()?;
+    if !site.names().iter().any(|n| n == name) {
+        return None;
+    }
+    let mut page = site.route(&["doc".to_owned(), name.to_owned()]);
+    if page.status != 200 {
+        return None;
+    }
+    page.body.push_str(
+        "<nav class=\"front-more\"><p><a href=\"/doc\">Every published document</a> · <a href=\"/receipts\">receipts</a> · \
+         <a href=\"/registry\">the laws of the box</a> · <a href=\"/tour\">the tour</a> · <a href=\"/join\">Join</a></p></nav>\n",
+    );
+    Some(page)
 }
 
 /// `/board` and `/room`: the workspace's references, each opened as that place.
