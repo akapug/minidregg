@@ -274,11 +274,10 @@ theorem pinned_plan_accepted {config : Config} {target : Durable}
         rw [pinnedPlan] at otherPlan
         cases otherPlan
 
-/-- No modified frame can receive consent against the same local prefix/draft,
-even when its separate server-authored presentation claims identical metadata. -/
-/-- Teeth: a candidate that is neither the local plan nor its height pin is refused,
-whatever else it claims: a different effect, amount, subject, key or any header byte
-other than the deadline. -/
+/-- No modified frame can receive consent against the same local prefix/draft, even when
+its separate server-authored presentation claims identical metadata. Teeth: a candidate
+that is neither the local plan nor its height pin is refused, whatever else it claims: a
+different effect, amount, subject, key or any header byte other than the deadline. -/
 theorem changed_plan_refused {config : Config} {target : Durable}
     (basis : ConsentAnchor.Basis config target) (draft : Draft)
     (plan : SigningPlan) (candidate : List UInt8)
