@@ -12,9 +12,10 @@
 # the built `spk-sandbox-probe`. Each audit test forks a single-threaded child for the
 # namespace entry (the harness thread would make setns(CLONE_NEWUSER) EINVAL), so no
 # --test-threads setting is involved. APP_UID/APP_GID default to the first identity of the
-# operator's /etc/subuid grant (the one newuidmap maps). SPK_AUDIT_ROOT (default /run)
-# is the exec-capable parent of the throwaway audit directory; the operator's sudoers
-# rule is anchored on it. The script builds a throwaway
+# operator's /etc/subuid grant (the one newuidmap maps). SPK_AUDIT_ROOT (default
+# /var/lib/spk-floor-audit, root:root 0755, as on dregg-build) is the parent of the
+# throwaway audit directory: it must be exec-capable and neither it nor an ancestor
+# group/world writable; the operator's sudoers rule is anchored on it. The script builds a throwaway
 # image (the probe plus the shared objects `ldd` names, at their own paths), mounts a
 # 16 MiB tmpfs owned by the app UID as the separate /var, runs the two audit tests in
 # transient user units, and removes everything it created. Evidence: the unit
@@ -35,19 +36,34 @@ APP_GID=${6:-$FIRST_SUBUID}
 mkdir -p "$EVIDENCE"
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-# The image must be executable from inside the sandbox, and a bind mount made in
-# an unprivileged user namespace cannot clear a `noexec` locked on its source
-# mount. Debian 13 mounts /run noexec (dregg-build, 2026-10-27: `bwrap: execvp
-# /spk-sandbox-probe: Permission denied` with nothing else wrong), Ubuntu does
-# not (persvati, 2026-09-30). SPK_AUDIT_ROOT selects the parent directory; the
-# operator's sudoers rule must be anchored on "$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*".
-ROOT=${SPK_AUDIT_ROOT:-/run}
+# The audit root carries two conditions the production image root carries, checked
+# here by name before anything is built. (1) Exec-capable: a bind mount made in an
+# unprivileged user namespace cannot clear a `noexec` locked on its source mount, and
+# Debian 13 mounts /run noexec (dregg-build, 2026-10-27: `bwrap: execvp
+# /spk-sandbox-probe: Permission denied` with nothing else wrong); Ubuntu does not
+# (persvati, 2026-09-30). (2) Neither the root nor any ancestor group/world writable:
+# PreparedResident::prepare refuses the image otherwise ("image or ancestor is
+# task-owned or group/world writable"), which rules out /var/tmp and /tmp. The box
+# root is /var/lib/spk-floor-audit (root:root 0755); the operator's sudoers rule
+# must be anchored on "$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*".
+ROOT=${SPK_AUDIT_ROOT:-/var/lib/spk-floor-audit}
+HINT="Set SPK_AUDIT_ROOT to a directory that is exec-capable and not group/world writable at any level (/var/lib/spk-floor-audit, root:root 0755, is the box's) and anchor the operator's sudoers rule on \$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*."
+[ -d "$ROOT" ] || { echo "audit root $ROOT is not a directory. $HINT" >&2; exit 2; }
 ROOT_MOUNT=$(findmnt -no SOURCE,FSTYPE,OPTIONS -T "$ROOT")
 if echo "$ROOT_MOUNT" | tr ' ,' '\n\n' | grep -qx noexec; then
-  echo "$ROOT is on a noexec mount ($ROOT_MOUNT): the sandbox cannot exec an image under it." >&2
-  echo "Set SPK_AUDIT_ROOT to an exec-capable directory (/var/tmp, for one) and anchor the operator's sudoers rule on \$SPK_AUDIT_ROOT/spk-sandbox-floor-audit-*." >&2
+  echo "$ROOT is on a noexec mount ($ROOT_MOUNT): the sandbox cannot exec an image under it. $HINT" >&2
   exit 2
 fi
+level=$(realpath "$ROOT")
+while :; do
+  mode=$(stat -c %a "$level")
+  if (( 8#$mode & 8#022 )); then
+    echo "$level is group/world writable (mode $mode): PreparedResident::prepare refuses an image beneath it. $HINT" >&2
+    exit 2
+  fi
+  [ "$level" != / ] || break
+  level=$(dirname "$level")
+done
 DIR=$ROOT/spk-sandbox-floor-audit-$STAMP
 UNIT=spk-sandbox-floor-audit-$STAMP
 
@@ -115,8 +131,11 @@ run() {
   set -e
   echo "$name unit=$UNIT-$name test=$test exit=$status" | tee -a "$EVIDENCE/results.txt"
   sudo -n cat "$DIR/app-output-$name.log" > "$EVIDENCE/app-output-$name.log" 2>/dev/null || true
-  # Name the openat2 class loudly rather than as a generic probe failure.
-  if grep -q "Function not implemented" "$EVIDENCE/$name.transcript" "$EVIDENCE/app-output-$name.log" 2>/dev/null; then
+  # Name the openat2 class loudly rather than as a generic probe failure. bwrap's
+  # stderr and the probe's JSON report share the app-output pipe; only bwrap's own
+  # `bwrap: ...` lines count (the probe reports its held seccomp refusals as
+  # "Function not implemented (os error 38)" inside JSON, on a passing run).
+  if grep -q "^bwrap: .*Function not implemented" "$EVIDENCE/app-output-$name.log" 2>/dev/null; then
     echo "$name: bwrap hit ENOSYS under the unit's hardening (openat2 filtered?)" | tee -a "$EVIDENCE/results.txt"
   fi
   return $status
