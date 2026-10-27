@@ -129,6 +129,7 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+mod bend;
 mod seat;
 #[cfg(unix)]
 mod shell;
@@ -2672,6 +2673,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
+        "bend" => bend::run(args),
         "seat" => seat::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),

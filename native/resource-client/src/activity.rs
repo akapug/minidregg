@@ -27,16 +27,16 @@ use crate::agent_reserve::field;
 use crate::*;
 use serde_json::{json, Value};
 
-struct Ws {
-    root: PathBuf,
-    host: PathBuf,
+pub(crate) struct Ws {
+    pub(crate) root: PathBuf,
+    pub(crate) host: PathBuf,
     socket: PathBuf,
-    config: PathBuf,
+    pub(crate) config: PathBuf,
     key: PathBuf,
-    subject: String,
+    pub(crate) subject: String,
 }
 
-fn ws(root: PathBuf) -> Result<Ws> {
+pub(crate) fn ws(root: PathBuf) -> Result<Ws> {
     let bytes = fs::read(root.join("workspace.json"))
         .map_err(|error| format!("activity: cannot read workspace.json: {error}"))?;
     if bytes.len() > 64 * 1024 {
@@ -105,7 +105,7 @@ fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn view(ws: &Ws, request: &Value) -> Result<Value> {
+pub(crate) fn view(ws: &Ws, request: &Value) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, 214, request.to_string().as_bytes())?)
         .map_err(|error| format!("activity: invalid view: {error}"))
 }
@@ -206,7 +206,7 @@ fn plan_command(ws: &Ws, command: &Value, out: &Path) -> Result<(Vec<u8>, Value)
 /// budget in its envelope and postage, doubling while the plan runs out of it, up to the ceiling; then
 /// declare the plan's `frontEnd` in the envelope and `postageLoads` times its postage figures in the
 /// postage. The caller (activity_world.py `front_end_quote`) chooses the start, ceiling and loads.
-struct FrontEndQuote {
+pub(crate) struct FrontEndQuote {
     start: (u128, u128),
     ceiling: (u128, u128),
     loads: u128,
@@ -300,7 +300,7 @@ fn quote(ws: &Ws, turn: &Value, out: &Path, front_end: &FrontEndQuote) -> Result
 
 /// With `front_end`, the invoke is first quoted (`quote_front_end`) in this same process and the
 /// declared turn is what is signed and submitted.
-fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>, again: bool) -> Result<Value> {
+pub(crate) fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>, again: bool) -> Result<Value> {
     let nonce = turn_nonce(ws, turn, out, again)?;
     create_out(out)?;
     let authority = authority_root(ws)?;

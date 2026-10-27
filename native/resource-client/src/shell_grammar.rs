@@ -251,6 +251,11 @@ pub static JOB: Grammar = Grammar { verb: "job", leaves: &[
     Leaf { path: &["job", "fund"], args: &[arg("NAME", Kind::Word)], flags: &[JOB_ACCOUNT], effect: Effect::Transition, about: "mini job --action fund" },
     Leaf { path: &["job", "truth"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini job --action truth" },
 ] };
+pub static BEND: Grammar = Grammar { verb: "bend", leaves: &[
+    Leaf { path: &["bend", "publish"], args: &[arg("NAME", Kind::Id), arg("@FILE", Kind::File)], flags: &[valued("--entry", "DEF", Kind::Word), valued("--account", "REF", Kind::Word)], effect: Effect::Transition, about: "mini bend --action publish: the Objective Bend source in HOME/requests, captured and lowered by the Host's own front end, then published (one activity turn) from my account; NAME is the bend, DEF its entry definition (default NAME)" },
+    Leaf { path: &["bend", "run"], args: &[arg("NAME", Kind::Id), arg("OBJECT", Kind::Ref)], flags: &[valued("--seed", "JSON", Kind::Word), valued("--input", "JSON", Kind::Word), valued("--deposit", "N", Kind::Number), valued("--state-type", "JSON", Kind::Word), valued("--account", "REF", Kind::Word)], effect: Effect::Transition, about: "mini bend --action run: create OBJECT pinning the published bend when it has no record, then birth its activity under a full envelope (INPUT: the program's start value, default the Tally's; DEPOSIT: the activity's purse, default seven envelope prices)" },
+    Leaf { path: &["bend", "show"], args: &[arg("OBJECT", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini bend --action show: the public view of OBJECT (its pin, declared state, activity record and purse)" },
+] };
 pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
     Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
 ] };
@@ -475,7 +480,7 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
     Leaf { path: &["board", "take"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's owner field 2*TASK+3 := me)" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
+pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
     &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
