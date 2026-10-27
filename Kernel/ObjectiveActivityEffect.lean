@@ -238,4 +238,248 @@ def PremiseInhabitedPole : Prop :=
     Admissible config (poleFunds base) written polePayer ∧
       Covered config (poleFunds base) poleReserve written settledAwait 1
 
+/-! ## Proofs -/
+
+theorem transferVerdict_settled_iff {config : Config} {funds : Funds} {reserve : Nat} {written : Option StateWritten}
+    {recipient : AccountId} {amount : Nat} :
+    transferVerdict config funds reserve written recipient amount = .settled ↔
+      Admissible config funds written recipient ∧
+        amount + reserve ≤ purse (funds.book written) config.asset funds.purse := by
+  unfold transferVerdict Admissible
+  by_cases r : recipient = funds.purse ∨ recipient = config.collector ∨ recipient = config.asset
+  · rw [if_pos r]
+    constructor
+    · intro h; cases h
+    · rintro ⟨⟨a, b, c, _⟩, _⟩; rcases r with r | r | r <;> contradiction
+  · rw [if_neg r]
+    simp only [not_or] at r
+    by_cases o : recipient ∈ (funds.book written).accounts
+    · rw [if_neg (not_not.mpr o)]
+      by_cases c : amount + reserve ≤ purse (funds.book written) config.asset funds.purse
+      · rw [if_pos c]; exact ⟨fun _ => ⟨⟨r.1, r.2.1, r.2.2, o⟩, c⟩, fun _ => rfl⟩
+      · rw [if_neg c]
+        constructor
+        · intro h; cases h
+        · rintro ⟨_, h⟩; exact absurd h c
+    · rw [if_pos o]
+      constructor
+      · intro h; cases h
+      · rintro ⟨⟨_, _, _, h⟩, _⟩; exact absurd h o
+
+theorem verdict : VerdictStatement := by
+  intro config funds reserve written recipient amount
+  refine ⟨?_, ?_, ?_, transferVerdict_settled_iff⟩
+  · rintro ⟨a, b, c, o⟩ short
+    unfold transferVerdict
+    rw [if_neg (by rintro (h | h | h) <;> contradiction), if_neg (not_not.mpr o), if_neg (by omega)]
+  · intro r
+    unfold transferVerdict
+    rw [if_pos r]
+  · intro r closed
+    unfold transferVerdict
+    rw [if_neg (by rintro (h | h | h) <;> simp_all), if_pos closed]
+
+/-- How a yield commits a transfer Plan: by the verdict, at the settled await's reserve. -/
+theorem commitYield_transfer {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {write : Data} {recipient : AccountId} {amount : Nat}
+    {funds : Funds} {reserve : Await → Nat} {written : Option StateWritten}
+    (patient : 1 ≤ config.maxPatience) (narrow : height + 1 < 256 ^ 8) (effects : funds.effects = true)
+    (wrote : stateWrite config snapshot object current viewed write = .ok written) :
+    commitYield config snapshot height transaction cell object generation checkpoint current viewed
+        (transferPlan write recipient amount) funds reserve =
+      match transferVerdict config funds (reserve (decidedAwait cell generation checkpoint height .settled)) written
+          recipient amount with
+      | .settled => .ok ⟨decidedAwait cell generation checkpoint height .settled, written,
+          (written.map StateWritten.post).toList, some (recipient, amount)⟩
+      | .refused reason => .ok ⟨decidedAwait cell generation checkpoint height (.refused reason), none, [], none⟩ := by
+  unfold commitYield
+  simp only [transferPlan]
+  rw [if_neg (by omega), if_neg (by omega), wrote]
+  simp only [effects, Bool.not_true, Bool.false_eq_true, if_false]
+  rfl
+
+/-- How a yield commits a commit Plan: settled, with its write. -/
+theorem commitYield_commit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {write : Data}
+    {funds : Funds} {reserve : Await → Nat} {written : Option StateWritten}
+    (patient : 1 ≤ config.maxPatience) (narrow : height + 1 < 256 ^ 8) (effects : funds.effects = true)
+    (wrote : stateWrite config snapshot object current viewed write = .ok written) :
+    commitYield config snapshot height transaction cell object generation checkpoint current viewed
+        (commitPlan write) funds reserve =
+      .ok ⟨decidedAwait cell generation checkpoint height .settled, written, (written.map StateWritten.post).toList,
+        none⟩ := by
+  unfold commitYield
+  simp only [commitPlan]
+  rw [if_neg (by omega), if_neg (by omega), wrote]
+  simp only [effects, Bool.not_true, Bool.false_eq_true, if_false]
+  rfl
+
+theorem performed : PerformedStatement := by
+  intro rootBytes config snapshot height transaction cell object generation checkpoint current viewed write
+    recipient amount funds reserve written patient narrow effects wrote admissible covered
+  have settled := transferVerdict_settled_iff.mpr ⟨admissible, covered⟩
+  rw [commitYield_transfer patient narrow effects wrote, settled]
+  exact ⟨_, rfl, rfl, rfl, rfl, rfl⟩
+
+theorem refused : RefusedStatement := by
+  intro rootBytes config snapshot height transaction cell object generation checkpoint current viewed write
+    recipient amount funds reserve written reason patient narrow effects wrote decided
+  rw [commitYield_transfer patient narrow effects wrote, decided]
+
+theorem transferMoves : TransferMovesStatement := by
+  intro book source recipient asset amount distinct
+  have other : (recipient, asset) ≠ (source, asset) := fun h => distinct (congrArg Prod.fst h).symm
+  have other' : (source, asset) ≠ (recipient, asset) := fun h => distinct (congrArg Prod.fst h)
+  simp only [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting,
+    Book.balance, DFinsupp.coe_add, Pi.add_apply, DFinsupp.single_apply, other, other', if_true, if_false]
+  constructor <;> simp <;> omega
+
+/-- A committed yield whose await was refused wrote, posted and moved nothing. -/
+theorem commitYield_refused_shape {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
+    {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {funds : Funds} {reserve : Await → Nat}
+    {committed : YieldCommit} {reason : EffectRefusal}
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds
+      reserve = .ok committed)
+    (source : committed.await.source = .performed (.refused reason)) :
+    committed.written = none ∧ committed.posts = [] ∧ committed.effect = none := by
+  unfold commitYield at ok
+  split at ok
+  · cases ok
+  · split at ok
+    · cases ok
+    · split at ok
+      · cases ok
+      · split at ok
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok; subst ok; cases source
+        · split at ok
+          · cases ok
+          · simp only [Except.ok.injEq] at ok; subst ok; cases source
+        · split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok; subst ok; cases source
+            · split at ok
+              · simp only [Except.ok.injEq] at ok; subst ok; cases source
+              · simp only [Except.ok.injEq] at ok; subst ok; exact ⟨rfl, rfl, rfl⟩
+
+/-- An admitted delivery's yield commit is its segment's commit under the delivery's funds. -/
+theorem delivery_commit {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)
+    {committed : YieldCommit} (yielded : delivery.yielded = some committed) :
+    delivery.segment.yields = true ∧
+      ∃ state plan funds reserve, delivery.segment = .yielded state plan ∧
+        commitYield config snapshot height (deliveryTransaction delivery.await.id) request.record
+          delivery.record.object (delivery.record.generation + 1)
+          (checkpointDigest (checkpointBytes state)) (some delivery.view) true plan funds reserve = .ok committed := by
+  have commit := resumedSegment_commit delivery.endExact
+  rw [yielded] at commit
+  obtain ⟨state, plan, isYield, committedExact⟩ := segmentCommit_spec commit
+  refine ⟨by rw [isYield]; rfl, state, plan, _, _, isYield, committedExact⟩
+
+theorem deliveryPerformed : DeliveryPerformedStatement := by
+  intro rootBytes config snapshot height request delivery committed recipient amount yielded effect
+  obtain ⟨yields, _⟩ := delivery_commit delivery yielded
+  have settled := settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact
+  refine ⟨?_, delivery.conserves⟩
+  rw [delivery.postedBatch, settled.1]
+  simp only [effectOps, yielded, effect]
+
+theorem deliveryRefused : DeliveryRefusedStatement := by
+  intro rootBytes config snapshot height request delivery committed reason yielded source
+  obtain ⟨yields, state, plan, funds, reserve, _, ok⟩ := delivery_commit delivery yielded
+  obtain ⟨noWrite, noPosts, noEffect⟩ := commitYield_refused_shape ok source
+  have settled := settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact
+  refine ⟨?_, noWrite, noPosts⟩
+  rw [delivery.postedBatch, settled.1]
+  simp only [effectOps, yielded, noEffect, Option.bind_some, noWrite]
+
+theorem commitJudged : CommitJudgedStatement := by
+  intro rootBytes config snapshot height request delivery state write committed written _ yielded writes
+  exact judgeWritten_ok delivery.judged written (by rw [yielded]; exact writes)
+
+theorem resumed : ResumedStatement := by
+  refine ⟨?_, ?_⟩
+  · intro rootBytes config snapshot height cell await verdict source
+    unfold settle
+    rw [source]
+  · intro rootBytes config snapshot height request delivery verdict source
+    have settledEq := delivery.settled
+    unfold settle at settledEq
+    rw [source] at settledEq
+    have decided : delivery.settlement.decided = verdict.outcome := by
+      rw [← Except.ok.inj settledEq]
+    exact ⟨decided, decided ▸ delivery.resumeExact⟩
+
+/-! ### The poles, proved -/
+
+theorem poleBook_purse : purse poleBook poleAsset polePurse = 10 := by
+  simp [purse, poleBook, Book.balance, polePurse, poleAsset]
+
+theorem poleBook_payer_open : polePayer ∈ poleBook.accounts := by
+  simp [poleBook, polePayer, polePurse]
+
+theorem pole_unviewed_keep {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (object : CellId) (state : ObjectState) :
+    stateWrite config snapshot object (some state) true (.record []) = .ok none := rfl
+
+theorem premiseInhabited : PremiseInhabitedPole := by
+  rintro config base written settledAwait ⟨asset, collectorPurse, collectorPayer, _⟩
+  refine ⟨⟨show polePayer ≠ polePurse by decide, Ne.symm collectorPayer,
+    show polePayer ≠ config.asset by rw [asset]; decide, poleBook_payer_open⟩, ?_⟩
+  show 1 + poleReserve settledAwait ≤ purse poleBook config.asset polePurse
+  rw [asset, poleBook_purse]
+  show 1 + 3 ≤ 10
+  decide
+
+theorem satisfiable : SatisfiablePole := by
+  intro rootBytes config snapshot height transaction cell object generation checkpoint state base view
+    pole narrow
+  have patient := pole.2.2.2
+  have wrote := pole_unviewed_keep config snapshot object state
+  refine ⟨⟨_, commitYield_commit patient narrow rfl wrote, rfl, rfl⟩, ?_⟩
+  obtain ⟨admissible, covered⟩ := premiseInhabited config base none
+    (decidedAwait cell generation checkpoint height .settled) pole
+  have settled := transferVerdict_settled_iff.mpr ⟨admissible, covered⟩
+  have committed := commitYield_transfer (recipient := polePayer) (amount := 1) (reserve := poleReserve)
+    (transaction := transaction) (cell := cell) (generation := generation) (checkpoint := checkpoint)
+    patient narrow (show (poleFunds base).effects = true from rfl) wrote
+  rw [settled] at committed
+  refine ⟨_, committed, rfl, by simp [effectOps, pole.1], ⟨.resumed, .settled, [], [], []⟩, ?_, rfl⟩
+  exact (resumed.1 config snapshot height cell _ .settled rfl)
+
+theorem teeth : TeethPole := by
+  intro rootBytes config snapshot height transaction cell object generation checkpoint state base pole narrow
+  have patient := pole.2.2.2
+  have wrote := pole_unviewed_keep config snapshot object state
+  refine ⟨?_, ?_, rfl⟩
+  · rw [refused config snapshot height transaction cell object generation checkpoint (some state) true (.record [])
+      polePayer 8 (poleFunds base) poleReserve none .unfunded patient narrow rfl wrote]
+    obtain ⟨admissible, _⟩ := premiseInhabited config base none
+      (decidedAwait cell generation checkpoint height .settled) pole
+    apply (verdict config (poleFunds base) 3 none polePayer 8).1 admissible
+    show purse poleBook config.asset polePurse < 8 + 3
+    rw [pole.1, poleBook_purse]; decide
+  · rw [refused config snapshot height transaction cell object generation checkpoint (some state) true (.record [])
+      polePurse 1 (poleFunds base) poleReserve none .reserved patient narrow rfl wrote]
+    exact (verdict config (poleFunds base) 3 none polePurse 1).2.1 (.inl rfl)
+
+/-- info: 'Minidregg.Kernel.ObjectiveActivityEffect.performed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms performed
+#assert_axioms performed
+#assert_axioms deliveryPerformed
+#assert_axioms transferMoves
+#assert_axioms refused
+#assert_axioms verdict
+#assert_axioms deliveryRefused
+#assert_axioms commitJudged
+#assert_axioms resumed
+#assert_axioms satisfiable
+#assert_axioms teeth
+#assert_axioms premiseInhabited
+
 end Minidregg.Kernel.ObjectiveActivityEffect
