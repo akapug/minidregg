@@ -211,7 +211,7 @@ The opening read is the tag the image carries (`Loaded.headTag`, which the open,
 a physical-suffix extension and the append path all set: `Appended.headTagExact`)
 or, for an image that carries none, the head entry read back here. Either is
 authenticated by `Head.verify` at the image's height, chain and frontier
-(`Held.authentic`). The decision is `ApplicationStreamContinuityFresh.decide`
+(`Held.authentic`). The decision is `ApplicationStreamContinuityFresh.verdict`
 and the handoff runs exactly when its `gate` is `none`
 (`ApplicationStreamContinuityFresh.handoff_runs_iff`). `birthHeight` is the
 grain's floor (0 when the caller's admission already places the session in this
@@ -236,7 +236,7 @@ def withOpenedFreshTip {config : Config} {α : Type}
   let held : ApplicationStreamContinuityFresh.Held :=
     ⟨durable.height, record, durable.headTag, readTag, store, durable.chain, durable.frontier⟩
   match ApplicationStreamContinuityFresh.gate
-      (ApplicationStreamContinuityFresh.decide birthHeight held physical) with
+      (ApplicationStreamContinuityFresh.verdict birthHeight held physical) with
   | none => return .ok (← handoff)
   | some refusal => return .error refusal
 

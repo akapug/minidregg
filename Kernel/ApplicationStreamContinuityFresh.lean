@@ -13,9 +13,9 @@ image carries none, the head entry read back from the Store at the handoff. A
 tag that does not verify is never an opening read, even when it equals the tip's
 own tag, and `Loaded`'s own tag is checked the same way.
 
-`decide` is the pure core of `ApplicationStreamContinuity.withOpenedFreshTip`,
+`verdict` is the pure core of `ApplicationStreamContinuity.withOpenedFreshTip`,
 which is defined through it: the IO reads the Store, builds a `Held` and a
-`Physical`, runs `decide`, and calls the handoff only when `gate (decide ..)`
+`Physical`, runs `verdict`, and calls the handoff only when `gate (verdict ..)`
 is `none` (`handoff_runs_iff`).
 -/
 import Compiler.DurableReceiverCore
@@ -77,7 +77,7 @@ inductive Verdict where
 /-- The candidate opening tag: the carried one, else the one read back. -/
 def Held.candidate (held : Held) : Option (List UInt8) := held.headTag.or held.readTag
 
-/-- `decide` with the authentication abstracted, so the poles that do not need
+/-- `verdict` with the authentication abstracted, so the poles that do not need
 a MAC can be closed instances. -/
 def decideWith (verifies : List UInt8 → Bool) (birthHeight : Nat) (held : Held)
     (physical : Option Physical) : Verdict :=
@@ -95,7 +95,7 @@ def decideWith (verifies : List UInt8 → Bool) (birthHeight : Nat) (held : Held
             if tip.head = held.height ∧ tip.entries = [⟨record, tag⟩] then .admitted
             else .tipChanged
 
-def decide (birthHeight : Nat) (held : Held) (physical : Option Physical) : Verdict :=
+def verdict (birthHeight : Nat) (held : Held) (physical : Option Physical) : Verdict :=
   decideWith held.authentic birthHeight held physical
 
 /-- The refusal text, or `none` to go ahead. -/
@@ -116,7 +116,7 @@ theorem gate_injective (a b : Verdict) (h : gate a = gate b) (ha : a ≠ .admitt
 
 /-- The statement. -/
 def HotRegistrationAdmitted (birthHeight : Nat) (held : Held) (physical : Option Physical) : Prop :=
-  decide birthHeight held physical = .admitted
+  verdict birthHeight held physical = .admitted
 
 theorem decideWith_iff (verifies : List UInt8 → Bool) (birthHeight : Nat) (held : Held)
     (physical : Option Physical) :
@@ -173,15 +173,13 @@ theorem hotRegistration_iff (birthHeight : Nat) (held : Held) (physical : Option
           Head.verify held.store held.height tag held.chain frontier = .ok head) ∧
         birthHeight ≤ held.height ∧
         physical = some ⟨held.height, [⟨record, tag⟩]⟩ := by
-  unfold HotRegistrationAdmitted decide
+  unfold HotRegistrationAdmitted verdict
   rw [decideWith_iff]
   have cand : ∀ tag, held.candidate = some tag ↔
       (held.headTag = some tag ∨ (held.headTag = none ∧ held.readTag = some tag)) := by
     intro tag
     unfold Held.candidate
     rcases held.headTag with _ | t <;> rcases held.readTag with _ | r <;> simp [Option.or]
-    · intro h; subst h; rfl
-    · exact eq_comm
   have auth : ∀ tag, held.authentic tag = true ↔
       ∃ frontier head, held.frontier = some frontier ∧
         Head.verify held.store held.height tag held.chain frontier = .ok head := by
@@ -240,26 +238,26 @@ theorem satisfiable_held_tag (key : MacKey) (logStart chain root indexRoot : Dig
 
 /-- Teeth, by name: no tag carried and none read back. -/
 theorem teeth_noOpeningRead (s : StoreIdentity) (c : Digest) (f : Option (List (Nat × Digest)))
-    (t : List UInt8) : decide 3 (untagged s c f none) (tipAt t) = .noOpeningRead := by
-  simp [decide, decideWith, untagged, Held.candidate]
+    (t : List UInt8) : verdict 3 (untagged s c f none) (tipAt t) = .noOpeningRead := by
+  simp [verdict, decideWith, untagged, Held.candidate]
 
 /-- Teeth: a tag read back that is the tip's own tag but does not authenticate
 (an image never read from the Store has no frontier to verify against) is no
 opening read. This is the copied-tag forgery. -/
 theorem teeth_copiedTagUnverified (s : StoreIdentity) (c : Digest) (t : List UInt8) :
-    decide 3 (untagged s c none (some t)) (tipAt t) = .openingUnverified := by
-  simp [decide, decideWith, untagged, Held.candidate, Held.authentic]
+    verdict 3 (untagged s c none (some t)) (tipAt t) = .openingUnverified := by
+  simp [verdict, decideWith, untagged, Held.candidate, Held.authentic]
 
 /-- Teeth: any tag that fails `Head.verify` is refused, whatever the tip. -/
 theorem teeth_failedVerify (s : StoreIdentity) (c : Digest) (f : List (Nat × Digest))
     (t : List UInt8) (p : Option Physical) (bad : ∀ h, Head.verify s 5 t c f ≠ .ok h) :
-    decide 3 (untagged s c (some f) (some t)) p = .openingUnverified := by
+    verdict 3 (untagged s c (some f) (some t)) p = .openingUnverified := by
   have : (untagged s c (some f) (some t)).authentic t = false := by
     unfold Held.authentic untagged
     rcases hv : Head.verify s 5 t c f with _ | h
     · simp
     · exact absurd hv (bad h)
-  simp [decide, decideWith, untagged, Held.candidate, this]
+  simp [verdict, decideWith, untagged, Held.candidate, this]
 
 /-- Teeth: a stale tip (the Store moved on past the session's head). -/
 theorem teeth_staleTip (v : List UInt8 → Bool) (s : StoreIdentity) (c : Digest)
@@ -315,7 +313,7 @@ theorem unverified_noAdmission (birth : Nat) (h : Held) (p : Option Physical)
 
 /-- The IO's gate: the handoff runs iff the statement holds of what the IO read. -/
 theorem handoff_runs_iff (birth : Nat) (h : Held) (p : Option Physical) :
-    gate (decide birth h p) = none ↔ HotRegistrationAdmitted birth h p :=
+    gate (verdict birth h p) = none ↔ HotRegistrationAdmitted birth h p :=
   gate_none_iff _
 
 /-- The append path's pin: the image an append returns carries the tag the append
