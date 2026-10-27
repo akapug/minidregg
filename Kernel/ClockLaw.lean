@@ -87,11 +87,30 @@ def payClauses : List Minidregg.Pred.Pred :=
   [.all [.eq "request/verb" (Int.ofNat observeVerbTag), .eq payObserveSlot 1],
    .all [.eq "request/verb" (Int.ofNat installVerbTag), .eq paySelfEnrolSlot 1]]
 
+/-- The verb tags the clock's controller may exercise (O61), as on the pay cell:
+`observeProgram` (1, to read the cell's root, which every management plan pins),
+`delegateProgram` (3), `installPolicy` (4, to name new tickers in the law) and
+`revokeCapability` (5). Never `tickClock`. -/
+def controlVerbTags : List Int :=
+  [Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.observeProgram : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.delegateProgram : Verb .program)),
+   Int.ofNat installVerbTag,
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
+
+/-- The controller's management of the clock: the factory controller, a management verb. -/
+def controlClause (controller : SubjectId) : Minidregg.Pred.Pred :=
+  .all [.eq "request/subject" (Int.ofNat controller.value),
+    .memberOf "request/verb" controlVerbTags]
+
 /-- **The clock cell's genesis law.**  Never back; advanced by a ticker's tick,
-or, with a payment observer, by a payment observation or a self-enrollment. -/
-def clockPredicate (tickers : List SubjectId) (payWriters : Bool) : Minidregg.Pred.Pred :=
+or, with a payment observer, by a payment observation or a self-enrollment; and the
+factory controller may manage it (install the law, delegate, revoke), never tick. The
+`.monotone` conjuncts bound every step it admits, management included. -/
+def clockPredicate (controller : SubjectId) (tickers : List SubjectId) (payWriters : Bool) :
+    Minidregg.Pred.Pred :=
   .all [.monotone "clock/now", .monotone "clock/slot",
-    .any (tickClause tickers :: if payWriters then payClauses else [])]
+    .any (tickClause tickers :: controlClause controller ::
+      if payWriters then payClauses else [])]
 
 /-! ## Its meaning -/
 
@@ -117,13 +136,14 @@ theorem tickClause_eval (tickers : List SubjectId) (old new : Minidregg.Pred.Sta
 /-- **The clock law, decided** on a step whose old and new states carry the
 clock (`now`, `slot`): it admits exactly a step that moves neither back and
 is a tick by a ticker or (with pay writers) a pay operation. -/
-theorem clockPredicate_eval (tickers : List SubjectId) (payWriters : Bool)
+theorem clockPredicate_eval (controller : SubjectId) (tickers : List SubjectId) (payWriters : Bool)
     (old new : Minidregg.Pred.State) (oldNow newNow oldSlot newSlot : Int)
     (nowOld : old.get "clock/now" = some oldNow) (nowNew : new.get "clock/now" = some newNow)
     (slotOld : old.get "clock/slot" = some oldSlot) (slotNew : new.get "clock/slot" = some newSlot) :
-    Minidregg.Pred.eval (clockPredicate tickers payWriters) old new = true ↔
+    Minidregg.Pred.eval (clockPredicate controller tickers payWriters) old new = true ↔
       oldNow ≤ newNow ∧ oldSlot ≤ newSlot ∧
         (Minidregg.Pred.eval (tickClause tickers) old new = true ∨
+          Minidregg.Pred.eval (controlClause controller) old new = true ∨
           (payWriters = true ∧ ∃ clause ∈ payClauses, Minidregg.Pred.eval clause old new = true)) := by
   unfold Minidregg.Pred.eval clockPredicate
   rw [Minidregg.Pred.evalWith_all]
@@ -132,33 +152,35 @@ theorem clockPredicate_eval (tickers : List SubjectId) (payWriters : Bool)
 
 /-- **The clock never goes back**, whoever writes it: a step that lowers the
 slot is refused, by every writer. -/
-theorem clock_refuses_slot_regress (tickers : List SubjectId) (payWriters : Bool)
+theorem clock_refuses_slot_regress (controller : SubjectId) (tickers : List SubjectId) (payWriters : Bool)
     (old new : Minidregg.Pred.State) (oldSlot newSlot : Int)
     (slotOld : old.get "clock/slot" = some oldSlot) (slotNew : new.get "clock/slot" = some newSlot)
     (back : newSlot < oldSlot) :
-    Minidregg.Pred.eval (clockPredicate tickers payWriters) old new = false := by
+    Minidregg.Pred.eval (clockPredicate controller tickers payWriters) old new = false := by
   unfold Minidregg.Pred.eval clockPredicate
   rw [Minidregg.Pred.evalWith_all]
   simp [Minidregg.Pred.evalWith, slotOld, slotNew, Int.not_le.mpr back]
 
 /-- The same for `now`. -/
-theorem clock_refuses_now_regress (tickers : List SubjectId) (payWriters : Bool)
+theorem clock_refuses_now_regress (controller : SubjectId) (tickers : List SubjectId) (payWriters : Bool)
     (old new : Minidregg.Pred.State) (oldNow newNow : Int)
     (nowOld : old.get "clock/now" = some oldNow) (nowNew : new.get "clock/now" = some newNow)
     (back : newNow < oldNow) :
-    Minidregg.Pred.eval (clockPredicate tickers payWriters) old new = false := by
+    Minidregg.Pred.eval (clockPredicate controller tickers payWriters) old new = false := by
   unfold Minidregg.Pred.eval clockPredicate
   rw [Minidregg.Pred.evalWith_all]
   simp [Minidregg.Pred.evalWith, nowOld, nowNew, Int.not_le.mpr back]
 
 /-- **A non-ticker cannot tick**: a `tickClock` request by a subject that is no
-ticker is refused (no pay clause reads `tickClock`). -/
-theorem clock_refuses_nonticker_tick (tickers : List SubjectId) (payWriters : Bool)
+ticker is refused (no pay clause and no management verb is `tickClock`), the controller
+included. -/
+theorem clock_refuses_nonticker_tick (controller : SubjectId) (tickers : List SubjectId)
+    (payWriters : Bool)
     (old new : Minidregg.Pred.State) (subject : Nat)
     (named : new.get "request/subject" = some (Int.ofNat subject))
     (ticking : new.get "request/verb" = some (Int.ofNat tickVerbTag))
     (other : subject ∉ tickers.map (·.value)) :
-    Minidregg.Pred.eval (clockPredicate tickers payWriters) old new = false := by
+    Minidregg.Pred.eval (clockPredicate controller tickers payWriters) old new = false := by
   have tick : Minidregg.Pred.eval (tickClause tickers) old new = false := by
     cases h : Minidregg.Pred.eval (tickClause tickers) old new
     · rfl
@@ -167,18 +189,20 @@ theorem clock_refuses_nonticker_tick (tickers : List SubjectId) (payWriters : Bo
   unfold Minidregg.Pred.eval clockPredicate
   rw [Minidregg.Pred.evalWith_all]
   cases payWriters <;>
-    simp [tick, payClauses, Minidregg.Pred.evalWith, ticking, tickVerbTag, observeVerbTag,
-      installVerbTag, CredentialAuthorityEntryCodec.verbTag]
+    simp [tick, payClauses, controlClause, controlVerbTags, Minidregg.Pred.evalWith, ticking,
+      tickVerbTag, observeVerbTag, installVerbTag, CredentialAuthorityEntryCodec.verbTag]
 
-/-- **Without a payment observer only ticks advance the clock**: a request that
-is not a ticker's tick is refused. -/
-theorem clock_ticks_only (tickers : List SubjectId) (old new : Minidregg.Pred.State)
-    (notTick : Minidregg.Pred.eval (tickClause tickers) old new = false) :
-    Minidregg.Pred.eval (clockPredicate tickers false) old new = false := by
-  unfold Minidregg.Pred.eval at notTick
+/-- **Without a payment observer only ticks and the controller's management pass**: a
+request that is neither a ticker's tick nor the controller's management is refused. -/
+theorem clock_ticks_only (controller : SubjectId) (tickers : List SubjectId)
+    (old new : Minidregg.Pred.State)
+    (notTick : Minidregg.Pred.eval (tickClause tickers) old new = false)
+    (notControl : Minidregg.Pred.eval (controlClause controller) old new = false) :
+    Minidregg.Pred.eval (clockPredicate controller tickers false) old new = false := by
+  unfold Minidregg.Pred.eval at notTick notControl
   unfold Minidregg.Pred.eval clockPredicate
   rw [Minidregg.Pred.evalWith_all]
-  simp [notTick]
+  simp [notTick, notControl]
 
 /-! ## The clock write's law step -/
 
@@ -249,42 +273,71 @@ def poleState (subject verb : Nat) (operation : String) (now slot : Nat) : Minid
 
 def poleTickers : List SubjectId := [⟨70⟩]
 
+/-- The poles' factory controller (the sponsor, subject 7). -/
+def poleController : SubjectId := ⟨7⟩
+
 /-- A ticker's tick forward is admitted. -/
 theorem pole_tick_admitted :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 70 11 "tick" 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 70 11 "tick" 100 5)
       (poleState 70 11 "tick" 200 6) = true := by decide +kernel
 
 /-- A payment observation forward is admitted. -/
 theorem pole_observe_admitted :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 30 6 payObserveSlot 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 30 6 payObserveSlot 100 5)
       (poleState 30 6 payObserveSlot 100 9) = true := by decide +kernel
 
 /-- A self-enrollment forward is admitted. -/
 theorem pole_enrol_admitted :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 30 4 paySelfEnrolSlot 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 30 4 paySelfEnrolSlot 100 5)
       (poleState 30 4 paySelfEnrolSlot 150 9) = true := by decide +kernel
 
 /-- A payment observation that moves the slot back is refused. -/
 theorem pole_observe_back_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 30 6 payObserveSlot 100 9)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 30 6 payObserveSlot 100 9)
       (poleState 30 6 payObserveSlot 100 5) = false := by decide +kernel
 
 /-- Without a payment observer, a payment observation is refused. -/
 theorem pole_observe_without_observer_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers false) (poleState 30 6 payObserveSlot 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers false) (poleState 30 6 payObserveSlot 100 5)
       (poleState 30 6 payObserveSlot 100 9) = false := by decide +kernel
 
 /-- An `observePayment` request without the operation marker is refused (the
 verb alone does not advance the clock). -/
 theorem pole_unmarked_observe_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 30 6 "other" 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 30 6 "other" 100 5)
       (poleState 30 6 "other" 100 9) = false := by decide +kernel
 
 /-- A sponsor's tick is refused. -/
 theorem pole_sponsor_tick_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers true) (poleState 7 11 "tick" 100 5)
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers true) (poleState 7 11 "tick" 100 5)
       (poleState 7 11 "tick" 200 6) = false := by decide +kernel
 
+/-- Satisfiable (O61): the controller's `installPolicy` on the clock, the clock unmoved,
+is admitted, so a law naming a new ticker can be installed at runtime. -/
+theorem pole_controller_install_admitted :
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers false)
+      (poleState 7 4 "install" 100 5) (poleState 7 4 "install" 100 5) = true := by decide +kernel
+
+/-- Satisfiable (O61): under a law the controller installed naming a new ticker (80), that
+ticker's tick forward is admitted. -/
+theorem pole_new_ticker_admitted :
+    Minidregg.Pred.eval (clockPredicate poleController [⟨70⟩, ⟨80⟩] false)
+      (poleState 80 11 "tick" 100 5) (poleState 80 11 "tick" 200 6) = true := by decide +kernel
+
+/-- Teeth (O61): the controller's own tick is refused, its management clause notwithstanding. -/
+theorem pole_controller_tick_refused :
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers false)
+      (poleState 7 11 "tick" 100 5) (poleState 7 11 "tick" 200 6) = false := by decide +kernel
+
+/-- Teeth: the controller's management cannot move the clock back. -/
+theorem pole_controller_regress_refused :
+    Minidregg.Pred.eval (clockPredicate poleController poleTickers false)
+      (poleState 7 4 "install" 100 5) (poleState 7 4 "install" 100 4) = false := by decide +kernel
+
+#assert_axioms pole_controller_install_admitted
+#assert_axioms pole_new_ticker_admitted
+#assert_axioms pole_controller_tick_refused
+#assert_axioms pole_controller_regress_refused
 #assert_axioms tickClause_eval
 #assert_axioms clockPredicate_eval
 #assert_axioms clock_refuses_slot_regress

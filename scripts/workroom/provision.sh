@@ -148,6 +148,8 @@ cat >"$EVIDENCE/genesis.json" <<EOF
    "factoryObserveCapabilityId":"55","initialBalance":"$WORKROOM_TOOL_BALANCE",
    "accountPredicate":{"type":"all","predicates":[]}}],
  "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
+ "payControlCapability":"4031","clockControlCapability":"4093",
+ "platform":{"ownerBudget":"100000","lifetime":"10000","grainBirthTariff":null,"completionCustodianKey":null},
  "tailBound":"256","clockGenesisNow":"$(date +%s)","clockMaxStepSeconds":"300", "issuanceCap":"1000000000000000",
  "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
    "memoryTouches":"10000000","witnessBytes":"10000000",
