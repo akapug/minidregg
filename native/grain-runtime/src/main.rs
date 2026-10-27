@@ -11,6 +11,7 @@ mod concierge;
 mod hermes_room;
 mod room_task;
 mod sandbox_tools;
+mod resident_compute;
 mod room_resident;
 mod resident_context;
 mod quiescence;
