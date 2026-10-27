@@ -36,11 +36,19 @@ Realizer slots (law 1):
   refill family sets); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
   its family tag.
 
+Known boundaries (recorded by the third audit pass, not closed here):
+* the controller may name its OWN key as the first custodian (`CustodianStep none _`), so
+  custodian separation begins with the first key a separate party holds;
+* `Deployment.host` and `Deployment.genesis` carry no consistency premise between them;
+* the install encoding carries no deployment or domain tag: cross-world replay rests on
+  `expectedSemantics` in the signed request (`Host/Json.lean:2322`).
+
 Out of this lane: the issuance-cap half of M2 (`wellFloorAmend` on the credit asset's issuer
 well, `RealmWellReceiver`): a law-judged cell family, not the commit protocol's meter.
 -/
 import Kernel.NativeHostGenesis
 import Kernel.NativeHostContext
+import Kernel.DurableCommitProtocol
 import Theory.AxiomPin
 
 namespace Minidregg.Kernel.PlatformCell
@@ -537,19 +545,6 @@ theorem installToday_loses_credit (available : ResourceCost.Charge) (intent : Me
   have := (ResourceCost.Charge.le_iff _ _).mp funded lane
   omega
 
-/-- **M2-b, credit is the refill family's alone.** Over the intents a deployment commits
-(`committed`, the proof phase's: every `Receiving.Family.intent` with `credit := 0`, and the
-refill receiver's), a nonzero credit is a refill's. -/
-def CreditConfined (committed : MeterIntent → Prop) : Prop :=
-  ∀ intent, committed intent → intent.family ≠ .meterRefill → intent.credit = 0
-
-theorem creditConfined_teeth (minted : MeterIntent) (other : minted.family ≠ .meterRefill)
-    (lane : ResourceCost.Lane) (positive : 0 < minted.credit lane) :
-    ¬ CreditConfined (fun intent => intent = minted) := by
-  intro confined
-  have := congrFun (confined minted rfl other) lane
-  simp at this; omega
-
 structure Refill where
   subject : SubjectId
   capability : CapabilityId
@@ -592,6 +587,32 @@ def RefillAdmits (ctx : RefillContext) (m : Meter) (r : Refill) : Prop :=
 
 instance (ctx : RefillContext) (m : Meter) (r : Refill) : Decidable (RefillAdmits ctx m r) := by
   unfold RefillAdmits; infer_instance
+
+/-- **M2-b, credit has an admitted refill behind it.** Over the intents a deployment commits
+(`committed`: every `Receiving.Family.intent` with `credit := 0`, and the refill receiver's),
+a nonzero credit IS the intent of a refill admitted on some meter. The family label alone
+grants nothing. -/
+def CreditConfined (ctx : RefillContext) (committed : MeterIntent → Prop) : Prop :=
+  ∀ intent, committed intent → intent.credit ≠ 0 → ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent
+
+/-- Satisfiable: committing only admitted refills' intents is confined. -/
+theorem admitted_refills_confined (ctx : RefillContext) :
+    CreditConfined ctx (fun intent => ∃ m r, RefillAdmits ctx m r ∧ intent = r.intent) :=
+  fun _ behind _ => behind
+
+/-- Teeth: an intent tagged `.meterRefill` with a credit and no refill behind it (no
+nullifier, which every refill intent carries) is not confined. -/
+theorem tagged_mint_refused (ctx : RefillContext) (minted : MeterIntent)
+    (noNullifier : minted.nullifiers = []) (lane : ResourceCost.Lane)
+    (positive : 0 < minted.credit lane) :
+    ¬ CreditConfined ctx (fun intent => intent = minted) := by
+  intro confined
+  obtain ⟨m, r, -, same⟩ := confined minted rfl (fun zero => by
+    have := congrFun zero lane
+    simp at this; omega)
+  have := congrArg MeterIntent.nullifiers same
+  rw [noNullifier] at this
+  simp [Refill.intent] at this
 
 /-- The post-state of an admitted refill: the extended install of its intent. -/
 def refilled (m : Meter) (r : Refill) : Meter :=
@@ -663,14 +684,101 @@ theorem overflow_refused (ctx : RefillContext) (post : Meter → Refill → Opti
   simp [raised] at this
   omega
 
+/-! ## M2: the copy is the protocol's install
+
+`installAvailable`, `Meter` and the tagged `Nullifier` are the SPEC; the protocol is
+`DurableCommitProtocol.Snapshot.install`, instantiated at the tagged `Nullifier`. Today's
+install equals the spec at zero credit (proved); the proof phase's install, carrying
+`Intent.credit`, must equal it at every credit (`ProtocolInstallMatches`), and then a
+refill's meter IS the protocol's post-state (`refilled_is_protocol_install`). -/
+
+def meterIntentOf {TxId CellId Event : Type} (family : Family) (credit : ResourceCost.Charge)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) : MeterIntent :=
+  ⟨family, intent.exactCharge, credit, intent.nullifiers⟩
+
+def meterOf {TxId CellId Event : Type}
+    (snapshot : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event) : Meter :=
+  ⟨snapshot.available, snapshot.consumed⟩
+
+theorem protocol_install_is_spec_at_zero_credit {TxId CellId Event : Type} [DecidableEq CellId]
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (family : Family) :
+    (DurableCommitProtocol.Snapshot.install before intent).available =
+        installAvailable before.available (meterIntentOf family 0 intent) ∧
+      (DurableCommitProtocol.Snapshot.install before intent).consumed =
+        fun n => decide (n ∈ intent.nullifiers) || before.consumed n := by
+  constructor
+  · funext lane
+    simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf]
+  · funext n
+    by_cases member : n ∈ intent.nullifiers <;>
+      simp [DurableCommitProtocol.Snapshot.install, member]
+
+/-- **M2-d, the proof phase's install is the spec.** `installed` is the extended protocol's
+meter (`fun b i => (Snapshot.install b i).available` once `Intent` carries `credit`),
+`creditOf` the new field. -/
+def ProtocolInstallMatches {TxId CellId Event : Type}
+    (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
+      DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
+    (creditOf : DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge) :
+    Prop :=
+  ∀ before intent family,
+    installed before intent = installAvailable before.available (meterIntentOf family (creditOf intent) intent)
+
+/-- Satisfiable: today's install matches the spec when no intent carries credit. -/
+theorem today_install_matches_zero {TxId CellId Event : Type} [DecidableEq CellId] :
+    ProtocolInstallMatches (TxId := TxId) (CellId := CellId) (Event := Event)
+      (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available)
+      (fun _ => 0) :=
+  fun before intent family => (protocol_install_is_spec_at_zero_credit before intent family).1
+
+/-- Teeth: today's install does not match once any funded intent carries a credit, so the
+refill needs the protocol extension, not a second meter. -/
+theorem today_install_mismatch_with_credit {TxId CellId Event : Type} [DecidableEq CellId]
+    (creditOf : DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event)
+    (lane : ResourceCost.Lane) (positive : 0 < creditOf intent lane)
+    (funded : intent.exactCharge ≤ before.available) :
+    ¬ ProtocolInstallMatches
+      (fun before intent => (DurableCommitProtocol.Snapshot.install before intent).available) creditOf := by
+  intro agrees
+  have := congrFun (agrees before intent .meterRefill) lane
+  have le := (ResourceCost.Charge.le_iff _ _).mp funded lane
+  simp [DurableCommitProtocol.Snapshot.install, installAvailable, meterIntentOf] at this
+  omega
+
+/-- The link: under a matching extended install, a refill's protocol intent (no charge,
+the posting as credit, its one tagged nullifier) leaves exactly `refilled`. -/
+theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq CellId]
+    (installed : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event →
+      DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
+    (creditOf : DurableCommitProtocol.Intent TxId CellId Nullifier Event → ResourceCost.Charge)
+    (agrees : ProtocolInstallMatches installed creditOf)
+    (before : DurableCommitProtocol.Snapshot TxId CellId Nullifier Event)
+    (intent : DurableCommitProtocol.Intent TxId CellId Nullifier Event) (r : Refill)
+    (free : intent.exactCharge = 0) (credited : creditOf intent = r.amount)
+    (single : intent.nullifiers = [r.nullifier]) :
+    (⟨installed before intent, (DurableCommitProtocol.Snapshot.install before intent).consumed⟩ : Meter) =
+      refilled (meterOf before) r := by
+  have available := agrees before intent .meterRefill
+  have consumed := (protocol_install_is_spec_at_zero_credit before intent .meterRefill).2
+  simp only [refilled, meterOf, available, consumed, single]
+  congr 1
+  · funext lane
+    simp [installAvailable, meterIntentOf, free, credited, Refill.intent]
+  · funext n
+    simp
+
 #assert_axioms lawful_injective installWire_covers wireEncode_covers toy_admits premises_inhabited
   forged_refused relay_swap_refused trustsSubjectField_not_decides stale_version_refused
   invalid_refused zero_lifetime_invalid custodian_drop_refused uncosigned_rotation_refused
   cosigned_rotation_admitted sorted_load_bearing currentReader_reads_current genesisReader_stale
   pricing_without_platform_refused currentQuote_current genesisQuote_stale
-  install_conserves_with_credit installToday_loses_credit creditConfined_teeth
+  install_conserves_with_credit installToday_loses_credit admitted_refills_confined tagged_mint_refused
   installAvailable_refill refillReference_lawful refill_funded_at_exhaustion
   charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
-  overflow_refused
+  overflow_refused protocol_install_is_spec_at_zero_credit today_install_matches_zero
+  today_install_mismatch_with_credit refilled_is_protocol_install
 
 end Minidregg.Kernel.PlatformCell
