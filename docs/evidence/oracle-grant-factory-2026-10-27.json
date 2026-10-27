@@ -22,5 +22,21 @@
     "scripts/test-oracle-agent-lifetime-journey.py": "fdd6693e5dda4cd9fecc1597c2a4a64b9089bc7ea543cc5245c9d6c166887c6f"
   },
   "receiving_status": "Await coherent new Host/consent cohort with special lifetime-grant repair; no successful event27 or hosted Oracle call claimed.",
-  "specialist_panel_scores": null
+  "specialist_panel_scores": null,
+  "downstream_source_review": {
+    "scope": "Inspection of current source at23e49cd05 plus documentation-only main merge; not receiving execution. No additional concrete incompatibility established after the factory fix.",
+    "grant_assembly": "Native client and helper consume returned birthSlots then appSlot and canonicalPlanHex/birthBoundary/finalizedDraftHex. Grant repair owner confirms these contracts stay unchanged; special framing must preserve complete descriptor and signed envelopes, and consent must rederive the same plan.",
+    "genesis_policy": "Current Host.Json and SourceAgreementJson still accept explicit workerSubjects+workerGeneration exclusively with the new holderWitnessGeneration form. Existing agent3worker genesis and source-authorized2worker repair remain supported.",
+    "platform": "Current NativeHostContext imports the shared PlatformCellLayout tariff type; it does not yet add a new required platform selector to Config. Future completed wiring requires a fresh candidate/source review.",
+    "checkpoint": "Compiler.DurableCheckpointCodec uses v4. Next world must be fresh with coherent Host and independent consent; no copied old Store/checkpoint or old consent executable.",
+    "activation": "Initial bootstrap reference remains and oracle-app reference/route/service are appended together. Native application-enroll allows settled Soft custody, rejects held/unresolved work, and checks matching lineage. Activation checks source-scanned current START and immutable custody before publishing config.",
+    "restart": "Lifetime grant originalGeneration is issuance provenance; current parent execution generation is separately signed. Existing helper closes/re-enrolls the same source session, refreshes current hostUnit, and preserves the grant and request journal.",
+    "tenant_identity": "ApplicationDispatchAdmission.principalFor binds domain/app/subject; dispatch_web_input tab binds app/subject/session without process generation. Thus the service tenant key should persist across restart while separating owner and agent source sessions. Existing source tests cover stable tab under generation/fingerprint changes.",
+    "browser": "The owner web HTTP helper uses the cookie the bootstrap would set; it does not consume the bootstrap token. Actual form/bootstrap-used/UI/query/catalog and wrong-Origin controls remain required in the real browser journey.",
+    "next_candidate_checks": [
+      "Build Host and ClientConsent with the special event27 receiver from one source closure.",
+      "Use the matching current Mini/spk-host/broker/runtime/helpers instead of stitching frozen339 artifacts.",
+      "Run actual agent calls, authority negatives, same-grain isolation, restart replay and browser journey before claiming hosted acceptance."
+    ]
+  }
 }
