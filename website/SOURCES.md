@@ -111,8 +111,11 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 
 | Claim | Source |
 | --- | --- |
-| accounts by hand; FRIENDS.md is the guide | FRIENDS:1-9, 86-96 |
-| make an ssh key; send the public half and a session name; `mini>` prompt | FRIENDS:88-96 |
+| everything on this box is world-readable (every signer replays the whole Store) | docs/DEMO-PREFIX-2026-10-26.md §5 (D8); docs/review/2026-10-26-deploy/WEB-SPK-PUBLIC.md §5.3; deploy/web/README.md |
+| reading needs no account: a static snapshot at demo.dregg.online, refreshed every few minutes | deploy/web/README.md; deploy/web/mini-pubread.timer; `mini web --render-static` (native/resource-client/src/web.rs) |
+| hosted shell signup at demo.dregg.online/join; FRIENDS.md is the guide | docs/DEMO-PREFIX-2026-10-26.md §3 (L5, the door); FRIENDS:1-9 |
+| make an ssh key; `mini>` prompt | FRIENDS:88-96 |
+| publish: delegate observe to the public reader, submit, publish; revoke takes it down at the next refresh | deploy/web/README.md (Authors) |
 | works on the node; journey J0–J8 | FRIENDS:13-22; README.md:69 |
 | not on the node: rooms, chat, private rooms, key rotation, proxy mode, librarian, paying to enrol | FRIENDS:23-35 |
 | pay to enrol: 50 DREGG a week, built, fixtures only, not deployed | FRIENDS:35, 510-540; README.md:84; commits cb4235b6, b0bcb7d0, 243fb343 |
