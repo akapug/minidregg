@@ -12,7 +12,6 @@ import Assurance.ObjectiveZkLiteralInstance
 import Assurance.ObjectiveZkRefinementAudit
 import Assurance.ObjectiveZkStepTariff
 import Assurance.ObjectiveZkTraceDisclosure
-import Assurance.ObliviousNetworkChecks
 import Assurance.ResourceMoneyOperationDomainAudit
 import Assurance.ResourceMoneyReceiverAudit
 import Compiler.BendCommitmentFrame
