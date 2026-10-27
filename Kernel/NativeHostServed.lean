@@ -48,7 +48,8 @@ def validateServed (config : Config) {store : StoreIdentity} (served : State sto
     Except String (OpenedServed config store) :=
   (validateCore config served.seed served.logStart (loadServedDirectory served)
     (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
-    (fun loaded => cellsLawfulServed config served loaded.directory)).map fun parts =>
+    (fun loaded => cellsLawfulServed config served loaded.directory)
+    (platformRecordIn config.deployment served.canonicalBytes)).map fun parts =>
       ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, parts.2⟩
 
 /-- Validation wraps exactly the state it was given. -/
@@ -58,7 +59,8 @@ theorem validateServed_served {config : Config} {store : StoreIdentity} {served 
   unfold validateServed at validated
   cases parts : validateCore config served.seed served.logStart (loadServedDirectory served)
       (loadServedAuthority config.deployment served) (·.directory) (·.cell.logical)
-      (fun loaded => cellsLawfulServed config served loaded.directory) with
+      (fun loaded => cellsLawfulServed config served loaded.directory)
+      (platformRecordIn config.deployment served.canonicalBytes) with
   | error detail => simp [parts, Except.map] at validated
   | ok value =>
       simp only [parts, Except.map, Except.ok.injEq] at validated
@@ -104,6 +106,7 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
     (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
     (·.directory) (·.cell.logical)
     (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory)
+    (platformRecordIn config.deployment durable.snapshot.canonicalBytes)
     (loadServedDirectory_ofLoaded durable sameStart)
     (by
       have rows := loadServedDirectory_ofLoaded durable sameStart
@@ -124,18 +127,22 @@ theorem validateServed_ofLoaded (config : Config) {store : StoreIdentity} (durab
       rfl)
   have sameSeed : (Served.ofLoaded durable sameStart).seed = durable.image.seed := rfl
   have sameLog : (Served.ofLoaded durable sameStart).logStart = durable.logStart := sameStart
+  have samePlatform : platformRecordIn config.deployment (Served.ofLoaded durable sameStart).canonicalBytes =
+      platformRecordIn config.deployment durable.snapshot.canonicalBytes := rfl
   unfold validateServed validateLoaded validateParts validatePartsWith validatePartsVia
-  rw [sameSeed, sameLog]
+  rw [sameSeed, sameLog, samePlatform]
   revert served
   generalize validateCore config durable.image.seed durable.logStart
     (loadServedDirectory (Served.ofLoaded durable sameStart))
     (loadServedAuthority config.deployment (Served.ofLoaded durable sameStart))
     (·.directory) (·.cell.logical)
-    (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory) = light
+    (fun loaded => cellsLawfulServed config (Served.ofLoaded durable sameStart) loaded.directory)
+    (platformRecordIn config.deployment durable.snapshot.canonicalBytes) = light
   generalize validateCore config durable.image.seed durable.logStart
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory) = full
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
+    (platformRecordIn config.deployment durable.snapshot.canonicalBytes) = full
   intro served
   cases light <;> cases full <;> simp_all [Except.map]
 
@@ -211,7 +218,7 @@ def validateServedWith (config : Config) {store : StoreIdentity} (served : State
     (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawfulServed config served loaded.directory) :
     Except String (OpenedServed config store) :=
   (validateCore config served.seed served.logStart directory? authority? (·.directory) (·.cell.logical)
-    lawfulCheck).map fun parts =>
+    lawfulCheck (platformRecordIn config.deployment served.canonicalBytes)).map fun parts =>
       ⟨served, parts.1.1, parts.1.2.1, parts.1.2.2, (lawfulExact parts.1.1) ▸ parts.2⟩
 
 theorem validateServedWith_eq (config : Config) {store : StoreIdentity} (served : State store)
