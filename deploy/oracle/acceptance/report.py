@@ -131,6 +131,14 @@ def controller_continuation(run, require):
         require('continuation_snapshot_' + name,
                 not relative.is_absolute() and '..' not in relative.parts
                 and sha(directory / 'prior' / relative) == digest)
+    for original, archived in value['archived_original_paths'].items():
+        require('continuation_original_location_' + original,
+                Path(original).is_relative_to(run) and Path(archived['path']).is_relative_to(directory / 'prior')
+                and sha(Path(archived['path'])) == archived['sha256'])
+    for original, archived in value['store_snapshot'].items():
+        require('continuation_stopped_source_snapshot_' + original,
+                Path(archived).is_relative_to(directory / 'prior')
+                and sha(Path(archived)) == value['store_before'][original])
     for phase in ('store', 'birth-a', 'install-a', 'birth-b', 'install-b', 'share-a'):
         for suffix in ('cmd', 'stdout', 'stderr', 'exit', 'seconds'):
             name = f'world/evidence/{phase}.{suffix}'
@@ -144,6 +152,8 @@ def controller_continuation(run, require):
         require('continuation_source_' + path, Path(path).is_absolute() and sha(Path(path)) == digest)
     return {'prepared': value, 'prepared_sha256': sha(directory / 'prepared.json'),
             'recovery_input_manifest_sha256': sha(directory / 'recovery-input-sha256.txt'),
+            'prior_exit_path': str(directory / 'prior/exit.json'),
+            'continuation_exit_path': str(directory / 'exit.json'),
             'scope': 'Preserved first failure; continued only the pending account creation and later phases. '
                      'No repeated genesis, installation, publication or application share.'}
 
