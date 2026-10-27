@@ -377,6 +377,10 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
         return Err("classRefused: --class takes S, M or L".into());
     }
     let root = absolute(&path(args.required("dir")?))?;
+    // The member's session home (the shell passes it): HOME/inbox holds the delegated
+    // references the frame leaves at enrolment.
+    let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?
+        .or_else(|| std::env::var_os("MINI_HOME").map(PathBuf::from));
     let retry = text_flag(&mut args, "retry")?;
     let birth_source = args.optional("birth-source").map(|v| absolute(&path(v))).transpose()?;
     let birth_receipt = args.optional("birth-receipt").map(|v| absolute(&path(v))).transpose()?;
@@ -416,7 +420,7 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
                 let config = apps_config(&paths.config)?;
                 let ws = crate::workspace::load(&root)?;
                 let name = format!("app-{}", &id[..12]);
-                let (born_source, born_receipt) = app_birth(&root, &ws, &name, &config)?;
+                let (born_source, born_receipt) = app_birth(&root, &ws, home.as_deref(), &name, &config)?;
                 crate::fsio::ensure_private_dir_all(&apps_dir.join("birth"))?;
                 source = apps_dir.join("birth").join("source.json");
                 receipt = apps_dir.join("birth").join("outcome.json");
@@ -681,7 +685,33 @@ const APP_ROLES: [(&str, IdKind); 9] = [
 /// turn (op 30), the way `workspace create` births a resource: reserve the nine ids in the
 /// member's namespace, retain the exact source, author through the Host, submit once with exact
 /// recovery, then register three references `NAME`, `NAME-package`, `NAME-snapshot`.
-pub(crate) fn app_birth(root: &Path, ws: &Value, name: &str, config: &AppsConfig) -> Result<(Value, Value)> {
+/// `HOME/inbox/<name>.json`: where the frame leaves a delegated reference for the member
+/// (the shell's `inbox` lists that directory; `import NAME @FILE` takes such a file).
+pub(crate) fn inbox_file(home: &Path, name: &str) -> PathBuf {
+    home.join("inbox").join(format!("{}.json", crate::workspace::ref_file(name)))
+}
+
+/// The member's reference to one of the world's metered tasks: already imported, or
+/// imported now from the inbox file the frame left at enrolment (`mini-reenroll`'s
+/// `apps_member_grants`), so a door member never runs an import by hand. Refuses by
+/// name, saying where the file was looked for, when neither exists.
+pub(crate) fn metered_reference(root: &Path, ws: &Value, home: Option<&Path>, name: &str, role: &str) -> Result<Value> {
+    if let Ok(reference) = crate::workspace::reference(root, name) {
+        return Ok(reference);
+    }
+    let inbox = home.map(|h| inbox_file(h, name));
+    if let Some(file) = inbox.as_ref().filter(|f| f.is_file()) {
+        crate::workspace::import_delegated(root, ws, name, file)
+            .map_err(|e| format!("meteredGrantRequired: the delegated reference {} for the {role} task did not import: {e}", file.display()))?;
+        return crate::workspace::reference(root, name);
+    }
+    Err(format!(
+        "meteredGrantRequired: no reference {name:?} to the world's metered {role} task and no delivered reference at {}; the operator delegates observe and the grain operation on it at enrolment (mini-reenroll apps_member_grants; L1b decides who pays)",
+        inbox.map(|f| f.display().to_string()).unwrap_or_else(|| "HOME/inbox (no --home given)".into())
+    ))
+}
+
+pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str, config: &AppsConfig) -> Result<(Value, Value)> {
     use crate::workspace::{self as w, member, member_path};
     w::validate_ref_name(name)?;
     let subject = member(ws, "subject")?.to_owned();
@@ -689,11 +719,8 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, name: &str, config: &AppsConfig
     if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
         return Err("unknown birth context version".into());
     }
-    let tool_ref = w::reference(root, &config.tool_ref).map_err(|_| format!(
-        "meteredGrantRequired: no reference {:?} to the world's metered tool task; the operator delegates observe and the grain operation on it to you (L1b decides who pays), then `import {} ...`",
-        config.tool_ref, config.tool_ref))?;
-    let parent_ref = w::reference(root, &config.parent_ref).map_err(|_| format!(
-        "meteredGrantRequired: no reference {:?} to the world's metered parent task", config.parent_ref))?;
+    let tool_ref = metered_reference(root, ws, home, &config.tool_ref, "tool")?;
+    let parent_ref = metered_reference(root, ws, home, &config.parent_ref, "parent")?;
     let namespace_root = w::namespace_root(root, ws)?;
     let request_path = root.join("sources").join(format!("apps-birth-{}.request.json", w::ref_file(name)));
     let core = json!({"type":"minidregg-apps-birth-request-v1","name":name,"subject":subject,"context":context,
@@ -1147,6 +1174,25 @@ mod tests {
         assert!(apps_config(&dir.join("none.json")).unwrap_err().starts_with("appsConfigUnavailable"));
         fs::write(&path, br#"{"protocol":"other"}"#).unwrap();
         assert!(apps_config(&path).is_err());
+    }
+
+
+    #[test]
+    fn apps_metered_reference_names_the_inbox_file_it_looked_for() {
+        let dir = scratch("inbox");
+        let root = dir.join("ws");
+        let home = dir.join("home");
+        fs::create_dir_all(root.join("refs")).unwrap();
+        fs::create_dir_all(home.join("inbox")).unwrap();
+        assert_eq!(inbox_file(&home, "tool"), home.join("inbox").join("tool.json"));
+        let ws = json!({"subject":"77"});
+        let refused = metered_reference(&root, &ws, Some(&home), "tool", "tool").unwrap_err();
+        assert!(refused.starts_with("meteredGrantRequired:") && refused.contains("inbox/tool.json"), "{refused}");
+        let no_home = metered_reference(&root, &ws, None, "parent", "parent").unwrap_err();
+        assert!(no_home.contains("no --home given"), "{no_home}");
+        // An imported reference is found without touching the inbox.
+        fs::write(root.join("refs").join("tool.json"), br#"{"type":"minidregg-participant-reference-v1","name":"tool","kind":"object","target":"7902","observeCapability":"8101","operationCapability":"8101","controlCapability":"8102"}"#).unwrap();
+        assert_eq!(metered_reference(&root, &ws, Some(&home), "tool", "tool").unwrap()["target"], "7902");
     }
 
     #[test]

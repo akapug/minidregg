@@ -2199,6 +2199,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "install" => {
                     if rest.is_empty() || rest.len() > 3 || (rest.len() == 3 && rest[1] != "--class") || rest.len() == 2 { return Err(u.to_owned()); }
                     flags.push(flag("app", rest[0].clone()));
+                    flags.push(flag("home", session.home.clone()));
                     if rest.len() == 3 { flags.push(flag("class", rest[2].clone())); }
                 }
                 "retry" => {

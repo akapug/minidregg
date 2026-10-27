@@ -62,11 +62,25 @@ sudo -u mini-core XDG_RUNTIME_DIR=/run/user/$(id -u mini-core) systemctl --user 
 `/etc/mini/apps.json` (root 0644, world-readable; `mini-apps-config-v1`) tells members what the
 world is: `{"protocol":"mini-apps-config-v1","managementSubject":"8","toolRef":"tool","parentRef":"parent","tariff":{"base":"2","perBirth":"1"}}`.
 A member's `apps install` births the application as their own op 30, whose admitted shape names the
-world's metered parent (7901) and tool (7902) tasks: the operator delegates observe and the grain
-operation on both to each member (the door's processor at enrolment, or by hand: `delegate ID
-<tool-ref> SUBJECT observe,mutate MAX`), and the member imports them under the names `toolRef` and
-`parentRef`; until then `apps install` refuses `meteredGrantRequired` by name. Who pays the metered
-reserve is L1b's tariff ruling.
+world's metered parent (7901) and tool (7902) tasks. The frame grants them at enrolment
+(dregg-infra `mini-reenroll`, `lib.sh apps_member_grants`, 400c94c); the three choices, confirmed:
+
+1. **The grant bound** (`delegate ID REF SUBJECT observe,mutate MAX`): `MINI_REENROLL_APPS_MAX`
+   default **1000**, the door's funding. `MAX` bounds one operation's cost under the delegated
+   capability; the metered reserve of one application birth is 5 units (`tariff.base` 2 +
+   `perBirth` 1 per resource, three resources), so 1000 is ample and the member's own purse bounds
+   the total. Who pays the reserve is L1b's ruling; the sponsor's account meanwhile.
+2. **The sponsor's references** are named exactly as `apps.json`'s `toolRef` and `parentRef`
+   (default `tool`, `parent`). The sponsor must hold them before the first enrolment: in the
+   sponsor's workspace, `import tool object 7902 81 81` and `import parent object 7901 73 73`
+   (the plan's management capabilities on the tool and parent tasks; if the sponsor is not the
+   subject that holds them, the operator delegates them to the sponsor first).
+3. **Delivery to the member**: the frame copies each grant's `recipient-reference.json` to the
+   member's `HOME/inbox/<toolRef>.json` and `HOME/inbox/<parentRef>.json` (member-owned; the
+   shell's `inbox` lists that directory). `mini apps install` (with `--home`, which the shell passes)
+   imports the two references from there by name before anything else, so a door member never runs
+   an import by hand; only when neither the reference nor the inbox file exists does it refuse
+   `meteredGrantRequired`, naming the file it looked for.
 
 `mini-apps-worker@STORE.service` reads `/var/lib/mini-spk-worlds/STORE/apps-world.json` (the
 operator writes it, 0600: `mini-apps-world-v1`, naming the grain-host profile, `mini`, the public

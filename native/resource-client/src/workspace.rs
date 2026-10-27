@@ -823,7 +823,7 @@ fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &s
     Ok(())
 }
 
-fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
+pub(crate) fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
     let value = bounded_json(source)?;
     if member(&value, "type")? != "minidregg-delegated-reference-v1"
         || member(&value, "recipient")? != member(workspace, "subject")?
