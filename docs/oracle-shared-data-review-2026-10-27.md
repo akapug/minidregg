@@ -4,6 +4,9 @@ This records the contract, focused test results, and limits of the review. The
 custody tests below passed; they do not establish a deployed Mini appliance.
 The subsequent real mount audit and release build are recorded separately in
 [`oracle-public-data-native-2026-10-27.json`](evidence/oracle-public-data-native-2026-10-27.json).
+The namespace repair's optimized binaries, focused checks and composed namespace
+test are recorded in
+[`oracle-public-data-namespace-2026-10-27.json`](evidence/oracle-public-data-namespace-2026-10-27.json).
 
 ## Authority boundary
 
