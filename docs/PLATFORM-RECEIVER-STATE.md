@@ -77,7 +77,16 @@ grant, the grain births, participant provisioning, PayEnrolV2, and the four comp
 `pins.tariff = config.tariff`, so after a tariff-changing install they refuse. They never
 stay silently stale.
 
-### Item 3: the deployed keystone (statement for the auditor; nothing coded)
+### Item 3: the deployed keystone (accepted, auditor pass 18; nothing coded)
+
+**Pass 18 (af7a93e7b8ba729d4, lane/audit-platform) accepts the statement as written,
+with one change and one condition.**
+- Change: `PlatformCell.BirthsReadCurrent` and `BirthQuoteCurrent` are vacuous over a
+  store-only `terms` (`currentReader` holds by `rfl`). They and their poles are deleted
+  from `Kernel/PlatformCell.lean`, pointing to `ReceiverReadsCurrent`, in the item 3
+  commit. No vacuous keystone stays beside the real one.
+- Condition: the keystone is not done until the satisfiable Lean witness exists (the same
+  concrete `AcceptedBirth` as item 7). `neutral-birth.lean` is the executed interim only.
 
 **One change makes the statement unconditional: pricing moves into `Pending`.** Today
 `pricedAt` runs in `receiveLoaded` (IO) before admission. A theorem over `AcceptedBirth`
@@ -149,29 +158,35 @@ creation tariff, owner budget, lifetime, and the cell's read guard. Owed: share 
 lifetime-grant source, grain births, provisioning, PayEnrolV2, completion keys (87 census
 rows)."
 
-### Item 6: `readGuards_platform` unconditional (in progress)
+### Item 6: `readGuards_platform` unconditional (coded, not yet elaborated)
 
-`readGuards_platform`'s `unwritten` premise is discharged from the birth's own write list
-rather than from `platform_written_only_by_install`. The birth receiver never forms
-`ReceivingLaw.LawfulBy`, so a bridge to the family discipline would first have to make the
-receiver judge its writes that way. `prepared.writes = planWrites …` consists of:
-- `allocationWrites`: fresh, `expectedPre = freshRoot`, at ids that `ResourceBirth.allocate`
-  requires absent;
-- the factory cell (`.declaredObject`);
-- the resource book (`.resourceBook`);
-- the authority writes (the credential-authority cell).
+`Kernel/ResourceBirthReceiver.lean`:
+- `platform_unwritten prepared loaded : cellIdOf deployment ∉ prepared.writes.map
+  DataWrite.cellId` is proved from the birth's own write list (`planWrites`). The pass 18
+  auditor accepts this discharge. The birth receiver never forms `ReceivingLaw.LawfulBy`,
+  so `platform_written_only_by_install` does not apply to it. The argument:
+  - The private `slot_of_live` reads the loaded directory's slot from the image's bytes
+    (`bytes_exact`, `rawDecode_bytes`, `view_slot`). So the platform cell is
+    `.present ⟨.platform, cell⟩`.
+  - Allocations sit at ids absent from `used` (`allocate_success_fresh`), against
+    `present_used`.
+  - The factory and the book are `.present` at kinds `.declaredObject` and
+    `.resourceBook` (`ObservedCell.present`).
+  - The authority cell is `.present ⟨.authority, _⟩` (`slot_of_live` on its
+    `observed`).
+  - No digest or identifier premise is used.
+- `readGuards_platform` drops its `unwritten` premise.
 
-The platform cell is present (`load = some`) and of kind `.platform`. So each write differs
-from it, either by absence in the loaded directory or by its observed kind. The lemma is
-`platform_unwritten (prepared) (found : PlatformCellDomain.load … = some loaded) :
-cellIdOf deployment ∉ prepared.writes.map DataWrite.cellId`.
+It elaborates in the first warm dregg-ref build. `/build/lanes/lean-audit-c` has packages
+but no `build/` yet; no cold build was run.
 
 ### Next, in order
 
 3. Pricing into `Pending`, then `receiverReadsCurrent`, `unpriced_empty` and
-   `preparePending_stale`, once the auditor answers the statement above.
+   `preparePending_stale`; delete `pricedAt` and the vacuous `BirthsReadCurrent` /
+   `BirthQuoteCurrent` (pass 18).
 4. The owed families, one per commit, each deleting its census rows.
 5. `Intent.credit` with ops 244–247.
-6. `platform_unwritten` (above), then `readGuards_platform` without its premise.
+6. Coded (above); elaborate it in the warm tree.
 7. Audit (c)'s Lean poles and item 3's satisfiable pole: one concrete loaded, signed
    `Pending`/`AcceptedBirth`.
