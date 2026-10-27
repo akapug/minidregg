@@ -126,7 +126,7 @@ jq --argjson bytes "$(stat -c '%s' "$spk")" '
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
 sha256sum "$spk" "$inventory" "$benchmark" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
   "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/deploy/oracle/acceptance/agent.py" \
-  "$repo/deploy/oracle/acceptance/agent-cases.json" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
+  "$repo/deploy/oracle/acceptance/agent-cases.json" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
