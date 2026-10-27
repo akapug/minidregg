@@ -70,7 +70,7 @@ fn decode_claim_wire(operation: u8, bytes: &[u8]) -> Result<Vec<u8>> {
         );
     }
     let mut frame = vec![operation];
-    frame.extend_from_slice(&decode_hex(raw)?);
+    frame.extend_from_slice(&mini_sdk::hex::decode(raw).map_err(|e| e.0)?);
     Ok(frame)
 }
 
@@ -335,7 +335,7 @@ fn exact_hex(value: &Value, field: &str, size: usize) -> Result<Vec<u8>> {
             "source {field} must be {size} lowercase hexadecimal bytes"
         ));
     }
-    decode_hex(raw)
+    mini_sdk::hex::decode(raw).map_err(|e| e.0)
 }
 
 fn canonical_matches(value: &Value, field: &str, bytes: &[u8]) -> Result<()> {
@@ -642,7 +642,7 @@ where
     if message_hex.is_empty() || message_hex.len() > 8192 {
         return Err("source claim signing message exceeds bound".into());
     }
-    let message = decode_hex(message_hex)?;
+    let message = mini_sdk::hex::decode(message_hex).map_err(|e| e.0)?;
     eprintln!(
         "Paid claim action (source command; exact origin and selected terms):\n{}",
         serde_json::to_string_pretty(command_view).map_err(|e| e.to_string())?
@@ -839,7 +839,7 @@ fn run_quote(mut args: Args) -> Result<()> {
     {
         return Err("quote canonical command exceeds source bound or is malformed".into());
     }
-    let canonical = decode_hex(raw)?;
+    let canonical = mini_sdk::hex::decode(raw).map_err(|e| e.0)?;
     let input = record.join("command.bin");
     create_private(&input, &canonical)?;
     let inspected = session.inspect("pay-claim-command", &input, &record.join("command.json"))?;

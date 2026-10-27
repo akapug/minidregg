@@ -204,7 +204,7 @@ fn seal(
     let signed = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
     crate::client_consent::operator_plan(grant.host, &config, PLAN_OPERATION,
         &pair(&signed, command)?, plan)?;
-    let header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
+    let header = mini_sdk::hex::decode(field(&plan_view["sponsorHeader"], "canonical")?).map_err(|e| e.0)?;
     let signature = key(grant.sponsor_key)?.sign(&header).to_bytes();
     retain_exact(&directory.join("sponsor-signature.bin"), &signature)?;
     let ingress = staged_invoke(

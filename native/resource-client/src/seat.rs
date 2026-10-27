@@ -120,7 +120,7 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let inspected = inspect(ws, "seat-plan", &plan)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("seat: plan lacks a header")?;
-    let header = crate::decode_hex(canonical).map_err(|error| format!("seat: {error}"))?;
+    let header = mini_sdk::hex::decode(canonical).map_err(|error| format!("seat: {error}"))?;
     let donation = donation_gate(&inspected, file)?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
     let ingress = invoke(ws, mini_sdk::host_operations::SEAT_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;

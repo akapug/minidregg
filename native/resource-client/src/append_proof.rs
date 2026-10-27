@@ -101,10 +101,7 @@ fn statement(record: &Value, intent: &Value, subject: &str) -> Result<Value> {
         return Err("append proof command differs from recorded stream/authority/reply".into());
     }
     let encoded = field(actual, "payload")?;
-    let decoded = crate::decode_hex(encoded)?;
-    if crate::hex(&decoded) != encoded {
-        return Err("append proof payload hex is not canonical".into());
-    }
+    let decoded = mini_sdk::hex::decode(encoded).map_err(|e| e.0)?;
     same(&decoded, text_bytes, "say payload")?;
     Ok(
         json!({"subject":subject,"stream":decimal(reference,"target")?,"to":to,

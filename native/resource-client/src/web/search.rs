@@ -197,7 +197,8 @@ pub(super) fn page(site: &Site, target: &str) -> Page {
     }
 }
 pub(super) fn hit(site: &Site, name: &str, target: &str, atom: &str, revision: &str) -> Page {
-    let name = match crate::decode_hex(name)
+    let name = match mini_sdk::hex::decode(name)
+        .map_err(|e| e.0)
         .and_then(|v| String::from_utf8(v).map_err(|_| "invalid name".into()))
     {
         Ok(v) => v,

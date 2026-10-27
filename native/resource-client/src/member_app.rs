@@ -146,7 +146,7 @@ fn check_plan(
             {
                 return Err("App signing slot differs from this member's current key".into());
             }
-            let bytes = crate::decode_hex(header)?;
+            let bytes = mini_sdk::hex::decode(header).map_err(|e| e.0)?;
             if bytes.is_empty() || bytes.len() > 65536 {
                 return Err("App signing header bound refused".into());
             }

@@ -41,8 +41,6 @@
 //! recomputes every opened leaf and the root, and checks that every declared
 //! entry the view displays is one of the opened entries.
 
-
-use crate::decode_hex;
 use serde_json::{json, Value};
 use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
 use sha3::CShake256Core;
@@ -443,7 +441,7 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
         return Ok(json!({"verified": false, "reason": "view carries no opening"}));
     };
     let opening = resource.get("opening").ok_or("view lacks opening")?;
-    let frame = decode_hex(opening.get("frame").and_then(Value::as_str).ok_or("opening lacks frame")?)?;
+    let frame = mini_sdk::hex::decode(opening.get("frame").and_then(Value::as_str).ok_or("opening lacks frame")?).map_err(|e| e.0)?;
     if frame.is_empty() {
         return Ok(json!({"verified": false, "reason": "this kind has no store opening"}));
     }
@@ -456,12 +454,12 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
     let mut sealed = 0usize;
     for item in items {
         if let Some(salt) = item.get("salt").and_then(Value::as_str) {
-            let salt = decode_hex(salt)?;
-            let entry = decode_hex(item.get("entry").and_then(Value::as_str).ok_or("opened item lacks entry")?)?;
+            let salt = mini_sdk::hex::decode(salt).map_err(|e| e.0)?;
+            let entry = mini_sdk::hex::decode(item.get("entry").and_then(Value::as_str).ok_or("opened item lacks entry")?).map_err(|e| e.0)?;
             preimage.extend(leaf(&salt, &entry));
             opened.push(entry);
         } else {
-            let sealed_leaf = decode_hex(item.get("leaf").and_then(Value::as_str).ok_or("item lacks leaf")?)?;
+            let sealed_leaf = mini_sdk::hex::decode(item.get("leaf").and_then(Value::as_str).ok_or("item lacks leaf")?).map_err(|e| e.0)?;
             if sealed_leaf.len() != 32 {
                 return Err("a sealed leaf is not 32 bytes".to_owned());
             }

@@ -802,6 +802,7 @@ fn session_file(value: &str, label: &str) -> std::result::Result<(), String> {
 }
 
 /// Exactly `length` bytes spelled as lowercase or uppercase hex.
+// A shell word a person typed (a key, a signature): either case reads.
 fn hex_bytes(word: &str, length: usize) -> Option<Vec<u8>> {
     if word.len() != 2 * length {
         return None;
@@ -1668,7 +1669,7 @@ fn hex_text(value: Option<&Value>) -> String {
     let Some(hex) = value.and_then(Value::as_str) else {
         return "(absent)".into();
     };
-    let bytes: Option<Vec<u8>> = crate::decode_hex(hex).ok();
+    let bytes: Option<Vec<u8>> = mini_sdk::hex::decode(hex).ok();
     match bytes.and_then(|b| String::from_utf8(b).ok()) {
         Some(text) if !text.chars().any(char::is_control) => format!("{text:?}"),
         _ => format!("hex {hex}"),

@@ -6,7 +6,9 @@
 use crate::join_solana::{
     b64_decode, b64_encode, ssh_blob, sshsig_raw_signature_for, sshsig_signed_data_for,
 };
-use crate::{decode_hex, hex, Result};
+use crate::{hex, Result};
+#[cfg(test)]
+use crate::decode_hex;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde_json::Value;
 
@@ -274,10 +276,7 @@ fn fixed<const N: usize>(value: &Value, name: &str) -> Result<[u8; N]> {
     if s.len() != 2 * N {
         return Err(format!("quote {name} must be {N} bytes"));
     }
-    let bytes = decode_hex(s)?;
-    if hex(&bytes) != s {
-        return Err(format!("quote {name} must be canonical lowercase hex"));
-    }
+    let bytes = mini_sdk::hex::decode(s).map_err(|e| e.0)?;
     bytes.try_into().map_err(|_| format!("quote {name} width"))
 }
 fn next(value: &Value, name: &str) -> Result<Option<[u8; 32]>> {

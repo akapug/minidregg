@@ -582,7 +582,7 @@ fn attempt(
     };
     let plan_view = inspect(agent, "fleet-turn-plan", &directory.join("plan.bin"), &directory.join("plan.json"))?;
     validate_plan(&draft_view, &plan_view, &plan, base)?;
-    let header = decode_hex(field(&plan_view, "header")?)?;
+    let header = mini_sdk::hex::decode(field(&plan_view, "header")?).map_err(|e| e.0)?;
     let signing = read_secret(&workspace::member_path(&agent.workspace, "key")?)?;
     let signature = signing.sign(&header).to_bytes();
     retain(&directory.join("signature.bin"), &signature)?;
@@ -628,7 +628,7 @@ fn attempt(
         let detail = outcome
             .get("detail")
             .and_then(Value::as_str)
-            .and_then(|value| decode_hex(value).ok())
+            .and_then(|value| mini_sdk::hex::decode(value).ok())
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
         return Err(format!(
@@ -897,7 +897,7 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
         }
         match event.get("payload").and_then(Value::as_str) {
             Some(payload) => {
-                let bytes = decode_hex(payload)?;
+                let bytes = mini_sdk::hex::decode(payload).map_err(|e| e.0)?;
                 if let Ok(text_value) = String::from_utf8(bytes) {
                     event["payloadText"] = json!(text_value);
                 }
@@ -1027,7 +1027,7 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
             return Err("incoming ledger is not strictly ascending above the cursor".into());
         }
         previous = height;
-        if let Ok(text_value) = String::from_utf8(decode_hex(field(entry, "payload")?)?) {
+        if let Ok(text_value) = String::from_utf8(mini_sdk::hex::decode(field(entry, "payload")?).map_err(|e| e.0)?) {
             entry["payloadText"] = json!(text_value);
         }
     }

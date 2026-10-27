@@ -132,7 +132,7 @@ pub(crate) fn status_if_enrolled(
             let detail = decoded
                 .get("detail")
                 .and_then(Value::as_str)
-                .and_then(|text| crate::decode_hex(text).ok())
+                .and_then(|text| mini_sdk::hex::decode(text).ok())
                 .and_then(|bytes| String::from_utf8(bytes).ok())
                 .unwrap_or_default();
             let text = format!("{detail} {decoded}");
@@ -317,7 +317,7 @@ fn retained_prior(state: &Value, field: &str) -> Result<Option<Vec<u8>>> {
     match state.get(field) {
         None => Err(format!("retained rotation lacks {field} (prepared by an older mini): finish it with that mini, or start another with --new-attempt ID")),
         Some(Value::Null) => Ok(None),
-        Some(value) => Ok(Some(crate::decode_hex(value.as_str().ok_or_else(|| format!("retained {field} is not hex"))?)?)),
+        Some(value) => Ok(Some(mini_sdk::hex::decode(value.as_str().ok_or_else(|| format!("retained {field} is not hex"))?).map_err(|e| e.0)?)),
     }
 }
 
@@ -380,7 +380,7 @@ pub(crate) fn key_status(mut args: Args) -> Result<()> {
         let manifest = participant_enrollment::json_private(&root.join("workspace.json"))?;
         if let Some(text) = manifest.get("nextPublicKey").and_then(Value::as_str) {
             Some(
-                crate::decode_hex(text)?
+                mini_sdk::hex::decode(text).map_err(|e| e.0)?
                     .try_into()
                     .map_err(|_| "workspace nextPublicKey is not 32 bytes")?,
             )
@@ -581,11 +581,11 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
     if Some(hex(&signer_public).as_str()) != state["signerPublic"].as_str() {
         return Err("retained successor fingerprint changed".into());
     }
-    let named_public: [u8; 32] = crate::decode_hex(
+    let named_public: [u8; 32] = mini_sdk::hex::decode(
         state["namedPublic"]
             .as_str()
             .ok_or("retained named public absent")?,
-    )?
+    ).map_err(|e| e.0)?
     .try_into()
     .map_err(|_| "retained named public size")?;
     let epoch = state["epoch"]
@@ -706,12 +706,12 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             )?
         };
         check_rotation_plan(&plan_view, &command, identity.as_ref())?;
-        let header = crate::decode_hex(
+        let header = mini_sdk::hex::decode(
             plan_view
                 .get("possessionHeader")
                 .and_then(Value::as_str)
                 .ok_or("rotation plan lacks possession header")?,
-        )?;
+        ).map_err(|e| e.0)?;
         let signature = signer.sign(&header).to_bytes();
         let ingress = match call(
             &ws.host,
@@ -778,13 +778,13 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         custody::install(&ws.key, Some(&original_daily), &original_next)?;
         let prior_destination = state["destinationPrior"]
             .as_str()
-            .map(crate::decode_hex)
+            .map(|prior| mini_sdk::hex::decode(prior).map_err(|e| e.0))
             .transpose()?;
         custody::install(&destination, prior_destination.as_deref(), &after)?;
         let after_public = key(&after_path)?.verifying_key().to_bytes();
         let prior_public = state["publicPrior"]
             .as_str()
-            .map(crate::decode_hex)
+            .map(|prior| mini_sdk::hex::decode(prior).map_err(|e| e.0))
             .transpose()?;
         custody::install(
             &conventional_next_public(&ws.key),
