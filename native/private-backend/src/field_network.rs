@@ -98,26 +98,6 @@ impl TripleManifest {
         })
     }
 }
-/// Source program/capacity binding must separately be approved by the native
-/// receiver. This codec binds actual public input provenance/inventory; it does
-/// not turn caller source_binding bytes into source authority.
-pub fn binding(
-    manifest: &TripleManifest,
-    inputs: &[InputRef],
-    source_binding: &[u8],
-) -> Result<Vec<u8>> {
-    if source_binding.is_empty() {
-        return Err(bad("missing program/input source binding"));
-    }
-    let mut b = b"DREGG.PRIVATE.FIELD.NETWORK.BINDING\x01".to_vec();
-    bytes(&manifest.encode(), &mut b);
-    Nat::new(inputs.len() as u64).put(&mut b);
-    for i in inputs {
-        bytes(&i.public_bytes(), &mut b);
-    }
-    bytes(source_binding, &mut b);
-    Ok(b)
-}
 /// Public preflight for independently prepared inventories. Source admission
 /// must authorize this exact set; this function supplies no enrollment grant.
 fn catalog<'a>(
@@ -147,6 +127,10 @@ fn catalog<'a>(
     }
     Ok(by_pool)
 }
+/// Source program/capacity binding must separately be approved by the native
+/// receiver. This codec binds actual public input provenance/inventory; it does
+/// not turn caller source_binding bytes into source authority.
+///
 /// Versioned exact multi-inventory binding. Inventories are ordered by their
 /// canonical pool IDs; caller order cannot change the common Plan. Each entry
 /// also retains the actual original seed reservations, excluding relabeling
@@ -364,7 +348,7 @@ impl Engine {
         if plan.generation != manifest.generation {
             return Err(bad("single-inventory exact consumer generation"));
         }
-        let expected = binding(&manifest, &inputs, source_binding)?;
+        let expected = binding_many(&[checked], &inputs, source_binding)?;
         Self::reserve_inner(plan, &[checked], inputs, &expected, anchor, local)
     }
     /// Burns every selected row from every stock in one durable batch before
@@ -946,8 +930,8 @@ pub(crate) mod tests {
                 outputs: vec![7],
             },
             public_ticks: 1,
-            binding_bytes: binding(
-                &manifest,
+            binding_bytes: binding_many(
+                &[checked],
                 inputs,
                 b"public source-program/input schema fixture",
             )

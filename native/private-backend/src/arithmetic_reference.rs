@@ -10,7 +10,7 @@ pub(crate) mod tests {
         acss_id::{self, AcssId},
         codec::Generation,
         entropy::Entropy,
-        field_network::{binding, Engine, InputRef, Send, TripleManifest},
+        field_network::{Engine, InputRef, Send, TripleManifest},
         field_network_layers::LayerEngine,
         reconstruction::Field,
         transcript::{Tap, Wire},
@@ -199,11 +199,8 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(rows.len(), count);
             let single = checked.len() == 1;
-            let binding_bytes = if single {
-                binding(&TripleManifest::from_checked(checked[0]), &refs, source_binding).unwrap()
-            } else {
-                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap()
-            };
+            let binding_bytes =
+                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap();
             let plan = crate::circuit_batch::Plan {
                 generation: g.clone(),
                 network: network.clone(),
