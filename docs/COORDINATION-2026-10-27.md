@@ -155,6 +155,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Rehearsal ships when ember says**, from the newest gated main, with reds named (`ship.sh --rehearsal`; re-genesis is free);
   the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
+- **No Lean builds on the Mac** (2026-10-27 night: four concurrent lane builds put the Mac at 72 of 74 GB swap). The Mac edits, runs `cargo check` and filtered Rust tests; every `lake build` and every large elaboration runs on dregg-ref (lanes, through `closure-lock`) or is the continuous main build on dregg-build. Each lane and faerie works only in its own worktree.
 - **No lane waits on its own closure build** (ember, 2026-10-27 night: "we need to avoid having the dependence on these closure builds"). A lane per-file elaborates its changed files and their direct importers, pushes, and moves on; the continuous build of main is the closure, and its reds are named within minutes and fixed forward by the owning lane. A lane's own closure runs only in the background (dregg-ref, closure-lock) when a change touches importers it cannot check per file. The iteration-speed lane is replacing per-file batch checks with a live Lean server per lane and Lean 4.30's module system.
 - **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
   `dregg-build` builds main's Host closure continuously; a lane elaborates per file (`lean-ask`,
