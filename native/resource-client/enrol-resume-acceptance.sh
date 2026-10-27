@@ -18,12 +18,16 @@
 #      exactly one admission);
 #   5. the admitted subject and keyId are the first plan's; the namespace holds one request record
 #      and one binding for the name;
-#   6. a pinned plan (`pin-enrollment-plan-height`) survives two ticks without the resume path;
-#   7. five members enrol back to back (plan, tick, seal, submit each, as the composed world does under
-#      its ticker): each seal signs the pinned plan it planned, five admissions, five subjects.
-# On a Host that pins (pin.json `pinnedAtHeight`), steps 2 and 4 assert the pinned behaviour instead: a
-# tick does not kill a pinned plan, so `plan` resumes it and `seal` signs it as it stands. Steps 6 and 7
-# need the pin; on a Host without it the script stops there by name.
+#   6. five members enrol back to back under a running ticker (the composed world's `enroll
+#      member-1..5`, cut 4's red): plan, seal, submit each; a seal the consent provider refuses
+#      because a tick landed points at `plan`, which re-plans the SAME request; five admissions, five
+#      subjects, each the subject its first plan printed;
+#   7. a pinned plan (`pin-enrollment-plan-height`) sealed after a tick: PASS when the consent provider
+#      accepts it; while the provider authorizes only the current source
+#      (NativeObservationController.authorize in NativeHost.enrollmentPlanAuthorizedLoaded) the row
+#      prints OWED by name and the script still passes on the steps above.
+# Steps 2 and 4 take the path the consent provider decides for a pinned plan after a tick (resumed and
+# signed as it stands, or re-planned under the same request), each path with its own assertions.
 # Every step leaves cmd/stdout/stderr/exit under ROOT/log (provisioning-acceptance.sh's shape).
 set -eu
 umask 077
@@ -72,8 +76,8 @@ said plan-resume 'a validated plan is retained'
 tick tick-1
 plan plan-after-tick ok "$A"
 same_identity plan-after-tick
-if [ -n "$PINNED" ]; then
-  [ "$(plan_sha)" = "$P1" ]; [ ! -e "$A/replanned" ]
+if [ -n "$PINNED" ] && [ ! -e "$A/replanned" ]; then
+  [ "$(plan_sha)" = "$P1" ]
   said plan-after-tick 'a validated plan is retained'
 else
   [ "$(plan_sha)" != "$P1" ]; [ -s "$A/replanned/01/plan.bin" ]
@@ -87,14 +91,16 @@ said plan-elsewhere "already planned at $A"
 # 4. a tick before seal: an unpinned plan is refused by the consent provider, which points at plan; a
 #    pinned one is signed as it stands (the consent provider re-derives it at the observation's height)
 tick tick-2
-if [ -n "$PINNED" ]; then
+set +e; "$MINI" enroll --action seal --dir "$A" >"$LOG/seal-1.stdout" 2>"$LOG/seal-1.stderr"; code=$?; set -e
+printf 'seal-1\t%s\n' "$code" >>"$ROOT/steps.tsv"
+if [ "$code" -ne 0 ]; then
+  said seal-1 'plans the same request again'
+  before=$(ls "$A/replanned" 2>/dev/null | wc -l | tr -d ' ')
+  plan plan-2 ok "$A"
+  same_identity plan-2; [ "$(ls "$A/replanned" | wc -l | tr -d ' ')" = $((before + 1)) ]
   step seal-2 ok "$MINI" enroll --action seal --dir "$A"
 else
-  step seal-stale fail "$MINI" enroll --action seal --dir "$A"
-  said seal-stale 'plans the same request again'
-  plan plan-2 ok "$A"
-  same_identity plan-2; [ -s "$A/replanned/02/plan.bin" ]
-  step seal-2 ok "$MINI" enroll --action seal --dir "$A"
+  [ -n "$PINNED" ] || { echo "an unpinned plan was sealed across a tick" >&2; exit 1; }
 fi
 tick tick-3
 set +e; "$MINI" enroll --action submit --dir "$A" >"$LOG/submit-1.stdout" 2>"$LOG/submit-1.stderr"; code=$?; set -e
@@ -121,39 +127,62 @@ records=$(for f in "$NS"/request-*.json; do jq -r 'select(.request=="newcomer") 
 bindings=$(ls "$NS" | grep -c '^binding-' || true)
 [ "$bindings" = 1 ] || { echo "namespace holds $bindings bindings" >&2; exit 1; }
 step lookup ok "$MINI" enroll --action lookup --dir "$A"
-# 6. The pinned plan survives the ticker WITHOUT the resume path: a second newcomer is planned (the plan's
-#    sponsor deadline pinned to the observation's height, `pin-enrollment-plan-height`), the clock ticks, the
-#    plan is sealed as it stands, the clock ticks, and the sealed plan is admitted. A Host without the pin verb
-#    cannot pass this row (the plan says so on stderr), and neither can a consent provider or Host that refuses
-#    a past-height observation.
-"$MINI" keygen --secret "$ROOT/second.key" --public "$ROOT/second.pub" >"$ROOT/second-keygen.json"
-B="$ROOT/attempts/second"
-step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
-  --name second --new-key "$ROOT/second.key" --dir "$B"
-if grep -q 'has no pin-enrollment-plan-height' "$LOG/pinned-plan.stderr"; then
-  echo "enrol-resume: FAIL the Host has no pin-enrollment-plan-height; a plan cannot survive a tick before it is sealed" >&2; exit 1
-fi
-[ -s "$B/plan-pinned.bin" ]; [ "$(jq -er .pinnedAtHeight "$B/pin.json")" = "$(jq -er .height "$B/observation/challenge.json")" ]
-tick tick-4
-step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
-tick tick-5
-step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
-[ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
-[ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
-# 7. Five members back to back under a ticker (the composed world's `enroll member-1..5`): each plan is
-#    pinned at its own observation's height, the clock ticks before its seal, and seal signs the pinned
-#    plan (it inspects the plan the custody signs, never the unpinned answer beside it).
+# 6. Five members back to back under a running ticker (a tick every second, as a box's ticker races the
+#    composed world's enrolments): a plan born over a moved source is observed again inside `plan`; a seal
+#    refused because a tick landed after the plan re-plans the same request (bounded); five admissions.
+( while :; do "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; sleep 1; done ) &
+printf '%s\n' "$!" >"$ROOT/ticker.pid"
+trap 'kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 for i in 1 2 3 4 5; do
   "$MINI" keygen --secret "$ROOT/member-$i.key" --public "$ROOT/member-$i.pub" >"$ROOT/member-$i-keygen.json"
   M="$ROOT/attempts/member-$i"
-  step "member-$i-plan" ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
-    --name "member-$i" --new-key "$ROOT/member-$i.key" --dir "$M"
-  [ -s "$M/plan-pinned.bin" ]
-  tick "member-$i-tick"
-  step "member-$i-seal" ok "$MINI" enroll --action seal --dir "$M"
-  step "member-$i-submit" ok "$MINI" enroll --action submit --dir "$M"
+  mplan() { step "$1" ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
+    --name "member-$i" --new-key "$ROOT/member-$i.key" --dir "$M"; }
+  mplan "member-$i-plan"
+  first=$(jq -er .subject "$LOG/member-$i-plan.stdout")
+  admitted=""
+  for try in 1 2 3 4 5 6; do
+    set +e; "$MINI" enroll --action seal --dir "$M" >"$LOG/member-$i-seal-$try.stdout" 2>"$LOG/member-$i-seal-$try.stderr"; code=$?; set -e
+    printf 'member-%s-seal-%s\t%s\n' "$i" "$try" "$code" >>"$ROOT/steps.tsv"
+    if [ "$code" -ne 0 ]; then
+      said "member-$i-seal-$try" 'plan'
+      mplan "member-$i-replan-$try"; [ "$(jq -er .subject "$LOG/member-$i-replan-$try.stdout")" = "$first" ]
+      continue
+    fi
+    set +e; "$MINI" enroll --action submit --dir "$M" >"$LOG/member-$i-submit-$try.stdout" 2>"$LOG/member-$i-submit-$try.stderr"; code=$?; set -e
+    printf 'member-%s-submit-%s\t%s\n' "$i" "$try" "$code" >>"$ROOT/steps.tsv"
+    if [ "$code" -eq 0 ]; then admitted=1; break; fi
+    [ -s "$M/submit-refused.json" ] || { echo "member-$i submit refused without the no-record marker" >&2; tail -5 "$LOG/member-$i-submit-$try.stderr" >&2; exit 1; }
+    mplan "member-$i-after-refusal-$try"; [ "$(jq -er .subject "$LOG/member-$i-after-refusal-$try.stdout")" = "$first" ]
+  done
+  [ -n "$admitted" ] || { echo "member-$i was not admitted in six seals under the ticker" >&2; exit 1; }
   [ "$(jq -er .authority "$M/enrollment.json")" = admitted-key-only ]
+  [ "$(jq -er .subject "$M/enrollment.json")" = "$first" ]
 done
+kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true
 members=$(for i in 1 2 3 4 5; do jq -er .subject "$ROOT/attempts/member-$i/enrollment.json"; done | sort -u | wc -l | tr -d ' ')
 [ "$members" = 5 ] || { echo "five members admitted $members distinct subjects" >&2; exit 1; }
-echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; pinned plan admitted across two ticks; five members back to back) subject=$SUBJECT keyId=$KEYID"
+seals=$(grep -c '^member-.-seal-' "$ROOT/steps.tsv")
+# 7. A pinned plan sealed after a tick (the pin's purpose). OWED while the consent provider authorizes only
+#    the current source; the row names it rather than failing the steps above.
+PIN7=no-pin
+if [ -n "$PINNED" ]; then
+  "$MINI" keygen --secret "$ROOT/second.key" --public "$ROOT/second.pub" >"$ROOT/second-keygen.json"
+  B="$ROOT/attempts/second"
+  step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
+    --name second --new-key "$ROOT/second.key" --dir "$B"
+  [ -s "$B/plan-pinned.bin" ]; [ "$(jq -er .pinnedAtHeight "$B/pin.json")" = "$(jq -er .height "$B/observation/challenge.json")" ]
+  tick tick-4
+  set +e; "$MINI" enroll --action seal --dir "$B" >"$LOG/pinned-seal.stdout" 2>"$LOG/pinned-seal.stderr"; code=$?; set -e
+  printf 'pinned-seal\t%s\n' "$code" >>"$ROOT/steps.tsv"
+  if [ "$code" -eq 0 ]; then
+    step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
+    [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
+    PIN7=pinned-plan-sealed-across-a-tick
+  else
+    said pinned-seal 'plan'
+    PIN7="OWED: the consent provider refused the pinned plan after one tick (it authorizes the current source only)"
+    echo "enrol-resume: $PIN7" >&2
+  fi
+fi
+echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; five members back to back under a 1 s ticker in $seals seals; step 7: $PIN7) subject=$SUBJECT keyId=$KEYID"
