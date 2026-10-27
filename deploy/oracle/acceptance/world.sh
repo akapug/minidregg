@@ -70,7 +70,7 @@ world_stop_probe() {
     --public-socket "$run/world/sock/participant/host.sock" \
     --plan "$state/apps/$app/g$generation/stop-claim/stop-plan-v2.bin" \
     --committed "$state/apps/$app/g$generation/stop-claim/committed-v3.bin" \
-    --out "$output" --deadline 1200 "${args[@]}" >"$output.stdout" 2>"$output.stderr"
+    --out "$output" --deadline 1200 --resident-only "${args[@]}" >"$output.stdout" 2>"$output.stderr"
 }
 
 world_controller_prepare() {

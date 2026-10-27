@@ -114,10 +114,23 @@ def main():
                            for boundary in ('before', 'after-a', 'before-b', 'after-b')]
     require('stop_inspection_same_operator_process', all(
         identity == operator_identities[0] for identity in operator_identities))
-    require('stop_inspection_cold_served_equal_both_boundaries', all(
+    require('fresh_stop_resident_controls_at_both_boundaries', all(
         item.get('schema') == 'mini-stop-inspection-probe-v1' and item.get('passed') is True
-        and item['measurements']['cold']['sha256'] == sha(run / f'op155-{letter}/cold.json')
-        for letter, item in op155.items()))
+        and item.get('mode') == 'resident-only' and item.get('served_checks_passed') is True
+        and item.get('cold_comparison') == 'not-performed'
+        for item in op155.values()))
+    copied_benchmark = read(run / 'copied-store-stop-benchmark.json')
+    require('separate_copied_store_cold_comparison_same_host',
+            copied_benchmark.get('schema') == 'mini-stop-inspection-continuation-v1'
+            and copied_benchmark.get('passed') is True
+            and copied_benchmark.get('host_sha256') == op155['a']['host_sha256']
+            and copied_benchmark.get('config_sha256') != op155['a']['config_sha256']
+            and re.fullmatch(r'[0-9a-f]{64}', copied_benchmark.get('cold_sha256', '')) is not None
+            and copied_benchmark.get('canonical_wrong_claim_checked') is True
+            and copied_benchmark.get('source_and_copied_store_and_anchor') == 'hashes unchanged'
+            and copied_benchmark.get('controls') == {
+                'trailing-claim': 'source', 'malformed-pair': 'transport-routing',
+                'mismatched-committed': 'source', 'public-denied': 'transport-routing'})
     require('stop_inspection_refreshed_for_new_claim',
             op155['a']['plan_sha256'] != op155['b']['plan_sha256']
             and op155['a']['committed_sha256'] != op155['b']['committed_sha256']
@@ -338,6 +351,9 @@ def main():
               'native_completion_receipts': native_receipts,
               'native_stop_receipts': stop_receipts,
               'stop_inspection': op155, 'operator_identity': operator_identities[0],
+              'separate_copied_store_cold_benchmark': {'receipt': copied_benchmark,
+                  'sha256': sha(run / 'copied-store-stop-benchmark.json'),
+                  'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
