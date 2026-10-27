@@ -57,8 +57,8 @@ un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also
 After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
 J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
 not compile). The first candidate carrying both bc88a5ab (frame v8)
-and hermes 68394077 (any full build from main >= fb15f121b): send its sha and path to L4 (ac2a5ad7827eb4744) and
-the coordinator at once; L4 runs J14_TOOLS against it (3315a908 refuses the v8 genesis). Unit
+and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3a0c41f3): send its sha and path to L4 (ac2a5ad7827eb4744) and
+the coordinator at once; L4 runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
 mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
 f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
 elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
