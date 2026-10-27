@@ -459,6 +459,54 @@ try:
                      'state': after.get('state')})
             again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
             w.check('refused-payout-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
+    if a.scenario == 'ballot':
+        # Ballot law natively (world/ballot/README.md:9-10 "TALLY ...: anyone closes the poll, once; the result is
+        # derived from the retained openings"; SealedBallot.obend `publish` :307, `publication` :282). Voters 1 and 2
+        # commit `seal` (:88) = 2*(salt*1000+voter)+vote: voter 1 yes, salt 111 -> 222003; voter 2 yes, salt 222 ->
+        # 444005; both open inside the reveal window; the tally at the close is the one `commit {write}` that
+        # publishes yes 2, no 0, abstain 0, passed (quorum 2), decided `settled` at the yield. Events: Cast :61,
+        # Reveal :66, Tick :72.
+        rec = v['recordCell']
+        cast = lambda voter, digest, now: ev('commit', voter=nat(voter), digest=nat(digest), now=nat(now))
+        open_ = lambda voter, vote, salt, now: ev('reveal', voter=nat(voter), vote=nat(vote), salt=nat(salt), now=nat(now))
+        tally = lambda now: ev('tally', now=nat(now))
+        with w.group('ballot'):
+            w.check('born-awaiting-the-keeper-unpublished',
+                    source_of(v).get('kind') == 'reply' and scalar_of(v.get('state'), 'published', 'boolean') is False
+                    and field_of(v.get('state'), 'yes') == 0, {'source': source_of(v), 'state': v.get('state')})
+            _, v1 = drive('obj', 'commit-1', tx, rec, v, cast(1, 222003, 10))
+            _, v2 = drive('obj', 'commit-2', tx, rec, v1, cast(2, 444005, 11))
+            _, v3 = drive('obj', 'reveal-1', tx, rec, v2, open_(1, 1, 111, 60))
+            _, v4 = drive('obj', 'reveal-2', tx, rec, v3, open_(2, 1, 222, 61))
+            _, v5 = drive('obj', 'tally', tx, rec, v4, tally(100))
+            st = v5.get('state')
+            w.check('tally-commit-publishes-the-derived-result',
+                    source_of(v5) == performed('settled') and field_of(st, 'yes') == 2 and field_of(st, 'no') == 0
+                    and field_of(st, 'abstain') == 0 and scalar_of(st, 'passed', 'boolean') is True
+                    and scalar_of(st, 'published', 'boolean') is True, {'source': source_of(v5), 'state': st})
+            v6 = deliver_only('obj', 'settled', tx, rec, v5)
+            w.check('published-once-and-finished',
+                    v6.get('state') == st and v6.get('stateVersion') == v5.get('stateVersion')
+                    and v6['record'].get('phase', {}).get('kind') != 'awaiting',
+                    {'phase': v6['record'].get('phase'), 'state': v6.get('state')})
+        # Teeth: an object whose law is `yes <= 0` refuses the publication of a result with a yes vote: the tally's
+        # delivery is refused `objectWrite` as a whole turn, nothing is written and the activity stays at its yield.
+        with w.group('ballot-teeth-law-refuses-publication'):
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('yes', 0), 'installed', state_type=BALLOT_STATE)
+            tx3, b = birth_of('lawful', BALLOT_SPEC(), a.deposit, 'birth-lawful')
+            rec3 = b['recordCell']
+            _, c1 = drive('lawful', 'commit-1-lawful', tx3, rec3, b, cast(1, 222003, 10))
+            _, c2 = drive('lawful', 'reveal-1-lawful', tx3, rec3, c1, open_(1, 1, 111, 60))
+            w.turn('resolve-tally-lawful', w.second, {'kind': 'resolve', 'slot': source_of(c2)['slot'],
+                                                       'answer': {'reply': tally(100)}}, 'installed')
+            w.turn('deliver-tally-law-refused', w.sponsor, {'kind': 'deliver', 'record': rec3,
+                   'await': World.await_of(c2)['id'], 'account': '0', 'accountCapability': '0'}, 'refused', 'objectWrite')
+            a3 = w.state('lawful', 'after-law-refusal', tx3)
+            w.check('law-refused-publication-writes-nothing',
+                    a3.get('state') == c2.get('state') and a3.get('stateVersion') == c2.get('stateVersion')
+                    and scalar_of(a3.get('state'), 'published', 'boolean') is False
+                    and World.await_of(a3).get('id') == World.await_of(c2).get('id'),
+                    {'state': a3.get('state'), 'version': [c2.get('stateVersion'), a3.get('stateVersion')]})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()

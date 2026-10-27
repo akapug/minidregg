@@ -36,6 +36,7 @@ mechanism. Shape from `CollectiveAdoption` (unique ballot, quorum) and `Kernel/S
   is readable from the digest. The preview shows the state machine, not secrecy. The native
   digest is the kernel's cSHAKE256 over the whole tuple (`Pred.hashEq`, as `Kernel/SealedMarket`
   does for bids); that needs a native digest atom in the language, which does not exist.
+* Native: native scenario `ballot` in world-activity-admit.py (not yet run; runs in the central gate).
 * No native route: the Plans are proposals; heights are caller-supplied `now` fields. Native
   needs the activity route with height awaits (commit end, reveal end) and the electors as
   authenticated actors (here the voter id is a field, not an authenticated subject).
