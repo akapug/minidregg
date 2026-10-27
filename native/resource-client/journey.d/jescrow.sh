@@ -91,7 +91,7 @@ want_admitted "delegate: the observe grant to the friend's subject is admitted" 
 run dpublish "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id "g-$RES" --attempt "$SPONSOR_WS/attempts/g-$RES"
 
 FW=$D/friend-ws
-run finit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" --key "$K/recovered.key" --subject "${FS:-0}" --dir "$FW"
+run finit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" --key "$K/recovered.key" --subject "${FS:-0}" --next-pub "$K/friend.key.next.pub" --dir "$FW"
 run fimport "$MINI" workspace --action import --dir "$FW" --name "$RES" --from-ref "$SPONSOR_WS/proposals/g-$RES/recipient-reference.json"
 run fread "$MINI" workspace --action read --dir "$FW" --name "$RES"
 row "Host: a workspace opened with the RECOVERED key reads as the friend" "signed read answered; field 2 = 7 (what the sponsor wrote)" \

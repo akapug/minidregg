@@ -11,6 +11,12 @@
 #               asserted changed BEFORE the verdict is read; `mini store audit` exits 1, stderr is
 #               `store audit refused: ...` and names that height, and the second (re-admission)
 #               audit never ran behind the refused store
+#   evidence    (R9) `mini export-evidence` of an accepted signed call from the journey's own workspace
+#               writes a package; `mini verify-evidence` re-derives the native prefix from it and
+#               prints the receipt the Host gave the call (transaction id and accepted count equal the
+#               attempt's retained outcome). One flipped byte of the package is refused by verify with
+#               nothing written; a flipped byte of the call is refused by export (noncanonical, or
+#               absent from the Store's history) with no package written.
 #
 # Hook contract: journey.sh exports MINI HOST CONFIG SOCKET JOURNEY_WORLD JOURNEY_STEP_DIR.
 # Last stdout line = artifact; last stderr line = detail.
@@ -90,6 +96,53 @@ if [ "$mrc" = 0 ]; then
     "exit=$(rc planted) stdout=$(wc -c <"$D/planted.out")B $(tail -1 "$D/planted.err" | cut -c1-140)" \
     "$([ "$(rc planted)" = 1 ] && grep -q '^store audit refused: ' "$D/planted.err" \
         && grep -qE "(^|[^0-9])$MH([^0-9]|\$)" "$D/planted.err" && ! grep -q '^audited ' "$D/planted.out" && echo 1 || echo 0)"
+fi
+
+# evidence (R9): an accepted call's package, verified, then the two refusals.
+CALL=""; OUTCOME=""
+for c in $(find "$JOURNEY_WORLD" -name call.bin -path '*/attempts/*' 2>/dev/null | sort); do
+  o=$(dirname "$c")/outcome.json
+  if [ -s "$o" ] && jq -e '.type == "confirmed"' "$o" >/dev/null 2>&1; then CALL=$c; OUTCOME=$o; break; fi
+done
+E=$D/evidence; mkdir -m 700 "$E"
+row "an accepted signed call of the journey's own workspace exists" "a call.bin with a confirmed outcome" "${CALL:-none}" "$([ -n "$CALL" ] && echo 1 || echo 0)"
+if [ -n "$CALL" ]; then
+  "$MINI" export-evidence --host "$HOST" --config "$CONFIG" --call "$CALL" --output "$E/package.bin" >"$E/export.out" 2>"$E/export.err"; erc=$?
+  row "mini export-evidence of the accepted call" "exit 0 and a package" "exit=$erc package=$(wc -c <"$E/package.bin" 2>/dev/null || echo none)B $(head -1 "$E/export.err" | cut -c1-80)" \
+    "$([ "$erc" = 0 ] && [ -s "$E/package.bin" ] && echo 1 || echo 0)"
+  "$MINI" verify-evidence --host "$HOST" --config "$CONFIG" --package "$E/package.bin" --output "$E/verified.json" >"$E/verify.out" 2>"$E/verify.err"; vrc=$?
+  row "mini verify-evidence of that package" "exit 0; verified-mini-native-prefix-v1 with the attempt's transaction id and accepted count" \
+    "exit=$vrc $(jq -c '{type,transactionId,acceptedCount}' "$E/verified.json" 2>/dev/null | cut -c1-120) vs $(jq -c '{transactionId,acceptedCount}' "$OUTCOME" 2>/dev/null)" \
+    "$([ "$vrc" = 0 ] && jq -e --slurpfile o "$OUTCOME" '.type == "verified-mini-native-prefix-v1" and .transactionId == ($o[0].transactionId | tostring) and .acceptedCount == ($o[0].acceptedCount | tostring)' "$E/verified.json" >/dev/null 2>&1 && echo 1 || echo 0)"
+  python3 - "$E/package.bin" "$E/package-planted.bin" >"$E/planted-package.txt" 2>&1 <<'PY'
+import sys
+b = bytearray(open(sys.argv[1], "rb").read())
+i = len(b) // 2
+b[i] ^= 0x01
+assert bytes(b) != open(sys.argv[1], "rb").read()
+open(sys.argv[2], "xb").write(bytes(b))
+print(i, len(b))
+PY
+  prc=$?
+  row "the planted fault took: one byte of the package changed" "exit 0" "rc=$prc $(cat "$E/planted-package.txt" | cut -c1-60)" "$([ "$prc" = 0 ] && echo 1 || echo 0)"
+  "$MINI" verify-evidence --host "$HOST" --config "$CONFIG" --package "$E/package-planted.bin" --output "$E/planted-verified.json" >"$E/planted-verify.out" 2>"$E/planted-verify.err"; pvrc=$?
+  row "mini verify-evidence of the planted package" "exit != 0, a refusal on stderr, no result written" \
+    "exit=$pvrc $(tail -1 "$E/planted-verify.err" | cut -c1-140)" \
+    "$([ "$pvrc" != 0 ] && [ -s "$E/planted-verify.err" ] && [ ! -e "$E/planted-verified.json" ] && echo 1 || echo 0)"
+  python3 - "$CALL" "$E/call-planted.bin" >"$E/planted-call.txt" 2>&1 <<'PY'
+import sys
+b = bytearray(open(sys.argv[1], "rb").read())
+i = len(b) // 2
+b[i] ^= 0x01
+assert bytes(b) != open(sys.argv[1], "rb").read()
+open(sys.argv[2], "xb").write(bytes(b))
+print(i, len(b))
+PY
+  crc=$?
+  "$MINI" export-evidence --host "$HOST" --config "$CONFIG" --call "$E/call-planted.bin" --output "$E/planted-package.bin" >"$E/planted-export.out" 2>"$E/planted-export.err"; xrc=$?
+  row "mini export-evidence of a call with one byte changed" "exit != 0 naming noncanonical or absent-from-history; no package written" \
+    "plant=$crc exit=$xrc $(tail -1 "$E/planted-export.err" | cut -c1-140)" \
+    "$([ "$crc" = 0 ] && [ "$xrc" != 0 ] && grep -Eq 'noncanonical native signed call|exact signed call is absent or conflicts' "$E/planted-export.err" && [ ! -e "$E/planted-package.bin" ] && echo 1 || echo 0)"
 fi
 
 echo "$T"
