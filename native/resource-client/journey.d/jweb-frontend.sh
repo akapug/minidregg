@@ -31,7 +31,9 @@
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
 #   tour-step          POST /tour/4 (`can` through the tour's form) lands an outcome under the step   -> outcome
-#   tour-chromium      jtour.mjs: login, /tour, step 4 through the pane, a terminal prompt (needs Playwright) -> PASS
+#   export-*           POST /export, ready, download (attachment, streamed), deleted on the box, untar: the
+#                      document's text and the manifest's height and world root equal the live page's  -> PASS
+#   tour-chromium      jtour.mjs: login, /tour, step 4 (`can DOC`) through the pane, a terminal prompt (needs Playwright) -> answered, elapsed
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-WEB-FRONTEND PASS n/n` or
@@ -89,7 +91,13 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"
       "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$NAME" --holder "$subject" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err" || return 1
       install -m 0600 "$SPONSOR_WS/provisions/$NAME/birth-context.json" "$M/home/provision/birth-context.json" || return 1
-      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null
+      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null || return 1
+      # The door's last enrolment step for a stranger who ticked "contribute my data for research":
+      # the member's research-consent fact, as the member (door::research_consent_lines(true)).
+      for l in "create research-consent declared open" "invoke research-consent-0 research-consent create 1 1" "submit research-consent-0"; do
+        mline "$M/home/workspace" "$M/home" "$l" >/dev/null || return 1
+      done
+      : >"$M/provisioned-this-run"
     }
     # A member an earlier run of this step provisioned (the box keeps its world) is reused.
     [ -f "$M/home/workspace/workspace.json" ] || provision_jwf || true
@@ -190,6 +198,57 @@ row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && ech
 # The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
 # point and not as a proof (A10's inclusion opening is pending).
 row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# Research consent (ember's ruling): the door wrote the member's fact at enrolment (ticked: CC0);
+# /export shows it with the sentence; the member flips it there (a write on their own cell); the
+# export's manifest carries the value the world holds.
+page=$(req GET /export)
+if [ -f "${M:-/nonexistent}/provisioned-this-run" ]; then
+  row consent-enrol "$(grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
+else
+  row consent-enrol "$(grep -qE 'field 1\): <strong>(contributed for research \(CC0\)|not contributed)' <<<"$page" && echo 1 || echo 0)" "reused member: $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
+fi
+rm -f "${M:-/nonexistent}/provisioned-this-run"
+if grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page"; then CWANT=none; CARGS=(); else CWANT=cc0; CARGS=(--data-urlencode "choice=cc0"); fi
+page=$(req POST /export/consent --data-urlencode "csrf=$CSRF" "${CARGS[@]}")
+cflip=$(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)
+page=$(req GET /export)
+want_text=$([ "$CWANT" = cc0 ] && echo 'contributed for research (CC0)' || echo 'not contributed')
+row consent-flip "$(grep -q "field 1): <strong>$want_text" <<<"$page" && echo 1 || echo 0)" "to $CWANT: $cflip"
+# The subscriber tier's page: what it buys (from the provider table, when the box has the row),
+# the policy line marked for ember, the price and window from the room, the two forms.
+page=$(req GET /subscribe)
+row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
+# Export my world (the 11 November shutdown): start, wait until it is ready, read the document page
+# (its stamp carries the read's height and world root), download (streamed through the gateway,
+# then deleted on the box), untar: the document's text and the manifest's root are the live world's.
+page=$(req POST /export --data-urlencode "csrf=$CSRF")
+XNAME=$(grep -o 'Preparing <code>world-[0-9]*' <<<"$page" | sed 's/.*<code>//' | head -1)
+row export-start "$([ -n "$XNAME" ] && echo 1 || echo 0)" "$(st) ${XNAME:-no name}"
+xready=0; xstart=$(date +%s)
+# The export reads every document the member holds (one signed read each): its time is published
+# in the row, and the wait is generous (JWF_EXPORT_WAIT_S, 900).
+for i in $(seq 1 $(( ${JWF_EXPORT_WAIT_S:-900} / 5 ))); do
+  page=$(req GET /export); grep -q "action=\"/export/$XNAME/download\"" <<<"$page" && { xready=1; break; }
+  grep -q "<code>$XNAME</code> ended without an archive" <<<"$page" && break
+  sleep 5
+done
+row export-ready "$xready" "$(st) after $(( $(date +%s) - xstart )) s, $(ls "$M/home/workspace/refs" 2>/dev/null | wc -l | tr -d ' ') references $(grep -o "<code>$XNAME</code> ended without an archive: <code>[^<]*" <<<"$page" | sed 's/.*<code>//' | cut -c1-160)"
+docpage=$(req GET "/doc/$DOC")
+LIVE_H=$(grep -o 'data-height="[0-9]*"' <<<"$docpage" | head -1 | grep -o '[0-9]*')
+LIVE_W=$(grep -o 'data-world-root="[^"]*"' <<<"$docpage" | head -1 | sed 's/.*="//; s/"$//')
+XCSRF=$(csrf_of)
+curl -s -o "$R/export.tar" -D "$R/xh" -w '%{http_code}' -X POST -b "$JAR" -c "$JAR" -H "Origin: $ORIGIN" -H 'Sec-Fetch-Site: same-origin' \
+  --data-urlencode "csrf=${XCSRF:-$CSRF}" "$BASE/export/$XNAME/download" >"$R/status"
+xtype=$(grep -i '^content-type:' "$R/xh" | tr -d '\r' | cut -d' ' -f2)
+row export-download "$([ "$(st)" = 200 ] && [ "$xtype" = application/x-tar ] && [ -s "$R/export.tar" ] && echo 1 || echo 0)" "$(st) $xtype $(wc -c <"$R/export.tar" | tr -d ' ') bytes"
+page=$(req GET /export)
+row export-deleted "$(grep -q "/export/$XNAME/download" <<<"$page" && echo 0 || echo 1)" "the box keeps no copy once downloaded"
+rm -rf "$R/export"; mkdir -p "$R/export"; tar -xf "$R/export.tar" -C "$R/export" 2>"$R/export.err"
+XM="$R/export/mini-export/manifest.json"
+row export-document "$([ -f "$XM" ] && grep -qF "$TEXT" "$R/export/mini-export/documents/$DOC.txt" 2>/dev/null && echo 1 || echo 0)" "$(head -c 200 "$R/export.err") documents=$(jq '.documents|length' "$XM" 2>/dev/null) attempts=$(jq '.attempts|length' "$XM" 2>/dev/null)"
+XH=$(jq -r '.height // ""' "$XM" 2>/dev/null); XW=$(jq -r '.worldRoot // ""' "$XM" 2>/dev/null)
+row export-consent "$([ "$(jq -r '.researchConsent // ""' "$XM" 2>/dev/null)" = "$CWANT" ] && echo 1 || echo 0)" "manifest $(jq -r '.researchConsent // "absent"' "$XM" 2>/dev/null), the world $CWANT"
+row export-root "$([ -n "$XW" ] && [ "$XW" = "$LIVE_W" ] && [ "$XH" = "$LIVE_H" ] && echo 1 || echo 0)" "manifest height $XH root $(cut -c1-16 <<<"$XW") | live height $LIVE_H root $(cut -c1-16 <<<"$LIVE_W")"
 # The private-room shape of `room invite` (parity's one world leaf): this member founds a private
 # room; the sponsor, as invitee, signs its key declaration into HOME/requests/decl.json.
 shell_as_member() { "$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line "$1" 2>"$R/shell.err"; }
@@ -315,14 +374,27 @@ page=$(req POST /tour/12 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=la
 row rules-revised "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 page=$(req POST "/doc/$RULES/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=under the revised law")
 row rules-admitted "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# The tour runs no shell itself: its purse meter fills in after the page (data-load).
+page=$(req GET /tour)
+row tour-purse-later "$(grep -q 'data-load="/purse/meter"' <<<"$page" && echo 1 || echo 0)" "$(st)"
+page=$(req GET /purse/meter)
+row purse-meter "$(grep -q '<meter ' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="n">[0-9]*' <<<"$page" | head -1)"
 # Door 11, the story (A7): the built-in tale; the member is author and, invited by themself,
 # player; one legal move admitted; the impossible move refused beside the theorem's name.
 TALE="tale$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 a=$(alt_of "$tour" "story new"); set -- $(fields_of "$tour" "story new"); F_NAME=${1:-a2}; F_FROM=${2:-a3}
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_FROM=tale")
-row story-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} fields=$F_NAME,$F_FROM $(headline "$page") $(pre_of <<<"$page" | head -2 | tr '\n' ' ' | cut -c1-100)"
+# The tale's template is nineteen transitions (minutes on a used world): past the body's 100 s the
+# page answers undecided ("still deciding") and the shell runs on to its decision; the seal is then
+# retried, as a member would, until the story exists (at most six minutes).
+ok=0; grep -q 'outcome admitted' <<<"$page" && ok=1; grep -q 'still deciding' <<<"$page" && ok=1
+row story-new "$ok" "$(st) alt=${a:-?} fields=$F_NAME,$F_FROM $(headline "$page") $(pre_of <<<"$page" | head -2 | tr '\n' ' ' | cut -c1-100)"
 a=$(alt_of "$tour" "story seal"); set -- $(fields_of "$tour" "story seal"); F_NAME=${1:-a2}
-page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE")
+for i in $(seq 1 24); do
+  page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE")
+  grep -q 'has no story' <<<"$page" || break
+  sleep 15
+done
 row story-seal "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 a=$(alt_of "$tour" "story invite"); set -- $(fields_of "$tour" "story invite"); F_NAME=${1:-a2}; F_SUBJ=${2:-a3}
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_SUBJ=$SUBJECT" --data-urlencode "submit=on")
@@ -350,7 +422,7 @@ row can-bare "$([ "$(st)" != 504 ] && [ "$(st)" != 502 ] && { grep -q 'outcome a
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
   CODE2=$(token); printf '{"name":"alice","expires":%d}\n' "$(( $(date +%s) + 3600 ))" >"$R/state/logins/$(sha256 "$CODE2").json"
-  out=$(PLAYWRIGHT_DIR=$PW node "$HERE/jtour.mjs" "$BASE" "$CODE2" "$SUBJECT" 2>"$R/jtour.err"); rc=$?
+  out=$(PLAYWRIGHT_DIR=$PW node "$HERE/jtour.mjs" "$BASE" "$CODE2" "$SUBJECT" "$DOC" 2>"$R/jtour.err"); rc=$?
   row tour-chromium "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$out $(tail -1 "$R/jtour.err" | cut -c1-120)"
 else
   printf 'UNCONFIGURED\ttour-chromium\tno Playwright at %s (PLAYWRIGHT_DIR), or --box\n' "$PW"

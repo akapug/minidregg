@@ -62,7 +62,7 @@ fn fixed<const N: usize>(value: &Value, name: &str) -> Result<[u8; N]> {
             "paid snapshot {name} is not {N} lowercase hexadecimal bytes"
         ));
     }
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("invalid {name}"))
 }

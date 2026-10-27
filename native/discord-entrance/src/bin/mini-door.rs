@@ -128,14 +128,24 @@ const WALLET_PAGE: &str = r#"(async () => {
     const quote = JSON.parse(document.getElementById("quote").textContent);
     const web3 = solanaWeb3;
     const conn = new web3.Connection(quote.rpc, "confirmed");
-    const wallets = await passwapWallets.list(web3);
+    const pay = makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) });
+    const late = pay.stale();
+    if (late) { say(late); return; }
+    const wallets = await passwapWallets.list(web3, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
     if (!wallets.length) { say("No Solana wallet extension was found in this browser (Phantom, Solflare, Backpack, Talisman, ...); the paste path below works with any wallet."); return; }
     for (const w of wallets) {
       const b = document.createElement("button"); b.textContent = "Pay with " + w.name;
       b.onclick = async () => {
         for (const x of out.querySelectorAll("button")) x.disabled = true;
         try {
-          const r = await makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) }).pay(w, say);
+          // The signature is shown, and put into the paste form, the moment the cluster returns it.
+          const sent = (sig) => {
+            out.querySelector(".sent").innerHTML = "Your transaction: <code></code>";
+            out.querySelector(".sent code").textContent = sig;
+            const field = document.querySelector("form[action='/join/paid'] input[name=transaction]");
+            if (field) field.value = sig;
+          };
+          const r = await pay.pay(w, say, sent);
           say("Sent and posted: " + r.signature + ". The door decides within a minute; this page reloads to show it.");
           setTimeout(() => location.reload(), 65000);
         } catch (e) { say(String(e && e.message || e)); for (const x of out.querySelectorAll("button")) x.disabled = false; }
@@ -182,7 +192,12 @@ impl Door {
             <code>ssh-keygen -t ed25519</code>). Without one, your account opens in the browser only, through the one-time link the \
             status page shows; the paid route needs a key (its memo is signed with it).<br><textarea name=key rows=3 maxlength=600></textarea></label></p>");
         if free {
-            body.push_str("<p><label><input type=radio name=route value=free checked> Free: the box funds a small starting balance</label><br>");
+            // The amount is the processor's configured funding (door.json), published in door-state.json.
+            let funded = match state["funding"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+                Some(n) => format!("Free: the box funds {} credits, enough for two apps and their weeks", html(n)),
+                None => "Free: the box funds a starting balance (the amount is published once the door's processor has run)".to_owned(),
+            };
+            body.push_str(&format!("<p><label><input type=radio name=route value=free checked> {funded}</label><br>"));
         } else {
             let why = state["freeReason"].as_str().unwrap_or("closed");
             body.push_str(&format!("<p>The free route is closed ({}).<br>", html(why)));
@@ -195,7 +210,8 @@ impl Door {
                 html(network)
             ));
         }
-        body.push_str("</p><p><label><input type=checkbox name=discord value=on> Link a Discord account (you get a one-time code)</label></p>\
+        body.push_str(&format!("</p><p class=policy>{}</p><p><label><input type=checkbox name=research value=cc0> contribute my data for research (CC0; kept private until reviewed)</label></p>", html(door::RETENTION_POLICY)));
+        body.push_str("<p><label><input type=checkbox name=discord value=on> Link a Discord account (you get a one-time code)</label></p>\
             <p><button>Request an account</button></p></form>");
         page("Join the Mini demo", &body)
     }
@@ -215,6 +231,9 @@ impl Door {
         }
         if let Some(login) = v["login"].as_str() {
             body.push_str(&format!("<p>Log in with:</p><pre>ssh -t {}</pre>", html(login)));
+        }
+        if let Some(n) = v["funding"].as_str() {
+            body.push_str(&format!("<p>The box funded your account with <strong>{} credits</strong>.</p>", html(n)));
         }
         if let Some(web) = v["webLogin"].as_str() {
             body.push_str(&format!(
@@ -255,7 +274,7 @@ impl Door {
                  <section id=\"wallet-pay\"><h2>Pay with your wallet</h2>\
                  <p>Your browser builds the transfer (your token account to the recipient's, with the memo above, byte for byte), your wallet signs it, \
                  your browser sends it to <code>{}</code> and posts the signature here. The box never sees your wallet. <noscript>This needs JavaScript; the paste path below does not.</noscript></p>\
-                 <p class=wallets></p><p class=status role=status></p></section>\
+                 <p class=wallets></p><p class=status role=status></p><p class=sent></p></section>\
                  <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
                  <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
@@ -327,7 +346,7 @@ impl Door {
                     Ok(id) => id,
                     Err(e) => return refuse(503, &e),
                 };
-                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route }
+                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0" }
             }
             "/join/sign" | "/join/paid" => {
                 let id = field("id");
@@ -350,8 +369,14 @@ impl Door {
             }
             _ => return (404, page("Not found", "")),
         };
-        if let Err((status, why)) = self.admit_post(key, now) {
-            return refuse(status, &why);
+        // The per-source budget counts new requests only: a later step (`/join/sign`, `/join/paid`)
+        // names a request the budget already admitted, is refused twice before the processor
+        // consumes it, and so cannot be spammed; counting it let one stranger's happy path spend a
+        // shared address's whole hour.
+        if path == "/join" {
+            if let Err((status, why)) = self.admit_post(key, now) {
+                return refuse(status, &why);
+            }
         }
         // A later step of the same request is a new file each time it is retried after the
         // processor consumed the previous one; the same step twice before that is refused.
@@ -461,7 +486,7 @@ mod tests {
         for d in ["queue", "status"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
-        std::fs::write(root.join("status/door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
+        std::fs::write(root.join("status/door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"funding":"10000"}"#).unwrap();
         Door { queue: root.join("queue"), status: root.join("status"), trusted: "127.0.0.1".parse().unwrap(),
             max_queued: 2, per_hour: 3, seen: Mutex::new(HashMap::new()) }
     }
@@ -560,6 +585,38 @@ mod tests {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+    }
+
+    #[test]
+    fn a_requests_later_steps_do_not_spend_the_sources_hourly_budget() {
+        let d = door("budget");
+        let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), r#"{"phase":"awaiting-payment","name":"alice"}"#).unwrap();
+        let tx = "5".repeat(87);
+        for _ in 0..3 {
+            let (status, _) = d.post("/join", b"name=bob&route=free", "1.2.3.4", 1000);
+            assert_ne!(status, 429);
+            for f in std::fs::read_dir(&d.queue).unwrap().flatten() { let _ = std::fs::remove_file(f.path()); }
+        }
+        let (status, _) = d.post("/join/paid", format!("id={id}&transaction={tx}").as_bytes(), "1.2.3.4", 1001);
+        assert_eq!(status, 200, "the paid step of an admitted request is not counted against the address");
+        let (status, _) = d.post("/join", b"name=carol&route=free", "1.2.3.4", 1002);
+        assert_eq!(status, 429, "a fourth new request from the address is still refused");
+    }
+
+    #[test]
+    fn the_free_route_and_the_enrolled_status_name_the_configured_funding() {
+        let d = door("funding");
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(page.contains("Free: the box funds 10000 credits"), "the amount comes from door-state.json");
+        let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"enrolled","name":"alice","funding":"10000",
+            "webLogin":"https://demo.example/login/X"}).to_string()).unwrap();
+        let body = String::from_utf8(d.status_page(&id).1).unwrap();
+        assert!(body.contains("funded your account with <strong>10000 credits</strong>"));
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false}"#).unwrap();
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(!page.contains("10000") && page.contains("published once"), "no number without the processor's");
     }
 
     #[test]

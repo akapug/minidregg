@@ -6,9 +6,11 @@ by this host adapter.
 
 The resident unit name carries the Store: two Stores on one physical host
 (a scratch copy beside a live world, or two tenants) may both hold app 7101 at
-generation 2 and must not name the same unit. The Store is the deployment's
-genesis seed identity (`Config.expectedSeed`), fixed for the deployment's life
-and unchanged by profile upgrades; `storeTag` is its low 64 bits in 16
+generation 2 and must not name the same unit. The Store is its identity
+(`Config.storeIdentity`, `Kernel/NativeHostStoreIdentity.lean`: the genesis seed
+identity at the Store's root directory), fixed while the Store stays where it
+is, unchanged by profile upgrades, and fresh for a world restored or forked to
+another root; `storeTag` is its low 64 bits in 16
 lowercase hex digits, the same key the physical host uses for volume, slice
 and journal paths (it reads it from the pinned Host's `profile` output, never
 recomputes it).
@@ -24,8 +26,8 @@ open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-/-- Sixteen lowercase hex digits of the low 64 bits of a Store's genesis seed
-identity. -/
+/-- Sixteen lowercase hex digits of the low 64 bits of a Store's identity
+(`Config.storeIdentity`). -/
 def storeTag (store : Digest) : String :=
   let digits := Nat.toDigits 16 (store.value % 2 ^ 64)
   String.ofList (List.replicate (16 - digits.length) '0' ++ digits)

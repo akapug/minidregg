@@ -280,7 +280,7 @@ fn tick(
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("clock plan lacks a canonical header")?;
-    let header_bytes = decode_hex(canonical).map_err(|_| "clock plan header is not hex")?;
+    let header_bytes = mini_sdk::hex::decode(canonical).map_err(|_| "clock plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
     let ingress = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     // Retained before submission: a lost reply is resolved by the next run.

@@ -385,13 +385,13 @@ pub const PLATFORM_INSTALL_ASSEMBLE: u8 = 241;
 pub const PLATFORM_INSTALL_SUBMIT: u8 = 242;
 // reserved; Host stdio only; owner: platform; effect: none
 pub const PLATFORM_INSTALL_LOOKUP: u8 = 243;
-// reserved; Host stdio only; owner: platform; effect: none
+// reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_PLAN: u8 = 244;
-// reserved; Host stdio only; owner: platform; effect: none
+// reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_ASSEMBLE: u8 = 245;
-// reserved; Host stdio only; owner: platform; effect: none
+// reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_SUBMIT: u8 = 246;
-// reserved; Host stdio only; owner: platform; effect: none
+// reserved; Host stdio only; owner: durable-meter; effect: none
 pub const METER_REFILL_LOOKUP: u8 = 247;
 
 // Response markers: the first byte of a reply frame, a namespace apart from requests.

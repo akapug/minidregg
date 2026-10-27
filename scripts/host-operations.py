@@ -51,6 +51,8 @@ def load(root):
         # operation is answered undecided (255), never NO_RECORD (Host/RequestRefusal.lean exceptionAnswer).
         require(entry["effect"] in {"none", "append"}, f"invalid effect: {symbol}")
         require(entry["status"] == "active" or entry["effect"] == "none", f"reserved operation with an effect: {symbol}")
+        require(not (entry["status"] == "active" and symbol.endswith("_SUBMIT")) or entry["effect"] == "append",
+                f"active submit operation without effect append: {symbol}")
         ids[code] = entry
         symbols.add(symbol)
     responses, markers = set(), set()

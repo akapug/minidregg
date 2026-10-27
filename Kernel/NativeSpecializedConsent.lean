@@ -53,9 +53,22 @@ theorem rederived_plan_accepted (expected : List UInt8) (pinned : Option (List U
   rw [dif_pos rfl]
   exact ⟨_, rfl⟩
 
-/-- Satisfiable: the pinned re-derived plan is accepted. -/
-theorem pinned_plan_accepted (expected pinned : List UInt8) :
-    ∃ consent, checkExactOrPinned expected (some pinned) pinned = .ok consent := by
+/-- Satisfiable, across ticks: the provider re-derives the enrollment plan at a LATER height
+than the one the signer saw; pinned at the observed height it is the plan authored there,
+so the client's candidate (authored at the observed height) is accepted. -/
+theorem pinned_plan_accepted (seen later : Nat) (le : seen ≤ later)
+    (plan : ParticipantKeyEnrollment.SigningPlan)
+    (header : CredentialSignedEnvelopeController.SignedHeader)
+    (decoded : CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader = some header)
+    (derived : header.validUntil = NativePlanHeight.authoredDeadline later) :
+    ∃ consent, checkExactOrPinned (ParticipantKeyEnrollment.signingPlanCodec.encode plan)
+      ((NativePlanHeight.pinEnrollment seen plan).toOption.map
+        ParticipantKeyEnrollment.signingPlanCodec.encode)
+      (ParticipantKeyEnrollment.signingPlanCodec.encode { plan with sponsorHeader :=
+        (CredentialSignedEnvelopeController.headerCodec.encode
+          { header with validUntil := NativePlanHeight.authoredDeadline seen }) }) = .ok consent := by
+  rw [NativePlanHeight.pinEnrollment_rederived_later seen later le plan header decoded derived]
+  simp only [Except.toOption, Option.map]
   unfold checkExactOrPinned
   split
   · exact ⟨_, rfl⟩
@@ -69,7 +82,8 @@ private def splitPair? (payload : List UInt8) : Option (List UInt8 × List UInt8
   else none
 
 /-- The height-pinned form of the re-derived plan, for the operations whose plan a signer
-pins before signing. Op 86 (enrollment): the sponsor header's deadline pinned to the height
+pins before signing. Op 86 (enrollment): the sponsor header's deadline pinned
+(`NativePlanHeight.pinHeaderAt`: the deadline a plan authored there carries) to the height
 of the authorizing observation in the retained request (`Challenge.height`), the height the
 signer saw and the client passes to `pin-enrollment-plan-height`; a pin to any other height
 differs and is refused. Every other operation: none (op 1's invocation pin is accepted by
@@ -111,6 +125,39 @@ private def admitted {α ε : Type} (result : Except ε α) : IO α :=
   | .ok value => pure value
   | .error _ => throw (IO.userError "local authenticated specialized preparation refused")
 
+/-- The consent provider's op-86 re-derivation. An observation at the provider's current
+height is authorized in full (`enrollmentPlanAuthorizedLoaded`). One at an EARLIER height
+`seen`, with the provider's height still within the plan's deadline
+(`NativePlanHeight.authoredDeadline seen`), is re-derived from the command at the
+provider's image, whose store extends the store the signer saw (the consent anchor's
+exact-prefix guarantee); `pinnedExpectedBytes` then pins it at `seen`, so a tick between
+plan and seal no longer refuses consent. The observation's byte checks are kept. A height
+above the provider's, or past the deadline, refuses. Safety does not rest on the
+observation's height: the pin only ever lowers the provider's own deadline
+(`pinHeaderAt_never_extends`). -/
+def enrollmentPlanAtObservation (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (observation commandBytes : List UInt8) : IO ParticipantKeyEnrollment.SigningPlan := do
+  let some command := ParticipantKeyEnrollment.commandCodec.decode commandBytes
+    | throw (IO.userError "noncanonical participant enrollment command")
+  let some signed := NativeObservationCodec.signedCodec.decode observation
+    | throw (IO.userError "noncanonical enrollment observation")
+  if signed.challenge.intent.subject != command.sponsor then
+    throw (IO.userError "enrollment observation subject differs from the sponsor")
+  match signed.challenge.intent.purpose with
+  | .query query =>
+      if query.kind != .object || query.target != config.deployment.factoryId ||
+          query.view != .resource then
+        throw (IO.userError "enrollment observation is not the factory resource query")
+  | .prepare _ => throw (IO.userError "enrollment observation is not a query")
+  let now := NativeHost.logicalHeight config opened.durable
+  let seen := signed.challenge.height
+  if seen = now then
+    admitted (← NativeHost.enrollmentPlanAuthorizedLoaded config opened observation commandBytes)
+  else if seen < now ∧ now ≤ NativePlanHeight.authoredDeadline seen then
+    IO.ofExcept (NativeHost.enrollmentPlanLoaded config opened commandBytes)
+  else
+    throw (IO.userError "enrollment observation height is not an admitted height within the plan deadline")
+
 /-- The exact production functions and production encoders used by Host.Main.
 No source mutation or signature creation occurs here. -/
 def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
@@ -120,7 +167,7 @@ def expectedPlanBytes (config : NativeHost.Config) {target : NativeHost.Durable}
   match operation with
   | 86 =>
       let (observation, command) ← splitPair request
-      let plan ← admitted (← NativeHost.enrollmentPlanAuthorizedLoaded config opened observation command)
+      let plan ← enrollmentPlanAtObservation config opened observation command
       pure (ParticipantKeyEnrollment.signingPlanCodec.encode plan)
   | 92 =>
       let (observation, command) ← splitPair request

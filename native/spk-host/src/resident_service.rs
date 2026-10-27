@@ -1764,7 +1764,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     write_new(&config.journal_dir, admitted_name, &admitted_bytes)?;
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
-    let mut resident = prepared.start(&journal, &claim.physical_begin)?;
+    // The last physical boundary before the one-shot spawn: fd5 is the exact
+    // directory the root witness attests, and the witness itself is unchanged
+    // since preflight (RUST-TRIAGE R15).
+    let mut resident = prepared.start_attested(&journal, &claim.physical_begin, &volume)?;
     // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
     // request is refused before it is sent, after the claim is committed.
     let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
@@ -1934,6 +1937,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     agent_fds.push(checkpoint.as_raw_fd());
     let route_control_index = agent_fds.len();
     agent_fds.push(route_control.as_raw_fd());
+    // The grain's publishing socket (apps/<app>/www.sock): anonymous GET/HEAD of
+    // the app's /var/www, read through the app-identity worker's descriptor.
+    let www = crate::www_publish::WwwListener::bind(&crate::www_publish::socket_for_journal(&config.journal_dir)?)?;
+    let www_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.listener));
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
@@ -1977,6 +1985,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         };
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
+        }
+        if index == www_index {
+            if let Err(error) = www.accept_one(|| resident.open_www()) {
+                eprintln!("spk-host: publishing connection refused: {error}");
+            }
+            return Ok(None);
         }
         if index == checkpoint_index {
             checkpoint.poll_once(&journal, || {

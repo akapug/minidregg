@@ -305,7 +305,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
     let (plan, inspected) = plan_command(ws, &command_for(ws, &turn, &authority, nonce.as_deref())?, out)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("activity: plan lacks a header")?;
-    let header = crate::decode_hex(canonical).map_err(|error| format!("activity: {error}"))?;
+    let header = mini_sdk::hex::decode(canonical).map_err(|error| format!("activity: {error}"))?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
     let ingress = invoke(ws, mini_sdk::host_operations::ACTIVITY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     write_new(&out.join("ingress.bin"), &ingress)?;

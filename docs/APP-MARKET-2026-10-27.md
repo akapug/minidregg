@@ -22,6 +22,31 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
 
+## State at hand-off (2026-10-27, lane tip after this commit)
+
+- **Proven on dregg-build** (world w3, store `2fdd71b31d0fe3be`, `/build/lanes/app-market-runs/w3/WORLD.env`):
+  `japps --box` lifecycle rows 23/24 (create, install, share, start, enrol, page load for Hacker
+  Slides and Simple Todos; Hacker Slides renders, its "Present" link from `getPublicId`; stop), and
+  the export row green by hand once the row named the right app (fixed). Simple Todos is running on
+  w3, Hacker Slides stopped and exported.
+- **Member install** (`scripts/spk-platform/apps-e2e.sh`, run as
+  `MEMBER_FUNDING=10000 APPS_MAX=50000 E2E_MINI=…/mini bash apps-e2e.sh $R/w3/WORLD.env OUT APP…`):
+  funded as the door funds, the tool reservation admitted and released on refusal, the birth past
+  prepare; refused at admission `GrainResourceBirthAdmission.Reject.policyRejected` by the parent
+  task's law, which admits the birth's witness touch only for the task's worker subject. Ruled:
+  Option A (any holder of a delegated parent grant), Lean work with the L1 successor; the factory
+  law to be checked on the signed path for ordinary births too, so members get a named refusal.
+- **Measured**: an ordinary birth costs the member 173; a grain-task birth by a member with 10000
+  is insolvent even at budget 1 (a large fixed debit, probably the template `ownerBudget`); the
+  delegated tool/parent `maxCost` must exceed 1000 (50000 passes).
+- **Next, not started**: Etherpad end to end as the worker subject (journey `birth_app` path:
+  `SPK_A=$R/cache/quarantine/aee0806c….spk` with `grain-journey.sh phase` on w3, then name any
+  interface Etherpad calls that `spk-rpc` lacks from its app output, as was done for
+  `HackSessionContext`); Simple Todos co-edit from a second browser session (a second `enroll`
+  and GET on the running grain); the `-www` publishing origin's front dispatch, `www.sock` and
+  connector verb (INSTALL §5a); measuring the first member install and replacing the ~1,500
+  estimate in INSTALL §4.
+
 ## 1. The pieces, who runs what
 
 Everything below is on the demo box (`dregg-demo`, Debian 13, split tenancy, loopback behind

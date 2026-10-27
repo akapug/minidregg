@@ -196,7 +196,7 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
   "creator":"7","nonce":"22000","resources":[
    {"kind":"object","storage":"grain","target":"$WORKROOM_PARENT_TASK","owner":"7",
     "ownerCapability":"71","controlCapability":"72","budget":"$WORKROOM_PARENT_BUDGET",
-    "workerSubject":"8","workerGeneration":"1"},
+    "holderWitnessGeneration":"1"},
    {"kind":"object","storage":"grain","target":"$WORKROOM_TOOL_TASK","owner":"8",
     "ownerCapability":"81","controlCapability":"82","budget":"$WORKROOM_TOOL_BUDGET"},
    {"kind":"object","storage":"declared","target":"7003","owner":"7",
@@ -238,7 +238,7 @@ for name in controller tool; do
   query_policy "$name-policy" "$owner" "$task" "$capability" "$EVIDENCE/$key" "$nonce"
   if [ "$name" = controller ]; then
     jq -n --arg owner "$owner" \
-      '{owner:$owner,workerSubject:"8",workerGeneration:"1"}' \
+      '{owner:$owner,holderWitnessGeneration:"1"}' \
       >"$EVIDENCE/$name-policy-source.json"
   else
     jq -n --arg owner "$owner" '{owner:$owner}' >"$EVIDENCE/$name-policy-source.json"
@@ -258,9 +258,11 @@ for name in controller tool; do
   test "$authored" = "$viewed"
 done
 
-# Parent witness authority is a distinct delegated child grant held by the
-# tool identity. The source-authored parent rule permits that subject only the
-# pinned-generation witness no-op; the tool owns its own spendable task.
+# Parent witness authority is a delegated child grant on the parent. The parent's
+# law is the holder form (AgentGrain.holderPolicy, ruling Option A): any holder of a
+# grant on it may make the pinned-generation witness no-op and nothing else, so the
+# tool (here) and a member installing an app (its own delegated grant) both may;
+# the tool owns its own spendable task.
 PARENT_ROOT=$(jq -er '.cell.root' "$EVIDENCE/controller-born/view.json")
 PARENT_AUTHORITY=$(jq -er '.authorityRoot' "$EVIDENCE/controller-born/challenge.json")
 cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF

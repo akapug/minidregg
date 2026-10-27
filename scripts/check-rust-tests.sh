@@ -544,6 +544,19 @@ exact rc-hex-rate-limit      resource-client --bin mini -- \
 # Operator `resolve` frees the slot of a dead lease holder (0c148911)
 exact scheduler-resolve      inference-scheduler --test core -- \
   dead_lease_holder_frees_its_slot_only_by_operator_resolve
+# Native crates the sprint never tested directly (un-native-rows): the placement bound, the exact signed-API
+# prefix, and the root image pin of a compatible upgrade each have a decision test that goes red under a planted fault
+exact scheduler-placement-bound inference-scheduler --test core -- \
+  placement_bound_is_exact_at_context_and_output_limits \
+  incompatible_context_tools_output_and_pool_are_refused
+exact signed-api-path        signed-api-path -- \
+  exact_prefix_tests::near_miss_prefixes_are_not_under_the_signed_prefix \
+  exact_prefix_tests::percent_escapes_and_trailing_slashes_are_refused_not_decoded \
+  tests::refuse_ambiguous_prefix_and_path_without_normalizing
+exact upgrade-custody-pin    compatible-upgrade-custody --features fixture-os -- \
+  tests::pin::root_pin_accepts_exact_digest_and_refuses_wrong_pin_or_custody \
+  tests::pin::root_pin_refuses_symlink_and_root_bytes_refuses_empty_and_oversize \
+  tests::only_exact_helper_transition_is_accepted
 # Signing consent: a remote plan with one changed byte is refused before any key signs (W1.9 b45237d1)
 exact consent-remote-plan    resource-client --bin mini -- \
   client_consent::tests::remote_signing_plan_with_one_changed_byte_is_refused_before_signing \

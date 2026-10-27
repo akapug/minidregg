@@ -767,7 +767,7 @@ pub(crate) fn entries_of(view: &Value, cell: &str, owner: &str) -> Vec<Entry> {
         .flatten()
         .filter_map(|e| {
             let payload = match (e.get("payloadState").and_then(Value::as_str), s(e, "payload")) {
-                (Some("verified"), Some(hex)) => match crate::decode_hex(&hex).ok().map(String::from_utf8) {
+                (Some("verified"), Some(hex)) => match mini_sdk::hex::decode(&hex).ok().map(String::from_utf8) {
                     Some(Ok(text)) => Payload::Verified(text),
                     Some(Err(_)) => Payload::Binary,
                     None => Payload::Mismatch,
@@ -776,7 +776,7 @@ pub(crate) fn entries_of(view: &Value, cell: &str, owner: &str) -> Vec<Entry> {
                 _ => Payload::Absent,
             };
             let topic = s(e, "topic")
-                .and_then(|h| crate::decode_hex(&h).ok())
+                .and_then(|h| mini_sdk::hex::decode(&h).ok())
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
                 .unwrap_or_default();
             let re = e.get("ref").filter(|r| !r.is_null()).and_then(|r| {
@@ -1048,7 +1048,7 @@ fn open_sealed(view: &mut Value, keys: &RoomKeys, stream: &str) {
         if e.get("payloadState").and_then(Value::as_str) != Some("verified") {
             continue;
         }
-        let Some(bytes) = e.get("payload").and_then(Value::as_str).and_then(|h| crate::decode_hex(h).ok()) else { continue };
+        let Some(bytes) = e.get("payload").and_then(Value::as_str).and_then(|h| mini_sdk::hex::decode(h).ok()) else { continue };
         let sequence = e.get("sequence").and_then(Value::as_str).unwrap_or("").to_owned();
         let note = crate::workspace::roomkey::open_in_room(ring.as_ref(), room_id, stream, &sequence, &bytes);
         let shown = match &note {

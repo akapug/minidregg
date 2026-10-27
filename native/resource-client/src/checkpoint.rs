@@ -18,7 +18,7 @@
 //! `tail` (head − certified) and `remaining` (heights left before the bound refuses).
 //!
 //! Today the certifier is the operator, trusted as the operator is; a timer runs this
-//! verb (deploy/checkpoint). After SURPASS N1 the certificate is a witness quorum's.
+//! verb (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)). After SURPASS N1 the certificate is a witness quorum's.
 
 use crate::agent_reserve::field;
 use crate::*;
@@ -137,7 +137,7 @@ fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Va
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("certify plan lacks a canonical header")?;
-    let header_bytes = decode_hex(canonical).map_err(|_| "certify plan header is not hex")?;
+    let header_bytes = mini_sdk::hex::decode(canonical).map_err(|_| "certify plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
     let ingress = invoke(ws, mini_sdk::host_operations::CERTIFY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     let outcome = invoke(ws, mini_sdk::host_operations::CERTIFY_SUBMIT, &ingress)?;

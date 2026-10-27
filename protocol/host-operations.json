@@ -2381,7 +2381,7 @@
       "status": "reserved",
       "routes": [],
       "owner": "platform",
-      "purpose": "platform install submit: controller-signed, version-monotone platform record (L1)",
+      "purpose": "platform install submit: controller-signed, version-monotone platform record (L1); effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2400,8 +2400,8 @@
       "symbol": "METER_REFILL_PLAN",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill plan (GENESIS-COUPLING M2; statements in Kernel/PlatformCell.lean; proof phase)",
+      "owner": "durable-meter",
+      "purpose": "plan a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2410,8 +2410,8 @@
       "symbol": "METER_REFILL_ASSEMBLE",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill assemble (M2)",
+      "owner": "durable-meter",
+      "purpose": "assemble a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2420,8 +2420,8 @@
       "symbol": "METER_REFILL_SUBMIT",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill submit: controller-signed posting that raises the lifetime meter lane by lane (M2)",
+      "owner": "durable-meter",
+      "purpose": "submit a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2430,8 +2430,8 @@
       "symbol": "METER_REFILL_LOOKUP",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill receipt-only lookup (M2)",
+      "owner": "durable-meter",
+      "purpose": "lookup a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     }

@@ -30,7 +30,7 @@ pub(super) fn active_home(home:&Path)->Result<PathBuf> {
 }
 fn roster_entries(members:&[Value])->Result<Vec<Value>> {
     members.iter().map(|m|Ok(json!({"subject":m["subject"],"capability":m["capability"],
-        "deviceSource":m["deviceSource"],"deviceGeneration":decimal(&crate::decode_hex(text(m,"generation")?)?),
+        "deviceSource":m["deviceSource"],"deviceGeneration":decimal(&mini_sdk::hex::decode(text(m,"generation")?).map_err(|e| e.0)?),
         "keyCommitment":m["keyCommitment"]}))).collect()
 }
 fn current_members(home:&Path)->Result<Vec<Value>> {
@@ -53,9 +53,9 @@ fn check_identity(stage:&Value,workspace:&Value,reference:&Value,name:&str)->Res
 }
 fn validate_device(device:&Value)->Result<()> {
     for field in ["deviceGeneration","keyCommitment"] {nat32(text(device,field)?)?;}
-    let bytes=crate::decode_hex(text(device,"generation")?)?;
+    let bytes=mini_sdk::hex::decode(text(device,"generation")?).map_err(|e| e.0)?;
     if bytes.len()!=32 {return Err("device generation must contain 32 bytes".into());}
-    if decimal(&crate::decode_hex(text(device,"generation")?)?)!=device["deviceGeneration"] {
+    if decimal(&mini_sdk::hex::decode(text(device,"generation")?).map_err(|e| e.0)?)!=device["deviceGeneration"] {
         return Err("device generation decimal and bytes disagree".into());
     }
     let public=crate::object_keys_hybrid::public_from_record(device)?;
@@ -192,7 +192,7 @@ fn phase(root:&Path,workspace:&Value,name:&str,dir:&Path,stage:&Value,phase:&str
     for generation in phase_generations(dir,phase)? {
         let label=format!("{phase}-{generation}");let wrapper=dir.join(&label);let directory=wrapper.join("epoch");
         let operation=id(text(stage,"namespace")?,&label);
-        let op=crate::decode_hex(&operation)?.try_into().map_err(|_|"invalid phase operation")?;
+        let op=mini_sdk::hex::decode(&operation).map_err(|e| e.0)?.try_into().map_err(|_|"invalid phase operation")?;
         let mut store=custody(root)?;
         let known=store.operation_known(&op)?;
         // A rejected earlier generation must not obstruct a later accepted one
@@ -431,7 +431,7 @@ pub(super) fn publish_current(root:&Path,workspace:&Value,name:&str,dir:&Path,st
         let receipt=match action(root,workspace,dir,namespace,&label,json!({
             "type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{
             "name":name,"expectedTargetRoot":checked_root,"payload":{"type":"content","actions":[{
-            "type":"createContainer","element":decimal(&crate::decode_hex(&id(namespace,&label))?) }]}}]})) {
+            "type":"createContainer","element":decimal(&mini_sdk::hex::decode(&id(namespace,&label)).map_err(|e| e.0)?) }]}}]})) {
             Ok(receipt)=>receipt,
             Err(error)=>{
                 if !post_unadmitted(root,dir,namespace,&label)? {return Err(error);}
@@ -448,7 +448,7 @@ pub(super) fn publish_current(root:&Path,workspace:&Value,name:&str,dir:&Path,st
 }
 
 pub(super) fn atom_epoch(payload:&str)->Result<u64>{
-    let bytes=crate::decode_hex(payload)?;
+    let bytes=mini_sdk::hex::decode(payload).map_err(|e| e.0)?;
     let offset=FRAME.len()+64+MESSAGE_FRAME.len()+32;
     let epoch=bytes.get(offset..offset+8).ok_or("protected atom has no epoch")?;
     Ok(u64::from_be_bytes(epoch.try_into().map_err(|_|"invalid epoch bytes")?))

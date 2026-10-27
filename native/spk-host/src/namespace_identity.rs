@@ -247,8 +247,11 @@ pub(crate) fn require_registered_controller(uid:u32) -> io::Result<()> {
 pub(crate) const PHYSICAL_BWRAPS: [&str; 2] = ["/usr/local/libexec/mini-grain-bwrap", "/usr/bin/bwrap"];
 /// A deployed physical bwrap: one of PHYSICAL_BWRAPS, a root-owned non-writable
 /// executable regular file whose bytes have the pinned SHA-256.
-pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
-    use sha2::{Digest, Sha256};
+/// The returned executable is the descriptor whose bytes were hashed; `enter`
+/// runs it by that descriptor (`/proc/self/fd/N`), so no path is resolved again
+/// between the pin and the exec (RUST-TRIAGE R7). The hashing and caching are
+/// `dispatch_native::verified_image`, the same custody the Host helper runs under.
+pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<crate::dispatch_native::VerifiedExecutable> {
     if !PHYSICAL_BWRAPS.iter().any(|b| Path::new(b) == path) {
         return Err(refused("namespace bwrap is not a deployed physical bwrap"));
     }
@@ -256,17 +259,11 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
     if !m.file_type().is_file() || m.uid() != 0 || m.mode() & 0o022 != 0 || m.mode() & 0o111 == 0 {
         return Err(refused("namespace bwrap must be a root-owned non-writable executable"));
     }
-    let mut f = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(path)?;
-    let held = f.metadata()?;
-    if (held.dev(), held.ino()) != (m.dev(), m.ino()) {
-        return Err(refused("namespace bwrap changed while pinned"));
+    if sha256.len() != 64 {
+        return Err(refused("namespace bwrap SHA-256 pin malformed"));
     }
-    let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes)?;
-    if sha256.len() != 64 || format!("{:x}", Sha256::digest(&bytes)) != sha256 {
-        return Err(refused("namespace bwrap SHA-256 differs from its pin"));
-    }
-    Ok(())
+    crate::dispatch_native::verified_image(path, sha256)
+        .map_err(|error| io::Error::new(error.kind(), format!("namespace bwrap pin ({}): {error}", path.display())))
 }
 /// Name the step and the path an OS error came from: a bare ENOENT from the
 /// namespace bootstrap says nothing about which helper or file is missing.
@@ -340,11 +337,18 @@ pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u
             "namespace entry requires a single-threaded process: this thread group has {threads} threads, and the kernel refuses setns(CLONE_NEWUSER) from more than one (EINVAL); enter before any thread starts"
         )));
     }
-    pinned_bwrap(bwrap, bwrap_sha256)?;
+    let executable = pinned_bwrap(bwrap, bwrap_sha256)?;
+    // The hashed descriptor is what runs: the kernel opens `/proc/self/fd/N`
+    // for exec before it closes close-on-exec descriptors. The holder's
+    // pre_exec below places the info and block pipes at 3 and 4, so the image
+    // is executed through a duplicate above 9: in a process with few open files
+    // the verified descriptor itself can be 3 or 4, and exec would then name
+    // the pipe (EACCES; found by the tenancy bootstrap test).
+    let image = crate::sandbox::inherited_fd(executable.as_raw_fd())?;
     let (info_r, info_w) = pipe()?;
     let (block_r, block_w) = pipe()?;
     let (iw, br) = (info_w.as_raw_fd(), block_r.as_raw_fd());
-    let mut command = Command::new(bwrap);
+    let mut command = Command::new(format!("/proc/self/fd/{}", image.as_raw_fd()));
     command
         .env_clear()
         .stdin(Stdio::null())
@@ -488,6 +492,29 @@ mod tests {
         // come and go between two censuses. nextest runs one test per process.
         assert!(text.contains("threads, and the kernel refuses setns(CLONE_NEWUSER)"), "{text}");
         assert!(!text.contains("nonexistent"), "bwrap was consulted before the thread rule: {text}");
+    }
+
+    /// The pinned bwrap is returned as the hashed descriptor, and a wrong pin
+    /// is refused by name before anything runs. Needs the deployed bwrap.
+    #[test]
+    fn pinned_bwrap_yields_the_hashed_descriptor_and_refuses_a_wrong_pin() {
+        use sha2::{Digest, Sha256};
+        let bwrap = Path::new("/usr/bin/bwrap");
+        let Ok(meta) = fs::symlink_metadata(bwrap) else { return };
+        if meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+            return;
+        }
+        let bytes = fs::read(bwrap).unwrap();
+        let pin = format!("{:x}", Sha256::digest(&bytes));
+        let executable = pinned_bwrap(bwrap, &pin).unwrap();
+        let path = executable.path();
+        assert!(path.starts_with("/proc/self/fd"), "{}", path.display());
+        assert_eq!(fs::read(&path).unwrap(), bytes, "the descriptor holds the hashed bytes");
+        let wrong = pinned_bwrap(bwrap, &"0".repeat(64)).unwrap_err().to_string();
+        assert!(wrong.starts_with("namespace bwrap pin (/usr/bin/bwrap): "), "{wrong}");
+        assert!(wrong.contains("SHA-256 drift"), "{wrong}");
+        let malformed = pinned_bwrap(bwrap, "abc").unwrap_err().to_string();
+        assert_eq!(malformed, "namespace bwrap SHA-256 pin malformed");
     }
 
     /// A forked child carries only the forking thread: the shape of the production

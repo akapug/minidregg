@@ -564,11 +564,11 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     }
     participant_namespace::bind_attempt(&reservation, directory, &digest(&command))?;
     let next_public = match request.get("nextPublicKey").and_then(Value::as_str) {
-        Some(text) => decode_hex(text)?,
+        Some(text) => mini_sdk::hex::decode(text).map_err(|e| e.0)?,
         None => Vec::new(),
     };
     let next_cosign = match request.get("nextCosign").and_then(Value::as_str) {
-        Some(text) => decode_hex(text)?,
+        Some(text) => mini_sdk::hex::decode(text).map_err(|e| e.0)?,
         None => Vec::new(),
     };
     if next_public.is_empty() != next_cosign.is_empty() {
@@ -937,7 +937,7 @@ fn plan(mut args: Args) -> Result<()> {
             return Err("the next key must differ from the key being enrolled".into());
         }
         let cosign = next_cosign.ok_or("a next key without its co-signature")?;
-        let enrolled: [u8; 32] = decode_hex(&public_key)?
+        let enrolled: [u8; 32] = mini_sdk::hex::decode(&public_key).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "enrolled public key is not 32 bytes")?;
         crate::key_rotation::verify_cosign(&enrolled, next, &cosign)?;
@@ -1037,7 +1037,7 @@ fn plan(mut args: Args) -> Result<()> {
             let factory_root = factory_root.as_str();
             let authority_root = authority_root.as_str();
             if let Some(next) = &next_public {
-                let enrolled: [u8; 32] = decode_hex(&public_key)?
+                let enrolled: [u8; 32] = mini_sdk::hex::decode(&public_key).map_err(|e| e.0)?
                     .try_into().map_err(|_| "enrolled public key is not 32 bytes")?;
                 crate::key_rotation::host_next_possession_frame(
                     &host, &public_socket, &retained_config, &enrolled, next)?;
@@ -1219,7 +1219,7 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
     {
         return Err("enrollment Plan does not name this key at the expected home subject".into());
     }
-    let candidate = decode_hex(field(&plan_view, "possessionHeader")?)?;
+    let candidate = mini_sdk::hex::decode(field(&plan_view, "possessionHeader")?).map_err(|e| e.0)?;
     let command = private_bytes(&directory.join("command.bin"), LIMIT)?;
     if field(&command_view, "canonical")? != hex(&command) {
         return Err("enrollment possession command differs from retained bytes".into());
@@ -1243,7 +1243,7 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
     sync_directory_ancestors(output.parent().ok_or("possession output lacks parent")?)?;
     Ok(json!({"type":"minidregg-participant-possession-signature-v1",
         "subject":subject,"publicKey":public_key,
-        "commandSha256":digest(&decode_hex(field(&command_view, "canonical")?)?),
+        "commandSha256":digest(&mini_sdk::hex::decode(field(&command_view, "canonical")?).map_err(|e| e.0)?),
         "possessionHeaderSha256":digest(&header),"signatureSha256":digest(&signature)}))
 }
 
@@ -1388,15 +1388,15 @@ fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
     let subject = field(&offer, "subject")?.to_owned();
     decimal(&subject, "offered subject")?;
     decimal(field(&offer, "keyId")?, "offered key id")?;
-    let config = decode_hex(field(&offer, "configHex")?)?;
+    let config = mini_sdk::hex::decode(field(&offer, "configHex")?).map_err(|e| e.0)?;
     if digest(&config) != field(&offer, "configSha256")? {
         return Err("the sponsor's plan config differs from its digest".into());
     }
     pin_remote_host(field(&offer, "hostSha256")?)?;
     let plan_view = offer.get("plan").ok_or("sponsor plan lacks the Plan")?;
     let command_view = offer.get("command").ok_or("sponsor plan lacks the command")?;
-    let plan = decode_hex(field(plan_view, "canonical")?)?;
-    let command = decode_hex(field(command_view, "canonical")?)?;
+    let plan = mini_sdk::hex::decode(field(plan_view, "canonical")?).map_err(|e| e.0)?;
+    let command = mini_sdk::hex::decode(field(command_view, "canonical")?).map_err(|e| e.0)?;
     validate_plan(plan_view, &command, &plan)?;
     join_dir(root)?;
     let state = root.join("join");
@@ -1446,7 +1446,7 @@ fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
     let signature_path = state.join("possession-signature.bin");
     let summary = if signature_path.exists() {
         let signature = bounded(&signature_path, 64)?;
-        let header = decode_hex(field(plan_view, "possessionHeader")?)?;
+        let header = mini_sdk::hex::decode(field(plan_view, "possessionHeader")?).map_err(|e| e.0)?;
         signing
             .verifying_key()
             .verify(&header, &ed25519_dalek::Signature::from_slice(&signature).map_err(|_| "retained possession signature is malformed")?)
@@ -1507,8 +1507,8 @@ fn match_join_ingress(view: &Value, ingress: &[u8], command: &[u8], possession: 
 fn match_join_prerotation(view: &Value, own_next: Option<[u8; 32]>, public: &[u8; 32]) -> Result<bool> {
     let offered = view["command"]["key"].get("nextKeyDigest")
         .ok_or("welcome command lacks nextKeyDigest")?;
-    let next = decode_hex(field(view,"nextPublicKey")?)?;
-    let cosign = decode_hex(field(view,"nextPossessionSignature")?)?;
+    let next = mini_sdk::hex::decode(field(view,"nextPublicKey")?).map_err(|e| e.0)?;
+    let cosign = mini_sdk::hex::decode(field(view,"nextPossessionSignature")?).map_err(|e| e.0)?;
     match own_next {
         Some(own) => {
             decimal(offered.as_str().ok_or("welcome removes the participant next-key commitment")?, "next-key digest")?;
@@ -1574,7 +1574,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
     if field(admitted, "publicKey")? != public_key {
         return Err("welcome names another key than --key".into());
     }
-    let ingress = decode_hex(field(&welcome, "ingressHex")?)?;
+    let ingress = mini_sdk::hex::decode(field(&welcome, "ingressHex")?).map_err(|e| e.0)?;
     if ingress.is_empty() || ingress.len() > LIMIT || digest(&ingress) != field(&welcome, "ingressSha256")? {
         return Err("welcome ingress exceeds bound or differs from its digest".into());
     }
@@ -1608,7 +1608,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
     let config = root.join("config.json");
     let config_bytes = bounded(&config, 65_536)?;
     if digest(&config_bytes) != field(&offer,"configSha256")?
-        || config_bytes != decode_hex(field(&offer,"configHex")?)? {
+        || config_bytes != mini_sdk::hex::decode(field(&offer,"configHex")?).map_err(|e| e.0)? {
         return Err("join config differs from retained offer".into());
     }
     pin_remote_host(field(&offer, "hostSha256")?)?;
@@ -1623,7 +1623,7 @@ fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path, verifier: &Pa
     retain_exact(&state.join("welcome-ingress.bin"), &ingress)?;
     let plan_view = local_join_inspect(verifier,&verifier_pin,&config,PLAN_KIND,&state.join("plan.bin"),&state)?;
     validate_plan(&plan_view,&command,&plan)?;
-    let header = decode_hex(field(&plan_view,"possessionHeader")?)?;
+    let header = mini_sdk::hex::decode(field(&plan_view,"possessionHeader")?).map_err(|e| e.0)?;
     signing.verifying_key().verify(&header, &ed25519_dalek::Signature::from_slice(&possession)
         .map_err(|_| "retained possession signature is malformed")?)
         .map_err(|_| "retained possession signature does not verify")?;
@@ -1729,8 +1729,8 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &pair(&observation, &pin.command)?, &pin.plan).map_err(|error| format!(
             "{error}; a plan the source has moved under (a tick or certify since it was planned) is not signed: `mini enroll --action plan` with this exact --dir retires it and plans the same request again (a home-identity member then signs possession over the new plan)"
         ))?;
-    let sponsor_header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
-    let possession_header = decode_hex(field(&plan_view, "possessionHeader")?)?;
+    let sponsor_header = mini_sdk::hex::decode(field(&plan_view["sponsorHeader"], "canonical")?).map_err(|e| e.0)?;
+    let possession_header = mini_sdk::hex::decode(field(&plan_view, "possessionHeader")?).map_err(|e| e.0)?;
     let sponsor = key(&pin.sponsor_key)?;
     let sponsor_signature = sponsor.sign(&sponsor_header).to_bytes();
     let possession_signature: [u8; 64] = match (&pin.new_key, detached) {
@@ -1739,7 +1739,7 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
             let bytes: [u8; 64] = bounded(&absolute(file)?, 64)?
                 .try_into()
                 .map_err(|_| "possession signature must contain exactly 64 bytes")?;
-            let public: [u8; 32] = decode_hex(&pin.public_key)?
+            let public: [u8; 32] = mini_sdk::hex::decode(&pin.public_key).map_err(|e| e.0)?
                 .try_into()
                 .map_err(|_| "pinned enrollment public key is not 32 bytes")?;
             VerifyingKey::from_bytes(&public)

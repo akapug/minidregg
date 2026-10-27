@@ -393,9 +393,23 @@ def check_app_allocation(store, helper, op_text, first_text, count_text):
     require(ident(operator) and ident(first, True) and 2 <= count <= 64 and first + count <= MAX_ID
             and str(operator) == os.environ.get('SUDO_UID', str(operator)), 'app allocation identity/bound refused')
     occupied = occupied_ids(); own, foreign = delegated(operator); accounts = nss_ids()
-    require(all(in_ranges(i, own) and not in_ranges(i, foreign) and i not in occupied and nss_free(i, accounts)
-                for i in range(first, first + count)), 'app range collides with reserved/account/foreign identity or is not delegated')
-    return {'store': store, 'appRangeChecked': [first, first + count]}
+    def free(start):
+        return all(in_ranges(i, own) and not in_ranges(i, foreign) and i not in occupied and nss_free(i, accounts)
+                   for i in range(start, start + count))
+    # START is where the caller would like the range. Several worlds (and their
+    # controller accounts) share one operator's delegated range, so a taken START
+    # moves to the next free COUNT-aligned range of the delegation, at or after
+    # START first, then from the delegation's beginning; the registry records the
+    # range actually allocated. Only a delegation with no free range refuses.
+    if not free(first):
+        candidates = [c for low, end in own for c in range(low, end - count + 1, count)]
+        later = [c for c in candidates if c >= first]
+        chosen = next((c for c in later + [c for c in candidates if c < first] if free(c)), None)
+        require(chosen is not None, 'app range exhausted: no free %d-identity range in the operator delegated UID/GID intersection' % count)
+        first_requested, first = first, chosen
+    else:
+        first_requested = first
+    return {'store': store, 'appRangeRequested': [first_requested, first_requested + count], 'appRangeChecked': [first, first + count]}
 
 
 def store_context(store, helper):

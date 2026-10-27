@@ -605,6 +605,7 @@ pub(super) fn program_create(root: &Path, workspace: &Value, name: &str,
     validate_ref_name(name)?;
     let source=bounded_json(source_path)?;
     exact(&source,&["jam","abi"])?;
+    // A person authors this source JSON (jam/abi hex and all): either case reads.
     let code=crate::decode_hex(member(&source,"jam")?)?;
     let length=u32::try_from(code.len()).map_err(|_|"program code too large")?;
     let mut payload=length.to_le_bytes().to_vec();

@@ -109,8 +109,9 @@ pub fn decimal(text: &str) -> bool {
 
 /// Mini's lifecycle receivers pin the resident unit name (Kernel
 /// `ApplicationLifecycleResidentProfile.processIdentity`): the Store key (Mini's
-/// `storeTag` of the genesis seed identity), the app and the generation. Two
-/// Stores on one host never name the same unit.
+/// `storeTag` of the Store identity, the genesis seed at the Store's root), the
+/// app and the generation. Two Stores on one host never name the same unit, a
+/// world restored or forked to another root included.
 /// Canonical Store coordinate; an absent or malformed id cannot name a unit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreId(String);

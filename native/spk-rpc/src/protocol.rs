@@ -294,8 +294,90 @@ impl grain_capnp::sandstorm_api::Server<capnp::data::Owned> for RecordingSandsto
     }
 }
 
-struct MinimalSessionContext;
-impl grain_capnp::session_context::Server for MinimalSessionContext {}
+/// The session context an app receives. It answers as `HackSessionContext`
+/// (which extends `SessionContext` and `EmailSendPort`), because bridge apps
+/// cast `getSessionContext`'s result to it and call `getPublicId` on ordinary
+/// page loads. The publishing origin is derived from the session's own origin
+/// (`base_path`, `https://<grain>.<base>`): `https://<grain>-www.<base>`.
+struct GrainSessionContext {
+    base_path: String,
+}
+
+/// `(publicId, hostname, autoUrl)` for a session origin `https://LABEL.REST`.
+pub fn publishing_origin(base_path: &str) -> Result<(String, String, String), &'static str> {
+    let host = base_path.strip_prefix("https://").ok_or("publishingOriginUnavailable")?;
+    let (label, rest) = host.split_once('.').ok_or("publishingOriginUnavailable")?;
+    let valid = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.');
+    if !valid(label) || label.contains('.') || !valid(rest) || rest.starts_with('.') || rest.ends_with('.') || rest.contains("..") {
+        return Err("publishingOriginUnavailable");
+    }
+    let public_id = format!("{label}-www");
+    let auto_url = format!("https://{public_id}.{rest}");
+    Ok((public_id, rest.to_owned(), auto_url))
+}
+
+impl grain_capnp::session_context::Server for GrainSessionContext {}
+
+impl crate::email_capnp::email_send_port::Server for GrainSessionContext {
+    async fn send(
+        self: capnp::capability::Rc<Self>,
+        _: crate::email_capnp::email_send_port::SendParams,
+        _: crate::email_capnp::email_send_port::SendResults,
+    ) -> capnp::Result<()> {
+        Err(refused("emailUnsupported"))
+    }
+    async fn hint_address(
+        self: capnp::capability::Rc<Self>,
+        _: crate::email_capnp::email_send_port::HintAddressParams,
+        _: crate::email_capnp::email_send_port::HintAddressResults,
+    ) -> capnp::Result<()> {
+        Err(refused("emailUnsupported"))
+    }
+}
+
+macro_rules! obsolete_hack_method {
+    ($($name:ident: $params:ident, $results:ident;)*) => {$(
+        async fn $name(
+            self: capnp::capability::Rc<Self>,
+            _: crate::hack_session_capnp::hack_session_context::$params,
+            _: crate::hack_session_capnp::hack_session_context::$results,
+        ) -> capnp::Result<()> {
+            Err(refused(concat!("obsoleteHackMethod: ", stringify!($name))))
+        }
+    )*};
+}
+
+impl crate::hack_session_capnp::hack_session_context::Server for GrainSessionContext {
+    async fn get_public_id(
+        self: capnp::capability::Rc<Self>,
+        _: crate::hack_session_capnp::hack_session_context::GetPublicIdParams,
+        mut results: crate::hack_session_capnp::hack_session_context::GetPublicIdResults,
+    ) -> capnp::Result<()> {
+        let (public_id, hostname, auto_url) = publishing_origin(&self.base_path).map_err(refused)?;
+        let mut out = results.get();
+        out.set_public_id(public_id.as_str());
+        out.set_hostname(hostname.as_str());
+        out.set_auto_url(auto_url.as_str());
+        out.set_is_demo_user(false);
+        Ok(())
+    }
+    async fn get_user_address(
+        self: capnp::capability::Rc<Self>,
+        _: crate::hack_session_capnp::hack_session_context::GetUserAddressParams,
+        _: crate::hack_session_capnp::hack_session_context::GetUserAddressResults,
+    ) -> capnp::Result<()> {
+        Err(refused("emailUnsupported"))
+    }
+    obsolete_hack_method! {
+        obsolete_http_get: ObsoleteHttpGetParams, ObsoleteHttpGetResults;
+        obsolete_get_ui_view_for_endpoint: ObsoleteGetUiViewForEndpointParams, ObsoleteGetUiViewForEndpointResults;
+        obsolete_generate_api_token: ObsoleteGenerateApiTokenParams, ObsoleteGenerateApiTokenResults;
+        obsolete_list_api_tokens: ObsoleteListApiTokensParams, ObsoleteListApiTokensResults;
+        obsolete_revoke_api_token: ObsoleteRevokeApiTokenParams, ObsoleteRevokeApiTokenResults;
+        obsolete_get_ip_network: ObsoleteGetIpNetworkParams, ObsoleteGetIpNetworkResults;
+        obsolete_get_ip_interface: ObsoleteGetIpInterfaceParams, ObsoleteGetIpInterfaceResults;
+    }
+}
 
 /// The participant's identity as presented to the app. A session's identity
 /// carries the connection tag so `SandstormApi.save` can accept it; a restored
@@ -588,8 +670,9 @@ impl SupervisorConnection {
             for (index, allowed) in params.permissions.iter().enumerate() {
                 permissions.set(index as u32, *allowed);
             }
-            let context: grain_capnp::session_context::Client =
-                capnp_rpc::new_client(MinimalSessionContext);
+            let hack: crate::hack_session_capnp::hack_session_context::Client =
+                capnp_rpc::new_client(GrainSessionContext { base_path: params.base_path.clone() });
+            let context = grain_capnp::session_context::Client { client: hack.client };
             body.set_context(context);
             body.set_tab_id(&params.tab_id);
             if api {
@@ -702,6 +785,9 @@ mod tests {
         paths: Vec<String>,
         posts: Vec<(String, Vec<u8>, String, String)>,
         view_fault: u8,
+        /// What a bridge app learns by casting its session context to `HackSessionContext`.
+        public_id: Vec<String>,
+        user_address: String,
     }
 
     struct FakeApp(Rc<RefCell<Observed>>);
@@ -805,6 +891,31 @@ mod tests {
                         params.get_session_params().get_as()?;
                     seen.base_path = web.get_base_path()?.to_str()?.to_owned();
                 }
+            }
+            // As Hacker Slides' index does: cast the context, ask for the publishing origin.
+            let hack = crate::hack_session_capnp::hack_session_context::Client {
+                client: params.get_context()?.client,
+            };
+            let public = hack.get_public_id_request().send().promise.await;
+            let address = hack.get_user_address_request().send().promise.await;
+            {
+                let mut seen = self.0.borrow_mut();
+                seen.public_id = match public {
+                    Ok(reply) => {
+                        let r = reply.get()?;
+                        vec![
+                            r.get_public_id()?.to_str()?.to_owned(),
+                            r.get_hostname()?.to_str()?.to_owned(),
+                            r.get_auto_url()?.to_str()?.to_owned(),
+                            r.get_is_demo_user().to_string(),
+                        ]
+                    }
+                    Err(error) => vec![format!("refused {error}")],
+                };
+                seen.user_address = match address {
+                    Ok(_) => "served".into(),
+                    Err(error) => error.to_string(),
+                };
             }
             let web: web_session_capnp::web_session::Client =
                 capnp_rpc::new_client(FakeWebSession(self.0.clone()));
@@ -1069,6 +1180,17 @@ mod tests {
     }
 
     #[test]
+    fn publishing_origin_is_the_grain_label_with_www_and_refuses_odd_origins() {
+        assert_eq!(
+            super::publishing_origin("https://a42.demo.dregg.online").unwrap(),
+            ("a42-www".into(), "demo.dregg.online".into(), "https://a42-www.demo.dregg.online".into())
+        );
+        for odd in ["http://a42.demo.test", "https://localhost", "https://a42.demo.test/i/x", "https://A42.demo.test", "https://a42.", "https://a42..test"] {
+            assert_eq!(super::publishing_origin(odd), Err("publishingOriginUnavailable"), "{odd}");
+        }
+    }
+
+    #[test]
     fn identity_objects_decode_only_with_this_connection_tag() {
         let secret = [5; 32];
         let identity = SavedIdentity { identity_id: [9; 32], display_name: "Grace".into(), preferred_handle: "grace".into() };
@@ -1149,7 +1271,7 @@ mod tests {
                     preferred_handle: "ada".into(),
                     permissions: vec![true, false],
                     tab_id: vec![9, 8, 7],
-                    base_path: "https://grain.example/i/test".into(),
+                    base_path: "https://a9101.demo.test".into(),
                     user_agent: "Mini test".into(),
                     acceptable_languages: vec!["en".into()],
                 };
@@ -1168,9 +1290,14 @@ mod tests {
                         seen.session_type,
                         web_session_capnp::web_session::Client::TYPE_ID
                     );
-                    assert_eq!(seen.base_path, "https://grain.example/i/test");
+                    assert_eq!(seen.base_path, "https://a9101.demo.test");
                     assert_eq!(seen.identity_profile, "Ada");
                     assert_eq!(seen.paths, ["todos"]);
+                    assert_eq!(
+                        seen.public_id,
+                        ["a9101-www", "demo.test", "https://a9101-www.demo.test", "false"]
+                    );
+                    assert!(seen.user_address.contains("emailUnsupported"), "{}", seen.user_address);
                 }
                 let api_session = host.new_api_session(&params).await.unwrap();
                 let api_response =

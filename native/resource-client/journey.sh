@@ -494,7 +494,7 @@ frontier() {
 }
 
 # run_step ID DEP... : a step whose dependency did not pass is FAIL (blocked).
-# The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
+# The operator's checkpoint timer (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)), run between steps: certify
 # the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
 # the journey's Store (L = 256) never reaches its tail bound between certifies.
 # Every certify, and every skip, is logged to $S/certify.log; a confirmed

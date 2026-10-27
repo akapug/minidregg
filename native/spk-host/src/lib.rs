@@ -47,6 +47,7 @@ mod dispatch_web_input;
 #[cfg(target_os = "linux")]
 pub mod hostd;
 pub mod identity_custody;
+pub mod www_publish;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
 #[cfg(target_os = "linux")]

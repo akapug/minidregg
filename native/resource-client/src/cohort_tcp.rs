@@ -471,7 +471,7 @@ struct Roster {
 }
 fn roster_entry(v: &serde_json::Value) -> Result<RosterEntry> {
     let field = |name: &str| -> Result<Vec<u8>> {
-        crate::decode_hex(v[name].as_str().ok_or("roster entry field must be hex text")?)
+        mini_sdk::hex::decode(v[name].as_str().ok_or("roster entry field must be hex text")?).map_err(|e| e.0)
     };
     let native = field("native")?;
     if native.len() == 32 {
@@ -505,7 +505,7 @@ fn parse_roster(bytes: &[u8]) -> Result<Roster> {
         return Err("cohort roster type/shape refused".into());
     }
     let generation: [u8; 16] =
-        crate::decode_hex(v["generation"].as_str().ok_or("roster generation must be hex")?)?
+        mini_sdk::hex::decode(v["generation"].as_str().ok_or("roster generation must be hex")?).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "roster generation must be 16 bytes")?;
     let list = |name: &str| -> Result<Vec<RosterEntry>> {

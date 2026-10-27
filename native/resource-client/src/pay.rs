@@ -244,7 +244,7 @@ fn hex_exact(value: &str, bytes: usize, field: &str) -> Result<Vec<u8>> {
     if value.len() != bytes * 2 || value.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(format!("{field} must be {bytes} bytes of lowercase hex"));
     }
-    decode_hex(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
+    mini_sdk::hex::decode(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
 }
 
 fn base58(bytes: &[u8]) -> String {
@@ -364,7 +364,7 @@ fn hex_text(value: &Value, field: &str) -> String {
     value
         .get(field)
         .and_then(Value::as_str)
-        .and_then(|text| decode_hex(text).ok())
+        .and_then(|text| mini_sdk::hex::decode(text).ok())
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default()
 }
@@ -459,13 +459,13 @@ fn prepare(
     if text(&plan_view, "commandBytes")? != hex(&command_bytes) {
         return Err("the Host's plan is not for the authored command".into());
     }
-    let header = decode_hex(
+    let header = mini_sdk::hex::decode(
         plan_view
             .get("header")
             .and_then(|header| header.get("canonical"))
             .and_then(Value::as_str)
             .ok_or("the Host's plan has no canonical header")?,
-    )?;
+    ).map_err(|e| e.0)?;
     let signature = read_secret(&session.key)?.sign(&header).to_bytes();
     create_private(&directory.join("signature.bin"), &signature)?;
     let length: u32 = plan.len().try_into().map_err(|_| "plan too large")?;
@@ -1418,7 +1418,7 @@ fn memo_key(session: &Session, record: &Record, directory: &Path) -> Result<Opti
     };
     let bin = directory.join("memo.bin");
     if !bin.exists() {
-        create_private(&bin, &decode_hex(memo)?)?;
+        create_private(&bin, &mini_sdk::hex::decode(memo).map_err(|e| e.0)?)?;
     }
     let parsed = session.inspect("pay-enrol-memo", &bin, &directory.join("memo.json"))?;
     Ok(if parsed.get("accepted").and_then(Value::as_bool) == Some(true) {
@@ -1435,7 +1435,7 @@ fn v2_memo_identity(record: &Record) -> Result<Option<String>> {
     let Some(encoded) = record.value.get("memo").and_then(Value::as_str) else {
         return Ok(None);
     };
-    let bytes = decode_hex(encoded)?;
+    let bytes = mini_sdk::hex::decode(encoded).map_err(|e| e.0)?;
     let Ok(text) = std::str::from_utf8(&bytes) else { return Ok(None); };
     Ok(crate::pay_memo_v2::SignedMemo::parse(text).ok()
         .map(|memo| hex(&memo.unsigned.identity_key)))

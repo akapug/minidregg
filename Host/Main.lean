@@ -211,6 +211,7 @@ import Host.FnInboxView
 import Host.GrainOriginCommand
 import Host.ProviderUsage
 import Lean.Data.Json
+import Kernel.NativeHostStoreIdentity
 
 open Lean
 open Minidregg.Compiler
@@ -905,7 +906,7 @@ def inspectHost (config : NativeHost.Config) (kind : String) (bytes : List UInt8
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
-    ApplicationLifecycleClaimInspection.inspect config.expectedSeed bytes
+    ApplicationLifecycleClaimInspection.inspect config.storeIdentity bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v4" then
@@ -1000,9 +1001,10 @@ def profileDescription (config : NativeHost.Config)
      ("domain", n config.deployment.domain.value),
      ("expectedSeed", n config.expectedSeed.value),
      -- The Store's key in physical names (resident units, volumes, slices):
-     -- the SPK host reads it here and never derives its own.
+     -- the tag of the Store identity (`Config.storeIdentity`: the genesis seed at
+     -- this Store's root). The SPK host reads it here and never derives its own.
      ("storeTag", toJson (Minidregg.Kernel.ApplicationLifecycleResidentProfile.storeTag
-       config.expectedSeed)),
+       config.storeIdentity)),
      -- The Store's durable-anchor identity (`Config.anchorIdentity`): a script that
      -- reads the Store's image (`durable-read`) takes it from here.
      ("storeAnchorIdentity", toJson config.anchorIdentity),
@@ -6379,7 +6381,7 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       return ((68 : UInt8), bytes)
   | 69 =>
       let (planBytes, signaturesBytes) ← splitPair payload
-      if let some routed ← retryLifecycleClaimAssemble pinnedConfig.expectedSeed
+      if let some routed ← retryLifecycleClaimAssemble pinnedConfig.storeIdentity
           planBytes (← decodeSignatures signaturesBytes) then
         return routed
       let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
@@ -6387,7 +6389,7 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
         | throw (RequestRefusal.malformed "noncanonical launch claim plan")
       let signatures ← decodeSignatures signaturesBytes
       let ingress ← IO.ofExcept <|
-        ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.expectedSeed plan signatures
+        ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.storeIdentity plan signatures
       unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "launch claim ingress exceeds host frame bound")
       return ((69 : UInt8), ingress)
@@ -7750,7 +7752,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical resident BEGIN plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleBeginOperator.assemble pinnedConfig.expectedSeed plan signatures
+                              ApplicationLifecycleBeginOperator.assemble pinnedConfig.storeIdentity plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
                             return ((51 : UInt8), ingress)
@@ -7775,7 +7777,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical lifecycle claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleClaimOperator.assemble pinnedConfig.expectedSeed plan signatures
+                              ApplicationLifecycleClaimOperator.assemble pinnedConfig.storeIdentity plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
@@ -8256,8 +8258,9 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "pin-enrollment-plan-height", [planPath, heightText, output] =>
           -- An enrollment plan (op 86) carries no height of its own: the signer pins its
-          -- sponsor deadline to the height of the observation it was planned at, the same
-          -- height local consent re-derives the pinned plan from (`NativeSpecializedConsent`).
+          -- sponsor deadline to the one a plan authored at its observation's height carries
+          -- (`NativePlanHeight.pinHeaderAt`: that height plus the validity window), the pin
+          -- local consent applies to its own re-derivation (`NativeSpecializedConsent`).
           let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode (← readBytes planPath)
             | throw (RequestRefusal.malformed "noncanonical enrollment signing plan")
           let height ← IO.ofExcept (exactDecimal "pin height" heightText)

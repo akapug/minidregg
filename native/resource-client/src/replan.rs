@@ -162,7 +162,7 @@ pub(crate) fn submit_stale_target(decision: Option<&HostDecision>) -> Option<Str
         || outcome["phase"] != crate::hex(b"stale-target") {
         return None;
     }
-    let detail = crate::decode_hex(outcome["detail"].as_str()?).ok()?;
+    let detail = mini_sdk::hex::decode(outcome["detail"].as_str()?).ok()?;
     let target = std::str::from_utf8(&detail).ok()?
         .strip_prefix("target ")?
         .strip_suffix(" moved since the plan was signed")?;

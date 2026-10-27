@@ -121,11 +121,17 @@ readers() {
   run shell-paths     bash scripts/check-shell-paths.sh
   run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
   run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
+  # The story law files and Assurance/StoryLaw.lean §8 are the client's own generator output: build `mini` and
+  # require that `mini story-law` still produces exactly the embedded text (a stale embed is how a theorem
+  # about `law taleTable` stops being about the law `story seal` installs; the rfl in the build only holds
+  # the Lean side, this holds the Rust side).
+  run gen-storylaw    $SB bash -c 'cargo build --quiet --manifest-path native/resource-client/Cargo.toml --bin mini && python3 scripts/gen-storylaw.py --check --mini "$CARGO_TARGET_DIR/debug/mini"'
   run website         python3 website/gen-status.py --check
   # A generated fixture's authority (a hand-written file no generator writes) never changes in the same
   # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
   # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
   run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
+  run intent-vector-authority python3 scripts/pipeline/check-intent-vector-authority.py
   python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || echo "rust-rows RED (selector failed)" | tee -a "$S"
   cat "$L/gate-$TAG-rust-rows.txt"
   run rust-rows       $SB bash "$B/tmp-rust-rows-$TAG.sh"

@@ -602,6 +602,26 @@ impl Worker {
         let socket = PathBuf::from(route["socket"].as_str().unwrap_or(""));
         UnixStream::connect(&socket).map_err(|e| refused("routeUnavailable", format!("{}: {e}", socket.display())))
     }
+
+    /// The edge connector's publishing verb: the grain's `www.sock`, which the
+    /// resident binds in the app's state directory, the grandparent of every
+    /// route directory (`apps/<app>/routes/<route>/http.sock`).
+    fn connect_www(&self, grain: &str) -> std::result::Result<UnixStream, Value> {
+        if !valid_grain(grain) {
+            return Err(refused("routeRefused", "grain malformed"));
+        }
+        let Some(record) = self.grain_record(grain).map_err(|e| refused("stateUnavailable", e))? else {
+            return Err(refused("unknownGrain", grain.to_owned()));
+        };
+        let socket = record.get("routes").and_then(Value::as_object).and_then(|routes| routes.values().next())
+            .and_then(|route| route["socket"].as_str()).map(PathBuf::from)
+            .ok_or_else(|| refused("noRoute", format!("{grain} has no route yet")))?;
+        let routes_dir = socket.parent().and_then(Path::parent)
+            .filter(|dir| dir.file_name().is_some_and(|name| name == "routes"))
+            .ok_or_else(|| refused("stateUnavailable", format!("{} is not under a routes directory", socket.display())))?;
+        let www = routes_dir.parent().ok_or_else(|| refused("stateUnavailable", "routes directory has no app directory"))?.join("www.sock");
+        UnixStream::connect(&www).map_err(|e| refused("grainStopped", format!("{}: {e}", www.display())))
+    }
 }
 
 /// The owner's role basis for one grain: the world's basis (`allAccess` on the
@@ -680,7 +700,7 @@ fn write_line(stream: &mut UnixStream, value: &Value) {
 }
 
 /// One JSON line plus one file descriptor, `SCM_RIGHTS`.
-fn send_with_fd(stream: &UnixStream, value: &Value, fd: std::os::unix::io::RawFd) -> Result<()> {
+pub(crate) fn send_with_fd(stream: &UnixStream, value: &Value, fd: std::os::unix::io::RawFd) -> Result<()> {
     let mut bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
     let mut iov = libc::iovec { iov_base: bytes.as_mut_ptr().cast(), iov_len: bytes.len() };
@@ -768,13 +788,17 @@ pub(crate) fn serve(worker: Arc<Worker>, members: UnixListener, edge: UnixListen
                 Ok(request) => request,
                 Err(e) => { write_line(&mut stream, &refused("requestRefused", e)); continue; }
             };
-            if request.get("verb").and_then(Value::as_str) != Some("connect") {
-                write_line(&mut stream, &refused("unknownVerb", "the edge socket serves connect only"));
-                continue;
-            }
             let grain = request.get("grain").and_then(Value::as_str).unwrap_or("");
             let member = request.get("route").and_then(Value::as_str).unwrap_or("");
-            match edge_worker.connect_route(grain, member) {
+            let connected = match request.get("verb").and_then(Value::as_str) {
+                Some("connect") => edge_worker.connect_route(grain, member),
+                Some("www") => edge_worker.connect_www(grain),
+                _ => {
+                    write_line(&mut stream, &refused("unknownVerb", "the edge socket serves connect and www only"));
+                    continue;
+                }
+            };
+            match connected {
                 Ok(route) => {
                     let fd = route.into_raw_fd();
                     let reply = json!({"protocol":WORKER_PROTOCOL,"decided":true,"state":"connected","detail":format!("{grain}/{member}")});
@@ -1406,6 +1430,24 @@ mod tests {
         let mut head = [0_u8; 18];
         app_side.read_exact(&mut head).unwrap();
         assert_eq!(&head, b"GET / HTTP/1.1\r\n\r\n");
+        // The publishing verb reaches the app directory's www.sock, the routes
+        // directory's parent; with the resident gone it is grainStopped by name.
+        let mut front = UnixStream::connect(&edge_path).unwrap();
+        front.write_all(b"{\"verb\":\"www\",\"grain\":\"a4501\"}\n").unwrap();
+        let (reply, fd) = receive_with_fd(&front).unwrap();
+        assert_eq!(reply["refused"], "grainStopped", "{reply}");
+        assert!(fd.is_none());
+        let publishing = UnixListener::bind(root.join("www.sock")).unwrap();
+        let mut front = UnixStream::connect(&edge_path).unwrap();
+        front.write_all(b"{\"verb\":\"www\",\"grain\":\"a4501\"}\n").unwrap();
+        let (reply, fd) = receive_with_fd(&front).unwrap();
+        assert_eq!(reply["state"], "connected", "{reply}");
+        let mut handed = fd.expect("the publishing socket arrived");
+        let (mut site, _) = publishing.accept().unwrap();
+        handed.write_all(b"HEAD / HTTP/1.0\r\n\r\n").unwrap();
+        let mut head = [0_u8; 19];
+        site.read_exact(&mut head).unwrap();
+        assert_eq!(&head, b"HEAD / HTTP/1.0\r\n\r\n");
         // An unknown route is refused by name with no socket.
         let mut front = UnixStream::connect(&edge_path).unwrap();
         front.write_all(br#"{"verb":"connect","grain":"a4501","route":"mallory"}"#).unwrap();

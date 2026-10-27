@@ -26,9 +26,9 @@ global injection into 256 bits.  Durable execution is a model until a physical
 handler inhabits the existing `ImplementationRefinement` simulation boundary.
 -/
 import Compiler.CredentialAuthorityCell
-import Compiler.DeployedCellRegistry
 import Kernel.CanonicalPolicyRegistry
 import Theory.CredentialAuthorityEffects
+import Theory.DeployedMaterializerWitness
 
 namespace Minidregg.Assurance.DeployedCredentialLifecycle
 
@@ -54,12 +54,7 @@ set_option autoImplicit false
 /-! ## The deployed authority cell and its built pre-cell -/
 
 abbrev AuthorityMaterializer : Materializer :=
-  Compiler.DeployedCellRegistry.materializer
-    Compiler.DeployedCellRegistry.Kind.credentialAuthority
-
-/-- The deployed authority kind's materializer is the one authority cell's. -/
-theorem authorityMaterializer_deployed :
-    AuthorityMaterializer = CredentialAuthorityCell.materializer := rfl
+  CredentialAuthorityCell.materializer
 
 def examplePolicy : PolicyId := ⟨17⟩
 

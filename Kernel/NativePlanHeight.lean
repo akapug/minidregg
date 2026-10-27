@@ -138,15 +138,70 @@ theorem pin_only_slots (plan pinned : SigningPlan) (ok : pin plan = .ok pinned) 
     all_goals cases ok
     all_goals exact ⟨rfl, len, point⟩
 
-/-- The enrollment plan's pin (op 86): only the sponsor header's deadline moves, to
-`min validUntil height`; the possession frame is a fixed function of the command
-(`NativeHost.enrollmentAssemble` checks it) and is untouched, as are the command bytes. -/
+/-- The deadline a plan authored at `height` carries
+(`CredentialSignatureAdmission.signingHeader`: authoring height plus the validity window). -/
+def authoredDeadline (height : Nat) : Nat :=
+  height + CredentialSignatureAdmission.planValidityWindow
+
+/-- The enrollment pin's header move: the deadline becomes the one a plan authored at the
+observed `height` carries, never later than before. It does NOT cut the deadline to the
+observed height (`pinHeader` does, which expired an enrollment plan at the next tick). -/
+def pinHeaderAt (height : Nat)
+    (header : CredentialSignedEnvelopeController.SignedHeader) :
+    CredentialSignedEnvelopeController.SignedHeader :=
+  { header with validUntil := min header.validUntil (authoredDeadline height) }
+
+theorem pinHeaderAt_never_extends (height : Nat)
+    (header : CredentialSignedEnvelopeController.SignedHeader) :
+    (pinHeaderAt height header).validUntil ≤ header.validUntil := Nat.min_le_left _ _
+
+theorem pinHeaderAt_only_deadline (height : Nat)
+    (header : CredentialSignedEnvelopeController.SignedHeader) :
+    { pinHeaderAt height header with validUntil := header.validUntil } = header := by
+  cases header
+  rfl
+
+/-- A header re-derived at a LATER height and pinned at the observed one is exactly the
+header authored at the observed height: provider and client agree whatever ticks passed. -/
+theorem pinHeaderAt_rederived (seen later : Nat) (le : seen ≤ later)
+    (header : CredentialSignedEnvelopeController.SignedHeader)
+    (derived : header.validUntil = authoredDeadline later) :
+    pinHeaderAt seen header = { header with validUntil := authoredDeadline seen } := by
+  have : min (authoredDeadline later) (authoredDeadline seen) = authoredDeadline seen := by
+    unfold authoredDeadline; omega
+  simp [pinHeaderAt, derived, this]
+
+/-- Liveness: the pinned header stays admissible (`height ≤ validUntil`) at every height up
+to the observed height's deadline, the ticks between included. -/
+theorem pinHeaderAt_live (seen later current : Nat) (le : seen ≤ later)
+    (header : CredentialSignedEnvelopeController.SignedHeader)
+    (derived : header.validUntil = authoredDeadline later)
+    (within : current ≤ authoredDeadline seen) :
+    current ≤ (pinHeaderAt seen header).validUntil := by
+  rw [pinHeaderAt_rederived seen later le header derived]
+  exact within
+
+/-- Teeth: the old cut (`pinHeader`) expires the plan at the first height after the
+observation, the `expired 13 12` the box run saw; the new pin keeps it. -/
+theorem old_cut_expires_new_pin_lives (seen : Nat)
+    (header : CredentialSignedEnvelopeController.SignedHeader)
+    (derived : header.validUntil = authoredDeadline seen) :
+    (pinHeader seen header).validUntil < seen + 1 ∧
+      seen + 1 ≤ (pinHeaderAt seen header).validUntil := by
+  refine ⟨Nat.lt_succ_of_le (pinHeader_deadline seen header), ?_⟩
+  rw [pinHeaderAt_rederived seen seen le_rfl header derived]
+  simp [authoredDeadline, CredentialSignatureAdmission.planValidityWindow]
+
+/-- The enrollment plan's pin (op 86): only the sponsor header's deadline moves, to the
+deadline a plan authored at the observed height carries (`pinHeaderAt`); the possession
+frame is a fixed function of the command (`NativeHost.enrollmentAssemble` checks it) and is
+untouched, as are the command bytes. -/
 def pinEnrollment (height : Nat) (plan : ParticipantKeyEnrollment.SigningPlan) :
     Except String ParticipantKeyEnrollment.SigningPlan := do
   let some header := CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader
     | .error "noncanonical enrollment sponsor header"
   return { plan with sponsorHeader :=
-    CredentialSignedEnvelopeController.headerCodec.encode (pinHeader height header) }
+    CredentialSignedEnvelopeController.headerCodec.encode (pinHeaderAt height header) }
 
 /-- The enrollment pin changes nothing but the sponsor header's deadline. -/
 theorem pinEnrollment_only_sponsor_deadline (height : Nat)
@@ -156,7 +211,7 @@ theorem pinEnrollment_only_sponsor_deadline (height : Nat)
       pinned.commandBytes = plan.commandBytes ∧ pinned.possessionHeader = plan.possessionHeader ∧
       ∃ header, CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader = some header ∧
         pinned.sponsorHeader =
-          CredentialSignedEnvelopeController.headerCodec.encode (pinHeader height header) := by
+          CredentialSignedEnvelopeController.headerCodec.encode (pinHeaderAt height header) := by
   unfold pinEnrollment at ok
   split at ok
   · rename_i header decoded
@@ -165,8 +220,25 @@ theorem pinEnrollment_only_sponsor_deadline (height : Nat)
     exact ⟨rfl, rfl, rfl, rfl, header, decoded, rfl⟩
   · cases ok
 
+/-- The provider's plan re-derived at a later height, pinned at the observed height, is the
+plan authored at the observed height. -/
+theorem pinEnrollment_rederived_later (seen later : Nat) (le : seen ≤ later)
+    (plan : ParticipantKeyEnrollment.SigningPlan)
+    (header : CredentialSignedEnvelopeController.SignedHeader)
+    (decoded : CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader = some header)
+    (derived : header.validUntil = authoredDeadline later) :
+    pinEnrollment seen plan = .ok { plan with sponsorHeader :=
+      (CredentialSignedEnvelopeController.headerCodec.encode
+        { header with validUntil := authoredDeadline seen }) } := by
+  unfold pinEnrollment
+  rw [decoded]
+  simp only [pure, Except.pure]
+  rw [pinHeaderAt_rederived seen later le header derived]
+
 #assert_axioms pinSlot_only_header
 #assert_axioms pinEnrollment_only_sponsor_deadline
+#assert_axioms pinHeaderAt_never_extends pinHeaderAt_rederived pinHeaderAt_live
+  old_cut_expires_new_pin_lives pinEnrollment_rederived_later
 #assert_axioms pin_only_slots
 
 /-- Invert one refusal guard without simplifying any symbolic codec terms. -/

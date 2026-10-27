@@ -74,7 +74,7 @@ fn hex_bytes(value: &Value, name: &str, length: Option<usize>) -> Result<Vec<u8>
     {
         return Err(format!("adoption {name} is not bounded lowercase hex"));
     }
-    let bytes = crate::decode_hex(text)?;
+    let bytes = mini_sdk::hex::decode(text).map_err(|e| e.0)?;
     if length.is_some_and(|length| bytes.len() != length) {
         return Err(format!("adoption {name} has the wrong length"));
     }

@@ -321,7 +321,7 @@ fn read_epoch_head(root: &Path, room: &str, keys: &str) -> Result<Option<(Value,
     if value["type"] != "minidregg-authenticated-room-head-v1" || value["room"] != room
         || value["keys"] != keys { return Err("retained room lineage belongs to another context".into()); }
     let epoch: u32 = member(&value, "epoch")?.parse().map_err(|_| "invalid retained epoch")?;
-    let identity = crate::decode_hex(member(&value, "identity")?)?.try_into()
+    let identity = mini_sdk::hex::decode(member(&value, "identity")?).map_err(|e| e.0)?.try_into()
         .map_err(|_| "retained epoch identity must have 32 bytes")?;
     Ok(Some((value, EpochHead { epoch, identity })))
 }
@@ -333,7 +333,7 @@ fn retained_transitions(retained: Option<&Value>) -> usize {
 }
 
 fn retained_founder_tip(retained: Option<&Value>) -> Option<[u8; 32]> {
-    crate::decode_hex(retained?["founderTip"].as_str()?).ok()?.try_into().ok()
+    mini_sdk::hex::decode(retained?["founderTip"].as_str()?).ok()?.try_into().ok()
 }
 
 /// A served founder-key chain shorter than one this client already authenticated is a
@@ -431,7 +431,7 @@ fn founder_pin(root: &Path, room: &str, keys: &str) -> Result<[u8; 32]> {
     if value["type"] != FOUNDER_PIN_TYPE || value["room"] != room || value["keys"] != keys {
         return Err("founder pin belongs to another room or keys cell".into());
     }
-    let public: [u8; 32] = crate::decode_hex(member(&value, "founderKeyHex")?)?.try_into()
+    let public: [u8; 32] = mini_sdk::hex::decode(member(&value, "founderKeyHex")?).map_err(|e| e.0)?.try_into()
         .map_err(|_| "pinned founder key must be 32 bytes")?;
     verifying_key(&public)?;
     Ok(public)
@@ -446,7 +446,7 @@ fn member_pins(root: &Path, room: &str, keys: &str) -> Result<(Option<Value>, BT
     }
     let mut pins = BTreeMap::new();
     for (subject, key) in value["members"].as_object().ok_or("member pins lack members")? {
-        let public: [u8; 32] = crate::decode_hex(key.as_str().ok_or("member pin must be hex")?)?
+        let public: [u8; 32] = mini_sdk::hex::decode(key.as_str().ok_or("member pin must be hex")?).map_err(|e| e.0)?
             .try_into().map_err(|_| "member pin must be 32 bytes")?;
         pins.insert(subject_number(subject)?, public);
     }
@@ -611,7 +611,7 @@ fn transitions_in_view(view: &Value) -> Result<Vec<FounderTransition>> {
     let mut out = BTreeMap::new();
     for atom in atoms {
         let id = member(atom, "id")?;
-        let transition = FounderTransition::from_atom(id, &crate::decode_hex(member(atom, "payload")?)?)?;
+        let transition = FounderTransition::from_atom(id, &mini_sdk::hex::decode(member(atom, "payload")?).map_err(|e| e.0)?)?;
         if out.insert(transition.index, transition).is_some() { return Err("transition atom repeats an address".into()); }
     }
     Ok(out.into_values().collect())
@@ -820,7 +820,7 @@ fn releases_in_view(view: &Value) -> Result<BTreeMap<String, ReleaseStatement>> 
     let mut out = BTreeMap::new();
     for atom in atoms {
         let id = member(atom, "id")?;
-        let release = ReleaseStatement::from_atom(id, &crate::decode_hex(member(atom, "payload")?)?)?;
+        let release = ReleaseStatement::from_atom(id, &mini_sdk::hex::decode(member(atom, "payload")?).map_err(|e| e.0)?)?;
         if out.insert(id.to_owned(), release).is_some() { return Err("release atom repeats an address".into()); }
     }
     Ok(out)
@@ -1188,7 +1188,7 @@ pub(crate) fn wraps_in_view(view: &Value) -> Result<Vec<WrapAtom>> {
                             .get("payload")
                             .and_then(Value::as_str)
                             .ok_or("wrap atom lacks payload")?;
-                        WrapAtom::from_atom(id, &crate::decode_hex(payload)?)
+                        WrapAtom::from_atom(id, &mini_sdk::hex::decode(payload).map_err(|e| e.0)?)
                     })());
                 } else {
                     object.values().for_each(|item| walk(item, schema, out));
@@ -1240,7 +1240,7 @@ pub(crate) fn records_in_view(view: &Value) -> BTreeMap<u64, EncRecord> {
         let parsed = (|| {
             let id = atom.get("id").and_then(Value::as_str).ok_or("record atom lacks id")?;
             let payload = atom.get("payload").and_then(Value::as_str).ok_or("record atom lacks payload")?;
-            EncRecord::from_atom(id, &crate::decode_hex(payload)?, atom)
+            EncRecord::from_atom(id, &mini_sdk::hex::decode(payload).map_err(|e| e.0)?, atom)
         })();
         match parsed {
             Ok(record) => {
@@ -1967,9 +1967,9 @@ impl RetainedReleaseDraft {
 
     fn deliveries(&self) -> Result<Vec<Delivery>> {
         self.manifest["deliveries"].as_array().ok_or("release draft lacks deliveries")?.iter().map(|row| {
-            let wrap = WrapAtom::from_atom(member(row, "wrapAtom")?, &crate::decode_hex(member(row, "wrapPayloadHex")?)?)?;
+            let wrap = WrapAtom::from_atom(member(row, "wrapAtom")?, &mini_sdk::hex::decode(member(row, "wrapPayloadHex")?).map_err(|e| e.0)?)?;
             let release = ReleaseStatement::from_atom(member(row, "releaseAtom")?,
-                &crate::decode_hex(member(row, "releasePayloadHex")?)?)?;
+                &mini_sdk::hex::decode(member(row, "releasePayloadHex")?).map_err(|e| e.0)?)?;
             release.names(&wrap)?;
             Ok(Delivery { wrap, release })
         }).collect()
@@ -1979,7 +1979,7 @@ impl RetainedReleaseDraft {
         let head = &self.manifest["headBefore"];
         if head.is_null() { return Ok(None); }
         Ok(Some(EpochHead { epoch: member(head, "epoch")?.parse().map_err(|_| "invalid draft head epoch")?,
-            identity: crate::decode_hex(member(head, "identity")?)?.try_into()
+            identity: mini_sdk::hex::decode(member(head, "identity")?).map_err(|e| e.0)?.try_into()
                 .map_err(|_| "draft head identity must be 32 bytes")? }))
     }
 }
@@ -1992,7 +1992,7 @@ fn drafts_of_room(root: &Path, room: &str) -> Result<Vec<RetainedReleaseDraft>> 
     for entry in fs::read_dir(&parent).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry.file_type().map_err(|error| error.to_string())?.is_dir() { continue; }
-        let Ok(operation) = crate::decode_hex(&entry.file_name().to_string_lossy())
+        let Ok(operation) = mini_sdk::hex::decode(&entry.file_name().to_string_lossy()).map_err(|e| e.0)
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).map_err(|_| "not an operation".to_string())) else { continue };
         if let Some(draft) = RetainedReleaseDraft::load(root, &operation)? {
             if draft.room()? == room { out.push(draft); }
@@ -2842,7 +2842,7 @@ pub(crate) fn tail(root: &Path, workspace: &Value, name: &str, start: &str, coun
     if let Some(entries) = view.get_mut("entries").and_then(Value::as_array_mut) {
         for entry in entries {
             let sequence = entry.get("sequence").and_then(Value::as_str).unwrap_or("").to_owned();
-            let note = match entry.get("payload").and_then(Value::as_str).map(crate::decode_hex) {
+            let note = match entry.get("payload").and_then(Value::as_str).map(|payload| mini_sdk::hex::decode(payload).map_err(|e| e.0)) {
                 Some(Ok(bytes)) => open_in_room(keys.as_ref(), &room, &stream, &sequence, &bytes),
                 Some(Err(error)) => json!({"refused": error}),
                 None => json!({"refused": "the view carried no payload for this entry"}),

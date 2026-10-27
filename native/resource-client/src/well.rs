@@ -277,7 +277,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
     if member(&view, "commandBytes")? != hex(&command) {
         return Err("well plan names a different command".into());
     }
-    let header = crate::decode_hex(member(&view, "header")?)?;
+    let header = mini_sdk::hex::decode(member(&view, "header")?).map_err(|e| e.0)?;
     let key = crate::read_secret(Path::new(member(&workspace, "key")?))?;
     let signature = key.sign(&header).to_bytes();
     let ingress = invoke(

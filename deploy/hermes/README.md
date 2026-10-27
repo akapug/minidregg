@@ -121,6 +121,18 @@ Example table (`type` and every field are required; `caps` exactly on a
   ceiling of at most `40000000`), so that cap is never the first line.
   `mini-keys pool --action ls` shows the charged total; `--action spend-reset
   --provider pool` resets it after the operator re-checks the provider side.
+- **Each member's share** of that ceiling: `memberDayMicroUsd` and
+  `memberTotalMicroUsd`, charged at the same `callMicroUsd` against the member
+  a call serves. For a room resident that is the author of the request the
+  prompt answers (the controller reads it from the assignment and names it to
+  the broker); for anything else, the runner. A call past either refuses
+  `member-day-ceiling` or `member-total-ceiling`. A row with a ceiling and no
+  member caps gets **1/40 of the ceiling a day and 1/10 in all**: on the demo's
+  `40000000` / `100000`, $1 a day (10 worst-case calls) and $4 in all (40
+  calls) per member, so no ten members can drain the key and no one can drain
+  it in a day. The numbers are the row's, so they are published with the
+  table (`/etc/mini/providers.json`, world-readable). Both caps need
+  `callMicroUsd <= day <= total <= ceiling`.
 
 **The pool is optional.** Set it only if you want to fund Hermes for friends
 who bring no key:
@@ -242,7 +254,9 @@ ssh mini@BOX key revoke openrouter        # delete the key and every grant
 | `no-credential` | your row needs your key, and there is no key or no grant for this runner |
 | `grant-expired` | the signed height is past your `--until` |
 | `per-call-cap` | the request's `max_tokens` is absent or above your `--per-call` |
-| `per-day-cap` | today's calls reached your `--per-day` |
+| `per-day-cap` | today's calls reached your `--per-day` (or the pool row's `perDay`) |
+| `member-day-ceiling` | the member this call serves spent its share of the pool row for this UTC day |
+| `member-total-ceiling` | the member this call serves spent its whole share of the pool row |
 | `no-credit` | the purse refused the reserve (402) |
 
 ## Charges: the Host's per-route tariff
@@ -274,50 +288,150 @@ one credit per purse micro-unit):
   different fees refuses the user-route reserve (its hold must equal the law's
   fee) and fails a metered settle closed; a fee change means a new purse.
 
-## The demo box: Hermes's grain and controller config
+## The demo box: Hermes as a room resident
 
-`controller.json` is not written by hand: two of its fields are capabilities
-allocated when the owner delegates the parent witness, so it comes out of
-`grain-runtime create deploy/hermes/grain-create.demo.json` (run as the Hermes
-grain account against the serving Store). `controller.demo.json` is the exact
-shape that command writes for this spec, kept for review; its
-`WITNESS-FROM-CREATE` values are the two fields create fills, and the
-controller refuses the file until they are real. Then
-`install-controller --system --service-user ACCOUNT --config /var/lib/mini/hermes/g/controller.json ...`
-renders `mini-grain-controller@9870001.service` (controller manager `system`,
-worker `user`, unit name) and writes `/etc/mini/controllers/9870001.json`.
+`demo/install-hermes STEP...` (run as root) is the sequence J14 runs on the
+ACP room resident, with the box's paths and dregg-infra's registration
+(`mini-controller-register`, `mini-grain-controller@TASK`,
+`mini-grain-resident@TASK`). Every Mini command runs as the service account
+(`SVC`, default `mini-core`). Steps, in order:
 
-Where each spec field comes from:
+    install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
 
-- `mini`, `host`: the shipped candidate (`/var/lib/mini/candidate/current/bin`).
-- `hostConfig`, `genesis`, `namespaceRoot`, `sponsor.key`: the Store's own
-  deployment files; `hostConfig` must carry the purse's `providerServices`
-  tariff (the profile's semantics do not change when it is added).
-- `hostSocket`, `room.socket`: the **private operator** socket (`mini
-  serve-operator`); the resident refuses anything that does not answer
-  `operator-status`.
-- `sponsor.subject`/`accountCapability`/`grants`, `template`: the Store's
-  genesis (sponsor enrollment, factory observation) and operator template.
-- `owner`, `workerKey`, `provider.key`: three subjects enrolled for Hermes's
-  grain, keys private to the grain account, never Hermes's room key.
-- `task`, `toolTask`, `provider.task`, `capabilities.*`: unused resource IDs
-  the operator picks (create refuses duplicates among them; the Host refuses
-  IDs in use).
-- `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices (Rust
-  policy today, gr R1).
-- `worker`: the shipped `bwrap` launcher (sibling `launch-gate`), a runtime
-  root holding `hermes-acp`, `grain-runtime` and `grain-provider-bridge`, and
-  `network: none` (the production topology: the worker reaches the model only
-  through the bridge and the controller's Unix gateway).
-- `provider.gateway`: `providers`/`credentialBroker` are the root-owned table
-  and broker client; `provider: "pool"` pins the pool row (set it, or the
-  first row listing the model is chosen); `model` is the infra lane's choice;
-  `reserve` must cover the pool fee plus the metered charge at
-  `maxInputTokens`/`maxOutputTokens` under the Host profile's pool tariff.
-- `room`: the room Hermes is summoned into, its room workspace and account;
-  `restrictTools: true` (also the default).
+Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
+operator's sealed pool key, the metered tariff quoted from the upstream's
+usage record) and `J14_HERMES_ROOT` set to the runtime root below; the default
+`J14_ROUTE=user` runs a friend's own key instead.
 
-Hermes cannot settle a provider call until the client consent accepts the
-height-pinned provider settle plan (main's `checkPlan` compares it with the
-unpinned local prepare and refuses; L1 owns the fix). The grain and unit can
-be installed now; turn the unit on with the candidate that carries that fix.
+Before it can run:
+
+- **The Store pins Hermes's purse tariff.** `demo/provider-services.json`
+  goes into genesis-params.json as `providerServices`; `genesis.sh` checks it
+  and copies it into `operator.json`. It is pinned at genesis (a serving
+  Store refuses a changed config), so it ships with the next re-genesis:
+  `jq --slurpfile ps provider-services.json '.providerServices = $ps[0]'`. Default prices: 1 credit is about 1 micro-dollar on the pool
+  route; `meta-llama/llama-3.1-8b-instruct` at 20000 / 50000 micro-credits per
+  million input / output tokens (OpenRouter's $0.02 / $0.05 per million) plus
+  100 per call; the user (BYOK) route pays 5 per call.
+- **The worker is upstream Hermes Agent.** `build-runtime-root SOURCE OUT
+  CANDIDATE` stages it from a hermes-agent checkout at 6d8a8beb with
+  `hermes-agent/mini-tool-catalogue.patch` (the restricted resident admits a
+  session only when Hermes reports exactly the Mini room tools) and the
+  candidate's grain-runtime and grain-provider-bridge, checked against its
+  manifest; `OUT/pins.json` records every digest. It needs python3 (3.11–3.13),
+  uv and network on the build host. For a later candidate,
+  `build-runtime-root --rebind OUT CANDIDATE` swaps the two binaries and
+  rewrites the pins (no rebuild). `HERMES_ROOT` names the root at the
+  `runtime` step, which refuses a root pinned to another candidate's
+  grain-runtime.
+- **dregg-infra's controller-entry.py** still calls `grain-runtime
+  controller-write-scopes`, which no longer exists (the source parses the
+  config at `controller-launch`); its registration must check the broker pin
+  directly instead (the patch the L4 lane handed the infra lane).
+
+What the steps write, and where each controller field comes from:
+
+- `subjects`: four enrolled subjects through the sponsor workspace
+  (`NODE/sponsor`): `hermes` (its room key, also the tool worker: room tools
+  act in the tool task's own workspace), `hhost` (parent owner), `hprov`
+  (provider worker), and `founder`, funded `FOUNDER_FUNDING` to own the room
+  and summon. Keys stay in `/var/lib/mini/hermes/homes`, private to `SVC`.
+- `create` writes the `mini-grain-create-v1` spec and runs `grain-runtime
+  create`, which births the parent (9870001), tool task (9870002) and provider
+  purse (9870003) and writes `/var/lib/mini/hermes/g/controller.json`:
+  - `mini`, `host`: the archived candidate by real path.
+  - `hostConfig`/`hostSocket`: `NODE/deployment/pinned-config.json` and the
+    private operator socket `NODE/operator/mini.sock` (the registration
+    requires exactly these).
+  - `sponsor`, `template`: `/etc/mini/genesis-params.json` (sponsor subject,
+    spend capability, factory observation) and `NODE/operator.json`.
+  - `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices.
+  - `worker`: the materialized `bwrap` launcher (sibling `launch-gate`), the
+    runtime root, `network: none` (the worker reaches the model only through
+    `grain-provider-bridge` and the controller's Unix gateway).
+  - `provider.gateway`: `/etc/mini/providers.json` (root-owned) pinned to its
+    pool row for the model, `/etc/mini/keys-client.json`, the model, token
+    caps 16000 / 1024, and `reserve` = the pool fee plus the metered charge at
+    those caps under the pinned tariff (computed from the config).
+  - `room`: the room's workspace and home are direct children of `stateDir`
+    (the registration requires it); `restrictTools` is true by default.
+- `controller` writes the summoned budget account into `controller.json`
+  (it is known only after the summon) and registers it; `resident` writes
+  `resident.json` (`maxPrompts: null`, one pass a minute) with the inbox the
+  dispatch delivered, and re-registers with both units stopped.
+
+One registration serves one room: summoning Hermes into another room needs its
+own task and registration.
+
+## The subscriber tier: Hermes on GLM through the Z.AI coding plan
+
+A flat 4000 DREGG a month buys membership of the `subscribers` room, whose
+resident Hermes answers on GLM through ember's Z.AI coding-plan key. It is
+existing machinery: a concierge room, a second house resident, a pool row.
+
+**The route.** The coding plan serves OpenAI Chat Completions at
+`https://api.z.ai/api/coding/paas/v4/chat/completions` (measured 2026-10-27:
+200, streaming, usage on the finishing chunk), so the row is the ordinary
+`openai-compatible` shape and needs no adapter. The pay-as-you-go
+`/api/paas/v4` is not funded (`1113`), and a 429 on the plan endpoints means a
+wrong endpoint. The Host quotes its stream (it omits `finish_reason` on delta
+chunks; `Host/ProviderUsageAudit.lean` holds the measured stream). Rows in
+`/etc/mini/providers.json`:
+
+```json
+{"name":"zai-glm","kind":"openai-compatible","credential":"pool",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"],
+ "caps":{"perCall":"4096","perDay":"140","ceilingMicroUsd":"70000","callMicroUsd":"500",
+         "memberDayMicroUsd":"10000","memberTotalMicroUsd":"35000"}},
+{"name":"zai-byok","kind":"openai-compatible","credential":"user",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"]}
+```
+
+The key is sealed like the OpenRouter pool key (`mini-keys pool --action set
+--provider zai-glm --secret - < zai-key`, as root, never in a file the repo
+sees). Egress: the broker account to `api.z.ai:443` only.
+
+**Caps, from the plan's quota.** The plan reports (`GET
+/api/monitor/usage/quota/limit`) 28000 credits per 5 hours and 140000 per week
+(level max). Measured: ~50 credits for a 75-token call, ~128 for a 4.4K-token
+call, so a Hermes model call (≤16000 in, ≤4096 out) is at most ~500. On this
+row the broker's spend units are those credits: `callMicroUsd` 500 (worst
+case), `ceilingMicroUsd` 70000 (half the week, the other half stays ember's;
+`mini-keys pool --action spend-reset --provider zai-glm` at each weekly
+reset), `perDay` 140 calls (70000 / 500, per runner: the GLM resident), and
+per subscriber 10000 a day (20 calls, about five asks) and 35000 in all (half
+the ceiling) until the weekly reset. A subscriber past either gets
+`member-day-ceiling` / `member-total-ceiling` by name. The plan's three
+one-time resets (valid to 2026-12-22) raise the week when used; they change
+the ceiling, not the code.
+
+**Who pays what.** The subscriber pays 4000 DREGG to the room's till (`pay
+subscribers week`); the concierge delegates `member` under the room with
+`notAfter = height + 43200` (30 days at one tick a minute; renewing extends),
+refunds anything it does not honour, and the kernel ends the window. The GLM
+resident's purse pays 1 credit a call on either route (the tariff in
+`demo/provider-services.json`, purse 9871003: no token metering, because the
+plan is flat); the room's `hermes/turn` and the summon budget are the
+founder's, funded from the till. ember's plan pays Z.AI. A member's own Z.AI
+plan key goes on `zai-byok` exactly as any friend key (`mini key --action
+set`, `--action grant` to their own grain's runner).
+
+**Install** (after the `hermes` resident; Store genesis carries both purse
+tariffs):
+
+    INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+      HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+
+`concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
+
+**Subscribe** (the web form's verbs): `tariff subscribers` (price and period),
+`credit` (balance), `pay subscribers week`, `room status subscribers` (the
+window and its end).
+
+**Open:** a concierge window is kernel membership, but asking the room's
+Hermes is a chat line, which needs a roster stream only the founder's `chat
+invite` creates. Until that is closed, the founder invites each new member.
+Whether the coding plan's terms permit serving others' agents is for the join
+page to state.

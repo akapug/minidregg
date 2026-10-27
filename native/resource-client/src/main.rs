@@ -52,6 +52,7 @@ mod meter;
 #[cfg(unix)]
 mod market;
 mod checkpoint;
+mod world_export;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
@@ -420,7 +421,7 @@ pub(crate) fn outcome_text(value: Option<&Value>) -> String {
     // A controller's nested `Reject` is printed by Lean's `repr` across lines;
     // line breaks and tabs become single spaces. Any other control character
     // keeps the text out of the terminal: it is shown as hex.
-    match decode_hex(hex)
+    match mini_sdk::hex::decode(hex).map_err(|e| e.0)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
     {
@@ -1579,8 +1580,8 @@ fn validate_public_inspection(kind: &str, value: &Value, input: Option<&[u8]>) -
                 .get("canonical")
                 .and_then(Value::as_str)
                 .ok_or("schema inspection lacks canonical bytes")?;
-            let decoded = decode_hex(canonical)?;
-            if hex(&decoded) != canonical || Some(decoded.as_slice()) != input {
+            let decoded = mini_sdk::hex::decode(canonical).map_err(|e| e.0)?;
+            if Some(decoded.as_slice()) != input {
                 return Err("schema inspection canonical bytes differ from exact input".into());
             }
             Ok(())
@@ -1663,10 +1664,10 @@ fn inspect_public(
     result
 }
 
-/// The crate's hex codec is mini_sdk::hex: lowercase on encode; this decoder accepts either case
-/// (what a person or another tool may type), ASCII digits only, even length, never a panic on
-/// non-ASCII input and never `from_str_radix`'s leading `+`. Where the spelling is part of the
-/// contract, callers check `mini_sdk::hex::is_canonical*` or decode strictly with `mini_sdk::hex::decode`.
+/// The crate's hex codec for text a person or another tool may type: lowercase on encode; this
+/// decoder accepts either case, ASCII digits only, even length, never a panic on non-ASCII input
+/// and never `from_str_radix`'s leading `+`. Values the Host produced or this client retained
+/// are contract spellings: their sites decode strictly with `mini_sdk::hex::decode`.
 pub(crate) use mini_sdk::hex::encode as hex;
 pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode_any_case(value).map_err(|error| error.0)
@@ -1683,7 +1684,7 @@ fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
             slot.get("header")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "host plan slot has no header string".to_owned())
-                .and_then(decode_hex)
+                .and_then(|header| mini_sdk::hex::decode(header).map_err(|e| e.0))
         })
         .collect()
 }
@@ -2287,7 +2288,7 @@ fn batch_inspect(host: &Path, config: &Path, directory: &Path, stem: &str,
         &directory.join(format!("{stem}.json")))?;
     let rows = value.as_array().ok_or("Host batch is not a collection")?;
     if rows.len() != count { return Err("Host batch count differs from signed intents".into()); }
-    rows.iter().map(|row| decode_hex(row.as_str().ok_or("Host batch item is not hex")?))
+    rows.iter().map(|row| mini_sdk::hex::decode(row.as_str().ok_or("Host batch item is not hex")?).map_err(|e| e.0))
         .collect()
 }
 
@@ -2672,6 +2673,7 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
+        "export-world" => world_export::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
