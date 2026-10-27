@@ -320,9 +320,17 @@ row rules-admitted "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)
 TALE="tale$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
 a=$(alt_of "$tour" "story new"); set -- $(fields_of "$tour" "story new"); F_NAME=${1:-a2}; F_FROM=${2:-a3}
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_FROM=tale")
-row story-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} fields=$F_NAME,$F_FROM $(headline "$page") $(pre_of <<<"$page" | head -2 | tr '\n' ' ' | cut -c1-100)"
+# The tale's template is nineteen transitions (minutes on a used world): past the body's 100 s the
+# page answers undecided ("still deciding") and the shell runs on to its decision; the seal is then
+# retried, as a member would, until the story exists (at most six minutes).
+ok=0; grep -q 'outcome admitted' <<<"$page" && ok=1; grep -q 'still deciding' <<<"$page" && ok=1
+row story-new "$ok" "$(st) alt=${a:-?} fields=$F_NAME,$F_FROM $(headline "$page") $(pre_of <<<"$page" | head -2 | tr '\n' ' ' | cut -c1-100)"
 a=$(alt_of "$tour" "story seal"); set -- $(fields_of "$tour" "story seal"); F_NAME=${1:-a2}
-page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE")
+for i in $(seq 1 24); do
+  page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE")
+  grep -q 'has no story' <<<"$page" || break
+  sleep 15
+done
 row story-seal "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 a=$(alt_of "$tour" "story invite"); set -- $(fields_of "$tour" "story invite"); F_NAME=${1:-a2}; F_SUBJ=${2:-a3}
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_SUBJ=$SUBJECT" --data-urlencode "submit=on")
