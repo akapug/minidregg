@@ -266,7 +266,9 @@ check tamper-others "alice's untouched entry still prints" grep -qE '^#1 h[0-9]+
 check tamper-no-forgery "no altered text is printed" sh -c "! grep -q 'ii alice' '$OUT'"
 
 # ------------------------------------------------ the Discord bridge, both ways
-DD=${JCHAT_DISCORD_DIR:-}
+# The bridge binaries: JCHAT_DISCORD_DIR, else the directory the candidate's `mini` is in (the set's bin,
+# once `fake-discord` ships beside `mini-discord-mirror` there). Without both, the mirror rows are red by name.
+DD=${JCHAT_DISCORD_DIR:-$(dirname "$MINI")}
 if [ -x "$DD/mini-discord-mirror" ] && [ -x "$DD/fake-discord" ]; then
   PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
   mkdir -p -m 700 "$SD/discord" "$SD/spool"
