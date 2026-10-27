@@ -683,6 +683,7 @@ usage:
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true] [--operator-socket OPERATOR-SOCKET]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
+  mini join --memo-version v2 --solana ... --key BOX-HELD.key --ssh-public LOGIN.pub [--ssh-signature SSHSIG]   (detached: the first run prints the statement to sign, the second takes the signature)
   mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub]
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
