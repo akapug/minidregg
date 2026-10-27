@@ -140,7 +140,7 @@ Missing ticks stay missing. The room is **output only**: fleet agents never read
 | A10 | **Receipts a stranger can verify**: op 151's inclusion opening on every receipt (SYNTHESIS E.10, plan C7), shown on `/receipts/ID`, with a one-line offline check against the published world root | the receipt stops being a claim the box makes about itself | M (Lean) + S | L1 after (a)–(c) |
 | A3 | **The operations room** (§2) with its allowlisted schema and honesty label | door 13; the numbers published in-world | S–M | infra, rehearsal #3 |
 | A6 | **The oracle grain** | door 8 | M–L | codex session; misses a redeploy cycle, not the date |
-| A9 | **The second node** (fn exchange to nano's or pug's node) | the re-genesis story | M | L8 after opening |
+| A9 | **The second node** (fn exchange to nano's or pug's node; The fn transport is not on this demo; the exchange row runs in the nightly against a loopback peer when its image exists.) | the re-genesis story | M | L8 after opening |
 
 A6 and A9 are off the tour's critical path (the council, three of three); the surfaces stay, as the
 opening contract says, and ride the redeploy cycle they are green in.

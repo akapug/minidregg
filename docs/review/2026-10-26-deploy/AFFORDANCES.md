@@ -91,7 +91,7 @@ The help text leaves out 12 live commands, including `activity` and `seat`, whic
 | generic Host calls | `author`, `submit`, `query`, `retry`, `inspect`, `profile`, `describe`, `current-*-intent` | agent, test | journeyed indirectly (J0-J8 go through them) | — | Speak any intent kind with exact-retry custody. |
 | evidence and audit | `store audit`, `audit`, `export-evidence`, `verify-evidence` | auditor | `journey/JAUDIT` required; export/verify have no live caller (resource-client review §Exec 2) | `journey.sh:1073` | Re-derive the whole Store from genesis and re-admit every ingress. |
 | fn transport | `consumer-*`, `reply-consumer-*`, `origin-*`, `fn-namespace-*`, `fn-frontier-*`, `meter`, `continuity` | operator gateway | authored: evidence dirs from 09-26/27 only, no row, no live caller | `docs/evidence/2026-09-27-fn-*` | Gateway loops for Mini over NNTP. |
-| selected exchange | `selected-exchange --phase …`, `selected-release-*`, `selected-source-*` | operator, member | `exchange` required, for 4 phases | §1.7 | A second Store receives one owner-selected content version through fn. |
+| selected exchange | `selected-exchange --phase …`, `selected-release-*`, `selected-source-*` | operator, member | `exchange` required, for 4 phases | §1.7 | A second Store receives one owner-selected content version through fn. The fn transport is not on this demo; the exchange row runs in the nightly against a loopback peer when its image exists. |
 | agent reserves | `agent-reserve-*`, `agent-lifetime-*`, `agent-payer-sign` | operator, agent | authored: evidence dirs 09-27, no row | — | Operator-approved purses for agent grains. |
 | channel and relay | `relay*`, `channel`, `traffic`, `mix`, `mix-live` | relay operator | exists (KCH hooks), not required | `jchan-*.sh` | Constant-rate cover-traffic chat outside Host admission. |
 | SPK share issue | `share-issue-*`, `grain-share-issue-*`, `historical-call-receipt-lookup` | operator | `m6grain` known-red | `required-rows` | Issue sharing tickets for grains. |
@@ -216,6 +216,8 @@ See the fleet row of §1.1. More detail:
 not deployed.
 
 ### 1.7 fn and a second Mini node
+
+The fn transport is not on this demo; the exchange row runs in the nightly against a loopback peer when its image exists. (ember's ruling, 2026-10-27; every network leg below is the nightly's loopback, not the demo's.)
 
 Required row `exchange` (`journey-rows:782-811`). Evidence:
 `docs/evidence/2026-10-08-selected-exchange-local-fn/README.md` and
