@@ -8259,8 +8259,9 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "pin-enrollment-plan-height", [planPath, heightText, output] =>
           -- An enrollment plan (op 86) carries no height of its own: the signer pins its
-          -- sponsor deadline to the height of the observation it was planned at, the same
-          -- height local consent re-derives the pinned plan from (`NativeSpecializedConsent`).
+          -- sponsor deadline to the one a plan authored at its observation's height carries
+          -- (`NativePlanHeight.pinHeaderAt`: that height plus the validity window), the pin
+          -- local consent applies to its own re-derivation (`NativeSpecializedConsent`).
           let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode (← readBytes planPath)
             | throw (RequestRefusal.malformed "noncanonical enrollment signing plan")
           let height ← IO.ofExcept (exactDecimal "pin height" heightText)
