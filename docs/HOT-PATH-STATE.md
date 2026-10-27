@@ -18,10 +18,18 @@ own cut when the closure is green and the proofs are in.
 | 107f040d | option A code: codec `Body.system`/`semantics`, frame v4, epoch `checkpoint/v5`, `.foreignSemantics`; `worldOfCheckpoint`, `trackFrom` in `loadChained`; `Loaded.system` in every sealer; light session `Start.world`/`Opening.world` advanced per suffix and append; `sealHead` + Host verb `checkpoint` + seal at a session's clean end; spec `Body4 := Body`, `Body.world`. Per-file green on the Mac up to DurableServed; `DurableStoreAudit`, `Host.Main` unchecked until a closure. |
 | 77b8f896, af8dd3a1, 5e554051 | `Compiler/DurableFastForwardProofs.lean` (standard axioms): `headState_snapshot`, `resume_honest`, `foldRecords_append`, `worldAt_fastForward`, `openSealed_foreign_semantics`. |
 
+## Measured: the compaction (dregg-build, 2026-10-27 20:11Z, load 15-19, the 483-record snapshot)
+
+Paired cold opens (`HOST CONFIG describe`), alternating: candidate 6236826f Host **189.4 s, 193.7 s**; the same plus the
+compaction (8f66d6cc, built on dregg-ref) **69.1 s, 64.1 s**: 2.9x, `describe` output byte-identical. Sampled (121
+samples, `/build/lanes/hpc-laps/compact-n483/profile.txt`): still 98% in `trackOf` -> `foldRecords` (the genesis fold):
+`DFinsupp.update` 62% (chains between compactions), `TurnOfIntent.ofCells` 52%, `World.admit` 40% (`absentCheck`/
+`retired` 31%, `pinCheck` 30%, `cellRoot` -> `StoreCodec.encode` 29%). The fold is the whole remaining cost: v4 (no
+genesis fold at open) is the fix; the `TurnOfIntent` written-keys item would shrink each suffix step.
+
 ## Running (nothing of mine waits on them)
 
-- dregg-ref: compaction candidate build 8f66d6cc, PID file `/build/lanes/hot-path-compact.pid` (no lock; predates it), logs
-  `/build/lanes/hot-path-compact-build.log`, `out/logs/host-build.log`. Then the v4 closure
+- dregg-ref: compaction build 8f66d6cc DONE (rc 0, 56 min, peak 21.5 G; binaries `/build/lanes/hot-path-compact/out/bin/`). The v4 closure
   `/build/lanes/hot-path-v4-build.sh e4e22cb0` (PID file `/build/lanes/hot-path-v4.pid`, log `hot-path-v4-build.log`; it
   waits for the compaction PID to exit, then `closure-lock swarm-build` the candidate builder; prints linked-file count).
 - dregg-build: BEFORE workload, PID file `/build/lanes/hot-path-codec-perf-before.pid`, output `/build/lanes/hot-path-codec-perf/`.
@@ -38,9 +46,7 @@ own cut when the closure is green and the proofs are in.
    chain ∧ suffix tags from the chain at the checkpoint height (split of `firstBadTag`).
 2. Instantiate `Spec` with the real code (`stateHead` = `State.ofSnapshot`, `stateWorld` = the track's World): the pieces
    proved so far give `exact` (`headState_snapshot`, `resume_honest`, `worldAt_fastForward`) and half of `macRefusals`.
-3. When the compaction build lands: copy its `out/bin/minidregg-host` to dregg-build and profile-open the 483-record
-   snapshot (`/build/lanes/hpc-laps/cand-n1/snap`) against the candidate's own Host (`hot-path-codec-profile-open.sh`).
-   When the BEFORE run ends: its reopen row at ~1.7k.
+3. When the BEFORE run ends: its reopen row at ~1.7k (`/build/lanes/hot-path-codec-perf/`).
 4. v4 measurement on the cut's candidate: a world born under it (~500, ~1.7k records), cold open before/after; the
    `checkpoint` verb then an open (zero fast-forward).
 5. Option B statement-first (journal read at use; ~50 consumers); the `TurnOfIntent` written-keys statement.
