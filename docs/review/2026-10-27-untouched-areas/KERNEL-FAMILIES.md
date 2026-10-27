@@ -31,3 +31,6 @@ Result: **no file qualifies for deletion.** Every unreached file either (a) stat
 | PrivateTurn | 287 | Assurance/SelvageV0Manifest | none | TWIN of `Kernel.Turn`'s `Hyperedge` at `Pub × Priv` per `KERNEL-TWIN-AUDIT.md` lines 68/542; deletable only after SelvageV0Manifest (research) moves in C2. Hold. |
 
 Seams reported, not acted on: (1) `roomkey.rs` wrap-atom id duplicates Lean (PrivateRoomKeys). (2) A merge/publish verb is the single missing wire for the whole Hyperdocument chain. (3) DomainEpochExport's relay entry points have no caller.
+
+Parked rescue (ruled 2026-10-27, DreggNet is on the post-demo plan): `CanonicalEscrowMarket`, `ProviderExecutionLease`, `Assurance/DreggNetProviderConsumer`, `HyperdocumentAgentRuntimeScheduler` and `ReactiveOutboxDelivery` stay as one cluster.
+The one wiring step: a Host op that opens a `ProviderExecutionLease` through `AuthorizedResourceCharge` from the `ProviderRoute` metering row; it pulls three joints into the Host closure, which grows past 776.
