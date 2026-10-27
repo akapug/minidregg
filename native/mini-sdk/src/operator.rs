@@ -616,10 +616,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ---- the ssh route, against the `ssh` stand-in (`frame::fake::SSH_STANDIN`) ----
+    // ---- the ssh route, against the `ssh` stand-in (`local::fake::SSH_STANDIN`) ----
 
     fn standin(dest: &str) -> (Operator, PathBuf) {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let dir = std::env::temp_dir().join(format!("mini-sdk-ssh-cfg-{}-{dest}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("config.json"), b"{}").unwrap();
@@ -728,7 +728,7 @@ mod tests {
     }
 
     fn standin_ssh(dest: &str, remote_command: Option<&str>) -> Ssh {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let mut ssh = Ssh::new(dest).unwrap();
         ssh.command = vec![sh.into(), script.into()];
         ssh.connect_timeout = Duration::from_secs(2);

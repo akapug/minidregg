@@ -97,6 +97,62 @@ pub fn create_dir(path: &Path) -> Result<()> {
     check_dir(path)
 }
 
+/// The uid of a connected Unix socket's peer, from the kernel (never from the peer's words).
+#[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
+pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Result<u32> {
+    use std::os::unix::io::AsRawFd;
+    let (mut uid, mut gid) = (0, 0);
+    if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
+        return Err(Error(format!("operator peer credential: {}", std::io::Error::last_os_error())));
+    }
+    Ok(uid)
+}
+
+/// The uid of a connected Unix socket's peer, from the kernel (never from the peer's words).
+#[cfg(target_os = "linux")]
+pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Result<u32> {
+    use std::os::unix::io::AsRawFd;
+    let mut credential = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let status = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED,
+            (&mut credential as *mut libc::ucred).cast(), &mut length)
+    };
+    if status != 0 || length as usize != std::mem::size_of::<libc::ucred>() {
+        return Err(Error(format!("operator peer credential: {}", std::io::Error::last_os_error())));
+    }
+    Ok(credential.uid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")))]
+pub fn peer_uid(_stream: &std::os::unix::net::UnixStream) -> Result<u32> {
+    Err("operator peer credentials are unavailable on this platform".into())
+}
+
+/// Remove a socket file no service listens on any more, before binding it again. Only an owned
+/// socket that refuses connections is removed, and only while it is still the same file.
+pub fn clear_stale_socket(path: &Path) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(Error(format!("cannot inspect socket {}: {error}", path.display()))),
+    };
+    if !metadata.file_type().is_socket() || !owned(&metadata) {
+        return Err("socket path is not an owned Unix socket".into());
+    }
+    match std::os::unix::net::UnixStream::connect(path) {
+        Ok(_) => Err("another service still listens on socket".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            let current = fs::symlink_metadata(path).map_err(|error| Error(format!("cannot recheck stale socket: {error}")))?;
+            if !current.file_type().is_socket() || (current.dev(), current.ino()) != (metadata.dev(), metadata.ino()) {
+                return Err("socket path changed during stale recovery".into());
+            }
+            fs::remove_file(path).map_err(|error| Error(format!("cannot remove stale socket: {error}")))
+        }
+        Err(error) => Err(Error(format!("cannot prove socket stale: {error}"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
