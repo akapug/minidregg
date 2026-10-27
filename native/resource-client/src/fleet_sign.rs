@@ -489,7 +489,10 @@ fn pending_operation(profile: &Profile) -> Result<Option<(String, Vec<PathBuf>)>
 /// Resolve an unfinished operation's attempts. Every attempt but the last was superseded
 /// (decided, nothing moved: `fleet::turn` journals a new attempt only after the previous one
 /// was superseded); the last one is resubmitted exactly. Returns its confirmed outcome, or
-/// None when it was never admitted (refused now, or it never reached the Host).
+/// None when it was never admitted: superseded, or the exact resubmit is DECODED as `refused`
+/// (the fleet receiver is replay-first, `Kernel/FleetTurnReceiver.lean`, so an admitted call
+/// answers `replayed`). Any other answer (`uncertain`, `unavailable`, `contention`, `absent`)
+/// is undecided: it is an error that keeps the record, so no second commit can follow it.
 fn resolve(agent: &fleet::Agent, attempts: &[PathBuf]) -> Result<Option<(PathBuf, Value)>> {
     let Some((last, earlier)) = attempts.split_last() else {
         return Ok(None);
@@ -507,8 +510,23 @@ fn resolve(agent: &fleet::Agent, attempts: &[PathBuf]) -> Result<Option<(PathBuf
     if last.join("superseded.json").exists() {
         return Ok(None);
     }
-    let outcome = fleet::resubmit(agent, last)?;
-    Ok(fleet::confirmed(&outcome).then(|| (last.clone(), outcome)))
+    resubmitted(last, fleet::resubmit(agent, last)?)
+}
+
+/// The exact resubmit's decoded `outcome` for the operation's `last` attempt (see `resolve`).
+fn resubmitted(last: &Path, outcome: Value) -> Result<Option<(PathBuf, Value)>> {
+    if fleet::confirmed(&outcome) {
+        return Ok(Some((last.to_path_buf(), outcome)));
+    }
+    if outcome.get("type").and_then(Value::as_str) == Some("refused") {
+        return Ok(None);
+    }
+    Err(format!(
+        "undecided: the earlier operation's exact call answered {}; it may have been admitted, so nothing new is \
+         committed and its record is kept: resolve it with `mini fleet-sign retry --attempt {}`",
+        crate::outcome_type(Some(&outcome)),
+        last.display()
+    ))
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -943,5 +961,20 @@ mod tests {
         assert!(transfer(&flags).unwrap_err().contains("Bread cell id"));
         flags.to = Some("007".into());
         assert!(transfer(&flags).unwrap_err().contains("canonical decimal"));
+    }
+
+    /// D F-3: only a confirmed or a decoded refused resubmit resolves the unfinished operation;
+    /// every undecided answer keeps its record and names the exact retry.
+    #[test]
+    fn an_undecided_resubmit_is_never_read_as_never_admitted() {
+        let last = Path::new("/w/attempts/a");
+        let confirmed = json!({"type":"confirmed","confirmation":"replayed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+        assert_eq!(resubmitted(last, confirmed.clone()).unwrap(), Some((last.to_path_buf(), confirmed)));
+        assert_eq!(resubmitted(last, json!({"type":"refused","reason":"stale-root"})).unwrap(), None);
+        for kind in ["uncertain", "unavailable", "contention", "absent"] {
+            let error = resubmitted(last, json!({"type": kind})).unwrap_err();
+            assert!(error.starts_with("undecided:") && error.contains(kind) && error.contains("fleet-sign retry --attempt /w/attempts/a"), "{error}");
+        }
+        assert!(resubmitted(last, json!({})).unwrap_err().contains("undecoded"));
     }
 }
