@@ -66,14 +66,28 @@ init_ws() { # NAME SUBJECT KEY CONTEXT  (the workroom's records commit to no nex
 }
 init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"
 init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller workspace (subject 7, the parent task's owner) over the workroom's controller key" "$([ -f "$out/ws-controller/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-controller.err" 2>/dev/null | cut -c1-120)"
-init_ws member 9 "$WR/member.key" "$(context 9 57 43)"; row "member workspace (subject 9) over the workroom's member key" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
+# The member is funded the way the door funds one (dregg-infra mini-reenroll): the sponsor (the
+# factory's controller, 7) provisions a funded account for the holder through the factory and
+# hands it the birth context; the member's own account pays for its app births.
+MEMBER_FUNDING=${MEMBER_FUNDING:-1000}
+gsrc=$RUN/store/base/workroom/deployment/genesis-source.json
+mini workspace --action import --dir "$out/ws-controller" --name factory --kind object --target "$(jq -er .factoryId "$gsrc")" \
+  --observe-capability 54 --control-capability "$(jq -er .factoryControllerCapability "$gsrc")" >"$out/import-factory.out" 2>&1
+printf '%s\n' '{"type":"all","predicates":[]}' >"$out/permit-all.json"
+mini workspace --action provision --dir "$out/ws-controller" --name member9 --holder 9 --funding "$MEMBER_FUNDING" \
+  --account-predicate "$out/permit-all.json" --factory-ref factory >"$out/provision.out" 2>"$out/provision.err"
+MEMBER_CONTEXT=$out/ws-controller/provisions/member9/birth-context.json
+row "the sponsor provisions the member a funded account ($MEMBER_FUNDING), as the door does" "$([ -s "$MEMBER_CONTEXT" ] && echo 1 || echo 0)" "$(jq -r '.account.target // empty' "$out/provision.out" 2>/dev/null) $(tail -1 "$out/provision.err" | cut -c1-140)"
+init_ws member 9 "$WR/member.key" "$MEMBER_CONTEXT"; row "member workspace (subject 9) over the workroom's member key, from the provisioned birth context" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
 WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-member
 
 # ---- the factory admits the member's grain-backed birth, as the demo's genesis does -------------
-# The workroom pins grain-backed births to its worker (subject 8); the candidate genesis pins
-# factoryPredicate `all []` (every subject). The controller (7, whom the law admits for every verb)
-# installs the next version with only that worker pin dropped: any subject may read or birth in
-# grain-backed mode. A signed policy read, then install-source under the read's exact root.
+# The workroom admits births only from its controller (7) and grain-backed ones from its worker
+# (8); the candidate genesis pins factoryPredicate `all []`, so on the demo every member's births
+# pass the factory (the app birth is grain-backed, the request cell an ordinary declared birth).
+# The controller installs the next version with that clause replaced by the demo's own base
+# `all []`, the ticker/observer/pay-claim wrapper kept. A signed policy read, then install-source
+# under the read's exact root.
 widen_factory() {
   local d=$out/factory-law key n1 n2 n3 gs=$RUN/store/base/workroom/deployment/genesis-source.json fsub fcap
   mkdir -m 700 -p "$d"; key=$(jq -r .key "$WSC/workspace.json")
@@ -87,22 +101,24 @@ widen_factory() {
   jq -n --slurpfile p "$d/query/view.json" --slurpfile c "$d/query/challenge.json" --arg n "$n2" --arg dn "$n3" --arg fcap "$fcap" '
     def eq($s;$v): {slot:$s,type:"eq",value:$v};
     def pinned: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/subject";"8"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"all"}],type:"any"};
-    def widened: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"any"};
+    def grainonly: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"any"};
+    def demo: {predicates:[],type:"all"};
     def count($x): [.. | select(. == $x)] | length;
     $p[0] as $p | $c[0] as $c |
-    if ($p.predicate | count(widened)) == 1 and ($p.predicate | count(pinned)) == 0 then {already:true}
-    elif ($p.predicate | count(pinned)) != 1 then error("factoryLawUnrecognized: the worker-pinned birth clause is not present exactly once")
+    ($p.predicate | count(pinned) + count(grainonly)) as $old |
+    if $old == 0 and ($p.predicate | [.. | objects | select(.slot? == "request/subject" and .value? == "8")] | length) == 0 then {already:true}
+    elif $old != 1 then error("factoryLawUnrecognized: the workroom birth clause is not present exactly once")
     else {subject:"7",nonce:$n,purpose:{type:"prepare",draft:{type:"install-source",subject:"7",control:$fcap,
       declaration:{expectedPreRoot:$c.authorityRoot,expected:{version:$p.version,address:$p.address},nonce:$dn,
         source:{policyId:$p.policyId,version:(($p.version|tonumber)+1|tostring),domain:$p.domain,semantics:$p.semantics,
-          previous:$p.address,predicate:($p.predicate | walk(if . == pinned then widened else . end))}}}},
+          previous:$p.address,predicate:($p.predicate | walk(if . == pinned or . == grainonly then demo else . end))}}}},
       grants:[{kind:"object",target:"10",capability:"54"}]} end' >"$d/intent.json" 2>"$d/intent.err" || return 1
   jq -e '.already == true' "$d/intent.json" >/dev/null && { echo already; return 0; }
   mini submit --host "$HOST" --config "$CONFIG" --intent "$d/intent.json" --key "$key" --dir "$d/submit" >"$d/submit.out" 2>"$d/submit.err" || return 1
   echo "version $(jq -r .purpose.draft.declaration.source.version "$d/intent.json")"
 }
 fl=$(widen_factory) && ok=1 || ok=0
-row "the controller widens the scratch factory to the demo's member births (grain-backed, any subject)" $ok "${fl:-$(tail -1 "$out/factory-law/"*.err 2>/dev/null | cut -c1-160)}"
+row "the controller sets the scratch factory's birth clause to the demo genesis base (all [])" $ok "${fl:-$(tail -1 "$out/factory-law/"*.err 2>/dev/null | cut -c1-160)}"
 
 # ---- the metered tasks' owners delegate observe+mutate to the member -------------------------------
 # The workroom's tool (7902) is owned by subject 8 (capability 81), its parent (7901) by the
@@ -153,9 +169,19 @@ install_app() { # APP-ID
   printf '%s\n' "$outcome" >"$out/install-$app.json"
   grep -q '"state": "running"' <<<"$outcome"
 }
+# The member's own account pays: its balance before the first install and after each one is the
+# measured cost of an install (the budget figure INSTALL.md §4 states).
+balance() { mini credit --action balance --dir "$WS9" 2>/dev/null | jq -r '[.. | objects | select(has("balance")) | .balance][0] // empty' 2>/dev/null; }
+bal_before=$(balance); echo "member balance before installs: ${bal_before:-unreadable}" >>"$out/balances.log"
 for app in "$@"; do
   name=$(jq -r --arg a "$app" '.apps[] | select(.appId == $a or .packageId == $a) | .name' "$FIXTURE" | head -1)
-  if install_app "$app"; then
+  install_app "$app"; installed=$?
+  bal_after=$(balance); echo "after $app: ${bal_after:-unreadable}" >>"$out/balances.log"
+  if [ "$installed" = 0 ] && [ -n "$bal_before" ] && [ -n "$bal_after" ]; then
+    row "the install of $name debited the member's own account" "$([ "$bal_after" -lt "$bal_before" ] && echo 1 || echo 0)" "before=$bal_before after=$bal_after debit=$((bal_before - bal_after))"
+  fi
+  bal_before=$bal_after
+  if [ "$installed" = 0 ]; then
     grain=$(grep -oE '"grain": "a[0-9]+"' "$out/install-$app.json" | head -1 | grep -oE 'a[0-9]+')
     row "install $name as the member: running, grain $grain" 1 "$(jq -r '.receipt.origin' "$out/install-$app.json" 2>/dev/null)"
     # the origin check: one authenticated GET through the route socket with the route's cookie and the grain's Host
