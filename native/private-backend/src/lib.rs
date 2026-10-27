@@ -14,6 +14,7 @@ pub mod acs_store;
 pub mod allocation_receipt;
 pub mod asks;
 pub mod codec;
+pub mod current_recipient;
 pub mod consensus_wire;
 pub mod custody;
 pub mod gather;
