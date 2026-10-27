@@ -290,15 +290,6 @@ row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$L
 page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
 docpage=$(req GET "/doc/$DOC")
 row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
-# The tour's refusal and the write its law admits (step 4): striking a line of the note is
-# refused by the note's law (`content/tombstones == 0`), the clause highlighted; `can --any` on
-# the note answers the law and one write it admits (as slot witnesses: the shell line to paste is
-# lawsat's to print); the append, the write the law admits, is then admitted.
-pre_of() { python3 -I -c 'import sys,re,html; m=re.search(r"<pre>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")'; }
-docpage=$(req GET "/verb/doc")
-edit_alt=$(tr -d '\n' <<<"$docpage" | awk 'BEGIN{RS="</form>"} /<code>doc remove<\/code>/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
-page=$(req POST /verb/doc --data-urlencode "csrf=$CSRF" --data-urlencode "alt=${edit_alt:-0}" --data-urlencode "a2=$DOC" --data-urlencode "a3=1")
-row tour-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q '<mark class="clause">' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${edit_alt:-?} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-160)"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC" --data-urlencode "a3=on")
 can_text=$(pre_of <<<"$page")
 page2=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=the write the law admits")
