@@ -109,7 +109,10 @@ branches plus L3 fence 5aaf1a32, L4 hermes a9e0dd70, L5 door bce88a74, L13 app-m
 web-frontend db7f3171, L1 lean-critical 181e44e6, coordination 179a21c2, m7 c851d8c4; built on `dregg-build`
 (`/build/candidates/45f45d15…`, 21 roles including the web gateway and its root helper; host 1,598 s,
 consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows and the composed scenario
-are running there. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
+are running there. **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
+box `dregg-ref` reproduces all 26 outputs byte for byte (the first reproducible-build verdict across two
+machines this project has had; the earlier hbox reference differed only by Ubuntu's GCC startup objects).
+Cold build on `dregg-ref`: 790 Lean modules in 35.8 min with the weighted RSS table, 53 min total. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
 23 / UNCONFIGURED 4; the new reds are journey drivers still speaking the pre-L2 wire (an L2 successor
 lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already has L12 3bb0a248 and L2's driver successor 2c15e48c. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
 `scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
@@ -152,7 +155,7 @@ application birth (op 30) is a Host question on L1's queue); the M7 reference bu
 spk-host edits when it commits.
 
 **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (L1, on its
-branch); `m6grain` (sudoers path, fixed on hbox); `m7` (reference being built); pending `births`,
+branch); `m6grain` (sudoers path, fixed on hbox); `m7` PASS on the round-2 candidate (reference on `dregg-ref`); pending `births`,
 `HERMES-LIVE`, `jcertify`.
 
 **Owner items**: none outstanding. Optional: three orphaned `mini consent-resident` processes on
