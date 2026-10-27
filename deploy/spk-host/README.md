@@ -16,12 +16,15 @@ the installer never follows them on the host. The raw signed SPK remains beside
 the tree. Package identity is the raw SPK SHA-256 and signing-key-derived app ID,
 not a claim inferred from file names.
 
-Run package parsing only through `spk-ingest HOST_BINARY HOST_SHA256 INBOX_SPK
-APP_UID` after placing a root-owned mode-0600 SPK directly in
-`/var/lib/minidregg/spk/inbox`. It starts a short-lived system unit with a
-2 GiB memory cap (no swap), 120-second runtime cap, 16-task cap, no network, a
-read-only host filesystem except the package store, and a SHA-pinned host
-executable. The host hands the parser a 768 MiB decompressed-output cap
+Run package parsing only as the Store operator (never root) through
+`spk-ingest --root SPK_ROOT [--import-profile PROFILE] HOST_BINARY HOST_SHA256
+INBOX_SPK APP_UID`, after placing an operator-owned mode-0600 SPK directly in
+`SPK_ROOT/inbox/` (`SPK_ROOT` is the canonical per-store `.../<16-hex store>/spk`).
+It starts a short-lived **user** unit with a 2 GiB memory cap (no swap), one
+CPU, a 16-task cap, the profile's runtime and output caps (`standard-v1`: 120 s;
+`operator-appliance-v1`, selected only by the operator broker's config: 1800 s),
+and a SHA-pinned host executable. The unit sets `NoNewPrivileges` and those caps
+only: it is not network- or filesystem-confined. The host hands the parser a 768 MiB decompressed-output cap
 (`materialize::MAX_DECOMPRESSED_PACKAGE_BYTES`) instead of Bread's 256 MiB
 default, which refused 4 of 10 market packages (TT-RSS, Etherpad, Davros,
 Wekan; SPK-APPS 2026-10-01). The parse holds the plain stream and the decoded
