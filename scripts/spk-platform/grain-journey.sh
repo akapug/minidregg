@@ -736,9 +736,12 @@ run_phase() {
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
     a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
-    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;;
+    # j..p: the featured market set (featured-qualify.sh), resource prefixes 61..67.
+    j) P=61 i=10 ;; k) P=62 i=11 ;; l) P=63 i=12 ;; m) P=64 i=13 ;; n) P=65 i=14 ;;
+    o) P=66 i=15 ;; p) P=67 i=16 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  upper=$(printf '%s' "$letter" | tr a-p A-P)
   eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
   eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
