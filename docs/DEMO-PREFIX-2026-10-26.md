@@ -191,15 +191,14 @@ grain operations (L1b), the full economy in Phase 3; R13 workspace gate day one 
 README rewritten whole as lanes land and once more against the shipped candidate; R15 the
 oracle ships through the same grain gate, with its format blocker owned by the oracle lane.
 
-**For ember** (the residue all three reviewers left; answer when convenient, the lanes do not
-block on it):
-
-1. **Money**: the OpenRouter hard spend cap; the sponsor's total funding cap and the
-   per-stranger provisioning amount; week-1 pay-to-enrol on mainnet (one real payment from
-   your wallet to accept it) or devnet-only.
-2. **Lifetime**: the shutdown date the demo advertises and the backup retention period.
-
-Everything else you supply is a provisioning action, listed in Phase 0.3.
+**Answered by ember (2026-10-27)**: the OpenRouter pool key exists at `~/.openrouter-key` with
+a $50 hard cap set at OpenRouter (the broker's pool ceiling is $40, $0.10 worst-case per call;
+BYOK on); the Dragon's Egg bot (application 1507638321877090374) is in guild 1507637841235017768;
+the demo's **shutdown date is 2026-11-11**, written on the join page and in the teardown plan;
+backup retention defaults to 7 days after shutdown. Still open, with the engineering default that
+applies meanwhile: **mainnet vs devnet for week-1 pay-to-enrol** (default: devnet, two providers,
+until ember says mainnet; the sponsor's total cap and per-stranger funding amount are the door's
+configured values, published on the join page).
 
 ## 6. What this file is not
 
