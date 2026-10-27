@@ -48,9 +48,9 @@ fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
 /// role and response nonce. An operator path or stale mode file cannot do so.
 pub(crate) fn require_private_operator(config:&Config)->Result<Value> {
     let socket=config.host_socket.as_deref().ok_or("resident controller requires private native operator socket")?;
-    let result=Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
-        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config)
-        .stdin(Stdio::null()).output().map_err(|e|format!("private operator preflight: {e}"))?;
+    let result=crate::deadline::output(Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
+        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config),crate::deadline::NATIVE_CALL)
+        .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
     if !result.status.success() || result.stdout.len()>65_536 {
         return Err(format!("private operator preflight refused: {}",String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>()));
     }

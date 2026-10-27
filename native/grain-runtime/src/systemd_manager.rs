@@ -356,14 +356,13 @@ fn incarnation(text: &str, pid: u32) -> Result<String> {
 /// unverified PID/InvocationID. The worker monitor binds this exact incarnation.
 pub(crate) fn lifetime_environment(task: &str, target: &mut Command) -> Result<()> {
     let context = current(task)?;
-    let output = command(context.controller, context.uid)
+    let output = crate::deadline::output(command(context.controller, context.uid)
         .args([
             "show",
             "--property=MainPID,ActiveState,InvocationID",
             &unit(task),
-        ])
-        .output()
-        .map_err(|e| format!("controller lifetime observation: {e}"))?;
+        ]), crate::deadline::MANAGER_QUERY)
+        .map_err(|e| crate::deadline::describe("controller lifetime observation", e))?;
     if !output.status.success() || output.stdout.len() > 16384 {
         return Err("controller lifetime observation unavailable".into());
     }
@@ -403,10 +402,9 @@ pub(crate) fn verify_launcher(task: &str, program: &Path) -> Result<()> {
 }
 fn require_launcher_protocol(controller:Manager,worker:Manager,program:&Path)->Result<()> {
     if controller != worker {
-        let output = Command::new(program)
-            .arg("--controller-manager-protocol")
-            .output()
-            .map_err(|e| format!("cross-manager launcher protocol: {e}"))?;
+        let output = crate::deadline::output(Command::new(program)
+            .arg("--controller-manager-protocol"), crate::deadline::MANAGER_QUERY)
+            .map_err(|e| crate::deadline::describe("cross-manager launcher protocol", e))?;
         if !output.status.success() || output.stdout != format!("{PROTOCOL}\n").as_bytes() {
             return Err(
                 "cross-manager worker requires source-owned controller lifetime protocol".into(),

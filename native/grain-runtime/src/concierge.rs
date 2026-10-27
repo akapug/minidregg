@@ -286,10 +286,8 @@ struct Runner<'a> {
 impl Runner<'_> {
     /// Run the pinned client; stdout parsed as the LAST JSON value it printed.
     fn mini(&self, args: &[&str]) -> Result<(Value, String)> {
-        let output = Command::new(&self.config.mini)
-            .args(args)
-            .output()
-            .map_err(|e| format!("{}: {e}", self.config.mini.display()))?;
+        let output = crate::deadline::output(Command::new(&self.config.mini).args(args), crate::deadline::NATIVE_CALL)
+            .map_err(|e| crate::deadline::describe(&self.config.mini.display().to_string(), e))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if !output.status.success() {
