@@ -265,27 +265,60 @@ the tree's root:
 `Effects/Revival/Statements.lean` is not yet imported by `Effects.lean`.  It joins the CI
 closure (law 5) in the commit after it elaborates.
 
-## 8. Continuation
+## 8. Continuation (for a successor; present state, 2026-10-27)
 
-State at the first push:
+**Gates.**  Proofs start once two gates are back.
+- Audit: **CLEARED.**  The auditor (`af7a93e7b8ba729d4`) wrote pass 19 on
+  `lane/audit-platform` (`3fc181cae`) and an addendum (`260fceaed`).  It accepted
+  `3dac92b91`.
+- Elaboration: **PENDING.**  The integrator (`a34bdb948f1cf4796`) runs
+  `swarm-build lake lean Effects/Revival/Statements.lean` in `/build/lanes/integ8/src` on
+  dregg-build after its codec regen (A7d) ends, and sends the errors or a clean result.
+  Do not run anything in that tree while the regen runs.  A warm copy reaches dregg-ref
+  through infra later.  Never run Lean on the Mac, and never start a cold closure.  Fix
+  elaboration errors without changing what a statement means; if a meaning has to change,
+  send it back to the auditor.
 
-* Done: this document; the statements file; the auditor's pass 19 (lane/audit-platform
-  `3fc181cae`): engine, completeness and `ContentComplete` cleared for proof; its two
-  changes applied (`Handler.Sound` gains the converse `select cell = some s → pack s =
-  cell`, agreement now holds on every cell through `Handler.fire`; `HostKeystone` stated).
-  Unchecked: the integrator elaborates it in `/build/lanes/integ8/src` after its regen.
-* Next: send the revision to the auditor; then prove: first the pole witnesses (decidable over
-  `toyLayout`), then `EngineKeystone` and `CompletenessKeystone` (generic), then
-  `ContentAgreement` (unfold `computeTarget`'s content arm, `prepareCell_ok_of_run`,
-  `Patch.run_append`) and `ContentComplete` (per action, by the lowering's write sites);
-  the fixture inhabitant of `ContentAccepted`/`HostAccepted` is owed.
-* Auditor's addendum (accepted at `3dac92b91`), two proof notes:
-  - `HostPremise`'s `pack (select cell) = cell` needs `CellState.materialize
-    contentMaterializer value.logical = value`.  `Materialized` is a one-field structure
-    (`mk :: logical`, `Theory/CellState.lean:47`), so this is structure eta.  Prove it
-    first anyway.
-  - `HostTeeth`'s ghost clause needs an admitted command whose seal is non-empty.  It rests
-    on the same doc-write fixture `HostAccepted` owes.
-* Risk to watch: `contentActionFrame` is a declared table.  If an action writes a field
-  the table omits, `ContentComplete` is false, and the fix is to the table, after
-  checking which addresses the lowering writes (`ContentResource.step`).
+**Branch.**  `lane/effects-revival` in the worktree
+`/Users/ember/dev/minidregg-lanes/effects-revival`.  Main has the statements at
+`f3361d17`.  The tip `8bf02d6b7` is docs only.  `Effects.lean` does NOT import
+`Effects/Revival/Statements.lean`; add that import in the first commit after it
+elaborates (law 5).
+
+**Keystones and their witnesses** (all `def … : Prop` in `Statements.lean`; nothing proved):
+
+| keystone | satisfiable | teeth | premise |
+|---|---|---|---|
+| `EngineKeystone` | `EngineSatisfiable` | `EngineTeeth` (ghost, fail-open, unframed, twin) | `EnginePremise` |
+| `CompletenessKeystone` | `CompletenessSatisfiable` | `CompletenessTeeth` | `CompletenessPremise` |
+| `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | `ContentAccepted` (fixture owed) | `ContentTeeth` (`contentGhost`, `contentNarrowed`) | `ContentAccepted` |
+| `HostKeystone` (known false today, by clause; it gates the migration commit) | `HostAccepted` (fixture owed) | `HostTeeth` | `HostPremise` = `contentHandler.Lawful` |
+
+**Proof order.**
+1. The materialize lemma, `CellState.materialize contentMaterializer value.logical = value`.
+   `Materialized` has the single field `logical`, so this is structure eta.  `HostPremise`
+   needs it.
+2. The toy pole: `EngineSatisfiable`, `EngineTeeth`, `EnginePremise` and the completeness
+   trio.  They are over `toyLayout`.  If DFinsupp equality blocks `decide`, use
+   `DFinsupp.ext` per address.
+3. `EngineKeystone` and `CompletenessKeystone`, generic.  Needed: `toLawful.decode_encode`,
+   the Sound fields, and a lemma that `Substrate.run` preserves locations outside
+   `footprint` when the substrate is `Framed`.  Also prove `(storeSubstrate L).Framed` from
+   `Op.apply`/`Store.set_ne`, and that `(storeSubstrate L).run s ps = some s'` holds iff
+   `Patch.ValidFrom s ps ∧ Patch.run s ps = s'`.
+4. `ContentComplete`, action by action over the write sites of `ContentResource.step`.
+   **Risk:** `contentActionFrame` is a declared table.  If an action writes a field the
+   table omits, fix the table, not the statement's meaning, and tell the auditor.
+5. The doc-write fixture inhabitant (`Fixtures/NativeDocWriteFixture*`).  It needs a
+   non-empty seal and serves `ContentAccepted`, `HostAccepted` and the ghost clauses of
+   `ContentTeeth`/`HostTeeth`.
+6. `ContentAgreement contentSpec`: unfold the content arm of `computeTarget`, then use
+   `ContentResource.prepareCell_ok_of_run`, `Patch.run_append`, and the validate
+   semantics.  For the header clauses, case on the kind (the match in `payloadVerb`).
+7. `HostKeystone` lands with the migration commit, not before (§5 step 1).  Coordinate it
+   with the platform lane (L1).
+
+**Not done, not this lane's:**
+- the migration itself (§5);
+- the census/regen changes (§6); the integrator plans the raw-octet bump separately;
+- the open item in step 1, a JSON face for the Host presentation arms.
