@@ -12,7 +12,7 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf jprivate)
+JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf jprivate rate)
 # growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
 # it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
 # kernel (journey.sh JOURNEY_SET=kernel without G: the steps no public surface needs) is nightly too.
@@ -813,6 +813,29 @@ row_jprivate() {
   awk -F'\t' '$1=="PASS"||$1=="FAIL" {print "jprivate-" $2 "\t" $1 "\t0\t" $3}' "$OUT/jprivate.out" >"$OUT/subrows.tsv"
   tail -1 "$OUT/jprivate.err" >&2
   return $rc
+}
+
+# The per-subject request rate (Kernel/SubjectRate.lean; docs/PD-HOST-RATE-DESIGN.md): a genesis
+# with requestRate {limit 3, window 20 s, the sponsor exempt} through the one template, one
+# `mini serve`; subject 8's first three signed reads (op 5) admitted, the fourth in the window
+# refused `rate-limited` naming the retry seconds under NO_RECORD; subject 9 admitted at that
+# moment; the exempt sponsor never refused past the limit; after the window subject 8 admitted
+# again. One sub-row per check (rate-rows.tsv); the driver names its own red row.
+# world: genesis: requestRate is operator config pinned at this row's own genesis (scenario-genesis.sh), a knob the template world does not carry
+row_rate() {
+  local d=$SRC/native/resource-client/rate-journey.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec rate bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN/r"; rc=$?
+  product_keep "$RUN/r/rate-rows.tsv" "$RUN/r/input-sha256.txt"
+  [ ! -s "$OUT/rate-rows.tsv" ] ||
+    awk -F'\t' 'NR>1 {printf "%s\t%s\t0\t%s\n", $1, $2, $3}' "$OUT/rate-rows.tsv" >"$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/rate-rows.tsv" || return 1
+  # every check of the row table, and exactly the nine it defines
+  awk -F'\t' 'NR>1 {n++; if ($2 != "PASS") bad=1} END {exit !(n==9 && !bad)}' "$OUT/rate-rows.tsv" ||
+    { echo "invalid expected evidence: rate-rows.tsv $(cut -f1,2 "$OUT/rate-rows.tsv" | tr '\n' ';')" >&2; return 1; }
+  tail -1 "$OUT/rate.err" >&2
 }
 
 product_pay_step() {

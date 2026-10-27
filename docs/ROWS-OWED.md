@@ -131,7 +131,7 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 | grain-runtime acceptance (plain, `PROVIDER_BOOTSTRAP=1`, profiled) | grain runtime through the shared genesis | `bash $T/native/grain-runtime/acceptance.sh` x3 | genesis | custody-drivers | not run |
 | jpay6 extractors: bootstrap-native-controller, journeys/byok-native (+`--ssh`), inference-scheduler native-journey and native-two-member | jpay6's genesis seam | each driver with the candidate's binaries | genesis | custody-drivers | not run |
 | fn-e1e2 setup-mini | fn setup through the shared writer | `bash $T/scripts/fn-e1e2/setup-mini.sh` | genesis | custody-drivers | not run (fn out of the demo: low priority) |
-| per-subject request rate | `requestRate.limit 3` refuses the 4th by `rateLimited` | row to write (pd-host-rate) | genesis with `requestRate` | product deputy | row not written |
+| per-subject request rate | `requestRate.limit 3`: the 4th signed read in the window refused `rate-limited` with its retry; another subject and the exempt sponsor admitted at that moment; after the window admitted | `JR rate` (driver `native/resource-client/rate-journey.sh`) | genesis with `requestRate` | product deputy | row written (lane/snipe-rate-row); never run |
 | mainnet pay-to-enrol | one real 50 DREGG enrolment | demo box only | the demo | ember / infra | not the validator's (never the demo box) |
 
 ## 7. Oracle (codex; `docs/ORACLE-GRAIN-2026-10-27.md`, `docs/evidence/oracle-*-2026-10-27.md`)
@@ -154,7 +154,7 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 
 | row | proves | command | world | owner | last known |
 |---|---|---|---|---|---|
-| JFEEDBACK | a member reports into its own `feedback-NAME` room; the operator reads it; no member reads another's | `JFEEDBACK_DISCORD_DIR=<mini-discord-mirror + fake-discord> JS "JFEEDBACK"` (`--only JFEEDBACK`) | template (J0) | product deputy (pd-feedback) | not run on any candidate; day limit (10/day) not built |
+| JFEEDBACK | a member reports into its own `feedback-NAME` room; the operator reads it; no member reads another's | `JS "JFEEDBACK"` (`--only JFEEDBACK`) | template (J0) | product deputy (pd-feedback) | not run on any candidate; day limit (10/day) not built; `--via discord` not in the row (header corrected against the code, lane/snipe-rate-row) |
 
 ## 10. FOUC
 
