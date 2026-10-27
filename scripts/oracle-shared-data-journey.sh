@@ -49,7 +49,11 @@ done
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
+  if [[ $mode == continue-session ]]; then
+    python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
+  else
+    [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
+  fi
   # This recipe cannot extend historical receiving-only worlds. Check the
   # exact fresh U3 allocation and initial authoring selectors before any phase.
   python3 - "$run" "$repo/deploy/oracle/acceptance/agent-allocation.json" <<'PYRESUME'

@@ -192,6 +192,17 @@ class ContinuationGuards(unittest.TestCase):
                                          Path('/unused'), Path('/unused'), check_only=True)
         self.assertFalse((self.run / 'continuations/session-refusal-1').exists())
 
+    def test_only_recorded_controller_traverse_acl_is_permitted(self):
+        acl = 'user::rwx\nuser:100064:--x\ngroup::---\nmask::--x\nother::---'
+        CONTINUATION.validate_run_acl(1000, 0o710, 1000, 100064, acl)
+        for bad in (acl.replace('100064', '100065'), acl.replace('group::---', 'group::--x'),
+                    acl.replace('other::---', 'other::--x'), acl.replace('--x', 'r-x'),
+                    acl + '\nuser:100065:--x'):
+            with self.assertRaisesRegex(ValueError, 'exact installed-controller'):
+                CONTINUATION.validate_run_acl(1000, 0o710, 1000, 100064, bad)
+        with self.assertRaisesRegex(ValueError, 'exact installed-controller'):
+            CONTINUATION.validate_run_acl(1001, 0o710, 1000, 100064, acl)
+
 
 class SessionRefusalGuards(unittest.TestCase):
     def setUp(self):

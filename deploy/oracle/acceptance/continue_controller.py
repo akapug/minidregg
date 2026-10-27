@@ -106,6 +106,41 @@ def session_refusal(request_id, result, final_journal, exported, store):
                          'new tool-id only after supported attach/reconciliation']}
 
 
+def validate_run_acl(owner, mode, operator, controller, acl):
+    require(type(controller) is int and controller > 0 and controller != operator,
+            'installed controller identity malformed')
+    expected = ['user::rwx', f'user:{controller}:--x', 'group::---', 'mask::--x', 'other::---']
+    require(owner == operator and mode == 0o710 and acl.splitlines() == expected,
+            'retained run ACL differs from exact installed-controller traversal')
+
+
+def retained_run_custody(run):
+    meta = run.lstat()
+    require(stat.S_ISDIR(meta.st_mode), 'retained run is not a directory')
+    world = read(run / 'world-identity.json')
+    require(re.fullmatch('[0-9a-f]{16}', world['store']), 'retained Store identity malformed')
+    created = read(run / 'agent-lifetime/controller-create.json')
+    reservation = Path('/etc/mini-spk-controller-reservations') / (world['store'] + '.json')
+    reserved_meta = reservation.lstat()
+    require(stat.S_ISREG(reserved_meta.st_mode) and reserved_meta.st_uid == 0
+            and stat.S_IMODE(reserved_meta.st_mode) == 0o644 and reserved_meta.st_nlink == 1,
+            'controller reservation custody differs')
+    reserved = read(reservation)
+    require(reserved.get('protocol') == 'mini-spk-controller-namespace-v1'
+            and reserved.get('store') == created.get('store') == world['store']
+            and reserved.get('operatorUid') == created.get('operatorUid') == os.getuid()
+            and reserved.get('controllerUid') == created.get('controllerUid'),
+            'installed controller reservation differs')
+    result = subprocess.run(['/usr/bin/getfacl', '-cpn', '--', str(run)], capture_output=True,
+                            text=True, check=True, timeout=5)
+    require(len(result.stdout) <= 4096 and result.stderr == '', 'run ACL observation differs')
+    acl = result.stdout.rstrip('\n')
+    validate_run_acl(meta.st_uid, stat.S_IMODE(meta.st_mode), os.getuid(), created['controllerUid'], acl)
+    return {'path': str(run), 'owner': meta.st_uid, 'mode': stat.S_IMODE(meta.st_mode),
+            'controller_uid': created['controllerUid'], 'acl': acl,
+            'reservation_sha256': sha(reservation)}
+
+
 def stopped_services(run, store):
     for name in ('operator.pid', 'participant.pid'):
         require(not (run / 'world/sock' / name).exists(), 'Store service remains present')
@@ -204,6 +239,7 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, check_o
     revision = root / 'spk/public-data' / ('sha256-' + sha(inventory))
     require(not revision.is_symlink() and sha(revision / 'inventory.json') == sha(inventory),
             'published inventory differs')
+    custody = retained_run_custody(run)
     services = stopped_services(run, world['store'])
     output = run / 'continuations/session-refusal-1'
     require(not output.exists(), 'session-refusal continuation already attempted')
@@ -218,7 +254,7 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, check_o
     value = {'schema': 'mini-oracle-session-continuation-v1', 'run': str(run), 'store': world['store'],
              'boundary': refusal, 'prior_continuation': str(first), 'recovery_source': str(repo),
              'original_inputs': inputs, 'original_binaries': binaries, 'native_files_before': actual,
-             'stopped_services': services, 'store_before': before, 'repeated_phases': [],
+             'run_custody': custody, 'stopped_services': services, 'store_before': before, 'repeated_phases': [],
              'failed_request_acknowledged': False,
              'ack_scope': 'null operation has no retained native foreground record; preserve client receipt only',
              'source_repair_phases': ['worker-policy', 'bootstrap-dispatch-enrollment'],
@@ -423,6 +459,10 @@ def prepare(run, spk, inventory, benchmark, repo, check_only=False):
 if __name__ == '__main__':
     os.umask(0o077)
     args = sys.argv[1:]
+    if args[:1] == ['--check-session-custody']:
+        require(len(args) == 2, 'session custody requires exactly one run path')
+        print(json.dumps(retained_run_custody(Path(args[1]))))
+        sys.exit(0)
     session = args[:1] == ['--session-refusal']
     if session:
         args = args[1:]
