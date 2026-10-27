@@ -44,7 +44,7 @@ fn collection(root: &Path, scope: &str) -> Result<Vec<String>> {
 
 /// Direct document projection shares the ordinary renderer and authenticated
 /// opened_entries boundary. Empty sources deliberately leave transclusions unresolved.
-fn direct(
+pub(crate) fn direct(
     root: &Path,
     workspace: &Value,
     reference: &Value,

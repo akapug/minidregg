@@ -136,6 +136,9 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
                     body.extend_from_slice(&buffer[..read]);
                 }
                 body.truncate(length);
+                if let ["export", name, "download"] = parts.as_slice() {
+                    return export_download(&mut stream, site, name);
+                }
                 let _mutation = site.mutations.lock().map_err(|_| "custody lock poisoned")?;
                 post(site, &parts, &body)
             }
@@ -149,11 +152,13 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
 fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
     let context = match &page.stamp {
         Stamp::Read(read) => format!(
-            "<details class=\"ctx\"><summary>Authorized read</summary><p>read as subject <span class=id>{}</span> at height <span class=id data-height=\"{h}\">{h}</span> | authority root {} | cell root {}</p></details>\n",
+            "<details class=\"ctx\"><summary>Authorized read</summary><p>read as subject <span class=id>{}</span> at height <span class=id data-height=\"{h}\">{h}</span> | authority root {} | cell root {} | world root <span class=id data-world-root=\"{w}\">{ws}</span></p></details>\n",
             escape(&site.subject),
             short(&read.authority_root),
             short(&read.cell_root),
-            h = escape(&read.height)
+            h = escape(&read.height),
+            w = escape(&read.world_root),
+            ws = short(&read.world_root)
         ),
         Stamp::EditBase(read) => format!("<p class=\"ctx\">Editor base snapshot at height <span class=id>{}</span>; sidebar observations may be newer.</p>\n", escape(&read.height)),
         Stamp::Refused => format!("<p class=\"ctx\">subject <span class=id>{}</span> | the Host refused this page's signed read</p>\n", escape(&site.subject)),
@@ -177,6 +182,7 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
         ["tour"] => tour(site, None),
+        ["export"] if !site.front.read_only => export_page(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
@@ -190,6 +196,9 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
                     operations(site),
                     page.body
                 );
+            }
+            if !site.front.read_only && now_secs() >= EXPORT_NOTICE_FROM {
+                page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p>Take your world with you: <a href=\"/export\">Export my world</a> hands you one archive of your documents, attempts, rooms and keys' public half, with the world root it was read at.</p></section>\n");
             }
             if !site.front.read_only {
                 page.body.push_str(
@@ -672,6 +681,11 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
         }
+        ["export"] => {
+            let name = format!("world-{}", now_secs());
+            let started = verb_detached(site, &format!("export world {name}"));
+            export_page(site, Some(if started { format!("Preparing <code>{name}</code>: every document is read as the Host renders it to you now. Reload this page; the download appears when it is ready.") } else { "The export could not be started (no shell paths for this body).".to_owned() }))
+        }
         ["tour", step] => {
             let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
             let outcome = verbs::post(site, name, &form);
@@ -847,15 +861,82 @@ pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
     Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
 }
 
-/// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
-/// proposal and its `submit`), the same binary and subcommand the ssh login runs.
-pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
+/// From 10 November 2026 (UTC) the member's front page points at the export.
+const EXPORT_NOTICE_FROM: u64 = 1_794_268_800;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// A finished export's file under HOME/exports, by its name (letters, digits, '-').
+fn export_file(site: &Site, name: &str) -> Option<PathBuf> {
     let shell = site.shell.as_ref()?;
-    let exe = std::env::current_exe().ok()?;
-    let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
-    if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
-        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| shell.home.join("exports").join(name))
+}
+
+/// `/export`: what the archive holds, the exports ready to download (each a POST that streams the
+/// file and then deletes it: no copy stays on the box), those still being prepared, and the button.
+fn export_page(site: &Site, said: Option<String>) -> Page {
+    let mut body = String::from(
+        "<p>One <code>.tar</code> of your world, made by your own <code>mini</code> (<code>export world</code>, reads only): every reference you hold; each document as the Host renders it to you now, \
+         as text and as its signed view; every retained attempt with its decided standing (admitted, refused, charged, or undecided with its exact <code>retry</code>); your room state; your public key and the custody statement; \
+         and <code>manifest.json</code> with the world root and height of the last read and a sha256 per file. Your secret key is not in it.</p>\n",
+    );
+    if let Some(said) = said {
+        body.push_str(&format!("<p class=\"note\">{said}</p>\n"));
     }
+    let mut ready = Vec::new();
+    let mut preparing = Vec::new();
+    if let Some(dir) = site.shell.as_ref().map(|s| s.home.join("exports")) {
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            match name.strip_suffix(".part") {
+                Some(base) => preparing.push(base.to_owned()),
+                None if export_file(site, &name).is_some() => ready.push((name, entry.metadata().map(|m| m.len()).unwrap_or(0))),
+                None => {}
+            }
+        }
+    }
+    ready.sort();
+    preparing.sort();
+    for (name, bytes) in &ready {
+        body.push_str(&format!(
+            "<form method=\"post\" action=\"/export/{n}/download\" class=\"row\"><p><code>{n}</code>, {bytes} bytes</p><button>Download</button></form>\n",
+            n = escape(name)
+        ));
+    }
+    for name in &preparing {
+        body.push_str(&format!("<p class=\"note\"><code>{}</code> is being prepared.</p>\n", escape(name)));
+    }
+    body.push_str("<form method=\"post\" action=\"/export\"><button>Export my world</button></form>\n");
+    Page { status: 200, title: "Export my world".into(), stamp: Stamp::None, body }
+}
+
+/// Stream a finished export as an attachment, then delete it: the archive leaves the box with
+/// the member, and nothing of it stays behind.
+fn export_download(stream: &mut UnixStream, site: &Site, name: &str) -> Result<()> {
+    let Some(path) = export_file(site, name).filter(|p| p.is_file()) else {
+        return answer(stream, &simple(404, "Export", "no finished export by that name"), site);
+    };
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let length = file.metadata().map_err(|e| e.to_string())?.len();
+    let subject: String = site.subject.chars().filter(char::is_ascii_digit).collect();
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Disposition: attachment; filename=\"mini-{subject}-{name}.tar\"\r\nContent-Length: {length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+    );
+    stream.set_write_timeout(Some(Duration::from_secs(60))).map_err(|e| e.to_string())?;
+    stream.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
+    let sent = std::io::copy(&mut file, stream).map_err(|e| e.to_string())?;
+    if sent == length {
+        let _ = fs::remove_file(&path);
+    }
+    Ok(())
+}
+
+/// `mini shell` as this member, in script mode, in its own process group: a read stopped at the
+/// deadline is stopped whole, the client the shell ran for it included (a killed shell alone left
+/// `mini workspace --action can` judging on, ahead of the member's next request).
+fn shell_command(site: &Site, exe: &std::path::Path, shell: &Shell) -> Command {
     let mut command = Command::new(exe);
     command.arg("shell");
     // The deployment's socket, as the ssh wrapper passes it; a workspace that pins one takes it from the pin.
@@ -869,12 +950,38 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         .arg("--config").arg(&shell.config)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
-        .env("HOME", &shell.home)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Its own process group: a read stopped at the deadline is stopped whole, the client the
-    // shell ran for it included (a killed shell alone left `mini workspace --action can` judging
-    // on, ahead of the member's next request).
+        .env("HOME", &shell.home);
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command
+}
+
+/// Run one shell line as this member in the background, to its end (a thread reaps it): the
+/// export, which reads every document and may take longer than one request.
+fn verb_detached(site: &Site, line: &str) -> bool {
+    let (Some(shell), Ok(exe)) = (site.shell.as_ref(), std::env::current_exe()) else { return false };
+    let mut command = shell_command(site, &exe, shell);
+    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+    let Ok(mut child) = command.spawn() else { return false };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(format!("{line}\n").as_bytes());
+    }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    true
+}
+
+/// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
+/// proposal and its `submit`), the same binary and subcommand the ssh login runs.
+pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
+    let shell = site.shell.as_ref()?;
+    let exe = std::env::current_exe().ok()?;
+    let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
+    if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
+        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    }
+    let mut command = shell_command(site, &exe, shell);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes());

@@ -31,6 +31,8 @@
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
 #   tour-step          POST /tour/4 (`can` through the tour's form) lands an outcome under the step   -> outcome
+#   export-*           POST /export, ready, download (attachment, streamed), deleted on the box, untar: the
+#                      document's text and the manifest's height and world root equal the live page's  -> PASS
 #   tour-chromium      jtour.mjs: login, /tour, step 4 (`can DOC`) through the pane, a terminal prompt (needs Playwright) -> answered, elapsed
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
@@ -187,6 +189,33 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
+# Export my world (the 11 November shutdown): start, wait until it is ready, read the document page
+# (its stamp carries the read's height and world root), download (streamed through the gateway,
+# then deleted on the box), untar: the document's text and the manifest's root are the live world's.
+page=$(req POST /export --data-urlencode "csrf=$CSRF")
+XNAME=$(grep -o 'Preparing <code>world-[0-9]*' <<<"$page" | sed 's/.*<code>//' | head -1)
+row export-start "$([ -n "$XNAME" ] && echo 1 || echo 0)" "$(st) ${XNAME:-no name}"
+xready=0; xstart=$(date +%s)
+for i in $(seq 1 60); do
+  page=$(req GET /export); grep -q "action=\"/export/$XNAME/download\"" <<<"$page" && { xready=1; break; }
+  sleep 5
+done
+row export-ready "$xready" "$(st) after $(( $(date +%s) - xstart )) s"
+docpage=$(req GET "/doc/$DOC")
+LIVE_H=$(grep -o 'data-height="[0-9]*"' <<<"$docpage" | head -1 | grep -o '[0-9]*')
+LIVE_W=$(grep -o 'data-world-root="[^"]*"' <<<"$docpage" | head -1 | sed 's/.*="//; s/"$//')
+XCSRF=$(csrf_of)
+curl -s -o "$R/export.tar" -D "$R/xh" -w '%{http_code}' -X POST -b "$JAR" -c "$JAR" -H "Origin: $ORIGIN" -H 'Sec-Fetch-Site: same-origin' \
+  --data-urlencode "csrf=${XCSRF:-$CSRF}" "$BASE/export/$XNAME/download" >"$R/status"
+xtype=$(grep -i '^content-type:' "$R/xh" | tr -d '\r' | cut -d' ' -f2)
+row export-download "$([ "$(st)" = 200 ] && [ "$xtype" = application/x-tar ] && [ -s "$R/export.tar" ] && echo 1 || echo 0)" "$(st) $xtype $(wc -c <"$R/export.tar" | tr -d ' ') bytes"
+page=$(req GET /export)
+row export-deleted "$(grep -q "/export/$XNAME/download" <<<"$page" && echo 0 || echo 1)" "the box keeps no copy once downloaded"
+rm -rf "$R/export"; mkdir -p "$R/export"; tar -xf "$R/export.tar" -C "$R/export" 2>"$R/export.err"
+XM="$R/export/mini-export/manifest.json"
+row export-document "$([ -f "$XM" ] && grep -qF "$TEXT" "$R/export/mini-export/documents/$DOC.txt" 2>/dev/null && echo 1 || echo 0)" "$(head -c 200 "$R/export.err") documents=$(jq '.documents|length' "$XM" 2>/dev/null) attempts=$(jq '.attempts|length' "$XM" 2>/dev/null)"
+XH=$(jq -r '.height // ""' "$XM" 2>/dev/null); XW=$(jq -r '.worldRoot // ""' "$XM" 2>/dev/null)
+row export-root "$([ -n "$XW" ] && [ "$XW" = "$LIVE_W" ] && [ "$XH" = "$LIVE_H" ] && echo 1 || echo 0)" "manifest height $XH root $(cut -c1-16 <<<"$XW") | live height $LIVE_H root $(cut -c1-16 <<<"$LIVE_W")"
 # The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
 # point and not as a proof (A10's inclusion opening is pending).
 row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
