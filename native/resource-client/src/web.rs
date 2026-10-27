@@ -21,7 +21,6 @@ mod inspect;
 mod resident;
 #[path = "web/world.rs"]
 mod world;
-mod surface;
 mod studio;
 #[path = "web/search.rs"]
 mod search;
