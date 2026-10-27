@@ -1,5 +1,11 @@
 # Private operator Mini Host and frontend services
 
+> **Cannot be run as written (2026-10-26).** Its per-UID frontend, `host-frontend.rs`, was deleted: a
+> hand-written public-operation allowlist (`0..=11, 17, 19` with hand payload limits) twinning
+> `protocol/host-operations.json` and `mini serve-public-proxy` (RUST-TRIAGE 2.1 row 37). The frontend role
+> is `mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json --socket-gid GID`;
+> `install-operator-stack` still renders the deleted binary's argument shape and needs that change first.
+
 [`install-operator-stack`](install-operator-stack) renders and installs one operator-owned `mini serve` user service with one Unix-socket frontend per task UID. Optional provider services are **only** the reviewed deterministic `--content-peer-a`/`--content-peer-b` loopback fixtures. A real provider gateway has separate custody and is not provisioned by this script. This complements [`offer-render-task`](offer-render-task), which owns each task account's controller unit; it does not create accounts, grant Mini authority, install SSH keys, or contact a model provider.
 
 The operator supplies a mode-0600 JSON manifest in an operator-owned directory. All paths are absolute and deliberately restricted to letters, digits, `_./@-`; paths with spaces, `%`, quotes, backslashes, traversal, or symlinks are refused so systemd unit arguments cannot be reinterpreted. The `installer` entry pins the reviewed executable itself. Example shape (replace every path, SHA and UID with selected qualified artifacts):
