@@ -227,7 +227,7 @@ The other 18 batteries (6,154 lines) are in Host or have importers. They need fo
 `Kernel/Job.lean` (57 of 91 theorems are closed cases) and `Kernel/PayCell.lean` (14/18) are the
 largest.
 
-### 2.5 Scripts that point at nothing (helper census, `scripts/summary.md`)
+### 2.5 Scripts that point at nothing (helper census, `summary.md [not in tree]`)
 
 - **5 files / 718 lines have every repo path they reference dead:**
   - `scripts/spk-platform/two-world-journey.sh` (221);
@@ -254,7 +254,7 @@ largest.
 | `Kernel/HostRefinesWorldCore.lean:41`: `every_admission_is_turn` "decides it for all 37 shapes" | `Kernel/TurnCensus.lean:4,45`: 48 constructors | stale count |
 | `Kernel/HostRefinesWorldCore.lean:79`: a `theorem host_submit_is_step` line at column 0 | it is inside the module docstring and not proved; grep-based theorem censuses count it | statement exists only in prose |
 | `docs/design/RECEIVER.md:256` cites `Kernel/HostRefinesWorld.lean:1006` | that file is 128 lines; the content moved to `HostRefinesWorldCore.lean` | dead line reference |
-| `docs/FORMAL_STATUS_AND_NEXT_PROOFS.md` (snapshot `bf45a611`, 2026-08-18) cites `Kernel/Gate.lean`; its "immediate next proof" is BaseFold | `Kernel/Gate.lean` does not exist; per `Deployed.lean`, the 10-01 decision demoted proof-based admission | stale document; rewrite or retire |
+| `docs/FORMAL_STATUS_AND_NEXT_PROOFS.md` (snapshot `bf45a611`, 2026-08-18) cites `Kernel.Gate [deleted e5e66049]`; its "immediate next proof" is BaseFold | `Kernel.Gate [deleted e5e66049]` does not exist; per `Deployed.lean`, the 10-01 decision demoted proof-based admission | stale document; rewrite or retire |
 | `HISTORY.md:479` / NANO-VS-MINI: "4,258 `#guard` lines" | 0 `#guard`; 4,257 `#guard_msgs` axiom pins | §0 |
 | 58 docs `.md` files with ≥1 dead path; worst `docs/KERNEL-TWIN-AUDIT.md` (18 of 124 dead), `docs/research/2026-10-02-private-objects/typed-effects-design.md` (8 of 9), `docs/HP-DESIGN.md` (5 of 34), `docs/objective-bend/evidence/STATUS.md` (5 of 7), `docs/WORLD-RUNBOOK.md` (4 of 6) | | dead path refs |
 

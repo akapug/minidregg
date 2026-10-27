@@ -264,8 +264,9 @@ and stay here:
    sections, `path:line` pointers, the worktree and branch, and the verification it must run.
 6. Engineering decisions are made by the orchestrator after a multi-model synthesis; only
    money, dates and credentials go to ember.
-7. `swarm-build` on hbox, `/tank` only; named-file commits; no `git stash`; no pattern kills;
-   filtered tests only.
+7. `swarm-build` around every build (COORDINATION §5 says which box); named-file commits; no `git stash`;
+   no pattern kills; filtered tests only. The per-lane isolation, no-foreground-wait and reader rules are
+   COORDINATION §3's, and the integration cadence is §4's.
 
 ## 5. Decisions
 

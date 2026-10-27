@@ -5,10 +5,10 @@ change, reorient the entire system into what it would need to look like if it wa
 design." Tree: `next` = 0125b224. Tags: **READ** (path at `next` or a named lane tip) · **MEASURED** (number + source)
 · **DERIVED** · **INFERRED** (my inference) · **ASSUMED** (a constant this document sets; Ember may move it).
 
-This document is the target shape. `docs/WASTE-MODEL.md` (lane/cost-model d670d30a) already proved the design is not
+This document is the target shape. `WASTE-MODEL.md [deleted 3b2aa109]` (lane/cost-model d670d30a) already proved the design is not
 the problem: every operation does 11× to 6,700× the work the design requires and the excess is approach (W1–W14).
 What follows says what the *approach* is, so that the running lanes stop optimising the old shape and build this one.
-The style is TigerStyle (TigerBeetle `docs/TIGER_STYLE.md`): safety, then performance, then developer experience;
+The style is TigerStyle (TigerBeetle `TIGER_STYLE.md [not in tree]`): safety, then performance, then developer experience;
 performance decided in the design, by batching, static bounds and mechanical sympathy, not by profiling afterward;
 assertions on every invariant; a limit on everything; deterministic simulation as the last line of defence.
 
@@ -40,7 +40,7 @@ Everything below is these five, said in Mini's own names.
 ### 1.1 What it holds (the whole state, in one record)
 
 ```lean
-structure Resident where                                  -- Host/Resident.lean (new)
+structure Resident where                                  -- Host.Resident [not in tree] (new)
   world    : World deployedR TransactionId Digest         -- READ Kernel/World.lean:264 {cells, system}
   trie     : AuthTrie.Cache worldDig deployedIx 256       -- READ lane/store-root Theory/AuthTrieCache.lean (Cache, Holds)
   held     : LoadMemo                                     -- READ lane/perf-memo: pin-keyed CheckedEntry, bounded
@@ -234,11 +234,11 @@ Each ≤ ~10 files, one commit, its gate named. Lanes converge forward in parall
   past `turnBytesMax`/`legsPerTurnMax`/`cellsTouchedMax`); `Compiler/DurableReceiverIO.lean` (`prepareAppend` refuses
   past `cellBytesMax`, `nullifiersPerTurnMax`); `Host/Main.lean` (`serveFrame` refuses past `frameBytesMax`,
   `framesPerRequestMax`); `Compiler/NativeGlueGen.lean` (emit the constants to Rust); one generated Rust file;
-  `scripts/gates/bounds.tsv` (the table in §6, checked against the module). Gate: a plant one byte over each bound is
+  `bounds.tsv [not in tree]` (the table in §6, checked against the module). Gate: a plant one byte over each bound is
   refused by that bound's name; the 56 `partial def`s (MEASURED) are each either the loop or rewritten with a fuel from
   `Bounds`.
 - **HP-3 LOOP** (the resident loop with batched durability; needs TURN-LOG step 2 for Turn entries, can start on the
-  record log). `Host/Resident.lean` (the record of §1.1), `Host/ResidentLoop.lean` (§1.2; the only `partial def`),
+  record log). `Host.Resident [not in tree]` (the record of §1.1), `Host.ResidentLoop [not in tree]` (§1.2; the only `partial def`),
   `Compiler/DurableReceiverIO.lean` (`appendBatch`: one transaction, one fsync, one tag), the linked store
   (`native/hyperdocument-link-sqlite-store`: a linked call, not an exec, one transaction per batch; tags table keyed
   by batch-end height), `Kernel/NativeHostSession.lean` (Session := Resident; `NativeHostLight` deleted),
@@ -257,7 +257,7 @@ Each ≤ ~10 files, one commit, its gate named. Lanes converge forward in parall
   `scripts/gates/assertion-density` ≥ 2 per hot-path function; the simulation runs with assertions on.
 - **HP-2 BYTES+DIGEST** (one flag-day range after TURN-LOG 4b and CODEC-SHAPES item 1 land, so it rewrites the
   surviving tree once; mechanical by `ast-grep` in a day, not by hand over weeks). `Compiler/Tower256ConcreteBackend.lean`
-  (cursor over `ByteArray`), `Kernel/Digest.lean` (new: the 32-byte digest, `toNat`), `Theory/TypedAuthorization.lean`
+  (cursor over `ByteArray`), `Kernel.Digest [not in tree]` (new: the 32-byte digest, `toNat`), `Theory/TypedAuthorization.lean`
   (Digest replaced), `Theory/Sp800185*.lean` (absorb `ByteArray`; customization absorbed once per tag, W10),
   `Kernel/WorldRoot.lean`, `Kernel/DeployedTurnCompact.lean`, `Kernel/CellTable.lean` (bytes = `ByteArray`), the
   `DecidableEq` instance, `Host/Main.lean` frame boundary, the Rust `Digest` twin. Re-genesis (hash inputs change).

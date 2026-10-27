@@ -5,7 +5,7 @@ native core receiving freeze and had not passed Lean or a native journey.
 
 **Status at main 5216e02f (READ, import closure computed over the `import` lines).**
 `Kernel/WorldKindMethods.lean` is imported by `Kernel/ResourceTransaction.lean`;
-`Kernel/RunComputeBudgetDomain.lean` is imported by `Kernel/BendComputeCapacity.lean`,
+`Kernel/RunComputeBudgetDomain.lean` is imported by `Kernel.BendComputeCapacity [deleted 2f516fae]`,
 `Kernel/ResourceMoneyOperationDomain.lean`, `Kernel/RunComputeView.lean` and
 `Kernel/ResourceTransaction.lean`; `Compiler/WorldExecutionContract.lean` exists. All
 three are in the import closure of `Minidregg.lean` and of `Host.Main`. The shell has

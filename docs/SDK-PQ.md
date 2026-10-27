@@ -71,7 +71,7 @@ envelope. `FleetTurn.admitNative` (`Kernel/FleetTurn.lean:563`), `ParticipantKey
 4. **Every key-shape gate.** Each restates `algorithm = ed25519Algorithm ∧ publicKey.length = 32`.
    Replace all of them by one predicate `CredentialSignatureAdmission.wellFormedKey` (`(1,32) ∨ (2,1984)`):
    * `Kernel/ParticipantKeyEnrollment.lean:311-312` (the `Accepted` shape) and `:336-337` (admission);
-   * `Kernel/SubjectKeyRotation.lean:156-157` and `:175-176`;
+   * `Kernel/Receivers/SubjectKeyRotation.lean:156-157` and `:175-176`;
    * `Kernel/NativeObservationController.lean:449-450` (`intentKey`, the key an observation must be
      signed by);
    * `Kernel/NativeCurrentSigningKey.lean:26` and `:37` (`select`);

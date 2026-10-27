@@ -4,7 +4,7 @@ Scope: every file in `native/discord-entrance` (src, bin, tests, examples, Cargo
 
 ## EXECUTIVE SUMMARY
 
-**discord-entrance** (2,316 Rust lines + 137 Python) is two binaries. `mini-discord` is a Discord *interactions endpoint* over plain HTTP behind Caddy. It verifies Discord's Ed25519 signature, maps the Discord user id to a Mini session NAME through a root-owned roster file, and runs the one `line` option through the ssh forced command (`deploy/shell/mini-shell-ssh` → `mini shell --line`). `mini-discord-mirror` bridges one chat room and one channel. It posts room → channel through the `mini-keys` broker and runs channel → room as `say --via discord` under the bridge's own key. **The Discord-to-Mini identity binding is a hand-edited JSON file that Rust enforces** (`roster.rs`, `server.rs:200-214`); Lean never sees a Discord id. The entrance holds **no bot token**. The mirror's webhook URL and bot token are kept by the `mini-keys` broker. Duplicate interactions are deduplicated by a durable custody record per interaction id, with the phases accepted/started/completed: a started line is never re-run. In Rust, the crate decides who may enter (the roster), the retry and dedup policy, admission throttling and timeouts, and for the mirror, disclosure and which Discord authors may speak in a room. None of this vocabulary appears in `protocol/host-operations.json` or in Lean. The worst concrete flaw: any non-2xx reply from the webhook, including a definite 429 rate limit, wedges the mirror as UNKNOWN until an operator runs `--resolve-up`. That command needs a Discord message id that does not exist for a post that was never sent. `mini-discord-mirror` is also not in the candidate package, and `tests/native-world.py` plus the mirror section of `deploy/discord/README.md` describe an environment the binary now refuses.
+**discord-entrance** (2,316 Rust lines + 137 Python) is two binaries. `mini-discord` is a Discord *interactions endpoint* over plain HTTP behind Caddy. It verifies Discord's Ed25519 signature, maps the Discord user id to a Mini session NAME through a root-owned roster file, and runs the one `line` option through the ssh forced command (`deploy/shell/mini-shell-ssh` → `mini shell --line`). `mini-discord-mirror` bridges one chat room and one channel. It posts room → channel through the `mini-keys` broker and runs channel → room as `say --via discord` under the bridge's own key. **The Discord-to-Mini identity binding is a hand-edited JSON file that Rust enforces** (`roster.rs`, `server.rs:200-214`); Lean never sees a Discord id. The entrance holds **no bot token**. The mirror's webhook URL and bot token are kept by the `mini-keys` broker. Duplicate interactions are deduplicated by a durable custody record per interaction id, with the phases accepted/started/completed: a started line is never re-run. In Rust, the crate decides who may enter (the roster), the retry and dedup policy, admission throttling and timeouts, and for the mirror, disclosure and which Discord authors may speak in a room. None of this vocabulary appears in `protocol/host-operations.json` or in Lean. The worst concrete flaw: any non-2xx reply from the webhook, including a definite 429 rate limit, wedges the mirror as UNKNOWN until an operator runs `--resolve-up`. That command needs a Discord message id that does not exist for a post that was never sent. `mini-discord-mirror` is also not in the candidate package, and `native/discord-entrance/tests/native-world.py` plus the mirror section of `deploy/discord/README.md` describe an environment the binary now refuses.
 
 **spk-rpc** (1,803 Rust lines; 6,126 schema lines) is a library only. It is the supervisor side of Sandstorm's two-party Cap'n Proto connection on fd3: getViewInfo, newSession (Web/Api), typed WebSession GET/HEAD/POST/PUT/PATCH/DELETE, openWebSocket, and a decoder for the signed `BridgeConfig`. **All 27 pinned schemas are unmodified Sandstorm originals** (digests verified OK). `capnp/persistent.capnp` is a modified Cap'n Proto file and is not pinned. Only 10 schemas plus persistent are compiled; **17 vendored schemas (2,256 lines) are compiled by nothing**. The only consumer is `spk-host`; grain-runtime does not depend on it. The Cap'n Proto wire and the JSON host wire do **not** describe the same operations: host-operations.json carries Lean admission (`APPLICATION_DISPATCH_*`), and spk-rpc carries physical delivery to the app. The real twins are permission-schema validation (copied from `Kernel/ApplicationPermissionSchema.lean:110-128`, with diverging bounds) and `permission_schema_source`, which has no production caller and is twinned by `spk-host/src/materialize.rs:322`. The README still says WebSocket is unconnected.
 
@@ -70,9 +70,9 @@ Per-file line counts are in §6. The crate exposes one library and two binaries 
   - Drain phase: oldest first, at most 20 per poll. Each human message is written to `requests/discord-ID.txt` (`create_new`) and posted with `say --in ROOM --via discord --via-id A --via-name N --operation-record … --file …` (`:338`).
 
 **Test and dev surfaces.**
-- `tests/endpoint.rs`: in-process endpoint with a fake forced command, a fake runner and a fake PATCH sink.
+- `native/discord-entrance/tests/endpoint.rs`: in-process endpoint with a fake forced command, a fake runner and a fake PATCH sink.
 - `examples/fake-discord.rs`: signer plus fake REST API.
-- `tests/native-world.py`: real Host/Store scenario.
+- `native/discord-entrance/tests/native-world.py`: real Host/Store scenario.
 
 ### 1(b) spk-rpc
 
@@ -195,7 +195,7 @@ spk-rpc makes no admission, funding, ordering or retry decisions.
 7. **The mirror's `me()` re-reads `workspace.json` per entry and falls back to `""`** (`mirror.rs:236-242`). If the read fails mid-run, the bridge's own non-`via` entries are no longer filtered (`:163`) and get echoed to the channel. A startup guard exists (`:404`), but nothing guards inside the loop.
 8. **Stale docs and harness (the deploy will misconfigure).**
    - `deploy/discord/README.md:122` tells operators to set `MINI_MIRROR_WEBHOOK_URL`, `MINI_MIRROR_BOT_TOKEN` and `MINI_MIRROR_CHANNEL_URL`. The binary exits 78 when it sees them (`mirror.rs:371-375`).
-   - `tests/native-world.py:108` sets the same three variables and no `MINI_MIRROR_BROKER`, so that evidence scenario can no longer pass its mirror rows.
+   - `native/discord-entrance/tests/native-world.py:108` sets the same three variables and no `MINI_MIRROR_BROKER`, so that evidence scenario can no longer pass its mirror rows.
 9. **The split-tenancy unit and sudo.** `deploy/discord/mini-discord.service:27` sets `NoNewPrivileges=yes`. That prevents setuid `sudo` from elevating, which `Deployment::run` needs in split mode (`session.rs:65-70`). This only works if dregg-infra's drop-in overrides it, and that drop-in is not visible here. Scenario: a fresh install with the unit as written plus `MINI_SESSION_RUNNER` makes every line fail with a sudo error, reported as an `error:` ending.
 10. **`MINI_DISCORD_ROSTER_OWNER_UID` is parsed with `as u32`** (`server.rs:72`), so a value larger than u32 wraps silently. This is cosmetic.
 
@@ -262,9 +262,9 @@ spk-rpc makes no admission, funding, ordering or retry decisions.
 | src/lib.rs | 69 | |
 | src/navigation.rs | 56 | |
 | src/main.rs | 55 | |
-| tests/endpoint.rs | 316 | |
+| native/discord-entrance/tests/endpoint.rs | 316 | |
 | examples/fake-discord.rs | 215 | |
-| tests/native-world.py | 137 | stale (§4a.8) |
+| native/discord-entrance/tests/native-world.py | 137 | stale (§4a.8) |
 | Cargo.toml | 36 | |
 
 Dependencies: `ed25519-dalek`, `libc`, `serde_json`, `mini-sdk` (features `native`: blake3, fips204/ML-DSA, sha2, zeroize), and `mini-keys` (client, default features off). That is 45 unique crates in the normal-dependency tree (`cargo tree --offline`). Most of the weight comes from mini-sdk; the entrance itself needs only lease and atomic JSON.
@@ -272,7 +272,7 @@ Dependencies: `ed25519-dalek`, `libc`, `serde_json`, `mini-sdk` (features `nativ
 **Demo-minimal cut.**
 - **Keep** for the Discord surface: lib, main, server, http (without `client_request`), signature, interaction, roster, session, reply (without `render`), curl (`send` only), and navigation (for `/mini-world`).
 - **Keep the mirror** only if the demo includes room ↔ channel. It must then be added to `package.py` and given a unit, and flaws 4a.1 and 4a.2 should be fixed first, or the demo channel will wedge at the first burst.
-- **Delete today:** `curl.rs:57-122`, `reply.rs:55-65` and their tests. Fix or delete `tests/native-world.py`, and rewrite `deploy/discord/README.md:122`.
+- **Delete today:** `curl.rs:57-122`, `reply.rs:55-65` and their tests. Fix or delete `native/discord-entrance/tests/native-world.py`, and rewrite `deploy/discord/README.md:122`.
 
 ### 6(b) spk-rpc
 
@@ -335,7 +335,7 @@ Dependencies: `capnp 0.27` (unaligned), `capnp-rpc`, `futures`, `serde_json`, `t
 
 ## 8. Questions for the Lean side
 
-1. Should a Discord account → participant binding be a governed Lean fact rather than `/etc/mini/discord-roster.json`, for example a `PARTICIPANT_*`-style receipt naming the external account, so that turns proposed via Discord are attributable to a Discord identity and revocation is a Lean event? Today Lean cannot tell a Discord-proposed turn from an ssh one, and two Discord ids can share one custodial key (`tests/endpoint.rs:313`).
+1. Should a Discord account → participant binding be a governed Lean fact rather than `/etc/mini/discord-roster.json`, for example a `PARTICIPANT_*`-style receipt naming the external account, so that turns proposed via Discord are attributable to a Discord identity and revocation is a Lean event? Today Lean cannot tell a Discord-proposed turn from an ssh one, and two Discord ids can share one custodial key (`native/discord-entrance/tests/endpoint.rs:313`).
 2. Is "every non-bot member of a Discord channel may `say` in room R through the bridge's key" an authority Lean should grant explicitly, as a delegation from the room to the bridge with a scope, rather than something Rust decides in `inbound` (`mirror.rs:182-218`)?
 3. Should room → external-channel disclosure be a Lean-checked consent (a room law or attestation) rather than `MINI_MIRROR_PUBLISH_ROOM_TO_CHANNEL=yes` plus a Rust check of a Rust-written `private` stamp? Is there a Lean definition of room privacy that the `tail --json` `private` field is meant to project? I found none by grep.
 4. Which `mini shell` verbs are idempotent under a re-issued Discord interaction (new interaction id, same line)? If `submit` and pay verbs do not carry a Lean operation record by default, the 3-second-deadline double-run (§4a.3) can double-submit.

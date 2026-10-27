@@ -36,7 +36,7 @@
 # refused evaluatorDisabled at birth and at run. Absent = none disabled.
 #
 # GENESIS_PAY_OBSERVER, if set, is an absolute path to a JSON object
-# {"subject","capability","controlCapability","enrolCapability"} (canonical
+# {"subject","capability","enrolCapability"} (canonical
 # decimal strings) naming the PAY observer (deploy/pay/README.md): genesis then
 # installs the pay law and the observer's, the pay controller's and the
 # self-enrollment capabilities. Its subject must be one of the genesis
@@ -56,7 +56,7 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability, .tailBound, .issuanceCap] | all(int))
+          .factoryControllerCapability, .tailBound, .issuanceCap, .payControlCapability] | all(int))
     and .tailBound > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
@@ -182,6 +182,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
                   accountPredicate: {type: "all", predicates: []}}],
    factoryControllerSubject: ($p.sponsor.subject|s),
    factoryControllerCapability: ($p.factoryControllerCapability|s),
+   payControlCapability: ($p.payControlCapability|s),
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
    issuanceCap: ($p.issuanceCap|s),
@@ -209,8 +210,8 @@ if [ -n "${GENESIS_PAY_OBSERVER:-}" ]; then
   case "$GENESIS_PAY_OBSERVER" in /*) ;; *) echo 'genesis: GENESIS_PAY_OBSERVER must be absolute' >&2; exit 2;; esac
   jq -e --slurpfile g "$dir/genesis.json" '
     def dec: type == "string" and test("^(0|[1-9][0-9]*)$");
-    type == "object" and (keys == ["capability", "controlCapability", "enrolCapability", "subject"])
-    and ([.subject, .capability, .controlCapability, .enrolCapability] | all(dec))
+    type == "object" and (keys == ["capability", "enrolCapability", "subject"])
+    and ([.subject, .capability, .enrolCapability] | all(dec))
     and (.subject as $s | $g[0].enrollments | any(.key.subject == $s))' \
     "$GENESIS_PAY_OBSERVER" >/dev/null ||
     { echo 'genesis: the pay observer is invalid or not enrolled' >&2; exit 2; }

@@ -108,6 +108,11 @@ structure Settings where
   installs a law at a service resource must install exactly the pinned route
   law (`Kernel.ProviderRouteConsent.check`). -/
   providerServices : Option (List ProviderUsage.ServiceSettings) := none
+  /-- Host authoring coordinates, retained without making them consent
+  authority. Host.Main validates their detailed selectors before authoring;
+  consent independently admits history and reconstructs each proposed plan.
+  These rows do not enter NativeHost.Config or provider route laws. -/
+  agentLifetimeDispatchTargets : Option (List Json) := none
   deriving FromJson, ToJson
 
 /-- The pinned services' per-operation fee schedules, parsed with the Host's
@@ -153,6 +158,18 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   completionCustodianKey := settings.completionCustodianKey.map fun key =>
     (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key)).toOption.getD []
 
+/-- Recognizing the Host's authoring table cannot change the verifier's
+deployment, tariffs, storage, signature verifier, evaluator or other law. -/
+theorem Settings.config_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List Json)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).config = settings.config := rfl
+
+/-- The separately checked provider-route laws are equally unaffected. -/
+theorem Settings.providerRoutes_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List Json)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).providerRoutes =
+      settings.providerRoutes := rfl
+
 def Settings.checkJointConsensus (settings : Settings) : Except String Unit := do
   let some pin := settings.jointConsensus | return ()
   let config := settings.config
@@ -174,9 +191,10 @@ def Settings.checkJointConsensus (settings : Settings) : Except String Unit := d
   pure ()
 
 
-def loadSettings (path : System.FilePath) : IO Settings := do
-  let json ← IO.ofExcept (SourceAgreementJson.parse (← IO.FS.readFile path))
-  let object ← IO.ofExcept json.getObj?
+/-- Parse the complete original settings. Unknown non-null fields still
+refuse; no projected configuration or consent fallback is constructed. -/
+def parseSettings (json : Json) : Except String Settings := do
+  let object ← json.getObj?
   let allowed := ["domain", "federation", "factoryId", "resourceBookId",
     "authorityCellId", "issuer", "ownerBudget", "lifetime", "birthSlack",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
@@ -184,14 +202,23 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
     "jointConsensus", "nockFSync", "disabledEvaluators", "fnGateway",
     "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation",
-    "providerServices"]
+    "providerServices", "agentLifetimeDispatchTargets"]
   -- A deployment config written by `mini bootstrap` spells every absent Host
   -- option as null. Null is absence; any other value of a key this provider
   -- cannot honor refuses, since it would change the semantics it verifies.
   unless object.foldl (init := true) (fun valid key value =>
       valid && (allowed.contains key || value == Json.null)) do
-    throw (IO.userError "unsupported settings in client consent provider")
-  let settings : Settings ← IO.ofExcept (fromJson? json)
+    throw "unsupported settings in client consent provider"
+  let settings : Settings ← fromJson? json
+  if let some targets := settings.agentLifetimeDispatchTargets then
+    unless 0 < targets.length && targets.length ≤ 8 && targets.all (fun row =>
+        match row with | .obj _ => true | _ => false) do
+      throw "agentLifetimeDispatchTargets metadata requires one to eight objects"
+  pure settings
+
+def loadSettings (path : System.FilePath) : IO Settings := do
+  let json ← IO.ofExcept (SourceAgreementJson.parse (← IO.FS.readFile path))
+  let settings ← IO.ofExcept (parseSettings json)
   if let some pin := settings.fnGateway then
     let some address := pin.policyAddress.toNat? | throw (IO.userError "invalid gateway policy address")
     unless toString address == pin.policyAddress do

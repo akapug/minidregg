@@ -4,6 +4,188 @@
 # Sourced by the Oracle journey. This is a transport/fixture harness only;
 # Mini's Host and broker remain the authority and physical-custody receivers.
 # Every root effect uses the existing fixed deployment installer/helper.
+
+# Capacity accounting only. The native materializer and verifier independently
+# apply their unchanged statvfs guards; this does not reserve or grant space.
+world_disk_plan() {
+  python3 - "$spk" "$inventory" "$ORACLE_IMPORT_PROFILE" /var/lib/mini-spk-worlds <<'PY'
+import json, os, pathlib, sys
+spk, inventory, profile, root = sys.argv[1:]
+raw = pathlib.Path(spk).stat().st_size
+data = sum(f['size'] for f in json.loads(pathlib.Path(inventory).read_bytes())['files'])
+decoded = (20 * 1024**3 if profile == 'operator-appliance-v1' else 768 * 1024**2)
+s = os.statvfs(root)
+available = s.f_bavail * s.f_frsize
+materialize_guard = 2 * raw + 2 * decoded
+verify_guard = raw + decoded
+# Source qualification still uses the standard decoded cap for this runtime.
+# Plan for both full 2-GiB volumes, inbox+retained SPK, the maximum qualified
+# extracted image, and 64 MiB for Store/metadata. Large import spools are gone
+# before dataset publication begins.
+retained_allowance = data + 4 * 1024**3 + 2 * raw + 768 * 1024**2 + 64 * 1024**2
+projected = available - retained_allowance
+plan = {'schema': 'mini-oracle-disk-plan-v1', 'filesystem_path': root,
+        'available_bytes': available, 'runtime_spk_bytes': raw,
+        'dataset_bytes': data, 'materialize_guard_bytes': materialize_guard,
+        'verify_guard_bytes': verify_guard, 'retained_allowance_bytes': retained_allowance,
+        'projected_available_after_publication': projected,
+        'order': 'install-both-before-publication', 'reservation': False,
+        'fits': available >= materialize_guard and projected >= verify_guard}
+print(json.dumps(plan, indent=2))
+if not plan['fits']:
+    raise SystemExit(1)
+PY
+}
+
+world_disk_snapshot() {
+  python3 - "$GRAINS_ROOT" "$run/disk-$1.json" <<'PY'
+import json, os, pathlib, sys, time
+root, output = sys.argv[1:]
+s = os.statvfs(root)
+pathlib.Path(output).write_text(json.dumps({'path': root, 'unix_seconds': time.time(),
+    'available_bytes': s.f_bavail * s.f_frsize, 'free_bytes': s.f_bfree * s.f_frsize}, indent=2) + '\n')
+PY
+}
+
+# Pin the actual existing operator process across the two read-only inspection
+# boundaries. PID alone is insufficient because it can be reused.
+world_operator_identity() {
+  python3 - "$run/world/sock/operator.pid" <<'PYIDENTITY'
+import json, pathlib, sys
+pid = int(pathlib.Path(sys.argv[1]).read_text())
+proc = pathlib.Path('/proc') / str(pid)
+fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+print(json.dumps({'pid': pid, 'start_ticks': int(fields[19]),
+                  'executable': str((proc / 'exe').resolve(strict=True))}, sort_keys=True))
+PYIDENTITY
+}
+
+world_stop_probe() {
+  local app=$1 generation=$2 output=$3 previous_claim=${4:-}
+  local args=()
+  [[ -z $previous_claim ]] || args+=(--mismatched-committed "$previous_claim")
+  timeout 1800 python3 "$repo/scripts/oracle-stop-inspection-probe.py" \
+    --host "$BIN/minidregg-host" --config "$config" \
+    --operator-socket "$run/world/sock/operator/host.sock" \
+    --public-socket "$run/world/sock/participant/host.sock" \
+    --plan "$state/apps/$app/g$generation/stop-claim/stop-plan-v2.bin" \
+    --committed "$state/apps/$app/g$generation/stop-claim/committed-v3.bin" \
+    --out "$output" --deadline 1200 --resident-only "${args[@]}" >"$output.stdout" 2>"$output.stderr"
+}
+
+world_controller_prepare() {
+  local home request_id
+  timeout 120 sudo -n -- "$installer" controller-create "$store" "$helper" >"$run/agent-lifetime/controller-create.json"
+  controller_created=1
+  cp "$GRAINS_ROOT/controller/namespace.json" "$run/agent-lifetime/controller-namespace.json"
+  home=$(jq -er .controllerHome "$run/agent-lifetime/controller-create.json")
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-controller "$run" "$repo" "$home" \
+    >"$run/agent-lifetime/prepare-controller.stdout" 2>"$run/agent-lifetime/prepare-controller.stderr"
+  timeout 120 sudo -n -- "$installer" controller-stage "$store" "$helper" \
+    "$run/agent-lifetime/controller-stage" "$BIN" \
+    "$run/world/sock/operator/host.sock" "$run/world/sock/participant/host.sock" \
+    >"$run/agent-lifetime/controller-stage-receipt.json"
+  controller_staged=1
+  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$run/agent-lifetime/controller-bootstrap-start.json"
+  request_id=$("$BIN/grain-runtime" tool-id)
+  printf '%s\n' "$request_id" >"$run/agent-lifetime/session-birth.request-id"
+  jq .nextTool.arguments "$run/agent-lifetime/controller-stage.json" >"$run/agent-lifetime/session-birth.arguments.json"
+  # One actual controller-owned birth. A missing/uncertain reply is retained;
+  # this harness never resends the request or manufactures its birth journal.
+  timeout 1800 sudo -n -- "$installer" controller-tool "$store" "$helper" "$request_id" \
+    mini_create_application_session "$run/agent-lifetime/session-birth.arguments.json" \
+    >"$run/agent-lifetime/session-birth.result.json" 2>"$run/agent-lifetime/session-birth.stderr"
+  timeout 120 sudo -n -- "$installer" controller-tool-result "$store" "$helper" "$request_id" \
+    >"$run/agent-lifetime/session-birth.retained-result.json"
+  cmp "$run/agent-lifetime/session-birth.result.json" "$run/agent-lifetime/session-birth.retained-result.json"
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" issue-grant "$run" "$repo" \
+    "$run/agent-lifetime/session-birth.result.json" \
+    >"$run/agent-lifetime/issue-grant.stdout" 2>"$run/agent-lifetime/issue-grant.stderr"
+  timeout 120 sudo -n -- "$installer" controller-tool-ack "$store" "$helper" "$request_id" \
+    >"$run/agent-lifetime/session-birth.ack.json"
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-route "$run" "$repo" \
+    "$run/agent-lifetime/controller-create.json" \
+    >"$run/agent-lifetime/prepare-route.stdout" 2>"$run/agent-lifetime/prepare-route.stderr"
+}
+
+world_controller_stop() {
+  local snapshot_result=0
+  if [[ ${controller_staged:-0} == 1 ]]; then
+    world_consent_snapshot "before-stop-$1" || snapshot_result=$?
+  fi
+  timeout 120 sudo -n -- "$installer" controller-stop "$store" "$helper" >"$run/agent-lifetime/controller-stop-$1.json" || return
+  return "$snapshot_result"
+}
+
+# Observe the system service before stop resets its accounting. These are
+# physical measurements, not a consent/admission result.
+world_consent_snapshot() {
+  local label=$1 consent_unit observed_exit
+  consent_unit=$(jq -er '.consent.serviceUnit' "$run/agent-lifetime/controller-stage-receipt.json") || return
+  [[ $consent_unit == "mini-spk-controller-consent-$store.service" ]] || return 1
+  if systemctl show "$consent_unit" --no-pager \
+    -p LoadState -p ActiveState -p SubState -p MainPID -p InvocationID \
+    -p MemoryCurrent -p MemoryPeak -p MemoryMax -p MemorySwapMax -p Result \
+    >"$run/agent-lifetime/consent-memory-$label.properties" \
+    2>"$run/agent-lifetime/consent-memory-$label.stderr"; then observed_exit=0; else observed_exit=$?; fi
+  python3 - "$run/agent-lifetime/consent-memory-$label" "$consent_unit" "$observed_exit" <<'PYCONSENT'
+import json, pathlib, sys, time
+prefix, unit, exit_code = sys.argv[1:]
+properties = dict(line.split('=', 1) for line in pathlib.Path(prefix + '.properties').read_text().splitlines() if '=' in line)
+value = {'schema': 'mini-oracle-consent-resources-v1', 'unit': unit,
+         'unix_seconds': time.time(), 'observation_exit': int(exit_code), 'properties': properties}
+pathlib.Path(prefix + '.json').write_text(json.dumps(value, indent=2) + '\n')
+PYCONSENT
+}
+
+world_controller_activate() {
+  local start_result=$1 label=$2 activation bundle
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" activate "$run" "$repo" "$start_result" \
+    >"$run/agent-lifetime/activate-$label.stdout" 2>"$run/agent-lifetime/activate-$label.stderr"
+  activation=$(cat "$run/agent-lifetime/activate-$label.stdout")
+  bundle=$(jq -er .bundle "$activation")
+  world_controller_stop "before-$label"
+  timeout 120 sudo -n -- "$installer" controller-config "$store" "$helper" "$bundle" \
+    >"$run/agent-lifetime/controller-config-$label.json"
+  cp "$bundle/controller.json" "$run/agent-lifetime/controller-active-$label.json"
+  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$run/agent-lifetime/controller-start-$label.json"
+  export ORACLE_CONTROLLER_INSTALLER=$installer ORACLE_CONTROLLER_STORE=$store ORACLE_CONTROLLER_HELPER=$helper
+  export QUALIFIED_LIFETIME_HOST_BINARY=$BIN/minidregg-host
+  QUALIFIED_LIFETIME_HOST_SHA256=$(sha256sum "$BIN/minidregg-host" | cut -d ' ' -f1)
+  QUALIFIED_RUNTIME_SHA256=$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)
+  export QUALIFIED_LIFETIME_HOST_SHA256 QUALIFIED_RUNTIME_SHA256
+}
+
+world_controller_probe() {
+  local label=$1 directory=$2
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" \
+    "$BIN/grain-runtime" "$run/agent-lifetime/controller-active-$label.json" oracle-app \
+    "$repo/deploy/oracle/acceptance/agent-cases.json" "$run/agent-lifetime/$directory" \
+    >"$run/agent-lifetime/$directory.stdout" 2>"$run/agent-lifetime/$directory.stderr"
+  world_consent_snapshot "after-$directory"
+}
+
+world_authority_probe() {
+  local matched=$run/agent-lifetime/probe/discover-core-query.lifetime-attempt.json attempt_id
+  attempt_id=$(python3 - "$matched" <<'PYATTEMPT'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_bytes())['lifetimeSettlement']['dispatchAttemptId']
+if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 2**64:
+    raise SystemExit('native dispatch attempt ID absent or invalid')
+print(value)
+PYATTEMPT
+)
+  timeout 120 sudo -n -- "$installer" controller-reserve-export "$store" "$helper" "$attempt_id" \
+    >"$run/agent-lifetime/authority-reserve-export.json"
+  timeout 600 python3 "$repo/scripts/oracle-agent-authority-probe.py" \
+    --host "$BIN/minidregg-host" --config "$config" \
+    --operator-socket "$run/world/sock/operator/host.sock" \
+    --public-socket "$run/world/sock/participant/host.sock" \
+    --controller-export "$run/agent-lifetime/authority-reserve-export.json" \
+    --application-attempt "$matched" --out "$run/agent-lifetime/authority" --deadline 180 \
+    >"$run/agent-lifetime/authority.stdout" 2>"$run/agent-lifetime/authority.stderr"
+}
+
 world_prepare() {
   local base=$1 own=$2 run=$3 repo=$4 op_name start count registry bwrap deployment host
   [[ $(id -u) != 0 ]] || fail 'run as the operator, not root'
@@ -15,12 +197,14 @@ world_prepare() {
   for binary in mini minidregg-host minidregg-link-sqlite-store minidregg-credential-signature-verifier minidregg-client-consent; do
     install -m 755 "$base/$binary" "$run/bin/$binary"
   done
-  for binary in spk-host mini-spk-broker mini-spk-volume-helper spk-data-publish; do
+  for binary in spk-host mini-spk-broker mini-spk-volume-helper spk-data-publish grain-runtime; do
     install -m 755 "$own/$binary" "$run/bin/$binary"
   done
   install -m 755 "$repo/deploy/spk-host/spk-ingest" "$run/bin/spk-ingest"
   sha256sum "$run/bin/"* >"$run/binary-sha256.txt"
   export BIN=$run/bin
+  SPK_AGENT_ALLOCATION=$(sh "$repo/scripts/oracle-agent-lifetime-journey.sh" provision "$run" "$repo")
+  export SPK_AGENT_ALLOCATION
   # No broker is contacted by this phase. Store identity comes from the Host.
   GRAINS_ROOT=/var/lib/mini-spk-worlds/0000000000000000 \
     BROKER_SOCKET=/var/lib/mini-spk-worlds/0000000000000000/runtime-0000000000000000/broker.sock \
@@ -41,9 +225,9 @@ world_prepare() {
   end=$((start+count))
   while ((start+16<=end)); do
     occupied=0
-    for registry in /etc/mini-spk-volumes/*.json; do
+    for registry in /etc/mini-spk-volumes/*.json /etc/mini-spk-controller-reservations/*.json; do
       [[ -f $registry ]] || continue
-      if jq -e --argjson first "$start" --argjson last "$((start+16))" '.appUids | any(. >= $first and . < $last)' "$registry" >/dev/null; then occupied=1; break; fi
+      if jq -e --argjson first "$start" --argjson last "$((start+16))" '((.appUids // []) + [.controllerUid, .controllerGid]) | map(select(type == "number")) | any(. >= $first and . < $last)' "$registry" >/dev/null; then occupied=1; break; fi
     done
     [[ $occupied == 1 ]] || break
     start=$((start+16))
@@ -122,6 +306,18 @@ world_cleanup() {
   local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false
   trap - EXIT INT TERM
   if [[ ${configured:-0} == 1 ]]; then
+    if [[ ${controller_created:-0} == 1 ]]; then
+      world_controller_stop cleanup >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+      if [[ ${controller_staged:-0} == 1 ]]; then
+        timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" \
+          >"$run/agent-lifetime/controller-final-journal.json" 2>>"$run/cleanup.log" || cleanup_result=1
+      fi
+      if [[ $result == 0 && $cleanup_result == 0 ]]; then
+        timeout 120 sudo -n -- "$installer" controller-remove "$store" "$helper" \
+          >"$run/agent-lifetime/controller-remove.json" 2>>"$run/cleanup.log" || cleanup_result=1
+      fi
+      [[ $cleanup_result == 0 ]] || preserve_namespace=true
+    fi
     "$journey" stop-services "$run/world" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
     while read -r unit; do
       [[ -n $unit ]] || continue

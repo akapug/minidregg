@@ -226,7 +226,7 @@ else
     >"$ROOT/pay/genesis-enrollments-all.json"
 fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
-{"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}
+{"subject":"30","capability":"4030","enrolCapability":"4032"}
 EOF
 # The one genesis template (genesis.sh) from the example params, with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
@@ -292,7 +292,7 @@ jq -e '.type == "minidregg-participant-reference-v1" and .target == "10" and
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 --no-prerotation \
   --dir "$ROOT/pay/observer" >"$ROOT/pay/observer-workspace.stdout"
-jq -e '.payObserver == {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}' \
+jq -e '.payControlCapability == "4031" and .payObserver == {"subject":"30","capability":"4030","enrolCapability":"4032"}' \
   "$ROOT/genesis.json" >/dev/null
 [ -s "$ROOT/deployment/pay-ledger-genesis.json" ] || { echo 'bootstrap retained no genesis pay ledger' >&2; exit 1; }
 
