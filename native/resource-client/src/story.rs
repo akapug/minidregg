@@ -945,13 +945,31 @@ fn story_join(session: &Session, name: &str, invitation: &str) -> Result<(), Don
     if value.pointer("/grant/recipient").and_then(Value::as_str) != Some(me.as_str()) {
         return Err(usage(format!("this invitation is not addressed to you ({me})")));
     }
-    import_from(session, name, &value["grant"])?;
+    // The author joining their own table (invited by themself, to play as well as to run it)
+    // already holds the room's and the scenes' references and the story's record: those are
+    // kept, and the player's cell is added to the record; everyone else imports the grant.
+    let mine = value["author"].as_str() == Some(me.as_str());
+    if !(mine && reference(session, name).is_ok()) {
+        import_from(session, name, &value["grant"])?;
+    }
     let grant = reference(session, name).map_err(error)?;
     let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
     let s = |k: &str| value.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| usage(format!("the invitation lacks {k}")));
-    import_stream(session, &format!("{name}/scenes"), &s("scenes")?, &capability)?;
-    let mut record = json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
-        "grant":name,"table":s("table")?,"scenes":s("scenes")?});
+    let scenes_ref = format!("{name}/scenes");
+    if !(mine && reference(session, &scenes_ref).is_ok()) {
+        import_stream(session, &scenes_ref, &s("scenes")?, &capability)?;
+    }
+    let existing = if mine { fs::read(record_path(session, name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) } else { None };
+    let mut record = match existing {
+        // The author's record keeps its author and GM fields; the role becomes the invitation's
+        // (a player's cell is what the moves need; narrating stays the GM's by the gm field).
+        Some(mut r) if r.is_object() => {
+            r["role"] = json!(s("role")?);
+            r
+        }
+        _ => json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
+            "grant":name,"table":s("table")?,"scenes":s("scenes")?}),
+    };
     if value["role"] == "player" {
         import_stream(session, &format!("{name}/me"), &s("cell")?, &capability)?;
         record["cell"] = json!(s("cell")?);

@@ -254,7 +254,9 @@ row verb-run "$(grep -q 'outcome answered' <<<"$page" && grep -q "$SUBJECT" <<<"
 # through /tour/4 and its outcome lands under the step.
 page=$(req GET /tour)
 row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
-page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
+# `can DOC`, one reference: bare `can` dry-runs every grant the member holds (op 130 each) and on a
+# used workspace outlasts the gateway's two minutes, and the body answers one request at a time.
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC")
 # `can` is a read (op 130 dry-runs, never submits): its outcome class is `answered`, never a
 # world transition; a Host that lacks op 130 answers it undecided, which is red here by design.
 row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -q 'outcome answered' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
@@ -286,6 +288,53 @@ can_text=$(pre_of <<<"$page")
 paste_line=$(grep -A1 '^ *paste:' <<<"$can_text" | tail -1 | sed 's/^ *//')
 page2=$(req POST /paste --data-urlencode "csrf=$CSRF" --data-urlencode "line=$paste_line")
 row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law version' <<<"$can_text" && grep -q 'action="/paste"' <<<"$page" && [ -n "$paste_line" ] && grep -q 'outcome admitted' <<<"$page2" && echo 1 || echo 0)" "$(st) can --any $DOC: $(tr '\n' ' ' <<<"$can_text" | cut -c1-160) | paste=${paste_line:-none}: $(grep -o 'class="headline">[^<]*' <<<"$page2" | head -1 | cut -c18-60)"
+# A tour form's alternative index and its field names, by the form's literals (its <h2><code>).
+alt_of() { tr -d '\n' <<<"$1" | awk -v lit="<code>$2</code>" 'BEGIN{RS="</form>"} index($0, lit) {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}'; }
+fields_of() { tr -d '\n' <<<"$1" | awk -v lit="<code>$2</code>" 'BEGIN{RS="</form>"} index($0, lit) {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' '; }
+headline() { grep -o 'class="headline">[^<]*' <<<"$1" | head -1 | cut -c18-160; }
+tour=$(req GET /tour)
+# Door 12, "changes the rules" (DEMO-EXPERIENCE A7): a law on the member's own document that
+# refuses their append but admits installs (so it stays changeable). `law check` first (a read:
+# answered, a write exists in principle); install (admitted); the append refused with the clause;
+# the revised law admitted; the append admitted.
+RULES="rules$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$RULES" --data-urlencode "law=note" >/dev/null
+STRICT='any [ not (verb == write), slot "content/payload-bytes/after" <= 0 ]'
+LOOSE='any [ not (verb == write), slot "content/payload-bytes/after" <= 16384 ]'
+a=$(alt_of "$tour" "law check"); set -- $(fields_of "$tour" "law check"); F_LAW=${1:-a2}
+page=$(req POST /tour/12 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=law" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_LAW=$STRICT")
+row rules-check "$(grep -q 'id="step-12"' <<<"$page" && grep -q 'outcome answered' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} $(headline "$page") $(pre_of <<<"$page" | tr '\n' ' ' | cut -c1-120)"
+a=$(alt_of "$tour" "law"); set -- $(fields_of "$tour" "law"); F_ID=${1:-a1}; F_REF=${2:-a2}; F_LAW=${3:-a3}
+LID="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+page=$(req POST /tour/12 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=law" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_ID=$LID" --data-urlencode "$F_REF=$RULES" --data-urlencode "$F_LAW=$STRICT" --data-urlencode "submit=on")
+row rules-install "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} fields=$F_ID,$F_REF,$F_LAW $(headline "$page")"
+page=$(req POST "/doc/$RULES/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=under the strict law")
+row rules-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q '<mark class="clause">' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+LID2="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+page=$(req POST /tour/12 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=law" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_ID=$LID2" --data-urlencode "$F_REF=$RULES" --data-urlencode "$F_LAW=$LOOSE" --data-urlencode "submit=on")
+row rules-revised "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+page=$(req POST "/doc/$RULES/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=under the revised law")
+row rules-admitted "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# Door 11, the story (A7): the built-in tale; the member is author and, invited by themself,
+# player; one legal move admitted; the impossible move refused beside the theorem's name.
+TALE="tale$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+a=$(alt_of "$tour" "story new"); set -- $(fields_of "$tour" "story new"); F_NAME=${1:-a2}; F_FROM=${2:-a3}
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_FROM=tale")
+row story-new "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${a:-?} fields=$F_NAME,$F_FROM $(headline "$page") $(pre_of <<<"$page" | head -2 | tr '\n' ' ' | cut -c1-100)"
+a=$(alt_of "$tour" "story seal"); set -- $(fields_of "$tour" "story seal"); F_NAME=${1:-a2}
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE")
+row story-seal "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+a=$(alt_of "$tour" "story invite"); set -- $(fields_of "$tour" "story invite"); F_NAME=${1:-a2}; F_SUBJ=${2:-a3}
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_SUBJ=$SUBJECT" --data-urlencode "submit=on")
+INVITE=$(pre_of <<<"$page" | sed -n "s/^story join $TALE //p" | head -1)
+row story-invite "$(grep -q 'outcome admitted' <<<"$page" && [ -n "$INVITE" ] && echo 1 || echo 0)" "$(st) $(headline "$page") invitation=$(cut -c1-60 <<<"$INVITE")"
+a=$(alt_of "$tour" "story join"); set -- $(fields_of "$tour" "story join"); F_NAME=${1:-a2}; F_INV=${2:-a3}
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_INV=$INVITE")
+row story-join "$(grep -q 'outcome answered' <<<"$page" && grep -q 'joined' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
+row story-move "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'anteroom' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
+row story-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q 'sealed_story_scene_monotone' <<<"$page" && grep -q "proved for the built-in tale" <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
