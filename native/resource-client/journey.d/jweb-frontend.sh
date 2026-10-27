@@ -255,7 +255,9 @@ row verb-run "$(grep -q 'outcome answered' <<<"$page" && grep -q "$SUBJECT" <<<"
 page=$(req GET /tour)
 row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
-row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -qE 'outcome (admitted|refused|undecided)' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# `can` is a read (op 130 dry-runs, never submits): its outcome class is `answered`, never a
+# world transition; a Host that lacks op 130 answers it undecided, which is red here by design.
+row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -q 'outcome answered' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
 # The tour's lost reply (DEMO-EXPERIENCE A11): the append form with `lose this reply once` comes
 # back undecided with its retained attempt; the retry shows the decided outcome; one line landed.
 alt=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
