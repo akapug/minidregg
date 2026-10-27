@@ -1,5 +1,9 @@
 # Linux SSH controller transport probe, 2026-09-26
 
+History: the probe this records (`probe_control.rs`, `probe-shell.sh`) was deleted on 2026-10-26.
+It no longer compiled against `native/grain-runtime/src/control.rs` (which gained `serde_json`
+and two `Event` variants), so the run below cannot be reproduced from the tree.
+
 This is a **component** probe of the actual Rust `grain-runtime connect`
 binary over `ssh -T` to persvati, using `grain-ssh` and a transient user
 systemd service running `probe_control.rs` against the exact runtime
