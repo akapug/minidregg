@@ -749,3 +749,14 @@ silently. `planVerdict` leaves out binding, which is correct: binding depends on
 
 The known gap stays open and should be listed in the lane's state file:
 `GrainResourceBirthAdmission.Pending.admitBranch` still lets `law.admit`'s `none` cover binding.
+
+**Addendum, lean-audit-c 64903e599.**
+- *Disclosure: accepted.* `preparePending`'s refusals carry no payloads. The one payload in
+  `PreparationReject` (`room`) is the requester's own room, with a reason the gate already filters by
+  grant. The string was already printed on the same authorized channel.
+- *Poles: the probe is accepted as an interim witness, not a replacement.* `scripts/kn2/neutral-birth.lean`
+  exercises both poles on the real receiver path: a passing plan that commits, and a refused plan that
+  admission refuses `policyRejected`. That shows the keystones fire on deployed inputs. ATLAS law 2
+  still wants the witnesses at declaration level, though, gated beside the axiom pin. The concrete
+  `Pending` in Lean stays owed, and the keystones are not "done" until it exists. List it in the state
+  file next to the Grain gap.
