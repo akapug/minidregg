@@ -31,6 +31,51 @@ DUES_AMOUNT = 200000000
 PAID_STATE = {'tag': 'field', 'name': 'paid', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}}
 
 
+def row_type(**members):
+    """A declared state type: the record row of `members` (name -> 'natural'|'boolean'|'label'), fields in the
+    canonical (name-sorted) order the Host's type rows use (Compiler/ObjectiveBendElaborate.lean PTy.canonical)."""
+    row = {'tag': 'emptyRow'}
+    for name in sorted(members, reverse=True):
+        row = {'tag': 'field', 'name': name, 'member': {'tag': members[name]}, 'tail': row}
+    return row
+
+
+def label(text):
+    return {'tag': 'label', 'value': text}
+
+
+def boolean(value):
+    return {'tag': 'boolean', 'value': value}
+
+
+def scalar_of(state, name, tag):
+    """A scalar field of a record datum ('natural' -> int, 'boolean' -> bool, 'label' -> str; None when absent)."""
+    if not state or state.get('tag') != 'record':
+        return None
+    value = next((f['value'] for f in state.get('fields', []) if f.get('name') == name), {})
+    if value.get('tag') != tag:
+        return None
+    return int(value['value']) if tag == 'natural' else value['value']
+
+
+def modules_of(method, repo):
+    """The package's modules for the publication: each `import PATH as ALIAS` line names a module that comes first
+    (the cohorts' own layout: world/workshop/NatOrder.obend is module 0, imported as ./NatOrder.obend), the method last."""
+    import re
+    mods, imports = [], []
+    for path, alias in re.findall(r'^import (\S+) as (\w+)', method.read_text(), re.M):
+        src = (method.parent / path)
+        src = src if src.exists() else repo / 'world' / 'workshop' / pathlib.Path(path).name
+        imports.append({'alias': alias, 'path': path, 'module': str(len(mods))})
+        mods.append({'name': src.stem, 'sourcePath': str(src.resolve()), 'imports': []})
+    mods.append({'name': method.stem, 'sourcePath': str(method), 'imports': imports})
+    return mods
+
+
+KERNEL_APPS = ('bounty', 'play', 'ballot', 'story', 'commons')
+APP_REWARD = 200000000
+
+
 def field_of(state, name):
     """A natural field of a record datum (None when absent)."""
     if not state or state.get('tag') != 'record':
@@ -103,7 +148,7 @@ try:
     if a.scenario in ('call', 'send'):
         code = two_object_route(w, a, method)
         sys.exit(code)
-    w.bring_up(['obj', 'lawful'] if a.scenario == 'effect' else ['obj'])
+    w.bring_up(['obj', 'lawful'] if a.scenario in ('effect', 'ballot', 'story', 'commons') else ['obj'])
     if a.scenario == 'effect':
         # world/activity/Effects.obend: commit {total: set 5}, then transfer 1 to the second subject's account
         a.birth_input = json.dumps(record(init=variant('set', nat(5)), to=nat(int(w.SECOND)), amount=nat(1)))
@@ -116,8 +161,50 @@ try:
                          period=nat(10), start=nat(0), periods=nat(4), window=nat(3), lease={'tag': 'boolean', 'value': False}),
             deposit=nat(int(a.deposit)), keeper=nat(int(w.SECOND)), fresh={'tag': 'boolean', 'value': True}))
         a.state_type = a.state_type or json.dumps(PAID_STATE)
-    mod = {'name': method.stem, 'sourcePath': str(method), 'imports': []}
-    pin, art = w.publication('publication', [mod], '0', a.entry)
+    if a.scenario in KERNEL_APPS:
+        # The six kernel-protocol apps (e6c7ed42). The keeper (the one decider of every await) is the second subject;
+        # accounts named in an input are this world's real ones (a transfer's `to` must be an account).
+        sponsor_acct, second_acct = int(w.SPONSOR_ACCOUNT), int(w.SECOND)
+    if a.scenario == 'bounty':
+        # world/bounty/BountyBoard.obend: `Opening` :232 {posted: Posted :27, keeper, fresh}; `Ledger` :237 {moves: Nat}
+        # is the declared state; the poster is the sponsor (it funds the purse), claimant and keeper the second subject.
+        a.birth_input = json.dumps(record(
+            posted=record(poster=nat(sponsor_acct), title=label('translate the README'), reward=nat(APP_REWARD),
+                          deadline=nat(100), review=nat(20)),
+            keeper=nat(second_acct), fresh=boolean(True)))
+        a.state_type = a.state_type or json.dumps(row_type(moves='natural'))
+    if a.scenario == 'play':
+        # world/play/CommitReveal.obend: `Opening` :240 {a, b, stake, window, now, keeper, fresh}; `Ledger` :249 {moves}.
+        # Player A is the sponsor, player B the second subject; the pot (2 * stake) is the deposit's to pay.
+        a.birth_input = json.dumps(record(
+            a=nat(sponsor_acct), b=nat(second_acct), stake=nat(APP_REWARD // 2), window=nat(5), now=nat(0),
+            keeper=nat(second_acct), fresh=boolean(True)))
+        a.state_type = a.state_type or json.dumps(row_type(moves='natural'))
+    BALLOT_SPEC = lambda: record(first=nat(1), count=nat(3), quorum=nat(2), commitEnd=nat(50), revealEnd=nat(100),
+                                 keeper=nat(second_acct), fresh=boolean(True))
+    BALLOT_STATE = row_type(yes='natural', no='natural', abstain='natural', passed='boolean', published='boolean')
+    if a.scenario == 'ballot':
+        # world/ballot/SealedBallot.obend: `Spec` :322 {first, count, quorum, commitEnd, revealEnd, keeper, fresh};
+        # `Published` :211 is the declared state (yes, no, abstain: Nat; passed, published: Bool).
+        a.birth_input = json.dumps(BALLOT_SPEC())
+        a.state_type = a.state_type or json.dumps(BALLOT_STATE)
+    STORY_OPENING = lambda: record(title=label('the lighthouse'), window=nat(10), total=nat(1),
+                                   electorate=record(first=nat(10), count=nat(3)), now=nat(0),
+                                   keeper=nat(second_acct), fresh=boolean(True))
+    STORY_STATE = row_type(chapters='natural', author='natural', text='label')
+    if a.scenario == 'story':
+        # world/story/CoAuthor.obend: `Opening` :304 {title, window, total, electorate: Electorate :44, now, keeper,
+        # fresh}; `Shelf` :313 {chapters, author: Nat; text: String} is the declared state.
+        a.birth_input = json.dumps(STORY_OPENING())
+        a.state_type = a.state_type or json.dumps(STORY_STATE)
+    COMMONS_STATE = row_type(phase='label', admissions='natural')
+    if a.scenario == 'commons':
+        # world/commons/ResidentServiceCommons.obend: `Opening` :766 {keeper, fresh}; `Admitted` :707 {phase: String,
+        # admissions: Nat} is the declared state.
+        a.birth_input = json.dumps(record(keeper=nat(second_acct), fresh=boolean(True)))
+        a.state_type = a.state_type or json.dumps(COMMONS_STATE)
+    mods = modules_of(method, repo)
+    pin, art = w.publication('publication', mods, str(len(mods) - 1), a.entry)
     w.PIN = pin
     pub = {'payer': w.SPONSOR_ACCOUNT, 'payerCapability': w.SPONSOR_SPEND}
     with w.group('publish'):
@@ -265,6 +352,71 @@ try:
             deliver('deliver-refused-1', v4)
             v5 = w.state('obj', 'still-owed-1', tx)
             w.check('period-1-still-owed-awaiting', source_of(v5).get('kind') == 'reply', {'source': source_of(v5)})
+    if a.scenario in KERNEL_APPS:
+        bal = World.balance
+        ev = lambda name, **fields: variant(name, record(**fields))
+        performed = lambda verdict, reason=None: {'kind': 'performed', 'verdict': verdict, 'reason': reason}
+
+        def birth_of(name, inp, deposit, tag):
+            """A further birth on a declared object: its transaction and the view the birth leaves."""
+            ob = w.objects[name]
+            body = {'kind': 'birth', 'object': ob['object'], 'objectCapability': ob['capability'],
+                    'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND, 'pin': pin, 'input': inp,
+                    'envelope': aw.cap(ticks), 'resume': aw.cap(ticks), 'timeout': aw.cap(ticks), 'deposit': str(deposit)}
+            t = w.turn(tag, w.sponsor, body, 'installed').get('transaction')
+            return t, w.state(name, f'{tag}-view', t)
+
+        def deliver_only(name, tag, txn, rec_, cur, expect='installed', detail=None):
+            w.turn(f'deliver-{tag}', w.sponsor, {'kind': 'deliver', 'record': rec_, 'await': World.await_of(cur)['id'],
+                                                 'account': '0', 'accountCapability': '0'}, expect, detail)
+            return w.state(name, f'after-{tag}', txn)
+
+        def drive(name, tag, txn, rec_, cur, event, expect='installed', detail=None):
+            """The keeper answers the pending await with `event`; anyone delivers it. Returns the view between the
+            two (the resolve is the keeper's, the delivery the sponsor's) and the view after the delivery."""
+            w.turn(f'resolve-{tag}', w.second, {'kind': 'resolve', 'slot': source_of(cur)['slot'],
+                                                'answer': {'reply': event}}, 'installed')
+            mid = w.state(name, f'resolved-{tag}', txn)
+            return mid, deliver_only(name, tag, txn, rec_, cur, expect, detail)
+
+        def waits_again(view):
+            return source_of(view).get('kind') == 'reply'
+    if a.scenario == 'bounty':
+        # Bounty law natively (world/bounty/BountyBoard.obend header :12-17, `escrowConserved`): the reward leaves the
+        # escrow (the purse: the birth deposit) exactly once, whole, to exactly one party. Plans :263-:268 (`transfer`
+        # Pay {to, amount, write}), `disburse` :320: approve -> a kernel transfer of the whole reward to the claimant,
+        # decided `settled` at the yield; then the next delivery ends the activity ("paid").
+        rec = v['recordCell']
+        with w.group('bounty'):
+            w.check('born-awaiting-the-keeper-ledger-0', source_of(v).get('kind') == 'reply'
+                    and field_of(v.get('state'), 'moves') == 0, {'source': source_of(v), 'state': v.get('state')})
+            _, v1 = drive('obj', 'claim', tx, rec, v, ev('claim', claimant=nat(second_acct), now=nat(10)))
+            _, v2 = drive('obj', 'submit', tx, rec, v1, ev('submit', claimant=nat(second_acct), work=label('doc-hash-1'), now=nat(40)))
+            mid, v3 = drive('obj', 'approve', tx, rec, v2, ev('approve', actor=nat(sponsor_acct), now=nat(41)))
+            w.check('approved-pays-exactly-the-reward-from-the-purse',
+                    source_of(v3) == performed('settled') and bal(v3, w.SECOND) == bal(mid, w.SECOND) + APP_REWARD
+                    and field_of(v3.get('state'), 'moves') == 1,
+                    {'source': source_of(v3), 'claimant': [bal(mid, w.SECOND), bal(v3, w.SECOND)], 'state': v3.get('state'),
+                     'purse': [v.get('purse'), v3.get('purse')]})
+            v4 = deliver_only('obj', 'settled', tx, rec, v3)
+            w.check('paid-once-and-finished',
+                    field_of(v4.get('state'), 'moves') == 1 and bal(v4, w.SECOND) == bal(v3, w.SECOND)
+                    and v4['record'].get('phase', {}).get('kind') != 'awaiting',
+                    {'phase': v4['record'].get('phase'), 'state': v4.get('state')})
+        # Teeth: a purse below the reward cannot pay the poster's refund at the deadline: the transfer is refused
+        # `unfunded` at the yield, nothing moves and nothing is written, and the bounty waits for the next event.
+        with w.group('bounty-teeth-unfunded'):
+            tx2, b = birth_of('obj', json.loads(a.birth_input), APP_REWARD // 2, 'birth-underfunded')
+            rec2 = b['recordCell']
+            mid2, after = drive('obj', 'expire-underfunded', tx2, rec2, b, ev('expire', now=nat(100)))
+            w.check('refund-refused-unfunded-moves-nothing',
+                    source_of(after) == performed('refused', 'unfunded') and bal(after, w.SECOND) == bal(mid2, w.SECOND)
+                    and after.get('stateVersion') == b.get('stateVersion')
+                    and field_of(after.get('state'), 'moves') == field_of(b.get('state'), 'moves'),
+                    {'source': source_of(after), 'version': [b.get('stateVersion'), after.get('stateVersion')],
+                     'state': after.get('state')})
+            again = deliver_only('obj', 'refused-underfunded', tx2, rec2, after)
+            w.check('refused-disbursement-waits-for-the-next-event', waits_again(again), {'source': source_of(again)})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()
