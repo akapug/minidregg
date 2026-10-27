@@ -54,35 +54,40 @@ must be green for the candidate that opens. "Every surface in ~two weeks" is a t
 council unanimously called not yet evidence-backed; the date is re-estimated after Phase 0's
 evidence spike (§3), not promised now.
 
-## 2. Where we stand (2026-10-26 evening)
+## 2. Where we stand (2026-10-27, early)
 
-- **One public node exists** (`dregg-workhorse`, cx33 fsn1, candidate 5688775a of Sep 30 over
-  ssh; nobody but ember's harness has used it). It is torn down once the new box is up.
-- **main `d4f30d1f`** = the Oct 14–17 integrator batches + today's housekeeping, review corpus
-  and this plan. Tracked lines 1.69M (HISTORY §0.3; its "422K native Rust" counts every
-  tracked file under `native/`; the `.rs`-only count is 292K: both exceed the 290K founding
-  budget on their own). Host executable closure 784 modules / 330K Lean lines.
-- **Today's candidate of main** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the warm base
-  (cold Lean time still unmeasured; the M7 reference build now in flight measures it); rows
-  PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against a baseline of 137/2/5/3 (the one
-  delta, m6grain, is a harness path, now being fixed); `jdeploy3` FAIL: growth over the MAX
-  bar at every level on a loaded box; the composed scenario never ran because dregg-infra's
-  manifest rewrite dropped the v2 contract.
-- **dregg-infra** is reconciled and PUSHED (main 5501f4f, demo-vm dbc17c7, both remotes): the
-  full v2 manifest rebuilt from provenance (18/18 self-test), the DelveTalk candidate restored
-  by a forward commit, the certifier merged onto split tenancy (its 320-record claim still
-  only the branch's own report), genesis `issuanceCap` and `lifetime` 200000 set, the roster
-  fix. The confined box (`edge/demo/`, `edge/tofu-demo/`) is written and validated, unapplied.
-- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (a
-  70-byte socket-path row in the journey driver, AND the consent allowlist lacks fields:
-  both diagnoses are being fixed); `m6grain` (sudoers path, being fixed); `m7` (no reference,
-  being built); pending `births`, `HERMES-LIVE`, `jcertify`.
-- **In flight right now** (lanes, each on its own `lane/*` branch in a worktree): L1 Lean
-  critical path (hbox), L2 custody, L3 fence+sandbox, L4 Hermes+rooms, L5 door+PAY+Discord,
-  L6 keys+store, L7 web, L8 fn+fleet, L9 build gating, L11 performance, the infra lane, the
-  hbox lane (composed-gate re-run on the fixed frame, then the M7 reference build). Ember's
-  codex session is landing the oracle appliance in the main worktree (`native/oracle-appliance`,
-  `native/spk-package-stream`, `deploy/oracle/`, an SPK `import-profile`); it is the oracle lane.
+- **The demo box exists**: `dregg-demo`, Hetzner `ccx23` (4 dedicated vCPU / 16 GB), fsn1,
+  Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`, in the existing project with its own
+  firewall and no private network (`cx43`/`cx33` were refused as `resource_unavailable` in
+  fsn1/nbg1/hel1; `cpx41` can no longer be ordered). `demo.`, `calc.demo.`, `nano.demo.dregg.online`
+  resolve (A, AAAA, CAA as code in `edge/dns-demo`, Gandi LiveDNS). The host frame install,
+  the operator secrets (Helius, the Dragon's Egg bot, the enrolment keypair; no OpenRouter key
+  yet: ember's is expired) and **rehearsal ship #1** of candidate a0db11f8 are in progress.
+- **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
+  but ember's harness has used it). It is torn down once the demo box serves.
+- **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
+  plan. Tracked lines 1.69M; host executable closure 784 modules / 330K Lean lines.
+- **Lane branches pushed and done** (integration into `integration/2026-10-26` running):
+  `lane/custody` (L2 core: one signing path in the SDK, the four refusal fixes; L2 continues
+  with call sites and deletions), `lane/web` (L7), `lane/build` (L9, contains web), `lane/fn-fleet`
+  (L8), `lane/door` (L5), `lane/keys-store` (L6), `lane/fence` (L3, one follow-up commit coming:
+  absent-after-lost-reply is undecided, not no-record). Still working: `lane/lean-critical`
+  (L1, hbox), `lane/hermes` (L4), `lane/perf` (L11).
+- **Today's candidate of main a0db11f8** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the
+  warm base; rows PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against 137/2/5/3; `jdeploy3`
+  FAIL (growth over the write MAX bar on a loaded box; the composed scenario never ran because
+  the infra manifest rewrite dropped the v2 contract: fixed in dregg-infra 5501f4f; the
+  composed phases are being re-run now, with the M7 reference build and the `exchange` row).
+- **dregg-infra** main 5501f4f and `demo-vm` 8fca5ad, pushed to both remotes: the full v2
+  manifest, the certifier on split tenancy, genesis `issuanceCap` + `lifetime` 200000, the
+  roster fix, the confined box roots, the nano tenant contract. Queued on `demo-vm`: the
+  door's infra patch (L5) and the mini-keys config changes (L6), effective at rehearsal #2.
+- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (driver
+  row AND consent fields, both in L1); `m6grain` (sudoers path, hbox lane); `m7` (reference being
+  built); pending `births`, `HERMES-LIVE`, `jcertify`.
+- **Ember's codex session** is landing the oracle appliance in the main worktree (uncommitted:
+  `native/oracle-appliance`, `native/spk-package-stream`, `deploy/oracle/`, the SPK
+  `import-profile`); it is the oracle lane and reconciles with `lane/fence` when it commits.
 
 ## 3. The prefix
 
