@@ -14761,7 +14761,7 @@ impl Runtime {
             broker_path.clone()
         };
         if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
-            sandbox_tools::require_workspace_volume(&workspace, sandbox.scratch_mib)?;
+            sandbox_tools::require_workspace_volume(&workspace, sandbox.workspace_mib)?;
         }
         let mut command = Command::new(&spec.program);
         command

@@ -262,7 +262,25 @@ operator() {
   else record "$step" OPERATOR "$what" "rc 0" "rc $RC" FAIL "$(tail -1 "$ERR" | cut -c1-200)"; fi
 }
 
+# What the resident's uid would own on the demo box (deploy/hermes/README.md
+# "One uid per resident"): the controller root, Hermes's /workspace and the
+# three subjects' homes, in allocated KiB and inodes, and the Host operations
+# the controller and resident spoke (MINI_TRACE). Measured, never gated.
+footprint() {
+  local d k i out=$SD/footprint.tsv
+  printf 'path\tkib\tinodes\n' >"$out"
+  for d in "$G" "$SD/worker-work" "$H/hermes" "$H/hhost" "$H/hprov" "$SD/launcher"; do
+    [ -e "$d" ] || continue
+    k=$(du -sk "$d" 2>/dev/null | cut -f1); i=$(find "$d" 2>/dev/null | wc -l)
+    printf '%s\t%s\t%s\n' "$d" "$k" "$i" >>"$out"
+  done
+  printf 'models\t%s\tprompts\t%s\n' "$(find "$G/state" -maxdepth 1 -type d -name 'provider-meter-*' 2>/dev/null | wc -l)" \
+    "$(find "$G/state" -maxdepth 1 -name 'resident-entered-*' 2>/dev/null | wc -l)" >>"$out"
+  cat "$SD"/trace-controller.jsonl "$SD"/trace-resident.jsonl 2>/dev/null \
+    | jq -r 'select(.kind == "host") | .what' 2>/dev/null | sort | uniq -c | sort -rn >"$SD/host-ops.txt" || true
+}
 finish() {
+  footprint
   echo "$TABLE"
   if [ "$FAILED" = 0 ]; then
     echo "J14: $N rows as expected ($TABLE)" >&2; exit 0
@@ -297,7 +315,8 @@ hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or 
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
-  operator "$1" "hermes resident pass: $2" timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  operator "$1" "hermes resident pass: $2" env "MINI_TRACE=$SD/trace-resident.jsonl" \
+    timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
   { echo "# hermes resident ($1): $2"; cut -c1-400 "$OUT"; tail -3 "$ERR"; } >>"$SD/transcript.txt"
 }
@@ -604,6 +623,7 @@ operator hermes "CONTROLLER: start $UNIT (the rendered shape, as a transient uni
     --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
     --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
     --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
+    --setenv="MINI_TRACE=$SD/trace-controller.jsonl" \
     "$GRAIN_RUNTIME" serve "$G/controller.json"
 for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
 checkp hermes "the controller listens on its control socket" test -S "$G/state/control.sock"
