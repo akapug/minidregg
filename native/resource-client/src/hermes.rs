@@ -41,11 +41,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The role templates, compiled in (the files are the roles).
-const LIBRARIAN_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/grants.json");
-const LIBRARIAN_PROGRAM: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/program.md");
-const LIBRARIAN_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/budget.json");
-const RUNNER_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/runner/grants.json");
-const RUNNER_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/runner/budget.json");
+const LIBRARIAN_GRANTS: &str = include_str!("../templates/hermes/librarian/grants.json");
+const LIBRARIAN_PROGRAM: &str = include_str!("../templates/hermes/librarian/program.md");
+const LIBRARIAN_BUDGET: &str = include_str!("../templates/hermes/librarian/budget.json");
+const RUNNER_GRANTS: &str = include_str!("../templates/hermes/runner/grants.json");
+const RUNNER_BUDGET: &str = include_str!("../templates/hermes/runner/budget.json");
 
 /// Legacy operator record, used only when no resident registry is advertised.
 /// Current selection is scoped to the actual source room cell.
@@ -338,7 +338,7 @@ pub(crate) fn role(name: &str) -> Result<Role, String> {
         "librarian" => (LIBRARIAN_GRANTS, LIBRARIAN_BUDGET),
         "runner" => (RUNNER_GRANTS, RUNNER_BUDGET),
         "gm" => {
-            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; its template is deploy/shell/templates/hermes/gm, marked for MUD-GM".into())
+            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; there is no gm template until MUD-GM writes one".into())
         }
         _ => return Err(format!("no role {name}")),
     };

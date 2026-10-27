@@ -74,7 +74,8 @@
 # root, whose length is the caller's. The journey checks every declared socket
 # before J0 and prints their margins first.
 # The live service is running and is ours; a hook must stop every process it
-# starts. Exit 0 = PASS; any other exit = FAIL. The LAST stdout line is the
+# starts. Exit 0 = PASS; exit 5 = UNCONFIGURED (an outside input is absent, named
+# on the last stderr line); any other exit = FAIL. The LAST stdout line is the
 # deciding artifact's absolute path; stderr's last line is the detail.
 # Note: by the time M3-M7 run, the resource `shared` is deliberately locked
 # (J8). A hook that needs an open resource creates its own through SPONSOR_WS.
@@ -94,6 +95,8 @@
 # budget, the elapsed time and the slowest steps named, so a journey that runs
 # long (a store whose writes slow with every record) goes red in bounded time
 # and says why, instead of being cut by the CI job limit with no verdict.
+# JOURNEY_SET=demo|kernel: the demo journey or the nightly kernel journey (the partition is below,
+# beside STEPS; `journey.sh --list-set demo` prints one).
 # JOURNEY_STEPS (default: every step) runs only the named steps, in this
 # script's order; the frontier is computed over those alone. A step whose
 # dependency is not selected is blocked, so a subset must carry its deps.
@@ -106,8 +109,54 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+# The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
+# of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
+#   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
+#           and chat, SPK grains, PAY, keys and rotation, the fleet, the fn gateway, the Store audit.
+#           scripts/check-journey.sh (local gate `journey`) runs it inside the gate's 3 h.
+#   kernel  the kernel semantics no public surface exercises directly, and G (growth to 1000 records,
+#           30-90 min): the nightly (scripts/pipeline/journey-rows row_kernel and row_growth).
+# JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
+# set naming no step refuses every run before anything starts: a new step must be placed.
+SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KCHR KCHC KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
+journey_sets_check() {
+  local id n bad=""
+  for id in "${STEPS[@]}"; do
+    n=0
+    case " ${SPINE[*]} " in *" $id "*) n=$((n + 1));; esac
+    case " ${DEMO_STEPS[*]} " in *" $id "*) n=$((n + 1));; esac
+    case " ${KERNEL_STEPS[*]} " in *" $id "*) n=$((n + 1));; esac
+    [ "$n" = 1 ] || bad="$bad $id(in $n sets)"
+  done
+  for id in "${SPINE[@]}" "${DEMO_STEPS[@]}" "${KERNEL_STEPS[@]}"; do
+    case " ${STEPS[*]} " in *" $id "*) ;; *) bad="$bad $id(no such step)";; esac
+  done
+  [ -z "$bad" ] || { echo "journey: the demo/kernel partition is broken:$bad (journey.sh SPINE/DEMO_STEPS/KERNEL_STEPS)" >&2; exit 2; }
+}
+journey_sets_check
+# journey.sh --list-set demo|kernel|all prints that journey's step ids, in order, and exits.
+if [ "${1:-}" = --list-set ]; then
+  case "${2:-}" in
+    demo) printf '%s\n' "${SPINE[@]}" "${DEMO_STEPS[@]}" ;;
+    kernel) printf '%s\n' "${SPINE[@]}" "${KERNEL_STEPS[@]}" ;;
+    all) printf '%s\n' "${STEPS[@]}" ;;
+    *) echo "usage: $0 --list-set demo|kernel|all" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
+if [ -n "${JOURNEY_SET:-}" ]; then
+  [ -z "${JOURNEY_STEPS:-}" ] || { echo "journey: give JOURNEY_SET or JOURNEY_STEPS, not both" >&2; exit 2; }
+  case "$JOURNEY_SET" in
+    demo) JOURNEY_STEPS="${SPINE[*]} ${DEMO_STEPS[*]}" ;;
+    kernel) JOURNEY_STEPS="${SPINE[*]} ${KERNEL_STEPS[*]}" ;;
+    *) echo "journey: JOURNEY_SET must be demo or kernel" >&2; exit 2 ;;
+  esac
+fi
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 MANIFEST.json NEW_RUN_ROOT" >&2
+  echo "usage: $0 MANIFEST.json NEW_RUN_ROOT | $0 --list-set demo|kernel|all" >&2
   exit 2
 fi
 MANIFEST=$1
@@ -189,7 +238,6 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -256,7 +304,7 @@ TITLE[K4]="one resource holds 32 fields and reads them back"
 TITLE[JJ]="a law reads another participant by position (joint/index/i)"
 TITLE[M3]="newcomer provisions itself and creates, no sponsor step"
 TITLE[M4]="J1-J8 through the shell over ssh"
-TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves"
+TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves (needs LAUNCH_GATE)"
 TITLE[M6]="a grain: INSTALL -> START -> reachable over http"
 TITLE[M7]="candidate built from portable interfaces reproduces hashes"
 TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refused"
@@ -992,6 +1040,8 @@ hook() {
   if [ "$rc" = 124 ]; then
     DETAIL="hook killed at its ${hook_cap}s limit (HOOK_TIMEOUT_S ${HOOK_TIMEOUT_S:-3600}, journey budget left $(budget_left || echo none)s): $DETAIL"; return 1
   fi
+  # Exit 5 is the hook's own UNCONFIGURED: an input from outside the tree is absent, named on its last stderr line.
+  [ "$rc" != 5 ] || { DETAIL="UNCONFIGURED: $DETAIL"; return 5; }
   [ "$rc" = 0 ] || { DETAIL="hook exit $rc: $DETAIL"; return 1; }
   # The live service must still be ours and alive; a hook may not take it down.
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
@@ -1004,7 +1054,7 @@ step_J12X() { hook j12x "each malformed request (number for a decimal string, mi
 step_JSERVE() { hook jserve "under each attack (3 bytes then silence; a long Host request; 50 silent connections; the J-PAY-6 route-mismatch intent through op 7) the newcomer signed read is answered (< 2 s where the Host is free), every refusal is named, the same Host answers on, and the malformed table still holds (lane serve-robust)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
-step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
+step_M5() { needs_env LAUNCH_GATE || return; hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
 step_THIN() { hook jthin-consent "thin consent signs a turn without replaying the Store: the post it shows is the post that commits; a plan carrying another command's slots and a view of another state are refused before signing; a member without observe is refused before signing with no bytes served; a moved target is named only to a signer who observes it (P4 PLAN-SCOPED-REPLAY)"; }
@@ -1038,7 +1088,7 @@ step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinne
 step_K12N() { hook j12n-runs "K-RUNS-RANGES rows: doc append extends the run that ends at the last line (insertRun); a range from an old line to an appended line renders for a covered reader; a range ending before a later append does not move; a range of the newest line alone"; }
 step_K12R() { hook j12r "P-DOC-RENDER rows: A's doc show equals the golden byte for byte; raw is the atoms; json agrees with the text; outline; html; a reader without the source's grant sees the placeholder and no bytes; a backlink names its line (lane p-doc-render)"; }
 step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
-step_WEB() { hook jweb "WEB rows: loopback-only, read-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
+step_WEB() { hook jweb "WEB rows: loopback-only mini web, its --read-only refusals and --render-static snapshot; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -1055,7 +1105,7 @@ step_JSYNC() { hook jsync "nockFSync (default 1,000,000): a 1,000,000-step run a
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
-step_JJOB1() { hook jjob1 "the job law (COMPUTE §2.3, deploy/shell/templates/job) installs on fresh cells; every edge is admitted with the right subject and time and refused with the wrong one, each refusal naming its clause; the truth carries a real run claim and the money edges are the job-money receiver's (needs JOB_PROGRAMS)"; }
+step_JJOB1() { hook jjob1 "the job law (COMPUTE §2.3, native/resource-client/templates/job) installs on fresh cells; every edge is admitted with the right subject and time and refused with the wrong one, each refusal naming its clause; the truth carries a real run claim and the money edges are the job-money receiver's (needs JOB_PROGRAMS)"; }
 step_JJOB() { hook jjob "J-JOB: one friend posts a Nock job in a room, another friend runs it, the kernel adjudicates by re-execution; a wrong answer or a stall costs the bond (needs JOB_PROGRAMS, NOCK_RUN)"; }
 step_JJOBM() { hook jjob-money "J-JOB-MONEY: fund, claim and settle as conservation-checked Book turns; refusals named by the operator explanation"; }
 step_KCL() { hook jclosure "a write creating a field its cell did not declare is refused by name (undeclaredField N) before the law runs, on a sealed board, a plain cell and a cell that declared nothing; an open cell admits it (lane K-FIELD-CLOSURE)"; }

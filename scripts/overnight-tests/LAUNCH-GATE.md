@@ -1,14 +1,14 @@
 # Linux launch-fence race probe
 
-The deployed source is `deploy/grain-host/launch-gate.rs`. The sibling
-`launch-gate.rs` in this test directory preserves the first isolated prototype
-used for the historical race evidence. `launch-gate-probe.sh` compiles and runs
-the deployed source, not that prototype. The gate controls one unique
-`mini-grain-tTASK-oOP` systemd user service.
+The deployed source is `deploy/grain-host/launch-gate.rs`, built only through
+`native/launch-gate` (the candidate's `bin/launch-gate`). The first isolated
+prototype that once sat beside this file was deleted on 2026-10-26; the
+historical race evidence names its hash. `launch-gate-probe.sh` runs the gate
+named by `LAUNCH_GATE`. The gate controls one unique `mini-grain-tTASK-oOP`
+systemd user service.
 
-Compile on Linux with
-`rustc --edition=2021 deploy/grain-host/launch-gate.rs -o launch-gate`.
-The state directory must be an owned real directory with mode 0700. Commands:
+Build it with `cargo build --release -p launch-gate`, or take a candidate's
+`bin/launch-gate`. The state directory must be an owned real directory with mode 0700. Commands:
 
 ```sh
 launch-gate init ABS_STATE_DIR mini-grain-tTASK-oOP
@@ -33,7 +33,7 @@ prove a running worker is dead. The controller must durably initialize the
 gate before launching its wrapper and persist the matching operation ID/unit
 in its own journal.
 
-Run `launch-gate-probe.sh NEW_ABSOLUTE_SCRATCH_ROOT` on Linux with a working
+Run `LAUNCH_GATE=/abs/launch-gate launch-gate-probe.sh NEW_ABSOLUTE_SCRATCH_ROOT` on Linux with a working
 user systemd manager. It retains logs in the new root. The probe submits a
 real transient start request, pauses ExecStart with `ExecStartPre`, fences
 while the unit is `activating/start-pre`, and requires the late gate to exit

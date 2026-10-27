@@ -3,14 +3,15 @@
 set -euo pipefail
 umask 077
 
+# LAUNCH_GATE names the gate under test: a candidate's bin/launch-gate, or
+# `cargo build --release -p launch-gate` (the one build, native/launch-gate).
 [[ $# == 1 && $1 == /* && ! -e $1 ]] || {
-  echo 'usage: launch-gate-probe.sh NEW_ABSOLUTE_SCRATCH_ROOT' >&2; exit 2;
+  echo 'usage: LAUNCH_GATE=/abs/launch-gate launch-gate-probe.sh NEW_ABSOLUTE_SCRATCH_ROOT' >&2; exit 2;
 }
 root=$1
-here=$(cd -- "$(dirname -- "$0")" && pwd)
-gate_source=$(realpath -e "$here/../../deploy/grain-host/launch-gate.rs")
+[[ ${LAUNCH_GATE:-} == /* && -x ${LAUNCH_GATE:-} ]] || { echo 'LAUNCH_GATE must name an absolute executable' >&2; exit 2; }
 mkdir -m 700 -- "$root"
-rustc --edition=2021 "$gate_source" -o "$root/launch-gate"
+install -m 0700 "$LAUNCH_GATE" "$root/launch-gate"
 gate=$root/launch-gate
 task="$(date +%s)$$"
 late="mini-grain-t${task}-o1"

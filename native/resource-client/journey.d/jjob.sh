@@ -10,7 +10,7 @@
 # it starts. Run it from a SHORT root (the socket path must fit SUN_LEN).
 # Also needs: NOCK_RUN (the untrusted nockvm runner) and JOB_PROGRAMS, a
 # directory holding collatz.jam and liar.jam (minimal jam bytes of
-# deploy/shell/templates/job/programs/*.hoon, compiled by the pinned hoonc).
+# native/resource-client/templates/job/programs/*.hoon, compiled by the pinned hoonc).
 # Exit 0 = PASS. The last stdout line is rows.tsv; the verdict is the last stderr line.
 #
 # Who: A = the sponsor (subject 7, account 7) is the caller and the operator;

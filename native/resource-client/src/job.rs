@@ -2,7 +2,7 @@
 //! (COMPUTE, the J-JOB floor).
 //!
 //! A job is one declared cell born in a room under the job law
-//! (`deploy/shell/templates/job/law.job`, `Kernel/Job.lean`), bound here at
+//! (`native/resource-client/templates/job/law.job`, `Kernel/Job.lean`), bound here at
 //! CALLER = this workspace's subject, PROGRAM, WINDOW. Its money is the Book's,
 //! moved by the job-money receiver (ops 160-163, `Kernel/JobMoneyReceiver.lean`):
 //!
@@ -31,9 +31,9 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 /// The job law's JSON (`scripts/gen-joblaw.py` keeps it equal to `Kernel/Job.lean` §2).
-const LAW: &str = include_str!("../../../deploy/shell/templates/job/law.job.json");
+const LAW: &str = include_str!("../templates/job/law.job.json");
 /// The same law, one clause per line, as the Host renders a refused clause.
-const LAW_SHELL: &str = include_str!("../../../deploy/shell/templates/job/law.job.shell");
+const LAW_SHELL: &str = include_str!("../templates/job/law.job.shell");
 
 const STATES: [&str; 7] = ["open", "claimed", "answered", "upheld", "slashed", "void", "closed"];
 const NAMES: [&str; 16] = [

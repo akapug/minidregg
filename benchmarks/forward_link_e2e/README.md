@@ -16,28 +16,19 @@ computable path on the deployed content cell
 The v1 stages `validate_insert`, `reopen_page_codec` and
 `physical_page_route_query` measured the deleted four-slot page and are gone.
 
-`native/hyperdocument-link-store/src/bin/forward_link_e2e_bench.rs` measures
-the actual opaque `LocalLinkStore` path. Stage, install, restarted read, exact
-retry, and reopened read each occur in a fresh child process. The install
-response is deliberately ignored before the restarted reader observes the
-14-byte Lean-authored recovery fixture.
+The native half (`forward_link_e2e_bench` over the two-file `LocalLinkStore`) went with
+`native/hyperdocument-link-store` on 2026-10-26: that crate was the twin of the shipped
+`native/hyperdocument-link-sqlite-store`, and it had not built since the root workspace
+arrived (2026-10-08). Its committed logs here are history; the Store is measured by the
+pipeline rows `births` and `perf` now.
 
-The combined runner first builds the existing `LinkEndpointController`,
-`PageDurableWeld`, `LocalFileStore`, and `ClientLocalFileCutover` proof joins,
-then runs both timed surfaces. Those proof modules establish the exact
-read-result and deployed-cell correspondences. They do not prove the Rust
-filesystem implementation refines the Lean model.
-
-Run locally with:
+Run the Lean surface with:
 
 ```sh
-bash scripts/run-forward-link-e2e-benchmark.sh
+lake env lean --run scripts/ForwardLinkSemanticBenchmark.lean
 ```
 
-For quick harness checks, the native sample counts may be reduced with
-`MINIDREGG_LINK_BENCH_SAMPLES` and `MINIDREGG_LINK_BENCH_WARMUPS`. Committed
-evidence uses the defaults: 31 measured samples and three warmups. The Lean
-surface always uses 31 measured samples, three warmups per stage, 16 repeated
+It uses 31 measured samples, three warmups per stage, 16 repeated
 operations for ordinary stages, and one operation for the cSHAKE-root stage.
 
 ## Interpretation ceiling

@@ -23,10 +23,12 @@ if [ "$#" -ne 6 ]; then
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 GRAIN=$5 RUN=$6
+# The grain launch gate is the candidate's own (bin/launch-gate, native/launch-gate), never a local rustc build.
+LAUNCH_GATE=${LAUNCH_GATE:?LAUNCH_GATE names the launch gate (a candidate bin/launch-gate, or cargo build -p launch-gate)}
 TASK=${HERMES_JOURNEY_TASK:-8751}
 TOOL_TASK=$((TASK + 1))
 UNIT=mini-grain-controller@$TASK
-for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN"; do
+for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$LAUNCH_GATE" "$RUN"; do
   case "$item" in /*) ;; *) echo "paths must be absolute: $item" >&2; exit 2;; esac
 done
 for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN"; do
@@ -76,7 +78,7 @@ trap cleanup EXIT
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$0" \
   "$HERE/fixture/hermes-deterministic-acp" "$REPO/deploy/grain-host/bwrap" \
   "$REPO/deploy/grain-host/resolve-bwrap" "$REPO/deploy/grain-host/materialize-bwrap.py" "$BWRAP" \
-  "$REPO/deploy/grain-host/launch-gate.rs" \
+  "$LAUNCH_GATE" \
   "$REPO/native/resource-client/newparticipant-acceptance.sh" >"$EV/inputs.sha256"
 confirmed() {
   jq -e '.type == "confirmed" and (.confirmation == "installed" or .confirmation == "replayed")' "$1" >/dev/null
@@ -182,7 +184,7 @@ mkdir -m 700 "$H" "$H/state" "$H/worker-work" "$H/worker-runtime" "$H/launcher"
 python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$BWRAP" \
   --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$H/launcher/bwrap" >"$EV/launcher.json"
 mark "worker launcher materialized for $BWRAP"
-rustc -O --edition 2021 -o "$H/launcher/launch-gate" "$REPO/deploy/grain-host/launch-gate.rs" 2>"$EV/launch-gate-build.log"
+install -m 0700 "$LAUNCH_GATE" "$H/launcher/launch-gate"
 cp "$GRAIN" "$H/worker-runtime/grain-runtime"
 cp "$HERE/fixture/hermes-deterministic-acp" "$H/worker-runtime/hermes-acp"
 chmod 700 "$H/launcher/bwrap" "$H/worker-runtime/hermes-acp"

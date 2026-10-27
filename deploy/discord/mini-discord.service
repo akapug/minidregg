@@ -18,7 +18,7 @@ Slice=mini.slice
 Nice=10
 UMask=0077
 EnvironmentFile=/etc/mini/discord.env
-ExecStart=/usr/local/lib/mini/mini-discord
+ExecStart=/var/lib/mini/candidate/current/bin/mini-discord
 # Follow-up bodies are spooled here (0600, removed after each call).
 RuntimeDirectory=mini-discord
 RuntimeDirectoryMode=0700

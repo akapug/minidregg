@@ -1,7 +1,7 @@
 /-
 # Assurance.ItemLaw — no dupe for a unique item, as a theorem of the item law and the kernel
 
-`deploy/shell/templates/mud/item/law.item.json` (branch `mud-templates`, commit `1ee44ed`), composed
+`native/resource-client/templates/mud/item/law.item.json` (branch `mud-templates`, commit `1ee44ed`), composed
 `all [law.management, clause 1, …, clause 7]`, written out literally in §2. Field numbers are
 `item/fields.json`: id 0, kind 1, owner 2, where 3, worn 4, charges 5.
 

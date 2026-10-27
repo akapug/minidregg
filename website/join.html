@@ -28,13 +28,22 @@
 <main id="main">
 <div class="wrap">
 <h1>Join</h1>
-<p class="lede">Accounts on the public node are given by hand. The guide is
+<p class="lede"><strong>Everything on this box is world-readable.</strong> Put nothing
+private on it.</p>
+<p>Reading needs no account: the documents members publish are at
+<a href="https://demo.dregg.online/">demo.dregg.online</a>, a static snapshot
+refreshed every few minutes. Writing happens in the hosted shell over SSH. The guide is
 <a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>;
 read it first.</p>
 <ol>
 <li>Make an SSH key for Mini.</li>
-<li>Send ember its public half and the session name you want.</li>
-<li>Once enrolled, SSH in to the <code>mini&gt;</code> prompt.</li>
+<li>Sign up for a hosted shell account at
+<a href="https://demo.dregg.online/join">demo.dregg.online/join</a> with its public half
+and the session name you want.</li>
+<li>Once your account is made, SSH in to the <code>mini&gt;</code> prompt.</li>
+<li>To publish a document to the public snapshot, delegate <code>observe</code> on it to the
+public reader (<code>delegate ID DOC PUBLIC observe 0</code>, <code>submit ID</code>,
+<code>publish ID</code>); <code>revoke</code> takes it down at the next refresh.</li>
 </ol>
 
 <h2>On the public node</h2>
@@ -43,7 +52,9 @@ JSON laws including locks, retries, history, documents, boards.</p>
 <p><strong>Not yet:</strong> rooms, chat, private rooms, key rotation, proxy mode, the
 librarian, paying to enrol (50 DREGG a week; built and run on fixtures, not deployed).</p>
 <div class="note">
-<p>The devnet is re-genesised when its data model or kernel wire changes: your SSH
+<p>Everything on this box is world-readable: any signer on it, the public reader included,
+replays the whole Store to check what it signs, so treat every document, room and
+message as public. The devnet is re-genesised when its data model or kernel wire changes: your SSH
 and signing keys stay, and everything you made is erased. Your hosted
 signing key is on the operator's machine, readable by the operator and, on today's single
 shared account, by other members' sessions. A split-account setup, where only your own account

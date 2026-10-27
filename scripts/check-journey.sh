@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # check-journey.sh — gate 5: the Mini journey, from this tree, on a fresh Store.
 #
+# Which journey: LOCAL_GATES_JOURNEY_SET, default `demo` (journey.sh JOURNEY_SET=demo: the spine J0-J8
+# and the steps the public demo's surfaces need, inside the gate's 3 h). `kernel` runs the nightly
+# kernel journey (with G at 1000 records), `all` every step. The partition lives in journey.sh.
+#
 # Builds what the journey runs FROM THIS CHECKOUT (lake build minidregg-host;
 # cargo build --release of mini, the Store helper, the verifier, grain-runtime,
-# spk-host and pay-watcher into $CARGO_TARGET_DIR, default <repo>/target-gates),
+# spk-host, pay-watcher, the grain launch gate and the journey fixtures of
+# `deploy/candidate/package.py --fixture-roles` into $CARGO_TARGET_DIR, default
+# <repo>/target-gates),
 # writes a manifest with sha256 pins, and runs native/resource-client/journey.sh
 # under a SHORT private root (mktemp under $XDG_RUNTIME_DIR, else /run/user/UID,
 # else /tmp), because grain sockets must fit sun_path (108 bytes).
@@ -24,7 +30,8 @@
 #   LOCAL_GATES_CANDIDATE (a deploy/candidate/build.sh output dir)   M7
 #   LOCAL_GATES_GROWTH_LEVELS (default "10 100 500 1000": G at its real level)
 #   LOCAL_GATES_JOURNEY_ONLY (passed as JOURNEY_ONLY; the skipped steps are red)
-#   LOCAL_GATES_JOURNEY_BUDGET_S (default 14400; wall budget of the whole journey, 0 = none)
+#   LOCAL_GATES_JOURNEY_SET (default demo; kernel; all)
+#   LOCAL_GATES_JOURNEY_BUDGET_S (default 9000 for demo, 14400 otherwise; wall budget of the whole journey, 0 = none)
 # Prints the journey's step table and frontier; the last line is the verdict.
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -38,7 +45,8 @@ die() { echo "journey-gate: FAIL: $*"; exit 1; }
 build_die() { local log=$1; shift; echo "journey-gate: tail of $log:"; tail -n 40 "$log" | sed 's/^/  | /'; die "$@"; }
 
 lake build minidregg-host >"$root/build-logs/gate5-host.log" 2>&1 || build_die "$root/build-logs/gate5-host.log" "lake build minidregg-host (build-logs/gate5-host.log)"
-for c in resource-client hyperdocument-link-sqlite-store credential-signature-verifier grain-runtime spk-host pay-watcher; do
+for c in resource-client hyperdocument-link-sqlite-store credential-signature-verifier grain-runtime spk-host pay-watcher launch-gate \
+    $(python3 deploy/candidate/package.py --fixture-roles | awk '{print $2}'); do
   (cd "native/$c" && cargo "+$rust" build --release --locked -j "${LOCAL_GATES_CARGO_JOBS:-6}") \
     >"$root/build-logs/gate5-cargo-$c.log" 2>&1 || build_die "$root/build-logs/gate5-cargo-$c.log" "cargo build --release native/$c (build-logs/gate5-cargo-$c.log)"
 done
@@ -63,17 +71,27 @@ jq -r '.sha256 | to_entries[] | "  \(.key) \(.value)"' "$man"
 levels=${LOCAL_GATES_GROWTH_LEVELS:-10 100 500 1000}
 # The whole journey is bounded: past this wall budget every step not yet started is
 # recorded FAIL naming the budget and the slowest steps, and every call and hook is
-# capped at what is left (journey.sh, JOURNEY_BUDGET_S). 4 h leaves the 350 min CI job
-# its lake build and the other gates; a run that reaches it is red with a reason, never
-# cut by the job limit with no verdict. LOCAL_GATES_JOURNEY_BUDGET_S=0 removes it.
+# capped at what is left (journey.sh, JOURNEY_BUDGET_S). The demo journey gets 2.5 h, inside
+# local-gates' 3 h per gate (LOCAL_GATES_GATE_TIMEOUT_S) with the builds above; the kernel and
+# full journeys keep 4 h and belong to the nightly. A run that reaches its budget is red with a
+# reason, never cut by a timeout with no verdict. LOCAL_GATES_JOURNEY_BUDGET_S=0 removes it.
+set_name=${LOCAL_GATES_JOURNEY_SET:-demo}
+case $set_name in
+  demo) budget_default=9000 ;;   # 2.5 h: the gate's 3 h also holds the builds above
+  kernel|all) budget_default=14400 ;;
+  *) die "LOCAL_GATES_JOURNEY_SET must be demo, kernel or all" ;;
+esac
+echo "journey-gate: journey set $set_name"
 env_args=(JOURNEY_GROWTH_LEVELS="$levels" PAY_WATCHER_BIN="$bin/pay-watcher"
-  JOURNEY_BUDGET_S="${LOCAL_GATES_JOURNEY_BUDGET_S:-14400}")
+  LAUNCH_GATE="$bin/launch-gate" TEST_PROVIDER="$bin/mini-hermes-test-provider"
+  JOURNEY_BUDGET_S="${LOCAL_GATES_JOURNEY_BUDGET_S:-$budget_default}")
+[ "$set_name" = all ] || env_args+=(JOURNEY_SET="$set_name")
 [ -n "${LOCAL_GATES_JOURNEY_ONLY:-}" ] && env_args+=(JOURNEY_ONLY="$LOCAL_GATES_JOURNEY_ONLY")
 for v in NOCK_TEMPLATES NOCK_RUN NOCK_DOOR_JAM NOCK_DOOR_FUEL; do
   src=LOCAL_GATES_$v
   [ -n "${!src:-}" ] && env_args+=("$v=${!src}")
 done
-env -u JOURNEY_ONLY -u NOCK_TEMPLATES -u NOCK_RUN -u NOCK_DOOR_JAM -u NOCK_DOOR_FUEL \
+env -u JOURNEY_ONLY -u JOURNEY_SET -u JOURNEY_STEPS -u NOCK_TEMPLATES -u NOCK_RUN -u NOCK_DOOR_JAM -u NOCK_DOOR_FUEL \
   "${env_args[@]}" bash native/resource-client/journey.sh "$man" "$run"
 jrc=$?
 res=$run/journey-result.json

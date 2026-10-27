@@ -408,7 +408,8 @@ lake_manifest_sha=$(sha256_file "$source/lake-manifest.json")
 rust_toolchain_sha=none
 [[ ! -f "$source/rust-toolchain.toml" ]] || rust_toolchain_sha=$(sha256_file "$source/rust-toolchain.toml")
 cargo_lock_sha=none
-[[ ! -f "$source/prover/Cargo.lock" ]] || cargo_lock_sha=$(sha256_file "$source/prover/Cargo.lock")
+# The root lock pins every workspace member (Cargo.toml; scripts/check-workspace.sh).
+[[ ! -f "$source/Cargo.lock" ]] || cargo_lock_sha=$(sha256_file "$source/Cargo.lock")
 
 package_count=$(jq '.packages | length' "$source/lake-manifest.json")
 git_package_count=$(jq '[.packages[] | select(.type == "git")] | length' "$source/lake-manifest.json")

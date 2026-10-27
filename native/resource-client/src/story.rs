@@ -2,7 +2,7 @@
 //! and from then on the table is the LAW on every player's cell.
 //!
 //! THE TABLE is a document in the story's room (`NAME/table`), one row per
-//! line (`deploy/shell/templates/story/README.md` has the grammar):
+//! line (`native/resource-client/templates/story/README.md` has the grammar):
 //!   title TEXT | scene N TITLE | TEXT | start N | end N | item NAME N
 //!   exit N WORD M [needs ITEM] | act N VERB M [needs ITEM]
 //! `table_of` parses and checks it (fail closed: a dangling exit, an
@@ -62,7 +62,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// The built-in tale's table.
-pub(crate) const TALE: &str = include_str!("../../../deploy/shell/templates/story/tale/table");
+pub(crate) const TALE: &str = include_str!("../templates/story/tale/table");
 
 /// The fields every player cell has before its items, in field order.
 pub(crate) const PLAYER_FIELDS: [&str; 2] = ["scene", "turn"];

@@ -9,7 +9,7 @@
 # fresh Store and service (newparticipant-acceptance.sh, the J0 fixture) and stops what it starts.
 # Run it from a short root (SUN_LEN). Exit 0 = PASS; the last stdout line is rows.tsv.
 #
-# The job law is C1's (deploy/shell/templates/job/law.job): a job is a declared cell born in A's
+# The job law is C1's (native/resource-client/templates/job/law.job): a job is a declared cell born in A's
 # room `lab`, ordered by its caller (born unfunded), and its money moves only by the job-money
 # receiver (ops 160-163), which pins the job law (notJobLaw otherwise). The terminal states are
 # reached by the law's own edges, never hand-set: upheld by timeout (an answer, no truth, the

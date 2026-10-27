@@ -14,10 +14,11 @@
 #   bin/mini-discord                            Discord entrance
 #   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher
+#   bin/launch-gate                             grain worker launch gate (beside the bwrap launcher)
 # packaged by deploy/candidate/package.py into the one candidate format:
 # provenance.json (source commit, toolchains, hashes, each ELF's glibc needs),
 # SHA256SUMS, and manifest.json (the journey-format manifest: absolute paths +
-# SHA-256 pins). package.py --capsule packages a sealed hbox family the same way.
+# SHA-256 pins). lane-build.sh (an incremental build) packages through the same package.py.
 # Signing needs a locally selected consent pair: MINI_LOCAL_HOST (the native
 # Host, for pure codecs) and MINI_CONSENT_HOST (minidregg-client-consent, which
 # reconstructs every plan before a key signs it), plus MINI_CONSENT_CONFIG.

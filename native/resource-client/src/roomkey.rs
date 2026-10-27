@@ -130,9 +130,9 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 /// The keys cell's law, as the template ships it; `@FOUNDER` is the founder.
-const KEYS_LAW: &str = include_str!("../../../deploy/shell/templates/room/private/law.keys.json");
+const KEYS_LAW: &str = include_str!("../templates/room/private/law.keys.json");
 /// The room cell's own law for the private template.
-const ROOM_LAW: &str = include_str!("../../../deploy/shell/templates/room/private/law.room.json");
+const ROOM_LAW: &str = include_str!("../templates/room/private/law.room.json");
 /// The kernel's stream payload limit (`StreamCell.maxPayloadBytes`).
 const MAX_STREAM_PAYLOAD: usize = 4096;
 /// Where the operator lists the subjects whose signing key is a file on the box.

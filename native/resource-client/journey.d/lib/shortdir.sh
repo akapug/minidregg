@@ -37,6 +37,7 @@ J0	world	world.sock
 M3	m3	m3/public/mini.sock
 M4	m4	m4/store/public/mini.sock
 M5	m5	m5/hermes/state/mcp-0000000000000011.sock
+M6	m6	m6/g/a/sock/participant/host.sock
 M7	m7	m7/public/mini.sock
 M8	m8	m8/fixture/public/mini.sock
 J13	j13	j13/store/public/mini.sock

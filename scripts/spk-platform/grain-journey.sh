@@ -579,6 +579,67 @@ floor() (
   echo "floor-held app-processes=$found unit=$unit"
 )
 
+# edge APP KIND: the public edge in front of the resident's route socket (ruling D9;
+# WEB-SPK-PUBLIC section 4.7): a TLS terminator (Caddy, CADDY) on a loopback port with a
+# throwaway certificate for grain.test, reverse-proxying to the route's http.sock. Through
+# it: the authenticated GET answers 200; the same GET without the credential is refused
+# (not 2xx); a WebSocket open (WS_PATH_X, default /m6grain/ws) reaches 101. Caddy is this
+# phase's child, stopped by its PID file. Not measured here: the Store's op34 count per GET
+# and the edge running under a uid other than the operator's (the peer-gid change, L3).
+edge_check() (
+  app=$1 kind=$2 ws=$3
+  dir=$STATE/apps/$app/routes/owner-$kind
+  [ -n "${CADDY:-}" ] && [ -x "$CADDY" ] || { echo "edge phase needs CADDY (a caddy executable)" >&2; exit 1; }
+  [ -S "$dir/http.sock" ] || { echo "no route socket $dir/http.sock" >&2; exit 1; }
+  e=$RUN/edge-$app
+  rm -rf "$e"; mkdir -m 700 "$e" "$e/data" "$e/config"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=grain.test \
+    -addext subjectAltName=DNS:grain.test -keyout "$e/key.pem" -out "$e/cert.pem" 2>"$e/openssl.err" \
+    || { echo "openssl could not make the test certificate: $(tail -1 "$e/openssl.err")" >&2; exit 1; }
+  port=$((20000 + $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 20000))
+  cat >"$e/Caddyfile" <<CADDYFILE
+{
+	admin off
+	auto_https off
+	storage file_system $e/data
+}
+https://grain.test:$port {
+	bind 127.0.0.1
+	tls $e/cert.pem $e/key.pem
+	reverse_proxy unix/$dir/http.sock {
+		header_up Host grain.test
+	}
+}
+CADDYFILE
+  XDG_DATA_HOME=$e/data XDG_CONFIG_HOME=$e/config HOME=$e \
+    "$CADDY" run --config "$e/Caddyfile" --adapter caddyfile >"$e/caddy.log" 2>&1 &
+  echo $! >"$e/caddy.pid"
+  trap 'kill "$(cat "$e/caddy.pid")" 2>/dev/null; wait 2>/dev/null' EXIT
+  url=https://grain.test:$port
+  tls="--resolve grain.test:$port:127.0.0.1 --cacert $e/cert.pem"
+  tries=0
+  until curl -s $tls -o /dev/null --max-time 2 "$url/"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 50 ] || { echo "edge did not listen on 127.0.0.1:$port: $(tail -1 "$e/caddy.log")" >&2; exit 1; }
+    kill -0 "$(cat "$e/caddy.pid")" 2>/dev/null || { echo "caddy exited: $(tail -1 "$e/caddy.log")" >&2; exit 1; }
+    sleep 0.2
+  done
+  cred "$kind" "$dir" >"$e/cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$e/cred"
+  rm -f "$e/cred"
+  authed=$(curl -sS $tls --max-time 900 "$@" -o "$EV/edge-$app-authed.body" -w '%{http_code}' "$url$getp")
+  anon=$(curl -sS $tls --max-time 900 -o "$EV/edge-$app-anon.body" -w '%{http_code}' "$url$getp")
+  wsc=$(curl -sS $tls --http1.1 --max-time 10 "$@" -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: bWluaS1lZGdlLXByb2JlLQ==' \
+    -o /dev/null -w '%{http_code}' "$url$ws" 2>/dev/null || :)
+  printf 'authed=%s anon=%s websocket=%s port=%s\n' "$authed" "$anon" "$wsc" "$port" >"$EV/edge-$app.result"
+  [ "$authed" = 200 ] || { echo "edge: authenticated GET $getp answered $authed, not 200" >&2; exit 1; }
+  case $anon in 2??) echo "edge: GET $getp without the credential answered $anon" >&2; exit 1 ;; esac
+  [ "$wsc" = 101 ] || { echo "edge: WebSocket open $ws answered ${wsc:-nothing}, not 101" >&2; exit 1; }
+  echo "edge-held authed=200 anon=$anon websocket=101 via 127.0.0.1:$port"
+)
+
 write_profile() {
   state_paths
   if [ -n "$PROFILE" ]; then
@@ -653,6 +714,7 @@ run_phase() {
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
   eval "postm=\${POST_METHOD_$upper:-POST} pollp=\${POLL_PATH_$upper:-'/m6grain/json?poll=1&since=all'}"
   eval "postb=\${POST_BODY_$upper:-'published by $letter before STOP'}"
+  eval "wsp=\${WS_PATH_$upper:-/m6grain/ws}"
   # The owner's role basis in the share ceiling and the enrollment: role 0
   # (sntfy's only role) unless ROLE_BASIS_X says otherwise, e.g.
   # {"type":"allAccess"} for a package that declares no roles.
@@ -685,6 +747,7 @@ run_phase() {
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
     poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
     floor) step "$phase" floor "$app" ;;
+    edge) step "$phase" edge_check "$app" "$kind" "$wsp" ;;
     *) fail "unknown phase $1" ;;
   esac
 }

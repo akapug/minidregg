@@ -337,9 +337,9 @@ row "signed read of field 1 = 2^125 + 2^40 under any[verb 2, field 1 <= clock/no
   "stamp=$fs law=$fl read rc=$(rc rfar) [$why]" \
   "$([ $fs = 0 ] && [ $fl = 0 ] && [ "$(rc rfar)" != 0 ] && [[ "$why" == 'refused: law-input-range: '*'clock/now'*"left $FARR"*"right $NOW"* ]]; echo $?)"
 
-# A MUD sheet (deploy/shell/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
+# A MUD sheet (native/resource-client/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
 # founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.
-MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/mud" && pwd)
+MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/mud" && pwd)
 S=$(jq -r .subject "$SPONSOR_WS/workspace.json"); REF=$(jq -r .subject "$NEWCOMER_WS/workspace.json")
 SHEET=tidewrack-sheet-$S
 subst() {

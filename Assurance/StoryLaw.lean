@@ -17,7 +17,7 @@ on every player's cell, generated from the table:
 
 §2 defines that law for every table (`law`); §3–§5 prove what it admits; §6 proves that no
 policy installation can ever replace it; §7 is the table document's own sealed law; §8 is the
-example story (`deploy/shell/templates/story/tale/table`) with its law as the client generated
+example story (`native/resource-client/templates/story/tale/table`) with its law as the client generated
 it, embedded by `scripts/gen-storylaw.py` (`--check` proves the embed is the client's output),
 and proved equal to `law taleTable` by `rfl`; §8 also has both poles by `decide`.
 
@@ -398,7 +398,7 @@ end Sealed
 /-! ## §8. The tale: the example story, its generated law, and both poles
 
 `taleTable` and `taleEmbedded` (between the markers) are written by `scripts/gen-storylaw.py`
-from `mini story-law --table deploy/shell/templates/story/tale/table`: the client's own table
+from `mini story-law --table native/resource-client/templates/story/tale/table`: the client's own table
 parser and law generator, the code `story seal` runs. `--check` fails if either differs from
 what the client generates now. -/
 

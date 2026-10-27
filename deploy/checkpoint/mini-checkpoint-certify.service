@@ -17,7 +17,7 @@ Description=Mini certify the head (operator checkpoint, tail bound)
 
 [Service]
 Type=oneshot
-Environment=MINI=/usr/local/bin/mini
+Environment=MINI=/var/lib/mini/candidate/current/bin/mini
 Environment=MINI_CHECKPOINT_WORKSPACE=%h/mini/operator-workspace
 Environment=MINI_CHECKPOINT_CONTROL=53
 Environment=MINI_CHECKPOINT_MIN_TAIL=64

@@ -3,7 +3,7 @@
 
 One declared cell is one market: a founder sells `supply` units at one uniform price to at most
 four sealed bids. This module is the law's **source**. The shell template
-`deploy/shell/templates/market/sealed/law.market` is the Host's own rendering of `law`
+`native/resource-client/templates/market/sealed/law.market` is the Host's own rendering of `law`
 (`LawLeaf.renderClause`, the text a refusal prints) with the parameters as placeholders, written by
 `scripts/SealedMarketTemplate.lean`; the client binds the placeholders and parses it
 (`native/resource-client/src/market.rs`), and `law show` prints an installed law back from the same
