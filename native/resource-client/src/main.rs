@@ -705,7 +705,6 @@ usage:
   mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT --verifier LOCAL-HOST
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
-  mini key --action export-blinding --secret KEY
   mini verify-view --view VIEW.json
   mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
   mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
@@ -820,7 +819,6 @@ usage:
   mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
   mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
-  mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
   mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
   mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
   mini fn-namespace-lookup --state-dir PRIVATE-DIR
@@ -847,7 +845,6 @@ usage:
   mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
   mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
-  mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
@@ -1096,7 +1093,7 @@ fn keygen(
     hosted: bool,
 ) -> Result<()> {
     let public_key = generate_key(secret, public, escrow, next, hosted)?;
-    eprintln!("Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.");
+    eprintln!("Your blinding key is derived from this seed; it keys the salts that hide each cell’s fields from readers you have not named.");
     println!("{}", hex(&public_key));
     Ok(())
 }
@@ -2530,40 +2527,6 @@ fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     )
 }
 
-fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsString]) -> Result<()> {
-    let word = command.to_str().ok_or("host command must be UTF-8")?;
-    if !matches!(
-        word,
-        "portable-verify-fn"
-            | "consumer-verify-poll-files"
-            | "portable-consumer-decide"
-            | "poll-consumer-decide"
-            | "consumer-poll-decide"
-            | "consumer-export-inbox"
-            | "consumer-export-poll"
-            | "consumer-ack-poll"
-            | "reply-consumer-poll-decide"
-            | "reply-consumer-export-result"
-            | "reply-consumer-ack-poll"
-            | "consumer-export-reply"
-            | "consumer-stage-reply-plan"
-            | "consumer-stage-reply-sign"
-            | "consumer-decide-test"
-    ) {
-        return Err(format!("unsupported fn consumer command {word}"));
-    }
-    if SOCKET.get().is_some() {
-        return Err("fn consumer file commands require direct Host/Main CLI until a typed session opcode exists".to_owned());
-    }
-    let mut all = Vec::with_capacity(arguments.len() + 1);
-    all.push(command);
-    all.extend(arguments.iter().map(OsString::as_os_str));
-    let output = process(host, config, &all)?;
-    io::stdout()
-        .write_all(&output.stdout)
-        .map_err(|e| format!("cannot print host output: {e}"))
-}
-
 #[cfg(unix)]
 #[derive(Clone, Copy)]
 struct ConsumerRoute {
@@ -3228,7 +3191,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "key" if !matches!(
             args.peek("action").and_then(OsStr::to_str),
-            Some("export-blinding" | "cell-blinding" | "derive-salt")
+            Some("cell-blinding" | "derive-salt")
         ) => keys::run(args),
         // The credential service moved into the key broker (native/mini-keys);
         // the old verbs refuse by name rather than reading a seal key.
@@ -3333,14 +3296,6 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("operator control requires --socket")?;
             operator_drain::command(socket, &host, &config, instance.as_deref().map(|instance| (instance, pid, timeout)))
-        }
-        "host-command" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let command = args.required("command")?;
-            let arguments = args.repeated("arg");
-            args.finish()?;
-            host_command(&host, &config, &command, &arguments)
         }
         "consumer-poll" | "reply-consumer-poll" => {
             let reply = args.command == OsStr::new("reply-consumer-poll");
@@ -3727,12 +3682,6 @@ fn run(mut args: Args) -> Result<()> {
             let action = args.required("action")?;
             let seed = crate::fsio::read_seed(&path(args.required("secret")?))?;
             match action.to_str() {
-                Some("export-blinding") => {
-                    args.finish()?;
-                    eprintln!("{}", hiding::BLINDING_NOTICE);
-                    println!("{}", hex(&hiding::blinding_key(&seed)));
-                    Ok(())
-                }
                 Some("cell-blinding") => {
                     // With --heights, the cell's CURRENT blinding: the birth blinding
                     // ratcheted once per write at each height (K-HIDE-ROTATE).
@@ -3789,7 +3738,7 @@ fn run(mut args: Args) -> Result<()> {
                     println!("{}", hex(&salt));
                     Ok(())
                 }
-                _ => Err("key --action is export-blinding, cell-blinding or derive-salt".to_owned()),
+                _ => Err("key --action is cell-blinding or derive-salt".to_owned()),
             }
         }
         "bootstrap" => {
@@ -4430,12 +4379,6 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             selected_release::lookup(&directory, SOCKET.get().map(PathBuf::as_path))
-        }
-        #[cfg(unix)]
-        "selected-release-retry" => {
-            let directory = path(args.required("attempt")?);
-            args.finish()?;
-            selected_release::retry_submit(&directory, SOCKET.get().map(PathBuf::as_path))
         }
         "export-evidence" => {
             let host = path(args.required("host")?);

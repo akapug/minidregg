@@ -405,30 +405,17 @@ per-request marker before transmission. Each response frame is retained
 before the Host decodes its `Outcome`; a lost or mismatched response is
 uncertain even if the receiver may have committed. Lookup sends the same
 ingress to the source-owned historical replay path and never submits missing
-work. Only a retained latest lookup with `type: "absent"` permits an explicit
-`mini selected-release-retry --attempt /private/path/attempt-1`, which sends
-the exact retained ingress once; it does not author a new nonce or release.
-At retry, the pinned Host re-decodes the exact retained lookup binary; cached
-JSON cannot authorize submission. The latest lookup's ingress digest and
-selected socket must match the retry request.
-After any resubmit, another absent lookup is required before a further
-resubmit. A historical confirmed lookup reports the original native receipt.
-An optional `--socket NEW-SOCKET` on lookup or retry selects a restarted
-endpoint while retaining the Host image/config/ingress pins.
+work. Recovery (`selected_release::recover`) looks the exact ingress up and
+resubmits the same retained bytes once only when that lookup, decoded by the
+pinned Host at that moment, says `absent`; it does not author a new nonce or
+release, and a lost lookup reply never triggers a submit. A historical
+confirmed lookup reports the original native receipt. An optional
+`--socket NEW-SOCKET` on lookup selects a restarted endpoint while retaining
+the Host image/config/ingress pins.
 
-The existing file-oriented fn consumer Host/Main commands are exposed by a
-restricted direct bridge, for example:
-
-```sh
-mini host-command --host HOST --config CONFIG.json \
-  --command consumer-export-reply --arg TRANSACTION-ID --arg REPLY.bin
-```
-
-`--arg` order is preserved. Only the fn consumer command allowlist in the
-client source is accepted; Rust invokes Host/Main directly without a shell or a
-second implementation of those semantics. The typed B and A poll/ACK routes
-below use the framed session; other allowlisted file-oriented fn commands still
-use a separate direct host process.
+The fn consumer's file-oriented Host/Main commands have no client bridge (the
+former `mini host-command` allowlist had no caller and was deleted 2026-10-26);
+the typed B and A poll/ACK routes below use the framed session.
 
 For a service configured with the host's `fnPoll` pin, the typed consumer
 path uses one socket for the entire poll, Mini submission, and fn ACK:
