@@ -196,11 +196,14 @@ page=$(req POST /export --data-urlencode "csrf=$CSRF")
 XNAME=$(grep -o 'Preparing <code>world-[0-9]*' <<<"$page" | sed 's/.*<code>//' | head -1)
 row export-start "$([ -n "$XNAME" ] && echo 1 || echo 0)" "$(st) ${XNAME:-no name}"
 xready=0; xstart=$(date +%s)
-for i in $(seq 1 60); do
+# The export reads every document the member holds (one signed read each): its time is published
+# in the row, and the wait is generous (JWF_EXPORT_WAIT_S, 900).
+for i in $(seq 1 $(( ${JWF_EXPORT_WAIT_S:-900} / 5 ))); do
   page=$(req GET /export); grep -q "action=\"/export/$XNAME/download\"" <<<"$page" && { xready=1; break; }
+  grep -q "<code>$XNAME</code> ended without an archive" <<<"$page" && break
   sleep 5
 done
-row export-ready "$xready" "$(st) after $(( $(date +%s) - xstart )) s"
+row export-ready "$xready" "$(st) after $(( $(date +%s) - xstart )) s, $(ls "$M/home/workspace/refs" 2>/dev/null | wc -l | tr -d ' ') references $(grep -o "<code>$XNAME</code> ended without an archive: <code>[^<]*" <<<"$page" | sed 's/.*<code>//' | cut -c1-160)"
 docpage=$(req GET "/doc/$DOC")
 LIVE_H=$(grep -o 'data-height="[0-9]*"' <<<"$docpage" | head -1 | grep -o '[0-9]*')
 LIVE_W=$(grep -o 'data-world-root="[^"]*"' <<<"$docpage" | head -1 | sed 's/.*="//; s/"$//')

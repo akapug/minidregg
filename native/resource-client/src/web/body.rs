@@ -683,7 +683,13 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         }
         ["export"] => {
             let name = format!("world-{}", now_secs());
-            let started = verb_detached(site, &format!("export world {name}"));
+            // The run's own words land beside the archive (NAME.log), so a failure is said on the page.
+            let started = site.shell.as_ref().is_some_and(|shell| {
+                let dir = shell.home.join("exports");
+                fs::create_dir_all(&dir).is_ok()
+                    && fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).is_ok()
+                    && verb_detached(site, &format!("export world {name}"), &dir.join(format!("{name}.log")))
+            });
             export_page(site, Some(if started { format!("Preparing <code>{name}</code>: every document is read as the Host renders it to you now. Reload this page; the download appears when it is ready.") } else { "The export could not be started (no shell paths for this body).".to_owned() }))
         }
         ["tour", step] => {
@@ -887,11 +893,26 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
     }
     let mut ready = Vec::new();
     let mut preparing = Vec::new();
+    let mut failed = Vec::new();
     if let Some(dir) = site.shell.as_ref().map(|s| s.home.join("exports")) {
         for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(base) = name.strip_suffix(".log") {
+                // A run whose archive is neither ready nor in progress ended without one: say why.
+                let dir = entry.path().with_file_name("");
+                if !dir.join(base).exists() && !dir.join(format!("{base}.part")).exists() {
+                    let said = fs::read_to_string(entry.path()).unwrap_or_default();
+                    let why = said.lines().rev().find(|l| l.contains("error") || l.contains("refused") || l.contains("usage")).unwrap_or("");
+                    if !why.is_empty() {
+                        failed.push((base.to_owned(), why.to_owned()));
+                    } else {
+                        preparing.push(base.to_owned());
+                    }
+                }
+                continue;
+            }
             match name.strip_suffix(".part") {
-                Some(base) => preparing.push(base.to_owned()),
+                Some(_) => {}
                 None if export_file(site, &name).is_some() => ready.push((name, entry.metadata().map(|m| m.len()).unwrap_or(0))),
                 None => {}
             }
@@ -907,6 +928,9 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
     }
     for name in &preparing {
         body.push_str(&format!("<p class=\"note\"><code>{}</code> is being prepared.</p>\n", escape(name)));
+    }
+    for (name, why) in &failed {
+        body.push_str(&format!("<p class=\"note\"><code>{}</code> ended without an archive: <code>{}</code></p>\n", escape(name), escape(why)));
     }
     body.push_str("<form method=\"post\" action=\"/export\"><button>Export my world</button></form>\n");
     Page { status: 200, title: "Export my world".into(), stamp: Stamp::None, body }
@@ -929,6 +953,7 @@ fn export_download(stream: &mut UnixStream, site: &Site, name: &str) -> Result<(
     let sent = std::io::copy(&mut file, stream).map_err(|e| e.to_string())?;
     if sent == length {
         let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_file_name(format!("{name}.log")));
     }
     Ok(())
 }
@@ -957,10 +982,12 @@ fn shell_command(site: &Site, exe: &std::path::Path, shell: &Shell) -> Command {
 
 /// Run one shell line as this member in the background, to its end (a thread reaps it): the
 /// export, which reads every document and may take longer than one request.
-fn verb_detached(site: &Site, line: &str) -> bool {
+fn verb_detached(site: &Site, line: &str, log: &std::path::Path) -> bool {
     let (Some(shell), Ok(exe)) = (site.shell.as_ref(), std::env::current_exe()) else { return false };
+    let Ok(log) = fs::OpenOptions::new().write(true).create_new(true).open(log) else { return false };
+    let Ok(log2) = log.try_clone() else { return false };
     let mut command = shell_command(site, &exe, shell);
-    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+    command.stdin(Stdio::piped()).stdout(Stdio::from(log)).stderr(Stdio::from(log2));
     let Ok(mut child) = command.spawn() else { return false };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(format!("{line}\n").as_bytes());

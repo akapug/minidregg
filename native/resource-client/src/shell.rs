@@ -1859,7 +1859,9 @@ fn prune_refusals(dir: &Path, keep: usize) {
 /// first component of every request the line writes.
 fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: &[(PathBuf, Vec<u8>)]) -> Result<()> {
     let mut folders = vec!["keys".to_owned(), "enroll".to_owned()];
-    for (path, _) in writes {
+    // A command's output file (`--out`, the export) lands in its own private session folder too.
+    let outs: Vec<PathBuf> = flags.iter().filter(|(name, _)| name == "out").map(|(_, value)| PathBuf::from(value)).collect();
+    for path in writes.iter().map(|(path, _)| path).chain(outs.iter()) {
         if let Ok(relative) = path.strip_prefix(&session.home) {
             let mut parts = relative.components();
             if let (Some(std::path::Component::Normal(first)), Some(_)) = (parts.next(), parts.next()) {
@@ -2570,6 +2572,23 @@ mod tests {
             host: PathBuf::from("/bin/host"),
             config: PathBuf::from("/c.json"),
         }
+    }
+
+    #[test]
+    fn export_world_writes_into_a_private_exports_folder_under_home() {
+        let home = std::env::temp_dir().join(format!("mini-export-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let s = Session { home: home.clone(), ..session() };
+        let Plan::Client { command, flags, writes } = plan(&s, "export world w1").unwrap() else { panic!("not a client plan") };
+        assert_eq!(command, "export-world");
+        assert!(flags.iter().any(|(k, v)| k == "out" && PathBuf::from(v) == home.join("exports/w1")));
+        admit_session_paths(&s, &flags, &writes).unwrap();
+        assert_eq!(std::fs::metadata(home.join("exports")).unwrap().permissions().mode() & 0o777, 0o700);
+        assert!(plan(&s, "export world ../x").is_err());
+        assert!(matches!(plan(&s, "export p1").unwrap(), Plan::Export(_)), "export ID keeps its meaning");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     fn client(plan: Plan) -> (String, Vec<(String, String)>, Vec<(PathBuf, String)>) {
