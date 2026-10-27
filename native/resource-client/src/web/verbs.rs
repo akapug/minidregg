@@ -38,8 +38,10 @@ pub(super) struct Alt {
 }
 
 impl Alt {
+    /// The leading literal words: the leaf's name (`doc append`, `room template show`), as the
+    /// journey's face-coverage row reads it from `help`.
     pub fn literals(&self) -> String {
-        self.tokens.iter().filter_map(|t| if let Tok::Lit(l) = t { Some(l.as_str()) } else { None }).collect::<Vec<_>>().join(" ")
+        self.tokens.iter().map_while(|t| if let Tok::Lit(l) = t { Some(l.as_str()) } else { None }).collect::<Vec<_>>().join(" ")
     }
 
     /// A proposal: its first placeholder is the proposal `ID`; `submit ID` is offered after it.
@@ -167,8 +169,17 @@ fn tokens(alt: &str) -> Vec<Tok> {
             continue;
         }
         if is_literal(first) {
-            out.push(Tok::Lit(first.to_owned()));
-            // `[FIELDS|open]`: a literal choice inside brackets is still one optional field.
+            if optional {
+                // `[all]`, `[again]`, `[at N]`: an optional literal word is a choice of one.
+                out.push(Tok::Arg { name: first.to_owned(), optional: true, kind: Kind::Choice(vec![first.to_owned()]) });
+                for more in parts {
+                    if !is_literal(more) {
+                        out.push(Tok::Arg { name: more.to_owned(), optional: true, kind: kind_of(more) });
+                    }
+                }
+            } else {
+                out.push(Tok::Lit(first.to_owned()));
+            }
             continue;
         }
         if first.contains('|') && first.split('|').all(is_literal) {
@@ -393,6 +404,9 @@ mod tests {
         assert_eq!(room.len(), 2);
         assert_eq!(room[0].tokens[3], Tok::Flag { name: "--law".into(), value: Some(("open|realm".into(), Kind::Choice(vec!["open".into(), "realm".into()]))), optional: true });
         assert_eq!(room[1].tokens[3], Tok::Flag { name: "--private".into(), value: None, optional: false });
+        let hist = alternatives("history [all] | doc transclude NAME SOURCE FROM TO [snapshot|live] [at N] | invoke ID REF create FIELD VALUE | pay ROOM week|N [--account REF] [again]");
+        assert_eq!(hist.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["history", "doc transclude", "invoke", "pay"]);
+        assert_eq!(hist[0].tokens[1], Tok::Arg { name: "all".into(), optional: true, kind: Kind::Choice(vec!["all".into()]) });
         let law = alternatives("law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] | law show REF");
         assert_eq!(law[0].tokens[3], Tok::Arg { name: "\"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE".into(), optional: false, kind: Kind::Text });
         assert_eq!(law[0].tokens[4], Tok::Flag { name: "--allow-unsatisfiable".into(), value: None, optional: true });
