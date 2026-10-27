@@ -163,20 +163,16 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 
 ## 4. Rules for the prefix (binding on every lane brief)
 
+How lanes, the orchestrator, the boxes and the cadence work is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md) §3–§6
+(2026-10-27; it replaced the seven rules that stood here). Three rules are specific to this prefix
+and stay here:
+
 1. Rescue, repair, delete, in that order; "delete the twin" keeps and repairs the better one.
-2. Every lane's deletions are named in its brief; the first deletion commit lands within a
-   day of the lane's repair going green; a size ratchet refuses growth of the host closure.
-3. Lean interface changes land first and rebuild early; no statement packets for code being
-   removed; only a lane's top-level theorem must be non-vacuous.
-4. Rehearsals ship on the day with reds named; the opening waits for the §1 contract and
-   nothing else; the gate is never relaxed and never grown ahead of the surfaces.
-5. One root per project; resume the agent that holds the context; no censuses or ledgers
-   unless they unblock the ship; every lane brief carries the system framing, the report
-   sections, `path:line` pointers, the worktree and branch, and the verification it must run.
-6. Engineering decisions are made by the orchestrator after a multi-model synthesis; only
-   money, dates and credentials go to ember.
-7. `swarm-build` on hbox, `/tank` only; named-file commits; no `git stash`; no pattern kills;
-   filtered tests only.
+2. Every lane's deletions are named in its brief; the first deletion commit lands within a day of the
+   lane's repair going green; `scripts/gates/host-closure.max` (one number) refuses growth of the Host
+   closure.
+3. Lean interface changes land first and rebuild early (on `dregg-build`); no statement packets for
+   code being removed; only a lane's top-level theorem must be non-vacuous.
 
 ## 5. Decisions
 
