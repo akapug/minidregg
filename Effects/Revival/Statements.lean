@@ -145,6 +145,10 @@ inductive DispatchRefusal where
   | refused (code : Nat) (name : String)
   | outOfFrame (code : Nat)
   | guardFailed (code : Nat)
+  | unsupportedVersion (code : Nat)
+  | staleTarget (code : Nat)
+  /-- Any other refusal of the live controller, by its `Reject` name. -/
+  | host (code : Nat) (name : String)
   deriving DecidableEq, Repr
 
 namespace EffectSpec
@@ -188,18 +192,37 @@ end EffectSpec
 /-! ## §3. The registry and the one dispatcher. -/
 
 /-- A registered declaration over a common cell universe `Cell`: its substrate, its
-declaration, and how its typed state is read from and written back to a cell. -/
+declaration, the role/version/freshness header it checks against the cell (generic per
+controller: for the live controller, `selectTarget`'s role and cell law and
+`computeTarget`'s version and root, in that order), and how its typed state is read from
+and written back to a cell. -/
 structure Handler (Ctx Cell : Type) : Type 1 where
   S : Substrate
   O : Type
   R : Type
   spec : EffectSpec Ctx S O R
+  header : Ctx → Cell → Except DispatchRefusal Unit
   select : Cell → Option S.State
   pack : S.State → Cell
 
-/-- Sound: a packed state selects back, and the substrate is framed. -/
+/-- Sound: `select` and `pack` are inverse both ways (a selected cell IS the packing of
+its selection, so nothing outside the selection can be rewritten unseen), and the
+substrate is framed. -/
 def Handler.Sound {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
-  (∀ s, e.select (e.pack s) = some s) ∧ e.S.Framed
+  (∀ s, e.select (e.pack s) = some s) ∧
+  (∀ cell s, e.select cell = some s → e.pack s = cell) ∧
+  e.S.Framed
+
+/-- One registered handler fired on a decoded operation and a cell: header, selection,
+the derived executor, the packed post. -/
+def Handler.fire {Ctx Cell : Type} (e : Handler Ctx Cell) (code : Nat) (ctx : Ctx) (op : e.O)
+    (cell : Cell) : Except DispatchRefusal Cell :=
+  match e.header ctx cell with
+  | .error r => .error r
+  | .ok () =>
+    match e.select cell with
+    | none => .error (.wrongRole code)
+    | some s => (e.spec.exec code ctx op s).map e.pack
 
 /-- Lawful: sound and complete. -/
 def Handler.Lawful {Ctx Cell : Type} (e : Handler Ctx Cell) : Prop :=
@@ -218,10 +241,7 @@ def dispatch {Ctx Cell : Type} (R : Registry Ctx Cell) (code : Nat) (bytes : Lis
   | some e =>
     match e.spec.opStream.toLawful.decode bytes with
     | none => .error (.malformed code)
-    | some op =>
-      match e.select cell with
-      | none => .error (.wrongRole code)
-      | some s => (e.spec.exec code ctx op s).map e.pack
+    | some op => e.fire code ctx op cell
 
 /-- The registry the Host dispatches through: codes unique (a shadowed duplicate would be
 a silent twin), every entry lawful — the floor obligations as proof FIELDS. -/
@@ -236,15 +256,15 @@ structure LawfulRegistry (Ctx Cell : Type) : Type 1 where
 still hand arms (the migration window; the end state is `legacy = []`).
 
 * `noTwin` — no code is both registered and hand-armed (law 13 as a clause);
-* `agreement` — on a registered code, `d` IS the entry's derived executor;
+* `agreement` — on a registered code and EVERY cell, `d` IS the handler fired;
 * `unregistered` — any other code refuses by name;
 * `frame` — an admitted registered dispatch leaves every unsealed location outside the
   operation's declared fields unchanged. -/
 structure Dispatches {Ctx Cell : Type} (R : Registry Ctx Cell) (legacy : List Nat)
     (d : Nat → List UInt8 → Ctx → Cell → Except DispatchRefusal Cell) : Prop where
   noTwin : ∀ code ∈ legacy, R.lookup code = none
-  agreement : ∀ code e, R.lookup code = some e → ∀ (op : e.O) (ctx : Ctx) (s : e.S.State),
-    d code (e.spec.opStream.encode op) ctx (e.pack s) = (e.spec.exec code ctx op s).map e.pack
+  agreement : ∀ code e, R.lookup code = some e → ∀ (op : e.O) (ctx : Ctx) (cell : Cell),
+    d code (e.spec.opStream.encode op) ctx cell = e.fire code ctx op cell
   unregistered : ∀ code, R.lookup code = none → code ∉ legacy →
     ∀ bytes ctx cell, d code bytes ctx cell = .error (.unregistered code)
   frame : ∀ code e, R.lookup code = some e → ∀ bytes ctx cell cell',
@@ -263,10 +283,11 @@ def EngineKeystone (Ctx Cell : Type) : Prop :=
     Dispatches R [] (dispatch R)
 
 /-- **COMPLETENESS KEYSTONE.**  Through a lawful registry, every refusal of a well-encoded
-operation on a packed state is one of the entry's own declared names. -/
+operation on a packed state whose header passes is one of the entry's own declared names. -/
 def CompletenessKeystone (Ctx Cell : Type) : Prop :=
   ∀ (L : LawfulRegistry Ctx Cell) code e, L.entries.lookup code = some e →
     ∀ (op : e.O) (ctx : Ctx) (s : e.S.State) (r : DispatchRefusal),
+      e.header ctx (e.pack s) = .ok () →
       dispatch L.entries code (e.spec.opStream.encode op) ctx (e.pack s) = .error r →
         ∃ x : e.R, r = .refused code (e.spec.refusalName x)
 
@@ -341,6 +362,7 @@ def toyEntry {O R : Type} (spec : EffectSpec Unit ToySubstrate O R) : Handler Un
   O := O
   R := R
   spec := spec
+  header _ _ := .ok ()
   select c := some c
   pack s := s
 
@@ -367,6 +389,9 @@ def dispatchUnframed {Ctx Cell : Type} (R : Registry Ctx Cell) (code : Nat)
     match e.spec.opStream.toLawful.decode bytes with
     | none => .error (.malformed code)
     | some op =>
+      match e.header ctx cell with
+      | .error r => .error r
+      | .ok () =>
       match e.select cell with
       | none => .error (.wrongRole code)
       | some s =>
@@ -592,5 +617,130 @@ def ContentTeeth : Prop :=
 
 /-- **The live keystone, whole.** -/
 def LiveKeystone : Prop := ContentAgreement contentSpec ∧ ContentComplete
+
+/-! ## §7. The DEPLOYED keystone: the Host's target dispatch dispatches through the registry.
+
+`ContentAgreement` alone would license keeping the hand arm beside the declaration (the
+law-13 twin).  `HostKeystone` is the statement that closes it: today's target dispatch,
+`hostTargetDispatch` (the payload decode, `selectTarget`, `computeTarget`, the
+`targetPatch` validation and `packTarget` the controller runs per target), dispatches
+through the one-entry registry `[(1, contentHandler)]` with every other payload code in
+`hostLegacy`.  `noTwin` puts code 1 out of the hand arms.
+
+**Known false today, by clause:** `unregistered`: an unknown payload tag (9-255, or a code
+of 256 and up) is refused `malformed`, not by name, and code 1 is still served by the hand
+arm, which `agreement` only matches if the arm is the declaration (`ContentAgreement` plus
+`ContentComplete`).  The migration commit makes it true by rewiring the payload decoder
+through the registry and deleting the content arms; this statement is that commit's gate.
+
+Scope: the target dispatch, not the whole of `prepareTarget` (the post law, the policy
+source, the audience freshness and the authority legs stay the controller's). -/
+
+/-- Reindex a declaration's context (the content declaration reads a `LiveCtx`; the host
+dispatch carries more). -/
+def EffectSpec.comap {C C' : Type} {S : Substrate} {O R : Type} (f : C' → C)
+    (E : EffectSpec C S O R) : EffectSpec C' S O R :=
+  { E with sem := fun c => E.sem (f c), seal := fun c => E.seal (f c) }
+
+/-- The host dispatch's context: the target computation's, plus the deployment and the
+target header (`selectTarget`'s cell law, the schema version, the expected root, the
+observe capability and audience fields). -/
+structure HostCtx extends LiveCtx where
+  deployment : DeclaredResourceController.Deployment
+  version : Nat
+  root : Digest
+  observe : Option CapabilityId
+  epoch : Option Nat
+  roster : Option ObjectAudienceRoster.Roster
+
+/-- The cell universe of the live controller. -/
+abbrev HostCell := CellRegistry.PackedCell DeclaredResourceController.Registry
+
+/-- The live controller's target for a payload, under a host context. -/
+abbrev hostTarget (ctx : HostCtx) (payload : DeclaredResourceController.Payload) :
+    DeclaredResourceController.Target :=
+  ⟨ctx.kind, ctx.target, ctx.capability, ctx.version, ctx.root, payload, ctx.observe, ctx.epoch, ctx.roster⟩
+
+/-- A live refusal, named. -/
+def ofReject (code : Nat) : DeclaredResourceController.Reject → DispatchRefusal
+  | .wrongRole => .wrongRole code
+  | .unsupportedVersion => .unsupportedVersion code
+  | .staleTarget => .staleTarget code
+  | .content r => .refused code (reprStr r)
+  | r => .host code (reprStr r)
+
+/-- **Today's target dispatch**, as the controller runs it per target: decode the payload
+(`payloadStream`, the code its tag octet), select the cell (`selectTarget`), compute
+(`computeTarget`), validate the target's patch at the loaded store, pack the post
+(`packTarget`). -/
+def hostTargetDispatch (code : Nat) (bytes : List UInt8) (ctx : HostCtx) (cell : HostCell) :
+    Except DispatchRefusal HostCell :=
+  if 256 ≤ code then .error (.malformed code) else
+  match DeclaredResourceController.payloadStream.toLawful.decode (UInt8.ofNat code :: bytes) with
+  | none => .error (.malformed code)
+  | some payload =>
+    match DeclaredResourceController.selectTarget ctx.deployment (hostTarget ctx payload) cell with
+    | none => .error (.wrongRole code)
+    | some pre =>
+      match DeclaredResourceController.computeTarget ctx.snapshot ctx.semantics ctx.ambient
+          ctx.command (hostTarget ctx payload) pre with
+      | .error r => .error (ofReject code r)
+      | .ok post =>
+        if Patch.ValidFrom pre.logical (DeclaredResourceController.targetPatch ctx.snapshot
+            ctx.semantics ctx.ambient ctx.command (hostTarget ctx payload) pre) then
+          .ok (DeclaredResourceController.packTarget (hostTarget ctx payload)
+            (CellState.materialize (hostTarget ctx payload).materializer post))
+        else .error (.guardFailed code)
+
+/-- The content cell's header, in the live order: role and cell law and shape
+(`wrongRole`), then the schema version, then the expected root. -/
+def contentHeader (ctx : HostCtx) (cell : HostCell) : Except DispatchRefusal Unit :=
+  if contentSpec.accepts ctx.kind = false ∨
+      ¬ CanonicalCellRegistry.CellLaw ctx.deployment ctx.target cell then .error (.wrongRole 1)
+  else match cell with
+    | ⟨.content, value⟩ =>
+      if ctx.version ≠ contentSpec.version then .error (.unsupportedVersion 1)
+      else if ctx.root ≠ value.root then .error (.staleTarget 1)
+      else .ok ()
+    | _ => .error (.wrongRole 1)
+
+/-- **The content handler**: `contentSpec` over the host context, the content header, the
+content cell selected and packed. -/
+def contentHandlerOf (E : ContentSpec) : Handler HostCtx HostCell where
+  S := ContentSubstrate
+  O := ContentResource.Command
+  R := ContentResource.Reject
+  spec := E.comap HostCtx.toLiveCtx
+  header := contentHeader
+  select cell := match cell with
+    | ⟨.content, value⟩ => some value.logical
+    | _ => none
+  pack s := ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer s⟩
+
+def contentHandler : Handler HostCtx HostCell := contentHandlerOf contentSpec
+
+/-- Every payload code but content's is still a hand arm. -/
+def hostLegacy : List Nat := [0, 2, 3, 4, 5, 6, 7, 8]
+
+/-- **THE DEPLOYED KEYSTONE.** -/
+def HostKeystone : Prop :=
+  Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch
+
+/-- **Teeth.**  The host dispatch does not dispatch through a registry whose content
+handler drops the seal, nor through one that also keeps code 1 as a hand arm. -/
+def HostTeeth : Prop :=
+  ¬ Dispatches [(1, contentHandlerOf contentGhost)] hostLegacy hostTargetDispatch ∧
+  ¬ Dispatches [(1, contentHandler)] (1 :: hostLegacy) hostTargetDispatch
+
+/-- **Premise inhabitation.**  The content handler is sound (its `select`/`pack` are
+inverse both ways, the store substrate is framed) and lawful. -/
+def HostPremise : Prop := contentHandler.Lawful
+
+/-- **Satisfiable (the accepted branch).**  Some content cell and well-encoded content
+command are admitted by the host dispatch (the doc-write fixture is the intended
+inhabitant, owed). -/
+def HostAccepted : Prop :=
+  ∃ (op : ContentResource.Command) (ctx : HostCtx) (cell cell' : HostCell),
+    hostTargetDispatch 1 (ContentResource.commandStream.encode op) ctx cell = .ok cell'
 
 end Minidregg.Effects.Revival
