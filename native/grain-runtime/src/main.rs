@@ -7309,8 +7309,14 @@ impl Runtime {
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
         self.custody_exit_reaped.store(false, Ordering::SeqCst);
-        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL)
-            .map_err(|e| deadline::describe(&program.display().to_string(), e))?;
+        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL).map_err(|e| {
+            // At the deadline deadline::wait killed the child's whole process
+            // group and reaped the leader: the sender is stopped too.
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                self.custody_exit_reaped.store(true, Ordering::SeqCst);
+            }
+            deadline::describe(&program.display().to_string(), e)
+        })?;
         if !output.status.success() {
             // deadline::output returned a status and both pipes at EOF: the
             // child is reaped and no descendant still holds its output.

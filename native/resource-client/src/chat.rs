@@ -170,6 +170,10 @@ pub(crate) enum Line {
     /// workroom, or any room born with the room schema) the chat roster.
     Adopt { room: String },
     Invite { room: String, subject: String, name: Option<String>, enc: Option<String>, verbs: Vec<String>, i_know: bool },
+    /// `chat invite ROOM SUBJECT [NAME] --roster-only`: the stream and roster
+    /// row alone, for a subject whose room grant is a concierge window (it
+    /// joins with that window's reference; the window's end ends its posting).
+    Roster { room: String, subject: String, name: Option<String> },
     /// `room ls [--in ROOM] [--since H] [--import] [--json]`: the cells under
     /// the room the Host's signed `since` view names, with the roster's streams.
     Ls { room: Option<String>, since: u64, import: bool, json: bool },
@@ -409,6 +413,12 @@ fn parse_chat(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
                 Some(word) => { petname_ok(word)?; Some(word.to_owned()) }
                 None => None,
             };
+            if p.has("--roster-only") {
+                if p.flag("--verbs").is_some() || p.flag("--enc").is_some() || p.has("--i-know") {
+                    return Err("--roster-only grants nothing: no --verbs, --enc or --i-know".into());
+                }
+                return Ok(Line::Roster { room: p.arg(0).to_owned(), subject: p.arg(1).to_owned(), name });
+            }
             let verbs: Vec<String> = match p.flag("--verbs").flatten() {
                 Some(list) => {
                     let verbs: Vec<String> = list.split(',').map(str::to_owned).collect();
@@ -1607,6 +1617,10 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
         Line::New { room, private } => chat_new(session, &room, private),
         Line::Adopt { room } => chat_adopt(session, &room),
         Line::Invite { room, subject, name, enc, verbs, i_know } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs, i_know),
+        Line::Roster { room, subject, name } => roster_member(session, &room, &subject, name.as_deref()).map(|stream| {
+            println!("{} is on {room}'s roster: stream {stream}; their room grant is their window (they join with its reference)",
+                name.as_deref().unwrap_or(&subject));
+        }),
         Line::Ls { room, since, import, json: as_json } => {
             let room = match room {
                 // `room ls` is listed under `room`: a room made by `room new` (or
@@ -2030,6 +2044,36 @@ fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&st
     Ok(())
 }
 
+/// The founder gives `subject` a stream and a roster row of `name` and no
+/// grant: the room grant is the subject's concierge window (a public room
+/// only; a private room's key needs `invite --enc`). Idempotent: a subject
+/// already on the roster keeps its row and stream.
+pub(crate) fn roster_member(session: &Session, name: &str, subject: &str, petname: Option<&str>) -> Result<String, Done> {
+    let room = load_room(session, name).map_err(error)?;
+    if room_is_private(session, name) {
+        return Err(usage(format!("{name} is private: a roster row alone cannot carry its key (use chat invite --enc)")));
+    }
+    let me = me(session)?;
+    let ws = workspace_record(session).map_err(error)?;
+    let grant = reference(session, &room.grant).map_err(error)?;
+    let roster = roster_of(&signed_read(session, &ws, name, "roster", &grant, "resource", &[])?).map_err(error)?;
+    if roster.founder.as_deref() != Some(me.as_str()) {
+        return Err(usage(format!("only the founder of {name} writes its roster")));
+    }
+    if let Some((_, stream)) = roster.members.iter().find(|(s, _)| s == subject) {
+        return Ok(stream.clone());
+    }
+    let (slot, _) = crate::room_schema::member_fields(roster.members.len() as u64 + 1);
+    let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
+    let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), None)?;
+    let stream_target = member(&stream, "target").map_err(error)?.to_owned();
+    roster_write(session, name, &[(slot, subject), (slot + 1, &stream_target)])?;
+    if let Some(p) = petname {
+        set_petname(session, subject, p).map_err(error)?;
+    }
+    Ok(stream_target)
+}
+
 /// The founder adds `subject` to the roster of `name`: a room grant (`verbs`
 /// under the room), the member's stream born `--in` the room under the
 /// member's author law (the founder pays; the member owns it), the roster row;
@@ -2338,6 +2382,11 @@ mod tests {
         assert!(plan("chat adopt").unwrap().is_err());
         assert!(plan("chat adopt lab extra").unwrap().is_err());
         assert_eq!(
+            plan("chat invite subscribers 1234 bob --roster-only").unwrap().unwrap(),
+            Line::Roster { room: "subscribers".into(), subject: "1234".into(), name: Some("bob".into()) }
+        );
+        assert!(plan("chat invite subscribers 1234 --roster-only --verbs observe,append").unwrap().is_err());
+        assert_eq!(
             plan("chat invite commons 1234 bob").unwrap().unwrap(),
             Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None, verbs: vec!["observe".into(), "append".into()], i_know: false }
         );
@@ -2464,7 +2513,7 @@ mod tests {
 
     #[test]
     fn the_roster_reads_founder_and_member_rows() {
-        let declaration: Vec<String> = (1001..=1012).map(|f| f.to_string()).collect();
+        let declaration: Vec<String> = (1001..=1013).map(|f| f.to_string()).collect();
         let view = json!({"type":"resource","cell":{"root":"1","declaration":declaration,"declaredFrom":"2000","entries":[
             {"key":{"type":"object","resource":"9","field":"1008"},"value":"0"},
             {"key":{"type":"object","resource":"9","field":"2000"},"value":"100"},
@@ -2479,7 +2528,7 @@ mod tests {
             Roster { founder: Some("100".into()), members: vec![("100".into(), "500".into()), ("200".into(), "600".into()), ("300".into(), "700".into())] }
         );
         // A room born under room schema v1 is refused by name, not misread.
-        let mut v1: Vec<String> = (2..=1012).map(|f| f.to_string()).collect();
+        let mut v1: Vec<String> = (2..=1013).map(|f| f.to_string()).collect();
         v1.sort();
         let old = json!({"type":"resource","cell":{"root":"1","declaration":v1,"entries":[
             {"key":{"type":"object","resource":"9","field":"2"},"value":"100"}]}});

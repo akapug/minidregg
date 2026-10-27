@@ -4,7 +4,7 @@
               "pool":{"perOp":"100","inputMicroPerMillion":"20000","outputMicroPerMillion":"50000"},
               "homelab":{"perOp":"3","inputMicroPerMillion":"0","outputMicroPerMillion":"0"}}}},
  {"providerResourceId":9871003,
-  "tariff":{"version":"1","model":"glm-5.3",
+  "tariff":{"version":"1","model":"glm-5.3-flash",
     "routes":{"user":{"perOp":"1"},
               "pool":{"perOp":"1","inputMicroPerMillion":"0","outputMicroPerMillion":"0"},
               "homelab":{"perOp":"1","inputMicroPerMillion":"0","outputMicroPerMillion":"0"}}}}]

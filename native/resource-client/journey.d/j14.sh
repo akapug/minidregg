@@ -84,8 +84,18 @@ G=$JOURNEY_D/g
 # purse pays the per-op fee) or `pool` (the operator's sealed pool key; the
 # purse pays the metered tariff from the upstream's usage record), the demo
 # box's route.
+# `zai`: the subscriber tier's route, a pool row named zai-glm whose upstream
+# streams in Z.AI's coding-plan shape, with per-member caps.
+# J14_TIER=1: lab is the subscriber tier's room: a concierge workroom with a
+# chat roster; bob subscribes by `pay lab week`, the concierge issues his
+# window and puts him on the roster, he joins with the window's reference; his
+# second ask passes his member cap and is refused by name; at the end the
+# window lapses and his posting is refused outside-validity.
 J14_ROUTE=${J14_ROUTE:-user}
-case $J14_ROUTE in user|pool) ;; *) echo "J14_ROUTE must be user or pool" >&2; exit 2 ;; esac
+case $J14_ROUTE in user|pool|zai) ;; *) echo "J14_ROUTE must be user, pool or zai" >&2; exit 2 ;; esac
+J14_TIER=${J14_TIER:-}
+POOL_ROW=pool; [ "$J14_ROUTE" = zai ] && POOL_ROW=zai-glm
+WEEK=40 PERIOD=${J14_PERIOD:-260}
 PURSE_T=9870003 USER_FEE=5 POOL_FEE=7 POOL_IN=100000 POOL_OUT=200000 MODEL=mini-hermes-protocol-fixture
 jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" --arg pf "$POOL_FEE" --arg pi "$POOL_IN" --arg po "$POOL_OUT" '[{providerResourceId:($p|tonumber),
   tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:$pf,inputMicroPerMillion:$pi,outputMicroPerMillion:$po},
@@ -270,8 +280,9 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 
 # ------------------------------------------------ friends and Hermes: enroll, provision, init
 declare -A SUBJ FUND
-FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0
-for f in alice bob hermes; do
+FUND[alice]=5000; FUND[bob]=100; FUND[hermes]=0; FUND[con]=100
+FRIENDS="alice bob hermes"; [ -n "$J14_TIER" ] && FRIENDS="$FRIENDS con"
+for f in $FRIENDS; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
@@ -289,7 +300,7 @@ for f in alice bob hermes; do
     install_private 0600 "$SPONSOR_WS/provisions/j14-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
-A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]}
+A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]} CON=${SUBJ[con]:-}
 # Hermes's grain: Hermes itself is the tool worker (room tools act in the tool
 # task's own workspace); the parent owner and the provider worker are their
 # own enrolled subjects.
@@ -313,15 +324,51 @@ A0=$(credit_of alice)
 require_nat setup "alice's initial signed balance" "$A0"
 
 # ------------------------------------------------ the room
-ok room alice "chat new lab"
+if [ -n "$J14_TIER" ]; then
+  ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD"
+  ok room alice "chat adopt lab"
+  ok room alice "tariff lab set week $WEEK"
+  ok room alice "tariff lab set open 1"
+else
+  ok room alice "chat new lab"
+fi
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
 ok room alice "doc new lab-index 'any [ not (verb == write), subject == $A ]' --in lab"
 ok room alice "doc append map lab-index 'lab: what we are writing, linked from here'"
 ok room alice "submit map"
 ok room alice "tariff lab set hermes/turn $PRICE"
-ok room alice "chat invite lab $B bob --verbs observe,place,append"
-operator room "DELIVER: bob's invitation" install_private 0600 "$H/alice/chat/invites/lab-$B.json" "$H/bob/requests/lab-invite.json"
-ok room bob "chat join lab @lab-invite.json"
+if [ -n "$J14_TIER" ]; then
+  # ---------------------------------------------- subscribe: pay, the concierge's window and roster row
+  mkdir -p -m 700 "$H/con/programs" "$H/con/inbox" "$H/con/outbox" "$SD/homes"
+  # The hosted homes by subject (on the box: MEMBER_HOMES); here a link to bob's.
+  ln -sfn "$H/bob" "$SD/homes/$B"
+  jq -n --arg mini "$MINI" --arg ws "$WS/con" --arg p "$H/con/programs/lab.json" --arg i "$H/con/inbox" \
+    --arg o "$H/con/outbox" --arg j "$H/con/journal-lab.jsonl" --arg host "$HOST" --arg cfg "$CONFIG" \
+    --arg sock "$SOCKET" --arg fws "$WS/alice" --arg fh "$H/alice" --arg mh "$SD/homes" \
+    '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j,
+      roster:{room:"lab",host:$host,config:$cfg,socket:$sock,workspace:$fws,home:$fh,memberHomes:$mh}}' >"$SD/concierge-lab.json"
+  operator subscribe "DELIVER: alice's grants to the concierge" sh -c "cp '$H/alice/outbox/$CON'/*.json '$H/con/inbox/'"
+  operator subscribe "INSTALL: the program alice's room wrote" install_private 0600 "$H/alice/concierge/lab.json" "$H/con/programs/lab.json"
+  operator subscribe "concierge pass: adopts its grants" "$GRAIN_RUNTIME" concierge step "$SD/concierge-lab.json"
+  ok subscribe bob "tariff lab"
+  ok subscribe bob "pay lab week"
+  operator subscribe "concierge pass: honours bob's payment" "$GRAIN_RUNTIME" concierge step "$SD/concierge-lab.json"
+  cp "$OUT" "$SD/concierge-pay.json"
+  BNA=$(jq -r --arg b "$B" '[.decisions[] | select(.decision == "issued" and .subject == $b)][0].notAfter // empty' "$SD/concierge-pay.json")
+  require_nat subscribe "bob's window end (the concierge's issued decision)" "$BNA"
+  checkp subscribe "the concierge put bob on lab's roster (no grant: the window is the grant)" \
+    jq -e --arg b "$B" 'any(.decisions[]; .decision == "rostered" and .subject == $b)' "$SD/concierge-pay.json"
+  checkp subscribe "the concierge left bob's window reference in his HOME/requests (no operator copy)" \
+    jq -e --arg b "$B" '.recipient == $b' "$H/bob/requests/lab-invite.json"
+  ok subscribe bob "chat join lab @lab-invite.json"
+  checkp subscribe "bob joined with a stream (he can say)" grep -q "joined lab" "$OUT"
+  ok subscribe bob "room status lab"
+  checkp subscribe "room status: bob's window runs to $BNA" grep -q "$BNA" "$OUT"
+else
+  ok room alice "chat invite lab $B bob --verbs observe,place,append"
+  operator room "DELIVER: bob's invitation" install_private 0600 "$H/alice/chat/invites/lab-$B.json" "$H/bob/requests/lab-invite.json"
+  ok room bob "chat join lab @lab-invite.json"
+fi
 
 # ------------------------------------------------ Hermes's grain, controller and the deterministic provider
 PARENT_T=9870001 TOOL_T=9870002
@@ -330,17 +377,21 @@ pidfile=$W/public/server.pid
 operator hermes "the private operator socket answers operator-status" \
   "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG"
 # The deterministic librarian upstream.
-"$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" "--room-librarian$([ "$J14_ROUTE" = pool ] && echo -metered)" >"$SD/provider.out" 2>"$SD/provider.err" &
+"$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" "--room-librarian$(case $J14_ROUTE in pool) echo -metered ;; zai) echo -zai ;; esac)" >"$SD/provider.out" 2>"$SD/provider.err" &
 PROVIDER_PID=$!
 for i in $(seq 1 100); do grep -q "^http://" "$SD/provider.out" 2>/dev/null && break; sleep 0.1; done
 checkp hermes "the deterministic provider listens on loopback $PORT (pid $PROVIDER_PID)" grep -q "^http://127.0.0.1:$PORT/v1" "$SD/provider.out"
 # The provider table (root-owned) and the key broker (journey: one account).
 mkdir -p -m 700 "$SD/etc" "$JOURNEY_D/keys/run" "$JOURNEY_D/keys/state" "$SD/credentials"
 PTABLE=$SD/etc/providers.json
-jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" \
+provider_table() { # MEMBER-DAY: the table, the pool row's member day cap set to MEMBER-DAY
+jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" --arg pool "$POOL_ROW" --arg mday "$1" \
   '{type:"mini-provider-table-v2",providers:[{name:"friendkey",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"user"},
-    {name:"pool",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"pool",
-     caps:{perCall:"64",perDay:"200",ceilingMicroUsd:"40000000",callMicroUsd:"100000"}}]}' >"$SD/providers-source.json"
+    {name:$pool,kind:"openai-compatible",endpoint:$e,models:[$m],credential:"pool",
+     caps:{perCall:"64",perDay:"200",ceilingMicroUsd:"40000000",callMicroUsd:"100000",
+           memberDayMicroUsd:$mday,memberTotalMicroUsd:"40000000"}}]}' >"$SD/providers-source.json"
+}
+provider_table 40000000
 operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
 head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
@@ -372,12 +423,12 @@ operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
 # The operator's pool key, sealed by the broker (the demo box's OpenRouter row).
 POOL_KEY=j14-pool-fixture-key
 printf '%s\n' "$POOL_KEY" >"$SD/pool-key.secret"; chmod 600 "$SD/pool-key.secret"
-operator hermes "KEY: the operator seals the pool key (row pool, caps perCall 64, ceiling 40000000 micro-USD)" \
-  "$MINI" key --action set --pool true --provider pool --secret "$SD/pool-key.secret" --broker "$KEYS_CLIENT"
+operator hermes "KEY: the operator seals the pool key (row $POOL_ROW, caps perCall 64, ceiling 40000000 micro-USD)" \
+  "$MINI" key --action set --pool true --provider "$POOL_ROW" --secret "$SD/pool-key.secret" --broker "$KEYS_CLIENT"
 rm -f "$SD/pool-key.secret"
 # The pool hold covers the fee and the metered charge at the token caps
 # (deploy/hermes/demo/install-hermes sizes the box's the same way).
-if [ "$J14_ROUTE" = pool ]; then
+if [ "$J14_ROUTE" != user ]; then
   GW_RESERVE=$((POOL_FEE + (131072 * POOL_IN + 64 * POOL_OUT + 999999) / 1000000))
 else
   GW_RESERVE=30000
@@ -408,7 +459,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
   --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
-  --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" --arg pass "$J14_PASS_SECONDS" \
+  --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" --arg pass "$J14_PASS_SECONDS" --arg pool "$POOL_ROW" \
   --arg ws "$G/state/resource-workspace" --arg home "$G/state/room-home" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
   {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
@@ -425,7 +476,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
      budget:"20000",gateway:({providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:$reserve,
        maxInputTokens:131072,maxOutputTokens:64,
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}
-       + (if $route == "pool" then {provider:"pool"}
+       + (if $route != "user" then {provider:$pool}
           else {onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey"} end))},
    room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
@@ -471,6 +522,11 @@ require_nat summon "alice's balance after summon" "$A1"
 N=$((N + 1)); WALL=-
 record summon check "alice paid the budget and the births (signed reads before/after)" "A0 - A1 >= $BUDGET" "$A0 - $A1 = $((A0 - A1))" \
   "$([ $((A0 - A1)) -ge "$BUDGET" ] && echo ok || echo FAIL)" "births: till, account, Hermes's stream, digest, program, and their fees"
+# The room names the purse Hermes's model calls are paid from (a reader
+# shows its route by that purse's tariff model).
+ok summon alice "tariff lab set hermes/provider $PURSE_T"
+ok summon bob "tariff lab"
+checkp summon "the room shows hermes/provider $PURSE_T" grep -q "hermes/provider *$PURSE_T" "$OUT"
 ok summon alice "room status lab"
 checkp summon "room status names Hermes and its budget account" grep -q "hermes: $HS, budget account $ACCOUNT_T" "$OUT"
 ok summon alice "tariff lab"
@@ -570,6 +626,27 @@ tail_json >"$SD/tail-nogrant.jsonl"
 checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to bob" \
   jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and .kind == "say" and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
 check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  ')"
+
+if [ -n "$J14_TIER" ] && [ "$J14_ROUTE" != user ]; then
+  # -------------------------------------------- the member cap: bob's share of the pool row is spent
+  # Bob's request above was one paid answer; his day cap is lowered to what he
+  # has spent, so the next model call made for him passes it.
+  MEMBERS=$(find "$SD/credentials" -name "$POOL_ROW.members.json" 2>/dev/null | head -1)
+  BDAY=$(jq -r --arg b "$B" '.members[$b].day // empty' "$MEMBERS" 2>/dev/null)
+  require_nat cap "bob's charged pool spend today (the broker's member ledger)" "$BDAY"
+  provider_table "$BDAY"
+  operator cap "TABLE: $POOL_ROW's memberDayMicroUsd is now bob's spend so far ($BDAY)" \
+    sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
+  ok cap bob "ask lab what is in paper"
+  hermes cap "serves bob's ask; the broker refuses its model call for bob by name"
+  checkp cap "the key broker refused a call for member bob: member-day-ceiling" \
+    grep -q "member-day-ceiling" "$JOURNEY_D/keys/state/audit.jsonl"
+  tail_json >"$SD/tail-cap.jsonl"
+  checkp cap "bob is told, in lab, that his request was not answered (member-day-ceiling)" \
+    jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("member-day-ceiling")))' "$SD/tail-cap.jsonl"
+  provider_table 40000000
+  operator cap "TABLE: the member day cap restored" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
+fi
 
 # ------------------------------------------------ topup
 BAL=$(credit_of hermes "$ACCT")
@@ -708,7 +785,7 @@ restart() {
 }
 operator audit "stop the Host, cold audit re-admits every record, serve again" restart r1
 check audit "cold audit exit 0" 0 "$(cat "$SD/audit-r1.rc")"
-if [ "$J14_ROUTE" = pool ]; then
+if [ "$J14_ROUTE" != user ]; then
   POOL_AUTH="auth=sha256:$(printf 'Bearer %s' "$POOL_KEY" | sha256sum | cut -d' ' -f1)"
   check audit "every upstream completion was paid with the operator's pool bearer" \
     "$(grep -c '^completion ' "$PLOG")" "$(grep '^completion ' "$PLOG" | grep -c -- "$POOL_AUTH")"
@@ -721,5 +798,25 @@ cp "$OUT" "$SD/tail-final.txt"
 # Hermes is dismissed by now, so the tail names it by its subject's short
 # form (s…LAST6), not by its member name.
 checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes\|s…${HS: -6}" "$OUT"
+
+
+if [ -n "$J14_TIER" ]; then
+  # -------------------------------------------- expiry: bob's window lapses, his posting with it
+  ticks=0
+  while :; do
+    h=$(room_height lab)
+    [ -n "$h" ] && [ "$h" -gt "$BNA" ] && break
+    ticks=$((ticks + 1))
+    [ "$ticks" -le 300 ] || break
+    "$MINI" fleet --action publish --dir "$WS/alice" --account account --topic tick --payload "$ticks" \
+      >"$L/tick-$ticks.out" 2>"$L/tick-$ticks.err"
+  done
+  N=$((N + 1)); WALL=-
+  record expiry OPERATOR "advance the height past bob's window end $BNA by alice's fleet publishes" "height > $BNA" \
+    "height $h after $ticks turns" "$([ "${h:-0}" -gt "$BNA" ] && echo ok || echo FAIL)" ""
+  named expiry bob "say still here?" "outside-validity|outsideValidity"
+  ok expiry bob "room status lab"
+  checkp expiry "room status: bob's window ENDED at $BNA" grep -q "my window: ENDED at height $BNA" "$OUT"
+fi
 
 finish

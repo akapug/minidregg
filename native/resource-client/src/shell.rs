@@ -1865,9 +1865,10 @@ fn prune_refusals(dir: &Path, keep: usize) {
 /// first component of every request the line writes.
 fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: &[(PathBuf, Vec<u8>)]) -> Result<()> {
     let mut folders = vec!["keys".to_owned(), "enroll".to_owned()];
-    // A command's output file (`--out`, the export) lands in its own private session folder too.
-    let outs: Vec<PathBuf> = flags.iter().filter(|(name, _)| name == "out").map(|(_, value)| PathBuf::from(value)).collect();
-    for path in writes.iter().map(|(path, _)| path).chain(outs.iter()) {
+    // Any flag naming a file under the home (`--out`'s export, `room concierge`'s program in
+    // HOME/concierge/, an outbox) gets its first folder as a request does.
+    let flagged = flags.iter().map(|(_, value)| PathBuf::from(value));
+    for path in writes.iter().map(|(path, _)| path.clone()).chain(flagged) {
         if let Ok(relative) = path.strip_prefix(&session.home) {
             let mut parts = relative.components();
             if let (Some(std::path::Component::Normal(first)), Some(_)) = (parts.next(), parts.next()) {

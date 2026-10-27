@@ -38,10 +38,12 @@
 #   TIER             set (e.g. TIER=1 for the subscriber tier): the room is a concierge
 #                    workroom with a chat roster, `week` WEEK (4000) per PERIOD (43200
 #                    heights: 30 days at one tick a minute), open to any enrolled payer;
-#                    step `concierge` writes its controller config and timer
+#                    step `concierge` writes its controller config (it keeps the chat roster
+#                    for each paying subject) and timer; MEMBER_HOMES: the hosted homes
+#                    directory (DIR/SUBJECT) that receives each window's join reference
 #
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
-#     INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+#     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
 #       HERMES_ROOT=OUT install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
 SVC=${SVC:-mini-core}
@@ -50,7 +52,10 @@ SVC=${SVC:-mini-core}
 CAND=${CAND:-$(readlink -f /var/lib/mini/candidate/current)}
 NODE=${NODE:-/var/lib/mini/store/node}
 ROOM=${ROOM:-hermes-lab} BUDGET=${BUDGET:-1000} PRICE=${PRICE:-10} FOUNDER_FUNDING=${FOUNDER_FUNDING:-5000}
-INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000} MODEL=${MODEL:-meta-llama/llama-3.1-8b-instruct}
+INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000}
+# The house resident on the OpenRouter pool runs llama-3.1-8b; the subscriber
+# tier's (INSTANCE=glm) runs glm-5.3-flash on the coding plan.
+case $INSTANCE in glm) MODEL=${MODEL:-glm-5.3-flash} ;; *) MODEL=${MODEL:-meta-llama/llama-3.1-8b-instruct} ;; esac
 case $INSTANCE in *[!a-z0-9]*|'') echo "install-hermes: INSTANCE must be lowercase letters and digits" >&2; exit 64 ;; esac
 case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; exit 64 ;; esac
 TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
@@ -172,9 +177,15 @@ step_concierge() {
     [ -e "$f" ] && install -o "$SVC" -g "$SVC" -m 0600 "$f" "$H/con/inbox/"
   done
   install -o "$SVC" -g "$SVC" -m 0600 "$H/founder/concierge/$ROOM.json" "$H/con/programs/$ROOM.json"
+  # The roster: each paying subject gets a stream and a roster row from the
+  # founder (operator custody, the same account), and its window reference in
+  # MEMBER_HOMES/SUBJECT/requests/ROOM-invite.json when that home exists.
   jq -n --arg mini "$MINI" --arg ws "$WS/con" --arg p "$H/con/programs/$ROOM.json" --arg i "$H/con/inbox" \
-    --arg o "$H/con/outbox" --arg j "$H/con/journal-$ROOM.jsonl" \
-    '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j}' \
+    --arg o "$H/con/outbox" --arg j "$H/con/journal-$ROOM.jsonl" --arg room "$ROOM" --arg host "$HOST" \
+    --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg fws "$WS/founder" --arg fh "$H/founder" --arg mh "${MEMBER_HOMES:-}" \
+    '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j,
+      roster:({room:$room,host:$host,config:$cfg,socket:$sock,workspace:$fws,home:$fh}
+        + (if $mh == "" then {} else {memberHomes:$mh} end))}' \
     | as_svc tee "$V/concierge-$ROOM.json" >/dev/null
   as_svc "$GRAIN" concierge step "$V/concierge-$ROOM.json" | as_svc tee "$RECORD/concierge-first-pass.json" >/dev/null
   # One pass a minute; each pass decides only from the till's signed ledger.
@@ -273,6 +284,9 @@ step_summon() {
   sh_line founder "summon $ROOM as librarian --budget $BUDGET" | as_svc tee "$RECORD/summon.out"
   sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_svc tee "$RECORD/outbox" >/dev/null
   [ -s "$(cat "$RECORD/outbox")/handoff.json" ] || die "summon left no sealed hand-off"
+  # The room names Hermes's provider purse (the page shows its route by that
+  # purse's tariff model: meta-llama/... for hermes-lab, glm-5.3-flash for subscribers).
+  sh_line founder "tariff $ROOM set hermes/provider $PURSE_T" >/dev/null
   mark summon
 }
 
