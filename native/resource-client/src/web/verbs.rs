@@ -356,15 +356,16 @@ fn input(field: &str, label: &str, optional: bool, kind: &Kind) -> String {
 
 // ---------------------------------------------------------------- running
 
-/// POST `/verb/NAME`: the chosen alternative's fields become one shell line (plus `submit ID`
-/// when asked), run as the member.
-pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<String, String>) -> Page {
+/// The lines one alternative's fields assemble to (the verb line, and `submit ID` when asked),
+/// the proposal id, and whether they are a world transition. `Err` is the page that names what is
+/// missing. One assembler serves the POST and the dry run.
+pub(super) fn assemble(site: &Site, name: &str, form: &std::collections::BTreeMap<String, String>) -> std::result::Result<(Vec<String>, String, bool, String), Page> {
     let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
-        return simple(404, "No such verb", &format!("the shell has no verb {name}"));
+        return Err(simple(404, "No such verb", &format!("the shell has no verb {name}")));
     };
     let alts = alternatives_of(name, verb.usage);
     let Some(alt) = form.get("alt").and_then(|a| a.parse::<usize>().ok()).and_then(|i| alts.get(i)) else {
-        return simple(400, name, "which alternative of the usage?");
+        return Err(simple(400, name, "which alternative of the usage?"));
     };
     let field = |i: usize| form.get(&format!("a{i}")).map(|v| v.trim().to_owned()).unwrap_or_default();
     let mut words: Vec<String> = Vec::new();
@@ -379,7 +380,7 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
                     if *optional {
                         continue;
                     }
-                    return simple(400, name, &format!("{label} is required"));
+                    return Err(simple(400, name, &format!("{label} is required")));
                 }
                 if matches!(kind, Kind::Id) && id.is_empty() {
                     id = value.clone();
@@ -388,7 +389,7 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
                     // Free text rides on the line as typed (the verb takes the rest of the line).
                     Kind::Rest => {
                         if value.contains('\n') {
-                            return simple(400, name, &format!("{label} is one line"));
+                            return Err(simple(400, name, &format!("{label} is one line")));
                         }
                         words.push(value);
                     }
@@ -397,7 +398,7 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
                         let stamp = if id.is_empty() { super::body::fresh_id() } else { id.clone() };
                         match super::body::text_file(site, &format!("{stamp}-{files}"), &value) {
                             Some(file) => words.push(format!("@{file}")),
-                            None => return simple(400, name, &format!("{label} must be 1..4096 bytes")),
+                            None => return Err(simple(400, name, &format!("{label} must be 1..4096 bytes"))),
                         }
                     }
                     _ => words.push(super::body::quote(&value)),
@@ -430,9 +431,89 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
         lines.push(format!("submit {id}{lose}"));
         is_transition = true;
     }
+    Ok((lines, id, is_transition, alt.literals()))
+}
+
+/// POST `/verb/NAME`: the chosen alternative's fields become one shell line (plus `submit ID`
+/// when asked), run as the member.
+pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<String, String>) -> Page {
+    let (lines, id, is_transition, title) = match assemble(site, name, form) {
+        Ok(assembled) => assembled,
+        Err(page) => return page,
+    };
     let next: Vec<(String, String)> = vec![(format!("{name} again"), format!("/verb/{name}")), ("all commands".into(), "/verb".into())];
     let refs: Vec<(&str, &str)> = next.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-    super::body::act_as(site, &alt.literals(), lines, &id, &refs, is_transition)
+    super::body::act_as(site, &title, lines, &id, &refs, is_transition)
+}
+
+/// A placeholder value of each field kind for the dry run: a reference this workspace holds (or
+/// `paper`), a fresh id, `1`, a word, text; files the journey seeds under HOME/requests.
+fn placeholder(kind: &Kind, refs: &[String]) -> String {
+    match kind {
+        Kind::Id => super::body::fresh_id(),
+        Kind::Ref => refs.first().cloned().unwrap_or_else(|| "paper".into()),
+        Kind::Number => "1".into(),
+        Kind::Choice(options) => options.first().cloned().unwrap_or_default(),
+        Kind::Text => "hello".into(),
+        Kind::Rest => "hello there".into(),
+        Kind::Word => "1".into(),
+    }
+}
+
+/// `/verb/NAME/dry`: every leaf of the verb, its form filled with placeholders, assembled to its
+/// shell line and run through the shell's planner (`mini shell --line … --plan`): the real parser
+/// and plan builder, no Host, nothing written to the world. A leaf whose line the shell refuses
+/// as usage is red by name: its form and its parser disagree. The parity row sums these.
+pub(super) fn dry(site: &Site, name: &str) -> Page {
+    let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
+        return simple(404, "No such verb", &format!("the shell has no verb {name}"));
+    };
+    let alts = alternatives_of(name, verb.usage);
+    let refs = site.names();
+    let mut rows = String::new();
+    let mut errors = 0usize;
+    for (index, alt) in alts.iter().enumerate() {
+        let mut form = std::collections::BTreeMap::new();
+        form.insert("alt".to_owned(), index.to_string());
+        for (i, tok) in alt.tokens.iter().enumerate() {
+            match tok {
+                Tok::Arg { kind, .. } => {
+                    let value = match (name, kind) {
+                        // Files the journey seeds; a JSON word for JSON-or-file arguments.
+                        (_, Kind::Text) => "@x.txt".to_owned(),
+                        _ => placeholder(kind, &refs),
+                    };
+                    form.insert(format!("a{i}"), value);
+                }
+                Tok::Flag { value: Some((_, kind)), .. } => {
+                    form.insert(format!("a{i}"), placeholder(kind, &refs));
+                }
+                _ => {}
+            }
+        }
+        let (class, detail) = match assemble(site, name, &form) {
+            Err(page) => ("error", page.body),
+            Ok((lines, _, _, _)) => match super::body::plan_line(site, &lines[0]) {
+                Some(ending) if ending.code == 0 => ("answered", ending.stdout.trim().to_owned()),
+                Some(ending) => ("error", ending.stderr.trim().to_owned()),
+                None => ("error", "no shell paths".to_owned()),
+            },
+        };
+        if class == "error" {
+            errors += 1;
+        }
+        rows.push_str(&format!("<tr class=\"{class}\"><td><code>{}</code></td><td class=\"outcome {class}\">{class}</td><td><code>{}</code></td></tr>\n", escape(&alt.literals()), escape(&clip(&detail, 200))));
+    }
+    Page {
+        status: 200,
+        title: format!("{name}: dry run"),
+        stamp: Stamp::None,
+        body: format!(
+            "<p>Each leaf of <code>{name}</code>, its form filled with placeholders, assembled and planned by the shell (nothing runs against the Host).</p>\
+             <table class=\"dry\" data-leaves=\"{}\" data-errors=\"{errors}\"><thead><tr><th>leaf</th><th>class</th><th>plan</th></tr></thead><tbody>{rows}</tbody></table>",
+            alts.len()
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -920,7 +920,7 @@ impl Args {
             // The valueless switches: opting out of pre-rotation is a
             // deliberate act and reads as one; `web --body` / `--anonymous` name a face; `apps --json` a shape.
             if rendered == "--no-prerotation" || command == OsStr::new("web") && matches!(rendered.as_ref(), "--body" | "--anonymous")
-                || command == OsStr::new("apps") && rendered == "--json" {
+                || command == OsStr::new("apps") && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }

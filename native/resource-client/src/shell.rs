@@ -2124,6 +2124,22 @@ fn start_text(session: &Session) -> String {
     )
 }
 
+/// A plan as one line of words: the client command and its flag names (values elided), or the
+/// local plan's kind. What `--plan` prints; never the secrets a flag may carry.
+fn describe_plan(planned: &Plan) -> String {
+    match planned {
+        Plan::Client { command, flags, writes } => format!(
+            "client {command} {}{}",
+            flags.iter().map(|(name, _)| format!("--{name}")).collect::<Vec<_>>().join(" "),
+            if writes.is_empty() { String::new() } else { format!(" (+{} request file(s))", writes.len()) }
+        ),
+        other => {
+            let text = format!("{other:?}");
+            text.split(|c: char| c == '{' || c == '(').next().unwrap_or("local").trim().to_owned()
+        }
+    }
+}
+
 /// Run one line; returns (exit code, keep going).
 pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
     let started = std::time::Instant::now();
@@ -2434,6 +2450,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let host = args.optional("host").map(|h| absolute(h, "host")).transpose()?;
     let config = args.optional("config").map(|c| absolute(c, "config")).transpose()?;
     let one = args.optional("line");
+    // `--plan`: parse and plan the one line, print the plan, run nothing (the per-leaf dry run of
+    // the web front end's parity row; a usage error is the shell's usage ending, exit 2).
+    let plan_only = args.optional("plan").is_some();
     args.finish()?;
     let _ = crate::keys::STDIN_FREE.set(one.is_some());
     // A session over a workspace that already pins its Host takes host,
@@ -2459,7 +2478,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let session = Session { workspace, home, host, config };
     let code = if let Some(one) = one {
         let text = one.into_string().map_err(|_| "--line must be UTF-8")?;
-        line(&session, &text).0
+        if plan_only {
+            match plan(&session, &text) {
+                Ok(planned) => {
+                    println!("plan: {}", describe_plan(&planned));
+                    EXIT_OK
+                }
+                Err(message) => {
+                    eprint!("{}", render(&Ending::Usage(message)).1);
+                    EXIT_USAGE
+                }
+            }
+        } else {
+            line(&session, &text).0
+        }
     } else if io::stdin().is_terminal() {
         let mut past: Vec<String> = Vec::new();
         let mut last = EXIT_OK;

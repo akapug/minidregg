@@ -210,6 +210,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["grain", n, "pane"] => apps::pane(site, n),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name),
+        ["verb", name, "dry"] => verbs::dry(site, name),
         ["receipts"] => receipts(site),
         ["receipts", "lookup"] => match query(target, "id") {
             Some(id) => receipt(site, &id),
@@ -748,6 +749,27 @@ impl Ending {
             _ => ("error", if first.is_empty() { "The client could not complete this".into() } else { first }),
         }
     }
+}
+
+/// Plan one line as this member without running it (`mini shell --line L --plan`): the shell's
+/// parser and plan builder, no Host.
+pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
+    let shell = site.shell.as_ref()?;
+    let exe = std::env::current_exe().ok()?;
+    if line.bytes().any(|b| b.is_ascii_control()) {
+        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    }
+    let mut command = Command::new(exe);
+    command.arg("shell");
+    if let Some(socket) = super::super::SOCKET.get() {
+        command.arg("--socket").arg(socket);
+    }
+    let output = command
+        .arg("--workspace").arg(&site.root).arg("--home").arg(&shell.home).arg("--host").arg(&shell.host).arg("--config").arg(&shell.config)
+        .arg("--line").arg(line).arg("--plan")
+        .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
+        .stdin(Stdio::null()).output().ok()?;
+    Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
 }
 
 /// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
