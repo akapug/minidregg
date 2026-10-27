@@ -1434,7 +1434,12 @@ impl PrivateOperator {
         if response.get(4) != Some(&154)
             || !payload.starts_with(b"DREGG/APPLICATION/ROUTE-ADMISSION-ATTESTATION/v1")
         {
-            return Err(invalid("Mini refused current route admission"));
+            // Name the Host's answer: its marker byte and the printable part of
+            // its outcome frame (a refusal reason is ASCII inside it).
+            let text: String = payload.iter().take(512).map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' }).collect();
+            let _ = write_new(&attempt.0, "refusal.bin", payload);
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
+                "Mini refused current route admission (marker {:?}): {text}", response.get(4))));
         }
         let response_path = write_new(&attempt.0, "attestation.bin", payload)?;
         let inspection = self.tool_until(

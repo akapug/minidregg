@@ -251,7 +251,39 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 }
 
 /// Case-insensitive substring search over the index's text fields.
+/// The demo's featured set (docs/APP-MARKET-2026-10-27.md section 2a), in the
+/// order the market shows it: apps chosen for the data model and the scriptable
+/// surface beneath their HTML that a resident drives through the agent API.
+/// `(appId, agent hook)`; the rest of the store follows them.
+pub(crate) const FEATURED: &[(&str, &str)] = &[
+    ("h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60", "HTTP /api: create pads, append text, read text or HTML, revisions"),
+    ("a0n6hwm32zjsrzes8gnjg734dh6jwt7x83xdgytspe761pe2asw0", "REST /_/<sheet>: PUT CSV, POST SocialCalc commands, GET the sheet as CSV or JSON"),
+    ("4uda6a9yfxk4v3x2mpxjdn2md9y54tj104091480qjr8h758u4dh", "POST /new with markdown makes a note; GET /<note>/download reads it"),
+    ("8aspz4sfjnp8u89000mh2v1xrdyx97ytn8hq71mdzv4p4d8n0n3h", "files over HTTP: PUT and GET by path (the WebDAV tree; PROPFIND/MKCOL/MOVE when the bridge grows the DAV verbs)"),
+    ("uawacvvx9f9ncex1sqj8njwpujf8s9fkmg7wmp55hg6xetrd45w0", "SQL over HTTP: /<db>.json?sql=... answers JSON"),
+    ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
+    ("nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
+    ("rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph", "board events as JSON over its WebSocket; GET /boards/<name>.json"),
+    ("f5z8uwz7ynf89c286f9d5tse5dwjknv32nyd78qzsyema3zf9m8h", "events as forms and iCalendar over HTTP (CalDAV when the bridge grows REPORT/PROPFIND)"),
+    ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
+    ("8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90", "a plain-text journal: POST /add a transaction, GET /accounts and the JSON API"),
+    ("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh", "the deck is slides.md: PUT /slides.md, GET it back; published at <grain>-www"),
+    ("m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h", "REST /api (boards, lists, cards) and DDP"),
+];
+
+pub(crate) fn featured(app_id: &str) -> Option<(usize, &'static str)> {
+    FEATURED.iter().position(|(id, _)| *id == app_id).map(|rank| (rank + 1, FEATURED[rank].1))
+}
+
+/// Matching entries, the featured set first in its order, then the rest of the
+/// store in index order.
 pub(crate) fn search<'a>(entries: &'a [Entry], term: &str, category: Option<&str>) -> Vec<&'a Entry> {
+    let mut found = search_unordered(entries, term, category);
+    found.sort_by_key(|e| featured(&e.app_id).map_or(usize::MAX, |(rank, _)| rank));
+    found
+}
+
+fn search_unordered<'a>(entries: &'a [Entry], term: &str, category: Option<&str>) -> Vec<&'a Entry> {
     let term = term.to_lowercase();
     entries
         .iter()
@@ -324,6 +356,7 @@ fn entry_json(entry: &Entry, verdict: &Verdict) -> Value {
             "signedAppId":verdict.signed_app_id,"running":verdict.running},
         "suggestedClass":entry.pinned.as_ref().and_then(|p| p.class.as_deref()).unwrap_or_else(|| suggested_class(verdict.raw_bytes)),
         "pinned":entry.pinned.as_ref().map(|p| json!({"sha256":p.sha256,"packageUrl":p.package_url,"class":p.class})),
+        "featured":featured(&entry.app_id).map(|(rank, hook)| json!({"rank":rank,"agentHook":hook})),
         "claims":"name, version, publisher and links are the index's claims; identity is the signed package's"
     })
 }
@@ -588,15 +621,23 @@ fn catalogue(action: &str, mut args: Args, paths: &Paths, as_json: bool) -> Resu
                 return Ok(());
             }
             println!("{} of {} apps ({}):", found.len(), entries.len(), paths.index.display());
+            let mut rest_heading = false;
             for e in found {
                 let v = verdict(&paths.verdicts, &paths.meta, &e.package_id);
+                let hook = featured(&e.app_id);
+                if hook.is_none() && !rest_heading {
+                    println!("  -- the rest of the store --");
+                    rest_heading = true;
+                }
                 println!(
-                    "  {:<28} {:<22} {:<24} {} [{}]",
+                    "  {}{:<28} {:<22} {:<24} {} [{}]{}",
+                    if hook.is_some() { "featured " } else { "" },
                     truncate(&e.name, 28),
                     truncate(&e.version, 22),
                     truncate(&e.author, 24),
                     e.app_id,
-                    verdict_line(&v)
+                    verdict_line(&v),
+                    hook.map(|(_, h)| format!("\n      agent hook: {h}")).unwrap_or_default()
                 );
             }
             Ok(())
@@ -1091,15 +1132,16 @@ const BOOTSTRAP_ROLES: [(&str, IdKind); 6] = [
 
 /// The op 91 `birth-intent` for the two metered tasks an apps world needs, as the workroom
 /// provisioner births them at genesis (`scripts/workroom/provision.sh`): two `grain` resources
-/// owned by the operator's subject with explicit budgets, the parent naming the operator as its
-/// worker. Budget is an explicit operator allocation, never a metered claim.
+/// owned by the operator's subject with explicit budgets, the parent under the holder form (any
+/// holder of a delegated grant may make a birth's witness no-op; only the owner manages it).
+/// Budget is an explicit operator allocation, never a metered claim.
 pub(crate) fn bootstrap_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, budget: &str) -> Result<Value> {
     let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
     let mut birth = json!({"genesis":context["genesis"],"template":context["template"],"creator":subject,"nonce":nonce,
         "resources":[
             {"kind":"object","storage":"grain","target":id("parentTask")?,"owner":subject,
              "ownerCapability":id("parentOwnerCapability")?,"controlCapability":id("parentControlCapability")?,
-             "budget":budget,"workerSubject":subject,"workerGeneration":"1"},
+             "budget":budget,"holderWitnessGeneration":"1"},
             {"kind":"object","storage":"grain","target":id("toolTask")?,"owner":subject,
              "ownerCapability":id("toolOwnerCapability")?,"controlCapability":id("toolControlCapability")?,
              "budget":budget}],
@@ -1381,6 +1423,20 @@ mod tests {
     }
 
     #[test]
+    fn apps_search_shows_the_featured_set_first_with_its_agent_hook() {
+        let entries = fixture();
+        let all = search(&entries, "", None);
+        assert_eq!(all.len(), entries.len());
+        let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
+        assert_eq!(names[0], "Etherpad");
+        assert_eq!(names.len(), 13, "every featured appId is in the recorded index: {names:?}");
+        assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
+        let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
+        assert_eq!(pad["featured"]["rank"], 1);
+        assert!(pad["featured"]["agentHook"].as_str().unwrap().contains("/api"));
+    }
+
+    #[test]
     fn apps_search_is_case_insensitive_over_text_and_filters_categories() {
         let entries = fixture();
         let pads = search(&entries, "ETHERPAD", None);
@@ -1597,7 +1653,10 @@ mod tests {
         assert_eq!(resources.len(), 2);
         assert_eq!(resources[0]["storage"], "grain");
         assert_eq!(resources[0]["target"], "7901");
-        assert_eq!(resources[0]["workerSubject"], "8");
+        // The holder form (AgentGrain.holderPolicy, ruling Option A): any holder of a delegated
+        // grant may make the birth witness; no worker subject is named.
+        assert_eq!(resources[0]["holderWitnessGeneration"], "1");
+        assert!(resources[0].get("workerSubject").is_none());
         assert_eq!(resources[0]["budget"], "100000");
         assert_eq!(resources[1]["target"], "7902");
         assert!(resources[1].get("workerSubject").is_none(), "the tool names no worker, as the workroom births it");
