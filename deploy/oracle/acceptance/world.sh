@@ -74,7 +74,7 @@ world_stop_probe() {
 }
 
 world_controller_prepare() {
-  local home request_id
+  local home
   timeout 120 sudo -n -- "$installer" "$controller_create_verb" "$store" "$helper" >"$run/agent-lifetime/controller-create.json"
   controller_created=1
   if [[ $controller_create_verb == controller-resume-create ]]; then
@@ -86,13 +86,24 @@ world_controller_prepare() {
   home=$(jq -er .controllerHome "$run/agent-lifetime/controller-create.json")
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-controller "$run" "$repo" "$home" \
     >"$run/agent-lifetime/prepare-controller.stdout" 2>"$run/agent-lifetime/prepare-controller.stderr"
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-worker-policy "$run" "$repo" \
+    "$run/agent-lifetime/controller-stage/controller.json" \
+    >"$run/agent-lifetime/worker-policy.stdout" 2>"$run/agent-lifetime/worker-policy.stderr"
   timeout 120 sudo -n -- "$installer" controller-stage "$store" "$helper" \
     "$run/agent-lifetime/controller-stage" "$BIN" \
     "$run/world/sock/operator/host.sock" "$run/world/sock/participant/host.sock" \
     >"$run/agent-lifetime/controller-stage-receipt.json"
   controller_staged=1
   timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$run/agent-lifetime/controller-bootstrap-start.json"
-  request_id=$("$BIN/grain-runtime" tool-id)
+  world_controller_birth
+}
+
+world_controller_birth() {
+  local request_id
+  request_id=$("${controller_runtime:-$BIN/grain-runtime}" tool-id)
+  if [[ ${mode:-} == continue-session ]]; then
+    [[ $request_id != $(jq -er .boundary.request_id "$continuation/prepared.json") ]] || fail 'new tool ID reused definite refusal'
+  fi
   printf '%s\n' "$request_id" >"$run/agent-lifetime/session-birth.request-id"
   jq .nextTool.arguments "$run/agent-lifetime/controller-stage.json" >"$run/agent-lifetime/session-birth.arguments.json"
   # One actual controller-owned birth. A missing/uncertain reply is retained;
@@ -143,6 +154,45 @@ pathlib.Path(prefix + '.json').write_text(json.dumps(value, indent=2) + '\n')
 PYCONSENT
 }
 
+# Publish an exact stopped config, then let the native enrollment command
+# prove its permitted transition and commit the journal binding. No journal edits.
+world_controller_enroll() {
+  local enrollment_mode=$1 bundle=$2 label=$3 directory
+  directory=$run/agent-lifetime/enrollment-$label
+  mkdir -m 700 "$directory"
+  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$directory/before.json"
+  python3 - "$directory" "$bundle/controller.json" "$enrollment_mode" <<'PYREQUEST'
+import hashlib, json, os, pathlib, sys
+output, target, mode = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+journal = json.loads((output / 'before.json').read_bytes())
+canonical = json.dumps(journal['binding'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+request = {'protocol': 'mini-controller-application-enrollment-v1', 'mode': mode,
+           'expectedBindingSha256': hashlib.sha256(canonical).hexdigest(),
+           'targetConfigSha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+fd = os.open(output / 'request.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as sink:
+    json.dump(request, sink, sort_keys=True, separators=(',', ':'))
+    sink.write('\n')
+PYREQUEST
+  timeout 120 sudo -n -- "$installer" controller-config "$store" "$helper" "$bundle" \
+    >"$directory/config.json"
+  timeout 1850 sudo -n -- "$installer" controller-enroll "$store" "$helper" "$directory/request.json" \
+    >"$directory/result.json" 2>"$directory/stderr"
+  timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$directory/after.json"
+  python3 - "$directory" <<'PYCHECK'
+import hashlib, json, pathlib, sys
+p = pathlib.Path(sys.argv[1]); read = lambda name: json.loads((p / name).read_bytes())
+before, after, result = read('before.json'), read('after.json'), read('result.json')
+binding = json.dumps(after['binding'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+assert result['protocol'] == 'mini-controller-application-enrollment-v1' and result['status'] == 'enrolled'
+assert result['replayed'] is False
+assert result['requestSha256'] == hashlib.sha256((p / 'request.json').read_bytes()).hexdigest()
+assert result['bindingSha256'] == hashlib.sha256(binding).hexdigest()
+assert before['binding']['configPath'] == after['binding']['configPath']
+assert {k:v for k,v in before.items() if k != 'binding'} == {k:v for k,v in after.items() if k != 'binding'}
+PYCHECK
+}
+
 world_controller_activate() {
   local start_result=$1 label=$2 activation bundle
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" activate "$run" "$repo" "$start_result" \
@@ -150,21 +200,20 @@ world_controller_activate() {
   activation=$(cat "$run/agent-lifetime/activate-$label.stdout")
   bundle=$(jq -er .bundle "$activation")
   world_controller_stop "before-$label"
-  timeout 120 sudo -n -- "$installer" controller-config "$store" "$helper" "$bundle" \
-    >"$run/agent-lifetime/controller-config-$label.json"
+  world_controller_enroll application "$bundle" "$label"
   cp "$bundle/controller.json" "$run/agent-lifetime/controller-active-$label.json"
   timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$run/agent-lifetime/controller-start-$label.json"
   export ORACLE_CONTROLLER_INSTALLER=$installer ORACLE_CONTROLLER_STORE=$store ORACLE_CONTROLLER_HELPER=$helper
   export QUALIFIED_LIFETIME_HOST_BINARY=$BIN/minidregg-host
   QUALIFIED_LIFETIME_HOST_SHA256=$(sha256sum "$BIN/minidregg-host" | cut -d ' ' -f1)
-  QUALIFIED_RUNTIME_SHA256=$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)
+  QUALIFIED_RUNTIME_SHA256=$(sha256sum "${controller_runtime:-$BIN/grain-runtime}" | cut -d ' ' -f1)
   export QUALIFIED_LIFETIME_HOST_SHA256 QUALIFIED_RUNTIME_SHA256
 }
 
 world_controller_probe() {
   local label=$1 directory=$2
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" \
-    "$BIN/grain-runtime" "$run/agent-lifetime/controller-active-$label.json" oracle-app \
+    "${controller_runtime:-$BIN/grain-runtime}" "$run/agent-lifetime/controller-active-$label.json" oracle-app \
     "$repo/deploy/oracle/acceptance/agent-cases.json" "$run/agent-lifetime/$directory" \
     >"$run/agent-lifetime/$directory.stdout" 2>"$run/agent-lifetime/$directory.stderr"
   world_consent_snapshot "after-$directory"
@@ -332,7 +381,7 @@ world_continue_controller() {
   [[ $continuation == "$run/continuations/controller-create-1" ]] || fail 'continuation evidence path differs'
   preserve_existing_exit=0
   sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
     >"$continuation/recovery-input-sha256.txt"
   configured=1
   systemctl --user start "mini-spk-broker@$store.service"
@@ -348,8 +397,95 @@ world_continue_controller() {
   controller_create_verb=controller-resume-create
 }
 
+# A second, narrower seam: account/stage and six grants already exist, but
+# the original tool was definitively refused before any session operation.
+world_continue_session() {
+  local run=$1 repo=$2 fresh app target bundle
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
+  export BIN=$run/bin
+  store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store
+  export BROKER_SOCKET=$GRAINS_ROOT/runtime-$store/broker.sock
+  [[ $(jq -er .root "$run/world-identity.json") == "$GRAINS_ROOT" ]] || fail 'session continuation namespace differs'
+  [[ $helper =~ ^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$ ]] || fail 'session continuation helper malformed'
+  installer=$repo/deploy/spk-host/install-user-world
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  fresh=$(mktemp -d "$run/session-refusal-preflight.XXXXXXXX")
+  timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  continuation=$(python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --session-refusal \
+    "$run" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json")
+  [[ $continuation == "$run/continuations/session-refusal-1" ]] || fail 'session continuation evidence path differs'
+  mkdir -m 700 "$continuation/bin"
+  controller_runtime=$continuation/bin/grain-runtime
+  install -m 500 "$own/grain-runtime" "$controller_runtime"
+  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
+    "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent.py" \
+    "$installer" "$repo/deploy/spk-host/controller-world.py" "$controller_runtime" \
+    >"$continuation/recovery-input-sha256.txt"
+  preserve_existing_exit=0
+  configured=1 controller_created=1 controller_staged=1
+  timeout 120 sudo -n -- "$installer" controller-consent-storage "$store" "$helper" >"$continuation/consent-storage.json"
+  timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" \
+    >"$continuation/runtime-upgrade.json"
+  jq -e --arg expected "$(sha256sum "$controller_runtime" | cut -d ' ' -f1)" \
+    --arg previous "$(sha256sum "$BIN/grain-runtime" | cut -d ' ' -f1)" \
+    '.runtimeSha256 == $expected and .previousRuntimeSha256 == $previous' \
+    "$continuation/runtime-upgrade.json" >/dev/null || fail 'installed runtime upgrade differs'
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'session continuation broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  for app in 9101 9201; do
+    timeout 1800 "$BIN/spk-host" grain status "$profile" "$app" >"$continuation/status-$app.json"
+    jq -e --arg app "$app" '.app == $app and .installCompleted and (.runs | length == 0)' \
+      "$continuation/status-$app.json" >/dev/null || fail 'session continuation requires installed grains with no START'
+  done
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-bootstrap-dispatch "$run" "$repo" \
+    "$run/agent-lifetime/controller-create.json" >"$continuation/bootstrap-target.stdout" 2>"$continuation/bootstrap-target.stderr"
+  target=$(cat "$continuation/bootstrap-target.stdout")
+  [[ $target == "$run/agent-lifetime/native-prepare-bootstrap-dispatch/controller-update/controller.json" ]] || fail 'bootstrap target path differs'
+  bundle=$(dirname "$target")
+  timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-worker-policy "$run" "$repo" "$target" \
+    >"$continuation/worker-policy.stdout" 2>"$continuation/worker-policy.stderr"
+  world_controller_enroll bootstrap-dispatch "$bundle" bootstrap-dispatch
+  timeout 240 sudo -n -- "$installer" controller-start "$store" "$helper" >"$continuation/controller-bootstrap-start.json"
+  # Original null-operation error is archived, not ACKable. Only this new tool
+  # ID may create a session; its successful native result uses normal ACK.
+  world_controller_birth
+}
+
+# Run only after the world services have stopped. The planner observes physical
+# state; all unmount/destroy effects still go through native volume custody.
+world_cleanup_volumes() {
+  local preserve=$1 evidence=$2 request action status_request
+  mkdir -m 700 "$evidence" || return
+  status_request=$(jq -cer --arg root "$GRAINS_ROOT" \
+    '{verb:"volumes-status",store:.store,deploymentId:.deploymentId,volumesRoot:($root+"/volumes")}' \
+    "/etc/mini-spk-volumes/$store.json") || return
+  timeout 120 sudo -n -- "$helper" "$status_request" >"$evidence/status.json" || return
+  python3 -B "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$GRAINS_ROOT" \
+    "$evidence/status.json" >"$evidence/plan.json" || return
+  while IFS= read -r request; do
+    action=$(jq -er .action <<<"$request") || return
+    if [[ $action == unmount ]]; then
+      timeout 120 sudo -n -- "$helper" "$(jq -c .request <<<"$request")" || return
+    elif [[ $action != already-unmounted ]]; then
+      return 1
+    fi
+    if [[ $preserve == false ]]; then
+      timeout 120 sudo -n -- "$helper" "$(jq -c '.request | .verb="destroy"' <<<"$request")" || return
+    fi
+  done < <(jq -c '.volumes[]' "$evidence/plan.json")
+}
+
 world_cleanup() {
-  local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false exit_path
+  local result=${1:-$?} cleanup_result=0 unit preserve_namespace=false exit_path volume_evidence
   trap - EXIT INT TERM
   if [[ ${configured:-0} == 1 ]]; then
     if [[ ${controller_created:-0} == 1 ]]; then
@@ -380,14 +516,16 @@ world_cleanup() {
     # A failed journey keeps its own stopped namespace and state volumes for
     # diagnosis/recovery. Never erase an uncertain admitted operation's journal.
     [[ $result == 0 ]] || preserve_namespace=true
-    for request in "$GRAINS_ROOT/broker"/volume-*.json; do
-      [[ -f $request ]] || continue
-      verbs=unmount
-      [[ $preserve_namespace == true ]] || verbs='unmount destroy'
-      for verb in $verbs; do
-        sudo -n -- "$helper" "$(jq -c --arg verb "$verb" '.verb=$verb' "$request")" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
-      done
-    done
+    if [[ $cleanup_result == 0 ]]; then
+      if volume_evidence=$(mktemp -d "${continuation:-$run}/volume-cleanup.XXXXXXXX"); then
+        # The helper owns this new child; mktemp protects the unique parent.
+        world_cleanup_volumes "$preserve_namespace" "$volume_evidence/observations" \
+          >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+      else
+        cleanup_result=1
+      fi
+    fi
+    [[ $cleanup_result == 0 ]] || preserve_namespace=true
     # This registry is uniquely created by this run. A failed unmount prevents
     # installer removal; preserve the entire namespace for diagnosis in that case.
     if [[ $preserve_namespace == false ]]; then
