@@ -28,11 +28,11 @@ pub const OBSERVATION_ASSEMBLE: u8 = 10;
 pub const CALL_ASSEMBLE: u8 = 11;
 // active; public,operator; owner: fn-services
 pub const FN_POLL: u8 = 12;
-// active; public,operator; owner: fn-services
+// active; operator; owner: fn-services
 pub const FN_ACK: u8 = 13;
 // active; public,operator; owner: fn-services
 pub const FN_REPLY_POLL: u8 = 14;
-// active; public,operator; owner: fn-services
+// active; operator; owner: fn-services
 pub const FN_REPLY_ACK: u8 = 15;
 // active; public,operator; owner: fn-services
 pub const FN_ORIGIN_OUTBOX: u8 = 16;

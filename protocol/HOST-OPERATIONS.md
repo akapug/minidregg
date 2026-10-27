@@ -67,7 +67,10 @@ source admission and runtime receiving-test responsibilities.
 
 The joined source inventory retains Host-only operations 24/25 for selected-source
 publication. Observer-signed enrollment 117–120 is operator-only; public quote
-121 has its bounded JSON-object guard. Stream renewal 152, route inspection 154
+121 has its bounded JSON-object guard. fn ACK 13/15 is operator-only: the Host
+receiver checks only that the Mini transaction is accepted, not who asks, so a
+public caller is refused by name until Lean states who may ACK a public fn
+delivery; fn poll 12/14 stays public. Stream renewal 152, route inspection 154
 and route-bound dispatch 164 remain private. Exact carry receipt recovery 153,
 paid-claim operations 181–186 and next-key adoption 187–190 have bounded public
 selectors. Their registry status records installed source and routing, not an
