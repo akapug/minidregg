@@ -3,15 +3,6 @@
 //! started/unknown request or authorize a model, payment, or native effect.
 use crate::*;
 
-#[derive(Deserialize)]
-#[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Ready {
-    #[serde(rename="type")]
-    kind:String,
-    task:String,
-    config_sha256:String,
-    binding_sha256:String,
-}
 fn config_digest(config:&Config)->Result<String> {
     sha256_bytes(&serde_json::to_vec(config).map_err(|e|e.to_string())?)
 }
@@ -22,15 +13,6 @@ fn response(config:&Config,path:&Path)->Result<Value> {
     Ok(json!({"type":"mini-resident-preflight-ready-v1","task":config.task,
         "configSha256":config_digest(config)?,"bindingSha256":binding_digest(config,path)?}))
 }
-fn checked(config:&Config,path:&Path,text:&str)->Result<()> {
-    let ready:Ready=serde_json::from_str(text).map_err(|_|format!("resident preflight refused before prompt dispatch: {text}"))?;
-    if ready.kind!="mini-resident-preflight-ready-v1" || ready.task!=config.task
-        || ready.config_sha256!=config_digest(config)? || ready.binding_sha256!=binding_digest(config,path)? {
-        return Err("resident preflight differs from exact controller configuration".into());
-    }
-    Ok(())
-}
-
 fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
     let value:Value=serde_json::from_slice(text).map_err(|_|"private operator preflight did not return one JSON response")?;
     if value["format"]!="mini-operator-drain-v1" || value["phase"]!="serving"
@@ -211,22 +193,8 @@ pub(crate) fn fixture_retain_preparation(rt:&Runtime,id:&str,sha:&str) {
     write_new(&preparation_path(&rt.config,id),&serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }
 #[cfg(test)]
-pub(crate) fn fixture_response(config:&Config,path:&Path)->Value {response(config,path).unwrap()}
-#[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn preflight_refusal_and_substitution_do_not_grant_prompt_admission() {
-        let (root,rt)=crate::tests::restart_resolution_fixture("preflight-identity");
-        let good=fixture_response(&rt.config,&rt.config_path);
-        checked(&rt.config,&rt.config_path,&good.to_string()).unwrap();
-        for key in ["task","configSha256","bindingSha256","type"] {
-            let mut v=good.clone();v[key]=json!("different");
-            assert!(checked(&rt.config,&rt.config_path,&v.to_string()).is_err());
-        }
-        assert!(checked(&rt.config,&rt.config_path,"error: launcher protocol absent").is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
     #[test]
     fn private_operator_preflight_refuses_public_dead_closed_or_substituted_source() {
         let (root,mut rt)=crate::tests::restart_resolution_fixture("private-operator-preflight");
