@@ -320,13 +320,13 @@ for i in $(seq 1 100); do grep -q "^http://" "$SD/provider.out" 2>/dev/null && b
 checkp hermes "the deterministic provider listens on loopback $PORT (pid $PROVIDER_PID)" grep -q "^http://127.0.0.1:$PORT/v1" "$SD/provider.out"
 # The provider table (root-owned) and the key broker (journey: one account).
 mkdir -p -m 700 "$SD/etc" "$JOURNEY_D/keys/run" "$JOURNEY_D/keys/state" "$SD/credentials"
-TABLE=$SD/etc/providers.json
+PTABLE=$SD/etc/providers.json
 jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" \
   '{type:"mini-provider-table-v2",providers:[{name:"friendkey",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"user"}]}' >"$SD/providers-source.json"
-operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$TABLE"
+operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
 head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
-  --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg t "$TABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
+  --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg t "$PTABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
   --argjson uid "$(id -u)" --argjson gid "$(id -g)" \
   '{type:"mini-keys-broker-v1",socket:$s,audit:$a,spool:$sp,singleAccount:true,
     peers:[{role:"member",gids:[$gid]},{role:"provider",uids:[$uid]},{role:"discord",uids:[$uid]},{role:"operator",uids:[$uid]}],
@@ -344,7 +344,7 @@ printf '%s\n' alice-fixture-key >"$SD/alice-key.secret"; chmod 600 "$SD/alice-ke
 operator hermes "KEY: alice sets her provider key (sealed by the broker)" \
   "$MINI" key --action set --dir "$WS/alice" --provider friendkey --secret "$SD/alice-key.secret" --broker "$KEYS_CLIENT"
 rm -f "$SD/alice-key.secret"
-ALICE_PUB=$(grep -o '"publicKey":"[0-9a-f]*"' "$OUT" | head -1 | cut -d'"' -f4)
+ALICE_PUB=$(jq -r '.result.owner.publicKey // empty' "$OUT")
 checkp hermes "key set names alice's owner public key" test -n "$ALICE_PUB"
 operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
   "$MINI" key --action grant --dir "$WS/alice" --provider friendkey --runner "${SUBJ[hprov]}" \
@@ -365,7 +365,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
   --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
   --arg hk "$H/hhost/keys/mini.key" --arg hs "${SUBJ[hhost]}" --arg tk "$H/htool/keys/mini.key" --arg ts "${SUBJ[htool]}" \
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
-  --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$TABLE" \
+  --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
   --arg ws "$WS/hermes" --arg home "$H/hermes" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
