@@ -130,6 +130,8 @@ mark.clause { background: color-mix(in srgb, var(--refused) 18%, transparent); c
 table.registry { font-size: 13px; } table.registry tr.reserved { color: var(--ink-2); }
 iframe.grain { width: 100%; height: 70vh; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
 td.verdict { font-family: var(--mono); font-size: 13px; } td.verdict.verified, td.verdict.ok { color: var(--admitted); } td.verdict.refused { color: var(--refused); }
+ol.tour { padding-left: 1.2rem; } ol.tour > li.step { margin: 1rem 0 1.4rem; } ol.tour h2 { margin-top: 0; }
+.step-outcome { border-left: 3px solid var(--accent); padding-left: .8rem; margin-top: .6rem; }
 /* documents */
 .doc .line { margin: .15rem 0; } .doc .line .n { color: var(--ink-2); font: 11px var(--mono); margin-right: .5rem; }
 .doc .transclusion { border-left: 2px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }

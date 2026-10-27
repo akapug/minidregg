@@ -40,6 +40,7 @@ struct Gateway {
     shutdown: String,
     frame_src: String,
     registry: Option<PathBuf>,
+    defaults: Option<PathBuf>,
 }
 
 fn main() {
@@ -51,7 +52,7 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let (mut listen, mut helper, mut origin, mut shutdown, mut frame_src, mut registry) = (None, None, None, String::new(), String::new(), None);
+    let (mut listen, mut helper, mut origin, mut shutdown, mut frame_src, mut registry, mut defaults) = (None, None, None, String::new(), String::new(), None, None);
     while let Some(flag) = args.next() {
         let value = args.next().ok_or_else(|| format!("{flag} takes a value"))?;
         match flag.as_str() {
@@ -61,6 +62,7 @@ fn run() -> Result<(), String> {
             "--shutdown" => shutdown = value,
             "--frame-src" => frame_src = value,
             "--registry" => registry = Some(PathBuf::from(value)),
+            "--defaults" => defaults = Some(PathBuf::from(value)),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -85,6 +87,7 @@ fn run() -> Result<(), String> {
         shutdown,
         frame_src,
         registry,
+        defaults,
     });
     let sweeper = gateway.clone();
     std::thread::Builder::new().name("mini-web-sweep".into()).spawn(move || loop {
@@ -240,7 +243,7 @@ impl Gateway {
             },
             ("GET" | "HEAD", ["registry"]) => {
                 let who = self.sessions.who(request);
-                let html = page::registry(self.registry.as_deref());
+                let html = format!("{}{}", page::registry(self.registry.as_deref()), page::default_laws(self.defaults.as_deref()));
                 self.stage(200, "Registry", html, who, request)
             }
             (_, ["join", ..]) => Reply::Raw(Response::redirect("/join")),

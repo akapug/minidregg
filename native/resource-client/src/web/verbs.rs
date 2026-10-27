@@ -203,17 +203,26 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         return Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body };
     }
     for (i, alt) in alts.iter().enumerate() {
-        body.push_str(&form(name, i, alt, verb.operation));
+        body.push_str(&form(name, i, alt, verb.operation, &format!("/verb/{}", escape(name)), ""));
     }
     Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body }
 }
 
-fn form(name: &str, index: usize, alt: &Alt, operation: &str) -> String {
+/// The form of one verb alternative, by the literal words that name it (`"doc append"`), posted
+/// to `action` with `hidden` fields before its own: the tour embeds the real forms this way.
+pub(super) fn form_for(name: &str, literals: &str, action: &str, hidden: &str) -> Option<String> {
+    let verb = crate::shell::command_catalog().find(|v| v.name == name)?;
+    let alts = alternatives(verb.usage);
+    let (index, alt) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals)?;
+    Some(form(name, index, alt, verb.operation, action, hidden))
+}
+
+fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidden: &str) -> String {
     let mut out = format!(
-        "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"/verb/{}\"><input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
+        "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"{action}\">{hidden}<input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
         escape(&alt.literals()),
-        escape(name)
     );
+    let _ = name;
     for (i, tok) in alt.tokens.iter().enumerate() {
         let field = format!("a{i}");
         match tok {
@@ -357,7 +366,9 @@ mod tests {
         assert_eq!(chat[1].tokens[1], Tok::Flag { name: "-n".into(), value: Some(("N".into(), Kind::Number)), optional: true });
         let create = alternatives("create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM]");
         assert_eq!(create[0].tokens[4], Tok::Arg { name: "FIELDS|open".into(), optional: true, kind: Kind::Word });
-        let html = form("delegate", 0, &alts[0], "propose");
+        let html = form("delegate", 0, &alts[0], "propose", "/verb/delegate", "");
+        assert!(form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\">").unwrap().contains("action=\"/tour/3\""));
+        assert!(form_for("doc", "doc nope", "/x", "").is_none());
         assert!(html.contains("name=\"a1\"") && html.contains("list=\"refs\"") && html.contains("name=\"submit\""), "{html}");
     }
 }

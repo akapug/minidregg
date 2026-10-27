@@ -29,6 +29,9 @@ search · Log out), a rail of places, and the stage.
 | Purse | `/purse` | the account as a meter (`credit`), pay status, top up, tariffs | `credit`, `pay status`, `topup`, `tariff` |
 | Commands | `/verb`, `/verb/NAME` | **every shell verb as a form, derived from the shell's verb table** (`shell::command_catalog`: shell, chat, hermes, story): one form per usage alternative, reference arguments as pickers over the workspace's refs, text through `@FILE`, a fresh proposal id with "and `submit ID`"; the answer is the one outcome partial | all of them |
 | Terminal | `/term` | `mini shell` as this member, in the page (a convenience, never the parity mechanism) | the shell itself |
+| Tour | `/tour`, `/tour/N` | the twelve steps of `docs/DEMO-EXPERIENCE-2026-10-27.md` §1 as one page whose forms are the real derived forms; a step's outcome lands under it | the steps' verbs |
+| Registry | `/registry` | the operation registry (bytes, receivers, effects, markers, consent plans) and the Lean-emitted default laws, for every visitor | data files of the candidate |
+| the front page (public) | `/` | what the public reader may observe: published documents, the operations room (`operations`, posted into by `mini-s-box`; named when absent), the receipts stream newest first, the laws | the public body |
 
 **Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
 the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is

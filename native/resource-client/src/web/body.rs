@@ -176,11 +176,21 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
+        ["tour"] => tour(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
             }
             let mut page = site.index();
+            if site.front.read_only {
+                page.title = "Mini".into();
+                page.body = format!(
+                    "<p>The world as the public reader sees it: the documents members published, the box's own operations room, \
+                     the <a href=\"/receipts\">receipts stream</a> and the <a href=\"/registry\">laws of the box</a>. A <a href=\"/tour\">tour</a> shows what a member can do.</p>\n{}{}",
+                    operations(site),
+                    page.body
+                );
+            }
             if !site.front.read_only {
                 page.body.push_str(
                     "<section><h2>New document</h2><form method=\"post\" action=\"/doc/new\" class=\"row\"><div><label for=\"dn\">Name</label><input id=\"dn\" name=\"name\" type=\"text\" required pattern=\"[A-Za-z0-9-]+\"></div>\
@@ -292,7 +302,8 @@ fn receipts(site: &Site) -> Page {
         Some(ending) if ending.code == 0 => {
             let text = ending.text();
             let mut rows = String::new();
-            for line in text.lines() {
+            // Newest first: the stream reads down from the latest attempt.
+            for line in text.lines().rev() {
                 let id = line.split_whitespace().next().unwrap_or("");
                 if id.len() > 1 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
                     rows.push_str(&format!("<tr><td><a href=\"/receipts/{id}\">{id}</a></td><td>{}</td></tr>\n", escape(line[id.len()..].trim())));
@@ -471,6 +482,76 @@ fn import_inbox(site: &Site) {
     }
 }
 
+/// The box's own operations room: the reference `operations` in this workspace (the public reader
+/// is granted it; `mini-s-box` posts the ships, drills, certifier ticks and backup receipts into it
+/// as signed turns). Until it is shared, the page says so by name.
+fn operations(site: &Site) -> String {
+    if !site.names().iter().any(|n| n == "operations") {
+        return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>, posted into by the box's own member <code>mini-s-box</code>) is not yet shared with the public reader: nothing to show by that name.</p></section>\n".to_owned();
+    }
+    match verb(site, &["tail -n 20 --in operations".to_owned()]) {
+        Some(ending) if ending.code == 0 => format!(
+            "<section class=\"ops chat\" data-live=\"30000\"><h2>Operations room</h2><p class=note>The box's ships, drills, certifier ticks and backup receipts, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
+            escape(ending.text().trim())
+        ),
+        Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", outcome(&ending, &[])),
+        None => String::new(),
+    }
+}
+
+/// `/tour`: the twelve steps of docs/DEMO-EXPERIENCE-2026-10-27.md §1 as one guided page whose
+/// forms are the real forms (the derived verb forms, posted to `/tour/N`); a step's outcome
+/// partial renders under it. The public reader reads the steps; a member runs them.
+fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
+    let member = !site.front.read_only;
+    let forms = |n: usize, specs: &[(&str, &str)]| -> String {
+        if !member {
+            return String::new();
+        }
+        specs
+            .iter()
+            .filter_map(|(verb, literals)| verbs::form_for(verb, literals, &format!("/tour/{n}"), &format!("<input type=\"hidden\" name=\"verb\" value=\"{}\">", escape(verb))))
+            .collect()
+    };
+    let steps: Vec<(&str, String, String)> = vec![
+        ("lands", "The world as the public reader may observe it: published documents, the laws of the box (the operation registry, the consent plans), the receipts stream, the operations room, the shutdown date, the world-readable sentence.".into(),
+            format!("<p><a href=\"/\">the front page</a> · <a href=\"/registry\">the registry</a> · <a href=\"/receipts\">receipts</a></p>{}", operations(site))),
+        ("joins", "A name; optionally an ssh public key, Discord, pay-to-enrol. Without an ssh key the box makes the hosted key and the door answers a one-time <em>Open your session</em> link.".into(),
+            "<p><a href=\"/join\" data-full>the door</a></p>".into()),
+        ("writes", "A new document, an append, a link to another document, a transclusion; after every action the outcome partial: admitted at a height, or the refusal's clause, or undecided with its exact retry.".into(),
+            forms(3, &[("doc", "doc new"), ("doc", "doc append"), ("doc", "doc link"), ("doc", "doc transclude")])),
+        ("is refused, and reads why", "Try to edit a document you do not own: refused, with the clause of the law that refused it. <code>can</code> shows which verbs would pass; <code>why</code> explains the last refusal in the kernel's words.".into(),
+            forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
+        ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
+            forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
+        ("summons an agent", "A Hermes resident into your room with a budget; ask it to read a document and post a summary; its turns land as paid, admitted writes with receipts; the purse drains; <code>dismiss</code> refunds the remainder.".into(),
+            forms(6, &[("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("dismiss", "dismiss")])),
+        ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
+            format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
+        ("asks the oracle", "The veri7vn grain: a question, an answer with its evidence and the machine-checked function it rests on (the oracle appliance lands on the same grain path).".into(), String::new()),
+        ("links Discord", "<code>/mini link CODE</code> in Discord with the code the door's status page shows; <code>/mini say</code> then lands as your turn and appears in the web room.".into(), String::new()),
+        ("opens the terminal", "<code>mini shell</code> in the page, or over ssh with the key you gave: the same verbs, the same receipts.".into(),
+            "<p><a href=\"/term\">Terminal</a></p>".into()),
+        ("plays", "A story room: collective fiction under a law the author sealed; the Lean theorem <code>sealed_story_scene_monotone</code> is the rule of the game.".into(),
+            forms(11, &[("story", "story new"), ("look", "look"), ("go", "go"), ("take", "take"), ("act", "act"), ("narrate", "narrate")])),
+        ("reads the operations room", "The box's own ships, drills, certifier ticks and backup receipts as signed turns of the box's member; the published performance numbers read from the same world.".into(),
+            operations(site)),
+    ];
+    let mut body = String::from("<p>Fifteen minutes, from a browser, nothing installed. Every form below is the real form: the words of one shell verb, run as you, answered by the Host; its outcome lands under the step.</p>\n<ol class=\"tour\">");
+    for (i, (title, text, forms_html)) in steps.iter().enumerate() {
+        let n = i + 1;
+        body.push_str(&format!("<li id=\"step-{n}\" class=\"step\"><h2>{n}. The stranger {title}</h2><p>{text}</p>{forms_html}"));
+        if let Some((step, html)) = &outcome {
+            if *step == n {
+                body.push_str(&format!("<div class=\"step-outcome\">{html}</div>"));
+            }
+        }
+        body.push_str("</li>\n");
+    }
+    body.push_str("</ol>");
+    Page { status: 200, title: "Tour".into(), stamp: Stamp::None, body }
+}
+
 fn board_forms(name: &str) -> String {
     let n = escape(name);
     format!(
@@ -512,6 +593,11 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["new-document", id] => create::post(site, id, body, "create"),
         ["new-document", id, op] => create::post(site, id, body, op),
         ["verb", name] => verbs::post(site, name, &form),
+        ["tour", step] => {
+            let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
+            let outcome = verbs::post(site, name, &form);
+            tour(site, Some((step.parse().unwrap_or(0), outcome.body)))
+        }
         ["apps", "install"] => apps::install(site, &form),
         ["grain", n, action] => apps::grain_action(site, n, action, &form),
         ["doc", "new"] => {
