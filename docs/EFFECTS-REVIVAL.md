@@ -99,7 +99,9 @@ so it belongs to the controller once:
   full descriptor) and `exec` (sem, then a loud frame check `outOfFrame`, then the replay
   with every guard, loud `guardFailed`).  `Complete` is its proof obligation: neither
   dispatcher refusal is reachable, so every refusal is one the declaration names.
-* `Handler` (substrate, declaration, `select`/`pack` into a common cell universe),
+* `Handler` (substrate, declaration, the controller's header check, `select`/`pack` into a
+  common cell universe, inverse both ways, so a dispatch cannot rewrite a cell outside its
+  selection unseen),
   `Registry := List (Nat × Handler)`, the one `dispatch`, and `LawfulRegistry` (codes
   unique, every handler `Sound ∧ Complete` as proof fields, ATLAS §4's packed-handler
   shape).
@@ -153,6 +155,7 @@ so it belongs to the controller once:
 |---|---|---|---|---|
 | `EngineKeystone` | over sound handlers, `Dispatches R [] (dispatch R)` | `EngineSatisfiable`: the two-entry `toyPole` dispatches through itself, admits entry A's `5`, refuses entry B's out-of-frame `false` with `outOfFrame 1` | `EngineTeeth`: refutes the ghost reading (`toyGhostPole`), the fail-open dispatcher (`toyFailOpen`), the unframed dispatcher (`dispatchUnframed`), and a twin (`legacy = [1]`) | `EnginePremise`: every pole handler is sound |
 | `CompletenessKeystone` | through a `LawfulRegistry`, every refusal is a declared name | `CompletenessSatisfiable`: entry A lawful, its `tooLarge` surfaces as `refused 0 "tooLarge"` | `CompletenessTeeth`: entry B is not lawful | `CompletenessPremise`: a lawful registry exists |
+| `HostKeystone` = `Dispatches [(1, contentHandler)] hostLegacy hostTargetDispatch` | today's target dispatch (payload decode, `selectTarget`, `computeTarget`, patch validation, `packTarget`) dispatches through the one-entry registry, every other payload code in `hostLegacy`; `noTwin` puts code 1 out of the hand arms | `HostAccepted` (the doc-write fixture, owed) | `HostTeeth`: refutes the registry with the seal-less content handler, and code 1 kept as a hand arm too | `HostPremise`: `contentHandler.Lawful` |
 | `LiveKeystone` = `ContentAgreement contentSpec ∧ ContentComplete` | the deployed content arm (`computeTarget`, `targetPatch`, `targetField`, `targetRatchet`, `targetAmount`, `payloadVerb`, `targetProjection`) agrees with `contentSpec`; `contentSpec` keeps its declared frame (`contentActionFrame`, per action) | `ContentAccepted`: the live arm admits some content command (intended inhabitant: `Fixtures/NativeDocWriteFixture*`) | `ContentTeeth`: refutes the declaration without the blinding seal (`contentGhost`) and the frame without `annotations` (`contentNarrowed`, `annotate` writes there) | `ContentAccepted` |
 
 `Dispatches R [] (dispatch R)` is the engine's generic theorem, in the same role as the old
@@ -161,10 +164,22 @@ is `ContentAgreement`: a refinement of today's hand arm, which can be false.  It
 also tests `contentFrame`, because a live-admitted command that wrote outside the declared
 frame would make `exec` refuse it.
 
-`HostDispatches` over the controller's actual cell universe (`PackedCell Registry`, with
-`selectTarget`'s deployment and target-id dependence) is not stated here.  It needs the
-payload decoder to consult the registry, which is the migration commit itself.  It will be
-stated there, as that commit's gate, with `legacy = [0, 2, 3, 4, 5, 6, 7, 8]`.
+`HostKeystone` is the deployed keystone, stated now (the auditor's pass 19): over the
+controller's own cell universe (`PackedCell Registry`), against today's target dispatch.
+It is **known false today**, by clause: an unknown payload tag is refused `malformed`, not
+by name (`unregistered`), and code 1 is still the hand arm, which `agreement` matches only
+if `ContentAgreement` and `ContentComplete` hold.  The migration commit makes it true by
+rewiring the payload decoder through the registry and deleting the content arms; it is
+that commit's gate.  `ContentAgreement` alone would license keeping both arm and
+declaration; `HostKeystone`'s `noTwin` is what forbids it.
+
+**The label, said exactly (pass 19):** what is derived after step 1 is the dispatcher, the
+frame, the checks and the patch/post relation (one descriptor, its replay).  The content
+semantics itself is still the source-owned lowering `ContentResource.run`, reused by
+`contentSpec` as it is by `computeTarget`; that is why `ContentAgreement`'s clauses 2 and 5
+are near-identities and its real content is clause 4 (refuted by `contentGhost`) plus
+`ContentComplete`.  Deriving the lowering itself (its actions as a declared vocabulary
+over the hyperdocument layout) is a later rung, not claimed.
 
 ## 5. Migration order (each step deletes its hand arm in the same commit)
 
@@ -254,13 +269,16 @@ closure (law 5) in the commit after it elaborates.
 
 State at the first push:
 
-* Done: this document; the statements file.  It is unchecked: no warm tree on dregg-ref
-  had this lane's sources when it was written.
-* Next: elaborate the statements; send them to the auditor (`af7a93e7b8ba729d4`) and
-  revise on its verdict.  Only then prove: first the pole witnesses (decidable over
+* Done: this document; the statements file; the auditor's pass 19 (lane/audit-platform
+  `3fc181cae`): engine, completeness and `ContentComplete` cleared for proof; its two
+  changes applied (`Handler.Sound` gains the converse `select cell = some s → pack s =
+  cell`, agreement now holds on every cell through `Handler.fire`; `HostKeystone` stated).
+  Unchecked: the integrator elaborates it in `/build/lanes/integ8/src` after its regen.
+* Next: send the revision to the auditor; then prove: first the pole witnesses (decidable over
   `toyLayout`), then `EngineKeystone` and `CompletenessKeystone` (generic), then
   `ContentAgreement` (unfold `computeTarget`'s content arm, `prepareCell_ok_of_run`,
-  `Patch.run_append`) and `ContentComplete` (per action, by the lowering's write sites).
+  `Patch.run_append`) and `ContentComplete` (per action, by the lowering's write sites);
+  the fixture inhabitant of `ContentAccepted`/`HostAccepted` is owed.
 * Risk to watch: `contentActionFrame` is a declared table.  If an action writes a field
   the table omits, `ContentComplete` is false, and the fix is to the table, after
   checking which addresses the lowering writes (`ContentResource.step`).
