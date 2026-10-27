@@ -539,6 +539,68 @@ fn show(bend: &Bend, mut args: Args) -> Result<()> {
     Ok(())
 }
 
+// ------------------------------------------------------------------ await / answer
+
+fn decimal_arg(value: &str, what: &str) -> Result<()> {
+    if mini_sdk::decimal::is_canonical_max(value, 80) { Ok(()) } else { Err(format!("bend: {what} must be a canonical decimal")) }
+}
+
+/// `bend await OBJECT TRANSACTION`: the activity that birth made, as one JSON line (the read a
+/// resident's `mini_pending_awaits` is built on). Absent record: phase `none`.
+fn await_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let object = text(&mut args, "object")?;
+    let transaction = text(&mut args, "transaction")?;
+    args.finish()?;
+    decimal_arg(&object, "OBJECT")?;
+    decimal_arg(&transaction, "TRANSACTION")?;
+    let view = activity::view(&bend.ws, &json!({"objects": [&object], "births": [{"object": &object, "transaction": &transaction}]}))?;
+    println!("{}", await_of_view(&view, &object, &transaction));
+    Ok(())
+}
+
+fn await_of_view(view: &Value, object: &str, transaction: &str) -> Value {
+    let record_cell = view.pointer("/births/0/record").and_then(Value::as_str).unwrap_or_default();
+    let phase = cell_of(view, record_cell).and_then(|c| c.pointer("/record/phase"));
+    let state = view.pointer("/objects/0/stateCell").and_then(Value::as_str).and_then(|c| cell_of(view, c)).and_then(|c| c.get("value"));
+    let mut out = json!({"type": "mini-bend-await-v1", "object": object, "transaction": transaction, "record": record_cell,
+        "height": view.get("height"), "phase": phase.and_then(|p| p.get("kind")).cloned().unwrap_or(json!("none")),
+        "state": state.cloned().unwrap_or(Value::Null), "stateText": state.map(data_text)});
+    if let Some(source) = phase.and_then(|p| p.pointer("/await/source")).filter(|s| s.get("kind") == Some(&json!("reply"))) {
+        out["slot"] = source.get("slot").cloned().unwrap_or(Value::Null);
+        out["decider"] = source.get("decider").cloned().unwrap_or(Value::Null);
+        out["deadline"] = phase.and_then(|p| p.pointer("/await/deadline")).cloned().unwrap_or(Value::Null);
+    }
+    out
+}
+
+/// The attempt name of the answer to SLOT: fixed, so `bend lookup`/`bend retry` find it again.
+fn answer_name(slot: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("answer-{}", &format!("{:x}", Sha256::digest(slot.as_bytes()))[..16])
+}
+
+/// `bend answer SLOT @FILE`: one resolve turn deciding SLOT, signed by this workspace's key. The
+/// kernel admits only the slot's decider (notDecider) and only once (a decided slot refuses).
+fn answer_cmd(bend: &Bend, mut args: Args) -> Result<()> {
+    let slot = text(&mut args, "slot")?;
+    let file = path(args.required("answer")?);
+    args.finish()?;
+    decimal_arg(&slot, "SLOT")?;
+    let bytes = fs::read(&file).map_err(|e| format!("bend: {}: {e}", file.display()))?;
+    if bytes.len() > 4096 { return Err("bend: an answer is at most 4096 bytes".into()); }
+    let answer: Value = serde_json::from_slice(&bytes).map_err(|e| format!("bend: the answer is not JSON: {e}"))?;
+    let shaped = answer.as_object().is_some_and(|o| o.len() == 1
+        && (o.contains_key("reply") || o.get("refused").is_some_and(Value::is_string)));
+    if !shaped { return Err("bend: the answer is {\"reply\": DATA} or {\"refused\": REASON}".into()); }
+    let name = answer_name(&slot);
+    let turn = json!({"kind": "resolve", "slot": &slot, "answer": &answer});
+    let meta = json!({"kind": "resolve", "slot": &slot});
+    match bend.submit(&name, "resolve", &turn, &meta, false) {
+        Err(e) => ending_for(&name, e),
+        Ok((d, _)) => report(bend, &name, &meta, None, "bend answer", d),
+    }
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = text(&mut args, "action")?;
     let bend = Bend::open(path(args.required("dir")?))?;
@@ -546,9 +608,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "publish" => publish(&bend, args),
         "run" => run_bend(&bend, args),
         "show" => show(&bend, args),
+        "await" => await_cmd(&bend, args),
+        "answer" => answer_cmd(&bend, args),
         "lookup" => lookup_cmd(&bend, args, false),
         "retry" => lookup_cmd(&bend, args, true),
-        _ => Err("bend --action must be publish, run, show, lookup or retry".into()),
+        _ => Err("bend --action must be publish, run, show, await, answer, lookup or retry".into()),
     }
 }
 
@@ -627,6 +691,21 @@ mod tests {
             assert!(text.contains("`bend lookup tally`") && text.contains("`bend retry tally`"), "{text}");
             assert!(!text.contains("mini activity"), "{text}");
         }
+    }
+
+    #[test]
+    fn an_await_reads_the_reply_slot_decider_and_deadline() {
+        let view = json!({"height":"40","births":[{"record":"77"}],"objects":[{"stateCell":"78"}],"cells":[
+            {"cell":"77","record":{"phase":{"kind":"awaiting","await":{"id":"1","deadline":"90","source":{"kind":"reply","slot":"5551","slotCell":"9","decider":"42"}}}}},
+            {"cell":"78","value":{"tag":"record","fields":[{"name":"total","value":{"tag":"natural","value":"3"}}]}}]});
+        let a = await_of_view(&view, "12", "34");
+        assert_eq!((a["phase"].as_str(), a["slot"].as_str(), a["decider"].as_str(), a["deadline"].as_str()),
+            (Some("awaiting"), Some("5551"), Some("42"), Some("90")));
+        let none = await_of_view(&json!({"births":[{"record":"77"}],"cells":[]}), "12", "34");
+        assert_eq!(none["phase"], "none");
+        assert!(none.get("slot").is_none());
+        assert_eq!(answer_name("5551"), answer_name("5551"));
+        assert!(answer_name("5551").len() <= 64 && name_ok(&answer_name("5551")).is_ok());
     }
 
     #[test]

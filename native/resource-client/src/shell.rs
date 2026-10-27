@@ -1181,6 +1181,12 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
                 "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
+                "await" => flags.extend([flag("action", "await"), flag("object", p.arg(0)), flag("transaction", p.arg(1))]),
+                "answer" => {
+                    let file = p.arg(1).trim_start_matches('@');
+                    session_file(file, "answer")?;
+                    flags.extend([flag("action", "answer"), flag("slot", p.arg(0)), flag("answer", session.home.join("requests").join(file))]);
+                }
                 action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
             }
             if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }

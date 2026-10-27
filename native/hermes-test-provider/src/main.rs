@@ -953,6 +953,58 @@ fn sandbox_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'sta
     None
 }
 
+/// The await bridge (docs/HERMES-TOOLS-2026-10-27.md is the sandbox; this is Quest 2): when the
+/// selected request names `await OBJECT TRANSACTION`, read `mini_pending_awaits`, answer each await
+/// listed with `{amount: 7}`; when the request also names `slot S`, answer S as asked (the teeth row:
+/// an await another subject decides). The final text carries every answer's result; each tool result
+/// is kept in `LOG.await.jsonl`.
+fn await_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'static str, String), String>> {
+    let messages = request.get("messages")?.as_array()?;
+    let user = messages.iter().rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))?;
+    let text: String = match &messages[user]["content"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect(),
+        _ => return None,
+    };
+    let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
+    let ask = brief["selectedRequest"]["text"].as_str().unwrap_or("").to_owned();
+    if !ask.split_whitespace().any(|w| w == "await") { return None; }
+    let pending = room_tool(request, "mini_pending_awaits")?;
+    let answer = room_tool(request, "mini_answer_await")?;
+    let current = &messages[user..];
+    let issued: Vec<String> = current.iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .flat_map(|m| m.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default())
+        .filter_map(|c| c.get("id").and_then(Value::as_str).map(str::to_owned)).collect();
+    let calls = |list: Vec<Value>, stage: &str| Some(Ok((json!({"role":"assistant","content":null,"tool_calls":list}), "tool_calls", stage.to_owned())));
+    if !issued.iter().any(|id| id == "aw-pending") {
+        return calls(vec![call(pending, "aw-pending", json!({}))], "await-read");
+    }
+    if !issued.iter().any(|id| id.starts_with("aw-answer")) {
+        let listed = room_result(current, "aw-pending").and_then(|r| r.get("ok").cloned()).unwrap_or(Value::Null);
+        let _ = log_event(&log.with_extension("await.jsonl"), &json!({"id":"aw-pending","result":listed}).to_string());
+        let mut slots: Vec<String> = listed["awaits"].as_array().into_iter().flatten()
+            .filter_map(|a| a["slot"].as_str().map(str::to_owned)).collect();
+        let words: Vec<&str> = ask.split_whitespace().collect();
+        if let Some(i) = words.iter().position(|w| *w == "slot") {
+            if let Some(s) = words.get(i + 1).filter(|s| s.bytes().all(|b| b.is_ascii_digit())) { slots = vec![(*s).to_owned()]; }
+        }
+        if slots.is_empty() {
+            return Some(Ok((json!({"role":"assistant","content":"no await in this room is waiting for my answer"}), "stop", "await-none".into())));
+        }
+        let reply = json!({"tag":"record","fields":[{"name":"amount","value":{"tag":"natural","value":"7"}}]});
+        return calls(slots.iter().enumerate().map(|(i, slot)| call(answer.clone(), &format!("aw-answer-{i}"),
+            json!({"slot":slot,"reply":reply}))).collect(), "await-answer");
+    }
+    let mut results = Vec::new();
+    for id in issued.iter().filter(|id| id.starts_with("aw-answer")) {
+        let content = tool_result(current, id).and_then(|m| m.get("content")).cloned().unwrap_or(Value::Null);
+        let _ = log_event(&log.with_extension("await.jsonl"), &json!({"id":id,"content":content}).to_string());
+        results.push(content.to_string());
+    }
+    Some(Ok((json!({"role":"assistant","content":format!("await answers: {}", results.join("; "))}), "stop", "await-done".into())))
+}
+
 fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
     let model = request.get("model").and_then(Value::as_str).ok_or("model absent")?;
     if model != MODEL {
@@ -1375,7 +1427,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             let shown = json!({"brief":request.pointer("/messages/0/content"),
                 "tools":request["tools"].as_array().into_iter().flatten().filter_map(|t| t.pointer("/function/name").cloned()).collect::<Vec<_>>()});
             let _ = log_event(&log.with_extension("shown.jsonl"), &shown.to_string());
-            match sandbox_reply_for(&request, log) {
+            match sandbox_reply_for(&request, log).or_else(|| await_reply_for(&request, log)) {
                 Some(reply) => reply,
                 None => room_reply_for(&request),
             }

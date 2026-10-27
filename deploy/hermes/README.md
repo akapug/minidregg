@@ -457,65 +457,55 @@ page to state.
 
 ## State (lane L4, 2026-10-27)
 
-**Landed on lane/hermes** (each pushed): a83a3bd5 / ab2d4879 a provider settle killed at the
-deadline, or rejected by continuity before signing, prepares afresh (no call.bin = never sent);
-24e963e8 a maintenance prompt closes before delivery; 39d802f5 per-member pool caps in mini-keys
-(default 1/40 of the ceiling a day, 1/10 in all); 56f85933 the Host quotes Z.AI's stream (absent
-`finish_reason` before the finish); 54a43e15, e11eef11 the subscriber tier (second resident,
-`zai-glm` / `zai-byok` rows in `demo/providers-zai-rows.json`, glm-5.3-flash, caps from the measured
-quota); ff23955a the concierge keeps the chat roster and drops the window reference in
-`MEMBER_HOMES/SUBJECT/requests/ROOM-invite.json`; d1aeac26 `chat join` adopts that window over a
-guest reference; 8e6ad653 room field 1013 `hermes/provider`; c1c582e0, 0b35fbac a failed turn names
-the refusal of its model call and a turn whose every model call was refused is a typed failure;
-d223655a the renewal id is a digest of the transactionId; c2a05c60 a refund whose pass died is
-re-driven (pass lock inherited by children, eight generations then `refund-stalled`); 68e1921c a
-shell flag's file under the home gets its folder.
+**The room resident (J14)** passes whole on the lane (run 24, 153/153 rows; upstream Hermes
+Agent 6d8a8beb in the gated worker, pool route, `--network none` plus the bridge). The subscriber
+tier row's six tier-7 reds are fixed, unrun: bcd78780 (the turn count in a workroom), 2dfefa66
+(a failed prompt refused by the controller's typed record is closed and counted, so later passes are
+not blocked) and 65eca3e4 (the tier row's journey bound is 5400 s).
 
-**J14** passes whole on lane/hermes: run 24, 153/153 rows, upstream Hermes Agent 6d8a8beb in the
-gated worker, pool route, `--network none` + bridge, every lane binary including the shell
-(dregg-build `/build/lanes/hermes-live-run/tip-j14-24.log`). To run: on dregg-build,
-`J14_ROUTE=pool J14_TIER= /build/lanes/hermes-tier-run/run-j14-tip.sh /build/lanes/hermes-live-run/NAME`
-(binaries from `/build/lanes/hermes-tier` built into `/build/lanes/hermes-tier-target`; the Host and
-consent from that tree's `.lake/build/bin`). Run directories must sit under
-`/build/lanes/hermes-live-run/` (the sudo rule for the root-owned provider table names it). J14
-uses the user unit `mini-grain-controller@9870001`: one J14 at a time per account. The manifest's
-`shell` entry must be overridden too, or shell lines run the candidate's mini.
+**Sandbox tools** (docs/HERMES-TOOLS-2026-10-27.md, the design and the containment argument). A
+founder grants upstream Hermes's file, terminal and Python tools with room field 1014
+`hermes/tools` (bits 1/2/4), within the operator's `controller.json` `sandbox` ceiling (grain create
+`sandbox: S|M|L`). The worker gets a class-sized `/scratch` tmpfs, the class memory, task and CPU
+bounds, `LimitFSIZE`, `--disable-userns --cap-drop ALL --new-session`, and still no network.
+The catalogue check admits exactly Mini's tools plus the granted names. The gate records the
+worker's CPU (`UNIT.cpu`), and the resident pays ceil(CPU / `hermes/compute` seconds) as
+`hermes/turn` payments. Commits: fc2cf37a, 84637ef9, 17619fa2, 6240d0e9, 9b8a9ac8, 05b69e7e,
+3ffe040a, ec6f7307, 68394077. Controller tests passed on dregg-build (30/30).
+J14_TOOLS has not run: it needs a host built at or after bc88a5ab (genesis frame v8), and no
+candidate on dregg-build had one when this was written.
 
-**The subscriber tier row** is `J14_ROUTE=zai J14_TIER=1` (same script; for a candidate, set the
-manifest and binaries in `run-j14-tip.sh`'s header). Last run, tier-7 (lane tip 0b35fbac, 167 rows
-before the 3600 s hook timeout): subscribe (observe guest reference, `pay lab week`, the concierge's
-window, roster row, join-file drop, `chat join` adopting the window), summon, the route fact, ask and
-no-grant all pass; the broker refuses the over-cap call for bob `member-day-ceiling` and the
-controller decides the turn as a typed failure `provider-refused:member-day-ceiling`. Owed, not yet
-run:
-- attach1's turn count in a workroom (the template's own documents are linked too): bcd78780.
-- **The resident leaves a failed prompt pending.** `room_resident.rs` `prompt()` returns Err on a
-  `prompt-complete` whose outcome is `failed`, keeping `journal.pending`; the main loop then refuses
-  every later pass ("uncertain prior prompt") before `resident_requests::reconcile` can close the
-  request `failed-after-admission` from the controller's typed `refused` record. A failed frame
-  whose typed outcome is `refused` should be reconciled and cleared there (the bob notice row and
-  the dismissal cascade from this).
-- The tier row outruns the J14 hook's 3600 s bound (`journey.sh`); the expiry rows were not reached.
+**The await bridge** (645fa559): `bend await OBJECT TRANSACTION` / `bend answer SLOT @FILE`, and
+the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announces
+`await OBJECT TRANSACTION` in the room; that is the allowance. The kernel decides who may answer
+(notDecider) and refuses a second answer. Row: J14_AWAIT=1.
 
-**The resident's tools and grants** (for a new tool, e.g. an await bridge): the room catalogue is
-`resource_tools::room_tool_specs()` (the MCP schemas, also the provider's function list); reads go
-through `RoomTools::read`, writes are the names in `resource_tools::ROOM_WRITE_TOOLS`, validated by
-`validate_room_write`, admitted by `resident_delivery::admits_room_call`, paid (`RoomTools::pay`, one
-`hermes/turn`) and journaled as a `room_attempt` before the write (`room_task.rs`
-`room_call_with_id`); each tool maps to one shell line in the resident's own workspace, so the Host
-admits it under Hermes's grants. `restrictTools` (default true) makes `Runtime::tool_call` refuse
-any name `is_room_tool` does not list; the worker must report exactly that catalogue
-(`mcp.rs`, `hermes-agent/mini-tool-catalogue.patch`). A new resident tool is added to
-`room_tool_specs`, its read/write arm in `resource_tools.rs`, and (writes) `ROOM_WRITE_TOOLS`.
+**Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
+lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
+root with `build-runtime-root` from `/build/lanes/hermes-live-run/hermes-agent` (6d8a8beb) against
+those binaries, and runs J0-J5 and J14 keep-going with J14_TOOLS=1 on the pool route. Set `C=` in it
+to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge rows. Constraints:
+- Run directories must sit under `/build/lanes/hermes-live-run/` (the sudo rule for the root-owned
+  provider table names it).
+- J14 holds the user unit `mini-grain-controller@9870001`, so only one J14 runs per account.
+- The manifest's `shell` must be the lane `mini`.
+- A runtime root built before 05b69e7e needs a full rebuild, not `--rebind`.
+
+**The resident's tools** are added in `resource_tools.rs`:
+- the schema goes in `room_tool_specs()`, which is also the provider's function list and the
+  catalogue the worker must report;
+- reads go in `RoomTools::read`;
+- writes go in `ROOM_WRITE_TOOLS`, `validate_room_write` and `write_with_reply_guard`;
+- each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
+  exact lookup is `RoomTools::lookup`.
 
 **Owed:**
-- The redteam row (lane/redteam-q2 `docs/review/2026-10-27-redteam/REDTEAM.md`): 7 reds of 173.
-  Planted calls 0-3 leave no controller result because real Hermes drops names outside its
-  catalogue before the controller (the row expects the controller's refusal); planted call 7
-  (inside the grant) was not performed; the "paper unchanged" check greps a `created-by` line the
-  reader does not print; the injection spent 8 paid turns against the row's bound of 4 (cause not
-  examined).
-- The join flow must give each enrolled member an observe reference to `subscribers` before the
-  Subscribe form (a payer reads the price and pays through it).
-- On the OpenRouter row the default member cap is 10 worst-case calls a day (about two asks).
-- Orphaned `mini consent-resident` processes from runs on hbox and dregg-build (no PID files).
+- Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane.
+- The redteam row's 7 reds (lane/redteam-q2 REDTEAM.md):
+  - planted calls 0-3 never reach the controller, because Hermes drops the names first;
+  - planted call 7 was not performed;
+  - a stale `created-by` check;
+  - the injection spent 8 paid turns against a bound of 4.
+- The join flow must give each enrolled member an observe reference to `subscribers`.
+- A hard `/workspace` quota (a project quota per task directory) is an infra item; the code refuses
+  a prompt over the class volume.
