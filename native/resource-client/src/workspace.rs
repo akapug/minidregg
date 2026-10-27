@@ -152,7 +152,7 @@ pub(crate) fn ref_name_of_file(stem: &str) -> String {
     stem.replace('.', "/")
 }
 
-fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     let parent=path.parent().ok_or("retained JSON lacks parent")?;
     private_dir(parent)?;
     let filename=path.file_name().and_then(OsStr::to_str).ok_or("record name is not UTF-8")?;

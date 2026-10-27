@@ -1,0 +1,11 @@
+# /etc/systemd/system/mini-market.path — the worker drops a PACKAGE-ID flag into wanted/;
+# the fetcher runs within seconds instead of at the next 6-hour tick.
+[Unit]
+Description=Mini app market: fetch on a wanted-package flag
+
+[Path]
+DirectoryNotEmpty=/var/lib/mini-market/wanted
+Unit=mini-market.service
+
+[Install]
+WantedBy=multi-user.target

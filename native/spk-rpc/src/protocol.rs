@@ -2,8 +2,147 @@ use crate::{api_session_capnp, grain_capnp, identity_capnp, util_capnp, web_sess
 use capnp::traits::HasTypeId;
 use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
+use sha2::{Digest, Sha256};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use tokio::net::UnixStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
+
+/// One identity capability a grain asked to keep (`BridgeConfig.saveIdentityCaps`):
+/// the participant's identity as the custodian presented it, held by the grain
+/// under a token the custody minted. It is a grant the member made by opening
+/// the grain, recorded and revocable; it carries no permission of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedIdentity {
+    pub identity_id: [u8; 32],
+    pub display_name: String,
+    pub preferred_handle: String,
+}
+
+/// Why a token does not restore.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CustodyRefusal {
+    UnknownToken,
+    IdentityRevoked,
+    Io(String),
+}
+
+impl CustodyRefusal {
+    pub fn name(&self) -> String {
+        match self {
+            Self::UnknownToken => "unknownToken".into(),
+            Self::IdentityRevoked => "identityRevoked".into(),
+            Self::Io(detail) => format!("custodyUnavailable: {detail}"),
+        }
+    }
+}
+
+/// Where the grain's saved identities live across app generations. The
+/// supervisor transport calls it from its single-threaded RPC task.
+pub trait IdentityCustody {
+    /// Mint a fresh token for this identity and retain the record.
+    fn save(&self, identity: &SavedIdentity) -> Result<Vec<u8>, CustodyRefusal>;
+    /// The record a token names, unless revoked or unknown.
+    fn restore(&self, token: &[u8]) -> Result<SavedIdentity, CustodyRefusal>;
+    /// The grain (or the member) let the identity go: the token never restores again.
+    fn release(&self, token: &[u8]) -> Result<(), CustodyRefusal>;
+}
+
+/// Tokens that live as long as the connection: tests and the audit harness.
+#[derive(Default)]
+pub struct MemoryIdentityCustody {
+    records: RefCell<HashMap<Vec<u8>, (SavedIdentity, bool)>>,
+}
+
+impl IdentityCustody for MemoryIdentityCustody {
+    fn save(&self, identity: &SavedIdentity) -> Result<Vec<u8>, CustodyRefusal> {
+        let token = random_bytes().map_err(|e| CustodyRefusal::Io(e.to_string()))?.to_vec();
+        self.records.borrow_mut().insert(token.clone(), (identity.clone(), false));
+        Ok(token)
+    }
+    fn restore(&self, token: &[u8]) -> Result<SavedIdentity, CustodyRefusal> {
+        match self.records.borrow().get(token) {
+            None => Err(CustodyRefusal::UnknownToken),
+            Some((_, true)) => Err(CustodyRefusal::IdentityRevoked),
+            Some((identity, false)) => Ok(identity.clone()),
+        }
+    }
+    fn release(&self, token: &[u8]) -> Result<(), CustodyRefusal> {
+        match self.records.borrow_mut().get_mut(token) {
+            None => Err(CustodyRefusal::UnknownToken),
+            Some(entry) => {
+                entry.1 = true;
+                Ok(())
+            }
+        }
+    }
+}
+
+pub(crate) fn random_bytes() -> std::io::Result<[u8; 32]> {
+    use std::io::Read;
+    let mut bytes = [0_u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// The identity object's self-description, as `AppPersistent.save` returns it.
+/// The tag binds it to this connection's secret and this identity, so an app
+/// cannot hand `SandstormApi.save` a forged identity object: it would need the
+/// tag for an identity it never received.
+const IDENTITY_OBJECT_MAGIC: &[u8] = b"mini-identity-object-v1";
+
+fn identity_tag(secret: &[u8; 32], identity_id: &[u8; 32]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(IDENTITY_OBJECT_MAGIC);
+    hasher.update(secret);
+    hasher.update(identity_id);
+    hasher.finalize().into()
+}
+
+fn encode_identity_object(identity: &SavedIdentity, tag: &[u8; 32]) -> Vec<u8> {
+    let mut out = IDENTITY_OBJECT_MAGIC.to_vec();
+    out.extend_from_slice(&identity.identity_id);
+    out.extend_from_slice(tag);
+    for text in [&identity.display_name, &identity.preferred_handle] {
+        let len = u16::try_from(text.len()).unwrap_or(u16::MAX);
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&text.as_bytes()[..len as usize]);
+    }
+    out
+}
+
+fn decode_identity_object(bytes: &[u8], secret: &[u8; 32]) -> Result<SavedIdentity, &'static str> {
+    let rest = bytes
+        .strip_prefix(IDENTITY_OBJECT_MAGIC)
+        .ok_or("unsupportedPersistentCap: only identity capabilities are saved")?;
+    if rest.len() < 64 + 4 || rest.len() > 64 + 4 + 1024 + 256 {
+        return Err("identityObjectRefused: shape");
+    }
+    let mut identity_id = [0_u8; 32];
+    identity_id.copy_from_slice(&rest[..32]);
+    if rest[32..64] != identity_tag(secret, &identity_id) {
+        return Err("identityTagRefused: the object was not minted by this connection");
+    }
+    let mut cursor = &rest[64..];
+    let mut texts = Vec::with_capacity(2);
+    for bound in [1024_usize, 256] {
+        if cursor.len() < 2 {
+            return Err("identityObjectRefused: shape");
+        }
+        let len = u16::from_le_bytes([cursor[0], cursor[1]]) as usize;
+        cursor = &cursor[2..];
+        if len > bound || cursor.len() < len {
+            return Err("identityObjectRefused: shape");
+        }
+        texts.push(std::str::from_utf8(&cursor[..len]).map_err(|_| "identityObjectRefused: text")?.to_owned());
+        cursor = &cursor[len..];
+    }
+    if !cursor.is_empty() {
+        return Err("identityObjectRefused: shape");
+    }
+    Ok(SavedIdentity { identity_id, display_name: texts[0].clone(), preferred_handle: texts[1].clone() })
+}
 
 /// Values placed on Sandstorm's wire after the Mini controller has admitted
 /// this exact request. These values carry no authorization proof themselves.
@@ -92,15 +231,78 @@ pub struct InlineResponse {
     pub body: Vec<u8>,
 }
 
-struct MinimalSandstormApi;
-impl grain_capnp::sandstorm_api::Server<capnp::data::Owned> for MinimalSandstormApi {}
+/// The `SandstormApi` this side exports. Three methods are served, all about
+/// identity capabilities (`BridgeConfig.saveIdentityCaps`): `save` of an identity
+/// object this connection minted, `restore` of a token the custody issued, and
+/// `drop`. Every other method answers unimplemented by name: no powerbox, no
+/// sharing, no scheduling, no app-object persistence (an app-object token is
+/// `unknownToken` to `restore`), which is the bounded surface `expectAppHooks`
+/// apps get: their hooks answer the bridge's `getViewInfo`, nothing more.
+struct RecordingSandstormApi {
+    custody: Rc<dyn IdentityCustody>,
+    secret: [u8; 32],
+}
+
+fn refused(name: impl Into<String>) -> capnp::Error {
+    capnp::Error::failed(name.into())
+}
+
+impl grain_capnp::sandstorm_api::Server<capnp::data::Owned> for RecordingSandstormApi {
+    async fn save(
+        self: capnp::capability::Rc<Self>,
+        params: grain_capnp::sandstorm_api::SaveParams<capnp::data::Owned>,
+        mut results: grain_capnp::sandstorm_api::SaveResults<capnp::data::Owned>,
+    ) -> capnp::Result<()> {
+        let cap: grain_capnp::app_persistent::Client<capnp::data::Owned> =
+            params.get()?.get_cap().get_as_capability()?;
+        // The documented flow: the supervisor asks the capability to describe
+        // itself; only an identity object this connection minted passes the tag.
+        let reply = cap.save_request().send().promise.await.map_err(|error| {
+            refused(format!(
+                "unsupportedPersistentCap: the capability does not describe itself as an identity ({error})"
+            ))
+        })?;
+        let object = reply.get()?.get_object_id()?;
+        let identity = decode_identity_object(object, &self.secret).map_err(refused)?;
+        let token = self.custody.save(&identity).map_err(|e| refused(e.name()))?;
+        results.get().set_token(&token);
+        Ok(())
+    }
+
+    async fn restore(
+        self: capnp::capability::Rc<Self>,
+        params: grain_capnp::sandstorm_api::RestoreParams<capnp::data::Owned>,
+        mut results: grain_capnp::sandstorm_api::RestoreResults<capnp::data::Owned>,
+    ) -> capnp::Result<()> {
+        let token = params.get()?.get_token()?;
+        if token.len() != 32 {
+            return Err(refused(CustodyRefusal::UnknownToken.name()));
+        }
+        let identity = self.custody.restore(token).map_err(|e| refused(e.name()))?;
+        let client = identity_client(ProfileIdentity { identity, tag: None });
+        results.get().init_cap().set_as_capability(client.client.hook);
+        Ok(())
+    }
+
+    async fn drop(
+        self: capnp::capability::Rc<Self>,
+        params: grain_capnp::sandstorm_api::DropParams<capnp::data::Owned>,
+        _: grain_capnp::sandstorm_api::DropResults<capnp::data::Owned>,
+    ) -> capnp::Result<()> {
+        let token = params.get()?.get_token()?;
+        self.custody.release(token).map_err(|e| refused(e.name()))
+    }
+}
 
 struct MinimalSessionContext;
 impl grain_capnp::session_context::Server for MinimalSessionContext {}
 
+/// The participant's identity as presented to the app. A session's identity
+/// carries the connection tag so `SandstormApi.save` can accept it; a restored
+/// identity carries none (it is already held; saving it again is refused).
 struct ProfileIdentity {
-    display_name: String,
-    preferred_handle: String,
+    identity: SavedIdentity,
+    tag: Option<[u8; 32]>,
 }
 impl identity_capnp::identity::Server for ProfileIdentity {
     async fn get_profile(
@@ -112,8 +314,93 @@ impl identity_capnp::identity::Server for ProfileIdentity {
         profile
             .reborrow()
             .init_display_name()
-            .set_default_text(self.display_name.as_str());
-        profile.set_preferred_handle(self.preferred_handle.as_str());
+            .set_default_text(self.identity.display_name.as_str());
+        profile.set_preferred_handle(self.identity.preferred_handle.as_str());
+        Ok(())
+    }
+}
+/// Sandstorm's identity objects answer both `Identity` and `AppPersistent`; a
+/// generated client dispatches one interface, so this client routes by interface
+/// id to the generated dispatchers of each. Exported through the public
+/// `new_client` path (`FromServer`), never by poking at the transport.
+struct DualIdentityClient {
+    client: capnp::capability::Client,
+}
+impl capnp::capability::FromClientHook for DualIdentityClient {
+    fn new(hook: Box<dyn capnp::private::capability::ClientHook>) -> Self {
+        Self { client: capnp::capability::Client::new(hook) }
+    }
+    fn into_client_hook(self) -> Box<dyn capnp::private::capability::ClientHook> {
+        self.client.hook
+    }
+    fn as_client_hook(&self) -> &dyn capnp::private::capability::ClientHook {
+        &*self.client.hook
+    }
+}
+#[derive(Clone)]
+struct DualIdentityDispatch {
+    server: capnp::capability::Rc<ProfileIdentity>,
+}
+impl std::ops::Deref for DualIdentityDispatch {
+    type Target = ProfileIdentity;
+    fn deref(&self) -> &ProfileIdentity {
+        &self.server
+    }
+}
+impl capnp::capability::Server for DualIdentityDispatch {
+    fn dispatch_call(
+        self,
+        interface_id: u64,
+        method_id: u16,
+        params: capnp::capability::Params<capnp::any_pointer::Owned>,
+        results: capnp::capability::Results<capnp::any_pointer::Owned>,
+    ) -> capnp::capability::DispatchCallResult {
+        if interface_id == <identity_capnp::identity::Client as HasTypeId>::TYPE_ID {
+            identity_capnp::identity::ServerDispatch::<ProfileIdentity>::dispatch_call_internal(
+                self.server, method_id, params, results,
+            )
+        } else if interface_id
+            == <grain_capnp::app_persistent::Client<capnp::data::Owned> as HasTypeId>::TYPE_ID
+        {
+            grain_capnp::app_persistent::ServerDispatch::<ProfileIdentity, capnp::data::Owned>::dispatch_call_internal(
+                self.server, method_id, params, results,
+            )
+        } else {
+            capnp::capability::DispatchCallResult::new(
+                capnp::capability::Promise::err(capnp::Error::unimplemented(
+                    "identity object answers Identity and AppPersistent only".into(),
+                )),
+                false,
+            )
+        }
+    }
+    fn as_ptr(&self) -> usize {
+        capnp::capability::Rc::as_ptr(&self.server) as usize
+    }
+}
+impl capnp::capability::FromServer<ProfileIdentity> for DualIdentityClient {
+    type Dispatch = DualIdentityDispatch;
+    fn from_server(s: capnp::capability::Rc<ProfileIdentity>) -> DualIdentityDispatch {
+        DualIdentityDispatch { server: s }
+    }
+}
+fn identity_client(identity: ProfileIdentity) -> identity_capnp::identity::Client {
+    let dual: DualIdentityClient = capnp_rpc::new_client(identity);
+    identity_capnp::identity::Client { client: dual.client }
+}
+
+impl grain_capnp::app_persistent::Server<capnp::data::Owned> for ProfileIdentity {
+    async fn save(
+        self: capnp::capability::Rc<Self>,
+        _: grain_capnp::app_persistent::SaveParams<capnp::data::Owned>,
+        mut results: grain_capnp::app_persistent::SaveResults<capnp::data::Owned>,
+    ) -> capnp::Result<()> {
+        let Some(tag) = &self.tag else {
+            return Err(refused("identityAlreadyHeld: a restored identity is not saved again"));
+        };
+        let mut out = results.get();
+        out.set_object_id(&encode_identity_object(&self.identity, tag)[..])?;
+        out.init_label().set_default_text(self.identity.display_name.as_str());
         Ok(())
     }
 }
@@ -211,11 +498,22 @@ pub(crate) fn decode_view_info(
 /// this side is SERVER, exports SandstormApi, and bootstraps its UiView.
 pub struct SupervisorConnection {
     view: grain_capnp::ui_view::Client,
+    /// Per-connection secret behind the identity objects' tags.
+    secret: [u8; 32],
 }
 
 impl SupervisorConnection {
+    /// Identity tokens live as long as this connection (tests, audits).
     pub fn from_connected_stream(
         stream: UnixStream,
+    ) -> (Self, RpcSystem<rpc_twoparty_capnp::Side>) {
+        Self::from_connected_stream_with_custody(stream, Rc::new(MemoryIdentityCustody::default()))
+    }
+
+    /// The production shape: the custody outlives the app generation.
+    pub fn from_connected_stream_with_custody(
+        stream: UnixStream,
+        custody: Rc<dyn IdentityCustody>,
     ) -> (Self, RpcSystem<rpc_twoparty_capnp::Side>) {
         let (reader, writer) = stream.compat().split();
         let network = twoparty::VatNetwork::new(
@@ -224,11 +522,14 @@ impl SupervisorConnection {
             rpc_twoparty_capnp::Side::Server,
             reader_options(),
         );
+        // /dev/urandom failing is a broken host; the tag then binds to nothing
+        // the app can predict either, and save() refuses because no tag matches.
+        let secret = random_bytes().unwrap_or([0; 32]);
         let api: grain_capnp::sandstorm_api::Client<capnp::data::Owned> =
-            capnp_rpc::new_client(MinimalSandstormApi);
+            capnp_rpc::new_client(RecordingSandstormApi { custody, secret });
         let mut rpc = RpcSystem::new(Box::new(network), Some(api.client));
         let view = rpc.bootstrap(rpc_twoparty_capnp::Side::Client);
-        (Self { view }, rpc)
+        (Self { view, secret }, rpc)
     }
 
     pub async fn get_view_info(&self) -> capnp::Result<ViewInfo> {
@@ -274,10 +575,13 @@ impl SupervisorConnection {
                 .set_default_text(params.display_name.as_str());
             user.set_preferred_handle(params.preferred_handle.as_str());
             user.set_identity_id(&params.identity_id);
-            let identity: identity_capnp::identity::Client =
-                capnp_rpc::new_client(ProfileIdentity {
-                    display_name: params.display_name.clone(),
-                    preferred_handle: params.preferred_handle.clone(),
+            let identity = identity_client(ProfileIdentity {
+                    identity: SavedIdentity {
+                        identity_id: params.identity_id,
+                        display_name: params.display_name.clone(),
+                        preferred_handle: params.preferred_handle.clone(),
+                    },
+                    tag: Some(identity_tag(&self.secret, &params.identity_id)),
                 });
             user.set_identity(identity);
             let mut permissions = user.init_permissions(permission_count);
@@ -394,6 +698,7 @@ mod tests {
         base_path: String,
         api_sessions: u32,
         identity_profile: String,
+        identity: Option<identity_capnp::identity::Client>,
         paths: Vec<String>,
         posts: Vec<(String, Vec<u8>, String, String)>,
         view_fault: u8,
@@ -490,6 +795,7 @@ mod tests {
                 seen.permissions = user.get_permissions()?.iter().collect();
                 seen.session_type = params.get_session_type();
                 seen.identity_profile = profile_name;
+                seen.identity = Some(user.get_identity()?);
                 if seen.session_type == api_session_capnp::api_session::Client::TYPE_ID {
                     let _: api_session_capnp::api_session::params::Reader<'_> =
                         params.get_session_params().get_as()?;
@@ -635,6 +941,147 @@ mod tests {
             call.get().set_message(&echoed);
             call.send().await
         }
+    }
+
+
+    /// A forged identity object: the right shape, a tag this connection never minted.
+    struct Forger;
+    impl grain_capnp::app_persistent::Server<capnp::data::Owned> for Forger {
+        async fn save(
+            self: capnp::capability::Rc<Self>,
+            _: grain_capnp::app_persistent::SaveParams<capnp::data::Owned>,
+            mut results: grain_capnp::app_persistent::SaveResults<capnp::data::Owned>,
+        ) -> capnp::Result<()> {
+            let forged = encode_identity_object(
+                &SavedIdentity { identity_id: [3; 32], display_name: "Mallory".into(), preferred_handle: "m".into() },
+                &[0xAB; 32],
+            );
+            results.get().set_object_id(&forged[..])?;
+            Ok(())
+        }
+    }
+
+    async fn save_cap(
+        api: &grain_capnp::sandstorm_api::Client<capnp::data::Owned>,
+        hook: Box<dyn capnp::private::capability::ClientHook>,
+    ) -> Result<Vec<u8>, String> {
+        let mut request = api.save_request();
+        request.get().init_cap().set_as_capability(hook);
+        let reply = request.send().promise.await.map_err(|e| e.to_string())?;
+        Ok(reply.get().map_err(|e| e.to_string())?.get_token().map_err(|e| e.to_string())?.to_vec())
+    }
+
+    fn failure<T>(result: Result<T, String>) -> String {
+        match result {
+            Ok(_) => panic!("expected a refusal"),
+            Err(error) => error,
+        }
+    }
+
+    async fn restore_name(
+        api: &grain_capnp::sandstorm_api::Client<capnp::data::Owned>,
+        token: &[u8],
+    ) -> Result<(identity_capnp::identity::Client, String), String> {
+        let mut request = api.restore_request();
+        request.get().set_token(token);
+        let reply = request.send().promise.await.map_err(|e| e.to_string())?;
+        let cap: identity_capnp::identity::Client =
+            reply.get().map_err(|e| e.to_string())?.get_cap().get_as_capability().map_err(|e| e.to_string())?;
+        let profile = cap.get_profile_request().send().promise.await.map_err(|e| e.to_string())?;
+        let name = profile.get().unwrap().get_profile().unwrap().get_display_name().unwrap().get_default_text().unwrap().to_str().unwrap().to_owned();
+        Ok((cap, name))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn identity_capabilities_are_saved_restored_and_revoked_by_name() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (host_fd, app_fd) = UnixStream::pair().unwrap();
+                let observed = Rc::new(RefCell::new(Observed::default()));
+                let main: grain_capnp::main_view::Client<capnp::data::Owned> =
+                    capnp_rpc::new_client(FakeApp(observed.clone()));
+                let (reader, writer) = app_fd.compat().split();
+                let network = twoparty::VatNetwork::new(
+                    futures::io::BufReader::new(reader),
+                    futures::io::BufWriter::new(writer),
+                    Side::Client,
+                    reader_options(),
+                );
+                let mut app_rpc = RpcSystem::new(Box::new(network), Some(main.client.clone()));
+                let api: grain_capnp::sandstorm_api::Client<capnp::data::Owned> =
+                    app_rpc.bootstrap(Side::Server);
+                let _app_task = tokio::task::spawn_local(app_rpc);
+                let custody = Rc::new(MemoryIdentityCustody::default());
+                let (host, host_rpc) =
+                    SupervisorConnection::from_connected_stream_with_custody(host_fd, custody.clone());
+                let _host_task = tokio::task::spawn_local(host_rpc);
+
+                let params = SessionParameters {
+                    identity_id: [7; 32],
+                    display_name: "Ada".into(),
+                    preferred_handle: "ada".into(),
+                    permissions: vec![true],
+                    tab_id: vec![1],
+                    base_path: "https://a4501.demo.test".into(),
+                    user_agent: "Mini test".into(),
+                    acceptable_languages: vec![],
+                };
+                let _session = host.new_web_session(&params).await.unwrap();
+                let identity = observed.borrow().identity.clone().unwrap();
+
+                // The bridge saves the identity it was given: a 32-byte token, a record in custody.
+                let token = save_cap(&api, identity.client.hook.add_ref()).await.unwrap();
+                assert_eq!(token.len(), 32);
+                assert_eq!(
+                    custody.restore(&token).unwrap(),
+                    SavedIdentity { identity_id: [7; 32], display_name: "Ada".into(), preferred_handle: "ada".into() }
+                );
+                // restore() gives back an identity with the same profile ...
+                let (restored, name) = restore_name(&api, &token).await.unwrap();
+                assert_eq!(name, "Ada");
+                // ... which is already held: saving it again is refused by name.
+                let again = failure(save_cap(&api, restored.client.hook.add_ref()).await);
+                assert!(again.contains("identityAlreadyHeld"), "{again}");
+                // A forged identity object and a non-identity capability are refused by name.
+                let forger: grain_capnp::app_persistent::Client<capnp::data::Owned> = capnp_rpc::new_client(Forger);
+                let forged = save_cap(&api, forger.client.hook).await.unwrap_err();
+                assert!(forged.contains("identityTagRefused"), "{forged}");
+                let other = save_cap(&api, main.client.hook.add_ref()).await.unwrap_err();
+                assert!(other.contains("unsupportedPersistentCap"), "{other}");
+                // Unknown and malformed tokens do not restore.
+                assert!(failure(restore_name(&api, &[1; 32]).await).contains("unknownToken"));
+                assert!(failure(restore_name(&api, b"short").await).contains("unknownToken"));
+                // drop() revokes: the token never restores again, and says so.
+                let mut drop_request = api.drop_request();
+                drop_request.get().set_token(&token);
+                drop_request.send().promise.await.unwrap();
+                let revoked = failure(restore_name(&api, &token).await);
+                assert!(revoked.contains("identityRevoked"), "{revoked}");
+                assert_eq!(custody.restore(&token), Err(CustodyRefusal::IdentityRevoked));
+                // Unimplemented methods stay unimplemented by name.
+                let unimplemented = match api.share_view_request().send().promise.await {
+                    Ok(_) => panic!("shareView must stay unimplemented"),
+                    Err(error) => error.to_string(),
+                };
+                assert!(unimplemented.contains("not implemented"), "{unimplemented}");
+            })
+            .await;
+    }
+
+    #[test]
+    fn identity_objects_decode_only_with_this_connection_tag() {
+        let secret = [5; 32];
+        let identity = SavedIdentity { identity_id: [9; 32], display_name: "Grace".into(), preferred_handle: "grace".into() };
+        let object = encode_identity_object(&identity, &identity_tag(&secret, &identity.identity_id));
+        assert_eq!(decode_identity_object(&object, &secret).unwrap(), identity);
+        assert!(decode_identity_object(&object, &[6; 32]).unwrap_err().starts_with("identityTagRefused"));
+        assert!(decode_identity_object(b"not an identity", &secret).unwrap_err().starts_with("unsupportedPersistentCap"));
+        let mut truncated = object.clone();
+        truncated.pop();
+        assert!(decode_identity_object(&truncated, &secret).unwrap_err().starts_with("identityObjectRefused"));
+        let mut trailing = object;
+        trailing.push(0);
+        assert!(decode_identity_object(&trailing, &secret).unwrap_err().starts_with("identityObjectRefused"));
     }
 
     #[tokio::test(flavor = "current_thread")]

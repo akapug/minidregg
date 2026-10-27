@@ -32,6 +32,8 @@ mod current_birth;
 #[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
+mod apps;
+#[cfg(unix)]
 mod append_proof;
 #[cfg(unix)]
 mod fleet_sign;
@@ -753,6 +755,12 @@ usage:
   mini enroll --action submit|lookup --dir ATTEMPT
   mini key --action providers|choose|set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT --model MODEL] [--task TASK] [--broker CLIENT_CONFIG]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
+  mini apps search [--term TEXT] [--category C] [--json]        the Sandstorm app market, cached by mini-market (docs/APP-MARKET-2026-10-27.md)
+  mini apps show --app APP-ID|PACKAGE-ID [--json]
+  mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
+  mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
+  mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
+  mini apps-front --listen 127.0.0.1:8797 --origins DIR [--domain demo.dregg.online]   the grain entrance behind Caddy
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
@@ -890,7 +898,7 @@ impl Args {
         }
         let mut raw = raw.peekable();
         // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
-        if command == OsStr::new("pay") || command == OsStr::new("store") {
+        if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
                 values.push((OsString::from("--action"), action));
             }
@@ -909,7 +917,8 @@ impl Args {
             }
             // The valueless switches: opting out of pre-rotation is a
             // deliberate act and reads as one; `web --read-only` names a face.
-            if rendered == "--no-prerotation" || command == OsStr::new("web") && rendered == "--read-only" {
+            if rendered == "--no-prerotation" || command == OsStr::new("web") && rendered == "--read-only"
+                || command == OsStr::new("apps") && rendered == "--json" {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }
@@ -2643,6 +2652,10 @@ fn run(mut args: Args) -> Result<()> {
             "mini {gone} is gone: the key broker holds credential custody (mini-keys serve; the ssh credential command is mini-keys relay; namespace metadata is mini-keys namespace)"
         )),
         "fleet" => fleet::run(args),
+        #[cfg(unix)]
+        "apps" => apps::run(args),
+        #[cfg(unix)]
+        "apps-front" => apps::front::run(args),
         #[cfg(unix)]
         "mix" => pq_mailbox::run(args),
         #[cfg(unix)]

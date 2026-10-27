@@ -136,14 +136,14 @@ impl<'a> SourceBoundLaunch<'a> {
             .as_deref()
             .ok_or_else(|| invalid("retained signed bridge absent"))?;
         let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
-        if bridge.save_identity_caps
-            || bridge.expect_app_hooks
-            || bridge
-                .api_path
-                .as_deref()
-                .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+        // saveIdentityCaps and expectAppHooks are served (identity_custody, the
+        // SandstormApi save/restore/drop surface); an unchecked apiPath is not.
+        if bridge
+            .api_path
+            .as_deref()
+            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
         {
-            return Err(invalid("retained signed bridge outside resident mapping"));
+            return Err(invalid("retained signed bridge outside resident mapping: apiPath"));
         }
         let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
         let schema = retained_descriptor_file(&package_dir.join("schema.bin"))?;
@@ -472,7 +472,13 @@ impl PreparedResident {
         begin: &VerifiedBegin,
     ) -> io::Result<ResidentProcess> {
         let child = journal.enter_and_spawn(begin, &self.launch)?;
-        let rpc = RpcDriver::from_connected_stream(begin.app, begin.generation, self.host_rpc)?;
+        // Saved identities belong to the app, not the generation: apps/<app>/identities.
+        let identities = journal
+            .directory()
+            .parent()
+            .ok_or_else(|| invalid("generation journal has no app directory"))?
+            .join("identities");
+        let rpc = RpcDriver::from_connected_stream_at(begin.app, begin.generation, self.host_rpc, Some(identities))?;
         Ok(ResidentProcess { rpc, child, _output: self.output })
     }
 

@@ -1,0 +1,52 @@
+# /etc/systemd/system/mini-market.service — the app market fetcher (docs/APP-MARKET-2026-10-27.md §1).
+# Uid mini-market: the ONE uid on the box with egress to app-index.sandstorm.io:443 (the demo's
+# nftables row cg_market -> dst_market, resolved from /etc/mini/market.json by demo-egress-resolve).
+# It downloads the index and wanted packages into /var/lib/mini-market and parses nothing but the
+# index, through `mini apps index-check`. No key, no Mini socket, no sudo. Started by
+# mini-market.timer (every 6 h) and mini-market.path (a wanted/ flag appears).
+[Unit]
+Description=Mini app market: fetch the Sandstorm index and wanted packages into quarantine
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mini-market
+Group=mini-apps
+Slice=mini.slice
+UMask=0027
+ExecStart=/usr/local/lib/mini/market/mini-market-fetch --state /var/lib/mini-market --mini /var/lib/mini/candidate/current/bin/mini run
+Environment=MINI_BIN=/var/lib/mini/candidate/current/bin/mini
+TimeoutStartSec=1800
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Egress is the nftables row's to grant (cgroup + uid + destination); the unit itself allows only what curl needs.
+RestrictAddressFamilies=AF_INET AF_INET6
+# The demo drop-in adds: NFTSet=cgroup:inet:filter:cg_market
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/mini-market
+InaccessiblePaths=-/run/user -/run/dbus -/etc/mini/credentials.key -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/store -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini-door-process -/var/lib/mini-discord -/var/lib/mini-core -/var/lib/mini-apps
+MemoryMax=256M
+TasksMax=32

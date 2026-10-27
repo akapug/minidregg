@@ -810,6 +810,11 @@ impl ChildHandle for BoundedChild {
 // The physical state machine's mutators. They are reached only through the
 // resident's source-bound START/STOP and dispatch paths, never a CLI verb.
 impl Journal {
+    /// The generation directory this journal lives in (`apps/<app>/g<N>`).
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     /// Read-only recovery evidence for the exact claimed START whose spawn
     /// failed before producing a child. This does not clear a manager failure,
     /// mutate the journal, authorize a launch, or supply Mini's reserved gate.
