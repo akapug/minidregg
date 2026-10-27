@@ -80,3 +80,31 @@ compiled-law range and cast checks. So `.policyRejected` does not mean the law r
    Refusals reach the Host as `repr reason` text, and the new constructors only change that
    text. The birth Reject has no exhaustive match outside its file (GrainResourceBirthAdmission
    wraps it as `metadata reason`).
+
+## L1c state (lane/lean-audit-c)
+
+Audit (c) is pushed, not built. Under ember's no-build rule the integrator elaborates it and
+routes any reds here.
+- `Kernel/ResourceBirthPolicyController.lean`:
+  - New `Reject` constructors: `policyBinding`, `policyUnsupported`, `policyInputRange`,
+    `policyCastAlias`. They are not admission constructors, so the census and
+    host-operations.json are unaffected.
+  - `planVerdict` (supported, range, cast, eval) and `Pending.judgeBranch`: epoch and
+    revision, resolve, `bind` (refused as `policyBinding`), the three compiler verdicts, then
+    `law.admit` (refused as `policyRejected`, the law's verdict alone).
+    `Pending.admitBranch` now calls `judgeBranch`, and its refusal order is otherwise unchanged.
+  - Proved: `admit_some_of_bind`, `planVerdict_of_verifies`, `BranchAccepted.planVerdict_true`,
+    `Pending.judgeBranch_policyRejected`, `Pending.admitBranch_policyRejected`, and the
+    keystones `planRefusalSound`, `planPassNotLawRefused`, plus the new converse
+    `lawRefusalDisclosed` (`policyRejected` → verdict `some false`).
+  - Also new: `Pending.factoryRefusal` with `factoryRefusal_eq_none_iff`. `factoryVerdict`
+    is now `resolve?.map planVerdict`. `factoryVerdict_congr` was re-proved.
+- `Kernel/NativeHost.lean` `birthRefusal` (body only):
+  - It names a noncanonical draft, a `prepareDraft` error and a `preparePending` error, and
+    an unresolved factory law.
+  - It judges through `Pending.factoryRefusal`, so range, cast and unsupported refusals are
+    disclosed like a law refusal (`publicRefusal`, as `invokeRefusal` does).
+- Not touched: `GrainResourceBirthAdmission.Pending.admitBranch` has the same conflation
+  (`law.admit = none` → `policyRejected`). It is outside audit (c) and is a follow-up.
+- Next: merge lane/lean-critical 147d3861 (genesis seed), then births priced from the cell
+  (statement first), then `Intent.credit` with ops 244–247.
