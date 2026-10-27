@@ -606,8 +606,16 @@ ok attach1 alice "doc show $DIGEST_REF"
 cp "$OUT" "$SD/digest-1.txt"
 checkp attach1 "lab-digest has a section covering the three entries" grep -qE '^ +[0-9]+  entries #1-#3: ' "$OUT"
 T1=$(paid_turns)
-check attach1 "three turns paid (two links, one digest)" 3 "$T1"
-check attach1 "Hermes's account = $BUDGET - 3*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - 3 * TURN))" "$(credit_of hermes "$ACCT")"
+if [ -n "$J14_TIER" ]; then
+  # The workroom template births its own documents under the room; the
+  # librarian links each once too: one paid turn per link, one for the digest.
+  W1=$(( $(grep -cE '^link [0-9]+ -> ' "$SD/links-1.txt") + 1 ))
+  check attach1 "one turn paid per link written and one for the digest" "$W1" "$T1"
+else
+  W1=3
+  check attach1 "three turns paid (two links, one digest)" 3 "$T1"
+fi
+check attach1 "Hermes's account = $BUDGET - $W1*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - W1 * TURN))" "$(credit_of hermes "$ACCT")"
 
 # ------------------------------------------------ ask: answered from the history
 ok ask alice "ask lab what changed since $H0"
