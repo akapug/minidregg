@@ -15,87 +15,167 @@ contract holds** (§1). nanodregg stays the object of study whose laws are the t
 the consolidation. The council (all three) ruled this already decided by ember's words of
 Oct 19 and Oct 26 and the README of Oct 23; it is not re-asked.
 
-Also settled today: every surface on (ssh hosted shell, web docuverse, one SPK grain, Hermes
+Also settled (2026-10-26/27): every surface on (ssh hosted shell, web docuverse, one SPK grain, Hermes
 residents, PAY, Discord, fleet, fn transport, the veri7vn oracle appliance as an SPK app);
 hcloud project `dreggnet-demo`, same account; `demo.dregg.online` and `calc.demo.dregg.online`;
 security kernels rebooted as soon as available; operator ssh on 22; clock tick per minute;
 Caddy terminates TLS with hybrid X25519MLKEM768 + X25519 fallback; EtherCalc on its own
 origin; Studio out until a producer exists; `m6.sh` wraps `two-world-journey.sh`; the roster
-landmine fixed (explicit per-box roster, `BOX` file).
+landmine fixed (explicit per-box roster, `BOX` file); `*.demo.dregg.online` wildcard DNS as code and a
+**wildcard certificate** via Caddy's Gandi DNS-01 module (ember, 2026-10-27: "wildcard approved"), which
+puts a DNS token on the box as a written CONFINEMENT §2 exception and makes Caddy security updates our
+own rebuild; every installed grain gets one fixed origin `<grain>.demo.dregg.online`.
 
-## 1. The bar and the public-opening contract
+## 1. The bar, the gate, and the public-opening contract
 
-The bar: a stranger with the URL exercises every surface for a week without the operator
-babysitting.
+The bar: a stranger with the URL exercises every surface, for as long as the demo stands (to 11 Nov
+2026), without the operator babysitting, and finds a coherent product, not a set of prototypes
+(`docs/DEMO-EXPERIENCE-2026-10-27.md` is what that product is). There is no "week-1" scope and no
+degraded first edition; half-built prototypes are compost for the one design.
 
-Rehearsal ships (operator-only, re-genesis allowed) happen on the day planned with every red
-named: that is how DelveTalk shipped seventeen editions in a week and how DEPLOY-3 died when
-it was batched behind a composed gate (HISTORY §8). **Public opening** needs one contract, all
-four parts, measured on the demo box itself:
+**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships on the day
+with its reds named; the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
+`jtour`: the web journey's rows driven against the box's own Host (the twelve steps of the experience
+document, parity over every verb leaf, the lost reply and its exact retry, the paste-the-yes), and
+(b) the composed scenario over N forced-ssh members (rooms, churn, documents, apps, connector,
+residents, restart). The 148-row standing run is the nightly's on `dregg-build`; it names its reds
+in the morning report and never names a candidate's. Performance is measured and published, never a
+gate.
 
-1. **Advertised surfaces work**: the demo journey's rows for every surface that is on pass
-   on the candidate that ships (ssh shell J0–J8+J12, docuverse static render, EtherCalc
-   two-browser co-edit + restart, Hermes room resident with a real pool/homelab call, one
-   mainnet pay-to-enrol, Discord slash entrance, fn consumer worker, fleet row, oracle grain).
-2. **Tenancy holds**: split tenancy on the box (`jsplit-tenancy.sh` green), no member can read
-   another's key, the operator socket is unreachable from a tenant, Lean-emitted default
-   policies replace permit-all before the door opens.
-3. **Uncertain effects recover safely**: no undecided outcome is shown as a refusal; no
-   money or write path reruns without a record; provider failures (non-200, timeout,
-   malformed, crash-after-send) leave a decided purse; a failed first CREATE on a grain is
-   recoverable; restart, certifier failure and backup drills pass.
-4. **Performance is measured and published, never a gate** (ember, 2026-10-27: "growth / perf
-   isn't a good reason to avoid deploying this demo right now, we'll do more focused performance
-   engineering later"). The growth judge's numbers (write MAX, p99, reopen at 1000 records; the
-   journey's criterion is MAX ≤ 5 s, `native/resource-client/journey.sh:858-866`) and a 10k-record
-   soak are measured on the demo box and written on the join page and in the plan; they do not
-   block a rehearsal or the opening. L11 continues as engineering, off the critical path.
+**Public opening** needs one contract, measured on the demo box itself:
 
-The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; for the
-candidate that opens, its composed phases and its non-performance journey rows must be green
-(growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
-tested rule). "Every surface in ~two weeks" is a target the
-council unanimously called not yet evidence-backed; the date is re-estimated after Phase 0's
-evidence spike (§3), not promised now.
+1. **The tour runs for a stranger**: every spine step of the experience document admitted/refused/
+   undecided as the step says, from a browser with nothing installed; the composed scenario's phases
+   pass; one real Hermes resident through the pool route; one app installed from the real store and
+   opened on its own origin; one mainnet pay-to-enrol.
+2. **Tenancy holds**: split tenancy on the box, no member can read another's key, the operator socket
+   is unreachable from a tenant, Lean-emitted default laws replace permit-all.
+3. **Uncertain effects recover safely**: no undecided outcome is shown as a refusal; no money or
+   write path reruns without a record; provider failures of all four classes leave a decided purse;
+   restart, certifier failure and backup drills pass.
+4. **Performance is measured and published**, on the join page and here, never a gate.
 
-## 2. Where we stand (2026-10-27, early)
+**The opening target is 2026-10-29**, re-estimated from rehearsal #3's evidence (round 4's candidate,
+a re-genesis carrying the grain platform), and announced when the contract holds. Mainnet
+pay-to-enrol from the first open day (ember, 2026-10-27).
 
-- **Rehearsal ship #1 is SERVING on the demo box** (2026-10-27, ~04:30 UTC): `dregg-demo`
-  (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`; `demo.`, `calc.demo.`,
-  `nano.demo.dregg.online` resolve) runs candidate a0db11f8a8bc under `ship.sh --rehearsal` with every
-  login closed and the reds named in the notice; `mini-health` OK (signed read 0.33 s); Store, public
-  ingress, key broker (sealed OpenRouter pool key, BYOK row), certifier and clock timers, Caddy with
-  valid TLS are up; `/join` answers 503 with the maintenance text and the 11 Nov shutdown line; Hermes
-  (no controller.json yet), Discord (bot in zero guilds), PAY (devnet config, no observer key), the
-  door (not in this candidate) and roster sync (rehearsal) are off with their reasons recorded. Known
-  reds: nano's writer fails in bwrap (ENOSYS on /dev; with the nano root); thin consent refuses a
-  signed write on this candidate (consent = full until the incremental refresh lands). Seven frame
-  bugs found by the first real split-tenancy ship are fixed on dregg-infra main 587169b / demo-vm 8991808.
-- **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
-  but ember's harness has used it). It is torn down once the demo box serves.
-- **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
-  plan. Tracked lines 1.69M; host executable closure 784 modules / 330K Lean lines.
-- **Lane branches pushed and done** (integration into `integration/2026-10-26` running):
-  `lane/custody` (L2 core: one signing path in the SDK, the four refusal fixes; L2 continues
-  with call sites and deletions), `lane/web` (L7), `lane/build` (L9, contains web), `lane/fn-fleet`
-  (L8), `lane/door` (L5), `lane/keys-store` (L6), `lane/fence` (L3, one follow-up commit coming:
-  absent-after-lost-reply is undecided, not no-record). Still working: `lane/lean-critical`
-  (L1, hbox), `lane/hermes` (L4), `lane/perf` (L11).
-- **Today's candidate of main a0db11f8** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the
-  warm base; rows PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against 137/2/5/3; `jdeploy3`
-  FAIL (growth over the write MAX bar on a loaded box; the composed scenario never ran because
-  the infra manifest rewrite dropped the v2 contract: fixed in dregg-infra 5501f4f; the
-  composed phases are being re-run now, with the M7 reference build and the `exchange` row).
-- **dregg-infra** main 5501f4f and `demo-vm` 8fca5ad, pushed to both remotes: the full v2
-  manifest, the certifier on split tenancy, genesis `issuanceCap` + `lifetime` 200000, the
-  roster fix, the confined box roots, the nano tenant contract. Queued on `demo-vm`: the
-  door's infra patch (L5) and the mini-keys config changes (L6), effective at rehearsal #2.
-- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (driver
-  row AND consent fields, both in L1); `m6grain` (sudoers path, hbox lane); `m7` (reference being
-  built); pending `births`, `HERMES-LIVE`, `jcertify`.
-- **Ember's codex session** is landing the oracle appliance in the main worktree (uncommitted:
-  `native/oracle-appliance`, `native/spk-package-stream`, `deploy/oracle/`, the SPK
-  `import-profile`); it is the oracle lane and reconciles with `lane/fence` when it commits.
+## 2. Where we stand (2026-10-27, mid-morning UTC; rewritten whole)
+
+**What "there" is** is now written once: `docs/DEMO-EXPERIENCE-2026-10-27.md` (the fifteen-minute
+tour a stranger takes from a browser, the parity law that everything the shell can do is done
+visually in the browser, the box as a member posting its own operations as receipts, the ranked
+ambitions A0–A9). The join page, the front page, the README table and the demo journey derive from
+it. This section says where the work is against it.
+
+**The box.** `dregg-demo` (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`)
+serves **rehearsal ship #1** of candidate a0db11f8a8bc under `ship.sh --rehearsal`: every login
+closed, the reds named in the login notice, `mini-health` OK, Store, public ingress, key broker
+(sealed OpenRouter pool key with a $40 ceiling and $0.10 per call under ember's $50 cap; BYOK on),
+certifier and clock timers, Caddy 2.11.7 (our build, Gandi DNS-01 module, pinned by hash) serving
+`demo.`, `calc.demo.`, `nano.demo.` and the `*.demo.dregg.online` wildcard certificate with hybrid
+X25519MLKEM768 + classical fallback; per-IP 443 limits box-wide; backups to
+`dreggnet-demo-mini-backups` (Object Lock COMPLIANCE, 22 days) with the restore check green; ember's
+narrow Gandi PAT root-only on the box; consent `full` on this candidate (the O(1) consent arrives with
+rehearsal #2). Off, with reasons recorded in `edge/demo/CHECKLIST.md`: Hermes (no controller yet),
+Discord (gateway mode arrives with rehearsal #2; the bot token is installed root-only and the
+drop-in is staged), PAY (devnet, no observer key), the door (not in this candidate), roster sync.
+nano's testground is live on the box from its own origin (`https://nano.demo.dregg.online/`,
+kernel e16403be, Landlock+seccomp self-confinement, per-IP enrol budget). The older public node
+`dregg-workhorse` still runs candidate 5688775a of Sep 30 for nobody; its Mini slice is torn down at
+the opening.
+
+**The build box.** `dregg-build` (ccx33, 8 dedicated vCPU / 32 GB, fsn1, `178.105.4.114`, dies with
+the demo on 2026-11-11): Lean + Rust toolchains, warm Lake cache, the `lanes` user, anonymous fetch
+from GitHub, no push, no production secret. Lanes run their Linux checks and the integration build
+there; hbox keeps the standing run and the warm base on `/tank`, lane hot work on its SSD
+(`/othersys/lanes`), every job in its own `swarm-build` cgroup, in parallel. The Mac holds a warm
+`.lake` of the host closure (3,739 jobs, 51 min cold) and is the per-file Lean box. The first clean
+cold Lean build of the host umbrella on `dregg-build`: 1,308 modules in 2 h 00 min at 2 seats, cgroup
+peak 17.2 GiB (heaviest module 18.5 GiB); 4 seats are safe with the measured per-module RSS table.
+
+**Discord, settled.** Ember lost admin access to the account owning application 1507638321877090374
+(Dragon's Egg), so no Interactions Endpoint URL will be set; the portal saves that failed were made
+on a different application (1554678232631091200). The entrance now has a **gateway mode**
+(`lane/door` bce88a74, merged into integration): the bot connects out to `gateway.discord.gg`,
+receives `INTERACTION_CREATE` there, answers through the REST callback; token as a systemd credential;
+outbound 443 only, no inbound route. The box side is staged for rehearsal #2.
+
+**Integration round 2** (`integration/2026-10-26`, integrator lane): final at **45f45d15**: round 1's
+branches plus L3 fence 5aaf1a32, L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market fc4e2c7d, L12
+web-frontend db7f3171, L1 lean-critical 181e44e6, coordination 179a21c2, m7 c851d8c4; built on `dregg-build`
+(`/build/candidates/45f45d15…`, 21 roles including the web gateway and its root helper; host 1,598 s,
+consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows on `dregg-build`:
+**PASS 113 / FAIL 24 / UNCONFIGURED 7 / UNJUDGED 3** (wall 6,482 s); composed scenario: rooms, churn,
+documents, restart PASS, apps/connector/residents blocked (no script yet produces a scratch world's SPK
+platform, resident and protected-document inputs; L13 is writing `composed-inputs`). The reds are
+driver-side or environment, not the product: the stranger driver and the demo set counted only the old
+refusal byte (J5 and its cascade; fixed at 9f144c2b, the rest with the L2 successor), the `--again`
+class and the unbounded loops (fixed at 2c15e48c: with those drivers seats, bounty, send, domain,
+objectrecord, upgrade and JPAY4 all PASS), chargedfailure (L2 successor), jserve timing and births/perf
+under load, m6grain/JPAY6's `sudo -n true` probe. The web journey against this Host: 24/24.
+**Rehearsal ship #2 is SERVING** (2026-10-27 ~10:54 UTC, `--rehearsal --regenesis`, every login
+closed, the 36 reds in the notice): `mini-health` OK (0.79 s), the door on 8796 (`/join` held closed),
+mini-keys in the split shape with the sealed pool key and its caps, **Discord over the gateway, READY
+as Dragon's Egg**, the web gateway and root helper up with Caddy's `import mini_app`, the app front on
+8799 and the index fetcher reaching the store (98 apps), consent full; drills green (advance, Store and
+relay restart, certifier not-due, backup 121 MB pushed + restore check OK). Not yet live, each with its
+owner: the `public` member (its `enroll plan` goes stale while the clock writes: client lane), so the
+front page answers 502 as the public reader; the apps world's metered tasks (L13's bootstrap verb);
+the Hermes controller (L4 resumed to stand it up and run HERMES-LIVE).
+**Round 3** started at integration 6236826f (custody-drivers, m7, web-frontend d14ca3c8 with
+app-market inside, the stranger-driver fix). **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
+box `dregg-ref` reproduces all 26 outputs byte for byte (the first reproducible-build verdict across two
+machines this project has had; the earlier hbox reference differed only by Ubuntu's GCC startup objects).
+Cold build on `dregg-ref`: 790 Lean modules in 35.8 min, 53 min total, on an idle box (the earlier 78.8 min
+shared `dregg-build` with another lane's builds; not isolated). Evidence: `lane/m7` f5ed535b. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
+23 / UNCONFIGURED 4; the new reds are journey drivers still speaking the pre-L2 wire (an L2 successor
+lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already has L12 3bb0a248 and L2's driver successor 2c15e48c. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
+`scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
+ACP resident, the rehearsal #2 candidate → infra ships #2 (door on 8796, mini-keys split shape,
+Hermes controller via `grain create`, frame grain units without `RestrictSUIDSGID`, gateway Discord).
+
+**Lanes.** Done on branches: L2 custody-as-records 554667d9 (39 → 13 fsyncs, wire bytes identical,
+the 253/255 classifier by generated constants, 8,236 lines gone); L3 5aaf1a32 (the setns red explained
+to the kernel line: libtest threads, production unaffected; the **sandbox floor audit PASSED on Debian
+13** for the first time, evidence in `docs/evidence/2026-10-27-sandbox-floor-dregg-build/`; the audit
+root is `/var/lib/spk-floor-audit` because `/run` is noexec and `/var/tmp` world-writable); L4 a9e0dd70 (units that
+open, `grain create`, the outcome record, provider classes; J14 blocked only by L7's summon fix and
+L1's `checkPlan`); L5 bce88a74 (door: unprivileged `/join`, root processor the only writer of
+accounts/keys/roster, hosted keygen, pay-to-enrol onto a hosted account, Discord link codes; gateway
+mode); L6 43ede087 (WAL store, grant caps against the body, op-144 pinned); L7 717148c9 (render
+repairs; the summon fix: one document-creation path, loud refusal); L8 6e9ea3bb; L9 d74947d2
+(workspace gate, journey split, 9,348 lines gone); L11 ed73009c/bef88d32 (the breakdown; the fsync
+fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theorems, O(1) consent,
+codec resident, image hashed once); coordination 179a21c2 (`docs/COORDINATION-2026-10-27.md`,
+−116,631 lines of gate bookkeeping; the per-module Lean RSS table; a nightly on `dregg-build` at 00:00 UTC;
+the Lake artifact cache verified: an unchanged worktree rebuilds in 14 s). Working: **L1** (above); **L12 web front end**
+(`lane/web-frontend` 3bb0a248: the gateway + root helper + body, xterm.js vendored; browser-only join;
+the public front page with the operations room, receipts and laws; `/tour` with its rows; truthful outcome
+classes; the lost-reply switch `submit --lose-reply-once`; `delegate --until`; and **A0 complete**: every
+verb of the four tables is grammar data (69 verbs, 201 leaves), the shell parses through it, help and
+completion read it, the body renders every form from it, shell.rs about −1,400 net; **parity** measured: 203 leaves
+dry-run through the real handlers, 0 usage and 0 world refusals; the web journey 23/24 on the build box
+with its own provisioned member (the one red needs the round-2 Host's 253 byte); the tour's lose-reply,
+exact-retry and `can --any` paste-back rows PASS; `/receipts/ID` anchored honestly pending A10); **L13 app market**
+(dfc696de: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify from the real
+store, `japps --box` 22/22; the apps worker with every reply decided or carrying its exact retry; the
+request law `Kernel/AppsRequest.lean`; units and ports staged on the box; v1 = one guest subject per
+grain, v2 after L1b; blocked only on the round-2 broker world for its lifecycle rows; the member
+application birth (op 30) is a Host question on L1's queue); the M7 reference build on `dregg-build`; L11's 10k soak on the box.
+
+**Ember's codex session** is landing the veri7vn oracle appliance in the main worktree (uncommitted
+`deploy/oracle/`, `native/oracle-appliance`, `native/spk-package-stream`): the split recipe keeps the
+15 GB public stores outside the SPK on a fixed `/opt/oracle-data` mount; the signed runtime SPK is
+91.9 MB; Mini acceptance is separate work. It reconciles with `lane/fence` and `lane/app-market`'s
+spk-host edits when it commits.
+
+**Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (L1, on its
+branch); `m6grain` (sudoers path, fixed on hbox); `m7` PASS on the round-2 candidate (reference on `dregg-ref`); pending `births`,
+`HERMES-LIVE`, `jcertify`.
+
+**Owner items**: none outstanding. Optional: three orphaned `mini consent-resident` processes on
+hbox (PIDs 1479414, 1526819, 1531493, no PID file) idle until someone with the authority kills them
+by PID.
 
 ## 3. The prefix
 
@@ -123,7 +203,7 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 
 | lane | rescue / repair (critical-path items ★) | deletions at merge |
 |---|---|---|
-| **L1 Lean** (hbox lane, Fable) | ★(a) JPAY6: the driver's 70-byte socket row AND the consent allowlist fields; ★(b) a no-effect class on `Outcome` + the positive `NO_RECORD` frame, stated as a theorem first (NO_RECORD ⇒ the durable log is unchanged by that request); ★(c) a settle that leaves the purse decided for all four provider failure classes (non-200, timeout, malformed, crash-after-send); ★(g) Lean-emitted default `Pred` policies replacing permit-all on member accounts, tills, room cells (R11, moved into Phase 1 by all three reviewers); (h) the clock-law bypass on the PAY path (`Compiler/CanonicalCellRegistry.lean:108-112`: PayObservation/PayEnrol advance the clock without judging the law); (e) consent op list and response-marker table emitted from the registry; (d) op 35 receiver confirmed; (f) the 33 vacuous `∨ Collision` rewrites, demoted to last/optional | three uncalled V1/V2 submit receivers (383); census-only V1 lifecycle modules (347); orphan battery files (3,188) |
+| **L1 Lean** (hbox lane, Fable) | ★(a) JPAY6: the driver's 70-byte socket row AND the consent allowlist fields; ★(b) a no-effect class on `Outcome` + the positive `NO_RECORD` frame, stated as a theorem first (NO_RECORD ⇒ the durable log is unchanged by that request); ★(c) a settle that leaves the purse decided for all four provider failure classes (non-200, timeout, malformed, crash-after-send); ★(g) Lean-emitted default `Pred` policies replacing permit-all on member accounts, tills, room cells (R11); (h) the clock-law bypass on the PAY path (`Compiler/CanonicalCellRegistry.lean:108-112`: PayObservation/PayEnrol advance the clock without judging the law); (e) consent op list and response-marker table emitted from the registry; (d) op 35 receiver confirmed; (f) the 33 vacuous `∨ Collision` rewrites, demoted to last/optional | three uncalled V1/V2 submit receivers (383); census-only V1 lifecycle modules (347); orphan battery files (3,188) |
 | **L1b Lean economy** (after L1 pushes (a)–(c)) | ★ a minimal Lean-owned grain work tariff and ceiling, with the provider route bound to an operator table digest, before paid grain operations are exposed (R12: the council rejected "after the demo" as a containment shipped ahead of the fix, ATLAS law 15); the full economy (C6) stays Phase 3 | — |
 | **L2 custody** | ★ the refusal-semantics core first (the four 255 sites by decoded type; `fleet-sign` `uncertain`; record-less reruns refused for `credit`/`well`/`activity`/`workspace submit`; chat's outer retry loop); THEN `flow::Client` as the one signing path (the client's working path moved into the SDK) | traffic stacks 1 and 3 (3,774), `session_reenroll.rs` (1,150), `bend_session.rs`, `web/surface.rs` + `world_surface.rs`, unreached arms, Studio (D7) |
 | **L3 fence + sandbox** | ★ per-signed-call dispatch fence (today one `contention` locks every member out for 19–51 min); STOP lookups and deadlines; `broker_home::render` renders real hardening; seccomp gaps; the floor audit runnable on the production spawn path; bounded dispatch directories; the route socket accepts the edge gid (W6); v4 failed-START recovery, Rust half | `spk-hostd`/`endpoint.rs`/`serve_resident`, five harness binaries (2,168), `claim_descriptor.rs`, `setid_bound.rs`, stale `allow(dead_code)` headers; agent API v1 only after v3 demonstrably supersedes it (R7) |
@@ -131,6 +211,8 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 | **L5 door + PAY + Discord** | ★ the self-serve join door (unprivileged queue uid; a root processor that is the only writer of accounts, keys, `authorized_keys`, roster) with the `possess` custody flow and NO sponsor-held copies of member keys; pay-to-enrol onto a HOSTED account; `journalFloor` from the signed tariff; PAY pagination/dust, nullifier attribution, stuck-tick quarantine; Discord slash entrance via `/mini link CODE`, retry only on a decoded undecided outcome, a unit shape that holds under split tenancy; the mirror behind a flag, default off (needs a bot token + intent) | discord dead code; `join_solana` v1 after v2 is the door's route |
 | **L6 keys + store** | ★ mini-keys in the split shape (NOT `singleAccount`: it bypasses the broker's identity checks, `server/mod.rs:340-354`); grant caps enforced against the parsed body or a Lean reserve; op-144 answer pinned to the socket owner's uid and key-compared; per-uid slots and frame caps; image hashed once per candidate; tickets durable before the quota count; audit failure refuses; SQ: bound violations refuse loudly, typed full-disk read errors, crash/hold verbs out of the production binary, DURABLE-STORE.md rewritten to schema 5 | `verify-mldsa` + `fips204`, `Broker::default_box` |
 | **L7 web** | ★ the two render repairs (a malformed shared-name link breaks every reader; raw terminal escapes in history/diff); `mini web --read-only`; `--render-static` with `--public-origin`; the `public` reader subject + snapshot timer as `mini-pubread` with no network; Caddy snippet; join page with the D8 sentence | templates move into the crate |
+| **L12 web front end** | ★ the browser front end a stranger uses (ember: "at minimum some high quality lightweight embedded terminal plus nice reasonably minimal html forms"): one gateway uid `mini-web` on loopback behind Caddy (`/app/*`, `/ws/*`) holding no key and no Store access; a tiny root helper `mini-web-spawn` that, given a session the door's root processor issued at enrolment, spawns `mini shell` (or a `mini` verb for a form action) as the member's own uid under a pty in the same per-member scope ssh uses and hands back the fd (sshd-style privilege separation); xterm.js vendored (no CDN; the box has no egress); per-member `mini web` proxied under `/app/doc/*` for documents/boards/history (reusing L7's code); minimal no-JS forms for append/edit, boards, explain-refusal, receipts, delegate, law, retry, each showing the decoded outcome; a `jweb-frontend` journey row | the loopback-only assumptions in `web.rs` as the gateway replaces them |
+| **L13 app market** | ★ any Sandstorm SPK from app.sandstorm.io: a cached index read by `mini apps search/show`; `mini apps install` as a MEMBER turn (admission + funding) with the download as uid `mini-market` (the one egress to app.sandstorm.io) into quarantine, signature/appId verified by `sandstorm-package`, streamed through `spk-package-stream` into the broker's ingest under the standard import profile, the grain created and started by lifecycle v3 with L3's per-call fence, a receipt with the grain's URL; every grain on its own origin `https://<grain>.demo.dregg.online` (wildcard DNS as code + Caddy DNS-01/on-demand TLS, hybrid with fallback) routed to the custodian via `edgeGid`; member lifecycle verbs with decoded outcomes; `japps.sh` installs two real apps from the index | the GitWeb-specific chain and hand-copied `.spk` paths as the market lands |
 | **L8 fn + fleet** | ★ ops 13/15 (fn ACK) operator-only until Lean answers who may ACK a public delivery; the consumer worker as a hardened unit + a journey row on a recorded fixture; fn-r route; one NNTP repost rule | `publisher.rs` (552); the fn-e path; one of the `fn_namespace`/`fn_frontier` twins |
 | **L9 build + deploy + gate** | ★ 0.5 first; optional roles optional; `--capsule` deleted or fixed; the journey split into a demo journey inside the 3 h gate + a nightly kernel journey; `m6.sh` runnable | `hyperdocument-link-store`, the bend pair (R10), GitWeb root chain, `probe_control.rs`, `host-frontend.rs`, MUD `sim.py`, `gm/*`, the controller template, objective-emit dead bits |
 | **L11 performance** | ★ where the write seconds go, by phase, with A/B on the same box within minutes (the 57 s MAX outlier is the target, not the median); the biggest Rust-side fix (consent replay growth, Host spawns, STOP's five re-hashes); the 10k-record soak designed and, hbox time allowing, run; Lean asks specified file:function | — |
@@ -159,6 +241,7 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 | C5 | One wire: generated op constants at all 159 literal sites, consent namespace 220–233 registered, envelope v1 refused after migration, the agent API wire in `spk-rpc` | M |
 | C6 | The full grain economy in Lean (L1b's tariff widened; paid-slot room admission; delete the Rust concierge decision) | L + M |
 | C7 | Never-admissible witness + settle-by-anchor; private rooms owned by Lean; receipts with inclusion; the two choreographies; `runtime.c` retired once the fast Lean machine is wired as the differential reference | L each |
+| C9 | **Self-confinement instead of bwrap** for Hermes workers and SPK residents on Debian 13: the child applies Landlock (ABI ≥3; Debian 13's 6.12 kernel is ABI 6) + seccomp to itself before exec (nanodregg's CLIENT-48, `redregg/work/promo/DESIGN-SANDBOX.md`), so the units take the plain hardening contract (RestrictNamespaces, ProtectKernelTunables, ProcSubset=pid, RestrictSUIDSGID, `@system-service @sandbox`) with no user/mount/pid namespaces, no `openat2` dependence (bwrap 0.12 died under systemd's sxid filter), no pinned bwrap copy | M |
 | C8 | Performance beyond the bar: in-process codec (~68% of a read), the serial Host submit profile, STOP's re-hashes, room create 262 s | M each |
 
 ## 4. Rules for the prefix (binding on every lane brief)
@@ -168,11 +251,20 @@ How lanes, the orchestrator, the boxes and the cadence work is [`docs/COORDINATI
 and stay here:
 
 1. Rescue, repair, delete, in that order; "delete the twin" keeps and repairs the better one.
-2. Every lane's deletions are named in its brief; the first deletion commit lands within a day of the
-   lane's repair going green; `scripts/gates/host-closure.max` (one number) refuses growth of the Host
-   closure.
-3. Lean interface changes land first and rebuild early (on `dregg-build`); no statement packets for
-   code being removed; only a lane's top-level theorem must be non-vacuous.
+2. Every lane's deletions are named in its brief; the first deletion commit lands within a
+   day of the lane's repair going green; a size ratchet refuses growth of the host closure.
+3. Lean interface changes land first and rebuild early; no statement packets for code being
+   removed; only a lane's top-level theorem must be non-vacuous.
+4. Rehearsals ship on the day with reds named; the opening waits for the §1 contract and
+   nothing else; the gate is the tour plus the composed scenario and never grows ahead of the
+   surfaces; standing rows are nightly and never a candidate's reds.
+5. One root per project; resume the agent that holds the context; no censuses or ledgers
+   unless they unblock the ship; every lane brief carries the system framing, the report
+   sections, `path:line` pointers, the worktree and branch, and the verification it must run.
+6. Engineering decisions are made by the orchestrator after a multi-model synthesis; only
+   money, dates and credentials go to ember.
+7. `swarm-build` on hbox, `/tank` only; named-file commits; no `git stash`; no pattern kills;
+   filtered tests only.
 
 ## 5. Decisions
 
@@ -195,10 +287,12 @@ oracle ships through the same grain gate, with its format blocker owned by the o
 a $50 hard cap set at OpenRouter (the broker's pool ceiling is $40, $0.10 worst-case per call;
 BYOK on); the Dragon's Egg bot (application 1507638321877090374) is in guild 1507637841235017768;
 the demo's **shutdown date is 2026-11-11**, written on the join page and in the teardown plan;
-backup retention defaults to 7 days after shutdown. Still open, with the engineering default that
-applies meanwhile: **mainnet vs devnet for week-1 pay-to-enrol** (default: devnet, two providers,
-until ember says mainnet; the sponsor's total cap and per-stranger funding amount are the door's
-configured values, published on the join page).
+backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
+morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
+configured values, published on the join page). The oracle lands as a grain if it can be got away with
+(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+Main advances after every integration round; other sessions' work in the shared worktree is committed
+as found and fixed forward.
 
 ## 6. What this file is not
 

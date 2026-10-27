@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -63,10 +64,17 @@ def pinned_json(path, expected):
         data = source.read(64 * 1024 * 1024 + 1)
     if len(data) > 64 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != expected:
         raise ValueError("pinned JSON mismatch or size limit: " + str(path))
-    return json.loads(data)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON member: " + key)
+            result[key] = value
+        return result
+    return json.loads(data, object_pairs_hook=unique)
 
 
-def inventory(root):
+def inventory(root, unhashed=frozenset()):
     """Never follow symlinks, including directory links."""
     result = {}
     for directory, dirs, files in os.walk(root, followlinks=False):
@@ -82,7 +90,7 @@ def inventory(root):
                 if mode & (stat.S_ISUID | stat.S_ISGID):
                     raise ValueError("setid input: " + relative)
                 result[relative] = {"kind": "file", "size": path.stat().st_size,
-                                    "sha256": digest(path), "executable": bool(mode & 0o111)}
+                                    "sha256": None if relative in unhashed else digest(path), "executable": bool(mode & 0o111)}
             else:
                 raise ValueError("special file in rootfs: " + relative)
     return dict(sorted(result.items()))
@@ -138,7 +146,7 @@ def verify_rootfs(root, manifest_path, expected):
     require_spk_members(entries)
     validate_links(entries)
     for relative, entry in entries.items():
-        if relative in ("sandstorm-manifest", "sandstorm-http-bridge-config") or relative == "opt/oracle" or relative.startswith("opt/oracle/") or relative == "opt/oracle-bin" or relative.startswith("opt/oracle-bin/"):
+        if relative in ("sandstorm-manifest", "sandstorm-http-bridge-config", "minidregg-data.json") or any(relative == p or relative.startswith(p + "/") for p in ("opt/oracle", "opt/oracle-bin", "opt/oracle-data")):
             raise ValueError("reserved appliance path in rootfs: " + relative)
         if relative.split("/")[0] in ("var", "tmp", "proc", "dev") and "/" in relative:
             raise ValueError("rootfs mount points must be empty: " + relative)
@@ -153,24 +161,79 @@ def verify_rootfs(root, manifest_path, expected):
     return entries
 
 
-def verify_appliance(root, expected):
+def verify_appliance(root, expected, external_files=frozenset()):
     receipt_path = root / "APPLIANCE.json"
     receipt = pinned_json(receipt_path, expected)
     entries = receipt["files"]
     for relative in entries:
         name(relative)
-    actual = inventory(root)
+    # External bytes are checked by the shared-data publisher. This stage signs
+    # only their expected hashes and symlink names, so do not re-read 15 GB here.
+    actual = inventory(root, unhashed=external_files)
     actual_files = {}
     for relative, entry in actual.items():
         if entry["kind"] == "symlink":
             raise ValueError("symlink in appliance")
         if entry["kind"] == "file" and relative != "APPLIANCE.json":
+            if relative in external_files:
+                entry["sha256"] = entries[relative]["sha256"]
             actual_files[relative] = {k: v for k, v in entry.items() if k != "kind"}
     if actual_files != entries:
         raise ValueError("appliance file bytes, executable bits or inventory differ from APPLIANCE.json")
     if "adapter/serve.py" not in entries or "root" not in actual:
         raise ValueError("missing adapter or data root")
     return actual, receipt
+
+
+def data_inventory(document, appliance_receipt):
+    if set(document) != {"schema", "visibility", "files"} or document["schema"] != "minidregg-public-data-inventory-v1" or document["visibility"] != "public":
+        raise ValueError("invalid public data inventory")
+    files = document["files"]
+    if not isinstance(files, list) or not 1 <= len(files) <= 4096:
+        raise ValueError("invalid public data file count")
+    result = {}
+    previous = ""
+    for entry in files:
+        if not isinstance(entry, dict) or set(entry) != {"path", "size", "sha256"}:
+            raise ValueError("invalid public data entry")
+        path = name(entry["path"])
+        parts = path.split("/")
+        if path <= previous or not re.fullmatch(r"[A-Za-z0-9_./-]+", path) or len(path) > 1024 or len(parts) > 16 or any(len(part) > 255 for part in parts):
+            raise ValueError("public data paths must be sorted, unique and bounded")
+        previous = path
+        if type(entry["size"]) is not int or not 0 <= entry["size"] <= 2**64 - 1 or not isinstance(entry["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
+            raise ValueError("invalid public data size or digest")
+        original = appliance_receipt["files"].get(path)
+        if not path.startswith("root/") or original != {"size": entry["size"], "sha256": entry["sha256"], "executable": False}:
+            raise ValueError("shared data differs from non-executable appliance member: " + path)
+        result[path] = entry
+    if sum(entry["size"] for entry in files) > 64 * 1024**3:
+        raise ValueError("shared data exceeds 64 GiB")
+    if any(store["path"] not in result for store in appliance_receipt.get("stores", [])):
+        raise ValueError("shared inventory must include every declared bulk store")
+    return result
+
+
+def write_data_inventory(args):
+    receipt = pinned_json(args.appliance / "APPLIANCE.json", args.appliance_sha256)
+    selection = json.loads(args.selection.read_text())
+    if selection.get("schema") != "oracle-shared-data-selection-v1":
+        raise ValueError("invalid explicit data selection")
+    paths = selection["paths"]
+    if paths != sorted(set(paths)):
+        raise ValueError("data selection must be sorted and unique")
+    document = {"schema": "minidregg-public-data-inventory-v1", "visibility": "public",
+                "files": [{"path": path, "size": receipt["files"][path]["size"],
+                           "sha256": receipt["files"][path]["sha256"]} for path in paths]}
+    data_inventory(document, receipt)
+    raw = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(raw) > 1024 * 1024:
+        raise ValueError("public data inventory exceeds 1 MiB")
+    with args.out.open("xb") as out:
+        out.write(raw)
+    print(json.dumps({"inventory_sha256": hashlib.sha256(raw).hexdigest(), "files": len(paths),
+                      "bytes": sum(entry["size"] for entry in document["files"]),
+                      "scope": "Expected public data from pinned appliance receipt; publisher must verify actual file bytes."}))
 
 
 def linux_binary(path):
@@ -215,12 +278,20 @@ def build(args):
     schema = REPO / "native/spk-rpc/schema/package.capnp"
     if args.target.exists():
         raise ValueError("stage already exists")
-    # Detect the format blocker from the pinned declaration before hashing 15 GB.
-    require_spk_members(pinned_json(appliance / "APPLIANCE.json", args.appliance_sha256)["files"], "opt/oracle/")
+    declaration = pinned_json(appliance / "APPLIANCE.json", args.appliance_sha256)
+    external = {}
+    if getattr(args, "data_inventory", None) is not None:
+        if args.data_inventory.stat().st_size > 1024 * 1024:
+            raise ValueError("public data inventory exceeds 1 MiB")
+        external = data_inventory(pinned_json(args.data_inventory, args.data_sha256), declaration)
+    elif getattr(args, "data_sha256", None) is not None:
+        raise ValueError("data digest requires inventory")
+    # Detect the format blocker from the pinned declaration before reading stores.
+    require_spk_members({p: e for p, e in declaration["files"].items() if p not in external}, "opt/oracle/")
     rootfs_entries = verify_rootfs(rootfs, args.rootfs_manifest, args.rootfs_sha256)
-    appliance_entries, receipt = verify_appliance(appliance, args.appliance_sha256)
+    appliance_entries, receipt = verify_appliance(appliance, args.appliance_sha256, external)
     require_spk_members(rootfs_entries)
-    require_spk_members(appliance_entries, "opt/oracle/")
+    require_spk_members({p: e for p, e in appliance_entries.items() if p not in external}, "opt/oracle/")
     pinned(bridge, args.bridge_sha256)
     linux_binary(bridge)
     if not bridge.stat().st_mode & 0o111:
@@ -235,6 +306,14 @@ def build(args):
         image = temporary / "image"
         binary = image / "opt/oracle-bin"
         binary.mkdir(parents=True)
+        if external:
+            (image / "opt/oracle-data").mkdir()
+            attachment = {"schema": "minidregg-public-data-v1", "inventory_sha256": args.data_sha256}
+            (image / "minidregg-data.json").write_text(json.dumps(attachment, sort_keys=True, separators=(",", ":")) + "\n")
+            for path in external:
+                link = image / "opt/oracle" / path
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to("/opt/oracle-data/" + path)
         shutil.copyfile(HERE / "launch.py", binary / "launch.py")
         shutil.copyfile(bridge, binary / "minidregg-oracle-appliance")
         (binary / "minidregg-oracle-appliance").chmod(0o755)
@@ -245,6 +324,8 @@ def build(args):
           (key = "PYTHONDONTWRITEBYTECODE", value = "1"),
           (key = "PYTHONIOENCODING", value = "utf-8"),
           (key = "LANG", value = "C.UTF-8")])'''
+        if external:
+            command = command.replace('environ = [', 'environ = [(key = "NLTK_DATA", value = "/opt/oracle-data/root/nltk_data"), ')
         manifest = f'''(appTitle = (defaultText = "Oracle7"), appVersion = {args.version},
           appMarketingVersion = (defaultText = "4.9 repaired appliance"),
           actions = [(input = (none = void), nounPhrase = (defaultText = "Oracle7 workspace"), command = {command})],
@@ -261,7 +342,7 @@ def build(args):
                 raise ValueError("generated/rootfs package path collision: " + path)
             expected_package[path] = entry
         expected_package["opt/oracle"] = {"kind": "directory"}
-        expected_package.update({"opt/oracle/" + p: entry for p, entry in appliance_entries.items()})
+        expected_package.update({"opt/oracle/" + p: entry for p, entry in appliance_entries.items() if p not in external})
         paths = set(rootfs_entries) | set(generated) | {"opt/oracle"}
         paths.update("opt/oracle/" + p for p in appliance_entries)
         (temporary / "files.list").write_text("\n".join(sorted(paths)) + "\n")
@@ -274,10 +355,19 @@ using Spk = import "schema/package.capnp";
 const pkgdef :Spk.PackageDefinition = (
   id = {q(args.app_id)}, fileList = "files.list",
   sourceMap = (searchPath = [
+    (sourcePath = "image"),
     (packagePath = "opt/oracle", sourcePath = {q(str(appliance))}),
-    (sourcePath = "image"), (sourcePath = {q(str(rootfs))})]));
+    (sourcePath = {q(str(rootfs))})]));
 '''
         (temporary / "sandstorm-pkgdef.capnp").write_text(definition)
+        package_sources = {}
+        for path, entry in expected_package.items():
+            if path in generated:
+                package_sources[path] = {"root": "image", "path": path}
+            elif path.startswith("opt/oracle/"):
+                package_sources[path] = {"root": "appliance", "path": path[len("opt/oracle/"):]}
+            else:
+                package_sources[path] = {"root": "rootfs", "path": path}
         stage_receipt = {
             "schema": "oracle-package-stage-v1", "signed": False,
             "app_id": args.app_id, "version": args.version,
@@ -286,6 +376,11 @@ const pkgdef :Spk.PackageDefinition = (
                        "rootfs_sha256": args.rootfs_sha256, "bridge_sha256": args.bridge_sha256},
             "source_revision": receipt.get("source_revision"),
             "expected_package_entries": dict(sorted(expected_package.items())),
+            "package_sources": package_sources,
+            "shared_data": None if not external else {
+                "inventory_sha256": args.data_sha256, "inventory": str(args.data_inventory.resolve()),
+                "files": list(external.values()), "mount": "/opt/oracle-data",
+                "verification": "Publisher verifies external bytes; runtime package pins exact inventory and symlinks."},
             "validation_scope": "Point-in-time input validation; external source directories remain mutable.",
             "generated_files": inventory(temporary),
             "schema_files": {p.name: digest(p) for p in sorted(schema.parent.glob("*.capnp"))},
@@ -309,7 +404,12 @@ def verify_stage(stage):
         raise ValueError("generated package files changed")
     inputs = receipt["inputs"]
     verify_rootfs(Path(inputs["rootfs"]), Path(inputs["rootfs_manifest"]), inputs["rootfs_sha256"])
-    verify_appliance(Path(inputs["appliance"]), inputs["appliance_sha256"])
+    shared = receipt.get("shared_data")
+    external = {}
+    if shared:
+        declaration = pinned_json(Path(inputs["appliance"]) / "APPLIANCE.json", inputs["appliance_sha256"])
+        external = data_inventory(pinned_json(Path(shared["inventory"]), shared["inventory_sha256"]), declaration)
+    verify_appliance(Path(inputs["appliance"]), inputs["appliance_sha256"], external)
     schema_dir = REPO / "native/spk-rpc/schema"
     if {p.name: digest(p) for p in sorted(schema_dir.glob("*.capnp"))} != receipt["schema_files"]:
         raise ValueError("pinned package schemas changed")
@@ -357,7 +457,9 @@ def verify_package(args):
         executable.chmod(0o700)
         result = subprocess.run([str(executable.resolve()), str(args.package.resolve()),
                                  str(args.scratch.resolve()), args.profile],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=1800)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1800)
+        if result.returncode:
+            raise ValueError("signed-package inspector refused: " + result.stderr[:4096].decode("utf-8", "replace"))
     if len(result.stdout) > 16 * 1024 * 1024:
         raise ValueError("inspector inventory exceeds 16 MiB")
     actual = json.loads(result.stdout)
@@ -365,6 +467,7 @@ def verify_package(args):
     final = {"schema": "oracle-post-pack-verification-v1", "signature_verified": True,
              "exact_inventory_verified": True, "stage_sha256": args.stage_sha256,
              "inspector_sha256": args.inspector_sha256,
+             "shared_data_inventory_sha256": (receipt.get("shared_data") or {}).get("inventory_sha256"),
              **{key: actual[key] for key in ("app_id", "app_version", "public_key_hex", "raw_sha256", "raw_bytes", "profile")},
              "inventory_sha256": hashlib.sha256(json.dumps(actual["entries"], sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
              "scope": "Signed snapshot matches pinned stage; Mini must import this exact raw_sha256. No Mini admission or deployment."}
@@ -380,6 +483,11 @@ def main():
     inv = sub.add_parser("inventory", help="write a proposed lock; review before pinning its hash")
     inv.add_argument("--rootfs", type=Path, required=True)
     inv.add_argument("--out", type=Path, required=True)
+    data = sub.add_parser("data-inventory", help="derive expected public data from pinned receipt and explicit selection")
+    data.add_argument("--appliance", type=Path, required=True)
+    data.add_argument("--appliance-sha256", required=True)
+    data.add_argument("--selection", type=Path, default=HERE / "data-selection.json")
+    data.add_argument("--out", type=Path, required=True)
     stage = sub.add_parser("stage")
     for field in ("rootfs", "rootfs-manifest", "appliance", "bridge", "target"):
         stage.add_argument("--" + field, type=Path, required=True)
@@ -387,6 +495,8 @@ def main():
         stage.add_argument("--" + field, required=True)
     stage.add_argument("--version", type=int, required=True)
     stage.add_argument("--capnp", type=Path, default=Path(shutil.which("capnp") or "capnp"))
+    stage.add_argument("--data-inventory", type=Path)
+    stage.add_argument("--data-sha256")
     verify = sub.add_parser("verify")
     verify.add_argument("stage", type=Path)
     postpack = sub.add_parser("verify-package")
@@ -406,6 +516,8 @@ def main():
             target.write("\n")
     elif args.operation == "stage":
         build(args)
+    elif args.operation == "data-inventory":
+        write_data_inventory(args)
     elif args.operation == "verify-package":
         verify_package(args)
     else:

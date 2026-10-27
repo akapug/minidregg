@@ -7,7 +7,7 @@
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
-    VAR_FD,
+    VAR_FD, PUBLIC_DATA_FD,
 };
 use sha2::{Digest, Sha256};
 use std::ffi::{CString, OsStr};
@@ -23,6 +23,9 @@ const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
 /// RLIMIT_NOFILE for the app generation (bubblewrap and everything under it).
 pub(crate) const APP_MAX_FILES: libc::rlim_t = 1024;
+// Linux's maximum extended-attribute value size. The shared launcher can have
+// an entry for every operator-provisioned app identity, not merely 64 entries.
+const MAX_ACCESS_ACL_BYTES: usize = 64 * 1024;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -38,6 +41,7 @@ pub(crate) struct AppFds {
     pub persistent_var: RawFd,
     pub seccomp: RawFd,
     pub output: RawFd,
+    pub public_data: Option<RawFd>,
 }
 
 #[derive(Debug)]
@@ -79,7 +83,11 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
         return Err(invalid("invalid or oversized bubblewrap arguments"));
     }
     if let Some(fds) = spec.fds {
-        let sources = [fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        let mut sources = vec![fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        sources.extend(fds.public_data);
+        if crate::sandbox::has_public_data_args(&spec.args) != fds.public_data.is_some() {
+            return Err(invalid("public data mount and descriptor differ"));
+        }
         let distinct = sources
             .iter()
             .enumerate()
@@ -142,12 +150,13 @@ pub(crate) fn acl_execute_permits(acl: Option<&[u8]>, owner: u32, group: u32, mo
 
 fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
     let name = c"system.posix_acl_access";
-    let mut buffer = vec![0_u8; 4 + 8 * 64];
+    let mut buffer = vec![0_u8; MAX_ACCESS_ACL_BYTES];
     let n = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
     if n < 0 {
         let e = io::Error::last_os_error();
         return match e.raw_os_error() {
             Some(libc::ENODATA) | Some(libc::EOPNOTSUPP) => Ok(None),
+            Some(libc::ERANGE) => Err(invalid("launch executable access ACL exceeds 64 KiB bound")),
             _ => Err(e),
         };
     }
@@ -289,6 +298,11 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
             (fds.seccomp, SECCOMP_FD),
         ] {
             if libc::dup2(source, target) != target {
+                fail(write_fd);
+            }
+        }
+        if let Some(source) = fds.public_data {
+            if libc::dup2(source, PUBLIC_DATA_FD) != PUBLIC_DATA_FD || libc::fcntl(PUBLIC_DATA_FD, libc::F_SETFD, 0) != 0 {
                 fail(write_fd);
             }
         }
@@ -458,6 +472,9 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     if spec.fds.is_some() {
         keep.extend([RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD].map(|fd| fd as u32));
     }
+    if spec.fds.is_some_and(|fds| fds.public_data.is_some()) {
+        keep.push(PUBLIC_DATA_FD as u32);
+    }
     keep.sort_unstable();
     keep.dedup();
     let pid = unsafe { libc::fork() };
@@ -566,6 +583,31 @@ pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_data_fd_must_match_fixed_mount_arguments() {
+        let opened: Vec<_> = (0..6).map(|_| {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            crate::sandbox::inherited_fd(file.as_raw_fd()).unwrap()
+        }).collect();
+        let sandbox = crate::sandbox::SandboxSpec {
+            bwrap: "/usr/bin/bwrap".into(), image_root: "/image".into(), persistent_var: "/var-test".into(),
+            persistent_var_max_bytes: 1024, argv: vec!["/app".into()], environ: vec![], app_output: "/private/output".into(),
+        };
+        let mut spec = SpawnSpec {
+            program: sandbox.bwrap.clone(), sha256: "0".repeat(64),
+            args: crate::sandbox::bwrap_args_with_public_data(&sandbox, true).unwrap(), app_uid: 1001, app_gid: 1001,
+            fds: Some(AppFds {rpc:opened[0].as_raw_fd(),image:opened[1].as_raw_fd(),persistent_var:opened[2].as_raw_fd(),
+                seccomp:opened[3].as_raw_fd(),output:opened[4].as_raw_fd(),public_data:None}),
+        };
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = Some(opened[5].as_raw_fd());
+        validate(&spec, false).unwrap();
+        spec.args = crate::sandbox::bwrap_args(&sandbox).unwrap();
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = None;
+        validate(&spec, false).unwrap();
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
@@ -625,6 +667,33 @@ mod tests {
         // The owner class is the mode's owner bits, never a named entry.
         assert_eq!(acl_execute_permits(Some(&a), 165536, 1000, 0o650, 165536, 165536), Some(false));
         assert_eq!(acl_execute_permits(Some(&a[..7]), 0, 1000, 0o750, 165536, 165536), None);
+    }
+
+    #[test]
+    fn launch_acl_reads_more_than_64_entries_from_actual_inode() {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = std::env::temp_dir().join(format!("mini-launch-acl-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o700).open(&path).unwrap();
+        // The inode remains held, while even a failed assertion leaves no path.
+        std::fs::remove_file(&path).unwrap();
+        let u = u32::MAX;
+        let mut entries = vec![(1, 7, u)];
+        for uid in 200000..200128 {
+            entries.push((2, if uid == 200127 { 4 } else { 5 }, uid));
+        }
+        entries.extend([(4, 5, u), (0x10, 5, u), (0x20, 0, u)]);
+        let expected = acl(&entries);
+        assert!(expected.len() > 4 + 8 * 64);
+        let rc = unsafe { libc::fsetxattr(file.as_raw_fd(), c"system.posix_acl_access".as_ptr(),
+            expected.as_ptr().cast(), expected.len(), 0) };
+        assert_eq!(rc, 0, "{}", io::Error::last_os_error());
+        let actual = access_acl(&file).unwrap().unwrap();
+        assert_eq!(actual, expected);
+        let meta = file.metadata().unwrap();
+        for (uid, expected) in [(200000, true), (200126, true), (200127, false), (200128, false)] {
+            assert_eq!(acl_execute_permits(Some(&actual), meta.uid(), meta.gid(), meta.mode(), uid, uid), Some(expected));
+        }
     }
 
     #[test]

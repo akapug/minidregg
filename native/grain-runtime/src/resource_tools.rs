@@ -1393,6 +1393,7 @@ mod tests {
             registered_shared_applications: vec![],
             allowed_application_api_routes: vec![],
             allowed_application_lifetime_routes: vec![],
+            application_services: vec![],
             agent_api_host_sha256: None,
             lifetime_api_host_sha256: None,
             current_birth_host_sha256: None,

@@ -565,6 +565,7 @@ mod tests {
             signed_manifest_sha256: [0xbb; 32],
             signed_bridge_config_sha256: None,
             signed_bridge_config: None,
+            signed_data_config: None,
             manifest,
         };
         package.manifest.actions.push(Action {

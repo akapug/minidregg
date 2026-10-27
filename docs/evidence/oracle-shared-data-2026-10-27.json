@@ -1,0 +1,398 @@
+{
+  "acceptance_passed": false,
+  "attempts": [
+    {
+      "deadline_seconds": 120,
+      "import_observed_seconds": 120.265116,
+      "import_profile": "standard-v1",
+      "install_completed": false,
+      "install_prepared": true,
+      "path": "/othersys/oracle-acceptance-20261027/run-v3/initial-attempt",
+      "result": "materialization-timeout"
+    },
+    {
+      "deadline_seconds": 1800,
+      "import_cpu_seconds": 12.977,
+      "import_observed_seconds": 207.18901,
+      "import_peak_memory_mib": 657.5,
+      "import_profile": "operator-appliance-v1",
+      "install_completed": true,
+      "install_step_seconds": 293.331607103,
+      "original_install_preparation_bytes_unchanged": true,
+      "path": "/othersys/oracle-acceptance-20261027/run-v3/operator-profile-attempt",
+      "result": "resident namespace rejects genuine host-root scratch ancestry",
+      "share_completed": true,
+      "share_step_seconds": 81.538019657,
+      "start_state": "never-begun"
+    },
+    {
+      "cleanup_exit": 0,
+      "deadline_seconds": 1800,
+      "execution_exit": 1,
+      "import_cpu_seconds": 12.58,
+      "import_observed_seconds": 173.840542,
+      "import_profile": "operator-appliance-v1",
+      "install_completed": true,
+      "install_step_seconds": 299.029629707,
+      "namespace_preserved": true,
+      "path": "/othersys/oracle-acceptance-20261027/run-v3-r2",
+      "result": "bwrap: Can't find source path /proc/self/fd/7: Permission denied",
+      "retained_evidence_sha256": {
+        "failed-start-status.json": "1bafc3f4673671284ab66ae046f340e0a7c9a121e3d6b15a93cb0f29f771263d",
+        "import-units.jsonl": "bea53d1a6374a97a7dd13ea7a6130e8e68317ecfd171e5ea0ffbb650258f82d6",
+        "native-state.tar": "10b8c7bddd73df9ac867fc50307a788bce7d4fa79d8f11d1d32b6d94ff494217"
+      },
+      "share_completed": true,
+      "share_step_seconds": 104.609456301,
+      "spk_host_sha256": "875ec9f4b8dd14458ea8329e190967ab785b78d1112505822206088b5d334db9",
+      "start_begin_and_claim_accepted": true,
+      "start_completed": false,
+      "start_state": "uncertain: START attempted without a completion record",
+      "start_step_seconds": 67.867349863,
+      "store": "97c7f698372afc9e"
+    },
+    {
+      "api_enrollment_completed": true,
+      "api_enrollment_seconds": 67.14846611,
+      "cleanup_exit": 0,
+      "deadline_seconds": 1800,
+      "diagnosis": "Bridge returned structured400 for ordinary Accept */*; host serializer rejected bridge x-sandstorm-app-http-status metadata, converting the reply into uncertain503. Reproduced by native/package lanes; immutable v4 and composed validation pending.",
+      "execution_exit": 22,
+      "first_dispatch_native_accepted": true,
+      "first_dispatch_physical_state": "uncertain",
+      "first_get_seconds": 19.248344183,
+      "first_get_status": 503,
+      "import_cpu_seconds": 13.123,
+      "import_observed_seconds": 180.633439,
+      "import_peak_memory_mib": 546.3,
+      "import_profile": "operator-appliance-v1",
+      "install_completed": true,
+      "install_step_seconds": 316.569752932,
+      "namespace_preserved": true,
+      "path": "/othersys/oracle-acceptance-20261027/run-v3-r3",
+      "result": "First GET /health returned mini-spk-admission-v1 uncertain exact-recovery-only after native dispatch admission",
+      "retained_evidence_sha256": {
+        "failed-dispatch-status.json": "7329d8a5a37152f0441127818f57bb2846d56a1807d5b8377a48700ede5f3f20",
+        "import-units.jsonl": "9e54c3f44080cb8719ba8f4c4f7cf4c93d8c3fbd193bfe1e538c18d164a071c7",
+        "native-state.tar": "9005517c224ccf661381aa1c122e381c2a6138dc3ff26a071b4147a02ea8d97b"
+      },
+      "share_completed": true,
+      "share_step_seconds": 111.992160797,
+      "spk_host_sha256": "2c594dbe5c5c933fc4ea9b1e884fc058a68b52fba329f398abf1cefd6e8aaf8f",
+      "start_completed": true,
+      "start_step_seconds": 112.338158846,
+      "store": "bc2f3be5892aafea"
+    },
+    {
+      "app_version": 4,
+      "child_pid": null,
+      "cleanup_exit": 0,
+      "deadline_seconds": 1800,
+      "execution_exit": 1,
+      "import_cpu_seconds": 12.806,
+      "import_observed_seconds": 166.269489,
+      "import_peak_memory_mib": 595.4,
+      "import_profile": "operator-appliance-v1",
+      "install_completed": true,
+      "install_step_seconds": 299.062169313,
+      "namespace_preserved": true,
+      "path": "/othersys/oracle-acceptance-20261027/run-v4",
+      "physical_launch_phase": "entered",
+      "result": "Numerical result out of range (os error 34): launcher ACL580bytes exceeds fixed516byte read buffer before child fork",
+      "retained_evidence_sha256": {
+        "failed-start-status.json": "48933fbb85ce33a893faddd86f5c3fb710cd066d4616f2ca6608dc61431b085e",
+        "native-state.tar": "05cbcae37a951cfcad42996433dcce347def9b878c70e9fbcd6779e148255a55"
+      },
+      "runtime_spk_bytes": 91944584,
+      "runtime_spk_sha256": "bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0",
+      "share_completed": true,
+      "share_step_seconds": 100.428707123,
+      "spk_host_sha256": "a587e2b57c6bcdcb47f857da2e9d5538ce9e15299247aabd76b29342c4230fce",
+      "start_begin_and_claim_accepted": true,
+      "start_completed": false,
+      "start_step_seconds": 33.924571753,
+      "store": "b0e0b779961f087c"
+    },
+    {
+      "acceptance_passed": false,
+      "api_enrollment_both_grains_completed": true,
+      "app_version": 4,
+      "cleanup_exit": 0,
+      "completed_query_count": 13,
+      "deadline_seconds": 1800,
+      "execution_exit": 1,
+      "first_stop_seconds": 1049.751847506,
+      "import_last_message": "mini-spk-ingest-sab7ea949ee00356f-3814399.service: Consumed 13.004s CPU time, 869.2M memory peak.",
+      "import_observed_seconds": 184.442626,
+      "import_profile": "operator-appliance-v1",
+      "install_and_start_both_grains_completed": true,
+      "missing_data_refusal": "signed public-data 32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a custody refused: No such file or directory (os error 2)",
+      "namespace_preserved": true,
+      "native_binary_sha256": {
+        "mini-spk-broker": "76ad1f2cbcef85b3f645af738eda00757c6381769eee5405186b1c48412af00c",
+        "mini-spk-volume-helper": "75c9ba3af878fb2374ae2fbaabf484bc9a1fc2ea3d925be89dcfe1f2801aa76e",
+        "spk-data-publish": "b6751890e41422d8b0e5a2a4288b5add7af167f7c0d9df85aa24918668f32f9c",
+        "spk-host": "9d3d1808708453cc0cc184267975ee10a67a55fc5509855b392a7c2a88905758"
+      },
+      "path": "/othersys/oracle-acceptance-20261027/run-v4-r2",
+      "phase_timings": [
+        "store                        exit=0 64.565936565s",
+        "services                     exit=0 1.013772011s",
+        "workroom                     exit=0 1.311089277s",
+        "profile                      exit=0 0.436260223s",
+        "birth-a                      exit=0 17.378334761s",
+        "install-a                    exit=0 304.408650875s",
+        "share-a                      exit=0 95.943845749s",
+        "start-a                      exit=0 90.484877348s",
+        "floor-a                      exit=0 0.715908289s",
+        "enroll-a                     exit=0 55.267355680s",
+        "get-a                        exit=0 16.511712551s",
+        "post-a1                      exit=0 27.144265890s",
+        "post-a2                      exit=0 33.269887686s",
+        "post-a3                      exit=0 20.846251726s",
+        "post-a4                      exit=0 30.186799049s",
+        "post-a5                      exit=0 36.594041824s",
+        "post-a9                      exit=0 31.651532412s",
+        "post-a10                     exit=0 34.267110586s",
+        "post-a11                     exit=0 37.662834167s",
+        "post-a12                     exit=0 37.029102802s",
+        "post-a13                     exit=0 39.345048666s",
+        "post-a14                     exit=0 39.517920017s",
+        "birth-b                      exit=0 168.984810591s",
+        "install-b                    exit=0 183.372782230s",
+        "share-b                      exit=0 235.168002129s",
+        "start-b                      exit=0 188.439026594s",
+        "floor-b                      exit=0 0.564680576s",
+        "enroll-b                     exit=0 123.038533449s",
+        "get-b                        exit=0 31.986985922s",
+        "post-b1                      exit=0 64.917192459s",
+        "post-a6                      exit=0 47.469234705s",
+        "stop-a                       exit=0 1049.751847506s"
+      ],
+      "planned_query_count": 16,
+      "report_json_present": false,
+      "result": "Wrong-inventory assertion correctly failed: fixture publication0755 did not match required0555, so hash mismatch was not reached.",
+      "retained_evidence_sha256": {
+        "exit.json": "877fbbc9ca8e675f0bed6f8cc62c11feae308e044b2eda93810dd483658cf4cf",
+        "fixture-mode-check/report.json": "ef4d479b53dbbb61304ced21b605b645b6262cae8b5dd275898c49f68e2273b7",
+        "missing-data.unit.log": "638ebb14e3b6781635925c655daadcbebbea1146fc35d0c1b22d86b1f7d44573",
+        "native-state.tar": "e6c00f1439bb70ed3a0f6555eb15fddc96e16f1ab78737d67b56febd02aa6146",
+        "partial-observations.json": "e1f197a3fcf0c8eba64a35f47ae39cd9eb5b0bc78e110df7e70f08a75a280008",
+        "retained-manager-9201.txt": "e81eb8562b1af81cfa41fe68858daedd449e146d4e74af97a057e0ca6a8eb1a4",
+        "retained-state-9101.json": "9719fab3a205b5d35f896f4b79d5b212674e015a62c400f88d2dcc3c2f08dde9",
+        "retained-state-9201.json": "e3a86bf2eb55942b2ba65bd3facc3f76252b2aa9e0c5f21da6c14f97e2f78fd5",
+        "wrong-data.unit.log": "524c7a2b69cc73410849db3cfcde94fbf408057051862abb1bdbe7276b4ff109"
+      },
+      "runtime_spk_bytes": 91944584,
+      "runtime_spk_sha256": "bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0",
+      "store": "ab7ea949ee00356f",
+      "wrong_data_refusal": "signed public-data 32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a custody refused: published data entry custody changed"
+    }
+  ],
+  "base_store_prerequisite": {
+    "binary_sha256": {
+      "mini": "ee17b9c7dcc1123e6d3a16d51178b08c300674cf4d6a6c77b7ce7a892ce1e896",
+      "minidregg-credential-signature-verifier": "8fb9640ef2a9f27be2526373ca7c43cbd75955d882a8dc7255d684d379077e0f",
+      "minidregg-host": "e2f5da1ee055c7941285da2b90ebf17196f86c20c2a6516323ea5f57ae2ba12f",
+      "minidregg-link-sqlite-store": "1f31416a1cc20b9505f91ac5a652e0d0dc6862c01c51eae956c3e9640704e0fa"
+    },
+    "candidate": "a0db11f8 (Oct26 qualified C bundle)",
+    "cpu_quota": "200%",
+    "exit": 0,
+    "host": "hbox",
+    "marker": "grain-backed resource birth native acceptance PASS",
+    "memory_max": "4G",
+    "memory_peak_mib": 381.4,
+    "run": "/othersys/oracle-acceptance-20261027/base-preflight",
+    "runtime_max_seconds": 1800,
+    "seconds": 67.050575972
+  },
+  "checks_completed": {
+    "bash_syntax": true,
+    "python_compile": true,
+    "shellcheck": true
+  },
+  "date": "2026-10-27",
+  "fixture_correction": {
+    "change": "Create wrong fixture publication and data directories0555; preserve444 inventory/receipt files.",
+    "corrected_0555_error": "published inventory differs from signed attachment digest",
+    "narrow_check": "/othersys/oracle-acceptance-20261027/run-v4-r2/fixture-mode-check/report.json",
+    "narrow_check_sha256": "ef4d479b53dbbb61304ced21b605b645b6262cae8b5dd275898c49f68e2273b7",
+    "original_0755_error": "published data entry custody changed",
+    "scope": "Exact retained publisher shared-reader audit only; no Mini admission or original publication mutation. Both exits1; expected cause asserted. Full resident rerun not performed."
+  },
+  "harness": "scripts/oracle-shared-data-journey.sh",
+  "operational_limits": {
+    "actual_outer_runtime_seconds": 3263.722,
+    "explanation": "Each inspectStopClaimCurrent loads durable Store history and invokes NativeHostReplay.verifyLoaded before inspection. Both full-history inspections dominated STOP. No third full-history child observed before completion; op38 then completed.",
+    "first_inspection_observation": {
+      "cpu_lower_bound_seconds": 350,
+      "cpu_percent": 99.5,
+      "elapsed_lower_bound_seconds": 352,
+      "path": "/othersys/oracle-acceptance-20261027/run-v4-r2/stop-inspection-observation.json"
+    },
+    "history_inspections": 2,
+    "inspection_outputs_local_time": [
+      "04:06:40.533533816 stop-claim/stop-claim-current.json",
+      "04:14:14.483319024 stop-report-reinspect/current.json"
+    ],
+    "outer_runtime_max_seconds": 10800,
+    "phase_deadline_seconds": 1800,
+    "stop_a_seconds": 1049.751847506
+  },
+  "pending": [
+    "Repair and qualify source-bound STOP reconciliation for exact already-inactive Running unit without invocation drift, including negative replacement controls and established native pin adoption. Do not erase or restart the old incarnation.",
+    "With exact retained package/data/state identities, repeat corrected wrong-inventory case before BEGIN; retain the failed fixture attempt separately.",
+    "Reconcile B with native STOP before restart; restart A and verify exact a1/a3 bytes, then verify B original response independence. No blind resend of uncertain operations.",
+    "Complete final source-authorized stops, full report assertions, and owned cleanup. Evaluate repeated full-history STOP inspection cost separately without weakening authority."
+  ],
+  "prepared_inputs": {
+    "appliance_receipt_sha256": "e3bfe7fc7fa22e8d4641f0314dfb8d1a3cd50ba442b2f656c86617e0ee9e7392",
+    "bytes": 15046949326,
+    "data_source": "/othersys/oracle-acceptance-20261027/data-source",
+    "direct_relstore_receipt": "/othersys/lanes/oracle-rootfs-20261027/evidence/relstores-published.json",
+    "files": 26,
+    "inventory_sha256": "32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a",
+    "latest_runtime_app_version": 4,
+    "latest_runtime_spk_bytes": 91944584,
+    "latest_runtime_spk_sha256": "bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0",
+    "linux_host": "hbox",
+    "native_bin": "/othersys/lanes/oracle-u2-20261027/target/release",
+    "native_evidence": "docs/evidence/oracle-public-data-native-2026-10-27.json",
+    "publication_status": "all-26-files-verified-and-published",
+    "runtime_spk_bytes": 91931220,
+    "runtime_spk_sha256": "36a2848556cc7e3807d19fb9ac296bb593de9e396e86e1204171e02ca7a564f2"
+  },
+  "receiving_path_checks": {
+    "data_device": "259:4",
+    "data_mount": "/opt/oracle-data",
+    "data_root": "/var/lib/mini-spk-worlds/ab7ea949ee00356f/spk/public-data/sha256-32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a/data",
+    "distinct_var_devices": {
+      "9101": "7:27",
+      "9201": "7:39"
+    },
+    "first_grain_exact_replay_before_stop": true,
+    "missing_and_wrong_cases_no_running_or_uncertain_A_generation": true,
+    "missing_data_refused_before_begin": true,
+    "post_restart_replay_completed": false,
+    "queries": {
+      "post-a1-body.body": {
+        "path": "organ:relation>form:author>READ>FRAME>LINK>RELATE:fwd:P50>CHECK:P50>BIND>EXPAND>VERIFY",
+        "refusal": null,
+        "response": "Walt Whitman. Leaves of Grass is a collection of poetry by American writer Walt Whitman (1819\u20131892).",
+        "sha256": "043e90d99f9599643579c2f39bd0b763e2294f031663f946d0d2aa10a8badaf4",
+        "status": "answered"
+      },
+      "post-a10-body.body": {
+        "path": "family_precedence>specialist_call>specialist:rel-actors>actors",
+        "refusal": null,
+        "response": "April 1564 (Julian calendar; day unspecified). From the Wikidata relation store: William Shakespeare (Q692) - date of birth (P569) - April 1564 (Julian calendar; day unspecified). [rel-actors]",
+        "sha256": "0fc00f676791dd55d9bfe0510be2fcc2c52a01eecfe29391e2c3e8bff64ea42d",
+        "status": "answered"
+      },
+      "post-a11-body.body": {
+        "path": "family_precedence>specialist_call>specialist:rel-novelists>novelists",
+        "refusal": null,
+        "response": "1 January 1919 (Gregorian calendar). From the Wikidata relation store: J. D. Salinger (Q79904) - date of birth (P569) - 1 January 1919 (Gregorian calendar). [rel-novelists]",
+        "sha256": "86863ec9569440b618cd33fe9e132ac9bed059587908863fa433382d8cefeb00",
+        "status": "answered"
+      },
+      "post-a12-body.body": {
+        "path": "compose:comparison",
+        "refusal": null,
+        "response": "[ev:derived] J. D. Salinger. From the Wikidata relation store: J. D. Salinger (Q79904) - date of birth (P569) - 1 January 1919 (Gregorian calendar); Jimmy Carter (Q23685) - date of birth (P569) - 1 October 1924 (Gregorian calendar).",
+        "sha256": "1e8d5d0e1c0c69b0f151a0fe8ec06d4284e52617cf62dd2750f26d8939cdac1d",
+        "status": "answered"
+      },
+      "post-a13-body.body": {
+        "path": "compose:comparison",
+        "refusal": null,
+        "response": "[ev:derived] William Shakespeare. From the Wikidata relation store: William Shakespeare (Q692) - date of birth (P569) - April 1564 (Julian calendar; day unspecified); Isaac Newton (Q935) - date of birth (P569) - 25 December 1642 (Julian calendar); preferred-rank reason: original value.",
+        "sha256": "ae9f543f9360ec07a729118947362a9705125dde50af87f89e279be464e010d7",
+        "status": "answered"
+      },
+      "post-a14-body.body": {
+        "path": "composed>date_order_unverified",
+        "refusal": {
+          "candidates": [],
+          "declined_path": "act:clarify|vessel:receipt",
+          "reason": "date_order_unverified",
+          "terminal": true
+        },
+        "response": "I can't establish that order from comparable dates with known precision and calendars in my records.",
+        "sha256": "6ec7cf5c21142683d2a4514be97cf93ac87b08a5ccf9d119990e012c8c6d24fd",
+        "status": "withheld"
+      },
+      "post-a2-body.body": {
+        "path": "family_precedence>specialist_call>specialist:rel-novels>novels",
+        "refusal": null,
+        "response": "Jane Austen. From the Wikidata relation store: Emma (Q223880) - written by (P50) - Jane Austen (Q36322). [rel-novels]",
+        "sha256": "6af6b8ef51669806c169262d596dc5b6b0a16e2cc58109848bf2630ab41d2a80",
+        "status": "answered"
+      },
+      "post-a3-body.body": {
+        "path": "family_precedence>specialist_call>specialist:rel-novelists>novelists",
+        "refusal": null,
+        "response": "16 December 1775 (Gregorian calendar); preferred-rank reason: Q71536040. From the Wikidata relation store: Jane Austen (Q36322) - date of birth (P569) - 16 December 1775 (Gregorian calendar); preferred-rank reason: Q71536040. [rel-novelists]",
+        "sha256": "1498b544d0f8a711d854d0fbaff27572b1474bf58bcaa5a66d42d22e605df807",
+        "status": "answered"
+      },
+      "post-a4-body.body": {
+        "path": "specialist_call>specialist:meteorology>isa_temperature",
+        "refusal": null,
+        "response": "The standard-atmosphere temperature is -4.5 \u00b0C at 3000 m (ISA: 15 \u00b0C \u2212 6.5 \u00b0C per km). [meteorology]",
+        "sha256": "61a3ca94ba73c041993727048118f2e75099f7b90a6db30711066a3bb41dff09",
+        "status": "answered"
+      },
+      "post-a5-body.body": {
+        "path": "act:clarify|vessel:receipt",
+        "refusal": null,
+        "response": "I didn't fully parse that, so I won't guess. I can summarize a topic, compare two things, list facts, give a timeline, explain something simply, define a term, reason about why and what-if, and discuss any document you teach me. A shorter, more direct phrasing usually lands.\n\nI have received \"ISA temperature at 3000 m/s altitude?\" as an unnamed shape [vessel:v0004]; if it returns it gains weight, and when I can name it, I will.",
+        "sha256": "2de1b9c0187d3a2dbbaa8995f2b59ffaaebb34fd7544e29c7171f8322cb48db8",
+        "status": "clarification"
+      },
+      "post-a6-body.body": {
+        "path": "organ:relation>form:author>READ>FRAME>LINK>RELATE:fwd:P50>CHECK:P50>BIND>EXPAND>VERIFY",
+        "refusal": null,
+        "response": "Walt Whitman. Leaves of Grass is a collection of poetry by American writer Walt Whitman (1819\u20131892).",
+        "sha256": "043e90d99f9599643579c2f39bd0b763e2294f031663f946d0d2aa10a8badaf4",
+        "status": "answered"
+      },
+      "post-a9-body.body": {
+        "path": "specialist_call>specialist:astronomy-v3>year_years",
+        "refusal": null,
+        "response": "3 Mars years are about 5.64271047228 Earth years (3 \u00d7 687 Earth days per Mars year \u00f7 365.25 Earth days per Earth year; periods: Mars supplied, Earth supplied). [astronomy-v3]",
+        "sha256": "6060720ebbc8edd8c918718fedfdd1ced434552f8720432ff51cbc8814c598bd",
+        "status": "answered"
+      },
+      "post-b1-body.body": {
+        "path": "family_precedence>specialist_call>specialist:rel-novels>novels",
+        "refusal": null,
+        "response": "Jane Austen. From the Wikidata relation store: Emma (Q223880) - written by (P50) - Jane Austen (Q36322). [rel-novels]",
+        "sha256": "033989955e63863472b671da0fe6572d00db20c25269f1d20a84ed801b4f4126",
+        "status": "answered"
+      }
+    },
+    "query_count": 13,
+    "same_ids_different_grain_answers": true,
+    "same_read_only_physical_data": true,
+    "scope": "Observed completed phases; no full passing report. No new specialist-panel score or answer-proof claim.",
+    "wrong_inventory_specific_refusal_in_admitted_path": false
+  },
+  "retained_recovery": {
+    "app_9101": "g2 source-stopped; g4 never-begun after negative refusals. Original publication restored.",
+    "app_9201": "g2 source/native Running with completed START, but owned cleanup made exact unit loaded/inactive, MainPID0, cleared InvocationID and cgroup.",
+    "assessment_basis": "Read-only retained native/manager state plus source review; no B STOP reconciliation invocation was made.",
+    "b_stop_refusal_observed": false,
+    "native_sources": [
+      "native/spk-host/src/hostd.rs:608",
+      "native/spk-host/src/hostd.rs:1866",
+      "native/spk-host/src/resident_service.rs:1089"
+    ],
+    "obstruction": "Recovery classifies stopped-exact-needs-source-stop, but pinned hostd UnitStopAudit::before_stop requires retained InvocationID even when Running is physically inactive with cleared InvocationID. Native STOP reconciliation would reject unit invocation drift before stop. No reconciliation or restart was attempted.",
+    "processes": "All units owned by this run stopped; namespace, volumes, registry, helper and journals retained."
+  },
+  "schema": "mini-oracle-shared-data-evidence-v1",
+  "scope": "Private Linux Mini Store receiving path; no public deployment, specialist panel score, or new answer-proof claim.",
+  "status": "partial-acceptance-fixture-failure-and-retained-stop-recovery-gap"
+}
