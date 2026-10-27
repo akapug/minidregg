@@ -49,7 +49,7 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
 | 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
 | 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
-| 14 A7 | 969929026 | running since 22:13: `integ4/cut14g.sh` (pid file cut14g.pid; logs host-A7.log, regen-A7.log); adds un-nhr-tag 753271d7 (validateLoaded_headTag), hermes 6634b3bd (Oracle through Hermes, smaller sandboxes; 4319cca50) and PR #17 oracle-grant-factory f3865eae8 (merge 969929026; GitHub marks it merged) |
+| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s); regen rc=2 (seed v5 owed), A7b by hand rc=1 (DurableCheckpointCodec.lean:370/387/412 unsolved goals), A7c (seed proofs version-generic; integ4/regen-A7c.pid) running since 22:32. Was: `integ4/cut14g.sh` (pid file cut14g.pid; logs host-A7.log, regen-A7.log); adds un-nhr-tag 753271d7 (validateLoaded_headTag), hermes 6634b3bd (Oracle through Hermes, smaller sandboxes; 4319cca50) and PR #17 oracle-grant-factory f3865eae8 (merge 969929026; GitHub marks it merged) |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -60,7 +60,7 @@ After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; conta
 J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
 not compile). The first candidate carrying both bc88a5ab (frame v8)
 and hermes ea8a991e (e2374f120, the await bridge; any full build from main >= d3a0c41f3): send its sha and path to L4b (ad81db6d6fd317d3a) and
-the coordinator at once; L4 runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
+the coordinator at once; L4b runs J14_TOOLS and J14_AWAIT as one run against it (3315a908 refuses the v8 genesis). Unit
 mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
 f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
 elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
@@ -74,7 +74,7 @@ stage ends cleanly (the rerun's, if it does), name that clean host-stage tree, `
 (aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
 batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
 
-Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; un-stream-continuity reds
+Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
