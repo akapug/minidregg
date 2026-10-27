@@ -203,6 +203,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["board"] | ["room"] => place_index(site, parts[0]),
         ["search"] => search::page(site, target),
         ["purse"] => purse(site),
+        ["purse", "meter"] => Page { status: 200, title: "Purse".into(), stamp: Stamp::None, body: purse_meter(site, false) },
         ["apps"] => apps::market(site, target),
         ["apps", app] => apps::show(site, app),
         ["grain"] => apps::grains(site),
@@ -584,7 +585,7 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
         ("summons an agent", "First a bounded grant on one document to the resident's subject (<code>delegate … --until H</code>: the grant's expiry is a height); then a Hermes resident into your room with a budget funded from your purse (the meter); ask it to read the document and post a summary; its turns land as paid, admitted writes with receipts and the meter drains; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant; <code>dismiss</code> refunds the remainder.".into(),
             if member {
-                format!("{}{}", purse_meter(site), forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
+                format!("{}{}", PURSE_LATER, forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
             } else { String::new() }),
         ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
             format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
@@ -1044,16 +1045,21 @@ fn json_tree(v: &Value) -> String {
 
 /// The member's purse as a meter (`credit`): the balance a summon's budget is funded from and
 /// that a resident's paid turns drain; on the purse page and in the tour's agent step.
-fn purse_meter(site: &Site) -> String {
+/// The tour's purse meter, filled in after the page by app.js (`data-load`): the tour itself runs
+/// no shell, so a form's answer is never held behind a Host read; without JS it is a link.
+const PURSE_LATER: &str = "<section data-load=\"/purse/meter\"><div class=\"fill\"><p class=\"note\"><a href=\"/purse\">your purse, as a meter</a></p></div></section>\n";
+
+fn purse_meter(site: &Site, live: bool) -> String {
     match verb(site, &["credit".to_owned()]) {
         Some(ending) if ending.code == 0 => {
             let line = ending.stdout.lines().find(|l| l.starts_with("credit ")).unwrap_or("").to_owned();
             let balance: u64 = line.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
             let scale = balance.max(1000);
             format!(
-                "<section class=\"purse\" data-live=\"15000\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
+                "<section class=\"purse\"{}><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
                  <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
+                if live { " data-live=\"15000\"" } else { "" },
                 scale / 10,
                 escape(&line)
             )
@@ -1065,7 +1071,7 @@ fn purse_meter(site: &Site) -> String {
 
 /// `/purse`: the member's account as a meter (`credit`), then `pay status`.
 fn purse(site: &Site) -> Page {
-    let mut body = purse_meter(site);
+    let mut body = purse_meter(site, true);
     if let Some(ending) = verb(site, &["pay status".to_owned()]) {
         body.push_str(&format!("<section><h2>Pay</h2>{}</section>", answered(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
     }

@@ -315,6 +315,11 @@ page=$(req POST /tour/12 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=la
 row rules-revised "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
 page=$(req POST "/doc/$RULES/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=under the revised law")
 row rules-admitted "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# The tour runs no shell itself: its purse meter fills in after the page (data-load).
+page=$(req GET /tour)
+row tour-purse-later "$(grep -q 'data-load="/purse/meter"' <<<"$page" && echo 1 || echo 0)" "$(st)"
+page=$(req GET /purse/meter)
+row purse-meter "$(grep -q '<meter ' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="n">[0-9]*' <<<"$page" | head -1)"
 # Door 11, the story (A7): the built-in tale; the member is author and, invited by themself,
 # player; one legal move admitted; the impossible move refused beside the theorem's name.
 TALE="tale$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
