@@ -8,7 +8,7 @@ mod bridge_config;
 mod permission_schema;
 mod protocol;
 mod web;
-pub use bridge_config::{decode_bridge_config, BridgeConfig};
+pub use bridge_config::{decode_bridge_config, default_bridge_config_bytes, BridgeConfig};
 pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};
 pub use protocol::{
     CustodyRefusal, IdentityCustody, InlineResponse, LocalizedText, MemoryIdentityCustody,

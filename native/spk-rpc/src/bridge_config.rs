@@ -17,6 +17,18 @@ pub struct BridgeConfig {
     pub expect_app_hooks: bool,
 }
 
+/// The bridge config of a package that predates the `sandstorm-http-bridge-config` member
+/// (Sandstorm packages from before bridgeConfig existed, such as Hacker CMS, whose bundled
+/// bridge never reads the file). It is the canonical empty `BridgeConfig`: no permissions, no
+/// roles, no API path, no identity capabilities and no app hooks. A signed config can only add
+/// to that, so the default grants no more than any signed config could. The bytes are fixed,
+/// so its digest binds a descriptor exactly as a signed member's digest does.
+pub fn default_bridge_config_bytes() -> Vec<u8> {
+    let mut message = capnp::message::Builder::new_default();
+    message.init_root::<package_rust_capnp::bridge_config::Builder<'_>>();
+    capnp::serialize::write_message_to_words(&message)
+}
+
 /// Decode one exact, unpacked Cap'n Proto `BridgeConfig` message. Trailing
 /// bytes and unsupported Powerbox APIs are refused rather than silently
 /// omitted from a Mini interface descriptor.
@@ -53,10 +65,12 @@ pub fn decode_bridge_config(member: &[u8]) -> Result<BridgeConfig, String> {
     }
     let api_path = if api_path.is_empty() {
         None
-    } else if api_path.starts_with('/') && api_path.ends_with('/') {
+    } else if minidregg_signed_api_path::checked_prefix(api_path).is_ok() {
+        // Sandstorm concatenates apiPath and the relative path; signed-api-path states why
+        // a prefix without a trailing '/' cannot escape its own bytes.
         Some(api_path.to_owned())
     } else {
-        return Err("bridge apiPath must start and end with '/'".into());
+        return Err("bridge apiPath is not a canonical prefix (a '/' and safe segments)".into());
     };
     let powerbox_apis = config
         .get_powerbox_apis()
@@ -95,6 +109,17 @@ mod tests {
         assert_eq!(config.api_path.as_deref(), Some("/repo.git/"));
         assert!(!config.save_identity_caps);
         assert!(!config.expect_app_hooks);
+    }
+
+    #[test]
+    fn default_config_for_a_package_without_one_grants_nothing() {
+        let bytes = default_bridge_config_bytes();
+        assert_eq!(bytes, default_bridge_config_bytes(), "the default is canonical");
+        let config = decode_bridge_config(&bytes).unwrap();
+        assert!(config.view_info.permission_names.is_empty());
+        assert!(config.view_info.roles.is_empty());
+        assert_eq!(config.api_path, None);
+        assert!(!config.save_identity_caps && !config.expect_app_hooks);
     }
 
     #[test]
