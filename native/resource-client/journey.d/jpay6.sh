@@ -75,6 +75,10 @@ mkdir -p "$DIR"
 python3 - "$DIR" <<'PY'
 import json, os, signal, socket, struct, subprocess, sys, time
 import nacl.signing
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
@@ -232,7 +236,7 @@ def mini_submit(name, intent, signer, kind=None):
     if kind: words[words.index("--intent"):words.index("--intent")] = ["--intent-kind", kind]
     done = subprocess.run(words, capture_output=True)
     open(path(f"{name}.stderr"), "wb").write(done.stdout + done.stderr)
-    try: return json.load(open(path(f"{name}-attempt/outcome.json")))
+    try: return attempt_answer(path(f"{name}-attempt/outcome.json"))
     except (OSError, ValueError): return {"type": "no-outcome", "exit": done.returncode}
 query_nonce = [40000]
 def mini_query(name, subject, target, capability):
