@@ -696,8 +696,9 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RoomToolsConfig {
     /// Offer and accept only room tools for this resident. Generic workspace
-    /// mutations would bypass the room turn payment. Existing setups opt in.
-    #[serde(default)]
+    /// mutations would bypass the room turn payment, so this is on unless a
+    /// config says `"restrictTools": false` explicitly.
+    #[serde(default = "restrict_tools_default")]
     pub restrict_tools: bool,
     /// The pinned `mini` client.
     pub mini: PathBuf,
@@ -714,6 +715,8 @@ pub(crate) struct RoomToolsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
 }
+
+fn restrict_tools_default() -> bool { true }
 
 /// The room tools' MCP schemas (also the provider's function list).
 pub(crate) fn room_tool_specs() -> Vec<Value> {
@@ -1261,6 +1264,18 @@ impl RoomTools<'_> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn restrict_tools_is_on_unless_a_config_turns_it_off() {
+        let base = json!({"mini":"/m","host":"/h","hostConfig":"/c","socket":"/s",
+            "workspace":"/w","home":"/home","room":"lab"});
+        let config: RoomToolsConfig = serde_json::from_value(base.clone()).unwrap();
+        assert!(config.restrict_tools);
+        let mut off = base;
+        off["restrictTools"] = json!(false);
+        let config: RoomToolsConfig = serde_json::from_value(off).unwrap();
+        assert!(!config.restrict_tools);
+    }
 
     #[test]
     fn discovery_pipes_bounded_json_and_never_reads_model_paths() {
