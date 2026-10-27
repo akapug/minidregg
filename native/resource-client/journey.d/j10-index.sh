@@ -21,6 +21,7 @@
 #   audit-index      the genesis re-admission prints the same index      -> read
 # Exit 0 = every row as expected. Last stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 TW=$W/third-workspace
@@ -53,8 +54,8 @@ write() { # WS ID REQUEST -> prints the log height (acceptedCount) of the record
   run "p-$id" "$MINI" workspace --action propose --dir "$wsd" --request "$req" --proposal-id "$id"; ok "p-$id"
   run "s-$id" "$MINI" workspace --action submit --dir "$wsd" --intent "$wsd/proposals/$id/intent.json" \
     --attempt "$wsd/attempts/$id"; ok "s-$id"
-  jq -e '.type == "confirmed"' "$wsd/attempts/$id/outcome.json" >/dev/null || { echo "$id not confirmed" >&2; exit 1; }
-  jq -r .acceptedCount "$wsd/attempts/$id/outcome.json"
+  attempt_answer "$wsd/attempts/$id/outcome.json" | jq -e '.type == "confirmed"' >/dev/null || { echo "$id not confirmed" >&2; exit 1; }
+  attempt_answer "$wsd/attempts/$id/outcome.json" | jq -r .acceptedCount
 }
 q() { # NAME WS VIEW TARGET CAP [HEIGHT] — a signed query, answered by a cold open of the Store
   local name=$1 wsd=$2 view=$3 target=$4 cap=$5 height=${6:-} purpose
@@ -109,8 +110,8 @@ done
 # B writes note's field 8.
 scalar notew create 8 42 >"$D/req/b-0.json"
 HB=$(write "$NEWCOMER_WS" b-w0 "$D/req/b-0.json")
-btx=$(jq -r .transactionId "$NEWCOMER_WS/attempts/b-w0/outcome.json")
-atx=$(jq -r .transactionId "$SPONSOR_WS/attempts/a-w$((value - 1))/outcome.json")
+btx=$(attempt_answer "$NEWCOMER_WS/attempts/b-w0/outcome.json" | jq -r .transactionId)
+atx=$(attempt_answer "$SPONSOR_WS/attempts/a-w$((value - 1))/outcome.json" | jq -r .transactionId)
 [ "$HB" = $((HA + 1)) ] || { echo "B's write is at log height $HB, not $((HA + 1))" >&2; exit 1; }
 
 # The genesis height: a current read's challenge height minus the log height.
