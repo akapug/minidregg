@@ -91,6 +91,18 @@ tested rule). The date is re-estimated from each rehearsal's evidence, never pro
   bookkeeping that measured itself: 653 files, −116,517 lines (Objective contract manifests, the
   known-red ceremony, guard-discipline, waste-model, carrier census; host-closure.pin folded to one
   number; the hypothesis ledger and censuses moved to the nightly). Merges in integration round 2.
+- **Since the ship** (2026-10-27, morning): the `*.demo.dregg.online` wildcard certificate is issued and
+  serving (Caddy 2.11.7 + Gandi DNS-01 module, built on `dregg-build`, pinned by hash; the DNS token
+  root-only on the box, a written CONFINEMENT §2 exception); nano's tenant runs 7d30fc1d with a per-IP
+  `/enroll` budget (429 on the 11th per hour) and `/attest` routed; per-IP 443 limits are live box-wide.
+  Lanes landed on their branches: L2 custody-as-records (39 → 13 fsyncs per write, wire bytes identical),
+  L4 Hermes units/`grain create`/outcome record/provider classes (−6,577 lines), L7's fix for the real
+  Hermes blocker (`summon` created a bare cell without a document, so every read was empty; now one
+  creation path and a loud refusal), the hot-path lane's cSHAKE/KMAC kernels under `@[extern]` with the
+  Lean proof as spec, the consent provider made O(1) (it re-hashed the whole log twice per write: the
+  1.6 ms/record growth), and a resident codec (no per-request Host spawn): predicted write ~1.0 s flat
+  to 10k records (was 1.35 s growing to ~17 s). The memoised image was already on main. Integration round 2
+  merges ten branches and rebuilds the whole Lean tree once per box (the kernels change a Core olean).
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
