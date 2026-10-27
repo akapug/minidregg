@@ -510,6 +510,26 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
 - each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
   exact lookup is `RoomTools::lookup`.
 
+**Owed (first):**
+- **A system uid for each resident.** Today install-hermes defaults to SVC=mini-core, so both
+  residents run as the operator uid that owns the Store, and their files belong to the operator
+  (demo-vm 602b8fa, ABUSE-LIMITS gap 9). install-hermes must:
+  - create `mini-h-INSTANCE` (`mini-h-hermes`, `mini-h-glm`) and run the resident, its controller
+    and its workers as that user;
+  - give the user linger (its own systemd user manager) and the demo's user@ drop-in for bwrap user
+    namespaces;
+  - add only the groups that open the operator socket and the key broker's client socket.
+
+  The run sheet passes SVC=mini-h-INSTANCE. Infra's per-uid ext4 quota (about 32 MiB) then covers
+  everything that uid owns under the instance directory: homes, keys, journals, `/workspace`.
+  Measure what a resident actually uses (Hermes's `.hermes` with `state.db`, the room workspace and
+  journals after a J14 run) before raising 32 MiB. Send infra (aed5ecf506cf840af) the final user and
+  group names.
+- **Sandbox sizes are now small**: scratch S 16, M 64, L 128 MiB, `/tmp` 16 MiB,
+  `LimitFSIZE` = scratch. The controller refuses a prompt while `/workspace` exceeds the scratch
+  size. Check against the measurement above that Hermes's own state fits that threshold on S; if it
+  does not, the threshold needs its own figure.
+
 **Owed:**
 - Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane.
 - The redteam row's 7 reds (lane/redteam-q2 REDTEAM.md):

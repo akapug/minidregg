@@ -20,7 +20,7 @@ pub(crate) const TOOLSETS: &[(&str, u64, &[&str])] = &[
 pub(crate) struct Sandbox {
     /// The most any room may enable: names from `TOOLSETS`.
     pub tools: Vec<String>,
-    /// The per-worker /scratch tmpfs (the class volume: S 512, M 1024, L 2048).
+    /// The per-worker /scratch tmpfs (S 16, M 64, L 128 MiB).
     pub scratch_mib: u64,
     /// The worker unit's MemoryMax (`512M`, `1G`, `2G`...).
     pub memory_max: String,
@@ -35,12 +35,13 @@ pub(crate) struct Sandbox {
 }
 
 impl Sandbox {
-    /// The class bounds of `spk-host`'s size classes.
+    /// The class bounds: memory, tasks and CPU weight of `spk-host`'s size classes; scratch
+    /// much smaller than an app volume (a resident's working area, not its storage).
     pub(crate) fn for_class(class: &str) -> Result<Self> {
         let (scratch_mib, memory_max, tasks_max, cpu_weight) = match class {
-            "S" => (512, "512M", 256, 50),
-            "M" => (1024, "1G", 512, 100),
-            "L" => (2048, "2G", 1024, 200),
+            "S" => (16, "512M", 256, 50),
+            "M" => (64, "1G", 512, 100),
+            "L" => (128, "2G", 1024, 200),
             _ => return Err("grain class must be S, M or L".into()),
         };
         Ok(Self { tools: TOOLSETS.iter().map(|(n, ..)| (*n).to_owned()).collect(), scratch_mib,
