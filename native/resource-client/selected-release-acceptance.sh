@@ -77,38 +77,9 @@ provision() {
   side=$1 domain=$2 target=$3
   root="$EVIDENCE/$side"
   mkdir -m 700 "$root"
-  cat >"$root/operator.json" <<EOF
-{"domain":$domain,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$root/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-  "$HOST" "$root/operator.json" profile >"$root/profile.json"
-  semantics=$(decimal "$root/profile.json" semantics)
-  cat >"$root/genesis.json" <<EOF
-{"domain":"$domain","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$semantics",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[{"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1",
-   "subject":"7","publicKey":"$OWNER_PUBLIC","activeFrom":"0",
-   "activeUntil":"1000000","nextKeyDigest":null},"accountId":"7",
-   "spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"100",
-   "accountPredicate":{"type":"all","predicates":[]} }],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
-  sh "$GENESIS_PARAMS_SH" fill-source "$root/genesis.json"   # the genesis clock, chosen at genesis time
+  # The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+  HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+    sh "$HERE/scenario-genesis.sh" "$root" "$OWNER_PUBLIC" "del(.grainPlatform) | .domain = $domain | .sponsor.initialBalance = 100"
   "$MINI" bootstrap --host "$HOST" --config "$root/operator.json" \
     --source "$root/genesis.json" --dir "$root/deployment" >"$root/bootstrap.stdout"
   config="$root/deployment/pinned-config.json"
