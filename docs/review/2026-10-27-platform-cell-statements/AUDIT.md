@@ -185,3 +185,47 @@ with every other family, so they need a family tag.
 
 **Before proof work:** the `Intent.credit` statement, deployed-context quantification with injective
 `encode`, and the two rotation poles.
+
+## 2026-10-27, third pass: the restatement at 89dc0e17
+
+
+
+| delta | verdict |
+|---|---|
+| deployed `Deployment`, transcript boundary, `Reachable.genesis = genesisRecord host` | SOUND (boundary stated) |
+| `covers` / `wireEncode_covers` / `relay_swap_refused` | SOUND |
+| rotation poles `cosigned_rotation_admitted`, `uncosigned_rotation_refused` | SOUND |
+| births: absent-cell refusal, `currentQuote_current`, `genesisQuote_stale` | SOUND |
+| `Install` nonce dropped | SOUND: an old signed install is below the current version |
+| `install_conserves_with_credit`, `installToday_loses_credit`, `overflow_refused` | SOUND as targets, but about a local mirror |
+| `CreditConfined` | WEAK: confines by a self-declared tag |
+| `family_tag_separates` | SOUND but constructor-trivial; same mirror |
+
+**The meter is still a mirror (law 5).** `installAvailable`, `MeterIntent`, `Meter` and the tagged
+`Nullifier` are local to this file. `DurableCommitProtocol` is unchanged, so "the refill's post-state is
+the install of its own intent" holds of `installAvailable`, not of `install`. The keystone that makes M2
+about the deployed meter is missing. State it now as a Prop: once `Intent.credit` exists,
+`(install before intent).available = installAvailable before.available (meterView intent)`, and
+`Meter` is `⟨snapshot.available, snapshot.consumed⟩`.
+
+**`CreditConfined` checks the tag, not the source.** Its clause is `family ≠ .meterRefill → credit = 0`.
+Any producer that labels its intent `.meterRefill` can mint credit, and the teeth only refute an honestly
+mislabelled intent. The confinement that matters is: `committed intent → intent.credit ≠ 0 →
+∃ m r, RefillAdmits ctx m r ∧ intent = r.intent`. Its teeth: a `.meterRefill`-tagged intent with credit
+and no admitted refill.
+
+**Residuals:**
+- The custodian's first key is the controller's choice, and nothing stops the controller naming its own
+  enrolled key. `verifiesKey` and `verifies` read the same transcript triples, so the controller's own
+  signature would then count as the custodian's cosign. Add `key ≠ keyOf controller` to the
+  naming step, or state the trust-on-first-name boundary next to the transcript boundary.
+- `Deployment.host` and `Deployment.genesis` have no coherence premise: the controller comes from one,
+  the genesis record from the other.
+- `wireEncode` has no deployment or domain tag. Across worlds, replay protection relies on the
+  envelope pinning `expectedSemantics` (`Host/Json.lean:2322`); cite that in the boundary note.
+- `holdsInstall`, `holdsRefill`, `keyOf` and `layout` are still free functions, which is the declared
+  realizer boundary.
+
+**May proof work start?** L1 (platform cell, births, custodian): yes. M2: after two statement-level
+additions, the install-link Prop and the source-confined `CreditConfined`; proving against the mirror
+would reproduce the integration gap ATLAS law 5 names.
