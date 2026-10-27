@@ -697,9 +697,9 @@ mod tests {
         // `bend`: one derived form per leaf; publish and run are transitions, show a read.
         let bend = crate::shell::command_catalog().find(|v| v.name == "bend").expect("the shell has bend");
         let bends = alternatives_of("bend", bend.usage);
-        assert_eq!(bends.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["bend publish", "bend run", "bend show"]);
+        assert_eq!(bends.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["bend publish", "bend run", "bend lookup", "bend retry", "bend show"]);
         assert_eq!(bends.len(), crate::shell_grammar::BEND.leaves.len(), "one form per grammar leaf");
-        for (i, is) in [true, true, false].into_iter().enumerate() {
+        for (i, is) in [true, true, false, true, false].into_iter().enumerate() {
             assert_eq!(transition_of("bend", bend.usage, bend.operation, i, &bends[i].literals()), is, "{}", bends[i].literals());
         }
         assert!(form("bend", 1, &bends[1], bend.operation, "/verb/bend", "").contains("--deposit"), "bend run's form carries --deposit");

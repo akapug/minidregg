@@ -44,7 +44,7 @@ def shell(label, line, ok=(0, 1, 2, 3, 4)):
 
 
 try:
-    w.bring_up(['counter'], sponsor_balance='100000000000')
+    w.bring_up(['counter', 'lost'], sponsor_balance='100000000000')
     # The member's account: the sponsor's own, named once (`bend` finds the workspace's one account reference).
     w.sh('account-reference', w.mini, 'workspace', '--action', 'import', '--dir', w.sponsor, '--name', 'account',
          '--kind', 'account', '--target', w.SPONSOR_ACCOUNT, '--observe-capability', w.SPONSOR_SPEND,
@@ -76,6 +76,7 @@ try:
         w.objects['counter']  # the content resource bring_up made
         start = w.watched('account-before-run')
         rc, out, err = shell('run', 'bend run tally counter')
+        run_out = out
         w.check('run-admitted', rc == 0 and out.startswith('admitted: bend run tally on counter'), {'rc': rc, 'out': out, 'err': err[-300:]})
         m = re.search(r'height (\d+), world root (\d+), receipt tx (\d+) event (\d+); state (\{[^}]*\}); purse (\d+); deposit (\d+); '
                       r'account (\d+) -> (\d+) \(charge (\d+)\)', out)
@@ -99,6 +100,31 @@ try:
     with w.group('bend-show'):
         rc, out, err = shell('show', 'bend show counter')
         w.check('show-reads-the-object', rc == 0 and 'state {total=0}' in out and f'pin {pin}' in out and 'purse' in out, {'rc': rc, 'out': out, 'err': err[-300:]})
+
+    with w.group('bend-lost-reply'):
+        # the shell's lost-reply switch reaches the activity path: the birth is written, its answer never read
+        first_charge = int(re.search(r'charge (\d+)', run_out).group(1)) if run_out else -1
+        b0 = w.watched('account-before-lost')
+        rc, out, err = shell('run-lost', 'bend run tally lost --lose-reply-once')
+        w.check('lost-reply-is-undecided', rc == 4 and err.startswith('undecided:') and 'deliberately not read' in err, {'rc': rc, 'err': err[-400:]})
+        w.check('undecided-names-the-two-shell-lines', '`bend lookup tally`' in err and '`bend retry tally`' in err and 'mini activity' not in err, err[-400:])
+        w.check('nothing-is-claimed-admitted', 'admitted' not in out, out)
+        mid = w.watched('account-after-lost')
+        rc, looked, err = shell('lookup', 'bend lookup tally')
+        w.check('lookup-gives-the-decided-outcome', rc == 0 and looked.startswith('admitted: bend lookup tally') and 'state {total=0}' in looked, {'rc': rc, 'out': looked, 'err': err[-300:]})
+        rc, retried, err = shell('retry', 'bend retry tally')
+        rr = re.search(r'receipt (tx \d+ event \d+)', retried)
+        rl = re.search(r'receipt (tx \d+ event \d+)', looked)
+        w.check('retry-is-the-same-receipt', rc == 0 and rr is not None and rl is not None and rr.group(1) == rl.group(1)
+                and '(replayed)' in retried, {'lookup': looked[:200], 'retry': retried[:200]})
+        registry = json.loads((w.sponsor / 'bend' / 'objects' / 'lost.json').read_text())
+        s = w.state('lost', 'lost-after-retry', registry['transaction'])
+        end = w.watched('account-after-retry')
+        w.check('one-record', w.total_of(s) == 0 and s['record'].get('phase', {}).get('await') is not None, s['record'].get('phase'))
+        acct = lambda v: w.balance(v, w.SPONSOR_ACCOUNT)
+        w.check('one-charge', acct(mid) == acct(end) and acct(b0) - acct(end) == first_charge,
+                {'before': acct(b0), 'afterLost': acct(mid), 'afterRetry': acct(end), 'firstRunCharge': first_charge})
+        w.check('purse-is-one-deposit', s['purse'] == 7 * AW.PRICE, s['purse'])
 
     with w.group('bend-refusal'):
         before = height('height-before-refusal')

@@ -93,7 +93,7 @@ fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
     invoke(ws, 7, &with_kind(kind, value.to_string().as_bytes()))
 }
 
-fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
+pub(crate) fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
         .map_err(|error| format!("activity: invalid Host inspection of {kind}: {error}"))
 }
@@ -372,6 +372,26 @@ fn retain_decision(ingress: &Path, outcome: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The exact retained bytes submitted again (op 212): a retry replays, never a new nonce. An attempt's
+/// own `ingress.bin` is marked transmitted first, and a decided answer is retained beside it.
+pub(crate) fn resubmit(ws: &Ws, retained: &Path) -> Result<Value> {
+    let ingress = read_ingress(retained)?;
+    if let Some(dir) = own_attempt(retained) {
+        mark_submitted(dir)?;
+    }
+    let outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
+    retain_decision(retained, &outcome)?;
+    Ok(outcome)
+}
+
+/// The receipt-only lookup (op 213) of the retained ingress; absence never submits.
+pub(crate) fn lookup(ws: &Ws, retained: &Path) -> Result<Value> {
+    let ingress = read_ingress(retained)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, 213, &ingress)?)?;
+    retain_decision(retained, &outcome)?;
+    Ok(outcome)
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action")?.into_string().map_err(|_| "activity action must be UTF-8")?;
     let ws = ws(path(args.required("workspace")?))?;
@@ -403,17 +423,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "resubmit" | "lookup" => {
             let retained = path(args.required("ingress")?);
-            let ingress = read_ingress(&retained)?;
             args.finish()?;
-            let op = if action == "resubmit" { 212 } else { 213 };
-            if op == 212 {
-                if let Some(dir) = own_attempt(&retained) {
-                    mark_submitted(dir)?;
-                }
-            }
-            let outcome = inspect(&ws, "outcome", &invoke(&ws, op, &ingress)?)?;
-            retain_decision(&retained, &outcome)?;
-            outcome
+            if action == "resubmit" { resubmit(&ws, &retained)? } else { lookup(&ws, &retained)? }
         }
         "view" => {
             let request = match args.optional("request") {

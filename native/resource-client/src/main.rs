@@ -729,6 +729,7 @@ usage:
   mini bend --action publish --dir WORKSPACE --name NAME --source FILE.obend [--entry DEF] [--account REF]   an Objective Bend, captured and lowered by the Host's front end, then published
   mini bend --action run --dir WORKSPACE --name NAME --object REF [--seed JSON] [--input JSON] [--deposit N] [--state-type JSON] [--account REF]   create REF pinning the bend when it has no record, then birth its activity
   mini bend --action show --dir WORKSPACE --object REF
+  mini bend --action lookup|retry --dir WORKSPACE --name NAME   the receipt-only lookup of, or the exact retry of, NAME's last retained attempt
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
   mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
   mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
