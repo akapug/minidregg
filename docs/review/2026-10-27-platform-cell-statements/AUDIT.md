@@ -384,3 +384,28 @@ session is outside the keystone.
 **Verdict:** proofs may start once there is the bundled `Spec` with `SealOpens` and the inhabitation
 pole, plus the light-session clause in `Wrote`. Strengthen `TailCutAsReplay` and add the `Loaded`
 Prop in the same commit.
+
+## 2026-10-27, seventh pass: Option A spec (lane/hot-path-v4 41099e07)
+
+**Verdict: unsatisfiable as stated; one change before proofs.**
+
+**`executesNoPrefix` against `exact`.** `exact` requires `view.snapshot = replaySnapshot ⟨seed, pre ++ suf⟩`.
+That snapshot is `State.snapshot state (image.accepted.take height)` replayed (`DurableCheckpoint.lean:101-115, 151-156`).
+Its model's `journal`, `history` and `consumed` are built from the prefix records. `executesNoPrefix` sets
+`view.snapshot = stateSnapshot state` with `state` from `ffState`, whose inputs are the checkpoint and suffix only. Option A
+takes the journal out of the checkpoint, so `ffState` has no source for the prefix journal. Two prefixes giving the same body
+(a chain collision, which exists by counting) would demand two snapshots from one input. Fix: split the snapshot.
+`executesNoPrefix` should speak of the executed part only (`roots`, `available`, the World). Add a clause that `journal`,
+`history` and `consumed` are a pure function of the decoded `below ++ suffix` (the same non-executing rebuild as the indexes).
+
+**Does it forbid execution?** Only extensionally. An `ff` that replays the prefix as a check and then returns the
+checkpoint's World satisfies it. A fold divergence does break it: a replaying `ff`'s World differs from `ffState`'s, which
+reads `body.world`. Non-execution is a cost claim, so make it structural. Define `ff` in `Impl` as
+`ffState` ∘ `rebuild (decode below)` rather than a free field, and the type then proves it. That is ATLAS law 5: one
+executable path, no twin.
+
+**Dropping the anchor.** Safe, and stronger. The recomputed prefix chain must equal the MAC'd `body.chain`, which binds every
+prefix byte, not one tag.
+
+**Tamper guarantee.** The same as the sixth pass for the reader, but it now rests on the chain hash's collision resistance
+rather than on per-entry KMAC tags. Name that boundary in the spec's header beside the MAC's.
