@@ -11,7 +11,12 @@ scripts/platform-field-readers.json lists every such reader per file and pattern
 status:
   owed     must read the platform cell before the digest change ships;
   genesis  the genesis seed itself (the record the cell starts from);
-  encoding the template's own encoding (issuer and birthSlack stay profile fields).
+  encoding the template's own encoding (issuer and birthSlack stay profile fields);
+  cell     reads the field through the platform record (`templateAt profile.template record`
+           takes only issuer and birthSlack from the profile).
+
+A bare `profile.template` (the whole template handed on) counts as a reader of its owner
+budget and lifetime unless the row says otherwise.
 
   check-platform-field-readers.py           refuse any reader not in the census, or a count
                                             above its census row (a new silent twin);
@@ -27,7 +32,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CENSUS = ROOT / "scripts" / "platform-field-readers.json"
 PATTERN = re.compile(r"template\.(?:ownerBudget|lifetime)|config\.tariff\b|grainBirthTariffValue"
-                     r"|config\.completionCustodianKey")
+                     r"|config\.completionCustodianKey"
+                     r"|profile\.template\b(?!\.(?:issuer|birthSlack|ownerBudget|lifetime)\b)")
 EXCLUDED = ("Kernel/PlatformCell", "scripts/", "tests/", "Fixtures/", "Verify/", "Assurance/",
             ".lake/", "docs/")
 

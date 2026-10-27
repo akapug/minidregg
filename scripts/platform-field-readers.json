@@ -1,5 +1,9 @@
 {
  "Compiler/CanonicalRuntimeProfileCore.lean": {
+  "profile.template": {
+   "count": 2,
+   "status": "owed"
+  },
   "template.lifetime": {
    "count": 1,
    "status": "encoding"
@@ -22,6 +26,10 @@
   },
   "grainBirthTariffValue": {
    "count": 1,
+   "status": "owed"
+  },
+  "profile.template": {
+   "count": 2,
    "status": "owed"
   }
  },
@@ -66,6 +74,10 @@
    "count": 2,
    "status": "owed"
   },
+  "profile.template": {
+   "count": 1,
+   "status": "owed"
+  },
   "template.lifetime": {
    "count": 2,
    "status": "owed"
@@ -87,6 +99,10 @@
  },
  "Host/NativeReserveBirthAuthoring.lean": {
   "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  },
+  "profile.template": {
    "count": 1,
    "status": "owed"
   }
@@ -138,6 +154,10 @@
  "Kernel/ApplicationAgentLifetimeGrantSource.lean": {
   "config.tariff": {
    "count": 3,
+   "status": "owed"
+  },
+  "profile.template": {
+   "count": 1,
    "status": "owed"
   },
   "template.lifetime": {
@@ -255,12 +275,22 @@
    "status": "owed"
   }
  },
+ "Kernel/GrainResourceBirthAdmission.lean": {
+  "profile.template": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
  "Kernel/NativeHost.lean": {
   "config.tariff": {
    "count": 10,
    "status": "owed"
   },
   "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  },
+  "profile.template": {
    "count": 1,
    "status": "owed"
   }
@@ -307,6 +337,10 @@
  },
  "Kernel/NativeHostPayClaims.lean": {
   "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  },
+  "profile.template": {
    "count": 2,
    "status": "owed"
   }
@@ -376,16 +410,42 @@
   }
  },
  "Kernel/ParticipantFactoryProvisioning.lean": {
+  "profile.template": {
+   "count": 8,
+   "status": "owed"
+  },
   "template.lifetime": {
    "count": 1,
    "status": "owed"
   },
   "template.ownerBudget": {
    "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ParticipantFactoryProvisioningReceiver.lean": {
+  "profile.template": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/PayClaimReceiver.lean": {
+  "profile.template": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/PayEnrolProofs.lean": {
+  "profile.template": {
+   "count": 8,
    "status": "owed"
   }
  },
  "Kernel/PayEnrolReceiver.lean": {
+  "profile.template": {
+   "count": 5,
+   "status": "owed"
+  },
   "template.lifetime": {
    "count": 1,
    "status": "owed"
@@ -395,14 +455,30 @@
    "status": "owed"
   }
  },
- "Kernel/ResourceBirthPolicyController.lean": {
-  "template.lifetime": {
+ "Kernel/PayEnrolV2Legs.lean": {
+  "profile.template": {
    "count": 4,
    "status": "owed"
+  }
+ },
+ "Kernel/PayEnrolV2Receiver.lean": {
+  "profile.template": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ResourceBirthPolicyController.lean": {
+  "profile.template": {
+   "count": 1,
+   "status": "cell"
+  },
+  "template.lifetime": {
+   "count": 4,
+   "status": "cell"
   },
   "template.ownerBudget": {
    "count": 1,
-   "status": "owed"
+   "status": "cell"
   }
  },
  "Kernel/SeatStore.lean": {
@@ -414,6 +490,10 @@
  "TokenCensus/Table.lean": {
   "config.tariff": {
    "count": 3,
+   "status": "owed"
+  },
+  "profile.template": {
+   "count": 1,
    "status": "owed"
   }
  }
