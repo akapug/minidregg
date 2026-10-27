@@ -40,11 +40,15 @@ samples, `/build/lanes/hpc-laps/compact-n483/profile.txt`): still 98% in `trackO
 
 ## Next (successor: start here)
 
-1. When the v4 closure ends: fix forward what it names. Then overlay the files changed since e4e22cb0 into its tree
+1. The continuous main build on dregg-build checks the split's importers, DurableStoreAudit and Host.Main once the
+   integrator lands ebf92e7b; fix forward what it names. When the v4 closure ends: fix forward what it names. Then overlay the files changed since e4e22cb0 into its tree
    (`git archive ebf92e7b Kernel/DurableEngineSuffix.lean Compiler/DurableReceiverCore.lean Compiler/DurableFastForwardSpec.lean
    Compiler/DurableFastForwardProofs.lean docs | tar -x -C /build/lanes/hot-path-v4/<src>`) and rebuild incrementally through
    `closure-lock swarm-build` (the core's ~430 dependents, Host.Main included): the check of the split.
-2. Instantiate `Spec` (one more amendment first, statement to the auditor): the session build reads the entries BELOW the
+2. Instantiate `Spec` (one more amendment first, statement to the auditor; its draft is UNCOMMITTED in the Mac worktree's
+   `Compiler/DurableFastForwardSpec.lean`, patch at
+   `/private/tmp/claude-501/-Users-ember-dev-minidregg/698fc87d-1ed5-4b8d-a00d-67388a9da60b/scratchpad/opened-below.patch`: elaborate it
+   per file on dregg-ref once its warm tree from cut 13 arrives, then send it): the session build reads the entries BELOW the
    checkpoint (the last prefix tag for the accumulator check, the tags for the root log and head tag, the bytes for the
    chain proof), so `Opened` needs `below : List Entry` (opaque, never executed). Then `Loaded4 := Loaded`,
    `State4 := Σ suffix, OpenState rootBytes suffix`, `ffState := openState`, `stateBase := (base.1, baseChain)`,
