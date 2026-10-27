@@ -28,7 +28,12 @@ m sntfy bc424d5fd3cf60977cacdac328adfbee S / web
 n DokuWiki dda6d7e22e8e2566bdc804d8e3f9165f S /doku.php web
 o HledgerWeb 23321185cf7dd1ae7a74e5b7deb6caba S / web
 p Datasette 547714ee1f01bae653fe9276d6d30ce9 M / web"
-want=" ${*:-j k l m n o p} "
+# A batch brings its own table (same columns) and its write functions:
+# QUALIFY_TABLE=scripts/spk-platform/market-batches/bN.tsv, and every
+# scripts/spk-platform/market-writes/*.sh is sourced after the functions below.
+# QUALIFY_STOP=1 stops each grain after its write (a shared box keeps memory for the next app).
+[[ -z ${QUALIFY_TABLE:-} ]] || apps=$(grep -v '^#' "$QUALIFY_TABLE")
+want=" ${*:-$(awk '{printf "%s ", $1}' <<<"$apps")} "
 
 package() { # ID -> path
   local id=$1 f=$out/state/quarantine/$1.spk
@@ -56,10 +61,14 @@ write_EtherCalc() {
   local got; got=$(req GET /_/featured/csv)
   [[ $put =~ ^20 && $got == 200 ]] && grep -q widgets "$body" && echo "1 PUT /_/featured text/csv $put; GET csv $got"
 }
+# HedgeDoc's package (ff642cdb) lacks node_modules/iconv-lite/encodings, which the packager's
+# trace never touched: every request body it parses (text, form or JSON) throws "Cannot find
+# module '../encodings'" in the app (400 or 500). Its write therefore goes over its realtime
+# socket.io channel, which never reaches body-parser; until that recipe is in, the row names this.
 write_HedgeDoc() {
   local made; made=$(req POST /new -H 'Content-Type: text/markdown' --data-binary $'# featured\nwritten by a resident\n')
   local note; note=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); note=${note#https://grain.test}
-  [[ $made =~ ^30 && -n $note ]] || return
+  [[ $made =~ ^30 && -n $note ]] || { echo "0 POST /new $made: the package lacks iconv-lite/encodings (app output: Cannot find module '../encodings'); the write moves to socket.io"; return; }
   local got; got=$(req GET "$note/download")
   [[ $got == 200 ]] && grep -q 'written by a resident' "$body" && echo "1 POST /new $made -> $note; GET download $got"
 }
@@ -93,6 +102,7 @@ write_Datasette() {
   # Datasette 0.63 has no write API; its write is the upload of a database through the page.
   [[ $got == 200 ]] && echo "0 read-only: GET /-/versions.json $got; Datasette 0.63 has no HTTP write (upload is the page's form)"
 }
+for f in "$here"/market-writes/*.sh; do [[ -f $f ]] && . "$f"; done
 
 while read -r letter name pkg class page kind; do
   [[ $want == *" $letter "* ]] || continue
@@ -108,5 +118,7 @@ while read -r letter name pkg class page kind; do
   dir=$state/apps/$app/routes/owner-$kind body=$out/bodies/$letter
   result=$("write_$name" 2>&1 | tail -1)
   row "$name: one write beneath the HTML by a resident's script" "$([ "${result%% *}" = 1 ] && echo 1 || echo 0)" "${result#* }"
+  [[ ${QUALIFY_STOP:-} != 1 ]] || env BIN="$BIN" sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "stop-$letter" \
+    >>"$out/$letter-world.out" 2>>"$out/$letter-world.err" || row "$name: stopped after its write" 0 "$(tail -1 "$out/$letter-world.err" | cut -c1-120)"
 done <<<"$apps"
 grep -c '^PASS' "$rows" | xargs -I{} echo "featured: {} PASS of $(wc -l <"$rows") rows"
