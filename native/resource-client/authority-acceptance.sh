@@ -94,48 +94,14 @@ ALICE_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/alice.pub" | tr -d ' \n')
 BOB_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/bob.pub" | tr -d ' \n')
 test "$ALICE_PUBLIC" != "$BOB_PUBLIC"
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-
-cat >"$EVIDENCE/genesis.json" <<EOF
-{
- "domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-   {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-     "publicKey":"$ALICE_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-    "factoryObserveCapabilityId":"54","initialBalance":"100",
-    "accountPredicate":{"type":"all","predicates":[]}},
-   {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-     "publicKey":"$BOB_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-    "factoryObserveCapabilityId":"55","initialBalance":"200",
-    "accountPredicate":{"type":"all","predicates":[]}}
- ],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}
-}
-EOF
-
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+# The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+jq -n --arg bob "$BOB_PUBLIC" '[
+  {subject: 8, keyId: 8008, publicKey: $bob, accountId: 8, spendCapabilityId: 42,
+   controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 200}]' >"$EVIDENCE/enrollments.json"
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$HERE/scenario-genesis.sh" "$EVIDENCE" "$ALICE_PUBLIC" 'del(.grainPlatform) | .sponsor.initialBalance = 100' \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" \
   >"$EVIDENCE/bootstrap.stdout"
