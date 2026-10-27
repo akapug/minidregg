@@ -28,9 +28,9 @@ fn invalid(reason: &'static str) -> io::Error {
 }
 
 /// A single fresh human permit may reach fd3 once. Native op34 is committed
-/// before physical delivery, so any failure thereafter retains the global
-/// submit marker and/or DeliveryRequested tombstone for operator audit. The
-/// caller must not retry this HTTP request after an uncertain result.
+/// before physical delivery, so any failure thereafter retains this call's
+/// submit marker and/or DeliveryRequested tombstone for operator audit. This
+/// call is never resent; a new HTTP request is a new signed call.
 pub(crate) struct ResidentHuman<'a> {
     pub operator: &'a PrivateOperator,
     pub custody: &'a FixedAuthoring,
@@ -92,8 +92,7 @@ impl ResidentHuman<'_> {
         let base_path = format!("https://{}", policy.expected_host);
         // Everything the WebSession projection takes from the request itself
         // is checked here, before an operation number, Store record or
-        // generation-wide marker can exist. A refusal leaves no evidence and
-        // fences nobody.
+        // submit marker can exist. A refusal leaves no evidence.
         crate::dispatch_web_input::preflight_web_input(
             http,
             self.display_name,
@@ -107,21 +106,22 @@ impl ResidentHuman<'_> {
             .read()?
             .ok_or_else(|| invalid("app journal absent"))?
             .verify_running_instance()?;
-        // A retained native submission or physical attempt cannot be replaced
-        // with a new request. Report exact-recovery-only before authoring another
-        // ingress, so all members see the fence without creating extra evidence.
-        for name in ["native-dispatch-active.json", "dispatch-active.json"] {
-            match std::fs::symlink_metadata(attempt_parent.join(name)) {
-                Ok(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Interrupted,
-                        "SPK dispatch uncertain; exact recovery required",
-                    ))
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
+        // The physical fd3 slot is one per generation: while hostd holds a
+        // DeliveryRequested operation no other command may reach the app.
+        match std::fs::symlink_metadata(attempt_parent.join("dispatch-active.json")) {
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "SPK physical delivery uncertain; exact recovery required",
+                ))
             }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
+        // The native fence is per signed call (dispatch_fence): an undecided
+        // earlier call is looked up, never resent, and fences nobody else
+        // until the journal's bound of undecided calls is reached.
+        crate::dispatch_fence::admit_new_call(self.operator, attempt_parent)?;
         // A WebSocket open takes its place in the grain's class cap before
         // any Mini write: the open past the cap is refused by name and
         // leaves no dispatch record.
@@ -158,9 +158,15 @@ impl ResidentHuman<'_> {
             self.route_binding,
             self.continuity_namespace,
         )
-        .inspect_err(|_| {
+        .inspect_err(|error| {
             // A failed current-authority check (including unavailable authority)
             // ends streams for this exact pinned custody, never another principal.
+            // A lost tip race says nothing about authority and ends nothing.
+            if crate::dispatch_fence::DispatchOutcome::of(error)
+                .is_some_and(|outcome| outcome.status == crate::dispatch_fence::Status::Contention)
+            {
+                return;
+            }
             self.rpc.invalidate_custody(
                 &self.custody.app,
                 &self.custody.subject,
@@ -169,15 +175,9 @@ impl ResidentHuman<'_> {
                 self.route_binding,
             );
         })
-        .map_err(|error| {
-            if attempt_parent.join("native-dispatch-active.json").exists() {
-                io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "SPK native outcome uncertain; exact recovery required",
-                )
-            } else {
-                error
-            }
+        .inspect_err(|_| {
+            // An attempt that never armed its submit carries no Store effect.
+            let _ = crate::dispatch_fence::discard_unsubmitted(&attempt_dir);
         })?;
         // From DeliveryRequested on, the journal holds this exact operation.
         // Every later outcome either finishes it Delivered, releases the

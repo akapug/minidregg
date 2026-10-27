@@ -631,7 +631,7 @@ pub(crate) fn reconcile_failed_start(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
 
@@ -667,9 +667,9 @@ mod tests {
     /// A pinned "Host" that is /bin/sh running the config file as its
     /// outcome inspector, and an operator socket that answers each request
     /// with a scripted outcome. The served opcodes and payloads are returned.
-    struct FakeHost {
-        root: std::path::PathBuf,
-        operator: crate::dispatch_native::PrivateOperator,
+    pub(crate) struct FakeHost {
+        pub(crate) root: std::path::PathBuf,
+        pub(crate) operator: crate::dispatch_native::PrivateOperator,
     }
 
     const INSPECTOR: &str = "#!/bin/sh\n\
@@ -681,10 +681,11 @@ mod tests {
           fi\n\
         done\n\
         if grep -q absent \"$3\"; then printf '{\"type\":\"absent\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q contention \"$3\"; then printf '{\"type\":\"contention\"}' >\"$4\"; exit 0; fi\n\
         printf '{\"type\":\"refused\",\"reason\":\"operationRejected\"}' >\"$4\"\n";
 
     impl FakeHost {
-        fn new(name: &str) -> Self {
+        pub(crate) fn new(name: &str) -> Self {
             let root = scratch(name);
             let host = root.join("host");
             fs::copy("/bin/sh", &host).unwrap();
@@ -706,7 +707,7 @@ mod tests {
 
         /// Serve one connection per scripted reply; each reply is OUTCOME/v4
         /// followed by the word the inspector maps to a JSON view.
-        fn serve(&self, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
+        pub(crate) fn serve(&self, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
             let listener = std::os::unix::net::UnixListener::bind(&self.operator.socket).unwrap();
             fs::set_permissions(&self.operator.socket, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
             std::thread::spawn(move || {

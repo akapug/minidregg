@@ -39,6 +39,8 @@ mod dispatch_author;
 #[cfg(target_os = "linux")]
 mod dispatch_delivery;
 #[cfg(target_os = "linux")]
+mod dispatch_fence;
+#[cfg(target_os = "linux")]
 mod dispatch_inspection;
 #[cfg(target_os = "linux")]
 pub mod dispatch_native;

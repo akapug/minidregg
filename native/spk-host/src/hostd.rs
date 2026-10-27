@@ -1036,12 +1036,13 @@ impl Journal {
             if record.phase != Phase::Running || record.dispatch_in_flight.is_some() {
                 return Err(invalid("checkpoint requires settled physical dispatch"));
             }
-            for name in ["dispatch-active.json", "native-dispatch-active.json"] {
-                match fs::symlink_metadata(this.directory.join(name)) {
-                    Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
-                    Err(error) => return Err(error),
-                }
+            match fs::symlink_metadata(this.directory.join("dispatch-active.json")) {
+                Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error),
+            }
+            if !crate::dispatch_fence::undecided(&this.directory)?.is_empty() {
+                return Err(invalid("checkpoint dispatch outcome requires exact recovery"));
             }
             for entry in fs::read_dir(&this.directory)? {
                 let path = entry?.path();
@@ -2342,15 +2343,16 @@ mod tests {
     }
 
     /// The human path after DeliveryRequested: a worker fence releases the
-    /// shared slot and the generation-wide native marker, the operation
+    /// shared slot and settles the call's own submit marker, the operation
     /// stays terminally Uncertain and is never dispatchable again, and the
     /// next participant proceeds.
     #[test]
     fn human_post_commit_failure_releases_slot_and_native_marker_with_fence() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let attempt = path.join("dispatch-op-1");
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();
@@ -2392,8 +2394,9 @@ mod tests {
     fn human_failure_without_matching_fence_keeps_every_marker() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let attempt = path.join("dispatch-op-1");
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();

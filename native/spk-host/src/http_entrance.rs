@@ -932,7 +932,10 @@ fn write_response_bounded(stream: &UnixStream, mut bytes: &[u8]) -> io::Result<(
     Ok(())
 }
 fn dispatch_error_response(method: Method, error: &io::Error) -> Vec<u8> {
-    if error.kind() == io::ErrorKind::WouldBlock {
+    if let Some(outcome) = crate::dispatch_fence::DispatchOutcome::of(error) {
+        eprintln!("spk-host: {outcome}");
+        outcome.http_response(method == Method::Head)
+    } else if error.kind() == io::ErrorKind::WouldBlock {
         admission_response(method, "busy")
     } else if error.kind() == io::ErrorKind::Interrupted {
         admission_response(method, "uncertain")
