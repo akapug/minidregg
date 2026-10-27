@@ -27,6 +27,8 @@ const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
 const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(600);
+const STOP_INSPECTION_DEADLINE: Duration = Duration::from_secs(300);
+const MAX_HELPER_STDERR: u64 = 64 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -462,35 +464,7 @@ impl PrivateOperator {
             }
             process.arg(input).arg(output).stdout(Stdio::null());
         }
-        process.stdin(Stdio::null()).stderr(Stdio::null());
-        if Instant::now() >= deadline {
-            return Err(invalid("Mini helper deadline"));
-        }
-        let mut child = process.spawn()?;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Mini helper deadline",
-                ));
-            }
-            // Bounded local child wait, never a Mini authority poll.
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        if !status.success() {
-            return Err(invalid("pinned Mini Host helper refused"));
-        }
+        run_pinned(process, output, deadline)?;
         read_bounded(
             output,
             if command == "inspect" {
@@ -499,6 +473,31 @@ impl PrivateOperator {
                 HOST_MAX_FRAME - 1
             },
         )
+    }
+
+    /// `inspect-stop-claim PLAN COMMITTED OUTPUT`: the current-image STOP
+    /// claim inspection, run from the verified descriptor (never the path)
+    /// under a deadline, its refusal reason retained beside `output`.
+    pub(crate) fn inspect_stop_claim(
+        &self,
+        plan: &Path,
+        committed: &Path,
+        output: &Path,
+        max: u64,
+    ) -> io::Result<Vec<u8>> {
+        let _ = self.pinned_config()?;
+        let executable = self.verified_host()?;
+        let mut process = Command::new(executable.path());
+        process
+            .arg(&self.config)
+            .arg("inspect-stop-claim")
+            .arg(plan)
+            .arg(committed)
+            .arg(output)
+            .stdout(Stdio::null());
+        run_pinned(process, output, Instant::now() + STOP_INSPECTION_DEADLINE)?;
+        let _ = self.pinned_config()?;
+        read_bounded(output, max as usize)
     }
 
     pub(crate) fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
@@ -577,6 +576,75 @@ impl PrivateOperator {
         }
         Ok(reply)
     }
+}
+
+/// Run one pinned Host helper to completion under `deadline`. Its stderr is
+/// retained as `<output>.stderr` (at most `MAX_HELPER_STDERR` bytes, removed
+/// when empty), and a refusal carries the first line of it: Lean's refusal
+/// reason is never dropped.
+fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Result<()> {
+    let mut stderr_name = output
+        .file_name()
+        .ok_or_else(|| invalid("helper output name absent"))?
+        .to_owned();
+    stderr_name.push(".stderr");
+    let stderr_path = output.with_file_name(stderr_name);
+    let stderr_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&stderr_path)?;
+    process
+        .stdin(Stdio::null())
+        .stderr(Stdio::from(stderr_file.try_clone()?));
+    if Instant::now() >= deadline {
+        return Err(invalid("Mini helper deadline"));
+    }
+    let mut child = process.spawn()?;
+    drop(process);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Mini helper deadline",
+            ));
+        }
+        // Bounded local child wait, never a Mini authority poll.
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if stderr_file.metadata()?.len() > MAX_HELPER_STDERR {
+        stderr_file.set_len(MAX_HELPER_STDERR)?;
+    }
+    stderr_file.sync_all()?;
+    let mut reason = String::new();
+    File::open(&stderr_path)?
+        .take(MAX_HELPER_STDERR)
+        .read_to_string(&mut reason)
+        .ok();
+    if reason.is_empty() {
+        let _ = fs::remove_file(&stderr_path);
+    }
+    if !status.success() {
+        let first = reason.lines().next().unwrap_or("").trim();
+        eprintln!("spk-host: pinned Mini Host helper refused: {first}");
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned Mini Host helper refused: {first}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Every directory is freshly created under the resident's private journal.
@@ -892,7 +960,13 @@ fn author_signed_ingress(
     )?;
     let plan_reply = operator.invoke_until(36, &request_bytes, deadline)?;
     if plan_reply[4] != 36 {
-        return Err(invalid("Mini dispatch authoring refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            36,
+            &plan_reply,
+        ));
     }
     let plan_bytes = &plan_reply[5..];
     let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
@@ -924,7 +998,13 @@ fn author_signed_ingress(
     pair.extend_from_slice(&signatures_bin);
     let ingress_reply = operator.invoke_until(37, &pair, deadline)?;
     if ingress_reply[4] != 37 {
-        return Err(invalid("Mini dispatch assembly refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            37,
+            &ingress_reply,
+        ));
     }
     let ingress = &ingress_reply[5..];
     write_new(attempt_dir, "ingress.bin", ingress)?;

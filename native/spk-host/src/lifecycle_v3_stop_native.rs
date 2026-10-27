@@ -14,7 +14,6 @@ use std::fs::{DirBuilder, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 const MAX_INSPECTION: usize = 2 * 1024 * 1024;
 const MAX_FRAME: usize = 12_102_760;
@@ -520,22 +519,12 @@ pub(crate) fn resume_fenced_exact(
     let plan_path = write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
     let committed_path = write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
     let output = fresh_probe_dir.join("stop-claim-current.json");
-    let _ = operator.pinned_config()?;
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&output)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned Mini Host STOP recovery inspection refused"));
-    }
-    let inspection = read_private_artifact(&output, MAX_INSPECTION)?;
-    let _ = operator.pinned_config()?;
+    let inspection = operator.inspect_stop_claim(
+        &plan_path,
+        &committed_path,
+        &output,
+        MAX_INSPECTION as u64,
+    )?;
     let target = StopTarget::from_verified_inspection(
         &retained_plan,
         &retained_committed,

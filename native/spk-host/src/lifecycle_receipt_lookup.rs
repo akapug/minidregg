@@ -120,13 +120,15 @@ pub(crate) fn retained_submitted_ingress(
 
 /// Read-only lookup of one retained exact ingress: opcode `lookup` with the
 /// same bytes the one submit carried. Each probe owns fresh output paths, so a
-/// lookup may be repeated after another lost reply.
-pub(crate) fn lookup_retained(
+/// lookup may be repeated after another lost reply. Returns Lean's decoded
+/// outcome (`confirmed replayed`, `absent`, or a refusal) and the probe's
+/// directory name.
+pub(crate) fn lookup_view(
     operator: &PrivateOperator,
     attempt_dir: &Path,
     lookup: u8,
     ingress: &[u8],
-) -> io::Result<RecoveredReceipt> {
+) -> io::Result<(Value, String, Vec<u8>)> {
     let mut nonce = [0u8; 16];
     File::open("/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt_dir.join(format!("op{lookup}-lookup-{}", hex(&nonce)));
@@ -142,12 +144,24 @@ pub(crate) fn lookup_retained(
         &lookup_dir.join("outcome.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspected)?;
-    let [transaction_id, event_id, accepted_count, world_root] =
-        outcome_receipt(&view, "replayed")?;
     let lookup_name = lookup_dir
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| invalid("lifecycle lookup name absent"))?;
+        .ok_or_else(|| invalid("lifecycle lookup name absent"))?
+        .to_owned();
+    Ok((view, lookup_name, inspected))
+}
+
+/// As `lookup_view`, requiring Lean's original receipt.
+pub(crate) fn lookup_retained(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    lookup: u8,
+    ingress: &[u8],
+) -> io::Result<RecoveredReceipt> {
+    let (view, lookup_name, inspected) = lookup_view(operator, attempt_dir, lookup, ingress)?;
+    let [transaction_id, event_id, accepted_count, world_root] =
+        outcome_receipt(&view, "replayed")?;
     Ok(RecoveredReceipt {
         transaction_id,
         event_id,

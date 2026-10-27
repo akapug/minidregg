@@ -251,8 +251,15 @@ pub(crate) fn settle(active: &Path, expected: &[u8], resolution: &Value) -> io::
     strip(attempt_dir)
 }
 
-/// Keep `submit-requested.json` and `resolution.json`; remove the request
-/// body, plan, ingress, permit, inspection and lookup directories.
+/// Lean's refusal reasons, kept with the markers: a helper's bounded
+/// `*.stderr` and a refused plan or assembly frame (`op36`/`op37`).
+fn refusal_evidence(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| name.ends_with(".stderr") || name.ends_with("-refused-frame.bin"))
+}
+
+/// Keep `submit-requested.json`, `resolution.json` and refusal evidence;
+/// remove the request body, plan, ingress, permit, inspection and lookups.
 fn strip(attempt_dir: &Path) -> io::Result<()> {
     if present(&attempt_dir.join(SUBMIT_ACTIVE))? {
         return Err(invalid("undecided dispatch attempt is never stripped"));
@@ -260,7 +267,7 @@ fn strip(attempt_dir: &Path) -> io::Result<()> {
     for entry in fs::read_dir(attempt_dir)? {
         let entry = entry?;
         let name = entry.file_name();
-        if name == SUBMIT_REQUESTED || name == RESOLUTION {
+        if name == SUBMIT_REQUESTED || name == RESOLUTION || refusal_evidence(&name) {
             continue;
         }
         if entry.file_type()?.is_dir() {
@@ -272,20 +279,16 @@ fn strip(attempt_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Bound this journal's dispatch evidence. Attempts that never armed a
-/// submit (authoring refused or the process died before op34/164) carry no
-/// Store effect and are removed; settled attempts keep markers only, and at
-/// most `MAX_SETTLED` of them are retained, newest first. Undecided
+/// Bound this journal's dispatch evidence. Settled attempts, and attempts
+/// that never armed a submit (authoring refused, or the process died before
+/// op34/164: no Store effect), keep only their markers and refusal evidence,
+/// and at most `MAX_SETTLED` of them are retained, newest first. Undecided
 /// attempts are never touched. Runs between calls on the resident's single
 /// dispatch thread, so no attempt is in authoring while it runs.
 pub(crate) fn collect(parent: &Path) -> io::Result<()> {
     let mut settled = Vec::new();
     for (_, path) in attempts(parent)? {
         if present(&path.join(SUBMIT_ACTIVE))? {
-            continue;
-        }
-        if !present(&path.join(SUBMIT_REQUESTED))? {
-            fs::remove_dir_all(&path)?;
             continue;
         }
         strip(&path)?;
@@ -298,13 +301,47 @@ pub(crate) fn collect(parent: &Path) -> io::Result<()> {
     File::open(parent)?.sync_all()
 }
 
-/// Remove an attempt that never armed a submit. Its absence of
-/// `submit-requested.json` is the proof that no op34/164 was sent.
-pub(crate) fn discard_unsubmitted(attempt_dir: &Path) -> io::Result<()> {
-    if present(&attempt_dir.join(SUBMIT_REQUESTED))? || !present(attempt_dir)? {
-        return Ok(());
+/// A plan (op36) or assembly (op37) refusal: no submit was armed, so the
+/// call has no Store effect. The frame is retained as refusal evidence and
+/// Lean's decoded reason goes to the member.
+pub(crate) fn refused_before_submit(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    operation_id: &str,
+    opcode: u8,
+    frame: &[u8],
+) -> io::Error {
+    let _ = write_new(attempt_dir, &format!("op{opcode}-refused-frame.bin"), frame);
+    let lean = framed_payload(frame, 255, OUTCOME_TAG).ok().and_then(|payload| {
+        let directory = attempt_dir.join(format!("op{opcode}-refusal"));
+        fs::DirBuilder::new().mode(0o700).create(&directory).ok()?;
+        inspect_outcome(operator, &directory, payload, Instant::now() + LOOKUP_DEADLINE)
+            .ok()
+            .map(|view| refusal_words(&view))
+    });
+    DispatchOutcome {
+        operation: (operation_id != "0").then(|| operation_id.to_owned()),
+        status: Status::Refused,
+        lean: Some(format!("op{opcode} {}", lean.unwrap_or_else(|| "refused".into()))),
     }
-    fs::remove_dir_all(attempt_dir)
+    .into_error()
+}
+
+/// `type reason` plus the UTF-8 of Lean's hex `detail`, clipped.
+fn refusal_words(view: &Value) -> String {
+    let mut words = outcome_words(view);
+    if let Some(detail) = view.get("detail").and_then(Value::as_str) {
+        let bytes: Vec<u8> = (0..detail.len() / 2)
+            .filter_map(|i| u8::from_str_radix(detail.get(i * 2..i * 2 + 2)?, 16).ok())
+            .collect();
+        let text = String::from_utf8_lossy(&bytes);
+        let clipped: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+        if !clipped.is_empty() {
+            words.push_str(": ");
+            words.push_str(&clipped);
+        }
+    }
+    words
 }
 
 /// Lean's decoded answer to one outcome frame, through the pinned Host's
@@ -591,6 +628,7 @@ mod tests {
         let root = Root::new();
         let a = root.attempt(1);
         write_new(&a, "request.json", b"{\"body\":\"secret\"}").unwrap();
+        write_new(&a, "inspection.json.stderr", b"refusal reason").unwrap();
         let active = arm(&a, b"marker-a").unwrap();
         // A second arm of the same attempt refuses: it can never be resent.
         assert!(arm(&a, b"marker-a").is_err());
@@ -605,6 +643,7 @@ mod tests {
         assert!(a.join(SUBMIT_REQUESTED).exists());
         assert!(a.join(RESOLUTION).exists());
         assert!(!a.join("request.json").exists());
+        assert!(a.join("inspection.json.stderr").exists());
         assert!(arm(&a, b"marker-a").is_err());
     }
 
@@ -615,6 +654,8 @@ mod tests {
         fs::write(root.0.join("dispatch-op-abc.json"), b"{}").unwrap();
         let unsubmitted = root.attempt(1);
         write_new(&unsubmitted, "request.json", b"x").unwrap();
+        write_new(&unsubmitted, "op36-refused-frame.bin", b"refusal").unwrap();
+        write_new(&unsubmitted, "request.bin.stderr", b"reason").unwrap();
         let open = root.attempt(2);
         write_new(&open, "ingress.bin", b"ingress").unwrap();
         arm(&open, b"m").unwrap();
@@ -625,6 +666,7 @@ mod tests {
             settle(&active, b"m", &json!({})).unwrap();
         }
         collect(&root.0).unwrap();
+        // The unsubmitted attempt is the oldest: past the cap, it went.
         assert!(!unsubmitted.exists());
         assert!(open.join("ingress.bin").exists());
         assert!(open.join(SUBMIT_ACTIVE).exists());

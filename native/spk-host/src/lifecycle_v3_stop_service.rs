@@ -26,7 +26,6 @@ use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 const MAX_CONFIG: u64 = 65_536;
 const MAX_FRAME: u64 = 12_102_760;
@@ -366,25 +365,8 @@ fn inspect_original(
     let plan_path = write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
     let committed_path = write_new(probe_dir, "committed-v3.bin", &committed)?;
     let output_path = probe_dir.join("current.json");
-    let _ = operator.pinned_config()?;
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&output_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned STOP current source inspection refused"));
-    }
-    let _ = operator.pinned_config()?;
-    let inspection = fs::read(&output_path)?;
-    if inspection.is_empty() || inspection.len() as u64 > MAX_INSPECTION {
-        return Err(invalid("STOP current source inspection bound refused"));
-    }
+    let inspection =
+        operator.inspect_stop_claim(&plan_path, &committed_path, &output_path, MAX_INSPECTION)?;
     let target = StopTarget::from_verified_inspection(
         &plan,
         &committed,
@@ -1215,8 +1197,24 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let audit = match phase {
         Phase::Running => {
             set_aside_pure_begin(&config, &pins.journal_dir)?;
-            // Any prior source or physical marker makes this run an uncertain
-            // attempt. It cannot be converted into a second fresh op26.
+            // A lost op22/op26 reply is reconciled by Lean's op23/op27
+            // lookup: resume from an accepted BEGIN, set aside an absent
+            // attempt, or refuse by name (lifecycle_v3_stop_recovery).
+            let recovered = crate::lifecycle_v3_stop_recovery::reconcile_running(
+                &operator,
+                &crate::lifecycle_v3_stop_recovery::StopAttempts {
+                    journal_dir: &pins.journal_dir,
+                    begin: &config.begin_attempt_dir,
+                    claim_author: &config.claim_author_attempt_dir,
+                    claim: &config.claim_attempt_dir,
+                },
+            )?;
+            // Any other prior source or physical marker makes this run an
+            // uncertain attempt. It cannot be converted into a second fresh op26.
+            let begin_markers = [
+                config.begin_attempt_dir.clone(),
+                pins.journal_dir.join("lifecycle-stop-begin-v3-active.json"),
+            ];
             for path in [
                 &config.begin_attempt_dir,
                 &config.claim_author_attempt_dir,
@@ -1226,6 +1224,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 &pins.journal_dir.join("lifecycle-stop-begin-v3-active.json"),
                 &pins.journal_dir.join("lifecycle-stop-claim-v3-active.json"),
             ] {
+                if recovered.is_some() && begin_markers.contains(path) {
+                    continue;
+                }
                 if !absent(path)? {
                     return Err(invalid(
                         "STOP prior attempt on Running journal requires audit",
@@ -1236,14 +1237,17 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 serde_json::from_slice(&read_private(&pins.begin_management_custody, MAX_CONFIG)?)?;
             let claim_signers: FixedStopClaimSigners =
                 serde_json::from_slice(&read_private(&pins.claim_management_custody, MAX_CONFIG)?)?;
-            let begin = lifecycle_v3_stop_begin_native::submit_once(
-                &operator,
-                &begin_signers,
-                pins.app_uid,
-                &launch,
-                &pins.begin_operation_ledger,
-                &config.begin_attempt_dir,
-            )?;
+            let begin = match recovered {
+                Some(begin) => begin,
+                None => lifecycle_v3_stop_begin_native::submit_once(
+                    &operator,
+                    &begin_signers,
+                    pins.app_uid,
+                    &launch,
+                    &pins.begin_operation_ledger,
+                    &config.begin_attempt_dir,
+                )?,
+            };
             if begin.volume_id_hex() != volume.volume_id {
                 return Err(invalid("STOP BEGIN volume differs from root attestation"));
             }

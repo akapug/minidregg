@@ -174,10 +174,6 @@ impl ResidentHuman<'_> {
                 &self.custody.ticket_resource,
                 self.route_binding,
             );
-        })
-        .inspect_err(|_| {
-            // An attempt that never armed its submit carries no Store effect.
-            let _ = crate::dispatch_fence::discard_unsubmitted(&attempt_dir);
         })?;
         // From DeliveryRequested on, the journal holds this exact operation.
         // Every later outcome either finishes it Delivered, releases the
