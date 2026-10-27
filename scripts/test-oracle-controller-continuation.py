@@ -106,5 +106,35 @@ class ContinuationGuards(unittest.TestCase):
                          'fixture-stop-called\n')
 
 
+    def cleanup_fixture(self, action, preserve, fail_unmount=False):
+        plan = self.root / 'plan.json'
+        plan.write_text(json.dumps({'volumes': [{'action': action, 'request': {'verb': 'unmount'}}]}))
+        effects = self.root / 'effects'
+        self.shell('repo=/fixture/repo GRAINS_ROOT=/fixture/world store=fixture helper=/fixture/helper\n'
+                   'fixture_plan=' + shlex.quote(str(plan)) + '\n'
+                   'fixture_effects=' + shlex.quote(str(effects)) + '\n'
+                   'jq() { if [[ ${*: -1} == /etc/mini-spk-volumes/fixture.json ]]; then '
+                   'printf "%s\\n" \'{"verb":"volumes-status"}\'; else command jq "$@"; fi; }\n'
+                   'python3() { cat "$fixture_plan"; }\n'
+                   'timeout() { local verb; verb=$(command jq -r .verb <<<"${*: -1}"); '
+                   'if [[ $verb == volumes-status ]]; then printf "%s\\n" \'{}\'; '
+                   'else printf "%s\\n" "$verb" >>"$fixture_effects"; '
+                   + ('[[ $verb != unmount ]] || return 9; ' if fail_unmount else '')
+                   + 'fi; }\n'
+                   + ('if ' if fail_unmount else '')
+                   + 'world_cleanup_volumes ' + str(preserve).lower() + ' "$run/volume-evidence"'
+                   + ('; then exit 2; else [[ $? == 9 ]]; fi' if fail_unmount else '') + '\n')
+        return effects.read_text().splitlines() if effects.exists() else []
+
+    def test_preserved_unmounted_volume_skips_effect(self):
+        self.assertEqual(self.cleanup_fixture('already-unmounted', True), [])
+
+    def test_mounted_volume_unmounts_before_successful_destroy(self):
+        self.assertEqual(self.cleanup_fixture('unmount', False), ['unmount', 'destroy'])
+
+    def test_unmount_failure_prevents_destroy(self):
+        self.assertEqual(self.cleanup_fixture('unmount', False, True), ['unmount'])
+
+
 if __name__ == '__main__':
     unittest.main()
