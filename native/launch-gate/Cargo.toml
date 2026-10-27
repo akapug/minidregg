@@ -8,11 +8,7 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false
 
-[workspace]
-
 [[bin]]
 name = "launch-gate"
 path = "../../deploy/grain-host/launch-gate.rs"
 
-[profile.release]
-opt-level = 3

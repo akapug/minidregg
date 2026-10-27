@@ -26,6 +26,8 @@ rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
 jobs=${LOCAL_GATES_CARGO_JOBS:-6}
 logs=$root/build-logs/rust-tests; mkdir -p "$logs"
 red=0
+# CRATE is a directory under native/, or a top-level package directory (prover).
+crate_dir() { if [ -d "native/$1" ]; then echo "native/$1"; else echo "$1"; fi; }
 passed_of() { grep -Eo 'test result: [a-zA-Z]+\. [0-9]+ passed' "$1" | awk '{s+=$4} END{print s+0}'; }
 # The cause of a failed build (a build script's stderr) sits below its "error:" line, which
 # the one-line verdict cannot carry; print the end of the log so it is in the gate output.
@@ -38,7 +40,7 @@ t() {
     echo "rust-tests: RED: $name: floor '$floor' is not a positive integer"; red=$((red + 1)); return ;;
   esac
   printf '  %-22s cargo test --release --locked %s\n' "$name" "$*"
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "$@") >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "$@") >"$log" 2>&1
   rc=$?
   n=$(passed_of "$log")
   if [ "$rc" != 0 ]; then
@@ -55,7 +57,7 @@ t() {
 known_red() {
   local name=$1 task=$2 crate=$3; shift 3
   local log=$logs/$name.log rc
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "$@" --exact) >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "$@" --exact) >"$log" 2>&1
   rc=$?
   if [ "$rc" = 0 ] && [ "$(passed_of "$log")" -ge 1 ]; then
     echo "rust-tests: RED: $name: known-red test now PASSES; delete its known_red row (cv task $task)"
@@ -80,7 +82,7 @@ exact() {
   if [ "${#tests[@]}" = 0 ]; then
     echo "rust-tests: RED: $name: row names no test"; red=$((red + 1)); return
   fi
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "${args[@]}" -- --exact "${flags[@]}" "${tests[@]}") >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "${args[@]}" -- --exact "${flags[@]}" "${tests[@]}") >"$log" 2>&1
   rc=$?
   n=$(passed_of "$log")
   for test in "${tests[@]}"; do
@@ -133,6 +135,11 @@ t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: par
 t grain-provider          42 grain-runtime -- provider credential publication_refusal
 t hermes-test-provider    15 hermes-test-provider -- tests::
 t verifier-protocol       10 credential-signature-verifier --test protocol -- protocol_
+# The crates that sat outside the workspace (unbuildable 2026-10-08..10-26, tests silently stopped):
+# prover's five Lean-vector conformance suites, and the two Lean-spawned helpers' unit tests.
+t prover-conformance      30 prover --test sumcheck_conformance --test sumcheck_cubic_conformance --test zkml_matmul_conformance --test evm_stage0_dispatch --test rank1_gradient
+t joint-agreement          6 joint-agreement-crypto --bins
+t portable-archive         5 portable-archive --lib --bins
 
 # Landed defect fixes (R2-1 = scouts-20261003/R2-1-security-residuals-at-HEAD.txt,
 # D = scouts-20261003/D-deos-efficiency-semantics.txt). One row per defect.

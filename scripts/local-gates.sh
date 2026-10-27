@@ -57,6 +57,9 @@
 #   website        website/status.html is what website/gen-status.py generates from README.md's
 #                  Honest state table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused
+#   workspace      every Cargo package is a root-workspace member or an `exclude` with its reason; no member
+#                  carries its own lock; the root lock is current; each member compiles, all targets
+#                  (scripts/check-workspace.sh; self-tests its membership rules each run; compile is Linux-only)
 #   rust-tests     the filtered native test lines of scripts/check-rust-tests.sh
 #   deploy-scripts the deploy tooling's own tests, no Lean/Rust build: candidate packager (consent pair
 #                  required; stub roles), lane-build pack refusals, self-enrollment terms renderer
@@ -81,7 +84,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports guard-discipline shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports guard-discipline shell-paths objective-frontend world-cohorts website workspace rust-tests deploy-scripts spk-shell journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -123,6 +126,7 @@ g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
 g_world-cohorts() { bash scripts/check-world-cohorts.sh; }
 g_website()       { python3 website/gen-status.py --check; }
+g_workspace()     { bash scripts/check-workspace.sh; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
 g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh && sh deploy/candidate/test-params.sh; }
 g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }

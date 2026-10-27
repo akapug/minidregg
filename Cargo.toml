@@ -1,3 +1,37 @@
+# Every Cargo package under native/ and prover/ is listed here: a member, or an `exclude` entry
+# with its reason on the line. scripts/check-workspace.sh (local gate `workspace`) refuses a
+# package that is neither, a member that carries its own [workspace] table, and a member that
+# carries its own Cargo.lock: the root Cargo.lock is the one lock for every member.
 [workspace]
 resolver = "2"
-members = ["native/resource-client", "native/hyperdocument-link-sqlite-store", "native/credential-signature-verifier", "native/grain-runtime", "native/inference-scheduler", "native/spk-host", "native/discord-entrance", "native/pay-watcher", "native/mini-keys", "native/mini-sdk", "native/compatible-upgrade-custody", "native/signed-api-path", "native/spk-rpc", "native/oracle-appliance", "native/spk-package-stream"]
+members = [
+  "native/resource-client",
+  "native/hyperdocument-link-sqlite-store",
+  "native/hyperdocument-link-store",
+  "native/credential-signature-verifier",
+  "native/grain-runtime",
+  "native/inference-scheduler",
+  "native/spk-host",
+  "native/discord-entrance",
+  "native/pay-watcher",
+  "native/mini-keys",
+  "native/mini-sdk",
+  "native/compatible-upgrade-custody",
+  "native/signed-api-path",
+  "native/spk-rpc",
+  "native/oracle-appliance",
+  "native/spk-package-stream",
+  "native/launch-gate",
+  "native/hermes-test-provider",
+  "native/joint-agreement-crypto",
+  "native/portable-archive",
+  "prover",
+]
+exclude = [
+  # research crate leaving for degg-research (DEMO-PREFIX R5); own [workspace] and Cargo.lock pin its aws-lc/ring stack
+  "native/private-backend",
+  # second prover stack (ruling R10, deleted by lane L9); path dependencies on an absent breadstuffs slice (native/bend-proof-deps)
+  "native/bend-ir2-proof",
+  # bend-ir2-proof's RNG helper; goes with it (ruling R10)
+  "native/bend-proof-entropy",
+]
