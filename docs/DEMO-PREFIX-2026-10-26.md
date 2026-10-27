@@ -193,6 +193,7 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 | C5 | One wire: generated op constants at all 159 literal sites, consent namespace 220–233 registered, envelope v1 refused after migration, the agent API wire in `spk-rpc` | M |
 | C6 | The full grain economy in Lean (L1b's tariff widened; paid-slot room admission; delete the Rust concierge decision) | L + M |
 | C7 | Never-admissible witness + settle-by-anchor; private rooms owned by Lean; receipts with inclusion; the two choreographies; `runtime.c` retired once the fast Lean machine is wired as the differential reference | L each |
+| C9 | **Self-confinement instead of bwrap** for Hermes workers and SPK residents on Debian 13: the child applies Landlock (ABI ≥3; Debian 13's 6.12 kernel is ABI 6) + seccomp to itself before exec (nanodregg's CLIENT-48, `redregg/work/promo/DESIGN-SANDBOX.md`), so the units take the plain hardening contract (RestrictNamespaces, ProtectKernelTunables, ProcSubset=pid, RestrictSUIDSGID, `@system-service @sandbox`) with no user/mount/pid namespaces, no `openat2` dependence (bwrap 0.12 died under systemd's sxid filter), no pinned bwrap copy | M |
 | C8 | Performance beyond the bar: in-process codec (~68% of a read), the serial Host submit profile, STOP's re-hashes, room create 262 s | M each |
 
 ## 4. Rules for the prefix (binding on every lane brief)
