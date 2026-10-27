@@ -288,6 +288,14 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
     let public = http(port, "GET", "/", &[], "");
     assert!(public.body.contains("public reader"), "{}", public.body);
     assert_eq!(http(port, "GET", "/assets/vendor/xterm.js", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    // The page links its stylesheet by a content tag; that exact URL is immutable, the bare one is not.
+    let sheet = public.body.split("href=\"").find(|s| s.starts_with("/assets/app.css?v=")).expect("a tagged stylesheet link").split('"').next().unwrap().to_owned();
+    let tagged = http(port, "GET", &sheet, &[], "");
+    assert_eq!(tagged.header("Cache-Control"), Some("public, max-age=31536000, immutable"));
+    assert_eq!(tagged.header("Content-Type"), Some("text/css; charset=utf-8"));
+    assert_eq!(http(port, "GET", "/assets/app.css", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    assert_eq!(http(port, "GET", "/assets/app.css?v=stale", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
+    assert!(public.header("Content-Security-Policy").unwrap().contains("script-src 'self' 'sha256-"), "the head script is allowed by hash, not unsafe-inline");
     assert_eq!(http(port, "GET", "/healthz", &[], "").body, "ok");
 }
 
