@@ -186,7 +186,7 @@ impl Gateway {
     }
 
     /// The security headers every answer carries. Scripts come only from this origin (the
-    /// vendored xterm.js and app.js); styles may be inline because xterm.js lays its terminal out
+    /// vendored xterm.js and app.js); the one inline head script is allowed by its hash; styles may be inline because xterm.js lays its terminal out
     /// with inline styles (`mini web`'s own CSP made the same allowance).
     fn finish(&self, response: Response) -> Response {
         let frame = if self.frame_src.is_empty() { "'none'".to_owned() } else { self.frame_src.clone() };
@@ -194,8 +194,9 @@ impl Gateway {
         // pane may frame are the only other targets a form may name.
         let forms = if self.frame_src.is_empty() { "'self'".to_owned() } else { format!("'self' {}", self.frame_src) };
         let cache = response.header("Cache-Control").is_some();
+        let early = page::EARLY_JS_HASH;
         let response = response
-            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action {forms}; frame-ancestors 'none'; base-uri 'none'"))
+            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self' '{early}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action {forms}; frame-ancestors 'none'; base-uri 'none'"))
             .with("X-Content-Type-Options", "nosniff")
             .with("X-Frame-Options", "DENY")
             .with("Referrer-Policy", "same-origin");
@@ -218,7 +219,7 @@ impl Gateway {
             return self.stage(403, "Refused", refusal("Cross-origin request refused", &why), None, request);
         }
         match (request.method.as_str(), segments.as_slice()) {
-            (_, ["assets", rest @ ..]) => Reply::Raw(self.asset(&rest.join("/"))),
+            (_, ["assets", rest @ ..]) => Reply::Raw(self.asset(&rest.join("/"), &request.query)),
             (_, ["healthz"]) => Reply::Raw(Response::text(200, "ok")),
             ("GET" | "HEAD", ["login", code]) => {
                 if !is_token(code) {
@@ -464,16 +465,13 @@ impl Gateway {
         stream.flush()
     }
 
-    fn asset(&self, name: &str) -> Response {
-        let (kind, bytes): (&str, &[u8]) = match name {
-            "app.css" => ("text/css; charset=utf-8", include_bytes!("../assets/app.css")),
-            "app.js" => ("text/javascript; charset=utf-8", include_bytes!("../assets/app.js")),
-            "vendor/xterm.js" => ("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")),
-            "vendor/addon-fit.js" => ("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-fit.js")),
-            "vendor/xterm.css" => ("text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")),
-            _ => return Response::text(404, "no such asset"),
-        };
-        Response::new(200).with("Content-Type", kind).with("Cache-Control", "public, max-age=3600").body(bytes.to_vec())
+    /// A request for `?v=TAG` naming the asset's current tag is cached for a year, `immutable`;
+    /// any other asks the short cache, so an old link still resolves and a stale one cannot stick.
+    fn asset(&self, name: &str, query: &str) -> Response {
+        let Some((_, kind, bytes)) = page::ASSETS.iter().find(|(n, _, _)| *n == name) else { return Response::text(404, "no such asset") };
+        let tagged = page::asset_tag(name).is_some_and(|tag| query == format!("v={tag}"));
+        let cache = if tagged { "public, max-age=31536000, immutable" } else { "public, max-age=3600" };
+        Response::new(200).with("Content-Type", kind).with("Cache-Control", cache).body(bytes.to_vec())
     }
 }
 

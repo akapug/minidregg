@@ -25,12 +25,47 @@ pub const PLACES: &[(&str, &str, &str)] = &[
 
 pub const WORLD_READABLE: &str = "Everything on this box is world-readable: every member can read the whole demo Store, and a hosted account's signing key lives on the box. Keep nothing private or precious here.";
 
+/// The static assets: name, content type, bytes. One table, so the served bytes, the cache tag in
+/// the page's links and the hash tests all read the same thing.
+pub const ASSETS: &[(&str, &str, &[u8])] = &[
+    ("app.css", "text/css; charset=utf-8", include_bytes!("../assets/app.css")),
+    ("app.js", "text/javascript; charset=utf-8", include_bytes!("../assets/app.js")),
+    ("vendor/xterm.js", "text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")),
+    ("vendor/addon-fit.js", "text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-fit.js")),
+    ("vendor/xterm.css", "text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")),
+];
+
+/// The first twelve hex digits of an asset's SHA-256: its cache tag. A link carrying `?v=TAG` is
+/// served `immutable` for a year (the bytes behind a tag never change); the bare URL keeps the
+/// short cache. A changed asset changes its tag, so no page ever pairs new markup with old CSS.
+pub fn asset_tag(name: &str) -> Option<String> {
+    use sha2::Digest;
+    let (_, _, bytes) = ASSETS.iter().find(|(n, _, _)| *n == name)?;
+    Some(sha2::Sha256::digest(bytes).iter().take(6).map(|b| format!("{b:02x}")).collect())
+}
+
+fn asset_href(name: &str) -> String {
+    format!("/assets/{name}?v={}", asset_tag(name).unwrap_or_default())
+}
+
+/// The one inline script in the document head. It runs before the body is parsed and marks the
+/// root `js`, so the workspace layout (tiled panes) is the first frame for a browser that will run
+/// app.js, and the plain one-pane layout stays the first frame for one that will not. Allowed by
+/// the CSP through its hash (`EARLY_JS_HASH`), never `unsafe-inline`; a test pins the pair.
+pub const EARLY_JS: &str = "document.documentElement.classList.add('js')";
+pub const EARLY_JS_HASH: &str = "sha256-Du+OJKJSbdUgz5nrHeWWINvez6XKDDU/tyj/5c2uvwo=";
+
 /// The whole document around a stage fragment.
 pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &str) -> String {
     let xterm = if stage.contains("data-ws=") {
-        "<link rel=\"stylesheet\" href=\"/assets/vendor/xterm.css\">\n<script defer src=\"/assets/vendor/xterm.js\"></script>\n<script defer src=\"/assets/vendor/addon-fit.js\"></script>\n"
+        format!(
+            "<link rel=\"stylesheet\" href=\"{}\">\n<script defer src=\"{}\"></script>\n<script defer src=\"{}\"></script>\n",
+            asset_href("vendor/xterm.css"),
+            asset_href("vendor/xterm.js"),
+            asset_href("vendor/addon-fit.js")
+        )
     } else {
-        ""
+        String::new()
     };
     let mut rail = String::new();
     for (label, href, hint) in PLACES {
@@ -48,18 +83,20 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
     };
     let shutdown_line = if shutdown.is_empty() { String::new() } else { format!(" This demo is torn down on {}; nothing you make here persists beyond it.", h(shutdown)) };
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"color-scheme\" content=\"light dark\">\n\
+         <script>{EARLY_JS}</script>\n<title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"{css}\">\n{xterm}<script defer src=\"{js}\"></script>\n</head>\n\
          <body data-path=\"{path}\">\n\
          <a class=\"skip\" href=\"#stage\">Skip to content</a>\n\
          <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
          <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
          <div class=\"identity\">{identity}</div></header>\n\
          <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
-         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><div class=\"pane-head\"><h1 class=\"pane-title\">{title}</h1></div><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
          <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
         title = h(title),
         path = h(path),
+        css = asset_href("app.css"),
+        js = asset_href("app.js"),
         world = h(WORLD_READABLE),
     )
 }
@@ -361,6 +398,40 @@ mod tests {
         let term = term_page("abc123");
         assert!(term.contains("role=\"region\"") && term.contains("aria-label=\"Terminal"), "{term}");
         assert!(term.contains("href=\"/verb\""), "the terminal names the keyboard route to the same verbs");
+    }
+
+    #[test]
+    fn the_first_frame_needs_no_script_to_be_final() {
+        use sha2::Digest;
+        // The CSP's hash is the hash of the one inline head script, byte for byte.
+        let bytes = sha2::Sha256::digest(EARLY_JS.as_bytes());
+        let b64 = {
+            const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut out = String::new();
+            for c in bytes.chunks(3) {
+                let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+                for i in 0..4 {
+                    if i <= c.len() { out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char) } else { out.push('=') }
+                }
+            }
+            out
+        };
+        assert_eq!(EARLY_JS_HASH, format!("sha256-{b64}"));
+        let html = page("Keys", None, "/keys", "<p>x</p>", "");
+        let head = html.split("</head>").next().unwrap();
+        // Order in the head: the script that marks the root, then the blocking stylesheet; app.js is deferred.
+        let script = head.find(&format!("<script>{EARLY_JS}</script>")).expect("the early script");
+        let sheet = head.find("rel=\"stylesheet\" href=\"/assets/app.css?v=").expect("a versioned stylesheet in the head");
+        assert!(script < sheet, "{head}");
+        assert_eq!(head.matches("<script").count() - head.matches("<script defer").count(), 1, "the only non-deferred script is the early one: {head}");
+        assert!(!head.contains("@import") && !html.contains("<style"));
+        // The pane head is in the markup, so dressing it with buttons changes no height.
+        assert!(html.contains("<div class=\"pane-head\"><h1 class=\"pane-title\">Keys</h1></div>"));
+        // Every asset has a tag and a content type.
+        for (name, kind, _) in ASSETS {
+            assert!(asset_tag(name).is_some_and(|t| t.len() == 12), "{name}");
+            assert!(kind.starts_with("text/css") || kind.starts_with("text/javascript"));
+        }
     }
 
     #[test]

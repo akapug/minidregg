@@ -6,7 +6,7 @@
   "use strict";
   const stage = document.getElementById("stage");
   if (!stage) return;
-  document.body.classList.add("js");
+  document.documentElement.classList.add("js"); // already set by the head script; idempotent
   const terminals = new Map(); // pane -> { term, ws, fit, closed }
 
   // ---------------------------------------------------------------- panes
@@ -15,12 +15,18 @@
     return null;
   }
 
+  // The head (with the title inside) is in the markup the server wrote; dressing adds the buttons
+  // to it and nothing else, so the first frame and the dressed frame are the same size.
   function dress(pane) {
-    if (pane.querySelector(".pane-head")) return;
-    const title = pane.querySelector(".pane-title");
-    const head = document.createElement("div");
-    head.className = "pane-head";
-    if (title) head.appendChild(title);
+    let head = pane.querySelector(".pane-head");
+    if (!head) {
+      head = document.createElement("div");
+      head.className = "pane-head";
+      const title = pane.querySelector(".pane-title");
+      if (title) head.appendChild(title);
+      pane.insertBefore(head, pane.firstChild);
+    }
+    if (head.querySelector("button")) return;
     const mk = (label, name, fn) => {
       const b = document.createElement("button");
       b.type = "button"; b.title = name; b.setAttribute("aria-label", name); b.textContent = label;
@@ -30,14 +36,13 @@
     mk("↻", "Reload", () => load(pane, pane.dataset.path));
     mk("⤢", "Maximize", () => pane.classList.toggle("max"));
     mk("×", "Close", () => close(pane));
-    pane.insertBefore(head, pane.firstChild);
   }
 
   function newPane(path) {
     const pane = document.createElement("section");
     pane.className = "pane";
     pane.dataset.path = path;
-    pane.innerHTML = '<h1 class="pane-title">…</h1><div class="pane-body"></div>';
+    pane.innerHTML = '<div class="pane-head"><h1 class="pane-title">…</h1></div><div class="pane-body"></div>';
     stage.appendChild(pane);
     dress(pane);
     return pane;
