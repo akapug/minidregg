@@ -163,6 +163,14 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory \
   anchor_tests::a_durable_read_of_a_current_anchor_writes_nothing \
   anchor_tests::durable_read_repairs_an_anchor_that_lags_the_head
+# L6 (2026-10-26): a bound violation exits 6, never conflict (4); a read needs no
+# writable disk and a refused write is typed (7); the production binary has no
+# crash or hold verb (the fixtures run from the test binary, tests/support).
+exact store-repairs          hyperdocument-link-sqlite-store --test durable_anchor -- \
+  an_append_over_a_bound_exits_six_not_conflict \
+  a_read_needs_no_writable_disk_and_a_refused_write_is_typed \
+  serve_answers_in_process_and_the_production_binary_has_no_crash_verbs \
+  killed_publisher_recovers_before_and_after_commit_and_anchor
 # TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
 # member keys sealed and never returned, tickets bound to one body and one uid,
 # echo withheld, caller hang-up stops the provider call, Discord's one channel.

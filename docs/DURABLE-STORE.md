@@ -1,8 +1,11 @@
 # The durable Store: interfaces an operator depends on
 
-One Mini Store is one directory (`storageRoot` in the operator configuration)
-plus one key file and an independently retained sibling head anchor. This page lists what the Host and its store helper read,
-write and refuse there. Anything not listed is not part of the contract.
+Present-state contract, rewritten whole on 2026-10-26 against
+`native/hyperdocument-link-sqlite-store` (schema 5). One Mini Store is one
+directory (`storageRoot` in the operator configuration), one MAC key file, and
+an independently retained **sibling head anchor** that lives *outside* the
+Store directory. Back up the anchor with the Store or a restore refuses (see
+"Backup and restore"). Anything not listed here is not part of the contract.
 
 ## Files
 
@@ -10,12 +13,35 @@ write and refuse there. Anything not listed is not part of the contract.
 | --- | --- | --- | --- |
 | `DEPLOYMENT/checkpoint.key` | `mini bootstrap`, once | `0600` | 32 bytes from `/dev/urandom`: the Store's MAC key. Never printed, copied into another artifact, or committed. |
 | `DEPLOYMENT/pinned-config.json` | the Host's `genesis` | `0600` (umask) | Operator configuration plus `expectedSeed` and `checkpointKey` (the key's absolute path). Optional `checkpointEvery` (default 64). |
-| `STORE.head-anchor` | the store helper | `0600` | Independently retained exact genesis/deployment and head commitments; outside the Store directory. |
-| `STORE.head-anchor.lock` | the store helper | `0600` | Serializes SQLite publication and anchor persistence; no history is stored here. |
-| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, schema version 4. Tables: `durable_seed` (the genesis, once), `durable_log(height, record, tag)`, `durable_checkpoint(height, bytes)` (the latest two are kept), `archive_journal(seq, record, tag)` (the fn archive journal, `Kernel/FnArchiveJournal.lean`: signed articles before their first send, fn's acknowledgements and definite refusals, archive funding). |
+| `STORE/forward-link.sqlite3` (+ `-journal` during a write) | the store helper | `0600` | SQLite, **schema version 5** (`PRAGMA user_version`), rollback journal (`journal_mode=DELETE`, `synchronous=EXTRA`, `fullfsync=ON`). Tables below. |
+| `STORE.head-anchor` | the store helper | `0600` | The 120-byte `MINIANC2` anchor: exact deployment/genesis identity and the heads of both logs. In the Store's **parent** directory. |
+| `STORE.head-anchor.lock` | the store helper | `0600` | `flock` that serializes SQLite publication and anchor persistence; holds no history. |
+| `STORE.head-anchor.PID.N.tmp` | the store helper | `0600` | A crash between create and rename leaves one; it is inert and may be removed with the service stopped. |
 
-`DEPLOYMENT` is the directory given to `mini bootstrap --dir`, and `STORE` is
-the operator configuration's `storageRoot`.
+The anchor's directory (the Store's parent) must be owned by the Store's
+account or root and writable by no other account (or sticky); the anchor file
+must be the Store account's with no group or other bits. A systemd
+`StateDirectory=` parent (root `0755`) satisfies this.
+
+### Schema 5
+
+| table | shape | mutability |
+| --- | --- | --- |
+| `durable_seed` | `slot=1 → bytes` (≤ 64 MiB) | the genesis, written once |
+| `durable_log` | `height → (record, tag)` | append-only at `head + 1` |
+| `durable_node` | `(space, key, height) → value` (key, value ≤ 4096 bytes) | the history accumulator nodes (`Compiler.DurableHistory`), written in the same transaction as their entry, never rewritten |
+| `durable_checkpoint` | `height → bytes` (≤ 64 MiB) | **every checkpoint is kept**; re-sealing at an existing height (a key rotation) replaces that row only |
+| `archive_journal` | `seq → (record, tag)` | the fn archive journal (`Kernel/FnArchiveJournal.lean`), append-only at `head + 1` |
+| `opaque_record` | `slot=1 → bytes` | the legacy one-slot link record (`cas`, `read-to`) |
+
+Opening schema 0 upgrades it in one transaction (the legacy BLOB is kept); an
+unseeded v2–v4 Store gains the durable tables; a **seeded v2–v4 Store refuses**
+(`RetiredSchema`, exit 5: re-genesis, no migration). Opening a current Store
+takes no write lock and writes nothing.
+
+Checkpoints: the Host opens from the latest one; `durable-checkpoint-at H`
+reads the latest at or below `H` (history views). Nothing prunes them, so the
+table grows by one row per `checkpointEvery` records.
 
 ## What the key means, and what it does not
 
@@ -52,9 +78,11 @@ that the receipt signatures do not already carry.
 - **Open.** Performed by `mini serve` and every Host command that reads state.
   1. Lock the sibling anchor; read the seed, latest checkpoint and entries in
      one SQLite transaction. Check the retained deployment/genesis identity and
-     exact anchored prefix entry. A lower head, conflict or missing anchor refuses.
-     A committed but unacknowledged extension may recover. Persist the current
-     anchor before returning the read; the Lean checks below remain mandatory.
+     the exact anchored entry of each log. A lower head, a conflict or a
+     missing anchor refuses. A committed but unacknowledged extension recovers.
+     The read then brings the anchor up to the head it read; on a full or
+     read-only disk it answers anyway (the anchor it verified is never ahead of
+     the head, so a lagging anchor loses nothing and the next write repairs it).
   2. Recompute the log root over every record.
   3. Open the checkpoint: its key id, recomputed world root, MAC, and log-root
      value at its height must all check.
@@ -67,20 +95,15 @@ that the receipt signatures do not already carry.
 - **Write.** Each accepted operation appends one entry at `head + 1`; the
   helper refuses unless the head is still `head` and the anchor still matches.
   SQLite commits first; the helper then fsyncs a new anchor file, renames it and
-  fsyncs its parent directory before returning success. The independent lock spans
-  both publications. The Host reads that one entry
-  back and confirms only on exact equality. Every `checkpointEvery` accepted
-  records it seals a checkpoint. The served world root is a cached tree, so
-  one write rehashes one path per written slot.
+  fsyncs its parent directory before returning success. The lock spans both
+  publications. The Host reads that one entry back and confirms only on exact
+  equality. Every `checkpointEvery` accepted records it seals a checkpoint.
 - **Audit.** `mini audit --host HOST --config PINNED.json` or
-  `minidregg-host PINNED.json audit` runs the genesis re-admission.
-  - Every retained signed ingress is re-admitted by its real receiver, at its
-    original prefix height, with the signature helper, and compared record for
-    record with the stored history.
-  - The time grows with the whole history. It is an operator command, never
-    the request path.
-  - Run it after restoring a Store from backup, after key rotation, or on any
-    doubt about the Host's past execution.
+  `minidregg-host PINNED.json audit` runs the genesis re-admission: every
+  retained signed ingress is re-admitted by its real receiver at its original
+  prefix height and compared record for record. Its time grows with the whole
+  history; it is an operator command, never the request path. Run it after a
+  restore, after key rotation, or on any doubt about the Host's past execution.
 
 ## What refuses to load
 
@@ -107,19 +130,44 @@ entry stays visible to the operator.
 
 ## Store helper commands (opaque bytes; Lean owns all meaning)
 
+`minidregg-link-sqlite-store [--anchor-identity ID] VERB ...`, one-shot or as
+frames to its `serve` coprocess (`Compiler.NativeCoprocess`; reply tag
+`MDCOPRC1`). The production binary has only these verbs:
+
 ```
-minidregg-link-sqlite-store durable-init ROOT SEED                 # Installed | AlreadyPresent | exit 4
-minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT      # exit 3: not initialized
-minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG  # Installed | AlreadyPresent | exit 4
-minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT
-minidregg-link-sqlite-store journal-read ROOT FROM OUTPUT          # exit 3: not initialized
-minidregg-link-sqlite-store journal-append ROOT SEQ RECORD TAG     # Installed | AlreadyPresent | exit 4
+durable-init ROOT SEED                       # Installed | AlreadyPresent
+durable-read ROOT FROM 0|1|2 OUTPUT          # 2: the open's read (base + entries from the checkpoint)
+durable-history ROOT REQUEST OUTPUT
+durable-seed ROOT OUTPUT
+durable-append ROOT HEIGHT RECORD TAG NODES  # Installed | AlreadyPresent
+durable-checkpoint ROOT HEIGHT INPUT
+durable-checkpoint-at ROOT HEIGHT OUTPUT
+durable-anchor-enroll ROOT                   # operator only, see below
+journal-read ROOT FROM OUTPUT
+journal-append ROOT SEQ RECORD TAG           # Installed | AlreadyPresent
+read ROOT | read-to ROOT OUTPUT | publish ROOT INPUT | cas ROOT EXPECTED|- INPUT   # legacy one-slot record
+database-path ROOT                           # tamper probes
+serve
 ```
 
-`durable-append-crash … after-begin|after-insert|after-commit` is a lifecycle
-test hook. The probe `scripts/probe-durable-receiver.sh` exercises every
-command, both MAC poles, crash recovery and checkpoint resume.
+| exit | meaning | the Host reads it as |
+| --- | --- | --- |
+| 0 | success (stdout `Installed` / `AlreadyPresent` for writes) | success |
+| 2 | usage (an unknown verb, wrong arity) | uncertain |
+| 3 | absent (not initialized, no record) | absent |
+| 4 | **CAS conflict** only: the head moved, or a different entry is at that height | conflict: reload and recompute |
+| 5 | retired image or schema (re-genesis) | uncertain |
+| 6 | **bound violation**: height or seq 0, a tag, node key or node value over 4096 bytes, more than 4096 nodes, duplicate node keys. The same bytes never succeed | uncertain today (`DurableReceiverCore.parseCasOutput`); Lean ask: a distinct refused outcome |
+| 7 | **disk refused a write**: full (`ENOSPC`, `EDQUOT`, `SQLITE_FULL`) or read-only (`EROFS`, `SQLITE_READONLY`) | uncertain today; Lean ask: report it as such, never as absent |
+| 1 | anything else (opaque SQLite or filesystem failure, anchor refusal) | uncertain |
 
+Before 2026-10-26 a bound violation exited 4, so a Lean codec that produced
+an over-long tag reloaded and retried forever. The crash and hold fixtures
+(`*-crash`, `publish-hold`) are no longer verbs of this binary (`serve`
+forwarded them to any caller): the crate's lifecycle tests run them from the
+test binary itself (`tests/support`). `Compiler/DurableReceiverCore.lean`'s
+`append … crashAt` parameter therefore has no binary to drive; production
+passes `none`, and its removal is a Lean ask.
 
 ## Independent head continuity and upgrade
 
@@ -131,60 +179,72 @@ probes use the empty identity; this is not an alternate production identity.
 Changing domain, semantics or genesis requires explicit lineage/re-enrollment,
 not silently deleting the previous anchor.
 
-The fixed 120-byte anchor contains `MINIANC2`, SHA256 of length-delimited opaque
-identity and seed bytes with a domain separator, the big-endian u64 height, and
-SHA256 of the exact height/length-delimited record/tag with a separate domain
-separator, then the same pair for the head of the archive journal (u64 seq and
-SHA256 of the seq/length-delimited record/tag under its own separator). At
-height or seq zero the commitment names the empty entry. One anchor binds both
-logs: a Store whose journal is behind its retained journal head, or holds a
-different entry at that seq, refuses every read and write, the durable log's
-included. A `MINIANC1` (80-byte, durable-log-only) anchor refuses by name:
-`retired MINIANC1 anchor (durable log only); re-genesis (no migration)`. Rust does
-not parse or re-admit these bytes. Lean's existing domain/genesis-rooted chain,
-KMAC tags, checkpoint and replay checks continue to establish their meaning.
-No extra full replay occurs on the normal path: only the retained and current
-head entries are read for physical continuity.
+The fixed 120-byte anchor contains `MINIANC2`, SHA-256 of length-delimited
+opaque identity and seed bytes with a domain separator, the big-endian u64 log
+height and SHA-256 of the exact height/length-delimited record/tag under its own
+separator, then the same pair for the archive journal's head. At height or seq
+zero the commitment names the empty entry. One anchor binds both logs: a Store
+whose journal is behind its retained journal head, or holds a different entry
+at that seq, refuses every read and write. A `MINIANC1` (80-byte) anchor refuses
+by name (re-genesis). The digests are unkeyed: custody of the file is the only
+protection, which is why the custody checks above are enforced. Rust does not
+parse or re-admit the records; Lean's chain, KMAC tags, checkpoint and replay
+checks establish their meaning.
 
 A new genesis writes its initial anchor before committing the seed. An
-interruption may retry exactly the same seed and identity. Existing seeded
-Stores never auto-enroll, including height-zero Stores. Before upgrading an
-existing service, stop all writers, preserve its database and key, audit with
-the previously qualified Host/helper, compare any retained client evidence,
-and deliberately enroll the observed head using the new helper:
+interruption may retry exactly the same seed and identity. A seed commit that
+fails for a non-crash reason (a full disk) leaves an anchor naming a genesis
+the database lacks: reads report absent while the anchor exists, and recovery
+is the operator's (remove the anchor with the service stopped, or enroll).
+Existing seeded Stores never auto-enroll. To adopt an existing Store under a
+new helper (or after losing the anchor), stop all writers, preserve the
+database and key, audit with a qualified Host, and deliberately enroll the
+observed head:
 
 ```
 minidregg-link-sqlite-store --anchor-identity 'domain:D;semantics:S;seed:G' durable-anchor-enroll STORE
 ```
 
-Use the actual source-derived decimal identities, not the literal placeholders.
-This command establishes trust in the operator-selected existing history; it
-cannot prove freshness on its own. It refuses to overwrite a conflicting retained
-anchor. Run the updated Host's audit before exposing the upgraded service.
+Use the actual decimal identities, not the placeholders. Enrollment trusts the
+operator-selected history; it cannot prove freshness. It refuses to overwrite
+a conflicting retained anchor. Run the Host's audit before serving.
 
-If the process dies after SQLite commit but before anchor publication, the old
-anchor must still match a prefix of the database. A read or exact retry retains
-the committed head durably and succeeds. If it dies after rename but before the
-directory fsync, a retry syncs the existing file and directory before returning.
-An error after commit is still an uncertain result, never permission to submit
-a different operation. Test hooks cover `after-begin`, `after-insert`,
-`after-commit`, `after-anchor-prepare`, `after-anchor-rename`, and `after-anchor`.
+If the process dies after the SQLite commit but before anchor publication, the
+old anchor still matches a prefix of the database; a read or exact retry
+retains the committed head durably and succeeds. If it dies after the rename
+but before the directory fsync, a retry syncs the file and directory before
+returning. An error after commit is an uncertain result, never permission to
+submit a different operation.
 
-For backups, stop the service and copy both the SQLite Store and its sibling
-anchor. When moving the restored Store, put the copied anchor at the sibling
-path of its resolved destination. Preserve any newer live anchor separately;
-never overwrite it merely to make a historic backup open. A copied old database
-with the newer anchor correctly refuses. Restoring an old database **and its old
-anchor** cannot detect their joint rollback. Independent client receipt memory
-and ultimately external witnesses address that stronger threat; a local file
-is not a witness. Loss of the anchor needs explicit recovery evidence and an
-operator enrollment decision. New storage paths and re-enrollment must not
-silently reset clients' history.
+## Backup and restore
 
-Physical tests run real helper subprocesses killed at the publication boundaries,
-then reopen/read/retry and replace the database with an older copy. They also
-exercise row truncation above a checkpoint, same-height conflicts, foreign
-genesis/domain, missing/replaced anchors, and concurrent appenders. This tests
-process failure and exact-byte continuity; it does not prove filesystem/media
-behavior during power loss or provide protection from an operator controlling
-both the Store and retained anchor.
+- **Copy the Store directory and its sibling `STORE.head-anchor` together**,
+  with the service stopped. The anchor is outside `STORE/` on purpose (a
+  directory-only copy of the Store would otherwise carry its own anchor), so a
+  backup of `STORE/` alone restores to a Store that refuses: `missing anchor;
+  existing Stores require explicit audited enrollment`.
+- Back up `checkpoint.key` separately; without it the Store refuses to open.
+- When restoring to a new path, put the copied anchor at the sibling path of
+  the resolved destination. Preserve any newer live anchor separately; never
+  overwrite it to make a historic backup open. An old database with the newer
+  anchor correctly refuses.
+- Restoring an old database **and its old anchor** together cannot detect the
+  joint rollback. Client receipt memory and external witnesses address that;
+  a local file is not a witness.
+
+## Dependencies and tests
+
+The helper links the system `libsqlite3` through a hand-written FFI (no
+rusqlite) and depends on `sha2` (anchor digests) and `libc` (`flock`,
+`geteuid`, `O_NOFOLLOW`). `build.rs` creates a private linker alias when only
+`libsqlite3.so.0` is present (x86_64 and aarch64 Debian paths).
+
+The tests run real helper processes killed at every publication boundary
+(`after-begin`, `after-insert`, `after-commit`, `after-anchor-prepare`,
+`after-anchor-rename`, `after-anchor`), then reopen, read, retry and replace
+the database with an older copy; they cover truncation above a checkpoint,
+same-height conflicts, foreign genesis, missing and replaced anchors,
+concurrent appenders, bound violations (exit 6) and a read with an unwritable
+Store directory. They test process failure and exact-byte continuity, not
+filesystem or media behaviour under power loss, and not an operator who
+controls both the Store and its anchor.

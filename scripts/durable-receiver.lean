@@ -123,7 +123,10 @@ def expectOpenRefused (label : String) (transport : Transport) : IO Unit := do
   | .ok _ => throw (IO.userError s!"FAIL durable receiver: {label} opened")
   | .error _ => pure ()
 
-def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
+/-- `fixtures` is `minidregg-link-sqlite-store-fixtures` (built with the crate's
+`fixtures` feature): the crash phases are no longer verbs of the production
+helper, so the crash transports below run it on the same Store. -/
+def run (binary fixtures : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 3 }
@@ -164,7 +167,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let third := twoWrites 17 [111] [222] [31] [32] [3]
   let precommitCrash : Transport :=
-    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-insert") }
+    { transport with append := fun height entry nodes => ({ config with binary := fixtures }).append height entry nodes (some "after-insert") }
   require "precommit process exit is explicit uncertainty"
     (match ← receive precommitCrash rootBytes third 3 with | .uncertain _ => true | _ => false)
   require "precommit crash preserves whole image" ((← loadExact transport).image == beforeCrash.image)
@@ -172,7 +175,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let fourth := twoWrites 18 [31] [32] [41] [42] [3]
   let lostResponse : Transport :=
-    { transport with append := fun height entry nodes => config.append height entry nodes (some "after-commit") }
+    { transport with append := fun height entry nodes => ({ config with binary := fixtures }).append height entry nodes (some "after-commit") }
   let recovered ← confirmed "lost successful response" .recoveredAfterUncertainResponse
     (← receive lostResponse rootBytes fourth 3)
   require "cold reopen recovers all fields" ((← loadExact transport).height == 4 &&
@@ -334,5 +337,5 @@ end DurableReceiverProbe
 
 def main (arguments : List String) : IO Unit := do
   match arguments with
-  | [binary] => IO.FS.withTempDir (DurableReceiverProbe.run binary)
-  | _ => throw (IO.userError "usage: lean --run scripts/durable-receiver.lean /absolute/native-store-binary")
+  | [binary, fixtures] => IO.FS.withTempDir (DurableReceiverProbe.run binary fixtures)
+  | _ => throw (IO.userError "usage: lean --run scripts/durable-receiver.lean /absolute/native-store-binary /absolute/fixtures-binary")
