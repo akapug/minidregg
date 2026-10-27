@@ -38,7 +38,7 @@ mod verbs;
 #[path = "web/apps.rs"]
 mod apps;
 #[path = "web/subscribe.rs"]
-mod subscribe;
+pub(crate) mod subscribe;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
