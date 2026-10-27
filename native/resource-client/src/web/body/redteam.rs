@@ -73,7 +73,7 @@ fn site(tag: &str) -> (PathBuf, Site) {
         front: Front { origins: Vec::new(), read_only: false },
         base: String::new(),
         face: Face::Body,
-        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()) }),
+        shell: Some(Shell { host: "/unused".into(), config: "/unused".into(), home: root.join("home"), public_subject: Some("99".into()), front_doc: None }),
     };
     (root, site)
 }
