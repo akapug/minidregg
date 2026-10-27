@@ -215,22 +215,109 @@
         "no_retry": true,
         "report_json_present": false
       }
+    },
+    {
+      "kind": "preflight-only",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session",
+      "receipt_sha256": "7ea6568f9b3fcbd616e1ee7f9bcd003e4aab46d7db023b7dcab87b436c4d657c",
+      "cause": "continuation guard initially rejected legitimate named-controller execute ACL",
+      "native_source_attempt": false
+    },
+    {
+      "kind": "archive-only",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session-r2",
+      "receipt_sha256": "d206f51e4a9ff4407bbaf512124be7c8a239c01eabf83be50fec5c7cd84350b1",
+      "cause": "deployment source manifest omitted volume cleanup planner; durable backup retained, no repairs or native source attempt"
+    },
+    {
+      "kind": "physical-repairs-complete",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session-r3",
+      "receipt_sha256": "0c8a30b2f0d1efab1c0c30ccbe27a24c7ec7e5f47c28bb4181cf46402a536965",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-session-r3/failed-launch.json",
+      "completed": [
+        "consent-storage",
+        "controller-runtime-upgrade"
+      ],
+      "failed_phase": "public participant service restart rejected named execute ACL",
+      "seconds": 1.569751263,
+      "native_source_attempt": false,
+      "execution_exit": 1,
+      "cleanup_exit": 0
+    },
+    {
+      "kind": "checkpoint-source-continuation",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2/final-result.json",
+      "receipt_sha256": "b1a380c8ec7fe3c45b8ecd1c5a7da27763c433ab64787b493987f22f69b9639b",
+      "source_manifest_sha256": "367ccb9052a5e00c3a4eaec4073204ba937f208b8e5a4b9ea7d0d3198a5a7772",
+      "unit": "oracle-u3-v5-r3-checkpoint-r2.service",
+      "invocation": "72347a19d93f486d9582ec3e2887848d",
+      "exit": {
+        "execution_exit": 1,
+        "cleanup_exit": 0,
+        "namespace_preserved": true
+      },
+      "phases": {
+        "bootstrap-enrollment": {
+          "completed": true,
+          "started_sha256": "d3c0a3083b2ef66be42dfb92349e163aabc439873c34dbc68b1a9f29c8227e43",
+          "completed_sha256": "da7fcce9840caee2385ae506c6203e13f167bef7eb65fb0ccdfa2cc19da02080",
+          "seconds": 132.641155361
+        },
+        "bootstrap-target": {
+          "completed": true,
+          "started_sha256": "a764e7919872a36c0f3258d8073004b60d091cd77934d84577488368e581a278",
+          "completed_sha256": "c9c86a8edcba2f0e531994f2cb617481607dec2f37e1aa2e020aafa1552c5b4c",
+          "seconds": 0.26894588
+        },
+        "controller-start": {
+          "completed": true,
+          "started_sha256": "d010fa1c60a39e71c8ceef8de954160ba8f69285bcb9c81def7b9ab4657b6e0e",
+          "completed_sha256": "e808e4e130722b5f31a0570eb759d32a8276aa2abfbadfd61d5ff219a4c3ce50",
+          "seconds": 1.233729819
+        },
+        "public-listener": {
+          "completed": true,
+          "started_sha256": "2d03e1f98cc1811abf01ce25901fff545822cbec4419197c6bd968dabe8dece6",
+          "completed_sha256": "87817d80ba7b72dd7d5b33889e4d5201e8046e63caa204f82366a7fad54bc440",
+          "seconds": 2.482939061
+        },
+        "services": {
+          "completed": true,
+          "started_sha256": "b56078651ea37a6a33c82e1b957049f95047699cc2decf21c9c372fe3c1d45b9",
+          "completed_sha256": "81ac821860bc32b771f513039b29ff21bbda3140965bd675652f5cfca7b340d1",
+          "seconds": 1.809224611
+        },
+        "session-and-grant": {
+          "completed": false,
+          "started_sha256": "f1debe805382f3253c02c13f448e2b5c785265fa4b42627ef706cce5bdbec037",
+          "completed_sha256": null,
+          "seconds": null
+        },
+        "worker-policy": {
+          "completed": true,
+          "started_sha256": "7e6704f18432101d2c003a41903035369dffbefceeca7ff274a364fecc3dcaa5",
+          "completed_sha256": "04f3f137899f8c9d7128ab594cf6ff83ef427832fe0bee9ea224dc0f044eb85d",
+          "seconds": 13.186464181
+        }
+      },
+      "report_json_present": false,
+      "services_stopped": true
     }
   ],
   "qualification_limits": [
-    "Both v5 applications were admitted and installed; 26 public files were published and application A was shared. No application START, query, agent lifetime dispatch or STOP has completed in U3.",
-    "R3 initial account creation failed after successful installs. Its original exit1/cleanup0 and exact pre-continuation files remain retained.",
-    "Supported pending-create recovery reused the same Store and reserved UID100064. Controller stage and process/socket readiness succeeded, but first attach failed on consent verifier SQLite EROFS before session creation.",
-    "The session tool returned a definite error with operationId null. Its request ID and evidence remain retained, with no resend.",
-    "Continuation execution_exit1/cleanup_exit1 reflects repeated unmount of already-unmounted volumes. Authenticated native inventory and independent findmnt confirm both volumes are settled, unpaused and unmounted; all owned services stopped.",
-    "The cleanup planner and shell integration are qualified fixtures/read-only observations, not a successful continuation or admission claim.",
-    "Old U2 partial results and separate copied-Store consent/STOP benchmarks remain separate."
+    "Both v5 applications are admitted and installed; 26 public files are published and application A is shared. No v5 application START, query, lifetime dispatch, STOP or restart has completed.",
+    "Supported same-Store account recovery, consent writable-parent repair and controller runtime upgrade completed with separate archived receipts. Earlier failures remain retained.",
+    "The final public listener registration/restart passed. Ordinary owner policy was admitted and read back at version1 with workers20011/20012; native bootstrap-dispatch enrollment completed in132.641155361 seconds; controller attached soft.",
+    "New session request839a6731941b62b1179b4de9c076f0df reached native foreground operation13 and became uncertain during historical grain-share issue lookup. The exact refusal is operation unavailable on selected socket. No resend or ACK occurred.",
+    "The retained controller has a confirmed parent reserve of1 and uncertain foreground13, without a retained foreground result or any born session resource. This is not a rolled-back or completed session.",
+    "The final attempt ended execution1/cleanup0. All owned services stopped, the public socket is absent, and both already-unmounted volumes and all journals remain retained.",
+    "Separate fixture qualification, copied-Store benchmarks, U2 application answers and upstream U5 Engine results are not a passing v5 end-to-end acceptance result. No specialist panel scores are claimed by this lane."
   ],
   "next_work": [
-    "Repair and qualify exact production consent-service filesystem needs while preserving independent verification and controller isolation.",
-    "Correct the source setup/configured worker-policy mismatch identified during diagnosis using ordinary owner authority.",
-    "Review a new explicit retained-state continuation boundary; preserve the definite session refusal and all prior identities without blind resend.",
-    "Complete genuine two-grain receiving, lifetime-tool, authority, restart, data-refusal and STOP/reconciliation journey."
+    "Audit the qualified source routing of recipient historical grain-share issue lookup: runtime uses public hostSocket while opcode55 remains operator-only. Preserve the current socket refusal as observed evidence; this explanation is source-traced.",
+    "Qualify source-authorized exact recovery of foreground13 and its confirmed parent hold. Inspect the retained native attempt and never resend its original session request or manufacture an ACK.",
+    "After exact recovery, complete actual v5 session/grant/START, lifetime discovery/invoke, authority controls, two-grain isolation, dataset refusals, restart/replay and STOP/reconciliation. No automatic repair or relaunch is scheduled."
   ],
   "continuation_decision": {
     "retained_attempt": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
@@ -256,11 +343,18 @@
   },
   "current_continuation": {
     "store": "d4090a0c4c356d31",
-    "selected_next_action": "diagnose and qualify supported retained-state continuation; no new Store or resend",
-    "current_boundary": "failed first controller attach before session birth",
-    "request_id": "715a6097ed194196f68356d70a3d7ddc",
+    "current_boundary": "uncertain session foreground13 during historical issue lookup",
+    "request_id": "839a6731941b62b1179b4de9c076f0df",
+    "operation_id": 13,
+    "selected_next_action": "future audited exact recovery; this batch stopped",
     "services_stopped": true,
-    "report_passed": false
+    "namespace_preserved": true,
+    "report_passed": false,
+    "parent_reserve_confirmed": true,
+    "parent_reserve": "1",
+    "resend_performed": false,
+    "ack_performed": false,
+    "native_birth_resources": []
   },
   "cleanup_observation": {
     "host": "dregg-build",
@@ -270,6 +364,23 @@
       "already-unmounted",
       "already-unmounted"
     ],
-    "admission_or_cleanup_mutation": false
+    "admission_or_cleanup_mutation": false,
+    "historical_read_only_observation": true
+  },
+  "final_checkpoint": {
+    "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2/final-result.json",
+    "receipt_sha256": "b1a380c8ec7fe3c45b8ecd1c5a7da27763c433ab64787b493987f22f69b9639b",
+    "elapsed_wall_seconds": 185,
+    "execution_memory_peak_bytes": 1243181056,
+    "source_operation_error": "foreground operation 13 requires exact recovery: native historical lookup exited exit status: 1: mini: socket rejected request: operation unavailable on selected socket; fence=Ok(())",
+    "lookup_ingress_sha256": "1811bf42e6dc1f4ba238700480727050cf547714d38b695e3cc7df4d6e2c55da",
+    "lookup_opcode_source_trace": 55,
+    "scope": "exact fixed-installer export, observed refusal, archived receipts and stopped state; source trace does not authorize replay",
+    "cleanup_volume_actions": [
+      "already-unmounted",
+      "already-unmounted"
+    ],
+    "original_request_preserved": "715a6097ed194196f68356d70a3d7ddc",
+    "new_request": "839a6731941b62b1179b4de9c076f0df"
   }
 }
