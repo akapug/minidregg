@@ -92,10 +92,10 @@ started, uncompleted delivery is UNKNOWN and is never re-sent (`mini-discord-mir
 
 `@minidregg/sdk` builds intents, computes `InvocationId`, lowers, renders `explain()`, checks
 confirmations, signs, and runs the attempt machine — byte-identical to the Rust core. It has no
-consent process: a browser is not a full peer. A web page or extension reaches the member's
-local Host and consent process through a native-messaging bridge to a member-held replica (the
-extension precondition, `SDK-DESIGN.md` §8); until that bridge or a thin-peer consent producer
-exists, a browser surface must not sign Mini plans.
+consent process and no transport: a browser is not a full peer, and nothing in the SDK reaches a
+Host. A native-messaging bridge to a member-held replica is the extension precondition
+(`SDK-DESIGN.md` §8) and does not exist; until it or a thin-peer consent producer does, a browser
+surface must not sign Mini plans.
 
 ## Tests and the differential
 

@@ -259,7 +259,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
             }
             page
         }
-        ["studio", ..] | ["stream", ..] => simple(404, "Not here", "not a page"),
+        ["stream", ..] => simple(404, "Not here", "not a page"),
         _ => site.route(&parts.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
     }
 }
