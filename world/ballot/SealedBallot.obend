@@ -200,47 +200,121 @@ def resultOf(p: Poll) -> Result:
 def lawHolds(p: Poll) -> Bool:
   yesCount(p.openings) + noCount(p.openings) == openCount(p.openings) && openCount(p.openings) <= commitCount(p.commits) && commitCount(p.commits) <= size(p.terms.electorate)
 
-# ---- (2) the poll as an Activity ----------------------------------------------
+# ---- (2) the poll as an Activity on the kernel (Kernel/ObjectiveActivity) ------
+# The kernel's `resumed {outcome, view}` response and its own Plans: `await {write, on,
+# patience}` for the next event (the keeper, one decider, relays each voter's typed `Event`) and
+# `commit {write}` for the publication: the result is WRITTEN into the object's declared state
+# (`Published`) through the object's law, decided at the yield and answered `settled` or
+# `refused` (a law that refuses the write refuses the turn instead). The first yield creates the
+# declared state when the object has none (`fresh`).
 
-record Waiting:
-  commitEnd: Nat
-  revealEnd: Nat
-  commits: Nat
-  openings: Nat
+record Published:
+  yes: Nat
+  no: Nat
+  abstain: Nat
+  passed: Bool
+  published: Bool
+
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+sum EditBool:
+  keep: {}
+  set: Bool
+
+record Write:
+  yes: EditNat
+  no: EditNat
+  abstain: EditNat
+  passed: EditBool
+  published: EditBool
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
+
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+
+record Commit:
+  write: Write
 
 sum Plan:
-  await: Waiting
-  publish: Result
+  await: Await
+  commit: Commit
 
-sum Response:
-  event: Event
+sum Outcome:
+  reply: Event
   settled: {}
   refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
 
-def waitingOf(p: Poll) -> Waiting:
-  {commitEnd: p.terms.commitEnd, revealEnd: p.terms.revealEnd, commits: commitCount(p.commits), openings: openCount(p.openings)}
+record View:
+  version: Nat
+  state: Published
 
-def serve(p: Poll) -> Activity<Plan, Response, Result>:
-  if live(p) then await(p) else resultOf(p)
+record Step:
+  outcome: Outcome
+  view: View
 
-def await(p: Poll) -> Activity<Plan, Response, Result>:
-  match perform(Plan.await(waitingOf(p))):
-    case event(e): step(p, react(p, e))
-    case settled(_): serve(p)
-    case refused(_): serve(p)
+sum Response:
+  resumed: Step
 
-def step(p: Poll, t: Transition) -> Activity<Plan, Response, Result>:
+def keepAll() -> Write:
+  {yes: EditNat.keep(), no: EditNat.keep(), abstain: EditNat.keep(), passed: EditBool.keep(), published: EditBool.keep()}
+
+def created() -> Write:
+  {yes: EditNat.set(0n), no: EditNat.set(0n), abstain: EditNat.set(0n), passed: EditBool.set(false), published: EditBool.set(false)}
+
+def publication(r: Result) -> Write:
+  {yes: EditNat.set(r.yes), no: EditNat.set(r.no), abstain: EditNat.set(r.abstain), passed: EditBool.set(r.passed), published: EditBool.set(true)}
+
+def serve(keeper: Nat, p: Poll, w: Write) -> Activity<Plan, Response, Result>:
+  if live(p) then await(keeper, p, w) else resultOf(p)
+
+def await(keeper: Nat, p: Poll, w: Write) -> Activity<Plan, Response, Result>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: keeper}), patience: 64n})):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): step(keeper, p, react(p, e))
+        case settled(_): serve(keeper, p, keepAll())
+        case refused(_): serve(keeper, p, keepAll())
+        case unknown(_): serve(keeper, p, keepAll())
+        case timedOut(_): serve(keeper, p, keepAll())
+        case broken(_): serve(keeper, p, keepAll())
+        case upgraded(_): serve(keeper, p, keepAll())
+
+def step(keeper: Nat, p: Poll, t: Transition) -> Activity<Plan, Response, Result>:
   match t:
-    case refused(unchanged): serve(unchanged)
-    case moved(next): if next.closed then publish(p, next) else serve(next)
+    case refused(unchanged): serve(keeper, unchanged, keepAll())
+    case moved(next): if next.closed then publish(keeper, p, next) else serve(keeper, next, keepAll())
 
-# The result is a Plan: the kernel publishes it (labelled "ballot") or refuses, and a
-# refused publication leaves the poll open for the tally to be tried again.
-def publish(before: Poll, closed: Poll) -> Activity<Plan, Response, Result>:
-  match perform(Plan.publish(resultOf(closed))):
-    case settled(_): resultOf(closed)
-    case refused(_): serve(before)
-    case event(_): serve(before)
+# The result is a commit: the kernel writes it into the declared state or refuses, and a refused
+# publication leaves the poll open for the tally to be tried again.
+def publish(keeper: Nat, before: Poll, closed: Poll) -> Activity<Plan, Response, Result>:
+  match perform(Plan.commit({write: publication(resultOf(closed))})):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): resultOf(closed)
+        case refused(_): serve(keeper, before, keepAll())
+        case reply(_): serve(keeper, before, keepAll())
+        case unknown(_): serve(keeper, before, keepAll())
+        case timedOut(_): serve(keeper, before, keepAll())
+        case broken(_): serve(keeper, before, keepAll())
+        case upgraded(_): serve(keeper, before, keepAll())
 
 # The entry takes first-order scalars: the typed-argument encoding has no sum values, so
 # the electorate (a recursive sum) cannot be passed in. The entry takes a count of
@@ -251,14 +325,19 @@ record Spec:
   quorum: Nat
   commitEnd: Nat
   revealEnd: Nat
+  keeper: Nat
+  fresh: Bool
 
 def range(first: Nat, count: Nat) -> Voters:
   match count:
     case 0n: Voters.empty()
     case 1n+rest: Voters.more({head: first, tail: range(first + 1n, rest)})
 
+def firstWrite(s: Spec) -> Write:
+  if s.fresh then created() else keepAll()
+
 def ballot(s: Spec) -> Activity<Plan, Response, Result>:
-  serve(open({electorate: range(s.first, s.count), quorum: s.quorum, commitEnd: s.commitEnd, revealEnd: s.revealEnd}))
+  serve(s.keeper, open({electorate: range(s.first, s.count), quorum: s.quorum, commitEnd: s.commitEnd, revealEnd: s.revealEnd}), firstWrite(s))
 
 # ---- the named scenario --------------------------------------------------------
 # Electors 1..4, absolute YES quorum 2, commit while height < 50, reveal while

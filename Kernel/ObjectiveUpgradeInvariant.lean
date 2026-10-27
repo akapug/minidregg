@@ -1698,7 +1698,7 @@ theorem segmentCommit_posts_ok {rootBytes : Bytes → Digest} {funds : Funds} {c
     obtain ⟨_, _, _, commitOk⟩ := segmentCommit_spec ok
     rcases commitYield_posts_shape commitOk post member with ⟨written, isWritten, isPost⟩ | ⟨fresh, slot⟩
     · obtain ⟨_, wrote, same⟩ := (commitYield_spec commitOk).1
-      rw [same written isWritten] at wrote
+      rw [commitYield_built same isWritten] at wrote
       rw [isPost, stateWrite_post wrote]
       obtain ⟨c, readOk⟩ := read
       exact .inr ⟨object, written.after, rfl, ⟨c, readOk⟩, judged written (by simp [isWritten])⟩
