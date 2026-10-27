@@ -77,6 +77,16 @@ Written and not run by this lane; the central build runs them:
   `python3 scripts/host-operations.py check` (the registry records routes ["operator"]).
 - `b085895e` the export cooldown: `world_export::tests::one_export_per_cooldown_named_by_time_and_a_failed_one_costs_nothing`.
 - `c59ab026` `python3 scripts/test-host-operations.py` (31 tests, about 72 s).
+- `0153d8ae8` + `95214d02c` genesis frame v8: the eight scenario writers go through
+  `native/resource-client/scenario-genesis.sh` (genesis.sh grew compact enrollments, nextPublicKey,
+  factoryPredicate, a scenario enrollment bound and `requestRate`). Rows to run: acceptance.sh,
+  application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh,
+  native/grain-runtime/acceptance.sh (plain, PROVIDER_BOOTSTRAP=1, and profiled), journey JPAY2 and
+  JPAY6, scripts/fn-e1e2/setup-mini.sh. The four jpay6 extractors use jpay6's new genesis seam:
+  grain-runtime bootstrap-native-controller and journeys/byok-native (including --ssh),
+  inference-scheduler native-journey and native-two-member.
+- `5e0d2cb7b` pending inbox joins on the first init: test
+  `shell::tests::pending_inbox_joins_run_only_chat_join_and_a_refused_one_stays_for_the_member`.
 
 The world template's before/after, on the newest candidate set `C=/build/candidates/<sha>`.
 Templates ON is the run that matters (it is the default); OFF runs once, as the control for the
