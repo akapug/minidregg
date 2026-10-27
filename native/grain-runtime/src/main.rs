@@ -3465,6 +3465,10 @@ struct Runtime {
     /// request's author); the key broker charges that member's share of a
     /// pool row's spend ceiling. None for maintenance and operator prompts.
     prompt_member: Option<String>,
+    /// Provider requests the gateway refused during the current prompt (the
+    /// named code, e.g. `provider-refused:member-day-ceiling`): nothing was
+    /// reserved or sent for them.
+    prompt_provider_refusals: Vec<String>,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -6588,6 +6592,7 @@ impl Runtime {
             provider_lease: None,
             prompt_active: false,
             prompt_member: None,
+            prompt_provider_refusals: Vec::new(),
             prompt_decision: None,
             foreground_operation: None,
             output: None,
@@ -8894,7 +8899,12 @@ impl Runtime {
                         )
                     }
                     (Ok(_), _) => eprintln!("provider request: replayed from this prompt's cache"),
-                    (Err(error), _) => eprintln!("provider request refused: {error}"),
+                    (Err(error), _) => {
+                        eprintln!("provider request refused: {error}");
+                        if self.prompt_provider_refusals.len() < 16 {
+                            self.prompt_provider_refusals.push(error.clone());
+                        }
+                    }
                 }
                 let _ = reply.send(result);
             }
@@ -14563,6 +14573,7 @@ impl Runtime {
         let id = self.next_id()?;
         if invocation.is_prompt() {
             self.prompt_member = invocation.resident_identity().and(invocation.prompt()).and_then(resident_prompt_member);
+            self.prompt_provider_refusals.clear();
             self.prompt_decision = Some((id, None));
             self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
                 resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),
@@ -14884,8 +14895,17 @@ impl Runtime {
         let provider_drained = provider_drained.and(refused_completion);
         let outcome = match (outcome, provider_drained) {
             (Ok(value), Ok(())) if invocation.is_prompt() => hermes_outcome::validate_completion(
-                value, &self.journal, id, self.config.provider_task.is_some()),
+                hermes_outcome::refused_model_turn(value, &self.journal, id, &self.prompt_provider_refusals),
+                &self.journal, id, self.config.provider_task.is_some()),
             (Ok(value), Ok(())) => Ok(value),
+            // The worker ended with an error after the gateway refused every
+            // model call by name: decided (nothing sent), not uncertain.
+            (Err(error), Ok(())) if invocation.is_prompt() && self.config.provider_task.is_some()
+                && hermes_outcome::all_model_calls_refused(&self.journal, id, &self.prompt_provider_refusals) => {
+                hermes_outcome::validate_completion(
+                    hermes_outcome::refusal_failure(&self.prompt_provider_refusals, Some(&error)),
+                    &self.journal, id, true)
+            }
             (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
             (Err(acp), Err(provider)) => {
                 Err(format!("ACP outcome: {acp}; provider drain: {provider}"))
