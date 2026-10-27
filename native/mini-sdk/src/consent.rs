@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn unchecked_operator_opcodes_refuse_before_any_frame() {
         let mut consent = Consent(answering(224, ""));
-        assert!(consent.operator_plan(1, b"", b"").is_err());
+        assert!(consent.operator_plan(crate::host_operations::AUTHORIZED_PREPARE, b"", b"").is_err());
         // The list is generated from protocol/host-operations.json; pin membership, not a count.
         assert!(CONSENT_PLANS.contains(&210) && CONSENT_PLANS.contains(&215));
         assert!(CONSENT_PLANS.contains(&187) && CONSENT_PLANS.contains(&194));
@@ -870,10 +870,10 @@ mod tests {
             panic!("resident codec Host never listened");
         };
         let mut first = connect();
-        assert_eq!(round_trip(&mut first, 7, b"intent").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut first, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         let mut second = connect();
-        assert_eq!(round_trip(&mut second, 8, b"outcome").unwrap(), b"ok");
-        assert_eq!(round_trip(&mut first, 11, b"assemble").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut second, crate::host_operations::INSPECT, b"outcome").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut first, crate::host_operations::CALL_ASSEMBLE, b"assemble").unwrap(), b"ok");
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one child for all connections");
         assert!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().is_none(), "the codec Host retains no anchor");
         assert!(resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());

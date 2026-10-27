@@ -615,20 +615,20 @@ mod tests {
 
     #[test]
     fn request_frames_are_transport_rs_frames() {
-        let v1 = request(b"cfg", None, 3, b"call").unwrap();
+        let v1 = request(b"cfg", None, crate::host_operations::LOOKUP, b"call").unwrap();
         assert_eq!(v1, [&[1u8][..], &3u32.to_le_bytes(), b"cfg", &[3], b"call"].concat());
-        let v2 = request(b"cfg", Some(&[7; 32]), 2, b"c").unwrap();
+        let v2 = request(b"cfg", Some(&[7; 32]), crate::host_operations::SUBMIT, b"c").unwrap();
         assert_eq!(v2, [&[2u8][..], &3u32.to_le_bytes(), b"cfg", &[7; 32], &[2], b"c"].concat());
-        assert!(request(&vec![0; MAX_CONFIG + 1], None, 2, b"").is_err());
+        assert!(request(&vec![0; MAX_CONFIG + 1], None, crate::host_operations::SUBMIT, b"").is_err());
     }
 
     #[test]
     fn replies_classify_into_answer_refusal_unsent_uncertain() {
-        assert_eq!(classify_reply(2, vec![2, 9]), Ok(Reply::Answer(vec![9])));
-        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Outcome(vec![9])));
-        assert_eq!(classify_reply(2, vec![253, 9]), Ok(Reply::NoRecord(vec![9])));
-        assert!(matches!(classify_reply(2, vec![254, b'b']), Err(Failure::Unsent(_))));
-        assert!(matches!(classify_reply(2, vec![3]), Err(Failure::Uncertain(_))));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![2, 9]), Ok(Reply::Answer(vec![9])));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![255, 9]), Ok(Reply::Outcome(vec![9])));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![253, 9]), Ok(Reply::NoRecord(vec![9])));
+        assert!(matches!(classify_reply(crate::host_operations::SUBMIT, vec![254, b'b']), Err(Failure::Unsent(_))));
+        assert!(matches!(classify_reply(crate::host_operations::SUBMIT, vec![3]), Err(Failure::Uncertain(_))));
     }
 
     #[test]
@@ -639,7 +639,7 @@ mod tests {
         let sock = dir.join("world.sock");
         let _ = std::fs::remove_file(&sock);
         let op = Operator::new(Route::Unix(sock.clone()), &dir.join("config.json"), None).unwrap();
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Unsent(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Unsent(_))));
         let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
@@ -649,9 +649,9 @@ mod tests {
             s.read_exact(&mut body).unwrap();
             body // drop the stream: the Host may have the call, the client has no answer
         });
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         let seen = server.join().unwrap();
-        assert_eq!(seen, request(b"{}", None, 2, b"call").unwrap());
+        assert_eq!(seen, request(b"{}", None, crate::host_operations::SUBMIT, b"call").unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -706,19 +706,19 @@ mod tests {
         for (dest, named) in [("hostkey", "host key verification failed"), ("denied", "authentication refused"),
             ("refused", "destination unreachable"), ("garbled", "session not established")] {
             let (op, req) = standin(dest);
-            let said = unsent(op.call(2, b"call"));
+            let said = unsent(op.call(crate::host_operations::SUBMIT, b"call"));
             assert!(said.contains(named), "{dest}: {said}");
             assert!(!req.exists(), "{dest}: a request reached the stand-in");
         }
         let (op, _) = standin("hostkey");
-        assert!(unsent(op.call(2, b"call")).contains("known_hosts"), "the host-key refusal says what to do");
+        assert!(unsent(op.call(crate::host_operations::SUBMIT, b"call")).contains("known_hosts"), "the host-key refusal says what to do");
     }
 
     #[test]
     fn a_session_that_never_opens_times_out_as_certainly_unsent() {
         let (op, req) = standin("silent");
         let started = std::time::Instant::now();
-        let said = unsent(op.call(2, b"call"));
+        let said = unsent(op.call(crate::host_operations::SUBMIT, b"call"));
         assert!(said.contains("not within 2s"), "{said}");
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(!req.exists());
@@ -727,12 +727,12 @@ mod tests {
     #[test]
     fn requests_round_trip_over_one_reused_ssh_session_with_the_unix_frames() {
         let (op, req) = standin("serve-answer");
-        assert_eq!(op.call(2, b"first"), Ok(Reply::Answer(b"ok".to_vec())));
-        assert_eq!(op.call(2, b"second"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"first"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"second"), Ok(Reply::Answer(b"ok".to_vec())));
         // Both requests arrived, byte-for-byte the frames the unix socket would carry, length-prefixed
         // by the transport (the stand-in strips the length), over ONE session.
         let seen = std::fs::read(&req).unwrap();
-        let expect = [request(b"{}", None, 2, b"first").unwrap(), request(b"{}", None, 2, b"second").unwrap()].concat();
+        let expect = [request(b"{}", None, crate::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"second").unwrap()].concat();
         assert_eq!(seen, expect);
         assert!(op.channel.as_ref().unwrap().is_open(), "the session is kept for the next request");
     }
@@ -740,29 +740,29 @@ mod tests {
     #[test]
     fn an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket() {
         let (op, _) = standin("serve-refuse");
-        assert_eq!(op.call(2, b"c"), Ok(Reply::Outcome(b"no".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"c"), Ok(Reply::Outcome(b"no".to_vec())));
         let (op, _) = standin("serve-reject");
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
     }
 
     #[test]
     fn a_hangup_after_the_write_is_uncertain_closes_the_session_and_is_never_resent() {
         let (op, req) = standin("serve-hangup");
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         assert!(!op.channel.as_ref().unwrap().is_open(), "the dead session is closed");
         // The stand-in saw the request exactly once: the SDK did not resend it on a new session.
-        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", None, 2, b"call").unwrap());
+        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"call").unwrap());
         // A later, explicit call opens a NEW session (and is itself a new request).
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
     }
 
     #[test]
     fn a_garbled_or_missing_reply_is_uncertain_not_unsent() {
         let (op, _) = standin("serve-garbage");
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Uncertain(d)) if d.contains("response read")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Uncertain(d)) if d.contains("response read")));
         let (op, _) = standin("serve-mute");
         let started = std::time::Instant::now();
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Uncertain(d)) if d.contains("none within 2s")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Uncertain(d)) if d.contains("none within 2s")));
         assert!(started.elapsed() < Duration::from_secs(10));
     }
 
@@ -840,10 +840,10 @@ mod tests {
     #[test]
     fn a_session_that_ended_between_requests_is_replaced_before_anything_is_written() {
         let (op, req) = standin("serve-oneshot");
-        assert_eq!(op.call(2, b"one"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"one"), Ok(Reply::Answer(b"ok".to_vec())));
         std::thread::sleep(Duration::from_millis(300)); // the stand-in has exited; its pipe is closed
-        assert_eq!(op.call(2, b"two"), Ok(Reply::Answer(b"ok".to_vec())), "a fresh session served the second request");
-        let expect = [request(b"{}", None, 2, b"one").unwrap(), request(b"{}", None, 2, b"two").unwrap()].concat();
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"two"), Ok(Reply::Answer(b"ok".to_vec())), "a fresh session served the second request");
+        let expect = [request(b"{}", None, crate::host_operations::SUBMIT, b"one").unwrap(), request(b"{}", None, crate::host_operations::SUBMIT, b"two").unwrap()].concat();
         assert_eq!(std::fs::read(&req).unwrap(), expect, "each request was written exactly once");
     }
 }
