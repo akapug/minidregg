@@ -152,9 +152,8 @@ step_room() {
   local A; A=$(subject founder)
   if [ -n "$TIER" ]; then
     # A concierge workroom (its till, the concierge's grants, `week` per
-    # `period`), open to any enrolled payer, given the chat roster Hermes reads.
+    # `period`, the chat roster Hermes reads), open to any enrolled payer.
     sh_line founder "room new $ROOM --template workroom --concierge $(subject con) --period $PERIOD" >/dev/null
-    sh_line founder "chat adopt $ROOM" >/dev/null
     sh_line founder "tariff $ROOM set week $WEEK" >/dev/null
     sh_line founder "tariff $ROOM set open 1" >/dev/null
   else

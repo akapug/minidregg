@@ -325,8 +325,8 @@ require_nat setup "alice's initial signed balance" "$A0"
 
 # ------------------------------------------------ the room
 if [ -n "$J14_TIER" ]; then
+  # The workroom template births the room with its chat roster.
   ok room alice "room new lab --template workroom --concierge $CON --period $PERIOD"
-  ok room alice "chat adopt lab"
   ok room alice "tariff lab set week $WEEK"
   ok room alice "tariff lab set open 1"
 else
@@ -350,6 +350,14 @@ if [ -n "$J14_TIER" ]; then
   operator subscribe "DELIVER: alice's grants to the concierge" sh -c "cp '$H/alice/outbox/$CON'/*.json '$H/con/inbox/'"
   operator subscribe "INSTALL: the program alice's room wrote" install_private 0600 "$H/alice/concierge/lab.json" "$H/con/programs/lab.json"
   operator subscribe "concierge pass: adopts its grants" "$GRAIN_RUNTIME" concierge step "$SD/concierge-lab.json"
+  # A payer reads the price and pays through a reference to the room: the
+  # founder's observe-only guest grant (as J17's payers hold).
+  ok subscribe alice "room invite i-bob lab $B --verbs observe"
+  ok subscribe alice "submit i-bob"
+  ok subscribe alice "publish i-bob"
+  ok subscribe alice "export i-bob"
+  BREF=$(cat "$OUT")
+  ok subscribe bob "import lab $BREF"
   ok subscribe bob "tariff lab"
   ok subscribe bob "pay lab week"
   operator subscribe "concierge pass: honours bob's payment" "$GRAIN_RUNTIME" concierge step "$SD/concierge-lab.json"

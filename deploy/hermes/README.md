@@ -432,6 +432,12 @@ tariffs):
 
 `concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
 
+**Before a stranger can subscribe** they need a reference to the room to read
+its price and pay through: the founder's observe-only guest grant (`room
+invite i-NAME subscribers SUBJECT --verbs observe`, `submit`, `publish`,
+`export`; the member `import subscribers REF`), as J17's payers hold. The join
+flow issues it once per enrolled member.
+
 **Subscribe** (the web form's verbs): `tariff subscribers` (price and period),
 `credit` (balance), `pay subscribers week`, `room status subscribers` (the
 window and its end), then once `chat join subscribers @subscribers-invite.json`.
