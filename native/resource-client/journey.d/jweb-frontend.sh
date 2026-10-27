@@ -31,7 +31,7 @@
 #   verb-run           POST /verb/whoami through the derived form                                    -> answered, the subject
 #   tour               GET /tour: twelve steps with the real forms                                      -> 200, 12
 #   tour-step          POST /tour/4 (`can` through the tour's form) lands an outcome under the step   -> outcome
-#   tour-chromium      jtour.mjs: login, /tour, step 4 through the pane, a terminal prompt (needs Playwright) -> PASS
+#   tour-chromium      jtour.mjs: login, /tour, step 4 (`can DOC`) through the pane, a terminal prompt (needs Playwright) -> answered, elapsed
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-WEB-FRONTEND PASS n/n` or
@@ -363,7 +363,7 @@ row can-bare "$([ "$(st)" != 504 ] && [ "$(st)" != 502 ] && { grep -q 'outcome a
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
   CODE2=$(token); printf '{"name":"alice","expires":%d}\n' "$(( $(date +%s) + 3600 ))" >"$R/state/logins/$(sha256 "$CODE2").json"
-  out=$(PLAYWRIGHT_DIR=$PW node "$HERE/jtour.mjs" "$BASE" "$CODE2" "$SUBJECT" 2>"$R/jtour.err"); rc=$?
+  out=$(PLAYWRIGHT_DIR=$PW node "$HERE/jtour.mjs" "$BASE" "$CODE2" "$SUBJECT" "$DOC" 2>"$R/jtour.err"); rc=$?
   row tour-chromium "$([ "$rc" = 0 ] && echo 1 || echo 0)" "$out $(tail -1 "$R/jtour.err" | cut -c1-120)"
 else
   printf 'UNCONFIGURED\ttour-chromium\tno Playwright at %s (PLAYWRIGHT_DIR), or --box\n' "$PW"
