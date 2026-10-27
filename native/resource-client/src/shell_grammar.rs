@@ -582,16 +582,28 @@ pub fn parse(g: &'static Grammar, words: &[String]) -> Result<Parsed, String> {
         return Err(usage(g));
     }
     candidates.sort_by_key(|l| std::cmp::Reverse(l.path.len()));
-    let mut first_error = None;
+    // When no shape accepts the words, the refusal is the one from the shape that got furthest
+    // (the longest path, then the most leading words of the right kind): `doc mark p 2 link`
+    // is the link shape missing its TARGET, not the style shape refusing the word `link`.
+    let mut best: Option<((usize, usize), String)> = None;
     for leaf in candidates {
-        match parse_leaf(g, leaf, &words[leaf.path.len()..]) {
+        let rest = &words[leaf.path.len()..];
+        match parse_leaf(g, leaf, rest) {
             Ok(parsed) => return Ok(parsed),
             Err(e) => {
-                first_error.get_or_insert(e);
+                let rank = (leaf.path.len(), progress(leaf, rest));
+                if best.as_ref().is_none_or(|(r, _)| rank > *r) {
+                    best = Some((rank, e));
+                }
             }
         }
     }
-    Err(first_error.unwrap_or_else(|| usage(g)))
+    Err(best.map(|(_, e)| e).unwrap_or_else(|| usage(g)))
+}
+
+/// How many leading words pass the leaf's positional kinds in order (flags not counted).
+fn progress(leaf: &Leaf, rest: &[String]) -> usize {
+    leaf.args.iter().zip(rest).take_while(|(a, w)| check(a.kind, w, a.name).is_ok()).count()
 }
 
 fn parse_leaf(g: &Grammar, leaf: &'static Leaf, rest: &[String]) -> Result<Parsed, String> {

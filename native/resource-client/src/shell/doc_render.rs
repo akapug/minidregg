@@ -234,13 +234,22 @@ mod tests {
 
     #[test]
     fn malformed_lines_are_refused_before_anything_is_sent() {
+        // The shell parses a `doc` line through its grammar (typed arguments, choices, arity)
+        // before this lowering sees it; the lowering keeps only what the grammar cannot know.
+        // Both run before anything is sent: a malformed line is refused by one of them.
+        let refused = |line: &str| -> Result<(), String> {
+            let w: Vec<String> = line.split(' ').map(str::to_owned).collect();
+            crate::shell_grammar::parse(&crate::shell_grammar::DOC, &w)?;
+            flags(line).map(|_| ())
+        };
         for bad in ["doc", "doc show", "doc show p --pdf", "doc mark p 0 bold", "doc mark p 2 underline",
             "doc mark p 2 link", "doc mark p 2 bold extra", "doc unmark p x", "doc move p 1",
             "doc remove p two", "doc transclude p w 1 2 at", "doc follow p", "doc show p --at",
             "doc show p --at x", "doc show p --raw --html", "doc diff p 1", "doc history p --raw", "doc range p 0 2",
             "doc pull"] {
-            assert!(flags(bad).is_err(), "{bad} should be refused");
+            assert!(refused(bad).is_err(), "{bad} should be refused");
         }
-        assert!(flags("doc mark p 2 underline").unwrap_err().starts_with("unknownKind: underline"));
+        assert!(refused("doc mark p 2 underline").unwrap_err().contains("bold|italic|code|heading"));
+        assert!(refused("doc mark p 2 link").unwrap_err().contains("doc mark"));
     }
 }
