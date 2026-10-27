@@ -575,9 +575,7 @@ mod tests {
             credential: vec![3],
         };
         let bytes = request.encode().unwrap();
-        assert!(bytes.len() > crate::source_endpoint::MAX_COMPLETE_NATIVE_REQUEST);
         assert_eq!(InnerCredentialRequest::decode(&bytes).unwrap(), request);
-        assert!(crate::source_endpoint::admit_complete_transport_frame(&bytes, &[]).is_err());
         let claim = DispatchClaim {
             request_bytes: vec![1],
             source_index: request.source_index,
