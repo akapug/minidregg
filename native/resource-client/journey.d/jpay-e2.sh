@@ -110,6 +110,10 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
                            "controlCapability": str(PAY_CONTROL), "enrolCapability": "4032"}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# The genesis clock the helper filled (`clockGenesisNow`, seconds): the pay clock at genesis (Kernel/ClockCell
+# `genesisStore`), so a fresh Store's enrollment view reports `clock.hour = genesisNow / 3600`
+# (Kernel/PayEnrolDecision: the chain hour), never 0.
+GENESIS_HOUR = int(json.load(open(path("genesis.json")))["clockGenesisNow"]) // 3600
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
@@ -360,9 +364,10 @@ def law(observer):
 host = Host()
 op, data = host.call(112)
 ev = inspect("pay-enrolment-view", data) if op == 112 else {}
-row("op 112 on a fresh Store (the ROSTER-SYNC shape)", "view DREGG/PAY/ENROLMENT-VIEW/v3, clock.hour 0, no entries, no journal",
+row("op 112 on a fresh Store (the ROSTER-SYNC shape)",
+    f"view DREGG/PAY/ENROLMENT-VIEW/v3, clock.hour {GENESIS_HOUR} (the genesis clock's hour), no entries, no journal",
     json.dumps(ev, sort_keys=True)[:200],
-    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v3" and ev.get("clock") == {"hour": 0}
+    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v3" and ev.get("clock") == {"hour": GENESIS_HOUR}
     and ev.get("journal") == []
     and ev.get("entries") == [])
 v = view(host)
