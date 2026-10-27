@@ -29,7 +29,7 @@ const PLAN_ROUTE: &str = "application-agent-lifetime-grant-plan";
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
         _ => Err(format!("grant op{operation} returned an invalid frame")),
     }

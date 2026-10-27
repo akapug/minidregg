@@ -354,7 +354,7 @@ fn frame_body(frame: &[u8], operation: u8, bound: usize) -> Result<&[u8]> {
         [actual, body @ ..] if *actual == operation && !body.is_empty() && body.len() <= bound => {
             Ok(body)
         }
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "Host refused claim op{operation}; no automatic rebase or retry"
         )),
         _ => Err(format!("invalid or oversized claim op{operation} response")),

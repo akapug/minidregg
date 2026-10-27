@@ -248,7 +248,17 @@ pub(crate) fn connect(
 }
 
 fn allowed(frame: &[u8]) -> bool {
-    matches!(frame.first(), Some(220 | 221 | 222 | 224 | 226 | 227)) && frame.len() <= CAP
+    matches!(
+        frame.first().copied(),
+        Some(
+            mini_sdk::host_operations::CONSENT_INTENT
+                | mini_sdk::host_operations::CONSENT_OBSERVATION
+                | mini_sdk::host_operations::CONSENT_PLAN
+                | mini_sdk::host_operations::CONSENT_OPERATOR_PLAN
+                | mini_sdk::host_operations::CONSENT_POSSESSION
+                | mini_sdk::host_operations::CONSENT_OBJECTIVE
+        )
+    ) && frame.len() <= CAP
 }
 fn anchor_bytes(binding: &[u8], anchor: Option<&[u8]>) -> Vec<u8> {
     match anchor {

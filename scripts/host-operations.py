@@ -404,6 +404,8 @@ def rust_literals(root, data):
     literals (220..239) that no registry entry names."""
     named = {e["code"]: e["symbol"] for e in data["operations"]}
     named.update({e["code"]: e["symbol"] for e in data["consent_frames"]})
+    markers = {e["code"]: "RESPONSE_" + e["symbol"] for e in data["response_markers"] if e["code"] >= 253}
+    named.update(markers)
     files = [f for crate in WIRE_CRATES for f in sorted((root / "native" / crate).rglob("*.rs"))
              if "target" not in f.parts and f.name != GENERATED.name]
     sources = {f: f.read_text() for f in files}
@@ -441,6 +443,17 @@ def rust_literals(root, data):
                     if literal: report(f, a, m[1], int(literal[1]))
         for m in re.finditer(r"\bconst\s+(\w*(?:OP|OPERATION|OPCODE)\w*)\s*:\s*u8\s*=\s*(\d+)(?:u8)?\s*;", text):
             report(f, m.start(), "const " + m[1], int(m[2]))
+        # A frame's first byte matched against literals: `matches!(frame.first(), Some(48 | 58))`,
+        # `if let Some(220) = request.first()` (an operation, a consent frame or a response marker).
+        for m in re.finditer(r"\.first\(\)(?:\.copied\(\))?\s*,\s*Some\(\s*&?\s*(\d+(?:\s*\|\s*&?\s*\d+)*)\s*\)", text):
+            for number in re.finditer(r"\d+", m[1]):
+                report(f, m.start(1) + number.start(), "first()", int(number[0]))
+        for m in re.finditer(r"Some\(\s*&?\s*(\d+(?:\s*\|\s*&?\s*\d+)*)\s*\)\s*=\s*[\w.]+\.first\(\)", text):
+            for number in re.finditer(r"\d+", m[1]):
+                report(f, m.start(1) + number.start(), "first()", int(number[0]))
+        # A reply classified by its leading marker in a slice pattern: `[255, ..] =>`.
+        for m in re.finditer(r"\[\s*(\d+)\s*,\s*(?:\w+\s*@\s*)?\.\.\s*\]\s*(?:=>|\||if\b)", text):
+            if int(m[1]) in markers: report(f, m.start(1), "[marker, ..]", int(m[1]))
     return findings, unregistered
 
 def lean_ordinary_headers(root):

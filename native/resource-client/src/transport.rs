@@ -266,7 +266,7 @@ pub(crate) fn public_envelope(
 /// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
 pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
     let (_, request) = split_envelope(envelope, config)?;
-    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+    if !matches!(request.first().copied(), Some(mini_sdk::host_operations::AGENT_PAID_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_RESERVE_PLAN | mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE | mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_ASSEMBLE))
         || !request_within_bound(request) || !allowed_operator_operation(request) {
         return Err("operation unavailable on agent operator proxy");
     }
