@@ -933,21 +933,10 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
 
 // ---------------------------------------------------------------- for `mini credit`
 
-/// One paid fleet turn from this workspace's account reference `name`:
-/// `amount` of `asset` (the pinned tariff asset when `None`) to account `to`,
-/// publishing `payload` on `topic` of the paying account when given. The
-/// result is the fleet turn result (`minidregg-fleet-turn-result-v1`), printed.
-pub(crate) fn pay_turn(
-    root: &Path,
-    name: &str,
-    to: &str,
-    amount: &str,
-    asset: Option<&str>,
-    publication: Option<(&str, &[u8])>,
-) -> Result<Value> {
-    pay_turn_recorded(root, name, to, amount, asset, publication, None, Value::Null)
-}
-
+/// One paid fleet turn from this workspace's account reference `name`: `amount` of `asset` (the
+/// pinned tariff asset when `None`) to account `to`, publishing `payload` on `topic` when given,
+/// under the operation record `operation` (exact recovery on rerun). Without a record it is one
+/// fleet turn (`turn`); every money verb passes one (`credit::money_record`).
 pub(crate) fn pay_turn_recorded(
     root: &Path, name: &str, to: &str, amount: &str, asset: Option<&str>,
     publication: Option<(&str, &[u8])>, operation: Option<&Path>, context: Value,

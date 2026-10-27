@@ -80,7 +80,7 @@ Rules: a lost or undecided reply is answered by `Request::Lookup` of the same `c
 (into `retry-NNNN.{bin,json}`, `store::AttemptDir::next_retry`), never a new nonce. A
 `confirmed` outcome with `disposition: charged` is `Outcome::Charged`: terminal, and not a
 success. A Host refusal is terminal for the attempt and licenses no automatic successor until
-Lean declares a no-effect class (the Host's positive no-record frame); `custody::Attempt` allows a
+Lean declares a no-effect class (the Host's positive no-record frame); `custody::Attempt` (and its TS twin `Attempt` in `custody.ts`) allows a
 successor only for a call that was never sealed or never forwarded. A confirmation is for one
 invocation, attempt, intent, plan, header list and reading — change any and nothing signs.
 
