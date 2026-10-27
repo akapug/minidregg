@@ -1,5 +1,6 @@
-//! Root-declared read-only visibility for an existing Store outside /var.
-//! This affects the operator resident only. The app's bwrap root stays separate.
+//! The resident unit's hardening drop-in, and the root-declared read-only
+//! inventory of home paths it reads. This affects the operator resident only;
+//! the app's bwrap root stays separate.
 use super::*;
 use std::collections::BTreeSet;
 use std::os::unix::fs::FileTypeExt;
@@ -199,13 +200,38 @@ pub(super) fn render(
             )));
         }
     }
-    if declared.is_empty() {
-        return Ok(String::new());
+    Ok(hardening(&needed))
+}
+
+/// The resident unit's hardening drop-in, as far as a *user* manager can
+/// apply it without breaking the resident's own namespace bootstrap.
+///
+/// Not rendered, on purpose: `ProtectSystem=`, `ProtectHome=`, `PrivateTmp=`,
+/// `BindReadOnlyPaths=`, `InaccessiblePaths=`, `SystemCallFilter=` and
+/// `NoNewPrivileges=yes`. In a user manager every mount-namespace setting
+/// implies `PrivateUsers=yes` (only the operator uid mapped) and every seccomp
+/// setting implies no-new-privileges; either one stops the setuid
+/// `newuidmap`/`newgidmap` that map {operator, app} into the namespace the
+/// resident joins (`namespace_identity.rs`), so the grain could never start.
+/// Filesystem confinement of the resident therefore has to be applied by the
+/// resident itself, in a mount namespace owned by the joined user namespace,
+/// before it parses app bytes; that is not done yet.
+///
+/// Rendered: no core dumps (the resident holds every participant seed), a
+/// private session keyring, and a descriptor bound high enough for the
+/// resident's routes and WebSockets (the app's own bound is set at its spawn,
+/// `spawn_gate::APP_MAX_FILES`). `needed` is the root-declared read-only
+/// inventory the resident reads from home, kept in the drop-in as its audit.
+fn hardening(needed: &BTreeSet<PathBuf>) -> String {
+    let mut text = String::from(
+        "# rendered by mini-spk-broker: resident hardening a user manager can apply\n\
+         [Service]\nLimitCORE=0\nLimitNOFILE=8192\nKeyringMode=private\n",
+    );
+    for path in needed {
+        // Paths passed `text()`: literal, absolute, [A-Za-z0-9/_.-] only.
+        text.push_str(&format!("# reads (root-declared, read-only): {}\n", path.display()));
     }
-    // The operator's user unit already sees its own protected inputs. App
-    // bytes receive only the existing bwrap image/var/RPC descriptors; no
-    // system-manager bind mounts or privileged home overlay is rendered.
-    Ok(String::new())
+    text
 }
 fn seeds(value: &Value, needed: &mut BTreeSet<PathBuf>) -> io::Result<()> {
     for signer in value
@@ -224,6 +250,22 @@ fn seeds(value: &Value, needed: &mut BTreeSet<PathBuf>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hardening_drop_in_is_never_empty_and_never_blocks_newuidmap() {
+        let mut needed = BTreeSet::new();
+        needed.insert(PathBuf::from("/home/ember/a2/keys/mini.key"));
+        let text = hardening(&needed);
+        assert!(text.contains("[Service]\n"));
+        assert!(text.contains("LimitCORE=0\n"));
+        assert!(text.contains("LimitNOFILE=8192\n"));
+        assert!(text.contains("# reads (root-declared, read-only): /home/ember/a2/keys/mini.key\n"));
+        // Settings that would imply PrivateUsers= or no-new-privileges in a
+        // user manager, and so break the namespace bootstrap, stay absent.
+        for forbidden in ["ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateUsers",
+            "NoNewPrivileges", "SystemCallFilter", "BindReadOnlyPaths", "InaccessiblePaths"] {
+            assert!(!text.lines().any(|line| line.starts_with(forbidden)), "{forbidden}");
+        }
+    }
     #[test]
     fn unit_path_injection_and_broad_paths_refuse() {
         for bad in [

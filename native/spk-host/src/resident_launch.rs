@@ -526,8 +526,10 @@ mod tests {
         bwrap_sha256: String,
     }
 
+    /// The audit runs as the operator (never root), through the production
+    /// bootstrap: mapped namespace, launch worker, `spawn_bounded`.
     fn audit_inputs(output_name: &str) -> Audit {
-        assert_eq!(unsafe { libc::geteuid() }, 0, "the resident sandbox audit runs as root");
+        assert_ne!(unsafe { libc::geteuid() }, 0, "the resident sandbox audit runs as the operator");
         let var = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("{key} unset"));
         let dir = std::path::PathBuf::from(var("SPK_AUDIT_DIR"));
         Audit {
@@ -576,9 +578,11 @@ mod tests {
     /// The exit gate of the sandbox floor: the probe, run as the app through the
     /// production preparation and spawn gate, reports every check held.
     #[test]
-    #[ignore = "root only; run by scripts/spk-platform/sandbox-floor-audit.sh"]
-    fn root_probe_holds_inside_resident_sandbox() {
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_holds_inside_production_resident_sandbox() {
         let audit = audit_inputs("app-output-floor.log");
+        crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+            .unwrap();
         let prepared =
             PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
         let (status, lines) = run_probe(prepared, &audit.spec.app_output);
@@ -586,7 +590,9 @@ mod tests {
         for check in [
             "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",
             "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
-            "capabilities-all-zero", "web-app-positive-control",
+            "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
+            "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
+            "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
         ] {
             assert_eq!(held(&lines, check), Some(true), "{check}");
         }
@@ -596,9 +602,11 @@ mod tests {
     /// Negative control: the same gate and probe with the pre-floor argument
     /// list (abe988d). The probe must report a breach, so the audit can go red.
     #[test]
-    #[ignore = "root only; run by scripts/spk-platform/sandbox-floor-audit.sh"]
-    fn root_probe_breaches_under_pre_floor_arguments() {
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_breaches_under_pre_floor_arguments() {
         let audit = audit_inputs("app-output-pre-floor.log");
+        crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+            .unwrap();
         let mut prepared =
             PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
         let mut legacy: Vec<String> = [

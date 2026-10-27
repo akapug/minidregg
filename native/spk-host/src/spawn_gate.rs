@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
+/// RLIMIT_NOFILE for the app generation (bubblewrap and everything under it).
+pub(crate) const APP_MAX_FILES: libc::rlim_t = 1024;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -312,6 +314,23 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         fail(write_fd);
     }
     if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+        fail(write_fd);
+    }
+    // The app's descriptor bound (Sandstorm's supervisor sets one; the unit's
+    // inherited limit is the resident's, not the app's). Hard and soft, so the
+    // app cannot raise it.
+    let mut files = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut files) != 0 {
+        fail(write_fd);
+    }
+    // Never above the inherited hard limit: only lowering needs no privilege.
+    let bound = files.rlim_max.min(APP_MAX_FILES);
+    files.rlim_cur = bound;
+    files.rlim_max = bound;
+    if libc::setrlimit(libc::RLIMIT_NOFILE, &files) != 0 {
         fail(write_fd);
     }
     if !crate::os::child_assume_app_identity(spec.app_uid, spec.app_gid) {
