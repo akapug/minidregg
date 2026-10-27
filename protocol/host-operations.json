@@ -175,7 +175,6 @@
       "symbol": "FN_ACK",
       "status": "active",
       "routes": [
-        "public",
         "operator"
       ],
       "owner": "fn-services",
@@ -201,7 +200,6 @@
       "symbol": "FN_REPLY_ACK",
       "status": "active",
       "routes": [
-        "public",
         "operator"
       ],
       "owner": "fn-services",
