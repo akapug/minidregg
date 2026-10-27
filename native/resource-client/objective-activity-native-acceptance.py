@@ -223,13 +223,18 @@ def watched(label):
     return v
 
 
-def submit(label, workspace, body, prepare=False):
+def submit(label, workspace, body, prepare=False, again=True):
+    """`again`: a scripted journey never reruns a step by accident, so a body it submits a second time is its
+    decision (`--again true`) and the row asserts the Host's decided answer; `again=False` asks for the
+    client's own local notice instead (one row below exercises it)."""
     out = attempts / label
     command = root / f'{label}.turn.json'
     command.write_text(json.dumps(body))
     args = ['activity', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
     if prepare:
         args += ['--prepare-only', 'true']
+    if again:
+        args += ['--again', 'true']
     return last_json(sh(label, mini, *args, ok=(0, 1, 2)))
 
 
@@ -240,14 +245,14 @@ def quote_heap(label, workspace, body):
     return quoted_heap(last_json(r))
 
 
-def turn(label, workspace, body, expect, detail=None, prepare=False):
-    """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A deliver or
-    exhaust first asks the Host's quote for the heap its checkpoint needs and declares it in `extra`,
+def turn(label, workspace, body, expect, detail=None, prepare=False, again=True):
+    """One signed command. `expect`: installed | replayed | refused | conflict | prepared | local. A deliver
+    or exhaust first asks the Host's quote for the heap its checkpoint needs and declares it in `extra`,
     paid by the submitter (activity_world.py)."""
     if body.get('kind') in RESUME_KINDS:
         payer = (SECOND, '4002') if pathlib.Path(workspace) == second else (SPONSOR_ACCOUNT, SPONSOR_SPEND)
         body = covering_body(body, quote_heap(label, workspace, body), payer)
-    return judge(label, submit(label, workspace, body, prepare), expect, detail)
+    return judge(label, submit(label, workspace, body, prepare, again), expect, detail)
 
 
 def resubmit(label, ingress, expect, detail=None):
@@ -285,6 +290,9 @@ def judge(label, value, expect, detail):
         ok = kind == 'prepared'
     elif expect == 'conflict':
         ok = kind == 'refused' and reason == 'conflict'
+    elif expect == 'local':
+        # the client's own answer to a decided turn submitted again without `--again`: nothing signed, no outcome
+        ok = kind is None and 'already submitted' in str(value.get('error', ''))
     else:
         ok = kind == 'refused' or 'refused' in str(value.get('error', ''))
     if ok and detail is not None:  # one substring, or a list of them (all must be in the whitespace-normalised text)
@@ -351,12 +359,12 @@ TALLY_STATE = {'tag': 'field', 'name': 'total', 'member': {'tag': 'natural'}, 't
 
 
 def create(label, workspace, name, expect, detail=None, object_cap=None, payer=SPONSOR_ACCOUNT,
-           payer_cap=SPONSOR_SPEND, pin=None):
+           payer_cap=SPONSOR_SPEND, pin=None, again=True):
     o = objects[name]
     return turn(label, workspace, {'kind': 'create', 'object': o['object'],
                                    'objectCapability': object_cap or o['capability'], 'pin': pin or PIN,
                                    'stateType': TALLY_STATE, 'law': PERMIT_ALL, 'upgrade': {'frozen': {}}, 'payer': payer,
-                                   'payerCapability': payer_cap}, expect, detail)
+                                   'payerCapability': payer_cap}, expect, detail, again=again)
 
 
 create('create-stranger-refused', second, 'tally-one', 'refused', 'notObjectHolder', object_cap='4002',
@@ -375,6 +383,9 @@ check('object-record-pins-tally', rec_one.get('kind') == 'object-record' and rec
 check('bare-has-no-record', cell_of(ov, ov['objects'][1]['objectCell']).get('kind') == 'absent',
       cell_of(ov, ov['objects'][1]['objectCell']))
 create('create-again-conflicts', sponsor, 'tally-one', 'conflict')
+# The client's own rule (mini-sdk custody, L2): the same turn, decided, submitted once more WITHOUT the member's
+# decision is answered locally and nothing is signed; with `--again true` (every other step here) the Host decides.
+create('create-again-without-a-decision-is-local', sponsor, 'tally-one', 'local', again=False)
 
 # The per-turn extraction ceiling the Host publishes (`limits.extractTicks` = `config.maxExtractTicks`): what every
 # full envelope declares, learned here, not authored into an envelope.
@@ -408,6 +419,9 @@ def cap(ticks, full=True):
 
 TICKS = 3000
 PRICE = price(cap(TICKS))
+# A deadline is passed by paid turns, one height each; a loop that has not passed it after this many is a red
+# row, never a run that fills the disk with attempts (hbox 2026-10-27: 190 449 attempts into a full tmpfs).
+PASS_LIMIT = 500
 PAIR = 2 * PRICE
 # Deposits and top-ups, in fee units (they were 20000, 30000 and 10000 against a 3001 fee before the front end
 # was priced): a deposit that comfortably reserves the first await, a larger one, a top-up.
@@ -612,10 +626,12 @@ t1 = state('tally-two', 'timeout-born', tx2)
 REC2 = t1['recordCell']
 deadline = int(await_of(t1)['deadline'])
 pays = 0
-while int(view('height', {})['height']) <= deadline:
+while int(view('height', {})['height']) <= deadline and pays < PASS_LIMIT:
     pays += 1
     turn(f'pass-height-{pays}', sponsor, {'kind': 'topUp', 'record': REC3, 'account': SPONSOR_ACCOUNT,
                                           'accountCapability': SPONSOR_SPEND, 'amount': '1'}, 'installed')
+check('timeout-deadline-passed', int(view('height-passed', {})['height']) > deadline,
+      {'passes': pays, 'deadline': deadline})
 turn('late-decider-refused', second, {'kind': 'resolve', 'slot': await_of(t1)['source']['slot'],
                                       'answer': {'reply': record(amount=nat(9))}}, 'refused', 'pastDeadline')
 before_timeout = state('tally-two', 'before-timeout', tx2)
@@ -698,10 +714,14 @@ slot6cell = await_of(a1)['source']['slotCell']
 abandon6 = {'kind': 'abandon', 'record': REC6, 'await': await6}
 turn('abandon-too-early-refused', second, abandon6, 'refused', 'notYetAbandonable')
 due6 = int(await_of(a1)['deadline']) + GRACE
-while int(view('height-abandon', {})['height']) <= due6:
+abandon_passes = 0
+while int(view('height-abandon', {})['height']) <= due6 and abandon_passes < PASS_LIMIT:
     pays += 1
+    abandon_passes += 1
     turn(f'pass-height-{pays}', sponsor, {'kind': 'topUp', 'record': REC3, 'account': SPONSOR_ACCOUNT,
                                           'accountCapability': SPONSOR_SPEND, 'amount': '1'}, 'installed')
+check('abandon-grace-passed', int(view('height-abandon-passed', {})['height']) > due6,
+      {'passes': abandon_passes, 'due': due6})
 a_before = state('tally-abandon', 'abandon-before', tx6)
 turn('abandon-prepared', second, abandon6, 'prepared', prepare=True)
 abandon_ingress = attempts / 'abandon-prepared' / 'ingress.bin'

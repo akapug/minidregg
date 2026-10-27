@@ -185,8 +185,10 @@ D = json.loads((alice_ws / 'refs' / 'receipt.json').read_text())['target']
 
 
 def mint(asset_name, account, amount):
+    # `--again true`: the same mint request made once more (a receipt per claim) is this journey's decision,
+    # not a rerun; the client would otherwise answer locally that the first one is retained.
     sh(f'mint-{asset_name}-{account}-{amount}', mini, 'well', '--action', 'mint', '--dir', alice_ws,
-       '--well', asset_name, '--account', account, '--amount', str(amount))
+       '--well', asset_name, '--account', account, '--amount', str(amount), '--again', 'true')
 
 
 objects = {}
