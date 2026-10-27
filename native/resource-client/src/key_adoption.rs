@@ -929,7 +929,7 @@ def serve():
         crate::create_private(
             &host,
             format!(
-                "#!/usr/bin/env python3\nimport sys\nassert sys.argv[2] == 'stdio'\n{LOCAL_CODEC_SERVE}serve()\n"
+                "#!/usr/bin/env python3\nimport sys\nassert sys.argv[2] == 'codec'\n{LOCAL_CODEC_SERVE}serve()\n"
             )
             .as_bytes(),
         )
@@ -1058,7 +1058,7 @@ def serve():
                 "#!/usr/bin/env python3\nimport json, sys\n",
                 LOCAL_CODEC_SERVE,
                 r#"
-if sys.argv[2] == 'stdio':
+if sys.argv[2] == 'codec':
     serve()
 elif sys.argv[2] == 'profile':
     print('{"domain":"1","semantics":"2","expectedSeed":"3"}')

@@ -2038,8 +2038,14 @@ mod tests {
             }
         });
         // One frame that no envelope rule accepts: an admitted peer is refused
-        // for the frame, a foreign peer before any byte is read.
-        write_frame(&mut client, b"x").unwrap();
+        // for the frame, a foreign peer before any byte is read. The foreign
+        // refusal may close the socket before this write lands (EPIPE); the
+        // refusal it wrote first is still there to read.
+        match write_frame(&mut client, b"x") {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("{error}"),
+        }
         let reply = read_frame(&mut client).unwrap().unwrap();
         worker.join().unwrap();
         reply
@@ -4030,9 +4036,13 @@ mod bootstrap_deadline_tests {
         let scratch = Scratch::new();
         let socket = scratch.0.join("socket");
         let listener = UnixListener::bind(&socket).unwrap();
+        // The server accepts and never reads, so a frame far above the socket buffer cannot be
+        // written. The deadline leaves the connect time on a loaded box (a 60 ms deadline expired
+        // in connect on dregg-build), and the write must still end at the deadline, not when the
+        // server goes away.
         let server = std::thread::spawn(move || {
             let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(350));
+            std::thread::sleep(Duration::from_millis(3000));
         });
         let start = Instant::now();
         let error = invoke_pinned_deadline(
@@ -4041,14 +4051,14 @@ mod bootstrap_deadline_tests {
             &"11".repeat(32),
             mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             &vec![b'x'; HOST_MAX_FRAME - 1],
-            start + Duration::from_millis(60),
+            start + Duration::from_millis(400),
         )
         .unwrap_err();
         assert!(
             error.contains("write") && error.contains("deadline"),
             "{error}"
         );
-        assert!(start.elapsed() < Duration::from_millis(250));
+        assert!(start.elapsed() < Duration::from_millis(2000));
         server.join().unwrap();
     }
 }
