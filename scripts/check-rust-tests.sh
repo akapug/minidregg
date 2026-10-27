@@ -177,7 +177,8 @@ exact store-repairs          hyperdocument-link-sqlite-store --test durable_anch
   an_append_over_a_bound_exits_six_not_conflict \
   a_read_needs_no_writable_disk_and_a_refused_write_is_typed \
   serve_answers_in_process_and_the_production_binary_has_no_crash_verbs \
-  killed_publisher_recovers_before_and_after_commit_and_anchor
+  killed_publisher_recovers_before_and_after_commit_and_anchor \
+  a_crash_after_commit_keeps_the_record_in_the_wal
 # TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
 # member keys sealed and never returned, tickets bound to one body and one uid,
 # echo withheld, caller hang-up stops the provider call, Discord's one channel.
