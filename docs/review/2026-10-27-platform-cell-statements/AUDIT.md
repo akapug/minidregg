@@ -836,3 +836,40 @@ its scope and the 87 owed rows. Item 6's discharge from the birth's own write li
 `AcceptedBirth`. That is the same owed Lean object as item 7, and one witness serves both.
 `neutral-birth.lean` is accepted as the executed interim witness only. The keystone is not "done" until
 the declaration-level witness exists.
+
+## 2026-10-27, nineteenth pass: effects revival statements (lane/effects-revival d084ef449, not elaborated)
+
+**Verdict: proofs may start on the engine, completeness and `ContentComplete`. Two statement changes
+before the live keystone is claimed as "the derived path".**
+
+**Engine keystone: honest, and near-definitional, as claimed.** `agreement` and `unregistered` hold of
+`dispatch` by its definition plus `Sound`'s `select ∘ pack = id`, and `frame` follows from `exec`'s
+`InFrame` check plus `Framed`. The content is the discrimination. The four teeth (ghost, fail-open,
+unframed, twin) each bite a distinct clause, and `frame`'s existential (decoded `op`, selected `s`/`s'`)
+also stops a dispatcher from admitting undecodable bytes. **One hole:** `agreement` constrains `d` only
+on `pack s`, and `Sound` gives `select (pack s) = some s` but not the converse. On a cell where
+`select cell = some s` but `cell ≠ pack s` (content outside the selected state), a dispatcher may rewrite
+that outside content. `frame` checks only the selected locations. Add `select cell = some s → pack s =
+cell` to `Handler.Sound` (selection is exact on its role), or extend `frame` to `cell'` agreeing with
+`cell` outside the selection.
+
+**Completeness keystone: sound.** Its inputs are `encode op` and `pack s`, so `malformed`, `wrongRole` and
+`unregistered` cannot occur, and `Complete` removes `outOfFrame` and `guardFailed`. Entry B's
+non-lawfulness is the right teeth.
+
+**Live keystone.**
+- *Real content:* `ContentComplete`, the frame law over `ContentResource.run` with the blinding seal
+  replaying; and clause 4 (`targetPatch = descriptor ++ seal`, which `contentGhost` refutes).
+- *Near-identity:* clauses 2 and 5, because `contentSem` reuses `ContentResource.run`, which
+  `computeTarget` also calls.
+- The label must say so: the dispatcher, frame and checks are derived, while the content semantics is
+  still the source-owned lowering, not a derived effect.
+
+**`HostDispatches` must be stated now, not at migration.** Statement-first (ATLAS law 2) applies to the
+deployed keystone above all. As stated, `ContentAgreement` certifies that the hand arm *agrees* with
+the declaration. That licenses keeping both, which is the twin law 13 forbids. `Dispatches` already
+has the migration window built in. State
+`HostDispatches : Dispatches [(1, contentHandler)] legacyCodes hostTargetDispatch` over today's target
+dispatch, with every other payload code in `legacy`. That is a `Prop` even if its proof waits for the
+decoder rewiring. `noTwin` then forces code 1 out of the hand arms at the moment the theorem closes.
+`ContentAccepted`'s inhabitant (the native doc-write fixture) is owed, as noted.
