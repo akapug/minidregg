@@ -195,6 +195,90 @@ def recheckStore (transport : DurableReceiverIO.Transport) (anchor : Anchor) :
       return checkStored anchor logStart stored.head
         (DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record)))
 
+/-! ## The O(1) re-check (HOT-PATH 2f)
+
+`recheckStore` reads the whole log and re-hashes its chain from genesis: O(history) per client
+connection, twice per signed write, the term that made consent grow 1.6 ms per record
+(L11-PERF §0). A resident provider holds more than an anchor: `Loaded.headTag`, the exact bytes
+of the Store's tag at its height, whose MAC it verified when it admitted that height
+(`DurableLogTags.verifyTags`). The re-check below reads the Store's entry AT that height (one
+`transport.read height`, no records before it) and compares the bytes.
+
+What it refuses exactly: a rollback (`recheckHeld_head`: the head is at or above the held
+height). What it refuses up to a KMAC256 collision: a rewrite the Store re-tagged (a different
+chain is a different MAC input, so different bytes). What it defers: a rewrite that left the
+old tag in place is not seen here; every read of those records goes through the Reader, which
+verifies each record against the MAC'd head (`DurableHistoryReader.fetch`), and the signer's
+state is never re-read from the Store (`Anchored`/`Verified` hold it). The exact-prefix
+guarantee -- the signer signs over the fold of exactly the records it admitted -- never rested
+on this re-check; `trailer_eq_carried` says equal tag bytes carry equal (root, chain, frontier,
+index root), so the held comparison is a comparison of the chain at the height. -/
+
+/-- Equal stored tags carry equal values: the trailer encodes `Carried` in the clear through a
+lawful codec, so no two carried values share tag bytes. -/
+theorem trailer_eq_carried (key : DurableCheckpointCodec.MacKey) (height : Nat)
+    (left right : DurableHistory.Carried)
+    (same : DurableHistory.trailer key height left = DurableHistory.trailer key height right) :
+    left = right := by
+  have encoded : DurableHistory.trailerStream.toLawful.encode (left, DurableHistory.tagMac key height left) =
+      DurableHistory.trailerStream.toLawful.encode (right, DurableHistory.tagMac key height right) := same
+  exact congrArg Prod.fst (ResourceBirthCodec.lawful_encode_injective DurableHistory.trailerStream.toLawful encoded)
+
+/-- The held re-check: the Store's entry at `height` still carries the exact tag this provider
+verified there, and the head has not fallen below it. -/
+def recheckHeld (transport : DurableReceiverIO.Transport) (height : Nat) (heldTag : List UInt8) :
+    IO (Except String Unit) := do
+  match ← transport.read height false with
+  | .error message => return .error message
+  | .ok none => return .error "durable store is not initialized"
+  | .ok (some stored) =>
+      if stored.head < height then
+        return .error s!"the Store's head {stored.head} is below the height {height} this provider admitted: the accepted history was rolled back"
+      match stored.entries.head? with
+      | none => return .error s!"the Store carries no entry at the height {height} this provider admitted"
+      | some entry =>
+          if entry.tag = heldTag then return .ok ()
+          else return .error s!"the Store's entry at height {height} no longer carries the tag this provider verified: the prefix this client admitted was rewritten or re-keyed"
+
+/-- The judgement `recheckHeld` makes of what it read, as data: head, and the first entry's tag. -/
+def checkHeld (height : Nat) (heldTag : List UInt8) (head : Nat) (first : Option (List UInt8)) :
+    Except String Unit :=
+  if head < height then .error "rolled back"
+  else match first with
+    | none => .error "no entry"
+    | some tag => if tag = heldTag then .ok () else .error "rewritten"
+
+/-- An accepted held re-check is a head at or above the held height carrying exactly the held tag. -/
+theorem checkHeld_ok {height : Nat} {heldTag : List UInt8} {head : Nat} {first : Option (List UInt8)}
+    (accepted : checkHeld height heldTag head first = .ok ()) :
+    height ≤ head ∧ first = some heldTag := by
+  unfold checkHeld at accepted
+  by_cases below : head < height
+  · simp [below] at accepted
+  · refine ⟨Nat.le_of_not_lt below, ?_⟩
+    cases first with
+    | none => simp [below] at accepted
+    | some tag =>
+        by_cases same : tag = heldTag
+        · rw [same]
+        · simp [below, same] at accepted
+
+/-- **Teeth**: a rolled-back head refuses, and a different tag refuses. -/
+theorem checkHeld_refuses_rollback (height : Nat) (heldTag : List UInt8) (head : Nat)
+    (first : Option (List UInt8)) (below : head < height) :
+    checkHeld height heldTag head first ≠ .ok () := by
+  simp [checkHeld, below]
+
+theorem checkHeld_refuses_other_tag (height : Nat) (heldTag other : List UInt8) (head : Nat)
+    (fits : height ≤ head) (differs : other ≠ heldTag) :
+    checkHeld height heldTag head (some other) ≠ .ok () := by
+  simp [checkHeld, Nat.not_lt.mpr fits, differs]
+
+/-- **Satisfiable**: the held tag at a head at the height is accepted. -/
+theorem checkHeld_satisfiable (height : Nat) (heldTag : List UInt8) :
+    checkHeld height heldTag height (some heldTag) = .ok () := by
+  simp [checkHeld]
+
 /-- A target admitted after a retained anchor: the anchor's exact opening, cut
 from this target and validated, then native admission of every later record.
 Constructed only by `resume`. -/
