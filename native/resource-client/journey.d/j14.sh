@@ -432,19 +432,6 @@ ok summon alice "room status lab"
 checkp summon "room status names Hermes and its budget account" grep -q "hermes: $HS, budget account $ACCOUNT_T" "$OUT"
 ok summon alice "tariff lab"
 checkp summon "the tariff: hermes/turn $PRICE; hermes = $HS" sh -c "grep -q '^  hermes/turn *$PRICE\$' '$OUT' && grep -q '^  hermes  *$HS\$' '$OUT'"
-# the program is a document members read and the founder edits
-BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
-ok program bob "import lab-program object $PROGRAM_T $BCAP $BCAP"
-operator program "CONTINUITY: bob's imported reference starts its continuity record" \
-  "$MINI" workspace --action continuity-init --dir "$WS/bob" --name lab-program
-ok program bob "doc show lab-program"
-checkp program "bob reads the librarian's program" grep -q "Librarian of lab" "$OUT"
-# bob holds observe/place/append under lab, not mutate, and the program's
-# law admits only the founder's writes; the Host's prepare reports the law's
-# failing clause first (the clause names alice).
-two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: .*subject == $A"
-ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
-ok program alice "submit ap"
 
 # The summon names Hermes's budget account (per assignment); the operator
 # provisions the controller config to match before the controller first opens.
@@ -537,6 +524,22 @@ BAL=$(credit_of hermes "$ACCT")
 require_nat topup "Hermes's balance before topup" "$BAL"
 ok topup alice "topup lab $TOPUP"
 check topup "topup lands on Hermes's account" "$((BAL + TOPUP))" "$(credit_of hermes "$ACCT")"
+
+# ------------------------------------------------ the program document (after the resident rows, so a
+# document-rendering row cannot hide the resident run)
+# the program is a document members read and the founder edits
+BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
+ok program bob "import lab-program object $PROGRAM_T $BCAP $BCAP"
+operator program "CONTINUITY: bob's imported reference starts its continuity record" \
+  "$MINI" workspace --action continuity-init --dir "$WS/bob" --name lab-program
+ok program bob "doc show lab-program"
+checkp program "bob reads the librarian's program" grep -q "Librarian of lab" "$OUT"
+# bob holds observe/place/append under lab, not mutate, and the program's
+# law admits only the founder's writes; the Host's prepare reports the law's
+# failing clause first (the clause names alice).
+two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: .*subject == $A"
+ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
+ok program alice "submit ap"
 
 # ------------------------------------------------ dismiss: revoke, return the rest
 BEFORE_RETURN=$(credit_of hermes "$ACCT")
