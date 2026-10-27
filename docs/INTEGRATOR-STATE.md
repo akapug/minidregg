@@ -49,7 +49,8 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
 | 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Fixed by the deputy, a8eb2c50e (post image = successor up to its head tag; FnSelectedHistoricalStep's admitted_record gains ∃ headTag; reds there go to the deputy) |
 | 14 A6 | a8eb2c50e | host rc=1 at 22:09 (294 s): only Host.Main:2048 (claimOf: the intent subject is a SubjectId; the rate table is keyed by Nat); fixed 43023f83f |
-| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s); regen rc=2 (seed v5 owed), A7b by hand rc=1 (DurableCheckpointCodec.lean:370/387/412 unsolved goals), A7c (seed proofs version-generic; integ4/regen-A7c.pid) running since 22:32. Was: `integ4/cut14g.sh` (pid file cut14g.pid; logs host-A7.log, regen-A7.log); adds un-nhr-tag 753271d7 (validateLoaded_headTag), hermes 6634b3bd (Oracle through Hermes, smaller sandboxes; 4319cca50) and PR #17 oracle-grant-factory f3865eae8 (merge 969929026; GitHub marks it merged) |
+| 14 A7 | 969929026 | host stage CLEAN at 22:22 (534 s). Regen: A7 rc=2 (seed v5), A7b rc=1 (seed proofs), A7c rc=2 (ADMITTED-INPUT-CONTEXT trailing byte, bumped by hand), A7d rc=2 (DREGG/CLOCK: literal twin in ClockCell vs the registry constant), A7e rc=0 at 23:50 (938 s, peak 20.2 GB, 638 pins). Its diff is main da4a7645e (integ8/regen-A7e.patch); the tool changes are held on local branch integration/regen-tool 21077e063 for after the candidate |
+| full | da4a7645e | `integ4/main-full.sh da4a7645e` (pid file integ4/main-full.pid; build.pid, then gate.pid + enrol-resume.pid under integ8) started 23:53 |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
@@ -67,12 +68,13 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when A7 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
-build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
-for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly (the rerun's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
-(aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
-batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
+Next steps: when the full build's host stage ends cleanly, name `/build/lanes/integ8/src` to infra (aed5ecf506cf840af),
+the coordinator and L1c (acf52d65283ef4ebc), and run `swarm-build lake lean Effects/Revival/Statements.lean` there for the
+effects-revival lane (a83b7949ba401cca5; `lake lean`, not `lake env lean`, applies the lakefile's options). When the
+candidate exists: report "candidate <sha> at <path>: gate <verdict>, reds by name" to the coordinator and L4b
+(ad81db6d6fd317d3a; J14_TOOLS + J14_AWAIT); then push integration/regen-tool 21077e063 to main (the next build checks
+ClockCell's import). Every lane named to land so far is on main (hermes, hermes-b, abuse-caps, snipe-unconfigured,
+redteam, effects-revival); welcome-hermes is still to come.
 
 Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; Hermes to L4b (ad81db6d6fd317d3a); L13 a1618140607ac439b; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
