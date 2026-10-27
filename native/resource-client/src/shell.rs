@@ -77,6 +77,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
     Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law export ID REF COMPONENT-JSON|@FILE|none | law export show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
+    Verb { name: "apps", usage: "apps search [TERM] [--category C] [--json] | apps show APP-ID|PACKAGE-ID [--json] | apps install APP-ID|PACKAGE-ID [--class S|M|L] | apps retry REQUEST-ID | apps list [--json] | apps status GRAIN | apps open GRAIN | apps stop GRAIN | apps start GRAIN | apps share GRAIN MEMBER | apps export GRAIN FILE | apps delete GRAIN | apps identities GRAIN | apps revoke-identity GRAIN TOKEN", operation: "mini apps --action search|show (the market index mini-market caches: the index's claims beside Mini's verdict) | install (a member turn: the application birth and the hosting delegation, then the worker installs the signed package, starts it and hands back the grain's origin https://GRAIN.demo.dregg.online) | retry (the exact retry of a lost reply, never a second install) | list|status|open|stop|start|share|export|delete|identities|revoke-identity --grain GRAIN over the worker socket; every reply is a decoded outcome: performed, refused by name, or undecided with its exact retry (docs/APP-MARKET-2026-10-27.md)" },
     Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
     Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
     Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
@@ -2178,6 +2179,47 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "law" if w.len() == 3 && w[1] == "show" => {
             workspace_name(&w[2], "reference name")?;
             client("workspace", vec![flag("action", "law-show"), flag("dir", ws()), flag("name", w[2].clone())])
+        }
+        "apps" => {
+            let Some(action) = w.get(1).map(String::as_str) else { return Err(u.to_owned()); };
+            let mut flags = vec![flag("action", action), flag("dir", ws())];
+            let mut rest: Vec<String> = w[2..].to_vec();
+            if rest.last().is_some_and(|s| s == "--json") { rest.pop(); flags.push(flag("json", "yes")); }
+            match action {
+                "search" => {
+                    if let Some(i) = rest.iter().position(|s| s == "--category") {
+                        if i + 1 >= rest.len() { return Err(u.to_owned()); }
+                        flags.push(flag("category", rest[i + 1].clone()));
+                        rest.drain(i..i + 2);
+                    }
+                    if rest.len() > 1 { return Err(u.to_owned()); }
+                    if let Some(term) = rest.first() { flags.push(flag("term", term.clone())); }
+                }
+                "show" => { if rest.len() != 1 { return Err(u.to_owned()); } flags.push(flag("app", rest[0].clone())); }
+                "install" => {
+                    if rest.is_empty() || rest.len() > 3 || (rest.len() == 3 && rest[1] != "--class") || rest.len() == 2 { return Err(u.to_owned()); }
+                    flags.push(flag("app", rest[0].clone()));
+                    if rest.len() == 3 { flags.push(flag("class", rest[2].clone())); }
+                }
+                "retry" => {
+                    if rest.len() != 1 { return Err(u.to_owned()); }
+                    flags.retain(|(k, _)| k != "action");
+                    flags.push(flag("action", "install"));
+                    flags.push(flag("retry", rest[0].clone()));
+                }
+                "list" => { if !rest.is_empty() { return Err(u.to_owned()); } }
+                "status" | "open" | "stop" | "start" | "delete" | "identities" => {
+                    if rest.len() != 1 || !crate::apps::valid_grain(&rest[0]) { return Err(u.to_owned()); }
+                    flags.push(flag("grain", rest[0].clone()));
+                }
+                "share" | "export" | "revoke-identity" => {
+                    if rest.len() != 2 || !crate::apps::valid_grain(&rest[0]) { return Err(u.to_owned()); }
+                    flags.push(flag("grain", rest[0].clone()));
+                    flags.push(flag(match action { "share" => "to", "export" => "out", _ => "token" }, rest[1].clone()));
+                }
+                _ => return Err(u.to_owned()),
+            }
+            client("apps", flags)
         }
         "market" => match w.get(1).map(String::as_str) {
             Some("open") => {

@@ -58,7 +58,8 @@ it is showing.
   profile's 256 MiB; L is the operator's explicit choice), and the refusals an install could meet.
 - Both read `MINI_MARKET_INDEX` (default `/var/lib/mini-market/index.json`); the recorded fixture
   `native/resource-client/tests/fixtures/sandstorm-index-2026-10-27.json` (98 apps) pins the shape
-  the tests and `--dry` use. L12's market pane renders the same JSON (`--json`).
+  the tests and `--dry` use. In the shell they are `apps search` / `apps show` (one row of the verb
+  table, §5a); L12's market pane renders the same JSON (`--json`).
 
 ## 3. Install: the member turn, and what admits it
 
@@ -145,12 +146,17 @@ request, in order, each step idempotent on its retained artifact, as `grain-jour
 2. **`spk-host grain install PROFILE source receipt SPK --class C --management-selector DELEG`**:
    stage, broker `place`/`set-cgroup`/`ingest` (the bounded no-network unit; `standard-v1`), INSTALL
    BEGIN/CLAIM/COMPLETION through Mini. The verdict file is written from this parse.
-3. **Guest participant**: one hosted subject per (grain, member) whose key the worker holds
-   (`/var/lib/mini-apps/guests/<app>/<member>.key`, 0600 `mini-core`): session birth (op 31),
-   ticket issue under the delegated capability (`grain-share-issue-*`), `spk-host grain route` with
-   `expectedHost = a<app>.demo.dregg.online`, `edgeGid = mini-edge`, the route directory
-   `/var/lib/mini-apps/routes/a<app>/<member>/` (0750 `mini-core:mini-edge`). Signing is custodial
-   over a purpose-made subject, never over the member's key.
+3. **Guest participant and route** (ruling 2026-10-27, v1): the grain has **one hosted guest
+   subject** (the grain world's management subject, exactly the shape the one-grain EtherCalc route
+   and `grain-journey.sh` use) and **one route per (grain, member)**: its own session birth (op 31),
+   its own ticket under the delegated share capability (`grain-share-issue-*`), its own
+   `spk-host grain route` with `expectedHost = a<app>.demo.dregg.online`, `edgeGid = mini-edge`, its
+   own three tokens and identity record, in `/var/lib/mini-apps/routes/a<app>/<member>/` (0750
+   `mini-core:mini-edge`). Signing is custodial over that guest subject, never over the member's key.
+   **Consequence, stated in the receipt and on the Grants page**: members of a shared grain look like
+   one user to the app in v1 (one `identity_id`); Mini tells them apart by route, token and receipt,
+   the app does not. Per-member guest *subjects* (one provisioned, funded subject per (grain,
+   member)) are v2, scheduled when L1b's tariff says who pays for a guest's births and dispatches.
 4. **START** (`grain start`), then **enroll** the guest session against the serving generation.
 5. **Origin table**: `/var/lib/mini-apps/origins/a<app>.json` (0644): the grain's routes, each with
    its socket path and the SHA-256 of its three tokens. Token *hashes* are not secrets; the tokens
@@ -207,6 +213,28 @@ bootstrap token; the member visits `/__mini/bootstrap`, pastes it, and the custo
 session cookie on `demo.dregg.online` cannot cross to the grain origin, by design). `mini apps share
 a<app> --to NAME` gives NAME their own guest participant, ticket and route (hot registration on the
 running generation, 64 routes per generation); NAME then runs `mini apps open a<app>`.
+
+### 5a. The seam with L12's browser (`/apps`, `/apps/install`, `/grain/N`)
+
+Ember's ruling (DEMO-EXPERIENCE §1a): every shell verb has a visual face derived from the shell's
+verb table. The apps verbs are one row of that table (`shell.rs` `VERBS`, name `apps`: `apps search
+| show | install | retry | list | status | open | stop | start | share | export | delete |
+identities | revoke-identity`), each with its arguments spelled in `usage` and its outcome shape in
+`operation`, so L12's form derivation picks them up like any other verb. The seam, named:
+
+| L12 route | the body runs (as the member's own uid, through `mini-web-spawn`, exactly a shell line) | what comes back |
+|---|---|---|
+| `GET /apps` | `apps search [TERM] --json` | the catalogue JSON (`{apps:[{appId, packageId, name, version, publisher, verdict:{state, reason, rawBytes, running}, suggestedClass, packageUrl}], total}`); the pane renders claims beside verdicts |
+| `GET /apps/<appId>` | `apps show APP-ID --json` | one entry whole, the refusals an install can meet |
+| `POST /apps/install` (fields `app`, `class`) | `apps install APP-ID [--class C]` | the decoded outcome: `request <id>` then performed (`receipt: {grain, origin, class, rawSha256, signedAppId, identityNotice}`), refused by name (`unknownApp`, `sizeOverProfile`, `unsupportedBridge`, `funding`, `birthRequired`, ...), or undecided with `exact retry: apps retry <id>` |
+| `GET /grain/N` | `apps status aN --json` | state (generation, phase decoded, `running`/`stopped`/`stopping since`), the origin, the routes this member holds, **identities held by this grain** (the §3a records: who, since, revoked), the v1 notice |
+| `POST /grain/N/open` | `apps open aN --json` | `{origin, bootstrapPath:"/__mini/bootstrap", bootstrapToken}` once; the body renders a self-submitting POST form to `https://aN.demo.dregg.online/__mini/bootstrap` (its own session cookie cannot cross origins, by design) and then the grain in a pane |
+| `POST /grain/N/stop`, `/start`, `/delete`, `/share` (field `member`), `/export`, `/revoke-identity` (field `token`) | the matching verb | the decoded outcome; STOP is `undecided` with `exact retry: apps status aN` while the lifecycle runs |
+
+Which uid: the member's (`mini-s-NAME`), never the gateway's; the worker names the member from the
+socket peer. The receipt a form shows is the verb's `--json` reply, rendered by L12's one `outcome`
+partial; the `identityNotice` field carries the v1 sentence of §4 step 3 so the Grants page says it
+honestly. Nothing on these routes reaches the worker or the grain without the member's uid.
 
 ## 6. Journey row `japps.sh`
 
