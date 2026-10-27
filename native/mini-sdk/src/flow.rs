@@ -203,10 +203,20 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
     /// Step 4: sign the consented headers of `plan_bin` after `release` accepts them, assemble the
     /// exact call into `call.bin`, and sync it; returns its path.
     pub fn seal(&mut self, plan_bin: &Path, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<PathBuf> {
+        let signatures_bin = self.sign(plan_bin, release)?;
+        let call = self.path("call.bin");
+        self.host.assemble(plan_bin, &signatures_bin, &call)?;
+        sync_retained(self.dir, &call)?;
+        Ok(call)
+    }
+
+    /// The signing half of [`Flow::seal`]: the consented headers of `plan_bin`, released and
+    /// signed into `transaction-signatures.{json,bin}`; returns the `.bin`. A caller that does not
+    /// assemble a call (a dry run, op 130) stops here.
+    pub fn sign(&mut self, plan_bin: &Path, release: &mut dyn FnMut(&Sealing<'_>) -> Result<()>) -> Result<PathBuf> {
         let intent_bin = self.path("intent.bin");
         let signatures_json = self.path("transaction-signatures.json");
         let signatures_bin = self.path("transaction-signatures.bin");
-        let call = self.path("call.bin");
         let headers = self.host.consent_plan(&intent_bin, plan_bin, &self.signer.public_key())?;
         if headers.is_empty() {
             return Err("consent returned no headers; nothing to sign".into());
@@ -214,9 +224,7 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
         release(&Sealing { intent_bin: &intent_bin, plan_bin, headers: &headers })?;
         create_json(&signatures_json, &signature_list(self.signer, &headers)?)?;
         self.host.signatures(&signatures_json, &signatures_bin)?;
-        self.host.assemble(plan_bin, &signatures_bin, &call)?;
-        sync_retained(self.dir, &call)?;
-        Ok(call)
+        Ok(signatures_bin)
     }
 
     /// Step 5: submit or look up the retained `call.bin`; the answer goes to `outcome_bin` and the

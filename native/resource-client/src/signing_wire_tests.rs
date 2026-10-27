@@ -8,8 +8,6 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
-const GOLDEN: &str = "tests/fixtures/signing-path.wire";
-
 /// The Host stand-in. `$2 = codec`: the storeless frame loop, which answers op 8 (`inspect`)
 /// with a JSON presentation of the kind (a confirmed receipt for `outcome`) and every other frame
 /// with a checksum of the request. Otherwise a one-shot verb `HOST CONFIG VERB IN... OUT`: it logs
@@ -104,8 +102,13 @@ fn custody_listing(attempt: &Path) -> String {
 fn signing_wire_worker() {
     let dir = PathBuf::from(std::env::var_os("MINI_WIRE_DIR").expect("wire dir"));
     let host = dir.join("host");
-    let result = submit(&host, &dir.join("config.json"), &dir.join("intent.json"), OsStr::new("intent"),
-        &dir.join("mini.key"), &dir.join("attempt"), false);
+    let result = if std::env::var_os("MINI_WIRE_DRY_RUN").is_some() {
+        dry_run(&host, &dir.join("config.json"), &dir.join("intent.json"), OsStr::new("intent"),
+            &dir.join("mini.key"), &dir.join("attempt")).map(|refusal| assert_eq!(refusal, None))
+    } else {
+        submit(&host, &dir.join("config.json"), &dir.join("intent.json"), OsStr::new("intent"),
+            &dir.join("mini.key"), &dir.join("attempt"), false)
+    };
     let mut log = fs::OpenOptions::new().append(true).open(dir.join("wire")).unwrap();
     writeln!(log, "result {result:?}").unwrap();
     log.write_all(custody_listing(&dir.join("attempt")).as_bytes()).unwrap();
@@ -113,6 +116,16 @@ fn signing_wire_worker() {
 
 #[test]
 fn the_signing_path_wire_bytes_are_pinned() {
+    pinned("tests/fixtures/signing-path.wire", false);
+}
+
+/// `mini dry-run` (op 130 over the signed plan) under the same control.
+#[test]
+fn the_dry_run_wire_bytes_are_pinned() {
+    pinned("tests/fixtures/dry-run-path.wire", true);
+}
+
+fn pinned(golden: &str, dry_run: bool) {
     let dir = std::env::temp_dir().join(format!("mini-wire-{}-{}", std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     fs::create_dir(&dir).unwrap();
@@ -133,10 +146,11 @@ fn the_signing_path_wire_bytes_are_pinned() {
         .env("MINI_CONSENT_HOST", &consent)
         .env("MINI_CONSENT_CONFIG", dir.join("consent.json"))
         .env_remove("MINI_THIN_CONSENT")
+        .env(if dry_run { "MINI_WIRE_DRY_RUN" } else { "MINI_WIRE_SUBMIT" }, "1")
         .output().unwrap();
     assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     let wire = fs::read_to_string(dir.join("wire")).unwrap();
-    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join(golden);
     if std::env::var_os("MINI_WIRE_REGEN").is_some() {
         fs::write(&golden, &wire).unwrap();
     }
