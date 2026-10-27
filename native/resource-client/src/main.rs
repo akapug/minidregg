@@ -5153,14 +5153,18 @@ mod tests {
         let host = directory.join("fake-host.sh");
         let config = directory.join("config.json");
         let call = directory.join("call.bin");
+        // The one-shot verbs (submit, lookup) echo the call; `inspect` is the storeless codec
+        // loop's, as every pure verb is (`client_consent::codec_loop_arm`).
         fs::write(
             &host,
-            b"#!/bin/sh\nif [ \"$2\" = inspect ]; then printf '{\"type\":\"confirmed\"}' >\"$5\"; else cp \"$3\" \"$4\"; fi\n",
+            format!("#!/bin/sh\ncase \"$2\" in\n{}  *) cp \"$3\" \"$4\" ;;\nesac\n",
+                client_consent::codec_loop_arm(r#"printf '{"type":"confirmed"}' > "$out""#)),
         )
         .unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(&config, b"{}").unwrap();
         fs::write(&call, [0, 1, 2, 255, 17]).unwrap();
+        let _codec = client_consent::codec_test_lock();
         write_json_new(
             &directory.join("attempt.json"),
             &json!({
