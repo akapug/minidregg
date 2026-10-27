@@ -13,7 +13,9 @@ Store directory. Back up the anchor with the Store or a restore refuses (see
 | --- | --- | --- | --- |
 | `DEPLOYMENT/checkpoint.key` | `mini bootstrap`, once | `0600` | 32 bytes from `/dev/urandom`: the Store's MAC key. Never printed, copied into another artifact, or committed. |
 | `DEPLOYMENT/pinned-config.json` | the Host's `genesis` | `0600` (umask) | Operator configuration plus `expectedSeed` and `checkpointKey` (the key's absolute path). Optional `checkpointEvery` (default 64). |
-| `STORE/forward-link.sqlite3` (+ `-journal` during a write) | the store helper | `0600` | SQLite, **schema version 5** (`PRAGMA user_version`), rollback journal (`journal_mode=DELETE`, `synchronous=EXTRA`, `fullfsync=ON`). Tables below. |
+| `STORE/forward-link.sqlite3` | the store helper | `0600` | SQLite, **schema version 5** (`PRAGMA user_version`), write-ahead log (`journal_mode=WAL`, `synchronous=FULL`, `fullfsync=ON`, `checkpoint_fullfsync=ON`). Tables below. |
+| `STORE/forward-link.sqlite3-wal` | the store helper | `0600` | The write-ahead log: committed transactions not yet checkpointed into the database file. **Part of the database.** Kept after the last connection closes (persistent WAL), truncated to empty whenever it is reset. |
+| `STORE/forward-link.sqlite3-shm` | the store helper | `0600` | The WAL index (shared memory). Rebuilt from the `-wal` when needed; every process that opens the Store must be able to write it, so all of them run as the Store's account. |
 | `STORE.head-anchor` | the store helper | `0600` | The 120-byte `MINIANC2` anchor: exact deployment/genesis identity and the heads of both logs. In the Store's **parent** directory. |
 | `STORE.head-anchor.lock` | the store helper | `0600` | `flock` that serializes SQLite publication and anchor persistence; holds no history. |
 | `STORE.head-anchor.PID.N.tmp` | the store helper | `0600` | A crash between create and rename leaves one; it is inert and may be removed with the service stopped. |
@@ -33,6 +35,25 @@ must be the Store account's with no group or other bits. A systemd
 | `durable_checkpoint` | `height → bytes` (≤ 64 MiB) | **every checkpoint is kept**; re-sealing at an existing height (a key rotation) replaces that row only |
 | `archive_journal` | `seq → (record, tag)` | the fn archive journal (`Kernel/FnArchiveJournal.lean`), append-only at `head + 1` |
 | `opaque_record` | `slot=1 → bytes` | the legacy one-slot link record (`cas`, `read-to`) |
+
+### Durability contract
+
+**A write that the helper acknowledged (`Installed`, or `AlreadyPresent` on an
+exact retry) survives a crash and a power loss.** `synchronous=FULL` in WAL
+mode syncs the transaction's frames to `-wal` before `COMMIT` returns (about
+three syncs per write; the rollback journal at `synchronous=EXTRA` cost
+seven), and the helper then publishes the anchor (file fsync, rename,
+directory fsync) before it answers. A committed record may live only in
+`-wal` until the next checkpoint folds it into the database file, so **the
+database is the database file together with its `-wal`** (and `-shm`, which is
+rebuildable). A process killed right after `COMMIT` leaves the record in
+`-wal`; the next open recovers it exactly
+(`tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
+This is the behaviour of the linked SQLite and the host's `fsync` as observed
+by tests that kill processes; it is not a proof about media under power loss.
+
+A Store written by an older helper (rollback journal) enters WAL mode on its
+first open; that open needs a writable disk once.
 
 Opening schema 0 upgrades it in one transaction (the legacy BLOB is kept); an
 unseeded v2–v4 Store gains the durable tables; a **seeded v2–v4 Store refuses**
@@ -218,16 +239,33 @@ submit a different operation.
 
 ## Backup and restore
 
-- **Copy the Store directory and its sibling `STORE.head-anchor` together**,
-  with the service stopped. The anchor is outside `STORE/` on purpose (a
-  directory-only copy of the Store would otherwise carry its own anchor), so a
-  backup of `STORE/` alone restores to a Store that refuses: `missing anchor;
-  existing Stores require explicit audited enrollment`.
+- **Online (the service running): SQLite's online backup API**, which reads
+  through the WAL, so the snapshot holds every committed transaction and is one
+  self-contained file. dregg-infra's `mini-backup` does this
+  (`sqlite3 DB ".backup SNAP"`, run as the Store's account so any `-wal`/`-shm`
+  it creates belongs to that account), then `PRAGMA integrity_check` on the
+  copy. Never `cp` the database file of a live Store: it can miss the
+  committed transactions still in `-wal`.
+- **Cold (the service stopped): copy the database file, its `-wal` and its
+  `-shm` together** (or first run `PRAGMA wal_checkpoint(TRUNCATE)` as the
+  Store's account, after which the database file alone is whole). A cold copy
+  without `-wal` can restore to an older state silently.
+- **Either way, copy the sibling `STORE.head-anchor` with it.** The anchor is
+  outside `STORE/` on purpose (a directory-only copy of the Store would
+  otherwise carry its own anchor), so a backup of `STORE/` alone restores to a
+  Store that refuses: `missing anchor; existing Stores require explicit audited
+  enrollment`. A snapshot of the database taken while the service runs is at
+  or ahead of an anchor copied before it, never behind; copy the anchor first
+  or stop the service.
 - Back up `checkpoint.key` separately; without it the Store refuses to open.
 - When restoring to a new path, put the copied anchor at the sibling path of
-  the resolved destination. Preserve any newer live anchor separately; never
+  the resolved destination, and do not carry a stale `-wal` or `-shm` from
+  another copy into it. Preserve any newer live anchor separately; never
   overwrite it to make a historic backup open. An old database with the newer
   anchor correctly refuses.
+- Freezing a retired Store (`ship.sh --regenesis`): checkpoint with
+  `TRUNCATE` and set `journal_mode=DELETE` before making it read-only; it is
+  then read with `immutable=1` (`mini-restore-check`).
 - Restoring an old database **and its old anchor** together cannot detect the
   joint rollback. Client receipt memory and external witnesses address that;
   a local file is not a witness.
@@ -245,6 +283,7 @@ The tests run real helper processes killed at every publication boundary
 the database with an older copy; they cover truncation above a checkpoint,
 same-height conflicts, foreign genesis, missing and replaced anchors,
 concurrent appenders, bound violations (exit 6) and a read with an unwritable
-Store directory. They test process failure and exact-byte continuity, not
+Store directory, and a record committed only to the WAL surviving a kill
+after `COMMIT`. They test process failure and exact-byte continuity, not
 filesystem or media behaviour under power loss, and not an operator who
 controls both the Store and its anchor.

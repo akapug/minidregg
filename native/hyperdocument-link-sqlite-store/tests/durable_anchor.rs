@@ -45,6 +45,7 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         s.durable_init(b"genesis").unwrap();
         s.durable_append(1, b"one", b"tag-one", &[]).unwrap();
         let snapshot = dir.join("before.sqlite3");
+        s.wal_checkpoint().unwrap();
         fs::copy(s.database_path(), &snapshot).unwrap();
         drop(s);
         let record = dir.join("record");
@@ -344,5 +345,37 @@ fn a_read_needs_no_writable_disk_and_a_refused_write_is_typed() {
         assert!(StoreError::from(std::io::Error::from_raw_os_error(errno)).is_unwritable());
     }
     assert!(!StoreError::from(std::io::Error::from_raw_os_error(libc::EACCES)).is_unwritable());
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// WAL with synchronous=FULL: a writer killed right after COMMIT (before the
+/// anchor, before any checkpoint) leaves the record only in `-wal`, and the
+/// next open recovers it exactly. The database file says WAL (header byte 18).
+#[test]
+fn a_crash_after_commit_keeps_the_record_in_the_wal() {
+    let dir = directory();
+    let root = dir.join("store");
+    let s = SqliteByteStore::open(&root).unwrap();
+    s.durable_init(b"genesis").unwrap();
+    let database = s.database_path().to_owned();
+    drop(s);
+    let header = fs::read(&database).unwrap();
+    assert_eq!((header[18], header[19]), (2, 2), "the Store file is in WAL mode");
+    let (record, tag, nodes) = (dir.join("record"), dir.join("tag"), dir.join("nodes"));
+    fs::write(&record, b"the committed record").unwrap();
+    fs::write(&tag, b"its tag").unwrap();
+    fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
+    let output = support::fixture(&[std::ffi::OsStr::new("durable-append-crash"), root.as_os_str(), "1".as_ref(),
+        record.as_os_str(), tag.as_os_str(), nodes.as_os_str(), "after-commit".as_ref()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(88));
+    let wal = fs::metadata(format!("{}-wal", database.display())).unwrap().len();
+    assert!(wal > 0, "the committed frames are in the WAL, not yet checkpointed");
+    let reopened = SqliteByteStore::open(&root).unwrap();
+    let read = reopened.durable_read(1, false).unwrap();
+    assert_eq!(read.head, 1);
+    assert_eq!((read.entries[0].record.as_slice(), read.entries[0].tag.as_slice()), (&b"the committed record"[..], &b"its tag"[..]));
+    assert_eq!(reopened.durable_append(1, b"the committed record", b"its tag", &[]).unwrap(), PublishStatus::AlreadyPresent);
     fs::remove_dir_all(&dir).unwrap();
 }

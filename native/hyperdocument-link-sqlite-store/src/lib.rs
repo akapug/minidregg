@@ -1,11 +1,12 @@
 //! Opaque, fallible exact-byte SQLite compare-and-swap transport.
 //!
 //! This crate assigns no Hyperdocument, link, authorization, replay, checksum,
-//! or acceptance meaning to the bytes.  It uses SQLite's rollback-journal
-//! transaction boundary and returns only bytes, control status, or an error.
-//! Lean owns all semantic decoding and acceptance.
+//! or acceptance meaning to the bytes.  It uses SQLite's write-ahead-log
+//! transaction boundary (`journal_mode=WAL`, `synchronous=FULL`: every commit
+//! is synced to the `-wal` before it returns) and returns only bytes, control
+//! status, or an error. Lean owns all semantic decoding and acceptance.
 //!
-//! Successful `PRAGMA synchronous=EXTRA`, `BEGIN IMMEDIATE`, and `COMMIT`
+//! Successful `PRAGMA synchronous=FULL`, `BEGIN IMMEDIATE`, and `COMMIT`
 //! calls are observations of the linked SQLite/host stack.  They are not a
 //! proof of SQLite, POSIX locks, filesystem ordering, `fsync`, stable media,
 //! power-loss survival, or behavior under hostile directory mutation.
@@ -85,7 +86,13 @@ extern "C" {
     fn sqlite3_column_int(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
     fn sqlite3_column_int64(statement: *mut sqlite3_stmt, column: c_int) -> i64;
     fn sqlite3_bind_int64(statement: *mut sqlite3_stmt, index: c_int, value: i64) -> c_int;
+    fn sqlite3_file_control(database: *mut sqlite3, name: *const c_char, op: c_int, argument: *mut c_void) -> c_int;
 }
+
+/// `SQLITE_FCNTL_PERSIST_WAL`: keep the `-wal` and `-shm` files after the last
+/// connection closes (truncated, by `journal_size_limit=0`, after the closing
+/// checkpoint), so a later read never has to create a file.
+const SQLITE_FCNTL_PERSIST_WAL: c_int = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublishStatus {
@@ -493,8 +500,27 @@ impl SqliteByteStore {
             return Err(database.error(busy));
         }
         database.exec(b"PRAGMA trusted_schema=OFF\0")?;
-        database.exec(b"PRAGMA journal_mode=DELETE\0")?;
-        database.exec(b"PRAGMA synchronous=EXTRA\0")?;
+        // WAL with synchronous=FULL: a commit returns only after its frames are
+        // synced to `-wal` (about three syncs per write, against seven for the
+        // rollback journal at EXTRA), so a committed write survives power loss.
+        // The WAL is truncated to empty whenever it is reset, so a copied-in
+        // older database never meets newer frames left in it.
+        database.exec(b"PRAGMA journal_size_limit=0\0")?;
+        let mut persist: c_int = 1;
+        // SAFETY: an open handle, a nul-terminated schema name and an int out/in argument.
+        let persisted = unsafe {
+            sqlite3_file_control(database.raw.as_ptr(), b"main\0".as_ptr() as *const c_char, SQLITE_FCNTL_PERSIST_WAL, &mut persist as *mut c_int as *mut c_void)
+        };
+        if persisted != SQLITE_OK {
+            return Err(database.error(persisted));
+        }
+        {
+            let statement = database.prepare(b"PRAGMA journal_mode=WAL\0")?;
+            if statement.step()? != SQLITE_ROW || statement.column_blob_at(0)?.as_slice() != b"wal" {
+                return Err(StoreError::Sqlite { code: 0, message: "the Store could not enter WAL mode".to_owned() });
+            }
+        }
+        database.exec(b"PRAGMA synchronous=FULL\0")?;
         database.exec(b"PRAGMA fullfsync=ON\0")?;
         database.exec(b"PRAGMA checkpoint_fullfsync=ON\0")?;
         let store = Self {
@@ -513,6 +539,13 @@ impl SqliteByteStore {
 
     pub fn database_path(&self) -> &Path {
         &self.database_path
+    }
+
+    /// Fold the WAL into the database file and truncate it, so the database
+    /// file alone is a whole copy (the tamper tests' "older database"). The
+    /// online backup (`sqlite3 DB .backup`) needs no such step.
+    pub fn wal_checkpoint(&self) -> Result<(), StoreError> {
+        self.database.exec(b"PRAGMA wal_checkpoint(TRUNCATE)\0")
     }
 
     /// After a read verified the retained anchor against the database, bring
@@ -1999,6 +2032,7 @@ mod anchor_tests {
     fn whole_database_replacement_is_detected_by_sibling_anchor() {
         let s = store();
         let backup = s.root().join("earlier.sqlite3");
+        s.wal_checkpoint().unwrap();
         fs::copy(s.database_path(), &backup).unwrap();
         s.durable_append(3, b"third", b"tag-three", &[]).unwrap();
         let root = s.root().to_owned();
