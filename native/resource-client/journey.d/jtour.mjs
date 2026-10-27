@@ -36,6 +36,7 @@ try {
   await page.waitForSelector("#step-4 .step-outcome .outcome", { timeout: outcomeWait });
   const elapsed = Date.now() - started;
   const cls = await page.locator("#step-4 .step-outcome .outcome").first().getAttribute("class");
+  const said = ((await page.locator("#step-4 .step-outcome").first().innerText()) || "").replace(/\s+/g, " ").slice(0, 160);
   await page.click(".rail a:has-text('Terminal')");
   await page.waitForSelector(".pane form[action='/term'] button", { timeout: 15000 });
   await page.click(".pane form[action='/term'] button");
@@ -43,7 +44,7 @@ try {
   await page.keyboard.type("whoami");
   await page.keyboard.press("Enter");
   await page.waitForFunction((s) => (document.querySelector(".term")?.innerText || "").includes(s), subject, { timeout: 30000 });
-  console.log(`steps=${steps} step4=${cls} step4-ms=${elapsed} terminal=whoami-ok errors=${errors.length}`);
+  console.log(`steps=${steps} step4=${cls} step4-ms=${elapsed} terminal=whoami-ok errors=${errors.length}${/answered/.test(cls || "") ? "" : " said: " + said}`);
   await browser.close();
   // `can` is a read: its class is `answered` (outcome truth), never a world transition.
   process.exit(steps === 12 && /\boutcome answered\b/.test(cls || "") && errors.length === 0 ? 0 : 1);

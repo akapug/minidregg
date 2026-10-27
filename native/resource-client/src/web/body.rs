@@ -862,7 +862,7 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     if let Some(socket) = super::super::SOCKET.get() {
         command.arg("--socket").arg(socket);
     }
-    let mut child = command
+    command
         .arg("--workspace").arg(&site.root)
         .arg("--home").arg(&shell.home)
         .arg("--host").arg(&shell.host)
@@ -870,9 +870,12 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &shell.home)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Its own process group: a read stopped at the deadline is stopped whole, the client the
+    // shell ran for it included (a killed shell alone left `mini workspace --action can` judging
+    // on, ahead of the member's next request).
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes());
     }
@@ -931,6 +934,10 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         return Some(Ending { code: 255, stdout: cap(snapshot(&out_buf)), stderr });
     }
     // Reads and local verbs are stopped at the deadline: nothing they do can be left half-done.
+    // The group is the child's own (process_group(0) above), so its id is the child's pid.
+    if let Ok(pgid) = i32::try_from(child.id()) {
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    }
     let _ = child.kill();
     let _ = child.wait();
     let _ = out_thread.join();
