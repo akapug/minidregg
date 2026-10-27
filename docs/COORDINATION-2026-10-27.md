@@ -116,6 +116,13 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 | **hbox** | the pipeline's standing run and the warm base; co-tenant (nanodregg builds, codex's `poly`); a one-slot queue | `swarm-build` (there: 96 G cap, `taskset 0-15`) | a lane's default box; any timing measurement (`/tank` is an HDD mirror with no SLOG: §1) |
 | **`dregg-demo`** (`ccx23`, `167.233.199.225`) | rehearsals and the opening; the box drills; the published performance numbers (the baseline is the demo's own: write p50 1.35 s, max 1.56 s at the measured level) | `ship.sh` from the Mac | a build; a credential for another box |
 
+The first measured cold Lean build, on `dregg-build` at main `c77ef2f9` (the number three council
+reviewers asked for): 1,308 modules (the 787-module Host closure plus the umbrella) in **7,197 s =
+2 h 00 min** with 2 seats × 4 threads under a 28 G cap, cgroup peak 17.2 GiB, the heaviest module
+18.5 GiB (`Kernel.PayEnrolReceiver`); mathlib from the cache in 77 s. With the measured RSS table the
+same build runs at 4 seats. A warm `cargo check --workspace` is 22 s. Details and the table:
+dregg-infra `edge/tofu-build/README.md`.
+
 Teardown: `dregg-build` carries `expires = 2026-11-11`, the demo's shutdown date; `tofu destroy` in
 `edge/tofu-build/` is the whole teardown. Disk pressure on any box is a pause-and-tell condition,
 never a delete.
