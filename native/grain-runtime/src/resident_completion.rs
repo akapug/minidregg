@@ -546,7 +546,6 @@ impl Runtime {
     }
 
     fn publish_completion_journal(&self) -> Result<()> {
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
         let bytes = serde_json::to_vec_pretty(&self.journal).map_err(|e| e.to_string())?;
         journal_io::write(&self.config.state_dir.join("journal.json"), &bytes)
             .map_err(|e| format!("completion journal publication: {e}"))

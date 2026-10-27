@@ -150,13 +150,6 @@ fn failed_identity(bytes: &[u8], expected: &str, state_dir: &Path) -> Result<(Re
     Ok((before, pending_sha256, completion_sha256))
 }
 
-/// Reuse the exact authoritative failed-completion identity check for the
-/// separate session-marker recovery; this grants no state mutation by itself.
-pub(crate) fn bound_failed_pending(bytes: &[u8], expected: &str, state_dir: &Path) -> Result<Value> {
-    let (before, _, _) = failed_identity(bytes, expected, state_dir)?;
-    before.pending.ok_or_else(|| "resident pending disappeared".into())
-}
-
 fn plan(bytes: &[u8], expected: &str, status: &Status, state_dir: &Path) -> Result<Plan> {
     let (before, pending_sha256, completion_sha256) = failed_identity(bytes, expected, state_dir)?;
     if before.return_pending

@@ -304,7 +304,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     publish_notices(&room, &options.state);
-    while (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) || journal.return_pending {
+    while options.max_prompts.is_none_or(|limit| journal.completed < limit) || journal.return_pending {
         let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
         if prepared["dismissed"] == true {
             resident_requests::dismiss(&options.state)?;
@@ -341,12 +341,12 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
-            println!("{}", json!({"type":"resident-completed","completed":resident_outcomes::qualified_count(&options.state,journal.completed)?,"recordedCompletions":journal.completed}));
+            println!("{}", json!({"type":"resident-completed","completed":journal.completed}));
             resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
             publish_notices(&room, &options.state);
             // Prompt count and final delivery are separate durable states.
         }
-        if (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
+        if options.max_prompts.is_none_or(|limit| journal.completed < limit) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
     }
     Ok(())
 }

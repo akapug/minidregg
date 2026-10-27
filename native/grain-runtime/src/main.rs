@@ -16,8 +16,6 @@ mod resident_reconcile;
 mod hermes_outcome;
 mod prompt_outcome;
 mod hermes_session_verify;
-mod session_failure;
-mod resident_outcomes;
 mod resident_origin;
 mod resident_requests;
 mod resident_preflight;
@@ -6488,7 +6486,6 @@ impl Runtime {
         }
         let locked_state_dir = config.state_dir.clone();
         systemd_manager::initialize(&config, &config_path)?;
-        session_failure::ensure_publication_known(&config.state_dir)?;
         if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
         validate(&config)?;
         let binding = json!({"config":config,"configPath":config_path});
@@ -6552,7 +6549,6 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
     fn confirmed_publication_receipt(
@@ -17501,13 +17497,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
-        if let Err(error) = session_failure::ensure_publication_known(&rt.config.state_dir) {
-            if let Input::Admin(request) = next {
-                request.phase.store(2, Ordering::SeqCst);
-                let _ = request.reply.send(format!("error: {error}"));
-            } else { rt.emit(format!("error: {error}\n")); }
-            continue;
-        }
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
@@ -17612,24 +17601,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let result = rt.deliver_resident_final(Path::new(path));
                     request.phase.store(2, Ordering::SeqCst);
                     let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("resident supersede-completion ") {
-                    let result = rt.supersede_unsupported_completion(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("session reconcile-failure ") {
-                    let result = rt.reconcile_session_failure(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
                     continue;
                 }
                 if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
@@ -17833,18 +17804,6 @@ fn main() -> ExitCode {
         return match resident_delivery::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime resident-delivery: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "resident-outcome" {
-        return match resident_outcomes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime resident-outcome: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "session-failure" {
-        return match session_failure::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "quiescence" {
