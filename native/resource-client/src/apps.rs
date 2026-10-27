@@ -16,6 +16,7 @@ pub(crate) mod front;
 #[path = "apps_worker.rs"]
 pub(crate) mod worker;
 
+use crate::participant_namespace::{self, IdKind, Role};
 use crate::{absolute, hex, path, Args, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -276,6 +277,7 @@ struct Paths {
     meta: PathBuf,
     verdicts: PathBuf,
     socket: PathBuf,
+    config: PathBuf,
 }
 
 fn paths(args: &mut Args) -> Paths {
@@ -290,6 +292,7 @@ fn paths(args: &mut Args) -> Paths {
         meta: from(args, "meta", "MINI_MARKET_META", DEFAULT_META),
         verdicts: from(args, "verdicts", "MINI_APPS_VERDICTS", DEFAULT_VERDICTS),
         socket: from(args, "worker-socket", "MINI_APPS_WORKER_SOCKET", DEFAULT_WORKER_SOCKET),
+        config: from(args, "apps-config", "MINI_APPS_CONFIG", DEFAULT_APPS_CONFIG),
     }
 }
 
@@ -402,18 +405,30 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
             (id, retained)
         }
         None => {
+            let id = request_id()?;
             let apps_dir = root.join("apps").join(&entry.app_id);
-            let source = birth_source.unwrap_or_else(|| apps_dir.join("birth").join("source.json"));
-            let receipt = birth_receipt.unwrap_or_else(|| apps_dir.join("birth").join("outcome.json"));
-            let delegation = delegation.unwrap_or_else(|| apps_dir.join("delegation.json"));
-            for (what, file) in [("birth source", &source), ("birth receipt", &receipt), ("lifecycle delegation", &delegation)] {
-                if !file.is_file() {
-                    return Err(format!(
-                        "birthRequired: no {what} at {}; the install is a member turn: first birth the app \
-                         (mini current-application-intent + submit, retained as apps/{}/birth/), then delegate \
-                         hosting (mini app-lifecycle, retained as apps/{}/delegation.json); docs/APP-MARKET-2026-10-27.md §3",
-                        file.display(), entry.app_id, entry.app_id
-                    ));
+            let mut source = birth_source.unwrap_or_else(|| apps_dir.join("birth").join("source.json"));
+            let mut receipt = birth_receipt.unwrap_or_else(|| apps_dir.join("birth").join("outcome.json"));
+            let mut delegation = delegation.unwrap_or_else(|| apps_dir.join("delegation.json"));
+            // The member turn (§3 steps 1 and 2): the application birth as the member's own op 30
+            // and the hosting delegation to the manager, unless retained documents are supplied.
+            if !(source.is_file() && receipt.is_file() && delegation.is_file()) {
+                let config = apps_config(&paths.config)?;
+                let ws = crate::workspace::load(&root)?;
+                let name = format!("app-{}", &id[..12]);
+                let (born_source, born_receipt) = app_birth(&root, &ws, &name, &config)?;
+                crate::fsio::ensure_private_dir_all(&apps_dir.join("birth"))?;
+                source = apps_dir.join("birth").join("source.json");
+                receipt = apps_dir.join("birth").join("outcome.json");
+                for (file, value) in [(&source, &born_source), (&receipt, &born_receipt)] {
+                    if !file.exists() {
+                        crate::create_private(file, &serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)?;
+                    }
+                }
+                let selector = delegate_lifecycle(&root, &name, &format!("apps-{}", &id[..12]), &config.management_subject)?;
+                delegation = apps_dir.join("delegation.json");
+                if !delegation.exists() {
+                    fs::copy(&selector, &delegation).map_err(|e| format!("cannot retain the delegation: {e}"))?;
                 }
             }
             // The worker cannot read a member's 0700 home: the three documents travel
@@ -422,7 +437,6 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
                 let bytes = crate::fsio::read_bounded(file, 64 * 1024)?;
                 serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", file.display()))
             };
-            let id = request_id()?;
             let delegation_doc = document(&delegation)?;
             // The member's signed choice: the request cell under law.apps (§3 step 3),
             // its manager the delegation's. A class of auto is recorded once the worker
@@ -586,6 +600,228 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     }
 }
 
+
+
+// -------------------------------------------- the member's application birth
+
+pub(crate) const DEFAULT_APPS_CONFIG: &str = "/etc/mini/apps.json";
+
+/// What a member needs to know about the world to install an app, written by
+/// the operator (world-readable): the hosting manager's subject, the names of
+/// the member's references to the world's metered parent and tool tasks (the
+/// operator delegates those; L1b's tariff says who pays), and the grain birth
+/// tariff the Host pins.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AppsConfig {
+    pub management_subject: String,
+    pub tool_ref: String,
+    pub parent_ref: String,
+    pub tariff: Value,
+}
+
+pub(crate) fn apps_config(path: &Path) -> Result<AppsConfig> {
+    let bytes = crate::fsio::read_bounded(path, 16 * 1024)
+        .map_err(|e| format!("appsConfigUnavailable: {} ({e}); the operator writes it (deploy/market/INSTALL.md §4)", path.display()))?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    if value.get("protocol").and_then(Value::as_str) != Some("mini-apps-config-v1") {
+        return Err(format!("{} is not mini-apps-config-v1", path.display()));
+    }
+    let text = |key: &str, default: &str| value.get(key).and_then(Value::as_str).unwrap_or(default).to_owned();
+    let management_subject = text("managementSubject", "");
+    crate::workspace::decimal(&management_subject, "managementSubject")?;
+    Ok(AppsConfig {
+        management_subject,
+        tool_ref: text("toolRef", "tool"),
+        parent_ref: text("parentRef", "parent"),
+        tariff: value.get("tariff").cloned().unwrap_or(json!({"base":"2","perBirth":"1"})),
+    })
+}
+
+/// One metered peer as the Host's `grainBirthPeer` wants it: the task, the
+/// member's capability on it, its current root and grain state (a signed read).
+pub(crate) fn birth_peer(reference: &Value, view: &Value) -> Result<Value> {
+    let task = crate::workspace::member(reference, "target")?;
+    let capability = reference.get("operationCapability").and_then(Value::as_str).map_or_else(|| crate::workspace::member(reference, "observeCapability"), Ok)?;
+    let observe = crate::workspace::member(reference, "observeCapability")?;
+    let grain = view.pointer("/cell/grain").ok_or("the task's signed view has no grain state")?;
+    Ok(json!({"task":task,"capability":capability,"observeCapability":observe,
+        "targetRoot":view.pointer("/cell/root").cloned().ok_or("the task's signed view has no root")?,
+        "before":{"generation":grain["generation"],"status":grain["status"],"remaining":grain["remaining"],"reserved":grain["reserved"]}}))
+}
+
+/// The op 30 source (`Host/Json.lean` `grainBirthIntentFrom "applicationGrainBirth" "applicationBirth"`,
+/// `applicationBirthContext`, `applicationSpec`): the member is creator, owner and fee payer; the
+/// nine ids come from the member's own namespace reservation.
+pub(crate) fn app_birth_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, tool: &Value, parent: &Value, tariff: &Value) -> Result<Value> {
+    let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
+    let mut grants = context.get("grants").and_then(Value::as_array).cloned().ok_or("birth context lacks grants")?;
+    for peer in [tool, parent] {
+        grants.push(json!({"kind":"object","target":peer["task"],"capability":peer["capability"]}));
+    }
+    Ok(json!({"subject":subject,"nonce":nonce,
+        "applicationGrainBirth":{"tariff":tariff,
+            "applicationBirth":{"genesis":context["genesis"],"template":context["template"],"creator":subject,"nonce":nonce,
+                "application":{"app":id("app")?,"packageManifest":id("packageManifest")?,"snapshotManifest":id("snapshotManifest")?,"owner":subject,
+                    "appOwnerCapability":id("appOwnerCapability")?,"appControlCapability":id("appControlCapability")?,
+                    "packageOwnerCapability":id("packageOwnerCapability")?,"packageControlCapability":id("packageControlCapability")?,
+                    "snapshotOwnerCapability":id("snapshotOwnerCapability")?,"snapshotControlCapability":id("snapshotControlCapability")?},
+                "sourceCapabilities":context["sourceCapabilities"],"funding":context["funding"],"feePayer":context["feePayer"]},
+            "tool":tool,"parent":parent},
+        "grants":grants}))
+}
+
+const APP_ROLES: [(&str, IdKind); 9] = [
+    ("app", IdKind::Resource), ("packageManifest", IdKind::Resource), ("snapshotManifest", IdKind::Resource),
+    ("appOwnerCapability", IdKind::Capability), ("appControlCapability", IdKind::Capability),
+    ("packageOwnerCapability", IdKind::Capability), ("packageControlCapability", IdKind::Capability),
+    ("snapshotOwnerCapability", IdKind::Capability), ("snapshotControlCapability", IdKind::Capability),
+];
+
+/// Birth the application, package-manifest and snapshot-manifest resources as the member's own
+/// turn (op 30), the way `workspace create` births a resource: reserve the nine ids in the
+/// member's namespace, retain the exact source, author through the Host, submit once with exact
+/// recovery, then register three references `NAME`, `NAME-package`, `NAME-snapshot`.
+pub(crate) fn app_birth(root: &Path, ws: &Value, name: &str, config: &AppsConfig) -> Result<(Value, Value)> {
+    use crate::workspace::{self as w, member, member_path};
+    w::validate_ref_name(name)?;
+    let subject = member(ws, "subject")?.to_owned();
+    let context = w::bounded_json(&member_path(ws, "birthContext")?)?;
+    if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
+        return Err("unknown birth context version".into());
+    }
+    let tool_ref = w::reference(root, &config.tool_ref).map_err(|_| format!(
+        "meteredGrantRequired: no reference {:?} to the world's metered tool task; the operator delegates observe and the grain operation on it to you (L1b decides who pays), then `import {} ...`",
+        config.tool_ref, config.tool_ref))?;
+    let parent_ref = w::reference(root, &config.parent_ref).map_err(|_| format!(
+        "meteredGrantRequired: no reference {:?} to the world's metered parent task", config.parent_ref))?;
+    let namespace_root = w::namespace_root(root, ws)?;
+    let request_path = root.join("sources").join(format!("apps-birth-{}.request.json", w::ref_file(name)));
+    let core = json!({"type":"minidregg-apps-birth-request-v1","name":name,"subject":subject,"context":context,
+        "tool":member(&tool_ref,"target")?,"parent":member(&parent_ref,"target")?});
+    let request = if request_path.exists() {
+        let saved = w::bounded_json(&request_path)?;
+        let mut expected = core.clone();
+        expected["nonce"] = saved["nonce"].clone();
+        if saved != expected {
+            return Err("existing apps birth request differs; use a new name".into());
+        }
+        saved
+    } else {
+        let mut requested = core;
+        requested["nonce"] = json!(w::random_nonce()?);
+        crate::create_private(&request_path, &serde_json::to_vec(&requested).map_err(|e| e.to_string())?)?;
+        requested
+    };
+    let stable = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
+    let roles: Vec<Role> = APP_ROLES.iter().map(|(label, kind)| Role { label: (*label).into(), kind: *kind }).collect();
+    let reservation = participant_namespace::reserve(&namespace_root, member(&context["genesis"], "domain")?, &subject, name, &stable, &roles)?;
+    // The peers' current state: signed reads under the member's own grants.
+    let (tool_view, _, _) = w::signed_view(root, ws, &tool_ref, "resource")?;
+    let (parent_view, _, _) = w::signed_view(root, ws, &parent_ref, "resource")?;
+    let nonce = member(&request, "nonce")?;
+    let expected_source = app_birth_source(&subject, nonce, &context, &reservation.ids, &birth_peer(&tool_ref, &tool_view)?, &birth_peer(&parent_ref, &parent_view)?, &config.tariff)?;
+    let source_path = root.join("sources").join(format!("apps-birth-{}.json", w::ref_file(name)));
+    let source = if source_path.exists() {
+        let saved = w::bounded_json(&source_path)?;
+        // The peers' state moves between attempts; the identity (ids, subject, nonce) may not.
+        if saved["applicationGrainBirth"]["applicationBirth"]["application"] != expected_source["applicationGrainBirth"]["applicationBirth"]["application"] || saved["nonce"] != expected_source["nonce"] {
+            return Err("retained apps birth source differs from the namespace reservation".into());
+        }
+        saved
+    } else {
+        crate::create_private(&source_path, &serde_json::to_vec_pretty(&expected_source).map_err(|e| e.to_string())?)?;
+        expected_source
+    };
+    let socket = crate::SOCKET.get().ok_or("apps install requires a pinned persistent Host socket")?;
+    let authoring = root.join("sources").join(format!("apps-birth-{}.authoring", w::ref_file(name)));
+    let attempt = root.join("attempts").join(format!("apps-birth-{}", w::ref_file(name)));
+    let host = w::workspace_host(ws)?;
+    let host_config = member_path(ws, "config")?;
+    if attempt.exists() && w::attempt_definitely_unadmitted(&attempt)? {
+        let retired = w::release_unadmitted_attempt(&authoring, &attempt, &reservation)?;
+        eprintln!("apps birth attempt definitely unadmitted; retained as {}", retired.display());
+    }
+    let author_dir = if attempt.exists() {
+        w::authoring_generations(&authoring)?.last().cloned().ok_or("apps birth attempt exists without an authoring generation")?
+    } else {
+        w::author_generations(&authoring, &reservation,
+            || Ok(PathBuf::new()),
+            |generation, _| crate::current_birth::author(&host, &host_config, socket, &source_path, None, generation, crate::current_birth::Route::Application),
+            |generation| crate::observation_stale(&host, &host_config, generation))?
+    };
+    let intent_path = crate::current_birth::retained_intent(&author_dir, crate::current_birth::Route::Application)?;
+    let source_sha = {
+        use sha2::Digest;
+        hex(&sha2::Sha256::digest(fs::read(&intent_path).map_err(|e| format!("cannot hash the retained intent: {e}"))?))
+    };
+    participant_namespace::bind_attempt(&reservation, &attempt, &source_sha)?;
+    let receipt = if attempt.exists() {
+        if !attempt.join("call.bin").is_file() {
+            return Err(format!("apps birth preparation interrupted before the exact call; inspect {}", attempt.display()));
+        }
+        match w::accepted_outcome(&attempt)? {
+            Some(receipt) => receipt,
+            None => {
+                crate::retry(&attempt, "lookup", false)?;
+                w::accepted_outcome(&attempt)?.ok_or("apps birth lookup did not confirm the installed birth")?
+            }
+        }
+    } else {
+        eprintln!("apps birth attempt: {}", attempt.display());
+        crate::submit(&host, &host_config, &intent_path, std::ffi::OsStr::new("binary"), &member_path(ws, "key")?, &attempt, false)?;
+        w::accepted_outcome(&attempt)?.ok_or("apps birth returned without an installed receipt")?
+    };
+    let ids = &reservation.ids;
+    for (suffix, target, owner, control) in [("", "app", "appOwnerCapability", "appControlCapability"), ("-package", "packageManifest", "packageOwnerCapability", "packageControlCapability"), ("-snapshot", "snapshotManifest", "snapshotOwnerCapability", "snapshotControlCapability")] {
+        let reference_name = format!("{name}{suffix}");
+        let reference_path = root.join("refs").join(format!("{}.json", w::ref_file(&reference_name)));
+        if reference_path.exists() {
+            continue;
+        }
+        let value = json!({"type":"minidregg-participant-reference-v1","name":reference_name,"kind":"object","target":ids[target],
+            "observeCapability":ids[owner],"operationCapability":ids[owner],"controlCapability":ids[control],
+            "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,"reservationRecord":reservation.record_path,"applicationBirth":name},
+            "authority":"hint-only"});
+        crate::create_private(&reference_path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
+    }
+    Ok((source, receipt))
+}
+
+/// The hosting delegation to the manager through the shell's own verb
+/// (`app delegate-lifecycle`, six ordinary proposals), run to completion;
+/// returns the management selector `spk-host grain install` consumes.
+pub(crate) fn delegate_lifecycle(root: &Path, name: &str, request_id: &str, manager: &str) -> Result<PathBuf> {
+    let mini = std::env::current_exe().map_err(|e| e.to_string())?;
+    let run = |op: &str, with_names: bool| -> Result<Value> {
+        let mut command = std::process::Command::new(&mini);
+        command.args(["workspace", "--action", "app-lifecycle", "--dir"]).arg(root).args(["--request-id", request_id, "--op", op]);
+        if with_names {
+            command.args(["--name", name, "--package-name", &format!("{name}-package"), "--snapshot-name", &format!("{name}-snapshot"), "--manager", manager]);
+        }
+        let output = command.output().map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(format!("app delegate-lifecycle {op}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        Ok(serde_json::from_slice(&output.stdout).unwrap_or(Value::Null))
+    };
+    let mut status = run("status", true)?;
+    let mut rounds = 0;
+    while status.get("complete") != Some(&json!(true)) {
+        rounds += 1;
+        if rounds > 14 {
+            return Err(format!("the hosting delegation did not complete in 14 rounds; last status {status}"));
+        }
+        match status.get("nextAction").and_then(Value::as_str) {
+            Some("prepare") => { run("prepare", false)?; }
+            Some("submit") => { run("submit", false)?; }
+            Some("recover") => { run("recover", false)?; }
+            other => return Err(format!("the hosting delegation names no next action ({other:?}); status {status}")),
+        }
+        status = run("status", false)?;
+    }
+    status.get("managementSelector").and_then(Value::as_str).map(PathBuf::from)
+        .ok_or_else(|| "the hosting delegation is complete but its selector is not published yet (status: recover)".into())
+}
 
 // ------------------------------------------------ the request cell (law.apps)
 
@@ -867,6 +1103,50 @@ mod tests {
         assert!(app_bytes("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").is_err(), "b is outside Sandstorm's alphabet");
         assert_eq!(class_code("M").unwrap(), 2);
         assert!(class_code("auto").is_err());
+    }
+
+
+    #[test]
+    fn apps_birth_source_matches_the_host_decoder_key_sets() {
+        // Host/Json.lean: grainBirthIntentFrom ["subject","nonce","applicationGrainBirth","grants"];
+        // the composite ["tariff","applicationBirth","tool","parent"]; applicationBirthContext
+        // ["genesis","template","creator","nonce","application","sourceCapabilities","funding","feePayer"];
+        // applicationSpec (ten keys); grainBirthPeer ["task","capability","observeCapability","targetRoot","before"].
+        let context = json!({"type":"minidregg-participant-birth-context-v1","genesis":{"domain":"1","factoryId":"10"},"template":{"issuer":"5"},
+            "sourceCapabilities":["42"],"funding":[],"feePayer":"77","grants":[{"kind":"object","target":"10","capability":"55"},{"kind":"account","target":"77","capability":"42"}]});
+        let ids: std::collections::BTreeMap<String, String> = [("app","9001"),("packageManifest","9002"),("snapshotManifest","9003"),("appOwnerCapability","9101"),("appControlCapability","9102"),("packageOwnerCapability","9103"),("packageControlCapability","9104"),("snapshotOwnerCapability","9105"),("snapshotControlCapability","9106")].iter().map(|(k,v)| (k.to_string(), v.to_string())).collect();
+        let tool_ref = json!({"target":"7902","observeCapability":"8101","operationCapability":"8102"});
+        let view = json!({"cell":{"root":"abc","grain":{"generation":"1","status":"1","remaining":"50","reserved":"0"}}});
+        let tool = birth_peer(&tool_ref, &view).unwrap();
+        let parent = birth_peer(&json!({"target":"7901","observeCapability":"8201"}), &view).unwrap();
+        assert_eq!(tool["capability"], "8102");
+        assert_eq!(parent["capability"], "8201", "observe stands in when no operation capability is held");
+        let source = app_birth_source("77", "123", &context, &ids, &tool, &parent, &json!({"base":"2","perBirth":"1"})).unwrap();
+        let keys = |v: &Value| -> Vec<String> { let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect(); k.sort(); k };
+        assert_eq!(keys(&source), ["applicationGrainBirth","grants","nonce","subject"]);
+        let composite = &source["applicationGrainBirth"];
+        assert_eq!(keys(composite), ["applicationBirth","parent","tariff","tool"]);
+        assert_eq!(keys(&composite["applicationBirth"]), ["application","creator","feePayer","funding","genesis","nonce","sourceCapabilities","template"]);
+        assert_eq!(keys(&composite["applicationBirth"]["application"]), ["app","appControlCapability","appOwnerCapability","owner","packageControlCapability","packageManifest","packageOwnerCapability","snapshotControlCapability","snapshotManifest","snapshotOwnerCapability"]);
+        assert_eq!(keys(&composite["tool"]), ["before","capability","observeCapability","targetRoot","task"]);
+        assert_eq!(composite["applicationBirth"]["application"]["owner"], "77");
+        assert_eq!(composite["applicationBirth"]["creator"], "77");
+        assert_eq!(composite["applicationBirth"]["application"]["app"], "9001");
+        assert_eq!(source["grants"].as_array().unwrap().len(), 4, "the context's grants plus the tool and parent grants");
+        assert_eq!(source["grants"][2]["target"], "7902");
+    }
+
+    #[test]
+    fn apps_config_names_the_manager_and_the_metered_references() {
+        let dir = scratch("config");
+        let path = dir.join("apps.json");
+        fs::write(&path, br#"{"protocol":"mini-apps-config-v1","managementSubject":"8","toolRef":"world-tool","parentRef":"world-parent"}"#).unwrap();
+        let config = apps_config(&path).unwrap();
+        assert_eq!((config.management_subject.as_str(), config.tool_ref.as_str(), config.parent_ref.as_str()), ("8", "world-tool", "world-parent"));
+        assert_eq!(config.tariff, json!({"base":"2","perBirth":"1"}));
+        assert!(apps_config(&dir.join("none.json")).unwrap_err().starts_with("appsConfigUnavailable"));
+        fs::write(&path, br#"{"protocol":"other"}"#).unwrap();
+        assert!(apps_config(&path).is_err());
     }
 
     #[test]

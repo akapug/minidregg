@@ -59,6 +59,15 @@ systemctl start mini-market.service          # the first index refresh, so the c
 sudo -u mini-core XDG_RUNTIME_DIR=/run/user/$(id -u mini-core) systemctl --user enable --now mini-apps-worker@STORE.service
 ```
 
+`/etc/mini/apps.json` (root 0644, world-readable; `mini-apps-config-v1`) tells members what the
+world is: `{"protocol":"mini-apps-config-v1","managementSubject":"8","toolRef":"tool","parentRef":"parent","tariff":{"base":"2","perBirth":"1"}}`.
+A member's `apps install` births the application as their own op 30, whose admitted shape names the
+world's metered parent (7901) and tool (7902) tasks: the operator delegates observe and the grain
+operation on both to each member (the door's processor at enrolment, or by hand: `delegate ID
+<tool-ref> SUBJECT observe,mutate MAX`), and the member imports them under the names `toolRef` and
+`parentRef`; until then `apps install` refuses `meteredGrantRequired` by name. Who pays the metered
+reserve is L1b's tariff ruling.
+
 `mini-apps-worker@STORE.service` reads `/var/lib/mini-spk-worlds/STORE/apps-world.json` (the
 operator writes it, 0600: `mini-apps-world-v1`, naming the grain-host profile, `mini`, the public
 socket, the metered tool/parent tasks, the genesis, the quarantine, the market's `wanted/`, the

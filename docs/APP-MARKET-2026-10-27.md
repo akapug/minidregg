@@ -67,16 +67,24 @@ it is showing.
 is Mini's, through receivers that already exist; this lane registers **no new operation byte**,
 because every statement the install needs is already a kernel-admitted record:
 
-1. **The application birth** (op 30 `APPLICATION_CURRENT_BIRTH`, public route): the member births
-   the app, package-manifest and snapshot-manifest resources with their own key, paying the birth
-   tariff from their own purse. This is "the member's app-install capability and the funding": a
-   member whose purse cannot pay the tariff is refused by the kernel (`funding`), and L1b's grain
-   work tariff (R12) attaches here when it lands. Retained: `WORKSPACE/apps/<app>/birth/{source,
-   outcome}.json` (the same shape `grain-journey.sh birth_app` retains).
-2. **The hosting delegation** (`mini app-lifecycle …`, `app_lifecycle.rs`: six ordinary current
-   proposals, policy + grant for app, package and snapshot, admitted by the capability-delegation
-   receivers): the member delegates lifecycle hosting of *this* app to the operator's management
-   subject. `spk-host grain install --management-selector` consumes exactly this
+1. **The application birth** (op 30 `APPLICATION_CURRENT_BIRTH`, public route): `mini apps install`
+   births the app, package-manifest and snapshot-manifest resources as the member's own turn, the way
+   `workspace create` births a resource: nine ids reserved in the member's namespace, the exact source
+   retained, authored through the Host, submitted once with exact recovery, three references
+   registered (`app-<id>`, `-package`, `-snapshot`). The admitted shape is the metered composite
+   (`Host/Json.lean` `grainBirthIntentFrom "applicationGrainBirth"`): the member is creator, owner and
+   fee payer (`applicationBirthContext` from the member's own birth context, `applicationSpec` with the
+   six capabilities), and the composite names the world's metered **parent** (7901) and **tool**
+   (7902) tasks as peers with their current state. So the member needs references to those two tasks
+   (`/etc/mini/apps.json` names them, default `tool`/`parent`), which the operator delegates: the
+   refusal `meteredGrantRequired` names the missing one. This is "the member's app-install capability
+   and the funding": L1b's `grainBirthTariff` attaches here, and who pays for the metered reserve is
+   L1b's ruling. Retained: `WORKSPACE/apps/<appId>/birth/{source,outcome}.json`.
+2. **The hosting delegation** (the shell's `app delegate-lifecycle`, `app_lifecycle.rs`: six
+   ordinary current proposals, policy + grant for app, package and snapshot, admitted by the
+   capability-delegation receivers), which `mini apps install` runs to completion against the three
+   references, the manager being `/etc/mini/apps.json`'s `managementSubject`: the member delegates
+   lifecycle hosting of *this* app to the operator's management subject. `spk-host grain install --management-selector` consumes exactly this
    (`grain_management.rs`, protocol `mini-spk-grain-lifecycle-delegation-v1`), and the share
    authority the worker later exercises is the delegated app capability
    (`Kernel/ApplicationShareIssueDelegation.lean` records it; the custodian never holds the
