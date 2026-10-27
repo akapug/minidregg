@@ -195,7 +195,9 @@ row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acce
 shell_as_member() { "$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line "$1" 2>"$R/shell.err"; }
 if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
   PRIV="priv$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
-  shell_as_member "room new $PRIV --private" >"$R/priv.out"; priv_rc=$?
+  # A private room's keys live in the member's encrypted key cache, under a passphrase the member
+  # holds (FRIENDS.md); the journey's member holds one for this step.
+  MINI_KEYCACHE_PASSPHRASE=jwf-cache-pass shell_as_member "room new $PRIV --private" >"$R/priv.out"; priv_rc=$?
   if [ "$priv_rc" = 0 ] && [ -f "$WS/refs/$PRIV.json" ]; then
     rid=$(jq -r .target "$WS/refs/$PRIV.json"); kid=$(jq -r .private.keys "$WS/refs/$PRIV.json")
     fk=$(od -An -tx1 -v "${HOMEDIR:-$R/home}/keys/mini.key.pub" | tr -d ' \n')
@@ -265,17 +267,20 @@ row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$L
 page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
 docpage=$(req GET "/doc/$DOC")
 row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
-# The tour's refusal and its paste-back (step 4): an append to a document under the law `sealed`
-# is refused with its clause; `can --any` on the note names a write its law admits; that line,
-# run as the member, is admitted.
-SEALED="sealed$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
-req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$SEALED" --data-urlencode "law=sealed" >/dev/null
-page=$(req POST "/doc/$SEALED/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=into the sealed")
-row tour-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q '<mark class="clause">' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-140)"
+# The tour's refusal and the write its law admits (step 4): an edit of a line of the note is
+# refused by the note's law (`content/atom-edits == 0`), the clause highlighted; `can --any` on
+# the note answers the law and one write it admits (as slot witnesses: the shell line to paste is
+# lawsat's to print); the append, the write the law admits, is then admitted.
+pre_of() { python3 -I -c 'import sys,re,html; m=re.search(r"<pre>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")'; }
+docpage=$(req GET "/verb/doc")
+edit_alt=$(tr -d '\n' <<<"$docpage" | awk 'BEGIN{RS="</form>"} /<code>doc edit<\/code>/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
+EDIT_ID="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
+page=$(req POST /verb/doc --data-urlencode "csrf=$CSRF" --data-urlencode "alt=${edit_alt:-0}" --data-urlencode "a2=$EDIT_ID" --data-urlencode "a3=$DOC" --data-urlencode "a4=1" --data-urlencode "a5=edited" --data-urlencode "submit=on")
+row tour-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q '<mark class="clause">' <<<"$page" && echo 1 || echo 0)" "$(st) alt=${edit_alt:-?} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-160)"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC" --data-urlencode "a3=on")
-paste=$(sed -n 's/.*<pre>//; s/<\/pre>.*//p' <<<"$page" | sed 's/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g' | grep -m1 -E '^\s*(doc|propose|submit) ' | sed 's/^ *//')
-if [ -n "$paste" ]; then shell_as_member "$paste" >"$R/paste.out"; paste_rc=$?; else paste_rc=99; fi
-row tour-paste-back "$(grep -q 'outcome answered' <<<"$page" && [ "$paste_rc" = 0 ] && echo 1 || echo 0)" "$(st) can --any $DOC: $(sed -n 's/.*<pre>//; s/<\/pre>.*//p' <<<"$page" | tr '\n' ' ' | cut -c1-160) | paste=${paste:-none} rc=$paste_rc"
+can_text=$(pre_of <<<"$page")
+page2=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=the write the law admits")
+row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law version' <<<"$can_text" && grep -q 'outcome admitted' <<<"$page2" && echo 1 || echo 0)" "$(st) can --any $DOC: $(tr '\n' ' ' <<<"$can_text" | cut -c1-200) | append: $(grep -o 'class="headline">[^<]*' <<<"$page2" | head -1 | cut -c18-60)"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
