@@ -42,3 +42,49 @@ proof lane, not a field addition. #12-#15 and #19 are the next cheapest.
 Worst forgeable token by authority: `Theory.Receiving.Vouchers` (#10): every receiver's admission rests on "the
 signature oracle said true", and the type records nothing of it. Then `PolicyStepContext` (#6), which decides what
 any law is judged against.
+
+## #10 `Theory.Receiving.Vouchers`: statement first (no fix made)
+
+**Today** (`Theory/Receiving.lean:105-111`): `structure Vouchers (verify : SigQuery -> m (Except String Bool))`
+with `private mk` and two bare lists, `verified : List SigQuery` and `observed : List (SigQuery x Bool)`. A
+`SigQuery` is (scheme, publicKey, message, signature). Nothing in the type says `verify` answered `true` on
+any member; `Vouchers.vouches_iff` and `signed?_some` only read the list back. The index `verify` is a
+function in an arbitrary monad `m`, so no proposition about its answer can even be written against it.
+The guarantee lives in `admitVia` (`:508-524`) and, for `m = Id` only, in `admitVia_vouchers_verified`
+(`:868`) and `admitVia_observed` (`:801`); for `IO` (the live receiver) it is the oracle's runtime fact.
+
+**What a Vouchers value must record** so it cannot be minted without the oracle's answer:
+1. the query each voucher is for (scheme, key, message, signature): already `SigQuery`;
+2. the oracle verdict as a proposition the type pins: `verifiedAnswered : forall q in verified, Answered q true`
+   and `observedAnswered : forall (q, b) in observed, Answered q b`, where `Answered : SigQuery -> Bool -> Prop`
+   is a field of the VERIFIER, not of the value;
+3. therefore the verifier changes type from `SigQuery -> m (Except String Bool)` to a structure
+   `Verifier m` holding `ask : (q : SigQuery) -> m (Except String {b : Bool // Answered q b})` and the relation
+   `Answered`. `verifyAll`/`observeAll` return the subtype's proof; `admitVia` is then unable to build a
+   `Vouchers` except from answers the oracle returned. The index of `Vouchers` becomes the `Verifier`.
+   For `Id`/`pureVerifier v`, `Answered q b := v q = .ok b` (no layer 2 left). For the live oracle,
+   `Answered` is an inductive `Ran q b` whose only introduction is the shim around `CredentialSignatureIO.verify`;
+   that shim is the one remaining layer-2 trust and `TokenCensus` pins it as a `restricted` row.
+
+**Mint sites** (value constructions, not proofs): `Theory/Receiving.lean:119` (`Vouchers.empty`, vouches for
+nothing: stays valid vacuously), `:522` and `:524` (`admitVia`, the only real mint). Proof-only anonymous
+constructors `:751`, `:911` (theorems; unaffected in kind, restated).
+
+**Consumers, and whether their signature changes**
+- `Theory/Receiving.lean` (37 mentions, its own theorems `:342-959`): the `Receiver J verify` parameter type changes. YES.
+- `Compiler/CredentialSignatureAdmission.lean:342` (`receiverVerify`, a verifier over `Oracle m`), `:367` (a
+  field `Vouchers (receiverVerify oracle)`), `:398,412,495`: YES (builds the `Verifier`).
+- `Kernel/Receiving.lean:52-53,284,374,381,498`: `Receiver journal (receiverVerify oracle)` and two `admitVia`
+  calls: YES (the index type).
+- `Kernel/PayEnrolReceiver.lean:1192,1596-1611`, `Kernel/PayEnrolV2Receiver.lean:818-843`: restate
+  `answers`/`answer?_some` over `Answered`: YES.
+- `Kernel/Receivers/SubjectKeyRotation.lean:427-434`, `Kernel/ReceivingLawFixture.lean:173,248-307`: YES
+  (`variable {verify ...}` and `Vouchers.empty` uses).
+
+So every consumer changes (8 files, about 13 receivers' proofs through `Receiver.admitVia`). Per the quest
+rule (3) I stopped after the statement: no field addition at home keeps the signatures, because a field cannot
+mention an answer of a monadic `verify`. A smaller local patch (a `log` field with
+`verified subset log`) would be internal consistency over data the same forger writes, and does not close the row.
+This waits for a closure slot. Rebuild set: `Theory.Receiving`, `Compiler.CredentialSignatureAdmission`,
+`Kernel.Receiving`, `Kernel.PayEnrolReceiver`, `Kernel.PayEnrolV2Receiver`, `Kernel.Receivers.*`,
+`Kernel.ReceivingLawFixture`, plus the Host modules that import them. All are Host.Main-reached.
