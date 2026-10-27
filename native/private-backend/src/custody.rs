@@ -4,7 +4,7 @@ use crate::codec::*;
 use crate::transition_journal as wal;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::{Error, Read, Result, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
@@ -140,20 +140,16 @@ impl Anchor {
         }
     }
 }
-/// The one anchor loop. Polls the (nonblocking) listener until `stop` is set,
-/// then returns, dropping the Anchor and with it the authority lock.
+/// The one anchor loop. Accept blocks; `stop` is checked after every accept, so
+/// a stopper sets it and then connects once to the listener's own address (the
+/// wake connection is dropped unread). On return the Anchor, and with it the
+/// authority lock, is dropped.
 pub fn serve(mut a: Anchor, listener: UnixListener, stop: &AtomicBool) -> Result<()> {
-    listener.set_nonblocking(true)?;
-    while !stop.load(Ordering::SeqCst) {
-        let mut s = match listener.accept() {
-            Ok((s, _)) => s,
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                continue;
-            }
-            Err(e) => return Err(e),
-        };
-        s.set_nonblocking(false)?;
+    loop {
+        let (mut s, _) = listener.accept()?;
+        if stop.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         s.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
         s.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
         let answer = (|| {
@@ -173,7 +169,6 @@ pub fn serve(mut a: Anchor, listener: UnixListener, stop: &AtomicBool) -> Result
         }
         let _ = write_packet(&mut s, &response);
     }
-    Ok(())
 }
 pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
     let a = Anchor::open(root)?;
@@ -193,8 +188,11 @@ pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
         _ => Err(bad("anchor reply")),
     }
 }
-/// In-process anchor for tests: the real `serve` loop on a thread, stopped and
-/// joined on drop so the authority lock frees for a reopen.
+/// In-process anchor for tests: the real `serve` loop on a thread. Drop sets
+/// `stop`, wakes the blocked accept with one connection to the socket, and joins,
+/// so the authority lock frees for a reopen. Fault that must turn this red: remove
+/// the wake connect and drop hangs in join, so the kill9 and Cluster::open reopen
+/// tests time out.
 #[cfg(test)]
 pub(crate) struct AnchorHandle {
     sock: std::path::PathBuf,
@@ -227,6 +225,7 @@ impl AnchorHandle {
 impl Drop for AnchorHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        let _ = UnixStream::connect(&self.sock);
         self.task.take().unwrap().join().unwrap();
     }
 }

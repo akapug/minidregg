@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(before.original_prefix_count, 1);
         assert!(before.encode().len()
             <= SourceAllocationReceipt::planned_byte_bound(&before.request, &[9, 8, 7]));
-        assert!(verify(later, 1, a.socket()).is_ok());
+        assert!(verify(later.clone(), 1, a.socket()).is_ok());
         assert_eq!(
             verify(claim.clone(), 0, a.socket())
                 .unwrap()
@@ -300,8 +300,25 @@ mod tests {
         reserve(other_history.socket(), 5);
         reserve(other_history.socket(), 0);
         refused(
-            verify(claim, 0, other_history.socket()),
+            verify(claim.clone(), 0, other_history.socket()),
             "anchor original allocation prefix mismatch",
+        );
+        // The extends check alone refuses a rolled-back anchor: the receipt for
+        // row 0 was captured after row 1 was reserved, and the anchor now holds
+        // only row 0. The allocation lookup and the original-prefix comparison
+        // both pass (row 0 and everything older is identical), so only
+        // `extends` sees that the newer row 1 is gone. Plant that must turn this
+        // red: delete the `!actual.extends(&captured) ||` term; this case then
+        // verifies instead of being refused.
+        let captured_after_1 = AllocationReceipt {
+            journal_bytes: later.journal_bytes.clone(),
+            ..claim
+        };
+        let rolled_back = custody::AnchorHandle::new(&scratch("d"));
+        reserve(rolled_back.socket(), 0);
+        refused(
+            verify(captured_after_1, 0, rolled_back.socket()),
+            "protected anchor does not retain",
         );
     }
 }
