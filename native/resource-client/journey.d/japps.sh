@@ -109,8 +109,9 @@ if [ "$mode" = --box ]; then
   if [ -x "$BIN/spk-host" ]; then
     # qualify spools beside its input and refuses a world-writable ancestor (/tmp): the copies sit
     # under the runner's own 0700 cache directory, as the operator's inbox does.
-    Q=${XDG_CACHE_HOME:-$HOME/.cache}/mini-japps-qualify.$$
-    mkdir -p -m 0700 "${XDG_CACHE_HOME:-$HOME/.cache}" && mkdir -m 0700 "$Q"
+    # Directly under HOME (0700): a shared ~/.cache is often group-writable and refused too.
+    Q=${JAPPS_QUALIFY_ROOT:-$HOME}/.mini-japps-qualify.$$
+    mkdir -m 0700 "$Q"
     for pair in "$SLIDES_PKG:accept" "$TODOS_PKG:accept" "$ETHERPAD_PKG:saveIdentityCaps" "$TTRSS_PKG:expectAppHooks"; do
       pkg=${pair%%:*} want=${pair##*:}
       seed "$pkg"; bash "$FETCH" --state "$W/state" --mini "$MINI" fetch "$pkg" >/dev/null 2>&1
