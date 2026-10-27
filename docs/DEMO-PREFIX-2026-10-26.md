@@ -15,7 +15,7 @@ contract holds** (§1). nanodregg stays the object of study whose laws are the t
 the consolidation. The council (all three) ruled this already decided by ember's words of
 Oct 19 and Oct 26 and the README of Oct 23; it is not re-asked.
 
-Also settled today: every surface on (ssh hosted shell, web docuverse, one SPK grain, Hermes
+Also settled (2026-10-26/27): every surface on (ssh hosted shell, web docuverse, one SPK grain, Hermes
 residents, PAY, Discord, fleet, fn transport, the veri7vn oracle appliance as an SPK app);
 hcloud project `dreggnet-demo`, same account; `demo.dregg.online` and `calc.demo.dregg.online`;
 security kernels rebooted as soon as available; operator ssh on 22; clock tick per minute;
@@ -63,94 +63,88 @@ candidate that opens, its composed phases and its non-performance journey rows m
 (growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
 tested rule). The date is re-estimated from each rehearsal's evidence, never promised.
 
-## 2. Where we stand (2026-10-27, early)
+## 2. Where we stand (2026-10-27, mid-morning UTC; rewritten whole)
 
-- **Rehearsal ship #1 is SERVING on the demo box** (2026-10-27, ~04:30 UTC): `dregg-demo`
-  (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`; `demo.`, `calc.demo.`,
-  `nano.demo.dregg.online` resolve) runs candidate a0db11f8a8bc under `ship.sh --rehearsal` with every
-  login closed and the reds named in the notice; `mini-health` OK (signed read 0.33 s); Store, public
-  ingress, key broker (sealed OpenRouter pool key, BYOK row), certifier and clock timers, Caddy with
-  valid TLS are up; `/join` answers 503 with the maintenance text and the 11 Nov shutdown line; Hermes
-  (no controller.json yet), Discord (bot in zero guilds), PAY (devnet config, no observer key), the
-  door (not in this candidate) and roster sync (rehearsal) are off with their reasons recorded. Known
-  reds: nano's writer fails in bwrap (ENOSYS on /dev; with the nano root); thin consent refuses a
-  signed write on this candidate (consent = full until the incremental refresh lands). Seven frame
-  bugs found by the first real split-tenancy ship are fixed on dregg-infra main 587169b / demo-vm 8991808.
-- **nano's testground is live on the box** (2026-10-27): `wss://nano.demo.dregg.online/ws` serves
-  (writer under the admitted bwrap exception: `RestrictSUIDSGID=no` + `NoExecPaths`, because systemd's
-  sxid filter returns ENOSYS for `openat2`, which bwrap 0.12 needs); a Chromium visitor at the Pages
-  link joins the box's World as a member in ~0.6 s. The first browser-reachable surface on the box.
-- **A dedicated Linux build box exists**: `dregg-build` (Hetzner ccx33, 8 dedicated vCPU / 32 GB, SSD,
-  fsn1, `178.105.4.114`, dies with the demo on 2026-11-11; dregg-infra `demo-vm` `edge/tofu-build/`):
-  Lean + Rust toolchains, warm Lake cache, a `lanes` user; lanes run their Linux checks and the
-  integration build there instead of queueing on hbox's HDD. hbox's SSD (`rpool`, `/othersys/lanes`) now
-  holds lane hot work; `/tank` keeps the warm base and candidates. The Mac rebuilt the host closure in
-  ~25 minutes and is the Lean box for per-file work.
-- **The coordination rewrite is on `lane/coordination`** (34460623): `docs/COORDINATION-2026-10-27.md`
-  (one present-state description of how the project is developed) and the deletion of the gate
-  bookkeeping that measured itself: 653 files, −116,517 lines (Objective contract manifests, the
-  known-red ceremony, guard-discipline, waste-model, carrier census; host-closure.pin folded to one
-  number; the hypothesis ledger and censuses moved to the nightly). Merges in integration round 2.
-- **Since the ship** (2026-10-27, morning): the `*.demo.dregg.online` wildcard certificate is issued and
-  serving (Caddy 2.11.7 + Gandi DNS-01 module, built on `dregg-build`, pinned by hash; the DNS token
-  root-only on the box, a written CONFINEMENT §2 exception); nano's tenant runs 7d30fc1d with a per-IP
-  `/enroll` budget (429 on the 11th per hour) and `/attest` routed; per-IP 443 limits are live box-wide.
-  Lanes landed on their branches: L2 custody-as-records (39 → 13 fsyncs per write, wire bytes identical),
-  L4 Hermes units/`grain create`/outcome record/provider classes (−6,577 lines), L7's fix for the real
-  Hermes blocker (`summon` created a bare cell without a document, so every read was empty; now one
-  creation path and a loud refusal), the hot-path lane's cSHAKE/KMAC kernels under `@[extern]` with the
-  Lean proof as spec, the consent provider made O(1) (it re-hashed the whole log twice per write: the
-  1.6 ms/record growth), and a resident codec (no per-request Host spawn): predicted write ~1.0 s flat
-  to 10k records (was 1.35 s growing to ~17 s). The memoised image was already on main. Integration round 2
-  merges ten branches and rebuilds the whole Lean tree once per box (the kernels change a Core olean).
-  Ember's four provisioning inputs are applied: the Discord bot is in Wyrmware (1507637841235017768),
-  four slash commands registered, the entrance running on the box with an empty roster; Discord's
-  endpoint verification FAILED once because the public key installed on the box was 57 hex characters
-  instead of 64 (the same first and last four, so a prefix check passed): being corrected, then ember
-  re-saves the endpoint; the backup bucket `dreggnet-demo-mini-backups` exists (Object Lock
-  COMPLIANCE, 22 days so every archive outlives 2026-11-18) with the first encrypted archive pushed and
-  the restore check green; ember's narrowly scoped Gandi PAT replaced the shared DNS token on the box;
-  the tofu state bundle (16 files, five roots) is re-saved in 1Password.
-- **Later on 2026-10-27**: nano's testground page is served from the box itself at
-  `https://nano.demo.dregg.online/` (one origin for page and writer; kernel 7ec94566; the writer runs
-  under the plain hardening contract via Landlock+seccomp self-confinement, so no bwrap and no exception
-  remain on the box). L13's first app-market increment is pushed (`lane/app-market`: the `mini apps`
-  verbs over a recorded index, the Host-dispatching entrance for grain origins, fetcher and units, a
-  journey installing Hacker Slides and Simple Todos from the real store; Etherpad/TT-RSS refused today
-  by the custodian's bridge vocabulary, now being supported: "anything from the store" is the bar). L4's
-  provider-test red was its own fixture; L3's clean-box red now names its missing input. The Discord
-  endpoint saves failed because the URL was set on a different application in the portal
-  (1554678232631091200; the PING body names it); the box is configured for the Dragon's Egg application
-  1507638321877090374, whose bot is in Wyrmware and whose commands are registered. The key and the
-  entrance were right all along; the capture proved it. Ember has lost admin access to the account
-  that owns 1507638321877090374, so no endpoint URL will ever be set: the entrance gains a GATEWAY
-  mode (the bot connects out to Discord's gateway and receives interactions there; outbound 443 only,
-  no inbound Discord route), using the bot token we hold and the commands already registered.
-- **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
-  but ember's harness has used it). It is torn down once the demo box serves.
-- **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
-  plan. Tracked lines 1.69M; host executable closure 784 modules / 330K Lean lines.
-- **Lane branches pushed and done** (integration into `integration/2026-10-26` running):
-  `lane/custody` (L2 core: one signing path in the SDK, the four refusal fixes; L2 continues
-  with call sites and deletions), `lane/web` (L7), `lane/build` (L9, contains web), `lane/fn-fleet`
-  (L8), `lane/door` (L5), `lane/keys-store` (L6), `lane/fence` (L3, one follow-up commit coming:
-  absent-after-lost-reply is undecided, not no-record). Still working: `lane/lean-critical`
-  (L1, hbox), `lane/hermes` (L4), `lane/perf` (L11).
-- **Today's candidate of main a0db11f8** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the
-  warm base; rows PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against 137/2/5/3; `jdeploy3`
-  FAIL (growth over the write MAX bar on a loaded box; the composed scenario never ran because
-  the infra manifest rewrite dropped the v2 contract: fixed in dregg-infra 5501f4f; the
-  composed phases are being re-run now, with the M7 reference build and the `exchange` row).
-- **dregg-infra** main 5501f4f and `demo-vm` 8fca5ad, pushed to both remotes: the full v2
-  manifest, the certifier on split tenancy, genesis `issuanceCap` + `lifetime` 200000, the
-  roster fix, the confined box roots, the nano tenant contract. Queued on `demo-vm`: the
-  door's infra patch (L5) and the mini-keys config changes (L6), effective at rehearsal #2.
-- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (driver
-  row AND consent fields, both in L1); `m6grain` (sudoers path, hbox lane); `m7` (reference being
-  built); pending `births`, `HERMES-LIVE`, `jcertify`.
-- **Ember's codex session** is landing the oracle appliance in the main worktree (uncommitted:
-  `native/oracle-appliance`, `native/spk-package-stream`, `deploy/oracle/`, the SPK
-  `import-profile`); it is the oracle lane and reconciles with `lane/fence` when it commits.
+**What "there" is** is now written once: `docs/DEMO-EXPERIENCE-2026-10-27.md` (the fifteen-minute
+tour a stranger takes from a browser, the parity law that everything the shell can do is done
+visually in the browser, the box as a member posting its own operations as receipts, the ranked
+ambitions A0–A9). The join page, the front page, the README table and the demo journey derive from
+it. This section says where the work is against it.
+
+**The box.** `dregg-demo` (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`)
+serves **rehearsal ship #1** of candidate a0db11f8a8bc under `ship.sh --rehearsal`: every login
+closed, the reds named in the login notice, `mini-health` OK, Store, public ingress, key broker
+(sealed OpenRouter pool key with a $40 ceiling and $0.10 per call under ember's $50 cap; BYOK on),
+certifier and clock timers, Caddy 2.11.7 (our build, Gandi DNS-01 module, pinned by hash) serving
+`demo.`, `calc.demo.`, `nano.demo.` and the `*.demo.dregg.online` wildcard certificate with hybrid
+X25519MLKEM768 + classical fallback; per-IP 443 limits box-wide; backups to
+`dreggnet-demo-mini-backups` (Object Lock COMPLIANCE, 22 days) with the restore check green; ember's
+narrow Gandi PAT root-only on the box; consent `full` on this candidate (the O(1) consent arrives with
+rehearsal #2). Off, with reasons recorded in `edge/demo/CHECKLIST.md`: Hermes (no controller yet),
+Discord (gateway mode arrives with rehearsal #2; the bot token is installed root-only and the
+drop-in is staged), PAY (devnet, no observer key), the door (not in this candidate), roster sync.
+nano's testground is live on the box from its own origin (`https://nano.demo.dregg.online/`,
+kernel e16403be, Landlock+seccomp self-confinement, per-IP enrol budget). The older public node
+`dregg-workhorse` still runs candidate 5688775a of Sep 30 for nobody; its Mini slice is torn down at
+the opening.
+
+**The build box.** `dregg-build` (ccx33, 8 dedicated vCPU / 32 GB, fsn1, `178.105.4.114`, dies with
+the demo on 2026-11-11): Lean + Rust toolchains, warm Lake cache, the `lanes` user, anonymous fetch
+from GitHub, no push, no production secret. Lanes run their Linux checks and the integration build
+there; hbox keeps the standing run and the warm base on `/tank`, lane hot work on its SSD
+(`/othersys/lanes`), every job in its own `swarm-build` cgroup, in parallel. The Mac holds a warm
+`.lake` of the host closure (3,739 jobs, 51 min cold) and is the per-file Lean box.
+
+**Discord, settled.** Ember lost admin access to the account owning application 1507638321877090374
+(Dragon's Egg), so no Interactions Endpoint URL will be set; the portal saves that failed were made
+on a different application (1554678232631091200). The entrance now has a **gateway mode**
+(`lane/door` bce88a74, merged into integration): the bot connects out to `gateway.discord.gg`,
+receives `INTERACTION_CREATE` there, answers through the REST callback; token as a systemd credential;
+outbound 443 only, no inbound route. The box side is staged for rehearsal #2.
+
+**Integration round 2** (`integration/2026-10-26`, integrator lane): merged so far L3 fence 1fe14837,
+L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market 6ceadaca (on top of round 1: custody, web,
+build, fn-fleet, keys-store, perf, hot-path, coordination). Waiting on **L1** (`lane/lean-critical`,
+tip d21123eb: JPAY6 driver, the 253/255 registry, the provider settle for every failed leg, Lean-emitted
+default laws for accounts and rooms, `checkPlan` accepting the height-pinned plan; its two Lean reds in
+`Host/RequestRefusal.lean` and `Kernel/NativePlanHeight.lean` are the critical path of the whole-tree
+rebuild). Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
+`scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
+ACP resident, the rehearsal #2 candidate → infra ships #2 (door on 8796, mini-keys split shape,
+Hermes controller via `grain create`, frame grain units without `RestrictSUIDSGID`, gateway Discord).
+
+**Lanes.** Done on branches: L2 custody-as-records 554667d9 (39 → 13 fsyncs, wire bytes identical,
+the 253/255 classifier by generated constants, 8,236 lines gone); L3 1fe14837; L4 a9e0dd70 (units that
+open, `grain create`, the outcome record, provider classes; J14 blocked only by L7's summon fix and
+L1's `checkPlan`); L5 bce88a74 (door: unprivileged `/join`, root processor the only writer of
+accounts/keys/roster, hosted keygen, pay-to-enrol onto a hosted account, Discord link codes; gateway
+mode); L6 43ede087 (WAL store, grant caps against the body, op-144 pinned); L7 717148c9 (render
+repairs; the summon fix: one document-creation path, loud refusal); L8 6e9ea3bb; L9 d74947d2
+(workspace gate, journey split, 9,348 lines gone); L11 ed73009c/bef88d32 (the breakdown; the fsync
+fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theorems, O(1) consent,
+codec resident, image hashed once); coordination 34460623 (`docs/COORDINATION-2026-10-27.md`,
+−116,517 lines of gate bookkeeping). Working: **L1** (above); **L12 web front end**
+(`lane/web-frontend` 9f7de524: the gateway + root helper + body, xterm.js vendored, forms derived from
+the shell verb table per the parity law, refusal clause highlighted, purse meter, grants tree, live
+room stream; headless-Chromium end-to-end green without a Host; `jwebparity` next); **L13 app market**
+(increment 2 at 6ceadaca: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify
+from the real store, `japps --box` 22/22; now the apps worker, the apps law from Lean, birth +
+delegation inside `mini apps install`; v1 = per-member routes over one grain guest subject, v2 =
+per-member subjects after L1b); the M7 reference build on `dregg-build`; L11's 10k soak on the box.
+
+**Ember's codex session** is landing the veri7vn oracle appliance in the main worktree (uncommitted
+`deploy/oracle/`, `native/oracle-appliance`, `native/spk-package-stream`): the split recipe keeps the
+15 GB public stores outside the SPK on a fixed `/opt/oracle-data` mount; the signed runtime SPK is
+91.9 MB; Mini acceptance is separate work. It reconciles with `lane/fence` and `lane/app-market`'s
+spk-host edits when it commits.
+
+**Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (L1, on its
+branch); `m6grain` (sudoers path, fixed on hbox); `m7` (reference being built); pending `births`,
+`HERMES-LIVE`, `jcertify`.
+
+**Owner items**: none outstanding. Optional: three orphaned `mini consent-resident` processes on
+hbox (PIDs 1479414, 1526819, 1531493, no PID file) idle until someone with the authority kills them
+by PID.
 
 ## 3. The prefix
 
