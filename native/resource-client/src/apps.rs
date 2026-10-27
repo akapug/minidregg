@@ -573,6 +573,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let paths = paths(&mut args);
     match action.as_str() {
         "index-check" => index_check(args),
+        "bootstrap" => {
+            let root = absolute(&path(args.required("dir")?))?;
+            let budget = text_flag(&mut args, "budget")?.unwrap_or_else(|| "100000".into());
+            let tool_ref = text_flag(&mut args, "tool-ref")?.unwrap_or_else(|| "tool".into());
+            let parent_ref = text_flag(&mut args, "parent-ref")?.unwrap_or_else(|| "parent".into());
+            args.finish()?;
+            let ws = crate::workspace::load(&root)?;
+            let report = bootstrap(&root, &ws, &budget, &tool_ref, &parent_ref)?;
+            println!("{}", serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?);
+            if !as_json {
+                eprintln!("apps bootstrap: tool task {} parent task {}; the sponsor imports: {}; write the appsConfig above to /etc/mini/apps.json",
+                    report["toolTask"], report["parentTask"], report["sponsorImports"].as_array().map(|l| l.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ; ")).unwrap_or_default());
+            }
+            Ok(())
+        }
         "search" | "show" => catalogue(&action, args, &paths, as_json),
         "install" => install(args, &paths, as_json),
         verb if WORKER_VERBS.contains(&verb) => {
@@ -848,6 +863,122 @@ pub(crate) fn delegate_lifecycle(root: &Path, name: &str, request_id: &str, mana
     }
     status.get("managementSelector").and_then(Value::as_str).map(PathBuf::from)
         .ok_or_else(|| "the hosting delegation is complete but its selector is not published yet (status: recover)".into())
+}
+
+
+// ------------------------------------------ the world's metered tasks (bootstrap)
+
+const BOOTSTRAP_ROLES: [(&str, IdKind); 6] = [
+    ("parentTask", IdKind::Resource), ("toolTask", IdKind::Resource),
+    ("parentOwnerCapability", IdKind::Capability), ("parentControlCapability", IdKind::Capability),
+    ("toolOwnerCapability", IdKind::Capability), ("toolControlCapability", IdKind::Capability),
+];
+
+/// The op 91 `birth-intent` for the two metered tasks an apps world needs, as the workroom
+/// provisioner births them at genesis (`scripts/workroom/provision.sh`): two `grain` resources
+/// owned by the operator's subject with explicit budgets, the parent naming the operator as its
+/// worker. Budget is an explicit operator allocation, never a metered claim.
+pub(crate) fn bootstrap_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, budget: &str) -> Result<Value> {
+    let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
+    let mut birth = json!({"genesis":context["genesis"],"template":context["template"],"creator":subject,"nonce":nonce,
+        "resources":[
+            {"kind":"object","storage":"grain","target":id("parentTask")?,"owner":subject,
+             "ownerCapability":id("parentOwnerCapability")?,"controlCapability":id("parentControlCapability")?,
+             "budget":budget,"workerSubject":subject,"workerGeneration":"1"},
+            {"kind":"object","storage":"grain","target":id("toolTask")?,"owner":subject,
+             "ownerCapability":id("toolOwnerCapability")?,"controlCapability":id("toolControlCapability")?,
+             "budget":budget}],
+        "sourceCapabilities":context["sourceCapabilities"],"funding":context["funding"],"feePayer":context["feePayer"]});
+    if let Some(tariff) = context.get("grainBirthTariff") {
+        birth["grainBirthTariff"] = tariff.clone();
+    }
+    Ok(json!({"subject":subject,"nonce":nonce,"birth":birth,"grants":context["grants"]}))
+}
+
+/// `mini apps bootstrap --dir OPERATOR-WORKSPACE [--budget N] [--tool-ref tool] [--parent-ref parent]`:
+/// once per world, by the operator (mini-core), before `/etc/mini/apps.json` is written. Births the
+/// world's metered parent and tool tasks under the operator's own capabilities (ids from the
+/// operator's namespace), registers them as references and prints their ids and the sponsor's two
+/// import lines. Idempotent: a second run finds the references and prints the same lines.
+pub(crate) fn bootstrap(root: &Path, ws: &Value, budget: &str, tool_ref: &str, parent_ref: &str) -> Result<Value> {
+    use crate::workspace::{self as w, member, member_path};
+    crate::workspace::decimal(budget, "budget")?;
+    w::validate_ref_name(tool_ref)?;
+    w::validate_ref_name(parent_ref)?;
+    let subject = member(ws, "subject")?.to_owned();
+    let report = |tool: &Value, parent: &Value| -> Value {
+        let line = |name: &str, r: &Value| format!("import {name} object {} {} {}", r["target"].as_str().unwrap_or("?"), r["observeCapability"].as_str().unwrap_or("?"), r["operationCapability"].as_str().unwrap_or("?"));
+        json!({"type":"mini-apps-bootstrap-v1","subject":subject,"toolTask":tool["target"],"parentTask":parent["target"],
+            "toolRef":tool_ref,"parentRef":parent_ref,
+            "sponsorImports":[line(tool_ref, tool), line(parent_ref, parent)],
+            "appsConfig":{"protocol":"mini-apps-config-v1","managementSubject":subject,"toolRef":tool_ref,"parentRef":parent_ref,"tariff":{"base":"2","perBirth":"1"}}})
+    };
+    if let (Ok(tool), Ok(parent)) = (w::reference(root, tool_ref), w::reference(root, parent_ref)) {
+        return Ok(report(&tool, &parent));
+    }
+    let context = w::bounded_json(&member_path(ws, "birthContext")?)?;
+    if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
+        return Err("unknown birth context version".into());
+    }
+    let namespace_root = w::namespace_root(root, ws)?;
+    let name = "apps-bootstrap";
+    let request_path = root.join("sources").join("apps-bootstrap.request.json");
+    let core = json!({"type":"minidregg-apps-bootstrap-request-v1","subject":subject,"context":context,"budget":budget,"toolRef":tool_ref,"parentRef":parent_ref});
+    let request = if request_path.exists() {
+        let saved = w::bounded_json(&request_path)?;
+        let mut expected = core.clone();
+        expected["nonce"] = saved["nonce"].clone();
+        if saved != expected {
+            return Err("existing apps bootstrap request differs (budget or names changed); it is one per world".into());
+        }
+        saved
+    } else {
+        let mut requested = core;
+        requested["nonce"] = json!(w::random_nonce()?);
+        crate::create_private(&request_path, &serde_json::to_vec(&requested).map_err(|e| e.to_string())?)?;
+        requested
+    };
+    let stable = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
+    let roles: Vec<Role> = BOOTSTRAP_ROLES.iter().map(|(label, kind)| Role { label: (*label).into(), kind: *kind }).collect();
+    let reservation = participant_namespace::reserve(&namespace_root, member(&context["genesis"], "domain")?, &subject, name, &stable, &roles)?;
+    let nonce = member(&request, "nonce")?;
+    let source = bootstrap_source(&subject, nonce, &context, &reservation.ids, budget)?;
+    let source_path = root.join("sources").join("apps-bootstrap.json");
+    if source_path.exists() {
+        if w::bounded_json(&source_path)? != source {
+            return Err("retained apps bootstrap source differs from the namespace reservation".into());
+        }
+    } else {
+        crate::create_private(&source_path, &serde_json::to_vec_pretty(&source).map_err(|e| e.to_string())?)?;
+    }
+    let attempt = root.join("attempts").join("apps-bootstrap");
+    let host = w::workspace_host(ws)?;
+    let host_config = member_path(ws, "config")?;
+    let receipt = match w::accepted_outcome(&attempt).ok().flatten() {
+        Some(receipt) => receipt,
+        None => {
+            if attempt.exists() {
+                crate::retry(&attempt, "lookup", false)?;
+            } else {
+                eprintln!("apps bootstrap attempt: {}", attempt.display());
+                crate::submit(&host, &host_config, &source_path, std::ffi::OsStr::new("birth-intent"), &member_path(ws, "key")?, &attempt, false)?;
+            }
+            w::accepted_outcome(&attempt)?.ok_or("apps bootstrap birth is not confirmed; retained for exact recovery")?
+        }
+    };
+    let ids = &reservation.ids;
+    for (reference_name, target, owner, control) in [(tool_ref, "toolTask", "toolOwnerCapability", "toolControlCapability"), (parent_ref, "parentTask", "parentOwnerCapability", "parentControlCapability")] {
+        let reference_path = root.join("refs").join(format!("{}.json", w::ref_file(reference_name)));
+        if reference_path.exists() {
+            continue;
+        }
+        let value = json!({"type":"minidregg-participant-reference-v1","name":reference_name,"kind":"object","target":ids[target],
+            "observeCapability":ids[owner],"operationCapability":ids[owner],"controlCapability":ids[control],
+            "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,"reservationRecord":reservation.record_path,"appsBootstrap":true},
+            "authority":"hint-only"});
+        crate::create_private(&reference_path, &serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?)?;
+    }
+    Ok(report(&w::reference(root, tool_ref)?, &w::reference(root, parent_ref)?))
 }
 
 // ------------------------------------------------ the request cell (law.apps)
@@ -1193,6 +1324,28 @@ mod tests {
         // An imported reference is found without touching the inbox.
         fs::write(root.join("refs").join("tool.json"), br#"{"type":"minidregg-participant-reference-v1","name":"tool","kind":"object","target":"7902","observeCapability":"8101","operationCapability":"8101","controlCapability":"8102"}"#).unwrap();
         assert_eq!(metered_reference(&root, &ws, Some(&home), "tool", "tool").unwrap()["target"], "7902");
+    }
+
+
+    #[test]
+    fn apps_bootstrap_source_is_the_workroom_birth_of_two_grain_tasks() {
+        let context = json!({"type":"minidregg-participant-birth-context-v1","genesis":{"domain":"1","factoryId":"10"},"template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
+            "sourceCapabilities":["42"],"funding":[],"feePayer":"8","grants":[{"kind":"object","target":"10","capability":"55"},{"kind":"account","target":"8","capability":"42"}],
+            "grainBirthTariff":{"base":"2","perBirth":"1"}});
+        let ids: std::collections::BTreeMap<String, String> = [("parentTask","7901"),("toolTask","7902"),("parentOwnerCapability","71"),("parentControlCapability","72"),("toolOwnerCapability","81"),("toolControlCapability","82")].iter().map(|(k,v)| (k.to_string(), v.to_string())).collect();
+        let source = bootstrap_source("8", "22000", &context, &ids, "100000").unwrap();
+        let keys = |v: &Value| -> Vec<String> { let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect(); k.sort(); k };
+        assert_eq!(keys(&source), ["birth","grants","nonce","subject"]);
+        assert_eq!(keys(&source["birth"]), ["creator","feePayer","funding","genesis","grainBirthTariff","nonce","resources","sourceCapabilities","template"]);
+        let resources = source["birth"]["resources"].as_array().unwrap();
+        assert_eq!(resources.len(), 2);
+        assert_eq!(resources[0]["storage"], "grain");
+        assert_eq!(resources[0]["target"], "7901");
+        assert_eq!(resources[0]["workerSubject"], "8");
+        assert_eq!(resources[0]["budget"], "100000");
+        assert_eq!(resources[1]["target"], "7902");
+        assert!(resources[1].get("workerSubject").is_none(), "the tool names no worker, as the workroom births it");
+        assert_eq!(source["birth"]["feePayer"], "8");
     }
 
     #[test]
