@@ -10,8 +10,8 @@ on the Host, `dues-activity-route/`.
 | domain | entry shape | Plan / Response (file:line) | route now |
 |---|---|---|---|
 | activity | `tally(Start)` Activity | `sum Plan: await` only; `Resumed: resumed{outcome,view}` (Tally.obend, `sum Plan`, `sum Resumed`) | **admitted** (203ed84c, `tally-activity-route/`) |
-| call | methods `(View, args)` Activity | `PlanN: call` only; `Returned: returned` (Calls.obend:26-36) | await/call-only: admissible on the call route; needs two objects (not run) |
-| send | methods Activity | `PlanS: send`, `PlanN`, `Queued`/`Acked` (Sends.obend:32-51) | send-kernel Plans: admissible on the send route; not run |
+| call | methods `(View, args)` Activity | `PlanN: call` only; `Returned: returned` (Calls.obend:26-36) | **admitted** on the call route (203ed84c, `call/`) |
+| send | methods Activity | `PlanS: send`, `PlanN`, `Queued`/`Acked` (Sends.obend:32-51) | **admitted** on the send route (203ed84c, `send/`) |
 | ballot | `serve(Poll)` Activity | `Plan: await \| publish` (SealedBallot.obend:211); `Response: event\|settled\|refused` (:215) | gap: `publish` Plan, event Response |
 | bounty (Board) | `serve(State)` | `Plan: await \| disburse` (BountyBoard.obend:231); `Response: event...` (:235) | gap: `disburse`, event |
 | bounty (Escrow) | pure `Plan` list for the seat kernel | `Plan: nil\|cons Action` (BountyEscrow.obend) | seat-kernel route (README: executed natively there) |
@@ -33,3 +33,20 @@ effects in its own vocabulary (`pay`, `disburse`, `publish`, `admit`) and its Re
 one gap: the activity kernel has no effect Plan and no event response. Pure-function domains have no
 Activity and take the Route A entry contract (`world/NativeReceipt.obend`), which a hostInput adapter would
 make them fit; none was attempted.
+
+## Continuation note
+- Admitted natively on candidate 203ed84c, each with state read back, one law and one named refusal: activity
+  (Tally), call (Calls), send (Sends); driver `native/resource-client/world-activity-admit.py`, runner
+  `scripts/world-native-admit.sh DOMAIN --route activity --scenario tally|call|send`.
+- Waiting on ONE kernel feature: ballot, bounty Board, commons, drex, dues, play, story (effect Plans `pay`,
+  `disburse`, `publish`, `admit`, an action list; `event` / `tick` Responses). Dues is the probe: birth refused
+  `inputType` then `outcomeProtocol "reply"` (`dues-activity-route/`).
+- Files the feature touches: `decodePlan` in Kernel/ObjectiveActivity.lean (today only `await`, "the kernel
+  performs only `await` Plans"), `outcomeProtocol` (the response must be `resumed {outcome, view}` typed for every
+  kernel outcome), `loadProgram`/`replyType` (the `reply` row), plus the receiver wire
+  (Kernel/ObjectiveActivityReceiverCore.lean, Refusal encoding) and Host/ObjectiveInvocationQuote only if a new
+  Plan changes the quote.
+- Also owed per app: a single-input entry (dues needs `Opening{terms, deposit}`), and heights from the kernel,
+  not caller-supplied `now` fields.
+- Pure-function domains (automatafl, collective, market, station, workshop) are Route A (objective-invoke) and
+  need a hostInput adapter; none attempted.

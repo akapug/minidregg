@@ -1,0 +1,181 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-counter",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-relayA",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-relayB",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "leaf-deposit-5",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "call"
+  },
+  {
+   "step": "leaf-report-and-state-5",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "report": {
+     "tag": "natural",
+     "value": "5"
+    },
+    "total": 5
+   },
+   "group": "call"
+  },
+  {
+   "step": "twice-2",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "call"
+  },
+  {
+   "step": "second-callee-sees-first-write",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "report": {
+     "tag": "natural",
+     "value": "9"
+    },
+    "total": 9
+   },
+   "group": "call"
+  },
+  {
+   "step": "reentry-refused",
+   "expect": "charged",
+   "detailExpected": [
+    "reentry",
+    "11401017788112701895"
+   ],
+   "type": "confirmed",
+   "reason": "",
+   "detail": "ectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.extractionAccount (Minidregg.Kernel.ObjectiveCall.CallRefusal.reentry 11401017788112701895 [14857971432488455583, 11401017788112701895]) 3199918 82) { source := 17476, core := 87084, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "call"
+  },
+  {
+   "step": "reentry-commits-nothing",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "counter": 9
+   },
+   "group": "call"
+  }
+ ],
+ "totals": [
+  {
+   "after": "leaf",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "leaf-b",
+   "height": "19",
+   "total": "0"
+  },
+  {
+   "after": "twice",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "twice-b",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "pre-reentry",
+   "height": "20",
+   "total": "0"
+  },
+  {
+   "after": "post-reentry",
+   "height": "21",
+   "total": "0"
+  },
+  {
+   "after": "post-reentry-a",
+   "height": "21",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "counter": {
+   "object": "9958804170171575960",
+   "capability": "11227171683937425579"
+  },
+  "relayA": {
+   "object": "11401017788112701895",
+   "capability": "15536340262194095838"
+  },
+  "relayB": {
+   "object": "14857971432488455583",
+   "capability": "13945358788123312228"
+  },
+  "bare": {
+   "object": "11318966239872728705",
+   "capability": "18190652655551023510"
+  }
+ },
+ "allPass": true,
+ "pin": "57540479037624989207351680008547147504265549386967216010031938655311709368420"
+}
