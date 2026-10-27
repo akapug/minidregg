@@ -628,8 +628,17 @@ world_recover_foreground() {
     "$continuation/runtime-upgrade.json" >/dev/null || fail 'recovery runtime differs'
   world_phase_record runtime-upgrade completed "$continuation/runtime-upgrade.json"
   world_phase_record public-listener-upgrade started
-  timeout 120 sudo -n -- "$installer" controller-public-listener-upgrade "$store" "$helper" "$candidate" "$old_mini" "$new_mini" \
-    >"$continuation/public-listener.json"
+  if [[ $old_mini == "$new_mini" ]]; then
+    timeout 120 sudo -n -- "$installer" controller-status "$store" "$helper" \
+      >"$continuation/public-listener-status.json"
+    jq -e --arg digest "$new_mini" '.stopped == true and .publicListener.binarySha256 == $digest' \
+      "$continuation/public-listener-status.json" >/dev/null || fail 'already-qualified public listener differs'
+    jq '. + {publicListenerSelection:"already-qualified"}' "$continuation/public-listener-status.json" \
+      >"$continuation/public-listener.json"
+  else
+    timeout 120 sudo -n -- "$installer" controller-public-listener-upgrade "$store" "$helper" "$candidate" "$old_mini" "$new_mini" \
+      >"$continuation/public-listener.json"
+  fi
   jq -e --arg digest "$new_mini" '.publicListener.binarySha256 == $digest' "$continuation/public-listener.json" >/dev/null
   export SPK_PUBLIC_LISTENER_RECEIPT=$continuation/public-listener.json
   world_phase_record public-listener-upgrade completed "$continuation/public-listener.json"

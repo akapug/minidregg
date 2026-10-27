@@ -145,7 +145,7 @@ fn parent_matches(journal: &Journal, task: &str, observed: &Value) -> Result<()>
         .as_ref()
         .ok_or("missing session parent witness")?;
     if witness.get("task").and_then(Value::as_str) != Some(task)
-        || observed.get("target").and_then(Value::as_str) != Some(task)
+        || observed.pointer("/grain/task").and_then(Value::as_str) != Some(task)
         || observed.get("targetRoot") != witness.get("expectedTargetRoot")
     {
         return Err("current signed parent differs from exact session reservation root".into());
@@ -702,16 +702,68 @@ mod tests {
         assert!(candidate(&fixture.journal, &fixture.state).is_err());
     }
     #[test]
+    fn recovery_consumes_the_actual_runtime_query_projection() {
+        // Exercise the producer itself: Mini's decoded view is nested under
+        // cell, while Runtime::query returns grain/targetRoot and no target.
+        let (mut runtime, root) = crate::publication_refusal_tests::fixture(false, false, false);
+        let fixture = Fixture::new();
+        runtime.config.state_dir = fixture.state.clone();
+        runtime.config.task = "27920".into();
+        runtime.journal =
+            serde_json::from_value(serde_json::to_value(&fixture.journal).unwrap()).unwrap();
+        let view = json!({"type":"resource", "cell":{"root":"30", "grain":{
+            "task":"27920", "generation":"1", "remaining":"99", "reserved":"1", "status":"4"}}});
+        fs::write(
+            root.join("decoded-view.json"),
+            serde_json::to_vec(&view).unwrap(),
+        )
+        .unwrap();
+        let script = r#"#!/bin/sh
+set -eu
+[ "$1" = query ] || exit 91
+dir=
+while [ "$#" -gt 0 ]; do
+  case "$1" in --dir) dir=$2; shift 2 ;; *) shift ;; esac
+done
+mkdir "$dir"
+cp '__ROOT__/decoded-view.json' "$dir/view.json"
+printf '%s' '{"authorityRoot":"1","worldRoot":"2","height":"40"}' > "$dir/challenge.json"
+"#
+        .replace("__ROOT__", root.to_str().unwrap());
+        fs::write(&runtime.config.mini, script).unwrap();
+        let observed = runtime.query().unwrap();
+        assert!(observed.get("target").is_none());
+        assert_eq!(observed.pointer("/grain/task"), Some(&json!("27920")));
+        parent_matches(&runtime.journal, "27920", &observed).unwrap();
+        assert!(
+            runtime
+                .journal
+                .parent_hold
+                .as_ref()
+                .unwrap()
+                .reserve_confirmed
+        );
+        assert!(
+            runtime.journal.birth_operation.is_none() && runtime.journal.birth_pending.is_none()
+        );
+        drop(runtime);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn foreground_session_recovery_requires_exact_signed_parent_boundary() {
         let fixture = Fixture::new();
-        let exact = json!({"target":"27920","targetRoot":"30","grain":{"generation":"1","status":"4","remaining":"99","reserved":"1"}});
+        let exact = json!({"targetRoot":"30","grain":{"task":"27920","generation":"1","status":"4","remaining":"99","reserved":"1"}});
         parent_matches(&fixture.journal, "27920", &exact).unwrap();
-        for field in ["generation", "status", "remaining", "reserved"] {
+        let mut missing = exact.clone();
+        missing["grain"].as_object_mut().unwrap().remove("task");
+        missing["target"] = json!("27920");
+        assert!(parent_matches(&fixture.journal, "27920", &missing).is_err());
+        for field in ["task", "generation", "status", "remaining", "reserved"] {
             let mut changed = exact.clone();
             changed["grain"][field] = json!("999");
             assert!(parent_matches(&fixture.journal, "27920", &changed).is_err());
         }
-        for field in ["target", "targetRoot"] {
+        for field in ["targetRoot"] {
             let mut changed = exact.clone();
             changed[field] = json!("999");
             assert!(parent_matches(&fixture.journal, "27920", &changed).is_err());

@@ -96,6 +96,8 @@ def prepare(plan_path, exported_path, status_path, sources_path, output):
         pin = plan[key]; path = Path(pin['path'])
         require(path.is_absolute() and not path.is_symlink() and path.is_file() and sha(path) == pin['sha256'],
                 'recovery plan input changed: '+key)
+        if key in ('runtime','public_mini'):
+            require(path.stat().st_nlink == 1, 'installer binary must have exactly one hardlink: '+key)
     exported, status = read(exported_path), read(status_path)
     require(exported == read(Path(plan['predecessor_export']['path']))
             and status == read(Path(plan['predecessor_status']['path'])), 'fresh stopped evidence differs from reviewed predecessor')
