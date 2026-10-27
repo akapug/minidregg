@@ -174,7 +174,7 @@
     }
   },
   "consent_repair": {
-    "status": "companion build and scenario passed; real retained config qualification pending",
+    "status": "companion build, exact retained-config startup and copied-Store distinct-UID service checks passed",
     "baseline_consent_sha256": "1ce338424630443cfcac69e47ff0e001c1a0d42465749e07837ce8b7aedd7912",
     "baseline_core_sha256": "8fe7d8ed2b04ed8b796baf474c3373e78f047aad6f1cf5e0e0ee4b4e8a149ed6",
     "narrow_patch_sha256": "1debac2ae81ee77689149e7138baad7dbbc102773258e81e968bfa2f96c6b4f7",
@@ -188,6 +188,20 @@
     "binary_sha256": "1fca63aa1c82aefc2d9ea4f5161af951b505bb6a72edb6b34d8bac3d3ebe2717",
     "build_log_sha256": "0c5c36953bb75fd9de4b5c4cef7466fc2870b290306715cfde85bf393b81fa69",
     "companion": "679 Host modules verified unchanged; 13-module closure passed, 3 compiled; max Lean RSS 2960156 KiB",
-    "host_main_and_binary_recheck": "unchanged"
+    "host_main_and_binary_recheck": "unchanged",
+    "cross_host_binary": "/build/lanes/oracle-u3/minidregg-client-consent-new",
+    "original_config_probe": "/build/lanes/oracle-u3/consent-original-r2-probe/report.json",
+    "original_config_probe_sha256": "ff3319ae835295e70f651e8553e344a8953ef7a8730bca3352e0b70a35737ee2",
+    "original_config_scope": "old/new startup, pre-admission frame 233 and exact settings refusals; original config/Store/anchor unchanged",
+    "real_service_probe": "/othersys/lanes/oracle-u3-consent-real-service-evidence/report.json",
+    "real_service_probe_sha256": "7e6660d445ab8fed9ebcf3dfc6836e6b9cbed44e81a786d26632bca88feaa57e",
+    "real_service_scope": "distinct UID, inaccessible provider/config, actual Lean admission of retained R2 intent and key, source refusals, anchored restart; copied Store and path-rewritten config",
+    "memory_scope": "101504 KiB provider VmHWM at first completion on genesis-stage R2 copy; no full-history memory bound",
+    "transport_mini_sha256": "68f8eefadfb0d7bfa9a8bc69f7656a362e32688553ac7114b32cfd07bd9a1d48",
+    "transport_source_manifest_sha256": "5a0a6ccba691d31447f452b21f9ef222fb2de59ded623e2b644e6b2417053a19",
+    "transport_unit_tests": "9 passed",
+    "transport_adversarial_tests": "7 passed, fake provider; log sha256 ff45c1fc680014cbb9cf0f97eea3d77faf6d7a9d14cc385e8bbbb1571450434e",
+    "cohort": "/build/lanes/oracle-u3/rust-bin-consent",
+    "cohort_manifest_sha256": "9f2366fec193a9be6060b5f63610d446b002da29361ab1bf4afb15f735b2e7a0"
   }
 }

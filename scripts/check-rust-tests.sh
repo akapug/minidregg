@@ -131,6 +131,25 @@ armed_exact() { # armed_exact NAME ENVVAR WHAT CRATE [cargo args] -- FULL::TEST:
   exact "$name" "$crate" "$@"
 }
 
+# node_tests NAME FLOOR DIR: `npm ci` + `npm test` (node --test) in native/DIR; red when npm fails or
+# fewer than FLOOR tests passed. The TS SDK's pretest builds the wasm core with this script's cargo, so
+# the rows above and this one run the same Rust.
+node_tests() {
+  local name=$1 floor=$2 dir=$3 log=$logs/$1.log rc n
+  printf '  %-22s npm ci && npm test (native/%s)\n' "$name" "$dir"
+  (cd "native/$dir" && npm ci --no-audit --no-fund && RUSTUP_TOOLCHAIN=$rust npm test) >"$log" 2>&1
+  rc=$?
+  n=$(grep -E '^ℹ pass [0-9]+' "$log" | awk '{print $3}' | tail -n 1)
+  n=${n:-0}
+  if [ "$rc" != 0 ]; then
+    echo "rust-tests: RED: $name: npm exit $rc, $n passed ($log)"; red=$((red + 1))
+  elif [ "$n" -lt "$floor" ]; then
+    echo "rust-tests: RED: $name: $n tests ran, floor $floor ($log)"; red=$((red + 1))
+  else
+    echo "rust-tests: ok: $name: $n passed (floor $floor)"
+  fi
+}
+
 t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: participant_enrollment:: key_generation
 t grain-provider          27 grain-runtime -- provider credential publication_refusal
 t mini-keys-credentials   16 mini-keys --lib -- credentials::
@@ -282,6 +301,9 @@ exact sdk-lean-pin           mini-sdk --features native --test golden --test exa
 # one-bit difference to show the comparison goes red. Armed by MINI_SDK_LEAN_CODEC_LIB.
 armed_exact sdk-lean-codec MINI_SDK_LEAN_CODEC_LIB "the built libminidregg-intents.so" mini-sdk --features lean-codec --test lean_codec -- \
   the_sdk_encoder_equals_leans_exported_codec_on_every_golden_row
+# The TS SDK (native/mini-sdk-ts): golden, differential, custody, PQ and the pinned worked example against
+# the freshly built wasm core. It has no Cargo.toml; rust-rows.py selects it with mini-sdk.
+node_tests sdk-ts 24 mini-sdk-ts
 # resource-client (bin mini), one row per defect so a red names it
 # D1: sparse board rendering never scans the address space (bce707b7)
 exact rc-board-sparse        resource-client --bin mini -- \

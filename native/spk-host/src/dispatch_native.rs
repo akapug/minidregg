@@ -20,6 +20,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const HOST_MAX_FRAME: usize = 12_102_760;
+use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD, RESPONSE_PRIVATE_DISPATCH_NO_RECORD};
 const ROUTE_BOUND_DISPATCH_OPCODE: u8 = 164;
 const NO_RECORD_REFUSAL: &[u8] = b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1";
 const MAX_CONFIG: usize = 65_536;
@@ -568,9 +569,14 @@ impl PrivateOperator {
         read_exact_deadline(&mut stream, &mut reply[4..], deadline)?;
         let dispatch_reply = (operation == ROUTE_BOUND_DISPATCH_OPCODE && reply[4] == 34)
             || (operation == 34
-                && reply[4] == ROUTE_BOUND_DISPATCH_OPCODE
+                && reply[4] == RESPONSE_PRIVATE_DISPATCH_NO_RECORD
                 && &reply[5..] == NO_RECORD_REFUSAL);
-        if reply[4] != operation && reply[4] != 255 && !dispatch_reply {
+        // The Host's response markers are a namespace apart from requests:
+        // NO_RECORD carries a receiver's decided refusal, contention or
+        // unavailability (proven no-append), HOST_OUTCOME an undecided one.
+        // Both answer the operation; the fence reads them apart.
+        let marked = reply[4] == RESPONSE_NO_RECORD || reply[4] == RESPONSE_HOST_OUTCOME;
+        if reply[4] != operation && !marked && !dispatch_reply {
             return Err(invalid("Mini operator reply opcode mismatch"));
         }
         Ok(reply)
