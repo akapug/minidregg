@@ -384,7 +384,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
      budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
        maxInputTokens:131072,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
-   room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"lab-hermes"}}' >"$SD/grain-spec.json"
+   room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
   "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
 cp "$OUT" "$SD/grain-created.json"
@@ -392,29 +392,6 @@ cp "$OUT" "$SD/grain-created.json"
 # Room tools act in the tool task's workspace with a home inside stateDir.
 HERMES_WS=$G/state/resource-workspace
 mkdir -p -m 700 "$G/state/room-home"
-# The unit shape install-controller renders (user manager, all three variables).
-jq -n --arg r "$GRAIN_RUNTIME" --arg m "$MINI" --arg h "$HOST" --arg l "$SD/launcher/bwrap" --arg g "$SD/launcher/launch-gate" \
-  --arg b "$SD/runtime-root/grain-provider-bridge" '{artifacts:[$r,$m,$h,$l,$g,$b] | map({path:., sha256:""})}' >"$SD/pins.tmp"
-jq --rawfile sums <(sha256sum "$GRAIN_RUNTIME" "$MINI" "$HOST" "$SD/launcher/bwrap" "$SD/launcher/launch-gate" "$SD/runtime-root/grain-provider-bridge") '
-  ($sums | split("\n") | map(select(length > 0) | split("  ") | {(.[1]): .[0]}) | add) as $s
-  | .artifacts |= map(.sha256 = $s[.path])' "$SD/pins.tmp" >"$SD/pins.json"
-mkdir -p -m 700 "$SD/units"
-operator hermes "install-controller renders the controller unit (render only)" \
-  "$REPO/deploy/grain-host/install-controller" --config "$G/controller.json" --runtime "$GRAIN_RUNTIME" \
-    --unit-dir "$SD/units" --pins "$SD/pins.json" --render-only
-cp "$OUT" "$SD/rendered-unit.service"
-UNIT=mini-grain-controller@$PARENT_T
-checkp hermes "the rendered unit carries all three manager variables" sh -c "grep -q '^Environment=MINI_GRAIN_CONTROLLER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_WORKER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service\$' '$SD/rendered-unit.service'"
-operator hermes "CONTROLLER: start $UNIT (the rendered shape, as a transient unit)" \
-  systemd-run --user --unit="$UNIT" --description="j14:$SD" \
-    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
-    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
-    --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
-    --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
-    "$GRAIN_RUNTIME" serve "$G/controller.json"
-for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
-checkp hermes "the controller listens on its control socket" test -S "$G/state/control.sock"
-[ "$FAILED" = 0 ] || finish
 
 # The operator registers Hermes's task for lab and advertises it to the
 # founder (hermes-handoff registration/registry: what `summon` resolves).
@@ -440,10 +417,10 @@ cp "$OUT" "$SD/summon.out"
 [ "$RC" = 0 ] || finish
 OUTBOX=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)
 checkp summon "the hand-off: account, invitation, index, digest, manifest, sealed bundle" \
-  sh -c "for f in lab-hermes lab-invite lab-index lab-digest summon-lab handoff; do test -s '$OUTBOX/'\$f.json || exit 1; done"
+  sh -c "for f in \$(jq -r .account.name '$OUTBOX/summon-lab.json') lab-invite lab-index lab-digest summon-lab handoff; do test -s '$OUTBOX/'\$f.json || exit 1; done"
 [ "$FAILED" = 0 ] || finish
 checkp summon "Hermes's account is owned by Hermes and funded $BUDGET" \
-  jq -e --arg h "$HS" --arg b "$BUDGET" '.owner == $h and .funding == $b' "$OUTBOX/lab-hermes.json"
+  jq -e --arg h "$HS" --arg b "$BUDGET" '.owner == $h and .funding == $b' "$OUTBOX/$(jq -r .account.name "$OUTBOX/summon-lab.json").json"
 PROGRAM_T=$(jq -r .program.target "$OUTBOX/summon-lab.json")
 ACCOUNT_T=$(jq -r .account.target "$OUTBOX/summon-lab.json")
 A1=$(credit_of alice)
@@ -467,6 +444,34 @@ two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit
 ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
 ok program alice "submit ap"
 
+# The summon names Hermes's budget account (per assignment); the operator
+# provisions the controller config to match before the controller first opens.
+ACCT=$(jq -r .account.name "$OUTBOX/summon-lab.json")
+operator hermes "PROVISION: the controller config names the summoned budget account $ACCT" \
+  sh -c "jq --arg a '$ACCT' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
+# The unit shape install-controller renders (user manager, all three variables).
+jq -n --arg r "$GRAIN_RUNTIME" --arg m "$MINI" --arg h "$HOST" --arg l "$SD/launcher/bwrap" --arg g "$SD/launcher/launch-gate" \
+  --arg b "$SD/runtime-root/grain-provider-bridge" '{artifacts:[$r,$m,$h,$l,$g,$b] | map({path:., sha256:""})}' >"$SD/pins.tmp"
+jq --rawfile sums <(sha256sum "$GRAIN_RUNTIME" "$MINI" "$HOST" "$SD/launcher/bwrap" "$SD/launcher/launch-gate" "$SD/runtime-root/grain-provider-bridge") '
+  ($sums | split("\n") | map(select(length > 0) | split("  ") | {(.[1]): .[0]}) | add) as $s
+  | .artifacts |= map(.sha256 = $s[.path])' "$SD/pins.tmp" >"$SD/pins.json"
+mkdir -p -m 700 "$SD/units"
+operator hermes "install-controller renders the controller unit (render only)" \
+  "$REPO/deploy/grain-host/install-controller" --config "$G/controller.json" --runtime "$GRAIN_RUNTIME" \
+    --unit-dir "$SD/units" --pins "$SD/pins.json" --render-only
+cp "$OUT" "$SD/rendered-unit.service"
+UNIT=mini-grain-controller@$PARENT_T
+checkp hermes "the rendered unit carries all three manager variables" sh -c "grep -q '^Environment=MINI_GRAIN_CONTROLLER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_WORKER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service\$' '$SD/rendered-unit.service'"
+operator hermes "CONTROLLER: start $UNIT (the rendered shape, as a transient unit)" \
+  systemd-run --user --unit="$UNIT" --description="j14:$SD" \
+    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
+    --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
+    --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
+    "$GRAIN_RUNTIME" serve "$G/controller.json"
+for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
+checkp hermes "the controller listens on its control socket" test -S "$G/state/control.sock"
+[ "$FAILED" = 0 ] || finish
 operator hermes "DISPATCH: the sealed hand-off into Hermes's registered inbox (verified against the admitted origin)" \
   "$MINI" hermes-handoff --action dispatch --registration "$REG" --bundle "$OUTBOX/handoff.json" --socket "$SOCKET"
 RINBOX=$(jq -r '.inbox // empty' "$(find "$H/hermes" -name current.json | head -1)" 2>/dev/null)
@@ -499,7 +504,7 @@ cp "$OUT" "$SD/digest-1.txt"
 checkp attach1 "lab-digest has a section by Hermes covering the three entries" sh -c "grep -E 'created-by $HS' '$OUT' | grep -q 'entries #'"
 T1=$(paid_turns)
 check attach1 "three turns paid (two links, one digest)" 3 "$T1"
-check attach1 "Hermes's account = $BUDGET - 3*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - 3 * TURN))" "$(credit_of hermes lab-hermes)"
+check attach1 "Hermes's account = $BUDGET - 3*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - 3 * TURN))" "$(credit_of hermes "$ACCT")"
 
 # ------------------------------------------------ ask: answered from the history
 ok ask alice "ask lab what changed since $H0"
@@ -526,13 +531,13 @@ checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to 
 check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  created-by')"
 
 # ------------------------------------------------ topup
-BAL=$(credit_of hermes lab-hermes)
+BAL=$(credit_of hermes "$ACCT")
 require_nat topup "Hermes's balance before topup" "$BAL"
 ok topup alice "topup lab $TOPUP"
-check topup "topup lands on Hermes's account" "$((BAL + TOPUP))" "$(credit_of hermes lab-hermes)"
+check topup "topup lands on Hermes's account" "$((BAL + TOPUP))" "$(credit_of hermes "$ACCT")"
 
 # ------------------------------------------------ dismiss: revoke, return the rest
-BEFORE_RETURN=$(credit_of hermes lab-hermes)
+BEFORE_RETURN=$(credit_of hermes "$ACCT")
 A2=$(credit_of alice)
 require_nat dismiss "Hermes's balance before dismissal" "$BEFORE_RETURN"
 require_nat dismiss "alice's balance before dismissal" "$A2"
@@ -543,7 +548,7 @@ operator dismiss "DISPATCH: the sealed dismissal into Hermes's inbox" \
 hermes dismiss "returns the remainder"
 RETURNED=$(jq -r '.returned.returned // "none"' "$RSTATE/resident.json")
 check dismiss "Hermes returned its balance less the fee" "$((BEFORE_RETURN - FEE))" "$RETURNED"
-check dismiss "Hermes's account is empty" 0 "$(credit_of hermes lab-hermes)"
+check dismiss "Hermes's account is empty" 0 "$(credit_of hermes "$ACCT")"
 require_nat dismiss "the journaled return amount" "$RETURNED"
 check dismiss "alice received the remainder" "$((A2 + RETURNED))" "$(credit_of alice)"
 named dismiss hermes "read lab" "revoked|no-grant|noGrant"
