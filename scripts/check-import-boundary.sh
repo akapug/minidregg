@@ -57,7 +57,7 @@ cd "$(dirname "$0")/.." || exit 1
 python3 - <<'PY'
 import re, subprocess, sys
 sys.path.insert(0, "scripts")
-from lean_imports import header_imports
+from lean_imports import header_imports, header_layout
 ALLOWED = {
     "Theory":    {"Mathlib", "Lean", "Theory"},
     "Selvage":   {"Mathlib", "Theory", "Selvage"},
@@ -76,7 +76,14 @@ for f in files:
         continue
     # the header as Lean reads it: an indented import, several on one line, and the
     # public/meta/private modifiers all count (scripts/lean_imports.py)
-    for imported in header_imports(open(f, encoding="utf-8").read()):
+    text = open(f, encoding="utf-8").read()
+    # `import all Init.X` (scripts/lean-modularize.py CORE_REDUCE) adds no module to any closure, since
+    # every Lean file already imports Init; it only lets `decide` see core bodies core does not
+    # expose under the module system. It is no edge, so it is not counted against the row.
+    core_all = [m for (s, e, _, m) in header_layout(text)[1] if m.startswith("Init.") and text[s:e].split()[-2:-1] == ["all"]]
+    for imported in header_imports(text):
+        if imported in core_all:
+            continue
         parts = imported.split(".")
         tgt = parts[1] if parts[0] == "Minidregg" and len(parts) > 1 else parts[0]
         counts[(lib, tgt)] = counts.get((lib, tgt), 0) + 1

@@ -20,7 +20,9 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(git rev-parse --show-toplevel) || pipeline_die "not in a clone"
 cd "$root"
 log=$(mktemp "${TMPDIR:-/tmp}/lane-check.XXXXXX"); trap 'rm -f "$log"' EXIT
-mods=$(for f in "$@"; do sed -n 's/^import[[:space:]]\{1,\}//p' "$f"; done | tr ' ' '\n' | grep -v '^$' |
+# The header as Lean reads it (scripts/lean_imports.py: `public`/`meta` imports of module files included).
+mods=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from lean_imports import file_imports
+print("\n".join(m for f in sys.argv[1:] for m in file_imports(f)))' "$@" |
   while read -r m; do f=${m//.//}.lean; [ -f "$f" ] && echo "$m"; done | sort -u)
 if [ -n "$mods" ]; then
   # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
@@ -35,5 +37,7 @@ if [ -n "$mods" ]; then
   fi
 fi
 rc=0
-for f in "$@"; do LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} lake env lean "$f" || rc=$?; done
+# `lake lean`, not `lake env lean`: only the former passes the package's leanOptions (lakefile.toml), so a
+# file checks exactly as `lake build` compiles it (`lake env lean` gave 3 false errors on a module, 2026-10-27).
+for f in "$@"; do LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} lake lean "$f" || rc=$?; done
 exit $rc
