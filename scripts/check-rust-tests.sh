@@ -538,7 +538,12 @@ exact private-dealer-wal     private-backend --lib -- \
   dzk_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
   private_send_store::tests::dropped_reply_replays_identical_ciphertext_and_key_shares \
   private_send_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
-  private_send_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe
+  private_send_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
+  acss_id_store::tests::dropped_dealer_reply_replays_all_exact_private_rows_and_proofs \
+  acss_id_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  acss_id_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
+  king_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  king_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe
 # The anchor runs on transition_journal: a torn tail recovers, interior damage refuses, the
 # record is linear in the request
 exact private-anchor-wal     private-backend --lib -- \

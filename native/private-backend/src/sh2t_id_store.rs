@@ -207,18 +207,9 @@ pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
     }
     Ok(ps)
 }
-/// The journaled dealer event: tag 0, the dealing seed, and every zero-sharing polynomial.
-pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
-    dealer_body(0, seed, polys)
-}
 /// Tag 5: commit the dealing seed and inputs durably, publishing nothing.
-fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
-    dealer_body(5, seed, polys)
-}
-/// Tag 6: emit the deal from the committed seed and inputs.
-const EMIT_EVENT: [u8; 1] = [6];
-fn dealer_body(tag: u8, seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
-    let mut e = vec![tag];
+pub(crate) fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    let mut e = vec![5];
     e.extend(seed);
     Nat::new(polys.len() as u64).put(&mut e);
     for p in polys {
@@ -228,6 +219,8 @@ fn dealer_body(tag: u8, seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
     }
     e
 }
+/// Tag 6: emit the deal from the committed seed and inputs.
+pub(crate) const EMIT_EVENT: [u8; 1] = [6];
 #[derive(Clone)]
 pub struct Sh2tMachine {
     pub state: Sh2tId,
@@ -238,7 +231,7 @@ impl Machine for Sh2tMachine {
     fn apply(&mut self, e: &[u8]) -> Result<Vec<u8>> {
         let mut c = Cursor::new(e)?;
         let out = match c.byte()? {
-            tag @ (0 | 5) => {
+            5 => {
                 let seed = c.fixed32()?;
                 let n = count(&mut c)?;
                 if n != self.state.count() {
@@ -254,17 +247,13 @@ impl Machine for Sh2tMachine {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 c.finish()?;
-                if tag == 0 {
-                    self.state.dealer(&polys, seed)?
-                } else {
-                    if self.pending.is_some() {
-                        return Err(bad("Sh2t dealer already committed"));
-                    }
-                    // Dry run on a clone: a commit that could never emit is refused.
-                    self.state.clone().dealer(&polys, seed)?;
-                    self.pending = Some((seed, polys));
-                    vec![]
+                if self.pending.is_some() {
+                    return Err(bad("Sh2t dealer already committed"));
                 }
+                // Dry run on a clone: a commit that could never emit is refused.
+                self.state.clone().dealer(&polys, seed)?;
+                self.pending = Some((seed, polys));
+                vec![]
             }
             6 => {
                 c.finish()?;
