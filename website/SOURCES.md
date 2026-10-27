@@ -2,7 +2,7 @@
 
 Every factual sentence on the hand-written pages, and the file and lines it comes from, on
 `lane/W14-WEBSITE-REGEN` over main `df0cd116` (2026-10-05). `status.html` is not listed:
-`gen-status.py` generates it from the README's What is live table (`README.md:87-113`), each
+`gen-status.py` generates it from the table in `docs/STATUS.md:5-33`, each
 row carrying the landing commit or journey row it rests on, and the `website` gate fails when
 it is stale. When a source changes, fix the page and this map in the same commit. Paths are
 relative to the repository root. FRIENDS = `deploy/shell/FRIENDS.md`; OB =
@@ -16,18 +16,18 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 | Claim | Source |
 | --- | --- |
 | one shared world; one Lean-owned admission path; durable world root; refusal explained by clause; lost reply stays undecided with its exact retry | docs/DEMO-EXPERIENCE-2026-10-27.md §0 |
-| computation proposes, authority admits | README.md (the design paragraph); DEMO-EXPERIENCE §0 |
+| computation proposes, authority admits | README.md:8; DEMO-EXPERIENCE §0 |
 | "machine-checked" names the admission path's theorems, not every deployed behaviour | DEMO-EXPERIENCE §0 |
-| shuts down 11 November 2026 and everything is erased; opening target 29 October 2026 | README.md "The demo" |
+| shuts down 11 November 2026 and everything is erased; opening target 29 October 2026 | docs/DEMO-PREFIX-2026-10-26.md:336 (shutdown), :60 (opening target) |
 | devnet; may be re-genesised | deploy/shell/FRIENDS.md "beta, read this first"; DEMO-PREFIX §3 |
 | world-readable; hosted key held on the box, readable by operator and own account | DEMO-PREFIX §5 (D8); deploy/door/README.md (Custody contract) |
 | privacy not audited | FRIENDS:386-388 |
 | free route: fixed seats (door default 50), closes below the sponsor floor | deploy/door/README.md (Funding and caps: freeCap, sponsorFloor) |
-| paid route 50 DREGG a week on Solana; wallet, ssh key, account publicly linked; not yet live | README.md "What is live" (Pay-to-enrol); deploy/pay/enrol-terms.json |
+| paid route 50 DREGG a week on Solana; wallet, ssh key, account publicly linked; not yet live | docs/STATUS.md:13 (Browser join, free and paid routes); deploy/pay/enrol-terms.json |
 | application readable without an account | deploy/web/README.md |
-| door/application may answer 503 until the door opens | README.md "What is live" (rehearsal row: `/join` held closed) |
-| nano's testground at nano.demo.dregg.online | README.md "The demo"; DEMO-PREFIX §2 |
-| the repository and host binary keep the name minidregg | README.md |
+| door/application may answer 503 until the door opens | docs/STATUS.md:7 (The box today: `/join` held closed) |
+| nano's testground at nano.demo.dregg.online | docs/DEMO-PREFIX-2026-10-26.md:84 (§2) |
+| the repository and host binary keep the name minidregg | README.md:11 |
 
 ## language.html
 
@@ -84,8 +84,8 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 | Claim | Source |
 | --- | --- |
 | a signed request; admitted with a receipt or refused with a reason | FRIENDS:81-84 |
-| checked against capabilities, laws, exact read roots, funding | README.md:17-20 |
-| a computation re-run at admission and on every replay; no admission uses a proof | README.md:180-182; docs/SDK.md:135-136 |
+| checked against capabilities, laws, exact read roots, funding | docs/README.md:33 |
+| a computation re-run at admission and on every replay; no admission uses a proof | docs/OBJECTIVE-BEND.md:671-674, 695; docs/SDK.md:149-150 |
 | an Objective invocation: the receiver re-runs the front end on the package, requires a core equal to its own, prices the declared envelope by the tariff, requires the Plan's effects to equal the command's; ran on scratch worlds | OB:299-346; Kernel/ObjectiveBendNativeAdmission.lean:378-400, 468, 578, 650 |
 | Selvage outside the deployed umbrella except 12 modules through the digest backend | Deployed.lean:4-9, 14-16 |
 | grants with verbs; revocation | FRIENDS:168-173, 231 |
@@ -103,28 +103,28 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 | X25519 + ML-KEM-768 wrap | FRIENDS:420-422 |
 | the node sees membership, timing, sizes in 64-byte steps | FRIENDS:417-419 |
 | founder key trust on first use | FRIENDS:412-415 |
-| Generic Simplex BFT engine in Lean, compiled native | README.md:53-55 |
+| Generic Simplex BFT engine in Lean, compiled native | docs/GENERIC-SIMPLEX-NATIVE.md:1-9, 60 |
 | n = 3f + 1, at most f Byzantine | docs/GENERIC-SIMPLEX-NATIVE.md:11-12 |
-| safety over the engine model; liveness not established; four replicas on one host | README.md:80 |
+| safety over the engine model; liveness not established; four replicas on one host | docs/GENERIC-SIMPLEX-NATIVE.md:66-70, 285, 292 |
 
 ## join.html
 
-A redirect to https://demo.dregg.online/join (meta refresh and a link); no factual claim beyond the shutdown date (README.md "The demo").
+A redirect to https://demo.dregg.online/join (meta refresh and a link); no factual claim beyond the shutdown date (docs/DEMO-PREFIX-2026-10-26.md:336).
 
 ## edition.html
 
-Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/DEMO-EXPERIENCE-2026-10-27.md`; WF = `docs/WEB-FRONTEND-2026-10-27.md`; AM = `docs/APP-MARKET-2026-10-27.md`; HP = `docs/HOT-PATH-2026-10-27.md`. Every row is also a row of the README's What is live table (`README.md:87-113`), which `status.html` renders.
+Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/DEMO-EXPERIENCE-2026-10-27.md`; WF = `docs/WEB-FRONTEND-2026-10-27.md`; AM = `docs/APP-MARKET-2026-10-27.md`; HP = `docs/HOT-PATH-2026-10-27.md`. Every row is also a row of `docs/STATUS.md:5-33`, which `status.html` renders.
 
 | Claim | Source |
 | --- | --- |
-| the box still serves an earlier rehearsal, every login closed, `/join` closed until the owner opens it | README.md:87 (The box today); docs/DEMO-PREFIX-2026-10-26.md §2 |
-| the door opens on the owner's word; shuts down 11 November 2026 and everything is erased | README.md "The demo"; index.html rows above |
-| one admission path for documents, grants, money, programs, applications; refusal names its clause; the web shows the request that would pass | DE:53 (step 4), DE §0; README.md:22 |
+| the box still serves an earlier rehearsal, every login closed, `/join` closed until the owner opens it | docs/STATUS.md:7 (The box today); docs/DEMO-PREFIX-2026-10-26.md §2 |
+| the door opens on the owner's word; shuts down 11 November 2026 and everything is erased | docs/DEMO-PREFIX-2026-10-26.md:336; index.html rows above |
+| one admission path for documents, grants, money, programs, applications; refusal names its clause; the web shows the request that would pass | DE:53 (step 4), DE:13-18 (§0) |
 | the client keeps the exact call before sending; undecided attempt retried byte for byte | native/mini-sdk/src/custody.rs:1-27, 145; DE:55 (step 6) |
 | join: a name, a hosted key, one session link | DE:51 (step 2); WF (door rows) |
 | free route has a fixed number of seats | deploy/door/README.md:95 (`freeCap`) |
 | paid route 50 DREGG a week on Solana mainnet | deploy/pay/enrol-terms.json |
-| every shell command has a web form, 203 leaves; outcomes announced as live regions | README.md:95 (web pages row); native/resource-client/src/web/verbs.rs:610; native/resource-client/src/web/body.rs:1240 |
+| every shell command has a web form, 203 leaves; outcomes announced as live regions | docs/STATUS.md:15 (Web pages and accessibility); native/resource-client/src/web/verbs.rs:610; native/resource-client/src/web/body.rs:1240 |
 | export archive of documents, receipts and key, streamed then deleted; one per member per 10 minutes | WF:182, WF:197-199 |
 | research consent: unchecked box at the door, a fact in the member's world, shown and changeable on the export page | WF:185-193; deploy/policy/RETENTION.txt |
 | a built-in tale under a sealed law; a member can install a law and see the next write judged | DE:65-66 (doors 11, 12); Kernel/StoryLaw.lean |
@@ -144,4 +144,3 @@ Added on `lane/website-edition` over main `9123503ff` (2026-10-27). DE = `docs/D
 | not in this edition: fn transport and a second node | docs/DEMO-PREFIX-2026-10-26.md:344 |
 | not in this edition: the oracle as an application | DE:62 (door 8); docs/ORACLE-GRAIN-2026-10-27.md |
 | not in this edition: a networked private-computation service | docs/UNTOUCHED-DEPUTY-STATE.md:25 |
-| Lean owns admission; every keystone enters as a stated theorem before proof work | README.md:22; CLAUDE.md:18 |
