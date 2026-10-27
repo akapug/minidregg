@@ -291,7 +291,8 @@ ok leave alice "room invite i-carl lab $C --verbs observe"
 handoff leave alice i-carl
 ok leave carl "import labc $REF"
 ok leave carl "read labc"
-ok leave carl "renounce c-bob $BOBCAP"
+# by number with its kind: carl holds no reference to bob's grant (a bare number names a reference)
+ok leave carl "renounce c-bob $BOBCAP object"
 named leave carl "submit c-bob" notHolder
 ok leave bob "read lab"
 ok leave bob "room leave l-bob lab"
