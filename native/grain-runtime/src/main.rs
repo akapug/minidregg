@@ -20125,4 +20125,68 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         assert_eq!(result["toolCharge"], "0");
         fs::remove_dir_all(&root).unwrap();
     }
+    /// A pool 429 is a decided, retryable provider reply. It is carried by the
+    /// attempt's `decision`, never by a free-text unresolved-effect note.
+    #[test]
+    fn pool_429_through_handle_provider_leaves_no_note() {
+        let (root, mut runtime) = restart_resolution_fixture("pool-429");
+        let dir = runtime.config.state_dir.clone();
+        let request_path = dir.join("provider-0000000000000009.controller-request");
+        write_new(&request_path, b"{}").unwrap();
+        runtime.journal.provider_attempt = Some(ProviderAttempt {
+            fence: None,
+            placement: None,
+            id: 9,
+            prompt_operation_id: 42,
+            parent_generation: "3".into(),
+            model: "local".into(),
+            request_path: request_path.clone(),
+            request_bytes: 2,
+            request_sha256: sha256_file(&request_path).unwrap(),
+            send_started: true,
+            outcome_path: None,
+            outcome_bytes: None,
+            outcome_sha256: None,
+            outcome: None,
+            response_status: None,
+            response_content_type: None,
+            response_headers_path: None,
+            response_headers_bytes: None,
+            response_headers_sha256: None,
+            metering_pin: None,
+            meter_report_path: None,
+            meter_report_sha256: None,
+            metered_charge: None,
+            route: ProviderRouteRecord {
+                provider: "pool-row".into(),
+                endpoint: "https://pool.invalid/v1/chat/completions".into(),
+                credential: "pool".into(),
+            },
+            decision: None,
+        });
+        runtime.journal.unresolved_external.clear();
+        let (reply, _recv) = std::sync::mpsc::channel();
+        runtime.handle_provider(provider::ProviderCommand::Outcome {
+            attempt_id: 9,
+            outcome: provider::ProviderOutcome::Received {
+                status: 429,
+                content_type: "application/json".into(),
+                exact_headers: b"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n\r\n".to_vec(),
+                exact_body: br#"{"error":"rate limited"}"#.to_vec(),
+            },
+            reply,
+        });
+        assert!(
+            runtime.journal.unresolved_external.is_empty(),
+            "a decided pool 429 must not leave a note: {:?}",
+            runtime.journal.unresolved_external
+        );
+        let attempt = runtime.journal.provider_attempt.as_ref().unwrap();
+        let decision = attempt.decision.as_ref().expect("429 is decided on the attempt");
+        assert_eq!(
+            decision.class,
+            provider_failure::FailureClass::CompleteNon200 { status: 429 }
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }
