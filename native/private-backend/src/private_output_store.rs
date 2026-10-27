@@ -182,8 +182,9 @@ impl Store {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use crate::{
         arithmetic_reference,
@@ -215,7 +216,7 @@ pub(crate) mod tests {
         instance: u64,
     ) -> (
         Vec<Option<Store>>,
-        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<PathBuf>,
     ) {
         let (completed, anchors) = arithmetic_reference::tests::completed(left, right, instance);
@@ -223,11 +224,11 @@ pub(crate) mod tests {
     }
     fn stores_from_completed(
         completed: Vec<crate::field_network_layers::LayerEngine>,
-        anchors: Vec<crate::triple_king::tests::AnchorFixture>,
+        anchors: Vec<crate::custody::AnchorHandle>,
         instance: u64,
     ) -> (
         Vec<Option<Store>>,
-        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<PathBuf>,
     ) {
         stores_from_completed_descriptor(
@@ -239,12 +240,12 @@ pub(crate) mod tests {
     }
     pub(crate) fn stores_from_completed_descriptor(
         completed: Vec<crate::field_network_layers::LayerEngine>,
-        anchors: Vec<crate::triple_king::tests::AnchorFixture>,
+        anchors: Vec<crate::custody::AnchorHandle>,
         instance: u64,
         descriptor: &[u8],
     ) -> (
         Vec<Option<Store>>,
-        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<PathBuf>,
     ) {
         let paths = (0..4)

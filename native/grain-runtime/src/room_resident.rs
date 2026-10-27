@@ -307,7 +307,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     resident_completion::drain(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?; }
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed".into()); }
-    resident_requests::receive_maintenance(&options.state,journal.last_completion.as_ref())?;
+    resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
@@ -347,7 +347,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             if !prompt(&config, &options.controller, &prepared, &mut journal, &state, Some(&maintenance_input))? {continue;}
             resident_completion::drain(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?;
-            resident_requests::receive_maintenance(&options.state,journal.last_completion.as_ref())?;
+            resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }

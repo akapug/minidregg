@@ -121,7 +121,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JFEEDBACK JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 # The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
 # of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
 #   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
@@ -132,7 +132,7 @@ STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K1
 # JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
 # set naming no step refuses every run before anything starts: a new step must be placed.
 SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
-DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT JFEEDBACK J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
 journey_sets_check() {
   local id n bad=""
@@ -359,6 +359,7 @@ TITLE[JJOB]="the job floor: a Nock job posted, run, checked by re-execution, set
 TITLE[JJOBM]="a job's money: escrow, bond, payout and slash as Book turns (own Store)"
 TITLE[KCL]="K-FIELD-CLOSURE: an undeclared field is refused by name; an open cell admits it"
 TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
+TITLE[JFEEDBACK]="members report a problem into their own feedback room; the operator reads it with its context; no member reads another's"
 TITLE[JCHAT]="friends talk in a room: say, tail, topic, pin, react, the Discord bridge"
 TITLE[JINSPECT]="inspect views: cap tree, law, why, turn, receipt; nothing committed (own Store)"
 TITLE[JLS]="law-sat: an unsatisfiable law is caught at install; can --any's write is admitted (own Store)"
@@ -403,7 +404,7 @@ fail() { DETAIL="$*"; return 1; }
 # refusal) AND names the Host's decoded RefusalReason for `host refused
 # <stage>` AND the encoded refusal carries the native outcome v6 tag. A client
 # crash, a parse error or an undecoded frame is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7636   # DREGG/NATIVE-HOST/OUTCOME/v6
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7637   # DREGG/NATIVE-HOST/OUTCOME/v7
 refused() {
   local name=$1
   [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
@@ -1112,6 +1113,7 @@ step_JPD() { hook jprotected-docs "private comments and text on the JDV Store: i
 step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
+step_JFEEDBACK() { hook jfeedback "feedback: a member reports from a refusal context into the feedback-NAME room the operator founded; reports/tail show the text with client, attempt, clause and page; reports --digest is the relay line; a second member cannot read it (lane pd-feedback)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_KCH() { hook jchan-epoch "CH-EPOCH rows: e0 e1 e2 admitted; a gap, an out-of-order record, E-1 roots and a non-sequencer refused by name; a wrong-length opening refused maskLength; tail in order; cold audit (lane ch-epoch)"; }
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
@@ -1242,6 +1244,7 @@ run_step JJOBM J0
 run_step KCL J1
 run_step J12A J0
 run_step JCHAT J0
+run_step JFEEDBACK J0
 run_step JINSPECT J0
 run_step JLS J0
 run_step JPAY1 J0

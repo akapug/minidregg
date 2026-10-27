@@ -271,7 +271,7 @@ fn clip(text: &str, n: usize) -> String {
 }
 
 /// `/verb/NAME`: one form per alternative of the verb's usage.
-pub(super) fn page(site: &Site, name: &str) -> Page {
+pub(super) fn page(site: &Site, name: &str, target: &str) -> Page {
     let Some(verb) = crate::shell::command_catalog().find(|v| v.name == name) else {
         return simple(404, "No such verb", &format!("the shell has no verb {name}"));
     };
@@ -292,8 +292,13 @@ pub(super) fn page(site: &Site, name: &str) -> Page {
         body.push_str("<p class=note>The public reader runs no verb.</p>");
         return Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body };
     }
+    // A link may prefill the fields (`/verb/feedback?page=/doc&clause=...`): a query key is a
+    // field's name, lowercased and without its dashes (`--from` is `from`, `TEXT` is `text`), and
+    // reaches every alternative that has such a field. Values are fields to read and send, never
+    // run: the person presses Run.
+    let prefill = |key: &str| super::body::query(target, key);
     for (i, alt) in alts.iter().enumerate() {
-        body.push_str(&form(name, i, alt, verb.operation, &format!("/verb/{}", escape(name)), ""));
+        body.push_str(&form_with(name, i, alt, verb.operation, &format!("/verb/{}", escape(name)), "", &prefill));
     }
     Page { status: 200, title: name.to_owned(), stamp: Stamp::None, body }
 }
@@ -304,10 +309,20 @@ pub(super) fn form_for(name: &str, literals: &str, action: &str, hidden: &str) -
     let verb = crate::shell::command_catalog().find(|v| v.name == name)?;
     let alts = alternatives_of(name, verb.usage);
     let (index, alt) = alts.iter().enumerate().find(|(_, a)| a.literals() == literals)?;
-    Some(form(name, index, alt, verb.operation, action, hidden))
+    Some(form_with(name, index, alt, verb.operation, action, hidden, &|_| None))
 }
 
 fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidden: &str) -> String {
+    form_with(name, index, alt, operation, action, hidden, &|_| None)
+}
+
+/// The query key that prefills a token: an argument's name or a flag's, lowercased, letters and
+/// digits only (`TEXT|@FILE` is `textfile`, `--from` is `from`).
+fn prefill_key(name: &str) -> String {
+    name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
+}
+
+fn form_with(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidden: &str, prefill: &dyn Fn(&str) -> Option<String>) -> String {
     let mut out = format!(
         "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"{action}\">{hidden}<input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
         escape(&alt.literals()),
@@ -322,12 +337,12 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         let id = format!("{prefix}-{i}");
         match tok {
             Tok::Lit(_) => {}
-            Tok::Arg { name, optional, kind } => out.push_str(&input(&id, &field, name, *optional, kind)),
+            Tok::Arg { name, optional, kind } => out.push_str(&input(&id, &field, name, *optional, kind, prefill(&prefill_key(name)).as_deref())),
             Tok::Flag { name, value: None, optional } => {
                 out.push_str(&format!("<label class=\"check\" for=\"flag-{id}\"><input type=\"checkbox\" id=\"flag-{id}\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
             }
             Tok::Flag { name, value: Some((placeholder, kind)), optional } => {
-                out.push_str(&input(&id, &field, &format!("{name} {placeholder}"), *optional, kind));
+                out.push_str(&input(&id, &field, &format!("{name} {placeholder}"), *optional, kind, prefill(&prefill_key(name)).as_deref()));
             }
         }
     }
@@ -344,21 +359,22 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
 
 /// One field of a derived form: labelled by the grammar leaf's argument name (and kind, as the
 /// placeholder shows), with a page-unique `id` so the label resolves to this field and no other.
-fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind) -> String {
+fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind, value: Option<&str>) -> String {
     let req = if optional { "" } else { " required" };
+    let preset = value.map(|v| format!(" value=\"{}\"", escape(v))).unwrap_or_default();
     let shown = format!("{}{}", escape(label), if optional { " <span class=note>(optional)</span>" } else { "" });
     match kind {
-        Kind::Text => format!("<label for=\"{id}\">{shown}</label><textarea id=\"{id}\" name=\"{field}\" maxlength=\"4096\"{req}></textarea>"),
+        Kind::Text => format!("<label for=\"{id}\">{shown}</label><textarea id=\"{id}\" name=\"{field}\" maxlength=\"4096\"{req}>{}</textarea>", value.map(escape).unwrap_or_default()),
         Kind::Choice(options) => format!(
             "<label for=\"{id}\">{shown}</label><select id=\"{id}\" name=\"{field}\">{}{}</select>",
             if optional { "<option value=\"\">—</option>" } else { "" },
             options.iter().map(|o| format!("<option>{}</option>", escape(o))).collect::<String>()
         ),
-        Kind::Ref => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}>"),
-        Kind::Id => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
-        Kind::Number => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
-        Kind::Word => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\"{req}>"),
-        Kind::Rest => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
+        Kind::Ref => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}{preset}>"),
+        Kind::Id => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", escape(value.unwrap_or(&super::body::fresh_id()))),
+        Kind::Number => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}{preset}>"),
+        Kind::Word => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\"{req}{preset}>"),
+        Kind::Rest => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}{preset}>"),
     }
 }
 
@@ -377,6 +393,7 @@ pub(super) fn assemble(site: &Site, name: &str, form: &std::collections::BTreeMa
     };
     let field = |i: usize| form.get(&format!("a{i}")).map(|v| v.trim().to_owned()).unwrap_or_default();
     let mut words: Vec<String> = Vec::new();
+    let mut rest_text: Option<String> = None;
     let mut id = String::new();
     let mut files = 0usize;
     for (i, tok) in alt.tokens.iter().enumerate() {
@@ -395,11 +412,12 @@ pub(super) fn assemble(site: &Site, name: &str, form: &std::collections::BTreeMa
                 }
                 match kind {
                     // Free text rides on the line as typed (the verb takes the rest of the line).
+                    // The grammar reads flags only BEFORE the free text, so the text goes last.
                     Kind::Rest => {
                         if value.contains('\n') {
                             return Err(simple(400, name, &format!("{label} is one line")));
                         }
-                        words.push(value);
+                        rest_text = Some(value);
                     }
                     Kind::Text if !(value.starts_with('@') && !value.contains('\n')) => {
                         files += 1;
@@ -426,6 +444,7 @@ pub(super) fn assemble(site: &Site, name: &str, form: &std::collections::BTreeMa
             }
         }
     }
+    words.extend(rest_text);
     let mut lines = vec![words.join(" ")];
     let index = form.get("alt").and_then(|a| a.parse::<usize>().ok()).unwrap_or(0);
     let mut is_transition = transition_of(name, verb.usage, verb.operation, index, &alt.literals());
@@ -571,6 +590,19 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
 mod tests {
     use super::*;
 
+    /// The research door: its form is derived from the grammar leaf (no hand-written HTML), and
+    /// the words the verb page prints (`verb.operation`) carry the word "research" and the label.
+    #[test]
+    fn the_private_compute_form_is_derived_and_the_page_text_carries_the_research_label() {
+        let verb = crate::shell::command_catalog().find(|v| v.name == "private-compute").expect("in the catalog");
+        assert_eq!(verb.usage, "private-compute LEFT RIGHT");
+        assert!(verb.operation.contains("RESEARCH") && verb.operation.contains(crate::private_compute::LABEL), "{}", verb.operation);
+        let html = form_for("private-compute", "private-compute", "/verb/private-compute", "").expect("one leaf");
+        assert!(html.contains("LEFT") && html.contains("RIGHT") && html.contains("name=\"a1\"") && html.contains("name=\"a2\""), "{html}");
+        assert!(!transition_of("private-compute", verb.usage, verb.operation, 0, "private-compute"), "a local computation is not a transition");
+        assert!(!html.contains("submit ID"), "never a proposal");
+    }
+
     #[test]
     fn every_catalog_usage_parses_into_literal_led_alternatives() {
         let mut verbs = 0;
@@ -714,5 +746,57 @@ mod tests {
         // The page-unique ids: this form's fields are `delegate-0-*`, not the bare `a{i}`
         // (token 0 is the literal `delegate`, so the first field is index 1).
         assert!(html.contains("id=\"delegate-0-1\"") && html.contains("id=\"delegate-0-submit\""), "{html}");
+    }
+
+    fn bare_site() -> Site {
+        Site {
+            mutations: Mutex::new(()),
+            home: None,
+            root: std::env::temp_dir(),
+            workspace: Value::Null,
+            subject: "7".into(),
+            token: String::new(),
+            front: Front { origins: Vec::new(), read_only: false },
+            base: String::new(),
+            face: Face::Body,
+            shell: None,
+        }
+    }
+
+    /// The feedback form is derived from the verb's grammar, a link's query prefills it, and what
+    /// the person submits assembles to the line the shell parses back to the same report.
+    #[test]
+    fn the_feedback_form_is_derived_prefilled_and_assembles_to_a_report() {
+        let verb = crate::shell::command_catalog().find(|v| v.name == "feedback").expect("the shell has feedback");
+        let alts = alternatives_of("feedback", verb.usage);
+        assert_eq!(alts.len(), crate::shell_grammar::FEEDBACK.leaves.len(), "one form per grammar leaf");
+        let clause = r#"refused: law-denied: field 2 "monotone" (before 2)"#;
+        let target = format!("/verb/feedback?clause={}&from=w-abc&page=%2Fdoc%2Fpaper", super::super::body::pct(clause));
+        let html = form_with("feedback", 0, &alts[0], verb.operation, "/verb/feedback", "", &|k| super::super::body::query(&target, k));
+        assert!(html.contains("value=\"w-abc\"") && html.contains("value=\"/doc/paper\""), "{html}");
+        assert!(html.contains(&format!("value=\"{}\"", escape(clause))), "{html}");
+        let blank = form("feedback", 0, &alts[0], verb.operation, "/verb/feedback", "");
+        assert!(!blank.contains("w-abc") && !blank.contains("/doc/paper"), "no prefill without a query");
+        // The person types the text; the fields assemble, the free text last.
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("alt".to_owned(), "0".to_owned());
+        for (i, tok) in alts[0].tokens.iter().enumerate() {
+            let value = match tok {
+                Tok::Arg { .. } => "the save button is gone",
+                Tok::Flag { name, .. } if name == "--from" => "w-abc",
+                Tok::Flag { name, .. } if name == "--clause" => clause,
+                Tok::Flag { name, .. } if name == "--page" => "/doc/paper",
+                _ => continue,
+            };
+            fields.insert(format!("a{i}"), value.to_owned());
+        }
+        let site = bare_site();
+        let (lines, _, transition, _) = assemble(&site, "feedback", &fields).unwrap_or_else(|_| panic!("assemble"));
+        assert!(transition, "feedback is a world transition");
+        assert_eq!(
+            crate::chat::plan(&lines[0]).unwrap().unwrap(),
+            crate::chat::Line::Feedback { text: "the save button is gone".into(), from: Some("w-abc".into()), clause: Some(clause.into()), page: Some("/doc/paper".into()), via: None },
+            "{}", lines[0]
+        );
     }
 }

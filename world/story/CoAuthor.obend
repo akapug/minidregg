@@ -294,56 +294,127 @@ def proposalCount(ps: Proposals) -> Nat:
     case empty(_): 0n
     case more(m): 1n + proposalCount(m.tail)
 
-# ---- (2) the story as an Activity ----------------------------------------------
+# ---- (2) the story as an Activity on the kernel (Kernel/ObjectiveActivity) -------
+# One input value (`Opening`); the kernel's `resumed {outcome, view}` response and its own Plans:
+# `await {write, on, patience}` for the next event (the keeper, one decider, relays each typed
+# `Event`) and `commit {write}` for a sealed chapter: the chapter is WRITTEN into the object's
+# declared state (`Shelf`) through the object's law, decided at the yield (`settled`; a law that
+# refuses the write refuses the turn). The first yield creates the shelf when the object has none.
 
-record Await:
-  chapter: Nat
-  closes: Nat
+record Opening:
+  title: String
+  window: Nat
+  total: Nat
+  electorate: Electorate
+  now: Nat
+  keeper: Nat
+  fresh: Bool
 
-record Publish:
-  chapter: Nat
+record Shelf:
+  chapters: Nat
   author: Nat
   text: String
 
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+sum EditString:
+  keep: {}
+  set: String
+
+record Write:
+  chapters: EditNat
+  author: EditNat
+  text: EditString
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
+
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+
+record Commit:
+  write: Write
+
 sum Plan:
   await: Await
-  publish: Publish
+  commit: Commit
 
-sum Response:
-  event: Event
+sum Outcome:
+  reply: Event
   settled: {}
   refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
 
-def awaiting(s: Story) -> Await:
-  {chapter: chapterCount(s.chapters) + 1n, closes: s.round.closes}
+record View:
+  version: Nat
+  state: Shelf
 
-# The result is "complete" once the last chapter is sealed and published. Every
-# unfolding of `serve` past a yield costs one admitted turn.
-def serve(s: Story) -> Activity<Plan, Response, String>:
-  match perform(Plan.await(awaiting(s))):
-    case event(e): step(s, react(s, e))
-    case settled(_): serve(s)
-    case refused(_): serve(s)
+record Step:
+  outcome: Outcome
+  view: View
 
-def step(s: Story, t: Transition) -> Activity<Plan, Response, String>:
+sum Response:
+  resumed: Step
+
+def keepShelf() -> Write:
+  {chapters: EditNat.keep(), author: EditNat.keep(), text: EditString.keep()}
+
+def firstWrite(o: Opening) -> Write:
+  if o.fresh then {chapters: EditNat.set(0n), author: EditNat.set(0n), text: EditString.set("")} else keepShelf()
+
+# The result is "complete" once the last chapter is sealed and published. Every unfolding past a
+# yield costs one admitted turn; an unanswered await (unknown, timed out, broken) waits again.
+def serve(o: Opening, s: Story, w: Write) -> Activity<Plan, Response, String>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): step(o, s, react(s, e))
+        case settled(_): serve(o, s, keepShelf())
+        case refused(_): serve(o, s, keepShelf())
+        case unknown(_): serve(o, s, keepShelf())
+        case timedOut(_): serve(o, s, keepShelf())
+        case broken(_): serve(o, s, keepShelf())
+        case upgraded(_): serve(o, s, keepShelf())
+
+def step(o: Opening, s: Story, t: Transition) -> Activity<Plan, Response, String>:
   match t:
-    case refused(r): serve(r.story)
-    case moved(next): serve(next)
-    case appended(a): publish(s, a)
+    case refused(r): serve(o, r.story, keepShelf())
+    case moved(next): serve(o, next, keepShelf())
+    case appended(a): publish(o, s, a)
 
-# The chapter is the Plan; a refused publication leaves the round where it was
-# (it stays open for a seal to be retried).
-def publish(s: Story, a: Appended) -> Activity<Plan, Response, String>:
-  match perform(Plan.publish({chapter: a.chapter.number, author: a.chapter.author, text: a.chapter.text})):
-    case settled(_): finish(a.story)
-    case refused(_): serve(s)
-    case event(_): serve(s)
+# The chapter is a commit into the shelf; anything but `settled` leaves the round where it was.
+def publish(o: Opening, s: Story, a: Appended) -> Activity<Plan, Response, String>:
+  match perform(Plan.commit({write: {chapters: EditNat.set(a.chapter.number), author: EditNat.set(a.chapter.author), text: EditString.set(a.chapter.text)}})):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): finish(o, a.story)
+        case refused(_): serve(o, s, keepShelf())
+        case reply(_): serve(o, s, keepShelf())
+        case unknown(_): serve(o, s, keepShelf())
+        case timedOut(_): serve(o, s, keepShelf())
+        case broken(_): serve(o, s, keepShelf())
+        case upgraded(_): serve(o, s, keepShelf())
 
-def finish(s: Story) -> Activity<Plan, Response, String>:
-  if s.done then "complete" else serve(s)
+def finish(o: Opening, s: Story) -> Activity<Plan, Response, String>:
+  if s.done then "complete" else serve(o, s, keepShelf())
 
-def tell(title: String, window: Nat, total: Nat, electorate: Electorate, now: Nat) -> Activity<Plan, Response, String>:
-  serve(start(title, window, total, electorate, now))
+def tell(o: Opening) -> Activity<Plan, Response, String>:
+  serve(o, start(o.title, o.window, o.total, o.electorate, o.now), firstWrite(o))
 
 # ---- the named scenario ----------------------------------------------------------
 # "The lighthouse": three chapters, windows of 10 heights, started at height 0.

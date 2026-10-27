@@ -61,6 +61,20 @@ structure Policy where
   limit_pos : 0 < limit
   window_pos : 0 < windowMs
 
+/-- The Host's default (coordinator's ruling, 2026-10-27; ASSUMED until `jtour` counts signed
+frames per verb): 300 signed requests per subject per 60 s, 5 a second sustained. -/
+def hostDefault : Policy := ⟨300, 60000, by decide, by decide⟩
+
+/-- A configured rate; a zero limit or a zero window refuses the configuration. -/
+def Policy.make (limit windowMs : Nat) : Except String Policy :=
+  if h₁ : 0 < limit then
+    if h₂ : 0 < windowMs then .ok ⟨limit, windowMs, h₁, h₂⟩
+    else .error "requestRate.windowMs must be positive"
+  else .error "requestRate.limit must be positive"
+
+/-- The exempt predicate of a configured subject list. -/
+def exemptOf (subjects : List Nat) (subject : Nat) : Bool := subjects.contains subject
+
 /-- One subject's current window: when it started and how many requests it has charged. -/
 structure Slot where
   start : Nat

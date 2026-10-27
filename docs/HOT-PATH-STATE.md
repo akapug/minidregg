@@ -1,46 +1,62 @@
 # HOT-PATH lane state (2026-10-27 night)
 
 Branch `lane/hot-path-v4` (from main cut 12 f1ce1626). Mac worktree `/Users/ember/dev/minidregg-lanes/hot-path-world-checkpoint`
-(`.lake/build` is an APFS clone, 0 hard links). Per-file check, in dependency order, writing the olean so importers see it:
-`lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so F.lean -o .lake/build/lib/lean/F.olean -i .lake/build/lib/lean/F.ilean`
-(the dynlib is needed for the `native_decide` epoch pins). The modules downstream of the codec in `Host.Main`'s closure, in
-order, are listed by the script in this file's history (430; DurableReceiverCore is 6th, DurableServed 12th, DurableStoreAudit
-269th). Rules: no closure on the Mac; do not block on a closure (the integrator's hourly cut is the closure; fix its reds
-forward); dregg-ref closures through `closure-lock`; seed only `.lake/packages`; stop processes only by PID file.
-Rulings: snapshots fast-forwarded, replay = `store audit` (ember); option A now, B next; re-genesis is free, v4 lands on its
-own cut when the closure is green and the proofs are in.
+(edit and git only). **No Lean on the Mac at all** (coordinator, after the Mac ran out of swap): every elaboration runs
+on dregg-ref (`ssh -o IdentitiesOnly=yes -i ~/.ssh/id_portable lanes@2.31.71.194`; packages warm at
+`/build/minidregg/.lake/packages`; per-file `lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so F.lean` there,
+closures through `closure-lock swarm-build`). Integration is continuous (pushes land on main as they arrive); no lane waits
+on its own closure; the continuous build names reds, fix them forward. Statements go to the auditor (agent
+af7a93e7b8ba729d4) with a copy to the coordinator. Stop processes only by PID file or the harness task that started them.
+Rulings: snapshots fast-forwarded, replay = `store audit` (ember); option A now, B next; re-genesis is free.
 
 ## Landed on lane/hot-path-v4
 
 | sha | what |
 |---|---|
-| e4e22cb0 | `Compiler/DurableFastForwardSpec.lean` (auditor passes 5–13): one `Impl`, one `Spec`. `FastForward` takes the prefix ENTRIES (records + tags); `Impl.ff` = `ffState` (executing: head state and World from checkpoint + suffix; no prefix in its type) then the gate (count = checkpoint height, every prefix tag verifies from the seed's chain, recomputed chain = checkpoint chain), then records decoded and the root log read from tags. `Opened.view` = executed part + `rebuildDerived` + `State.snapshot head records` + root log. Laws: MAC gate (+ `sealOpens`, `.foreignSemantics`/`.badMac`), `suffixGate`/`genesisGate` on `ffState`, `exact` over the pair, `viewOpened`, `representsFromDerived`, keystone over `Wrote` (full + light sessions, seals at any height via one `bodyOf`, reopens of the Store's own entries), `inhabited`, `cutHonest` (+ backup rule `newestAtOrBelow`/`openInputs`), audit sound/refuses, `headSealZero`. `View.Honest` pins the root log to `replayRoot`. |
-| 107f040d | option A code: codec `Body.system`/`semantics`, frame v4, epoch `checkpoint/v5`, `.foreignSemantics`; `worldOfCheckpoint`, `trackFrom` in `loadChained`; `Loaded.system` in every sealer; light session `Start.world`/`Opening.world` advanced per suffix and append; `sealHead` + Host verb `checkpoint` + seal at a session's clean end; spec `Body4 := Body`, `Body.world`. Per-file green on the Mac up to DurableServed; `DurableStoreAudit`, `Host.Main` unchecked until a closure. |
-| 77b8f896, af8dd3a1, 5e554051 | `Compiler/DurableFastForwardProofs.lean` (standard axioms): `headState_snapshot`, `resume_honest`, `foldRecords_append`, `worldAt_fastForward`, `openSealed_foreign_semantics`. |
+| e4e22cb0, aa025c8d, fce764f7, cfc70253 (spec part) | `Compiler/DurableFastForwardSpec.lean`, auditor passes 5–14, NOTHING FURTHER from the auditor (pass 14 addendum, lane/audit-platform c8f30e7bb). One `Impl`, one `Spec`. `FastForward` takes the prefix ENTRIES; `Impl.ff` = `ffState` (prefix-free) then the gate (count, prefix tags from the seed's chain, chain = checkpoint's) then decode + root log from tags. `ofOpened : Opened → Except String Loaded4` (the session build may refuse); laws `viewOpened` (on success), `reopens` (succeeds under `exact`'s hypotheses), `buildSound` (a built session's snapshot is `resume` of the whole image from `stateCheckpoint` at its height: a reused prefix nullifier makes the build refuse); `suffixGate`/`genesisGate` pin `stateCheckpoint` to `body.state` / `State.ofSeed`. Plus MAC gate, `exact`, `representsFromDerived`, keystone over `Wrote`, `inhabited`, `cutHonest`, audit, `headSealZero`. |
+| 107f040d | option A code: v4 body (`system`, `semantics`), frame v4, epoch `checkpoint/v5`, `.foreignSemantics`; every sealer seals the session's World; the light session advances its World; `sealHead` + Host verb `checkpoint` + seal at a session's clean end. |
+| cfc70253 | `Kernel/DurableEngineSuffix.lean` (standard axioms): `Engine.Beneath`, `preflight_light_congr`, `replay_beneath` (+`_of_left`), `resume_suffix` (admissible + `Disjoint` + the prefix-free replay reaching `e` ⇒ `resume = some ((headState e).snapshot all)`), `resume_disjoint` (converse), `disjointFast_iff`. |
+| ebf92e7b | the open split: `openState` (executing; checkpoint + suffix only: suffix tags from `body.chain`, decode, frontier walk, replay from `Engine.ofState state []`, World fold from the checkpoint's World) then `openLoaded` (the gate; accumulator vs the prefix's last tag; prefix decode; `admissibleFast` + `disjointFast`; resume proof by `resume_suffix`; engine = `Engine.ofState (headState e) all`; chains = prefix's ++ suffix's tail; indexes, root log, track via `trackOfWorld`; head root check). `trackFrom` deleted; `trackOf` = `trackOfWorld` over the genesis fold. Proofs: `firstBadTag_append`, `firstBadTag_head`, `verifyTags_append` (the tag split at a checkpoint). |
+| 77b8f896, af8dd3a1, 5e554051 | proofs: `headState_snapshot`, `resume_honest`, `foldRecords_append`, `worldAt_fastForward`, `openSealed_foreign_semantics`. |
 
-## Running (nothing of mine waits on them)
+Checked: Mac per file (before the rule) the core, HostRefinesWorldCore, DurableHistoryStoreCore, DurableEngineSuffix, the
+Spec at fce764f7+gate pins, the tag lemmas in a scratch module. UNCHECKED: DurableReceiverIO, CredentialAuthorityDomainReceiver,
+DurableServed, DurableStoreAudit, Host.Main, DurableFastForwardProofs at ebf92e7b (the appended tag lemmas).
 
-- dregg-ref: compaction candidate build 8f66d6cc, PID file `/build/lanes/hot-path-compact.pid` (no lock; predates it), logs
-  `/build/lanes/hot-path-compact-build.log`, `out/logs/host-build.log`. Then the v4 closure
-  `/build/lanes/hot-path-v4-build.sh e4e22cb0` (PID file `/build/lanes/hot-path-v4.pid`, log `hot-path-v4-build.log`; it
-  waits for the compaction PID to exit, then `closure-lock swarm-build` the candidate builder; prints linked-file count).
+## Measured: the compaction (dregg-build, 2026-10-27 20:11Z, load 15-19, the 483-record snapshot)
+
+Paired cold opens (`HOST CONFIG describe`), alternating: candidate 6236826f Host **189.4 s, 193.7 s**; the same plus the
+compaction (8f66d6cc, built on dregg-ref) **69.1 s, 64.1 s**: 2.9x, `describe` output byte-identical. Sampled (121
+samples, `/build/lanes/hpc-laps/compact-n483/profile.txt`): still 98% in `trackOf` -> `foldRecords` (the genesis fold):
+`DFinsupp.update` 62%, `TurnOfIntent.ofCells` 52%, `World.admit` 40%. v4 (no genesis fold at open) is the fix; the
+`TurnOfIntent` written-keys item shrinks each suffix step.
+
+## Running
+
+- dregg-ref: the v4 closure `/build/lanes/hot-path-v4-build.sh e4e22cb0` (PID file `/build/lanes/hot-path-v4.pid`, log
+  `/build/lanes/hot-path-v4-build.log`, tree `/build/lanes/hot-path-v4`; queued on `closure-lock`). It checks 107f040d's
+  DurableStoreAudit and Host.Main, NOT the split (ebf92e7b).
 - dregg-build: BEFORE workload, PID file `/build/lanes/hot-path-codec-perf-before.pid`, output `/build/lanes/hot-path-codec-perf/`.
 
 ## Next (successor: start here)
 
-1. Restructure the open as `ffState` ∘ gate ∘ rebuild (coordinator's order): extract from `loadChained` a pure
-   `openState key seed checkpoint suffix head : Except String OpenState` (checkpoint open with semantics; suffix tags from
-   `body.chain`; frontier walk; replay of the suffix from the checkpoint state; `trackFrom`'s suffix fold), and a gate +
-   rebuild (prefix tags from the seed's chain, chain = `body.chain`, decode, indexes/journal/history, root log from tags).
-   OBSTACLE found: `resume` decides `State.Admissible image`, which needs every cell id of the WHOLE log; under the
-   split, admissibility moves to the gate (a non-executing check over the decoded records); the Spec's `ffState` then
-   resumes without it. Needed lemma: `verifyTags` over all entries from the seed's chain = prefix tags from the seed's
-   chain ∧ suffix tags from the chain at the checkpoint height (split of `firstBadTag`).
-2. Instantiate `Spec` with the real code (`stateHead` = `State.ofSnapshot`, `stateWorld` = the track's World): the pieces
-   proved so far give `exact` (`headState_snapshot`, `resume_honest`, `worldAt_fastForward`) and half of `macRefusals`.
-3. When the compaction build lands: copy its `out/bin/minidregg-host` to dregg-build and profile-open the 483-record
-   snapshot (`/build/lanes/hpc-laps/cand-n1/snap`) against the candidate's own Host (`hot-path-codec-profile-open.sh`).
-   When the BEFORE run ends: its reopen row at ~1.7k.
+1. The continuous main build on dregg-build checks the split's importers, DurableStoreAudit and Host.Main once the
+   integrator lands ebf92e7b; fix forward what it names. When the v4 closure ends: fix forward what it names. Then overlay the files changed since e4e22cb0 into its tree
+   (`git archive ebf92e7b Kernel/DurableEngineSuffix.lean Compiler/DurableReceiverCore.lean Compiler/DurableFastForwardSpec.lean
+   Compiler/DurableFastForwardProofs.lean docs | tar -x -C /build/lanes/hot-path-v4/<src>`) and rebuild incrementally through
+   `closure-lock swarm-build` (the core's ~430 dependents, Host.Main included): the check of the split.
+2. Instantiate `Spec` (one more amendment first, statement to the auditor; its draft is UNCOMMITTED in the Mac worktree's
+   `Compiler/DurableFastForwardSpec.lean`, patch at
+   `/private/tmp/claude-501/-Users-ember-dev-minidregg/698fc87d-1ed5-4b8d-a00d-67388a9da60b/scratchpad/opened-below.patch`: elaborate it
+   per file on dregg-ref once its warm tree from cut 13 arrives, then send it): the session build reads the entries BELOW the
+   checkpoint (the last prefix tag for the accumulator check, the tags for the root log and head tag, the bytes for the
+   chain proof), so `Opened` needs `below : List Entry` (opaque, never executed). Then `Loaded4 := Loaded`,
+   `State4 := Σ suffix, OpenState rootBytes suffix`, `ffState := openState`, `stateBase := (base.1, baseChain)`,
+   `stateCheckpoint := base.2.1`, `stateHead := headState engine`, `stateWorld := world.toOption`, `ofOpened` = the
+   session half of `openLoaded`. Proofs in hand: `buildSound` from `Loaded.resumed`; `reopens` and `exact` from
+   `resume_disjoint` + `resume_honest` + `verifyTags_append` + `worldAt_fastForward`; teeth pole: a reused prefix nullifier
+   makes `resume` none (`nullifiersFreshCheck`, `.alreadyConsumed`).
+3. When the BEFORE run ends: its reopen row at ~1.7k (`/build/lanes/hot-path-codec-perf/`).
 4. v4 measurement on the cut's candidate: a world born under it (~500, ~1.7k records), cold open before/after; the
    `checkpoint` verb then an open (zero fast-forward).
 5. Option B statement-first (journal read at use; ~50 consumers); the `TurnOfIntent` written-keys statement.

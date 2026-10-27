@@ -120,7 +120,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "genesisHeight", "expectedSeed", "storageBinary",
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
-    "jointConsensus", "nockFSync", "disabledEvaluators"]
+    "jointConsensus", "nockFSync", "disabledEvaluators", "requestRate"]
   unless object.foldl (init := true) (fun valid key _ => valid && allowed.contains key) do
     throw (IO.userError "unsupported settings in ordinary source-agreement reader")
   let settings : Settings ← IO.ofExcept (fromJson? json)

@@ -25,12 +25,47 @@ pub const PLACES: &[(&str, &str, &str)] = &[
 
 pub const WORLD_READABLE: &str = "Everything on this box is world-readable: every member can read the whole demo Store, and a hosted account's signing key lives on the box. Keep nothing private or precious here.";
 
+/// The static assets: name, content type, bytes. One table, so the served bytes, the cache tag in
+/// the page's links and the hash tests all read the same thing.
+pub const ASSETS: &[(&str, &str, &[u8])] = &[
+    ("app.css", "text/css; charset=utf-8", include_bytes!("../assets/app.css")),
+    ("app.js", "text/javascript; charset=utf-8", include_bytes!("../assets/app.js")),
+    ("vendor/xterm.js", "text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")),
+    ("vendor/addon-fit.js", "text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-fit.js")),
+    ("vendor/xterm.css", "text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")),
+];
+
+/// The first twelve hex digits of an asset's SHA-256: its cache tag. A link carrying `?v=TAG` is
+/// served `immutable` for a year (the bytes behind a tag never change); the bare URL keeps the
+/// short cache. A changed asset changes its tag, so no page ever pairs new markup with old CSS.
+pub fn asset_tag(name: &str) -> Option<String> {
+    use sha2::Digest;
+    let (_, _, bytes) = ASSETS.iter().find(|(n, _, _)| *n == name)?;
+    Some(sha2::Sha256::digest(bytes).iter().take(6).map(|b| format!("{b:02x}")).collect())
+}
+
+fn asset_href(name: &str) -> String {
+    format!("/assets/{name}?v={}", asset_tag(name).unwrap_or_default())
+}
+
+/// The one inline script in the document head. It runs before the body is parsed and marks the
+/// root `js`, so the workspace layout (tiled panes) is the first frame for a browser that will run
+/// app.js, and the plain one-pane layout stays the first frame for one that will not. Allowed by
+/// the CSP through its hash (`EARLY_JS_HASH`), never `unsafe-inline`; a test pins the pair.
+pub const EARLY_JS: &str = "document.documentElement.classList.add('js')";
+pub const EARLY_JS_HASH: &str = "sha256-Du+OJKJSbdUgz5nrHeWWINvez6XKDDU/tyj/5c2uvwo=";
+
 /// The whole document around a stage fragment.
-pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &str) -> String {
+pub fn page(title: &str, status: u16, who: Option<&Who>, path: &str, stage: &str, shutdown: &str) -> String {
     let xterm = if stage.contains("data-ws=") {
-        "<link rel=\"stylesheet\" href=\"/assets/vendor/xterm.css\">\n<script defer src=\"/assets/vendor/xterm.js\"></script>\n<script defer src=\"/assets/vendor/addon-fit.js\"></script>\n"
+        format!(
+            "<link rel=\"stylesheet\" href=\"{}\">\n<script defer src=\"{}\"></script>\n<script defer src=\"{}\"></script>\n",
+            asset_href("vendor/xterm.css"),
+            asset_href("vendor/xterm.js"),
+            asset_href("vendor/addon-fit.js")
+        )
     } else {
-        ""
+        String::new()
     };
     let mut rail = String::new();
     for (label, href, hint) in PLACES {
@@ -47,21 +82,42 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
         None => "<span class=\"me public\">public reader</span><a class=\"button\" href=\"/join\" data-full>Join</a>".to_owned(),
     };
     let shutdown_line = if shutdown.is_empty() { String::new() } else { format!(" This demo is torn down on {}; nothing you make here persists beyond it.", h(shutdown)) };
+    let report = report_href(path, status, title);
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"color-scheme\" content=\"light dark\">\n\
+         <script>{EARLY_JS}</script>\n<title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"{css}\">\n{xterm}<script defer src=\"{js}\"></script>\n</head>\n\
          <body data-path=\"{path}\">\n\
          <a class=\"skip\" href=\"#stage\">Skip to content</a>\n\
          <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
          <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
          <div class=\"identity\">{identity}</div></header>\n\
          <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
-         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
-         <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
+         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><div class=\"pane-head\"><h1 class=\"pane-title\">{title}</h1></div><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <footer class=\"foot\"><p>{world}{shutdown_line}</p><p><a class=\"report\" href=\"{report}\" data-pane>Report a problem</a></p></footer>\n</body>\n</html>\n",
         title = h(title),
         path = h(path),
+        css = asset_href("app.css"),
+        js = asset_href("app.js"),
         world = h(WORLD_READABLE),
+        report = h(&report),
     )
+}
+
+/// The "Report a problem" link every page's footer carries: the member shell's own `feedback`
+/// form (derived from its grammar, `/verb/feedback`), prefilled with the page the person is on,
+/// and with the status and title when the page itself is an error or a refusal. The form needs
+/// no script; `app.js` only keeps this link current when a pane swaps.
+pub fn report_href(path: &str, status: u16, title: &str) -> String {
+    let mut query = format!("page={}", encode(path));
+    if status >= 400 {
+        query.push_str(&format!("&clause={}", encode(&format!("HTTP {status}: {title}"))));
+    }
+    format!("/verb/feedback?{query}")
+}
+
+/// Percent-encode a query value: only the unreserved characters pass.
+fn encode(text: &str) -> String {
+    text.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 /// Every POST form on the stage carries the session's CSRF token: the body renders plain forms
@@ -108,6 +164,10 @@ pub fn outcome(class: &str, headline: &str, detail: &str, next: &[(&str, &str)])
     let mut links = String::new();
     for (label, href) in next {
         links.push_str(&format!("<a href=\"{}\" data-pane>{}</a> ", h(href), h(label)));
+    }
+    if matches!(class, "refused" | "error" | "undecided") {
+        let clause: String = headline.chars().take(400).collect();
+        links.push_str(&format!("<a class=\"report\" href=\"/verb/feedback?clause={}\" data-pane>Report a problem</a> ", encode(&clause)));
     }
     format!(
         "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}</div>",
@@ -340,7 +400,7 @@ mod tests {
     fn a11y_page_shell_landmarks_skip_link_and_nested_headings() {
         let who = Who { sid: "s".into(), name: "al".into(), csrf: "c".into() };
         let stage = "<section><h2>A place</h2><p>body</p><h3>Under it</h3></section><div class=\"outcome admitted\" role=\"status\"><p class=\"headline\">Admitted</p></div>";
-        let html = page("Documents", Some(&who), "/doc", stage, "");
+        let html = page("Documents", 200, Some(&who), "/doc", stage, "");
         assert_eq!(html.matches("<main").count(), 1, "exactly one main");
         assert_eq!(html.matches("<nav").count(), 1, "exactly one nav");
         assert!(html.contains("<nav class=\"rail\" aria-label=\"Places\""));
@@ -353,7 +413,7 @@ mod tests {
         assert_eq!(heading_levels(&html).first(), Some(&1), "the page's first heading is the h1 title");
         assert!(headings_nest(&html), "headings nest under the h1: {:?}", heading_levels(&html));
         // Red-proof the walker: a stage that opens at h3 must be named.
-        let bad = page("Bad", Some(&who), "/doc", "<section><h3>Skipped a level</h3></section>", "");
+        let bad = page("Bad", 200, Some(&who), "/doc", "<section><h3>Skipped a level</h3></section>", "");
         assert!(!headings_nest(&bad), "the nesting check must catch an h1 to h3 jump");
         // The gateway's own outcome partial and the terminal.
         let outcome_html = outcome("undecided", "Undecided", "the attempt is retained", &[("the receipt", "/receipts/w-1")]);
@@ -364,9 +424,43 @@ mod tests {
     }
 
     #[test]
+    fn the_first_frame_needs_no_script_to_be_final() {
+        use sha2::Digest;
+        // The CSP's hash is the hash of the one inline head script, byte for byte.
+        let bytes = sha2::Sha256::digest(EARLY_JS.as_bytes());
+        let b64 = {
+            const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut out = String::new();
+            for c in bytes.chunks(3) {
+                let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+                for i in 0..4 {
+                    if i <= c.len() { out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char) } else { out.push('=') }
+                }
+            }
+            out
+        };
+        assert_eq!(EARLY_JS_HASH, format!("sha256-{b64}"));
+        let html = page("Keys", None, "/keys", "<p>x</p>", "");
+        let head = html.split("</head>").next().unwrap();
+        // Order in the head: the script that marks the root, then the blocking stylesheet; app.js is deferred.
+        let script = head.find(&format!("<script>{EARLY_JS}</script>")).expect("the early script");
+        let sheet = head.find("rel=\"stylesheet\" href=\"/assets/app.css?v=").expect("a versioned stylesheet in the head");
+        assert!(script < sheet, "{head}");
+        assert_eq!(head.matches("<script").count() - head.matches("<script defer").count(), 1, "the only non-deferred script is the early one: {head}");
+        assert!(!head.contains("@import") && !html.contains("<style"));
+        // The pane head is in the markup, so dressing it with buttons changes no height.
+        assert!(html.contains("<div class=\"pane-head\"><h1 class=\"pane-title\">Keys</h1></div>"));
+        // Every asset has a tag and a content type.
+        for (name, kind, _) in ASSETS {
+            assert!(asset_tag(name).is_some_and(|t| t.len() == 12), "{name}");
+            assert!(kind.starts_with("text/css") || kind.starts_with("text/javascript"));
+        }
+    }
+
+    #[test]
     fn the_shell_carries_the_rail_identity_and_the_sentence() {
         let who = Who { sid: "s".into(), name: "alice".into(), csrf: "c".into() };
-        let html = page("Documents", Some(&who), "/doc", "<p>x</p>", "11 November 2026");
+        let html = page("Documents", 200, Some(&who), "/doc", "<p>x</p>", "11 November 2026");
         assert!(html.contains("aria-current=\"page\">Documents"));
         assert!(html.contains("alice"));
         assert!(html.contains("action=\"/logout\""));
@@ -379,7 +473,7 @@ mod tests {
         assert_eq!(foreign.matches("name=\"csrf\"").count(), 2, "only the same-origin forms carry the token: {foreign}");
         assert!(!foreign.split("</form>").next().unwrap().contains("csrf"), "{foreign}");
         assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
-        let anon = page("Mini", None, "/", &term_page("abc"), "");
+        let anon = page("Mini", 200, None, "/", &term_page("abc"), "");
         assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
         let table = registry_html(&serde_json::json!({"format": 3, "operations": [{"code": 0, "symbol": "DESCRIBE", "status": "active", "routes": ["public"], "owner": "kernel-client", "purpose": "describe", "receiver": "dispatchSession", "effect": "none"}, {"code": 9, "symbol": "X", "status": "reserved"}], "response_markers": {"253": "NO_RECORD"}}));
         assert!(table.contains("DESCRIBE") && table.contains("(1 active)") && table.contains("NO_RECORD"), "{table}");
@@ -392,5 +486,20 @@ mod tests {
         assert!(default_laws(None).contains("--defaults"));
         assert_eq!(when(0), "1970-01-01 00:00Z");
         assert_eq!(when(1_761_600_000), "2025-10-27 21:20Z");
+    }
+
+    /// Every page's footer links the derived feedback form, prefilled with the page; an error page
+    /// also carries its status, and the gateway's own refusal partial carries its clause.
+    #[test]
+    fn every_footer_and_failed_outcome_offers_the_report_form() {
+        let who = Who { sid: "s".into(), name: "al".into(), csrf: "c".into() };
+        let ok = page("Documents", 200, Some(&who), "/doc/a b", "<p>x</p>", "");
+        assert!(ok.contains("<footer class=\"foot\">") && ok.contains("href=\"/verb/feedback?page=%2Fdoc%2Fa%20b\""), "{ok}");
+        assert!(ok.contains(">Report a problem</a></p></footer>"));
+        let public = page("Open a session", 401, None, "/grants", "<p>x</p>", "");
+        assert!(public.contains("page=%2Fgrants&amp;clause=HTTP%20401%3A%20Open%20a%20session"), "{public}");
+        let refused = refusal("refused: no-grant: nothing", "");
+        assert!(refused.contains("href=\"/verb/feedback?clause=refused%3A%20no-grant%3A%20nothing\""), "{refused}");
+        assert!(!outcome("admitted", "Admitted", "", &[]).contains("Report a problem"));
     }
 }

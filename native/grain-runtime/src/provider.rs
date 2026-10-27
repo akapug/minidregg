@@ -958,6 +958,7 @@ fn native_reserve_refusal(error: &str) -> Option<&'static str> {
         "tail-bound" => Some("tail-bound"),
         "audience-transition" => Some("audience-transition"),
         "over-bound" => Some("over-bound"),
+        "rate-limited" => Some("rate-limited"),
         _ => None,
     }
 }

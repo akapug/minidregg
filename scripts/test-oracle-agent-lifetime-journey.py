@@ -21,6 +21,8 @@ def factory_lean_probe(predicate, agents):
     def lean(node):
         if node["type"] == "eq" and set(node) == {"type","slot","value"}:
             return "(.eq " + json.dumps(node["slot"]) + " " + str(int(node["value"])) + ")"
+        if node["type"] == "eqSlots" and set(node) == {"type","left","right"}:
+            return "(.eqSlots " + json.dumps(node["left"]) + " " + json.dumps(node["right"]) + ")"
         if node["type"] in ("all","any") and set(node) == {"type","predicates"}:
             return "(." + node["type"] + " [" + ",".join(map(lean,node["predicates"])) + "])"
         raise ValueError("unexpected emitted factory predicate syntax")
@@ -32,6 +34,21 @@ def factory_lean_probe(predicate, agents):
             state = "⟨[" + ",".join("("+json.dumps(k)+","+str(v)+")" for k,v in slots) + "]⟩"
             expected = subject == 7 or (subject in ((8,20011) if agents else (8,)) and (verb == 1 or mode))
             lines.append("#guard eval fixtureLaw ⟨[]⟩ " + state + " == " + str(expected).lower())
+    # Factory permission requires all four source-projected coordinates. The
+    # actual grant post root varies with later receipts, so presence is tested
+    # using eqSlots (missing slots fail closed), never writeOnce.
+    for subject in (None,8,9,20010,20011):
+        for verb in (None,0,2,3):
+            for count in (None,0,1,2):
+                for resource in (None,29520,29530,29531):
+                    slots = []
+                    if subject is not None: slots.append(("request/subject",subject))
+                    if verb is not None: slots.append(("request/verb",verb))
+                    if count is not None: slots.append(("birth/count",count))
+                    if resource is not None: slots.append(("birth/"+str(resource),123456))
+                    state = "⟨[" + ",".join("("+json.dumps(k)+","+str(v)+")" for k,v in slots) + "]⟩"
+                    expected = agents and subject == 8 and verb == 2 and count == 1 and resource == 29530
+                    lines.append("#guard eval fixtureLaw ⟨[]⟩ " + state + " == " + str(expected).lower())
     return "\n".join(lines) + "\n"
 
 
@@ -100,11 +117,10 @@ class HarnessTests(unittest.TestCase):
                     with self.assertRaises(ValueError): op.prepare_worker_policy(config_path)
                     self.assertEqual(sum(args[1] == "submit" for _,args in calls), 1 if fault == "wrong-readback" else 0)
 
-    def test_complete_grain_store_overlay_on_frozen_339_source(self):
+    def test_complete_grain_store_overlay_before_bootstrap(self):
         # Run the real grain-store -> positive-base -> native-share-member
         # transformations. Stub only native executables, stopping exactly at
         # bootstrap before a Store exists. This is a source composition test.
-        baseline = "339abf3e4b37940be0e69620dbf177470b0aeefc"
         inputs = ["scripts/workroom/provision.sh",
                   "scripts/application-share-issue/native-positive-base.sh",
                   "scripts/grain-birth/native-share-member.sh",
@@ -117,7 +133,7 @@ class HarnessTests(unittest.TestCase):
                 for name in inputs:
                     path = repo / name
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(subprocess.check_output(["git", "show", baseline + ":" + name], cwd=ROOT))
+                    path.write_bytes((ROOT / name).read_bytes())
                 for name in ("scripts/spk-platform/grain-store.sh", "scripts/spk-platform/agent-genesis-overlay.sh",
                              "scripts/grain-birth/native-share-member.sh"):
                     path = repo / name
@@ -187,6 +203,11 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     addition = json.loads(json.dumps(original_law["predicates"][1]))
                     addition["predicates"][0]["value"] = "20011"
                     expected_law["predicates"].append(addition)
+                    expected_law["predicates"].append({"type":"all","predicates":[
+                        {"type":"eq","slot":"request/subject","value":"8"},
+                        {"type":"eq","slot":"request/verb","value":"2"},
+                        {"type":"eq","slot":"birth/count","value":"1"},
+                        {"type":"eqSlots","left":"birth/29530","right":"birth/29530"}]})
                 self.assertEqual(genesis["factoryPredicate"], expected_law)
                 predicate_file = next(root.glob("new-world/base/workroom.source-stage/factory-predicate.json"))
                 self.assertEqual(json.loads(predicate_file.read_bytes()), expected_law)
@@ -218,7 +239,9 @@ else: raise SystemExit('unexpected native command: '+repr(args))
         source = (ROOT / "scripts/grain-birth/native-share-member.sh").read_text()
         start = source.index("FACTORY_PREDICATE=")
         end = source.index("# shellcheck",start)
-        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric"):
+        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric",
+                      "missing-grant","grant-nonnumeric","grant-leading-zero","grant-session","grant-task","grant-app",
+                      "duplicate-grant","relocated-grant"):
             with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_bytes())
@@ -226,6 +249,17 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 if fault == "other-role": allocation["agents"][0]["tool"]["subject"] = allocation["agents"][0]["dispatch"]["subject"]
                 if fault == "owner": allocation["agents"][0]["tool"]["subject"] = "7"
                 if fault == "nonnumeric": allocation["agents"][0]["tool"]["subject"] = "20011|invalid"
+                if fault == "missing-grant": del allocation["agents"][0]["persistentGrant"]
+                if fault == "grant-nonnumeric": allocation["agents"][0]["persistentGrant"] = "29530|invalid"
+                if fault == "grant-leading-zero": allocation["agents"][0]["persistentGrant"] = "029530"
+                if fault == "grant-session": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["session"]
+                if fault == "grant-task": allocation["agents"][0]["persistentGrant"] = allocation["agents"][0]["tool"]["task"]
+                if fault == "grant-app": allocation["agents"][0]["persistentGrant"] = allocation["app"]
+                if fault == "duplicate-grant":
+                    other = json.loads(json.dumps(allocation["agents"][0]))
+                    other["tool"]["subject"] = "20111"
+                    allocation["agents"].append(other)
+                if fault == "relocated-grant": allocation["agents"][0]["persistentGrant"] = "39530"
                 path = root / "allocation.json";path.write_text(json.dumps(allocation))
                 selected = str(path)
                 if fault == "empty": selected = ""
@@ -235,8 +269,13 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     linked = root / "link.json";linked.symlink_to(path);selected = str(linked)
                 env = dict(os.environ,STAGE=str(root),SPK_AGENT_ALLOCATION=selected)
                 result = subprocess.run(["sh","-eu"],input=source[start:end],env=env,capture_output=True,text=True)
-                self.assertEqual(result.returncode,0 if fault is None else 2,result.stderr)
-                self.assertEqual((root / "factory-predicate.json").exists(),fault is None)
+                valid = fault in (None,"relocated-grant")
+                self.assertEqual(result.returncode,0 if valid else 2,result.stderr)
+                self.assertEqual((root / "factory-predicate.json").exists(),valid)
+                if valid:
+                    atom = json.loads((root / "factory-predicate.json").read_bytes())["predicates"][-1]["predicates"][-1]
+                    slot = "birth/" + allocation["agents"][0]["persistentGrant"]
+                    self.assertEqual(atom,{"type":"eqSlots","left":slot,"right":slot})
 
     def test_fixed_cases_cover_bounded_operations_and_errors(self):
         cases = json.loads((ROOT / "deploy/oracle/acceptance/agent-cases.json").read_text())
