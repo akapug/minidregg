@@ -509,10 +509,13 @@ pub(super) fn select_read<'a>(
         .get("name")
         .and_then(Value::as_str)
         .ok_or("mini_read_resource name must be a string")?;
-    reads
-        .iter()
-        .find(|read| read.name == name)
-        .ok_or_else(|| format!("resource read {name} is not allowlisted"))
+    let mut matches = reads.iter().filter(|read| read.name == name);
+    let read = matches.next()
+        .ok_or_else(|| format!("resource read {name} is not allowlisted"))?;
+    if matches.next().is_some() {
+        return Err(format!("resource read {name} is ambiguous"));
+    }
+    Ok(read)
 }
 
 /// A born owner grant has observe and mutate verbs in the source factory law.
@@ -540,18 +543,31 @@ pub(super) fn born_publication(born: &BornResource) -> PublicationGrant {
     }
 }
 
-/// `run` owns the exact child lifetime. Production controller callers should
-/// use its CustodyGate so hard disconnect cancels and reaps a query instead of
-/// leaving an untracked native process.
+/// Only already configured custody can be selected. Controller custody is used
+/// solely after the caller verifies a controller-owned session birth receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ResourceReadSigner {
+    Tool,
+    Controller,
+}
+
+/// `run` owns the exact child lifetime. Production callers use CustodyGate so
+/// hard disconnect cancels and reaps a query rather than leaving a child.
 pub(super) fn read_resource_with(
     config: &Config,
     tool: &ToolTask,
     read: &AllowedResourceRead,
     nonce: u64,
+    signer: ResourceReadSigner,
     run: impl FnOnce(&mut Command) -> Result<()>,
 ) -> Result<Value> {
+    let (subject, key) = match signer {
+        ResourceReadSigner::Tool => (&tool.subject, &tool.custody_key),
+        ResourceReadSigner::Controller => (&config.subject, &config.custody_key),
+    };
     if read.observe_capability == tool.capability
         || read.observe_capability == tool.parent_capability
+        || (signer == ResourceReadSigner::Controller && read.observe_capability == config.capability)
     {
         return Err("resource read needs an observe grant distinct from mutation authority".into());
     }
@@ -561,7 +577,7 @@ pub(super) fn read_resource_with(
     let dir = config.state_dir.join(format!("resource-read-{nonce:016}"));
     fs::create_dir(&dir).map_err(|e| format!("resource read directory: {e}"))?;
     let intent = json!({
-        "subject": tool.subject,
+        "subject": subject,
         "nonce": nonce.to_string(),
         "purpose": {
             "type": "query", "kind": read.kind, "target": read.target,
@@ -587,7 +603,7 @@ pub(super) fn read_resource_with(
         .arg("--intent")
         .arg(&intent_path)
         .arg("--key")
-        .arg(&tool.custody_key)
+        .arg(key)
         .arg("--view")
         .arg("resource")
         .arg("--dir")
@@ -1340,7 +1356,7 @@ mod tests {
             fn_inbox_summary: false,
         };
         let mut entered = false;
-        let error = read_resource_with(&config, &tool, &read, 5, |command| {
+        let error = read_resource_with(&config, &tool, &read, 5, ResourceReadSigner::Tool, |command| {
             entered = true;
             assert_eq!(command.get_program(), "/unused/mini");
             Err("fenced before spawn".into())
@@ -1351,7 +1367,36 @@ mod tests {
         let intent: Value =
             serde_json::from_slice(&fs::read(dir.join("intent-source.json")).unwrap()).unwrap();
         assert_eq!(intent["grants"][0]["capability"], "90");
+        assert_eq!(intent["subject"], "8");
         assert!(!dir.join("attempt").exists());
+        let error = read_resource_with(
+            &config, &tool, &read, 6, ResourceReadSigner::Controller, |command| {
+                let args = command.get_args().collect::<Vec<_>>();
+                let key = args.iter().position(|arg| *arg == "--key").unwrap();
+                assert_eq!(args[key + 1], config.custody_key.as_os_str());
+                Err("controller fenced before spawn".into())
+            },
+        ).unwrap_err();
+        assert!(error.contains("controller fenced before spawn"));
+        let dir = config.state_dir.join("resource-read-0000000000000006");
+        let intent: Value =
+            serde_json::from_slice(&fs::read(dir.join("intent-source.json")).unwrap()).unwrap();
+        assert_eq!(intent["subject"], "7");
+        assert_eq!(intent["grants"][0]["capability"], "90");
+        assert_eq!(intent["purpose"]["target"], "100");
+        assert!(!dir.join("attempt").exists());
+        // A static name must not borrow the signer selected for a born member
+        // of the same name. Reject before choosing either grant/target pair.
+        let mut conflicting = read.clone();
+        conflicting.target = "999".into();
+        assert!(select_read(&[read.clone(), conflicting], &json!({"name":read.name})).is_err());
+        let mut task_grant = read.clone();
+        task_grant.observe_capability = config.capability.clone();
+        assert!(read_resource_with(
+            &config, &tool, &task_grant, 7, ResourceReadSigner::Controller,
+            |_| panic!("task mutation grant must refuse before spawn"),
+        ).is_err());
+        assert!(!config.state_dir.join("resource-read-0000000000000007").exists());
         fs::remove_dir_all(&config.state_dir).unwrap();
     }
 

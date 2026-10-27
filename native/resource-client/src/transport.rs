@@ -238,6 +238,18 @@ pub(crate) fn public_envelope(
     Ok(())
 }
 
+/// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
+/// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
+pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
+    let (pin, request) = split_envelope(envelope, config)?;
+    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
+    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+        || !request_within_bound(request) || !allowed_operator_operation(request) {
+        return Err("operation unavailable on agent operator proxy");
+    }
+    Ok(())
+}
+
 pub(crate) fn catalog_enabled(config: &[u8]) -> Result<bool, String> {
     Ok(serde_json::from_slice::<serde_json::Value>(config)
         .map_err(|e| format!("invalid operator config JSON: {e}"))?
@@ -1154,8 +1166,15 @@ fn invoke_inner(
 /// One framed request on a fresh unix-socket connection and its framed reply.
 /// A failure after the write leaves the request's status uncertain.
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
+    let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
+    if let Some(uid) = expected_peer {
+        if peer_uid(&stream)? != uid {
+            return Err("operator endpoint peer UID mismatch before transmission".into());
+        }
+        crate::operator_peer::check_socket(socket)?;
+    }
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("cannot set socket write deadline: {e}"))?;

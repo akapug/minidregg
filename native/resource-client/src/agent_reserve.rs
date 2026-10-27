@@ -161,6 +161,7 @@ fn pinned(directory: &Path) -> Result<Pin> {
     let host = PathBuf::from(field(&pin, "host")?);
     let config = PathBuf::from(field(&pin, "config")?);
     let operator_socket = PathBuf::from(field(&pin, "operatorSocket")?);
+    crate::operator_peer::restore(&operator_socket, &pin)?;
     let public_socket = PathBuf::from(field(&pin, "publicSocket")?);
     if [
         host.as_path(),
@@ -287,6 +288,7 @@ pub(super) fn plan(
             "config":utf8_path(&directory.join("config.json"))?,
             "configSha256":digest(&config_bytes),
             "operatorSocket":utf8_path(&operator_socket)?,
+            "operatorPeerUid":crate::operator_peer::selected(&operator_socket)?,
             "publicSocket":utf8_path(&public_socket)?,
             "requestSha256":digest(&request),"planSha256":digest(plan_bytes)}),
     )?;

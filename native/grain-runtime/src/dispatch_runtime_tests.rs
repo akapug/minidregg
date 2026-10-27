@@ -194,6 +194,7 @@ esac
             socket_path: root.join("dispatch.sock"),
             host_uid: unsafe { libc::geteuid() } + 1,
             operator_socket: None,
+            operator_peer_uid: None,
             reserve_signer: None,
         }),
         provider_task: None,
@@ -408,6 +409,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             socket_path: socket_dir.join("dispatch.sock"),
             host_uid: unsafe { libc::geteuid() } + 1,
             operator_socket: None,
+            operator_peer_uid: None,
             reserve_signer: None,
         }),
         provider_task: None,
@@ -640,4 +642,36 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         .any(|note| note.contains("external effects require explicit acknowledgement")));
     drop(runtime);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn operator_peer_pin_is_forwarded_only_to_reserve_and_payer_commands() {
+    let mini = Path::new("/fixed/mini");
+    let mut task: DispatchTask = serde_json::from_value(json!({
+        "task":"7103","subject":"9","capability":"91","queryCapability":"92",
+        "custodyKey":"/private/key","parentCapability":"73","parentObserveCapability":"75",
+        "reserve":"5","charge":"2","socketPath":"/host/dispatch.sock","hostUid":1000,
+        "operatorSocket":"/controller/operator/mini.sock","operatorPeerUid":0
+    })).unwrap();
+    for name in ["agent-reserve-plan", "agent-reserve-seal", "agent-reserve-submit", "agent-reserve-lookup",
+        "agent-lifetime-reserve-plan", "agent-lifetime-reserve-seal", "agent-lifetime-reserve-submit",
+        "agent-lifetime-reserve-lookup", "agent-lifetime-paid-plan", "agent-lifetime-paid-payer-sign", "agent-payer-sign"] {
+        let mut command = Command::new(mini);
+        command.args([name, "--dir", "/private/attempt"]);
+        pin_operator_peer_command(&mut command, mini, Some(&task));
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(&args[args.len()-2..], ["--operator-peer-uid", "0"]);
+    }
+    for (program, name) in [(mini, "query"), (Path::new("/other/mini"), "agent-reserve-plan")] {
+        let mut command = Command::new(program);
+        command.arg(name);
+        pin_operator_peer_command(&mut command, mini, Some(&task));
+        assert_eq!(command.get_args().count(), 1);
+    }
+    task.operator_peer_uid = None;
+    let mut command = Command::new(mini);
+    command.arg("agent-reserve-plan");
+    pin_operator_peer_command(&mut command, mini, Some(&task));
+    assert_eq!(command.get_args().count(), 1);
 }

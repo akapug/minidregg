@@ -523,6 +523,7 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         socket_path: runtime.config.state_dir.join("dispatch.sock"),
         host_uid: unsafe { libc::geteuid() } + 1,
         operator_socket: None,
+            operator_peer_uid: None,
         reserve_signer: None,
     });
     runtime.config.provider_task = Some(ProviderTask {

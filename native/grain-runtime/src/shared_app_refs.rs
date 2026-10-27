@@ -579,6 +579,7 @@ mod tests {
             allowed_session_families: vec![SessionFamily {
                 name: "office-web".into(),
                 application_family: "office".into(),
+                participant_subject: None,
                 kind: "web".into(),
                 profile: BirthProfile {
                     genesis: json!({}),

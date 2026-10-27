@@ -36,6 +36,29 @@ through the live API and can fail visibly.
 
 ## Discover and call
 
+The operator registers a provisioned lifetime entrance with
+`spk-host grain agent-route PROFILE APP REQUEST.json`. The request uses protocol
+`mini-spk-grain-agent-route-v1` and names the private custody file, controller
+UID, listener and reverse sockets, signed API prefix, route name, display name,
+handle and bounded timeouts. It does not mint a grant: the custody must carry
+the actual accepted event27 lineage and matching signer pins. Request and
+signer files must be private regular files beneath protected directories.
+
+Registration keeps immutable records (up to 64 revisions, eight selected
+routes). An optional `replaces` names the currently selected record; forks and
+cycles are refused. Registration leaves an active generation pinned to its
+existing routes. A source-authorized STOP followed by START activates the new
+selection. There is no removal command in this interface yet. Host service
+configuration must use the corresponding source-selected event22/event27
+indices through the supported profile transition before launch.
+
+For native qualification, `scripts/oracle-agent-lifetime-journey.sh` takes a
+running controller and fixed JSON cases. It invokes the real foreground tools
+and requires each reply to join the controller's event26 committed receipt and
+confirmed purse settlement. A receiving-session HTTP response cannot pass that
+probe. Its companion test uses a fake process only to test the probe's guards;
+those tests are not evidence of native admission.
+
 Start with:
 
 ```json

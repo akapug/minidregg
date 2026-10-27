@@ -201,9 +201,26 @@ struct DispatchTask {
     /// planning/assembly. The ordinary hostSocket remains public receipt IO.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     operator_socket: Option<PathBuf>,
+    /// Kernel credentials of the listening endpoint. A systemd-activated
+    /// controller-private socket may report its activator (often UID 0), not
+    /// the operator process accepting requests. Never inferred from path owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operator_peer_uid: Option<u32>,
     /// Pinned enrolled identity for the controller's private purse signer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_signer: Option<DispatchSignerPin>,
+}
+
+fn pin_operator_peer_command(command: &mut Command, mini: &Path, task: Option<&DispatchTask>) {
+    if command.get_program() != mini.as_os_str() { return; }
+    let selected = command.get_args().next().and_then(|arg| arg.to_str()).is_some_and(|name|
+        name.starts_with("agent-reserve-") || name.starts_with("agent-lifetime-reserve-")
+        || name.starts_with("agent-lifetime-paid-") || name == "agent-payer-sign");
+    if selected {
+        if let Some(uid) = task.and_then(|task| task.operator_peer_uid) {
+            command.arg("--operator-peer-uid").arg(uid.to_string());
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -2827,6 +2844,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
         {
             return Err("dispatchTask requires a distinct absolute custody key path".into());
         }
+        if d.operator_peer_uid.is_some() && d.operator_socket.is_none() {
+            return Err("dispatchTask.operatorPeerUid requires operatorSocket".into());
+        }
         if let Some(operator_socket) = &d.operator_socket {
             if !operator_socket.is_absolute()
                 || c.host_socket.as_ref() == Some(operator_socket)
@@ -3109,6 +3129,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             &t.allowed_publications,
             (&peer_targets, &peer_capabilities),
         )?;
+        for family in &t.allowed_session_families {
+            application_tools::session_participant(family, &t.subject, &c.subject)?;
+        }
         for family in &t.allowed_birth_families {
             let charge = resource_tools::planned_birth_charge(family)?;
             if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
@@ -7139,6 +7162,7 @@ impl Runtime {
                     family,
                     tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex {
                         nonce: pending.operation_id,
@@ -7245,6 +7269,12 @@ impl Runtime {
         Ok(())
     }
     fn verified_born_named(&self, name: &str) -> Result<Option<resource_tools::BornResource>> {
+        Ok(self.verified_born_read(name)?.map(|(born, _)| born))
+    }
+    fn verified_born_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<(resource_tools::BornResource, resource_tools::ResourceReadSigner)>> {
         let Some(record) = self.journal.born_resources.iter().find(|record| {
             record
                 .pending
@@ -7255,12 +7285,22 @@ impl Runtime {
             return Ok(None);
         };
         self.verify_born_record(record)?;
+        let signer = if record.pending.route == Some(ApplicationBirthRoute::Session) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            let family = tool.allowed_session_families.iter()
+                .find(|family| family.name == record.pending.family)
+                .ok_or("retained session family is no longer configured")?;
+            application_tools::session_read_signer(family, &tool.subject, &self.config.subject)?
+        } else {
+            resource_tools::ResourceReadSigner::Tool
+        };
         Ok(record
             .pending
             .members()
             .iter()
             .find(|born| born.name == name)
-            .cloned())
+            .cloned()
+            .map(|born| (born, signer)))
     }
     fn verified_born_target(
         &self,
@@ -7594,6 +7634,7 @@ impl Runtime {
     ) -> std::result::Result<(), custody_gate::CustodyError> {
         let mut command = Command::new(program);
         command.args(args);
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -7621,7 +7662,16 @@ impl Runtime {
         read: &resource_tools::AllowedResourceRead,
         nonce: u64,
     ) -> Result<Value> {
-        resource_tools::read_resource_with(&self.config, tool, read, nonce, |command| {
+        self.supervised_resource_read_as(tool, read, nonce, resource_tools::ResourceReadSigner::Tool)
+    }
+    fn supervised_resource_read_as(
+        &self,
+        tool: &ToolTask,
+        read: &resource_tools::AllowedResourceRead,
+        nonce: u64,
+        signer: resource_tools::ResourceReadSigner,
+    ) -> Result<Value> {
+        resource_tools::read_resource_with(&self.config, tool, read, nonce, signer, |command| {
             let output = self
                 .custody_gate
                 .run_capture(&self.cancelled, command)
@@ -7637,6 +7687,7 @@ impl Runtime {
         })
     }
     fn supervised_json_command(&self, mut command: Command) -> Result<Value> {
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -10841,6 +10892,7 @@ impl Runtime {
                     family,
                     &tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex { nonce: id, ordinal },
                     &tool_view,
@@ -12307,9 +12359,11 @@ impl Runtime {
                     .ok_or("toolTask is not configured")?
                     .clone();
                 let mut reads = configured.allowed_reads.clone();
+                let mut signer = resource_tools::ResourceReadSigner::Tool;
                 if let Some(name) = arguments.get("name").and_then(Value::as_str) {
-                    if let Some(born) = self.verified_born_named(name)? {
+                    if let Some((born, owner)) = self.verified_born_read(name)? {
                         reads.push(resource_tools::born_read(&born));
+                        signer = owner;
                     }
                 }
                 // A factory-minted owner capability carries both observe and
@@ -12318,7 +12372,7 @@ impl Runtime {
                 // exact composite receipt is revalidated above.
                 let read = resource_tools::select_read(&reads, arguments)?.clone();
                 let nonce = self.next_id()?;
-                self.supervised_resource_read(&configured, &read, nonce)
+                self.supervised_resource_read_as(&configured, &read, nonce, signer)
             }
             "mini_create_resource" => {
                 if self.tool_catalog()?.resource_workspace_create {
@@ -12735,7 +12789,7 @@ impl Runtime {
                         .journal
                         .born_resources
                         .iter()
-                        .any(|born| born.pending.born.name == name)
+                        .any(|born| born.pending.members().iter().any(|member| member.name == name))
                 {
                     return Err("resource read name is not configured or recorded".into());
                 }
