@@ -672,7 +672,7 @@ pub fn tool_connect(
         .write_all(format!("tool-v1 {}\n", request.len()).as_bytes())
         .and_then(|_| stream.write_all(request))
         .map_err(|e| format!("tool frame send: {e}; outcome unknown"))?;
-    receive_tool_completion(&mut stream, request_id, &mut io::stderr().lock())
+    receive_tool_completion(&mut stream, request_id, &mut io::stderr())
 }
 
 /// Keep bounded controller output for failures such as a failed Mini attach.
