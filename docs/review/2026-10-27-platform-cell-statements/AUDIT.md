@@ -682,3 +682,30 @@ The gate refuses files that *name* `Ran`, but a forged proof need not name it. E
 term-level. Every forged proof's value contains the constant `Ran.mk`, so add one environment scan,
 theorems included, that admits `Ran.mk` only inside `receiverVerifier`. This is a small Lean check over
 `env.constants` for one constant, not the whole census. Add a plant for the `oracleAnswered` spelling.
+
+## 2026-10-27, fifteenth pass: clock law controller clause (lane/lean-critical bc88a5ab, not built)
+
+**The clause must require the clock unchanged.** `clockPredicate`'s `.monotone` conjuncts forbid only
+regress. Under `controlClause`, a step whose subject is the controller with a management verb may move
+`clock/now` and `clock/slot` *forward* by any amount. A forward jump is not harmless. Every `validUntil`
+(`CredentialSignedEnvelopeController.lean:293`), every deadline and every expiry reads that clock, so a
+jump expires all of them at once, and that is controller authority the ruling did not grant ("manage,
+never tick").
+
+Relying on the clock cell's writers never projecting a management request onto a clock write is a
+premise outside the law (law 1). It holds for today's writers, but no theorem pins it, and any future
+family or a generic receiver path breaks it silently. Legitimate management (install, revoke, delegate)
+changes the cell's policy and grants, not its `now`/`slot`, so requiring them unchanged costs nothing.
+
+**Change:** `controlClause controller := .all [subject = controller, verb ∈ controlVerbTags,
+.eq "clock/now/delta" 0, .eq "clock/slot/delta" 0]` (or whatever the clock's projected delta slots are
+named). Add the teeth pole `pole_controller_advance_refused`: a controller management step that moves
+`now` forward is refused.
+
+The remaining statements read correctly:
+- `clock_refuses_nonticker_tick` now covers the controller, because no management tag is tick tag 11.
+- `clock_control_present` and `clock_control_cannot_tick` mirror the pay pair.
+- `platform_seeded` (`NativeHostGenesis.lean:893`) answers the twelfth pass's owed genesis clause: the
+  platform cell is in `baseCells`, and its store is `Reachable` under the controller. The loader bridge
+  (`load d snap = some L → Reachable …`) for snapshots after genesis is still to be composed from it and
+  `platform_written_only_by_install`.
