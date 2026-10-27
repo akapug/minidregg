@@ -328,10 +328,10 @@ operator hermes "TABLE: the provider table is root-owned" sudo -n install -o roo
 head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
   --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg t "$PTABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
-  --argjson uid "$(id -u)" --argjson gid "$(id -g)" \
+  --argjson uid "$(id -u)" --argjson gid "$(id -g)" --arg hsha "$(sha256sum "$HOST" | cut -d' ' -f1)" \
   '{type:"mini-keys-broker-v1",socket:$s,audit:$a,spool:$sp,singleAccount:true,
     peers:[{role:"member",gids:[$gid]},{role:"provider",uids:[$uid]},{role:"discord",uids:[$uid]},{role:"operator",uids:[$uid]}],
-    credentials:{host:$host,hostConfig:$cfg,publicSocket:$sock,providers:$t,root:$r,key:$k}}' >"$JOURNEY_D/keys/broker.json"
+    credentials:{host:$host,hostSha256:$hsha,hostConfig:$cfg,publicSocket:$sock,publicSocketUid:$uid,providers:$t,root:$r,key:$k}}' >"$JOURNEY_D/keys/broker.json"
 chmod 644 "$JOURNEY_D/keys/broker.json"
 KEYS_CLIENT=$JOURNEY_D/keys/client.json
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --argjson uid "$(id -u)" '{type:"mini-keys-client-v1",socket:$s,uid:$uid}' >"$KEYS_CLIENT"
