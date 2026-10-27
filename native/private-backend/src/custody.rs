@@ -4,13 +4,13 @@ use crate::codec::*;
 use crate::transition_journal as wal;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::{Error, Read, Result, Write};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
     io::AsRawFd,
     net::{UnixListener, UnixStream},
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 pub fn hash(b: &[u8]) -> [u8; 32] {
     Sha256::digest(b).into()
 }
@@ -178,177 +178,10 @@ pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
         _ => Err(bad("anchor reply")),
     }
 }
-pub struct Pool {
-    root: PathBuf,
-    pub id: Nat,
-    row_hashes: Vec<[u8; 32]>,
-}
-impl Pool {
-    pub fn provision(root: &Path, rows: &[Vec<u8>]) -> Result<Self> {
-        if rows.is_empty() || rows.iter().any(Vec::is_empty) {
-            return Err(bad("empty pool/row"));
-        }
-        fs::create_dir(root)?;
-        fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
-        let mut m = b"DREGG.PRIVATE.IMMUTABLE.POOL\x01".to_vec();
-        m.extend((rows.len() as u64).to_le_bytes());
-        for (i, row) in rows.iter().enumerate() {
-            let mut f = create(&root.join(format!("row-{i}")))?;
-            f.write_all(row)?;
-            f.sync_all()?;
-            m.extend(hash(row));
-        }
-        let p = root.join("manifest");
-        let mut f = create(&p)?;
-        f.write_all(&m)?;
-        f.sync_all()?;
-        parent_sync(&p)?;
-        Self::open(root)
-    }
-    pub fn open(root: &Path) -> Result<Self> {
-        let m = fs::read(root.join("manifest"))?;
-        let prefix = b"DREGG.PRIVATE.IMMUTABLE.POOL\x01";
-        if !m.starts_with(prefix) || m.len() < prefix.len() + 8 {
-            return Err(bad("pool manifest"));
-        }
-        let n = u64::from_le_bytes(m[prefix.len()..prefix.len() + 8].try_into().unwrap());
-        let rest = &m[prefix.len() + 8..];
-        if n == 0 || n as u128 * 32 != rest.len() as u128 {
-            return Err(bad("pool count"));
-        }
-        let row_hashes = rest
-            .chunks_exact(32)
-            .map(|x| x.try_into().unwrap())
-            .collect();
-        Ok(Self {
-            root: root.into(),
-            id: Nat::from_be(&hash(&m)),
-            row_hashes,
-        })
-    }
-    pub(crate) fn row(&self, row: u64) -> Result<Vec<u8>> {
-        let i = usize::try_from(row).map_err(|_| bad("row overflow"))?;
-        let h = self.row_hashes.get(i).ok_or_else(|| {
-            Error::new(
-                ErrorKind::UnexpectedEof,
-                "stock exhausted: independent refill required",
-            )
-        })?;
-        let b = fs::read(self.root.join(format!("row-{row}")))?;
-        if b.is_empty() || hash(&b) != *h {
-            return Err(bad("physical row substitution"));
-        }
-        Ok(b)
-    }
-    pub(crate) fn row_fixed(&self, row: u64, length: usize) -> Result<Vec<u8>> {
-        let expected = self.row_commitment(row)?;
-        let mut file = File::open(self.root.join(format!("row-{row}")))?;
-        if length == 0 || length > MAX || file.metadata()?.len() != length as u64 {
-            return Err(bad("fixed physical row shape"));
-        }
-        let mut b = vec![0; length];
-        file.read_exact(&mut b)?;
-        let mut extra = [0; 1];
-        if file.read(&mut extra)? != 0 || hash(&b) != expected {
-            return Err(bad("physical row substitution/growth"));
-        }
-        Ok(b)
-    }
-    pub fn row_commitment(&self, row: u64) -> Result<[u8; 32]> {
-        let i = usize::try_from(row).map_err(|_| bad("row overflow"))?;
-        self.row_hashes
-            .get(i)
-            .copied()
-            .ok_or_else(|| bad("pool row commitment range"))
-    }
-    pub fn len(&self) -> usize {
-        self.row_hashes.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.row_hashes.is_empty()
-    }
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Cut {
-    None,
-    BeforeAnchor,
-    AfterAnchor,
-    AfterSnapshot,
-    AfterSecretRead,
-}
-fn cut(x: Cut, y: Cut) {
-    if x == y {
-        std::process::exit(70);
-    }
-}
-pub fn reserve_release(
-    pool: &Pool,
-    row: u64,
-    g: Generation,
-    p: Purpose,
-    anchor: &Path,
-    local: &Path,
-    crash: Cut,
-) -> Result<Vec<u8>> {
-    let _guard = lock(&local.with_extension("reservation.lock"))?;
-    if row as u128 >= pool.len() as u128 {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "stock exhausted: independent refill required",
-        ));
-    }
-    let before = Journal::decode(&rpc(anchor, &[0])?)?;
-    let id = Correlation {
-        pool: pool.id.clone(),
-        row: Nat::new(row),
-    };
-    before.reserve(id.clone(), g.clone(), p)?;
-    cut(crash, Cut::BeforeAnchor);
-    let mut req = vec![1];
-    req.extend(request(&id, &g, p));
-    let b = rpc(anchor, &req)?;
-    let confirmed = Journal::decode(&b)?;
-    if !confirmed.extends(&before)
-        || !confirmed
-            .allocations
-            .iter()
-            .any(|a| a.id == id && a.generation == g && a.purpose == p && !a.consumed)
-    {
-        return Err(bad("anchor allocation binding"));
-    }
-    cut(crash, Cut::AfterAnchor);
-    snapshot(local, &b)?;
-    if fs::read(local)? != b {
-        return Err(bad("snapshot readback"));
-    }
-    let latest = Journal::decode(&rpc(anchor, &[0])?)?;
-    if !latest.extends(&confirmed) {
-        return Err(bad("anchor rollback"));
-    }
-    cut(crash, Cut::AfterSnapshot);
-    let secret = pool.row(row)?;
-    cut(crash, Cut::AfterSecretRead);
-    Ok(secret)
-}
-pub fn recover_snapshot(anchor: &Path, local: &Path) -> Result<Journal> {
-    let _guard = lock(&local.with_extension("reservation.lock"))?;
-    let b = rpc(anchor, &[0])?;
-    let authoritative = Journal::decode(&b)?;
-    if local.exists() {
-        let stale = Journal::decode(&fs::read(local)?)?;
-        if !authoritative.extends(&stale) {
-            return Err(bad("anchor behind local"));
-        }
-    }
-    snapshot(local, &b)?;
-    if fs::read(local)? != b {
-        return Err(bad("recovery readback"));
-    }
-    Ok(authoritative)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     fn temp(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "mini-backend-{label}-{}-{}",
@@ -497,15 +330,6 @@ mod tests {
             drop(a);
             assert_eq!(Anchor::open(&q).unwrap().journal().spent.len(), 2);
         }
-    }
-    #[test]
-    fn row_substitution_and_exhaustion() {
-        let p = temp("pool");
-        let pool = Pool::provision(&p, &[vec![1, 2, 3]]).unwrap();
-        assert_eq!(pool.row(0).unwrap(), vec![1, 2, 3]);
-        assert!(pool.row(1).is_err());
-        fs::write(p.join("row-0"), [7, 8, 9]).unwrap();
-        assert!(pool.row(0).is_err());
     }
     #[test]
     fn singleton_authority() {
