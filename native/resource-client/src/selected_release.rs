@@ -102,7 +102,7 @@ fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Res
     })?;
     create_private(&frame_path, &reply)?;
     sync_directory_ancestors(directory)?;
-    if reply.first() == Some(&255) {
+    if reply.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
         return Err(format!(
             "Host refused selected release; exact refusal retained in {}",
             frame_path.display()

@@ -23,7 +23,7 @@ class GateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         data, _ = ops.load(ROOT)
-        paths = {ops.REGISTRY, ops.GENERATED, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
+        paths = {ops.REGISTRY, ops.GENERATED, ops.GENERATED_LEAN, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
         paths.update(Path(binding["path"]) for binding in data["client_constants"])
         for path in paths:
             (self.root / path).parent.mkdir(parents=True, exist_ok=True)

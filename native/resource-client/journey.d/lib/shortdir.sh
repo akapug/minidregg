@@ -45,7 +45,7 @@ JN2	jnock2	jnock2/world/public/mini.sock
 JN3	jnock3	jnock3/world/public/mini.sock
 JN5	jnock5	jnock5/world/public/mini.sock
 JPAY4	jpay4	jpay4/acceptance/public/mini.sock
-JPAY6	jpay6	jpay6/runtime-state/mcp-0000000000000011.sock
+JPAY6	jpay6	jpay6/consent-anchors/r-0123456789abcdef0123456789abcdef.sock
 JROTL	jrotl	jrotl/f.sock
 TABLE
 }

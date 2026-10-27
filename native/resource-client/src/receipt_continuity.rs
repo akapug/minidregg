@@ -132,6 +132,7 @@ fn read_json(path: &Path) -> Result<Value> {
     read_json_mode(path, true)
 }
 fn read_json_mode(path: &Path, custody: bool) -> Result<Value> {
+    crate::fsio::repair_cache(path).map_err(fail)?;
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(NOFOLLOW)

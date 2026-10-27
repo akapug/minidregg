@@ -13,7 +13,8 @@
 //! 3. [`Flow::present`]: the local codec presents a plan (op 8, `plan.json`).
 //! 4. [`Flow::seal`]: consent names the plan headers the intent permits (222, or thin 232); the
 //!    caller's release sees exactly what would be signed; the headers are signed
-//!    (`transaction-signatures.{json,bin}`), assembled (op 11) into `call.bin`, and the call and
+//!    (`transaction-signatures.{json,bin}`), assembled (op 11) into `call.bin`, and the attempt's
+//!    ONE record (`seal.record`, [`crate::phase`]: every file so far, `call.bin` included) and
 //!    every ancestor directory are synced BEFORE anything can transmit it.
 //! 5. [`Flow::transmit`]: the exact retained call is submitted (op 2) or looked up (op 3), and the
 //!    local codec presents the answer. A lost reply is answered by looking up the SAME call
@@ -100,11 +101,24 @@ impl Request {
     }
 }
 
+/// How the Host framed the answer `Operator::request` wrote.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answered {
+    /// The operation's own reply.
+    Answer,
+    /// `NO_RECORD` (253): decided before any append; a fresh attempt is safe.
+    NoRecord,
+    /// `HOST_OUTCOME` (255): undecided whatever it decodes to; look the exact call up.
+    Outcome,
+}
+
 /// The serving Host, by file: `request` reads `inputs` and writes the answer to `output`, a new
-/// file. A refusal or an uncertain transmission is an error; what it means for the attempt is the
-/// caller's custody (a submit or lookup error leaves the retained call to be looked up).
+/// file, and says how it was framed. An uncertain or never-forwarded transmission is an error;
+/// what it means for the attempt is the caller's custody (a submit or lookup error leaves the
+/// retained call to be looked up). An implementation may also report a marker frame as an error
+/// it has already classified (the CLI's transport does).
 pub trait Operator {
-    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<()>;
+    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<Answered>;
 }
 
 /// What [`Flow::seal`] would sign, shown to the caller's release before any key signs.
@@ -141,7 +155,7 @@ pub fn signature_list(signer: &dyn Signer, headers: &[Vec<u8>]) -> Result<Value>
 /// precede the durable exact bytes and their pathname.
 pub fn sync_retained(directory: &Path, file: &Path) -> Result<()> {
     std::fs::File::open(file)
-        .and_then(|f| f.sync_all())
+        .and_then(|f| durable::sync_file(&f))
         .map_err(|e| Error(format!("cannot sync exact call {}: {e}", file.display())))?;
     durable::sync_ancestors(directory).map_err(|e| Error(format!("cannot sync directory {}: {e}", directory.display())))
 }
@@ -206,7 +220,16 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
         let signatures_bin = self.sign(plan_bin, release)?;
         let call = self.path("call.bin");
         self.host.assemble(plan_bin, &signatures_bin, &call)?;
-        sync_retained(self.dir, &call)?;
+        // The attempt's ONE durable record: every file written so far, `call.bin` included, is
+        // now a cache of it (`crate::phase`). Synced, with its directory and ancestors, before
+        // anything can transmit the call.
+        crate::phase::seal(self.dir)?;
+        // The record is fsynced and its name committed in `self.dir` by `seal`; what remains is
+        // every ancestor, so the attempt directory itself is durable before transmission.
+        let absolute = std::path::absolute(self.dir).map_err(|e| Error(e.to_string()))?;
+        if let Some(parent) = absolute.parent() {
+            durable::sync_ancestors(parent).map_err(|e| Error(format!("cannot sync directory {}: {e}", parent.display())))?;
+        }
         Ok(call)
     }
 
@@ -228,15 +251,24 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
     }
 
     /// Step 5: submit or look up the retained `call.bin`; the answer goes to `outcome_bin` and the
-    /// local codec's presentation of it to `outcome_json`, which is returned. Read it with
-    /// [`crate::custody::outcome_of`]: only a decoded outcome decides anything.
-    pub fn transmit(&mut self, request: Request, outcome_bin: &Path, outcome_json: &Path) -> Result<Value> {
+    /// local codec's presentation of it to `outcome_json`. Returns the presentation and how the
+    /// Host framed it; [`Flow::transmission`] turns both into the attempt's
+    /// [`crate::custody::Transmission`] (a 255 envelope is undecided whatever it decodes to).
+    pub fn transmit(&mut self, request: Request, outcome_bin: &Path, outcome_json: &Path) -> Result<(Value, Answered)> {
         if !matches!(request, Request::Submit | Request::Lookup) {
             return Err("only an exact call is transmitted".into());
         }
         let call = self.path("call.bin");
-        self.host.request(request, &[&call], outcome_bin)?;
-        self.host.inspect("outcome", outcome_bin, outcome_json)
+        let answered = self.host.request(request, &[&call], outcome_bin)?;
+        Ok((self.host.inspect("outcome", outcome_bin, outcome_json)?, answered))
+    }
+
+    /// The custody reading of a transmitted answer.
+    pub fn transmission(outcome: Value, answered: Answered) -> crate::custody::Transmission {
+        match answered {
+            Answered::Outcome => crate::custody::Transmission::Envelope(outcome),
+            Answered::Answer | Answered::NoRecord => crate::custody::Transmission::Answered(outcome),
+        }
     }
 }
 
@@ -305,17 +337,25 @@ impl Local for Member {
 }
 
 impl Operator for Member {
-    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<()> {
+    fn request(&mut self, request: Request, inputs: &[&Path], output: &Path) -> Result<Answered> {
         let payload = match (request, inputs) {
             (Request::Challenge, [intent, signature]) => crate::local::pair(&read(intent)?, &read(signature)?)?,
             (Request::Prepare | Request::Submit | Request::Lookup, [input]) => read(input)?,
             _ => return Err(Error(format!("{} takes other inputs", request.verb()))),
         };
         match self.operator.call(request.operation(), &payload) {
-            Ok(crate::operator::Reply::Answer(body)) => create(output, &body),
-            // A Host refusal frame is an outcome too: retained for the local codec to decode.
-            Ok(crate::operator::Reply::Refused(body)) if matches!(request, Request::Submit | Request::Lookup) => create(output, &body),
-            Ok(crate::operator::Reply::Refused(body)) => Err(Error(format!("host refused {}; encoded refusal: {}",
+            Ok(crate::operator::Reply::Answer(body)) => create(output, &body).map(|_| Answered::Answer),
+            // A marker frame is an outcome too: retained for the local codec to decode; its class
+            // is the marker's (`Reply::NoRecord` decided, `Reply::Outcome` undecided).
+            Ok(crate::operator::Reply::NoRecord(body)) if matches!(request, Request::Submit | Request::Lookup) => {
+                create(output, &body).map(|_| Answered::NoRecord)
+            }
+            Ok(crate::operator::Reply::Outcome(body)) if matches!(request, Request::Submit | Request::Lookup) => {
+                create(output, &body).map(|_| Answered::Outcome)
+            }
+            Ok(crate::operator::Reply::NoRecord(body)) => Err(Error(format!("host answered {} with no record; encoded outcome: {}",
+                request.verb(), crate::hex::encode(&body)))),
+            Ok(crate::operator::Reply::Outcome(body)) => Err(Error(format!("host answered {} undecided; encoded outcome: {}",
                 request.verb(), crate::hex::encode(&body)))),
             Err(crate::operator::Failure::Unsent(d)) => Err(Error(format!("{}: never forwarded: {d}", request.verb()))),
             Err(crate::operator::Failure::Uncertain(d)) => Err(Error(format!("{}: uncertain: {d}", request.verb()))),

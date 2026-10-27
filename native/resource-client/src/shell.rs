@@ -2445,7 +2445,7 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
                 // The class is the DECODED outcome's, never the reply byte's: Lean answers 255
                 // for `unavailable` and thrown handlers too (`HostDecision::is_refusal`), and an
                 // undecoded frame decides nothing. Only a decoded `refused` exits 3.
-                HostDecision::RefusedFrame { command, byte, encoded, .. } => {
+                HostDecision::Frame { command, byte, encoded, .. } => {
                     let code = match decoded {
                         // 254 is the socket's, judged before the Host write: certainly never sent.
                         _ if *byte == super::host_operations_never_forwarded() => {
@@ -2453,6 +2453,21 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
                                 "refused: not sent: {command} was never forwarded to the Host (reply byte {byte}); nothing happened\n"
                             ));
                             EXIT_REFUSED
+                        }
+                        // NO_RECORD (253): decided before any append, a refusal whatever the type.
+                        Some(Ok(outcome)) if *byte == crate::RESPONSE_NO_RECORD => {
+                            text.push_str(&format!("{} (Host refused {command} with no record, reply byte {byte})\n",
+                                super::no_record_line(Some(outcome))));
+                            text.push_str(&format!("  outcome (decoded by the Host): {outcome}\n"));
+                            EXIT_REFUSED
+                        }
+                        // HOST_OUTCOME (255): undecided whatever it decodes to.
+                        Some(Ok(outcome)) if *byte == crate::RESPONSE_HOST_OUTCOME => {
+                            text.push_str(&format!(
+                                "undecided: Host answered {command} with reply byte {byte} and outcome {}; \
+                                 the attempt is retained, `lookup ID` asks again\n", super::outcome_type(Some(outcome))));
+                            text.push_str(&format!("  outcome (decoded by the Host): {outcome}\n"));
+                            EXIT_UNDECIDED
                         }
                         Some(Ok(outcome)) => {
                             let (code, line) = outcome_line(outcome);
@@ -2632,7 +2647,7 @@ fn execute(session: &Session, plan: Plan) -> Ending {
         (Err(client), None) => Ending::Client(client),
         (Err(client), Some(decision)) => {
             let (evidence, decoded) = match &decision {
-                HostDecision::RefusedFrame { command, encoded, .. } => {
+                HostDecision::Frame { command, encoded, .. } => {
                     let (path, decoded) = decode_refusal(session, command, encoded);
                     (path, Some(decoded))
                 }
@@ -3728,14 +3743,14 @@ mod tests {
             "detail":super::super::hex(b"this key holds no grant covering this target and operation")});
         let ending = Ending::Host {
             client: "host refused query; encoded refusal: 4452".into(),
-            decision: HostDecision::RefusedFrame { command: "query".into(), byte: 255, encoded: vec![0x44, 0x52], decoded: None },
+            decision: HostDecision::Frame { command: "query".into(), byte: crate::RESPONSE_NO_RECORD, encoded: vec![0x44, 0x52], decoded: None },
             decoded: Some(Ok(decoded)),
             evidence: Some(PathBuf::from("/h/refusals/r.bin")),
         };
         let (code, text) = render(&ending);
         assert_eq!(code, EXIT_REFUSED);
         assert!(text.starts_with(
-            "refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refused query, reply byte 255)\n"
+            "refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refused query with no record, reply byte 253)\n"
         ), "{text}");
         assert!(text.contains("  encoded: 4452\n"));
         assert!(text.contains("  evidence: /h/refusals/r.bin\n"));
@@ -3751,14 +3766,14 @@ mod tests {
             "explain":"field 2 monotone (before 2, after 1)"});
         let ending = Ending::Host {
             client: "host refused prepare".into(),
-            decision: HostDecision::RefusedFrame { command: "prepare".into(), byte: 255, encoded: vec![0x44], decoded: None },
+            decision: HostDecision::Frame { command: "prepare".into(), byte: crate::RESPONSE_NO_RECORD, encoded: vec![0x44], decoded: None },
             decoded: Some(Ok(decoded)),
             evidence: None,
         };
         let (code, text) = render(&ending);
         assert_eq!(code, EXIT_REFUSED);
         assert!(
-            text.starts_with("refused: law-denied: field 2 monotone (before 2, after 1) (Host refused prepare, reply byte 255)\n"),
+            text.starts_with("refused: law-denied: field 2 monotone (before 2, after 1) (Host refused prepare with no record, reply byte 253)\n"),
             "{text}"
         );
         // Without the Host's `explain`, the reason's fixed text is printed.
@@ -3772,11 +3787,29 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_is_classified_by_its_decoding_never_by_its_byte() {
+    fn a_no_record_frame_is_a_refusal_whatever_it_decodes_to() {
+        for (decoded, first) in [
+            (json!({"type":"contention"}), "refused: no record: the Host answered contention before any append"),
+            (json!({"type":"unavailable"}), "refused: no record: the Host answered unavailable before any append"),
+        ] {
+            let ending = Ending::Host {
+                client: "c".into(),
+                decision: HostDecision::Frame { command: "submit".into(), byte: crate::RESPONSE_NO_RECORD, encoded: vec![1], decoded: None },
+                decoded: Some(Ok(decoded)),
+                evidence: None,
+            };
+            let (code, text) = render(&ending);
+            assert_eq!(code, EXIT_REFUSED, "{text}");
+            assert!(text.starts_with(first), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_frame_is_classified_by_its_marker_never_by_its_decoding_alone() {
         // 254: the socket refused before forwarding; certainly nothing happened.
         let ending = Ending::Host {
             client: "enrollment Host refused op87; exact frame retained".into(),
-            decision: HostDecision::RefusedFrame { command: "enrollment op87".into(), byte: 254, encoded: vec![1], decoded: None },
+            decision: HostDecision::Frame { command: "enrollment op87".into(), byte: 254, encoded: vec![1], decoded: None },
             decoded: Some(Err("bad frame".into())),
             evidence: None,
         };
@@ -3784,13 +3817,14 @@ mod tests {
         assert_eq!(code, EXIT_REFUSED);
         assert!(text.starts_with("refused: not sent: enrollment op87 was never forwarded to the Host (reply byte 254)"), "{text}");
         assert!(text.contains("  encoded: 01\n"));
-        // 255 the Host could not decode, or decoded as unavailable/uncertain: undecided, never "refused".
+        // 255 the Host could not decode, or decoded as anything (a refusal included): undecided.
         for decoded in [Some(Err("bad frame".to_owned())), None,
             Some(Ok(json!({"type":"unavailable","detail":super::super::hex(b"host session reopening")}))),
-            Some(Ok(json!({"type":"uncertain"})))] {
+            Some(Ok(json!({"type":"uncertain"}))),
+            Some(Ok(json!({"type":"refused","reason":"stale-root","phase":"78","detail":"78"})))] {
             let ending = Ending::Host {
                 client: "c".into(),
-                decision: HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None },
+                decision: HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None },
                 decoded,
                 evidence: None,
             };

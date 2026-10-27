@@ -126,8 +126,12 @@ pub fn classify(history: &[Value]) -> Option<Outcome> {
 /// What came back from one transmission of a sealed call.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Transmission {
-    /// The Host answered with this outcome presentation.
+    /// The Host answered with this outcome presentation (the operation's own reply, or a
+    /// `NO_RECORD` frame: decided).
     Answered(Value),
+    /// The Host answered under its `HOST_OUTCOME` envelope (255): undecided whatever it decodes
+    /// to (the exact call may be admitted); the attempt stays uncertain and is looked up.
+    Envelope(Value),
     /// Certainly never forwarded to the Host (connect failed, or the socket's 254 refusal).
     Unsent(String),
     /// Written, but no decided reply: the call may or may not be admitted.
@@ -205,6 +209,7 @@ impl Attempt {
                 Outcome::Undecided(v) => Phase::Uncertain { call_sha256: sha, detail: v.to_string() },
             },
             // A call that may have travelled before stays uncertain even if THIS send did not.
+            Transmission::Envelope(v) => Phase::Uncertain { call_sha256: sha, detail: v.to_string() },
             Transmission::Unsent(detail) if was_uncertain => Phase::Uncertain { call_sha256: sha, detail },
             Transmission::Unsent(detail) => Phase::NeverSent { call_sha256: sha, detail },
             Transmission::Uncertain(detail) => Phase::Uncertain { call_sha256: sha, detail },
@@ -370,6 +375,16 @@ mod tests {
         assert!(b.successor(d("11"), d("20")).is_err());
         let c = b.successor(d("11"), d("21")).unwrap();
         assert_eq!((c.number, c.invocation, c.phase.clone()), (2, b.invocation, Phase::Drafted));
+    }
+
+    #[test]
+    fn an_envelope_answer_is_undecided_whatever_it_decodes_to() {
+        let mut a = sealed();
+        a.record(b"call", Transmission::Envelope(json!({"type":"refused","reason":"staleRoot"}))).unwrap();
+        assert!(matches!(a.phase, Phase::Uncertain { .. }));
+        assert!(a.successor(d("11"), d("21")).unwrap_err().0.contains("look it up"));
+        // The exact lookup decides it.
+        assert!(matches!(a.record(b"call", Transmission::Answered(confirmed("replayed"))).unwrap(), Phase::Confirmed { .. }));
     }
 
     #[test]

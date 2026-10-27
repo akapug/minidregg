@@ -190,10 +190,17 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
     match codec.frame(&executable,&settings,operation,payload) {
         Ok(body)=>Ok([vec![operation],body].concat()),
         Err(CodecError::Failed(error))=>Err(error),
-        Err(CodecError::Refused{encoded,decoded})=>{
-            let line=decoded.as_ref().and_then(crate::refusal_line);
+        Err(CodecError::Refused{marker,encoded,decoded})=>{
+            let line=Some(crate::no_record_line(decoded.as_ref()));
             let command=match operation {7=>"author",8=>"inspect",9=>"signatures",10=>"observe-assemble",_=>"assemble"};
-            crate::note_host_decision(crate::HostDecision::RefusedFrame{command:command.to_owned(),byte:255,encoded:encoded.clone(),decoded});
+            let decision=crate::HostDecision::Frame{command:command.to_owned(),byte:marker,encoded:encoded.clone(),decoded};
+            let kind=crate::outcome_type(decision.outcome()).to_owned();
+            let refusal=decision.is_refusal();
+            crate::note_host_decision(decision);
+            // A pure codec frame changes nothing either way; the class is still the marker's.
+            if !refusal {
+                return Err(crate::undecided_frame_message(command,&kind,None,&encoded));
+            }
             Err(crate::refused_frame_message(command,&encoded,line))
         }
     }
@@ -353,14 +360,14 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1);
         let other = stub_dir("codec-refusal");
         fs::write(other.join("settings.json"), b"{}").unwrap();
-        fs::write(other.join("reply-1"), framed(&[255, 0xff, 0x00])).unwrap();
+        fs::write(other.join("reply-1"), framed(&[253, 0xff, 0x00])).unwrap();
         fs::write(other.join("reply-2"), framed(&[b"\x08".as_slice(), br#"{"type":"refused","reason":"malformed","phase":"6f702037","detail":"243a206d697373696e67206669656c64206e6f6e6365"}"#.as_slice()].concat())).unwrap();
         fs::write(other.join("reply"), framed(b"\x07again")).unwrap();
         let refusing = codec_stub(&other);
         let settings = other.join("settings.json");
         let error = local_frame(&refusing, &settings, 7, b"intent").unwrap_err();
         assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
-        assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::RefusedFrame { byte: 255, .. })));
+        assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::Frame { byte: 253, .. })));
         assert_eq!(local_frame(&refusing, &settings, 7, b"intent").unwrap(), b"\x07again");
         assert_eq!(fs::read_to_string(other.join("starts")).unwrap().lines().count(), 1);
         CODEC.lock().unwrap().reset();
@@ -382,8 +389,9 @@ mod tests {
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(dir.join("reply"), framed(&[255, 0xff, 0x00])).unwrap();
         let error = local_frame(&host, &settings, 7, b"intent").unwrap_err();
-        assert!(error.starts_with("host refused author"), "{error}");
-        assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::RefusedFrame { byte: 255, decoded: None, .. })));
+        // Under the 255 envelope and undecoded: undecided, never "refused".
+        assert!(error.starts_with("undecided: Host answered author with reply byte 255 and outcome undecoded"), "{error}");
+        assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::Frame { byte: 255, decoded: None, .. })));
         fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
         assert_eq!(local_frame(&host, &settings, 7, b"intent").unwrap(), b"\x07ok");
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 2);

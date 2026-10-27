@@ -2519,7 +2519,7 @@ fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> R
 /// read, a transport error) stays an error, not a placeholder.
 fn history_refused() -> bool {
     match crate::take_host_decision() {
-        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        Some(crate::HostDecision::Frame { decoded: Some(outcome), .. })
         | Some(crate::HostDecision::Outcome(outcome)) => reason_is_no_grant(&outcome),
         _ => false,
     }
@@ -4124,7 +4124,7 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
     let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     if attempt.parent() != Some(attempts.as_path())
         || !attempt.join("call.bin").is_file()
-        || fs::read(attempt.join("intent.json")).map_err(|error| error.to_string())? != bytes
+        || crate::fsio::read_bounded_or_empty(&attempt.join("intent.json"), MAX_RECORD as usize)? != bytes
     {
         return Err("delegation attempt lacks this exact retained proposal call".into());
     }
@@ -4331,7 +4331,7 @@ fn authoring_refused(generation: &Path) -> Result<bool> {
         return Ok(false);
     }
     let bytes = fs::read(&reply).map_err(|error| error.to_string())?;
-    Ok(bytes.first() == Some(&255))
+    Ok(bytes.first().is_some_and(|b| crate::is_outcome_frame(*b)))
 }
 
 /// A generation whose intent belonged to an attempt that was definitely
@@ -7911,7 +7911,7 @@ mod tests {
             vec![91, 7]
         };
         fs::write(generation.join("reply.frame"), &reply).unwrap();
-        if reply[0] == 255 {
+        if crate::is_outcome_frame(reply[0]) {
             Err("current resource birth authoring refused".into())
         } else {
             Ok(())

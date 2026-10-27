@@ -88,6 +88,12 @@ pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     mini_sdk::fsread::read_regular(path, 1, limit).map_err(String::from)
 }
 
+/// Repair `path` from the `seal.record` beside it if it is a cache the record names
+/// (`mini_sdk::phase`, invariant 3), for a reader that does not go through [`read_bounded`].
+pub(crate) fn repair_cache(path: &Path) -> Result<()> {
+    mini_sdk::phase::repair_file(path, std::fs::read(path).ok().as_deref()).map(|_| ()).map_err(String::from)
+}
+
 /// [`read_bounded`], an empty file also acceptable.
 pub(crate) fn read_bounded_or_empty(path: &Path, limit: usize) -> Result<Vec<u8>> {
     mini_sdk::fsread::read_regular(path, 0, limit).map_err(String::from)

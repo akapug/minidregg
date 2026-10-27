@@ -13,6 +13,20 @@
 //! Key material goes through these and nowhere else: a crash can never leave a partial secret
 //! (or an empty file a later run reads as one) at its final name.
 //!
+//! Deferred directory syncs ([`defer_directory_syncs`]): a process that publishes many files
+//! between two externally visible steps may opt in to coalescing the directory `fsync`s. The file
+//! itself is still staged and `fsync`ed before its name is committed, so "complete or absent" (and
+//! "old or new") holds at every crash point exactly as before; what is deferred is only the
+//! durability of the *name*, until the next barrier: [`flush_directory_syncs`], or any of
+//! [`sync_dir`], [`sync_parent`], [`sync_ancestors`], which flush first. A crash before the barrier
+//! may forget a name committed since the last one (the directory as it was at that barrier), never
+//! expose a partial file. The opting-in process must reach a barrier before anything outside it may
+//! depend on those names (a request to a service, its exit).
+//!
+//! Caches (`crate::phase`): inside a thread's cache scope a file is still staged and linked
+//! complete, but neither it nor its name is synced; the attempt's seal record is the durable copy
+//! and readers repair the cache from it. Everything outside a scope is unchanged.
+//!
 //! The `*_with` forms take a [`Stage`] observer called at each crash boundary. An observer error
 //! models the process dying at that point: it propagates at once and nothing is cleaned up, so a
 //! test sees exactly the bytes a crash leaves behind.
@@ -20,7 +34,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 /// File permissions of a published file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,13 +70,81 @@ pub enum Stage {
     BeforeCommit,
     /// The final name is committed; the directory entry is not yet durable.
     AfterCommit,
-    /// The directory is synced.
+    /// The directory is synced (when deferring: queued for the next barrier).
     AfterDirectorySync,
 }
 
-/// `fsync` a directory (so a rename, link or unlink inside it survives power loss).
+/// `fsync` a directory (so a rename, link or unlink inside it survives power loss). A barrier:
+/// every deferred directory sync is flushed first.
 pub fn sync_dir(directory: &Path) -> io::Result<()> {
-    File::open(directory)?.sync_all()
+    flush_directory_syncs()?;
+    fsync_dir(directory)
+}
+
+fn fsync_dir(directory: &Path) -> io::Result<()> {
+    sync_file(&File::open(directory)?)
+}
+
+thread_local! {
+    static FSYNCS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `fsync` one open file or directory, counted ([`fsyncs`]).
+pub fn sync_file(file: &File) -> io::Result<()> {
+    FSYNCS.with(|n| n.set(n.get() + 1));
+    file.sync_all()
+}
+
+/// How many `fsync`s this thread has issued through this module (files and directories): one
+/// signed write runs on one thread, so this is its count.
+pub fn fsyncs() -> u64 {
+    FSYNCS.with(|n| n.get())
+}
+
+static DEFER: AtomicBool = AtomicBool::new(false);
+/// The directories holding names committed since the last barrier, by (device, inode), each held
+/// open so a directory renamed or removed meanwhile is still the one synced.
+static PENDING: Mutex<Vec<(u64, u64, File)>> = Mutex::new(Vec::new());
+
+/// Opt this process in to deferred directory syncs (see the module documentation). There is no
+/// opt-out: a process that opts in owns reaching a barrier before its names matter outside it.
+pub fn defer_directory_syncs() {
+    DEFER.store(true, Ordering::SeqCst);
+}
+
+/// Whether this process defers directory syncs.
+pub fn deferring_directory_syncs() -> bool {
+    DEFER.load(Ordering::SeqCst)
+}
+
+/// The barrier: `fsync` every directory a name was committed in since the last barrier. On an
+/// error the directories not yet synced stay pending, so a later barrier retries them.
+pub fn flush_directory_syncs() -> io::Result<()> {
+    let mut pending = PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    while let Some((_, _, directory)) = pending.last() {
+        sync_file(directory)?;
+        pending.pop();
+    }
+    Ok(())
+}
+
+/// Make the name just committed at `path` durable: now, or at the next barrier when deferring.
+fn commit_name(path: &Path) -> io::Result<()> {
+    // A cache's name is made durable with its directory at the seal (`crate::phase`): the record
+    // names it, and a reader recreates it if a crash lost it.
+    if crate::phase::is_cache(path) {
+        return Ok(());
+    }
+    if !deferring_directory_syncs() {
+        return fsync_dir(parent_of(path)?);
+    }
+    let directory = File::open(parent_of(path)?)?;
+    let meta = directory.metadata()?;
+    let mut pending = PENDING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !pending.iter().any(|(dev, ino, _)| *dev == meta.dev() && *ino == meta.ino()) {
+        pending.push((meta.dev(), meta.ino(), directory));
+    }
+    Ok(())
 }
 
 /// `fsync` the directory holding `path`.
@@ -77,9 +160,10 @@ pub fn sync_parent(path: &Path) -> io::Result<()> {
 /// `/var/lib/mini/sessions`, which that account may traverse but not read. An ancestor it can
 /// write into but not open still refuses: it may hold this process's own new entries.
 pub fn sync_ancestors(directory: &Path) -> io::Result<()> {
+    flush_directory_syncs()?;
     let mut ancestor = Some(std::path::absolute(directory)?);
     while let Some(path) = ancestor {
-        match sync_dir(&path) {
+        match fsync_dir(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied && !can_create_in(&path) => {}
             Err(e) => return Err(e),
@@ -163,7 +247,12 @@ fn staged(
             observe(Stage::MidWrite).map_err(Crash::Observer)?;
         }
         observe(Stage::BeforeFileSync).map_err(Crash::Observer)?;
-        file.sync_all().map_err(Crash::Io)?;
+        // A cache of an attempt's seal record (`crate::phase`, invariant 2) is staged and linked
+        // without its own fsync: the record, written before anything can depend on it, is the
+        // durable copy, and readers repair the cache from it.
+        if !crate::phase::is_cache(path) {
+            sync_file(&file).map_err(Crash::Io)?;
+        }
         observe(Stage::BeforeCommit).map_err(Crash::Observer)
     };
     match write() {
@@ -201,7 +290,7 @@ pub fn replace_with(path: &Path, bytes: &[u8], perm: Perm, observe: &mut dyn FnM
         return Err(e);
     }
     observe(Stage::AfterCommit)?;
-    sync_parent(path)?;
+    commit_name(path)?;
     observe(Stage::AfterDirectorySync)
 }
 
@@ -230,7 +319,7 @@ pub fn create_new_from(
         return Err(e);
     }
     observe(Stage::AfterCommit)?;
-    sync_parent(path)?;
+    commit_name(path)?;
     observe(Stage::AfterDirectorySync)?;
     fs::remove_file(&temp)
 }
@@ -277,8 +366,8 @@ pub fn retain_exact(path: &Path, bytes: &[u8], perm: Perm) -> Result<Retained, R
             if held != bytes {
                 return Err(RetainError::Differs);
             }
-            file.sync_all().map_err(RetainError::Io)?;
-            sync_parent(path).map_err(RetainError::Io)?;
+            sync_file(&file).map_err(RetainError::Io)?;
+            commit_name(path).map_err(RetainError::Io)?;
             Ok(Retained::Matched)
         }
         Err(e) => Err(RetainError::Io(e)),
@@ -366,6 +455,64 @@ mod tests {
             assert!(held == old || held == new, "never a prefix");
             fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    /// Deferring directory syncs changes when a name becomes durable, never what a crash can leave
+    /// at it: the same kill at every boundary, in a child that deferred, leaves old or new.
+    #[test]
+    fn deferred_replace_is_still_old_or_new_across_a_kill_at_every_boundary() {
+        let old = vec![b'o'; 4096];
+        let new = vec![b'n'; 8192];
+        for at in STAGES {
+            let dir = scratch(&format!("deferred-replace-{at:?}"));
+            let target = dir.join("record");
+            replace(&target, &old, Perm::Private).unwrap();
+            assert!(die_at(at, |obs| {
+                defer_directory_syncs();
+                let _ = replace_with(&target, &new, Perm::Private, obs);
+            }), "child must reach {at:?}");
+            let held = fs::read(&target).unwrap();
+            let committed = matches!(at, Stage::AfterCommit | Stage::AfterDirectorySync);
+            assert_eq!(held, if committed { new.clone() } else { old.clone() }, "kill at {at:?}");
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    /// The barrier syncs the directory a name was committed in, by the directory itself: one that
+    /// was renamed or removed after the commit is still synced (or harmlessly gone), and a sync
+    /// wrapper (`sync_parent`) is a barrier too. Runs in a forked child, since deferral is
+    /// process-wide.
+    #[test]
+    fn deferred_names_are_synced_at_the_barrier_by_directory_identity() {
+        let root = scratch("deferred-barrier");
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            let check = || -> io::Result<bool> {
+                defer_directory_syncs();
+                let one = root.join("one");
+                fs::create_dir(&one)?;
+                replace(&one.join("a"), b"a", Perm::Private)?;
+                create_new(&one.join("b"), b"b", Perm::Private)?;
+                let queued = PENDING.lock().unwrap().len();
+                fs::rename(&one, root.join("moved"))?;
+                flush_directory_syncs()?;
+                let flushed = PENDING.lock().unwrap().is_empty();
+                let gone = root.join("gone");
+                fs::create_dir(&gone)?;
+                replace(&gone.join("c"), b"c", Perm::Private)?;
+                fs::remove_file(gone.join("c"))?;
+                fs::remove_dir(&gone)?;
+                replace(&root.join("d"), b"d", Perm::Private)?;
+                sync_parent(&root.join("d"))?;
+                Ok(queued == 1 && flushed && PENDING.lock().unwrap().is_empty())
+            };
+            unsafe { libc::_exit(if matches!(check(), Ok(true)) { 0 } else { 1 }) };
+        }
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        let _ = fs::remove_dir_all(&root);
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "child status {status}");
     }
 
     #[test]

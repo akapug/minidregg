@@ -182,7 +182,7 @@ pub(crate) fn meter(
             sync_directory_ancestors(directory)?;
             print_json(&value)
         }
-        Some(255) => {
+        Some(&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD)) => {
             create_private(&directory.join("refusal.bin"), &frame[1..])?;
             if let Ok(value) = serde_json::from_slice::<Value>(&frame[1..]) {
                 create_private(&directory.join("refusal.json"), &frame[1..])?;

@@ -86,8 +86,8 @@ pub(crate) fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 
 pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [byte @ (255 | 254), encoded @ ..] => {
-            note_host_decision(HostDecision::RefusedFrame {
+        [byte @ (crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), encoded @ ..] => {
+            note_host_decision(HostDecision::Frame {
                 command: format!("enrollment op{operation}"),
                 byte: *byte,
                 encoded: encoded.to_vec(),
@@ -111,7 +111,7 @@ pub(crate) fn stale_refusal(
     decision: Option<&HostDecision>,
 ) -> bool {
     match decision {
-        Some(HostDecision::RefusedFrame { decoded: None, encoded, .. }) => {
+        Some(HostDecision::Frame { decoded: None, encoded, .. }) => {
             let kind = b"outcome";
             let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
             payload.extend_from_slice(kind);

@@ -58,8 +58,11 @@ arbitrary `invoke` arguments, nested codec tags, documentation numbers or all
 integers in the tree.
 
 `response_markers` are a separate namespace. A marker reserves a request byte
-only when `request_reserved` is explicitly true (transport refusal 254 and Host
-refusal 255). Request 164 may legitimately receive response 34, and request 34
+only when `request_reserved` is explicitly true (transport refusal 254, the Host
+outcome envelope 255 and the proven no-record answer 253). A client reads 253
+(`NO_RECORD`: decided before any append, a fresh attempt is safe) as the refusal
+class and 255 (`HOST_OUTCOME`) as undecided, to be looked up by its exact call;
+it never reads 255 as a refusal. Request 164 may legitimately receive response 34, and request 34
 may receive the definitive no-record response 164. Ordinary responses echoing
 their request byte are also not duplicate allocations. This gate does not claim
 to verify response codecs, payload guards or Mini authorization; those remain

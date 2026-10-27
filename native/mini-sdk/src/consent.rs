@@ -32,7 +32,12 @@ use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
-use crate::host_operations::{CONSENT_PLANS, RESPONSE_HOST_REFUSAL};
+use crate::host_operations::CONSENT_PLANS;
+
+/// The consent provider's own refusal byte: `Host/ClientConsentCore.lean` answers `255 ‖ reason`
+/// for every frame it refuses. This is the local consent protocol's framing, not a reply marker
+/// of the Host request registry (whose 255 is the undecided outcome envelope).
+pub const CONSENT_REFUSAL: u8 = 255;
 use crate::local::{binding, pair, settings_bytes, Session, CAP};
 use crate::{Error, Result};
 
@@ -67,7 +72,7 @@ impl ConsentError {
     /// The provider's refusal of an observation (221) as stale: the source moved between the
     /// Host's challenge and the local check. Every other refusal stays terminal.
     pub fn is_stale_observation(&self) -> bool {
-        matches!(self, ConsentError::Refused { operation: 221, answer: RESPONSE_HOST_REFUSAL, detail }
+        matches!(self, ConsentError::Refused { operation: 221, answer: CONSENT_REFUSAL, detail }
             if detail.starts_with(STALE_OBSERVATION_TAG.as_bytes()))
     }
 }
@@ -403,12 +408,12 @@ fn serve_connection(stream: std::os::unix::net::UnixStream, shared: &Mutex<Resid
         }
         let operation = frame[0];
         let (answer, body) = match shared.lock() {
-            Err(_) => (RESPONSE_HOST_REFUSAL, b"resident consent provider lock poisoned".to_vec()),
+            Err(_) => (CONSENT_REFUSAL, b"resident consent provider lock poisoned".to_vec()),
             Ok(mut resident) => {
                 if resident.ended {
-                    (RESPONSE_HOST_REFUSAL, b"the resident consent provider ended; the next command starts a new one".to_vec())
+                    (CONSENT_REFUSAL, b"the resident consent provider ended; the next command starts a new one".to_vec())
                 } else if matches!(operation, 228 | 229 | 233) {
-                    (RESPONSE_HOST_REFUSAL, format!("frame {operation} is reserved to the resident consent provider").into_bytes())
+                    (CONSENT_REFUSAL, format!("frame {operation} is reserved to the resident consent provider").into_bytes())
                 } else {
                     let checked = if rechecked {
                         Ok(())
@@ -428,7 +433,7 @@ fn serve_connection(stream: std::os::unix::net::UnixStream, shared: &Mutex<Resid
                         Err(e) => {
                             resident.ended = true;
                             ended.store(true, std::sync::atomic::Ordering::Release);
-                            (RESPONSE_HOST_REFUSAL, e.into_bytes())
+                            (CONSENT_REFUSAL, e.into_bytes())
                         }
                     }
                 }

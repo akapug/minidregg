@@ -57,7 +57,7 @@ fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     let frame = session_invoke(&ws.host, &ws.socket, &ws.config, operation, payload)?;
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "refused: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(600)..])
                 .split_whitespace()

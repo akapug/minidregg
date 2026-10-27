@@ -66,13 +66,13 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 /// a diagnostic, never parsed into a decision.
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, body @ ..] => {
+        [byte @ (crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD), body @ ..] => {
             // The refusal frame is the Host's own encoded outcome; it is kept
             // as the Host's decision (the shell renders it through the Host),
             // never parsed here.
-            crate::note_host_decision(crate::HostDecision::RefusedFrame {
+            crate::note_host_decision(crate::HostDecision::Frame {
                 command: format!("fleet op{operation}"),
-                byte: 255,
+                byte: *byte,
                 encoded: body.to_vec(),
                 decoded: None,
             });
@@ -322,7 +322,7 @@ fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
 /// caller's report.
 fn observation_stale() -> bool {
     match crate::take_host_decision() {
-        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        Some(crate::HostDecision::Frame { decoded: Some(outcome), .. })
             if outcome.get("reason").and_then(Value::as_str) == Some("stale-root") =>
         {
             true

@@ -567,7 +567,7 @@ fn draft(v: &Value) -> Result<Vec<u8>> {
 fn typed_refusal(decision: Option<crate::HostDecision>) -> Option<Value> {
     let value = match decision? {
         crate::HostDecision::Outcome(v) => v,
-        crate::HostDecision::RefusedFrame {
+        crate::HostDecision::Frame {
             decoded: Some(v), ..
         } => v,
         _ => return None,
@@ -983,7 +983,7 @@ mod tests {
             json!({"type":"unknown"})
         )))
         .is_none());
-        assert!(typed_refusal(Some(crate::HostDecision::RefusedFrame {
+        assert!(typed_refusal(Some(crate::HostDecision::Frame {
             command: "call".into(),
             byte: 0,
             encoded: vec![],

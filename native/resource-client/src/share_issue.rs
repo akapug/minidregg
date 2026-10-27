@@ -280,7 +280,7 @@ fn retained_outcome_bytes(directory: &Path, stem: &str) -> Result<Option<PathBuf
     }
     let frame = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
     let operation = if stem == "submit" { 28 } else { 29 };
-    if frame.first() == Some(&255) && !binary.exists() {
+    if frame.first().is_some_and(|b| crate::is_outcome_frame(*b)) && !binary.exists() {
         return Ok(None);
     }
     if frame.first() != Some(&operation) || frame.len() < 2 {

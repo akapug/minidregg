@@ -83,7 +83,7 @@ fn workspace(directory: &Path) -> Result<Workspace> {
 fn reply(frame: Vec<u8>, operation: u8) -> Result<Vec<u8>> {
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "clock: Host refused op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(300)..])
         )),
