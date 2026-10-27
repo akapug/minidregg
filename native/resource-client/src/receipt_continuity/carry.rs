@@ -199,7 +199,7 @@ fn copy_config(source: &Path, destination: &Path) -> Result<()> {
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(NOFOLLOW)
-        .open(source)
+        .open({ crate::fsio::repair_cache(source).map_err(fail)?; source })
         .map_err(fail)?;
     let metadata = file.metadata().map_err(fail)?;
     if !metadata.is_file() || metadata.len() > MAX_JSON {

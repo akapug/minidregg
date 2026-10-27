@@ -16,8 +16,11 @@
 //! 3. Repair: [`crate::fsread::read_regular`] (and through it every bounded reader of the client)
 //!    checks a file named by a `seal.record` beside it against the record's SHA-256 and, when the
 //!    file is absent or differs, rewrites it from the record (durably) before returning the
-//!    record's bytes. [`repair_dir`] does the same for a whole directory, before a path is handed
-//!    to a process that reads it itself (a one-shot Host) or to a script.
+//!    record's bytes. [`repair_dir`] does the same for a whole directory; the client runs it when
+//!    it reopens a retained attempt (`mini retry`, workspace recovery), before anything (itself, a
+//!    one-shot Host, the transport) reads the attempt's files. A script that reads a cache directly
+//!    sees the repaired bytes once a `mini` command has read the file or reopened the attempt;
+//!    until then, after a crash, it may see a torn cache.
 //! 4. A file written before the seal and NOT named by any record belongs to an attempt whose call
 //!    was never sealed, so it was never transmitted; nothing reuses such an attempt's files (a new
 //!    submit makes a new directory, append recovery retires pre-call files). The answer files
@@ -242,6 +245,24 @@ mod tests {
         assert_eq!(repair_dir(&bare).unwrap(), 0);
         let _ = fs::remove_dir_all(dir);
         let _ = fs::remove_dir_all(bare);
+    }
+
+    /// The shared bounded reader repairs: a torn cache (here: emptied, which also fails the size
+    /// bound) and a missing one both read back as the record's bytes, and are fixed on disk.
+    #[test]
+    fn the_shared_reader_returns_the_record_s_bytes_for_a_torn_or_missing_cache() {
+        let dir = scratch("reader");
+        fs::write(dir.join("plan.bin"), b"PLAN").unwrap();
+        fs::write(dir.join("intent.bin"), b"INTENT").unwrap();
+        seal(&dir).unwrap();
+        fs::write(dir.join("plan.bin"), b"").unwrap();
+        assert_eq!(crate::fsread::read_regular(&dir.join("plan.bin"), 1, 100).unwrap(), b"PLAN");
+        assert_eq!(fs::read(dir.join("plan.bin")).unwrap(), b"PLAN");
+        fs::remove_file(dir.join("intent.bin")).unwrap();
+        assert_eq!(crate::fsread::read_regular(&dir.join("intent.bin"), 0, 100).unwrap(), b"INTENT");
+        // An unnamed file that is missing stays missing.
+        assert!(crate::fsread::read_regular(&dir.join("outcome.json"), 0, 100).unwrap_err().is_not_found());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

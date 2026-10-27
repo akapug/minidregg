@@ -4124,7 +4124,7 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
     let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     if attempt.parent() != Some(attempts.as_path())
         || !attempt.join("call.bin").is_file()
-        || fs::read(attempt.join("intent.json")).map_err(|error| error.to_string())? != bytes
+        || crate::fsio::read_bounded_or_empty(&attempt.join("intent.json"), MAX_RECORD as usize)? != bytes
     {
         return Err("delegation attempt lacks this exact retained proposal call".into());
     }

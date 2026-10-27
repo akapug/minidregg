@@ -2402,8 +2402,7 @@ fn query(
 
 fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
     let path = directory.join("attempt.json");
-    let bytes =
-        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let bytes = fsio::read_bounded(&path, 1 << 20)?;
     let value: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
     if value.get("format").and_then(Value::as_str) != Some("minidregg-resource-client-attempt-v1") {
@@ -2456,6 +2455,9 @@ fn retry_with_upgrade(
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
+    // A retained attempt's caches are checked against its seal record before anything (this
+    // process, a one-shot Host, the transport) reads them (`mini_sdk::phase`, invariant 3).
+    mini_sdk::phase::repair_dir(directory)?;
     let call = directory.join("call.bin");
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
