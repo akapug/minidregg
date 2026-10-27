@@ -2,7 +2,6 @@
 # 2026-10-05 on df0cd116: fewer tests than the floor is red (a deleted/renamed/skipped test), a failure is red.
 # scripts/check-unit-tests.sh. Dashed file names (test-ws-continuity-journey.py, test-docuverse-same-store.py,
 # test-protected-document-same-store.py, .spw/tools/check-source.py) are not importable as modules: not here.
-coordination/test_namespace_projection.py	4
 deploy/hermes-dispatch/test_dispatch.py	3
 native/resource-client/test_composed_scenario.py	27
 native/resource-client/test_joined_member_journey.py	15
