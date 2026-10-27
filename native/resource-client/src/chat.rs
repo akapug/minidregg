@@ -2237,7 +2237,22 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
     if value.get("recipient").and_then(Value::as_str) != Some(me.as_str()) {
         return Err(usage(format!("this invitation is not addressed to you ({me})")));
     }
-    import_from(session, name, &value)?;
+    let held = session.workspace.join("refs").join(format!("{}.json", crate::workspace::ref_file(name)));
+    if held.exists() {
+        // A guest who paid: NAME is its observe reference to this room. The
+        // invitation is its member window; adopt it as `room status` does
+        // (the guest reference moves to NAME-guest), never a second import.
+        let ws = workspace_record(session).map_err(error)?;
+        let same_room = reference(session, name).ok().and_then(|r| r.get("target").cloned()) == value.get("target").cloned();
+        if !same_room {
+            return Err(usage(format!("{name} already names another room in this workspace")));
+        }
+        if !crate::credit::adopt_window_from(&session.workspace, &ws, name, &session.home.join("requests")).map_err(error)? {
+            return Err(usage(format!("{name}: no member window addressed to you in HOME/requests to adopt")));
+        }
+    } else {
+        import_from(session, name, &value)?;
+    }
     let mut room = Room { name: name.to_owned(), grant: name.to_owned(), stream: None };
     let ws = workspace_record(session).map_err(error)?;
     let grant = reference(session, name).map_err(error)?;
