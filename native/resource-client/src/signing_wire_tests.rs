@@ -154,6 +154,7 @@ fn pinned(golden: &str, dry_run: bool) {
         .args(["--exact", "signing_wire_tests::signing_wire_worker", "--ignored", "--nocapture", "--test-threads=1"])
         .env("MINI_WIRE_DIR", &dir)
         .env("MINI_CONSENT_RESIDENT", "0")
+        .env("MINI_CODEC_RESIDENT", "0") // a test binary has no `codec-resident` verb (client_consent::codec_test_lock)
         .env("HOME", &dir)
         .env("MINI_CONSENT_ANCHOR_DIR", dir.join("anchors"))
         .env("MINI_LOCAL_HOST", &host)
