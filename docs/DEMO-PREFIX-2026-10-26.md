@@ -60,13 +60,17 @@ evidence spike (§3), not promised now.
 
 ## 2. Where we stand (2026-10-27, early)
 
-- **The demo box exists**: `dregg-demo`, Hetzner `ccx23` (4 dedicated vCPU / 16 GB), fsn1,
-  Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`, in the existing project with its own
-  firewall and no private network (`cx43`/`cx33` were refused as `resource_unavailable` in
-  fsn1/nbg1/hel1; `cpx41` can no longer be ordered). `demo.`, `calc.demo.`, `nano.demo.dregg.online`
-  resolve (A, AAAA, CAA as code in `edge/dns-demo`, Gandi LiveDNS). The host frame install,
-  the operator secrets (Helius, the Dragon's Egg bot, the enrolment keypair; no OpenRouter key
-  yet: ember's is expired) and **rehearsal ship #1** of candidate a0db11f8 are in progress.
+- **Rehearsal ship #1 is SERVING on the demo box** (2026-10-27, ~04:30 UTC): `dregg-demo`
+  (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`; `demo.`, `calc.demo.`,
+  `nano.demo.dregg.online` resolve) runs candidate a0db11f8a8bc under `ship.sh --rehearsal` with every
+  login closed and the reds named in the notice; `mini-health` OK (signed read 0.33 s); Store, public
+  ingress, key broker (sealed OpenRouter pool key, BYOK row), certifier and clock timers, Caddy with
+  valid TLS are up; `/join` answers 503 with the maintenance text and the 11 Nov shutdown line; Hermes
+  (no controller.json yet), Discord (bot in zero guilds), PAY (devnet config, no observer key), the
+  door (not in this candidate) and roster sync (rehearsal) are off with their reasons recorded. Known
+  reds: nano's writer fails in bwrap (ENOSYS on /dev; with the nano root); thin consent refuses a
+  signed write on this candidate (consent = full until the incremental refresh lands). Seven frame
+  bugs found by the first real split-tenancy ship are fixed on dregg-infra main 587169b / demo-vm 8991808.
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
