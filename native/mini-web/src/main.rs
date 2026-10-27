@@ -230,7 +230,7 @@ impl Gateway {
                 Some(who) => self.websocket(request, stream, id, &who),
                 None => Reply::Raw(Response::text(401, "no session")),
             },
-            ("GET" | "HEAD", ["apps"]) if self.apps_index.is_some() => {
+            ("GET" | "HEAD", ["apps"]) => {
                 let who = self.sessions.who(request);
                 let html = self.apps(who.as_ref());
                 self.stage(200, "Apps", html, who, request)
@@ -394,7 +394,11 @@ impl Gateway {
     }
 
     fn apps(&self, who: Option<&Who>) -> String {
-        let Some(path) = &self.apps_index else { return String::new() };
+        let Some(path) = &self.apps_index else {
+            return "<p>The Sandstorm app market: browse the index, install any SPK as a grain of your own, open it in a pane on its own origin. \
+                    This box has no app index configured yet (<code>--apps-index PATH</code>; the install path and the per-grain hostnames are the SPK lane's). \
+                    Grains already running answer under their own origins; <code>app status NAME</code> in the Terminal shows yours.</p>".to_owned();
+        };
         let index: serde_json::Value = match std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
             Some(v) => v,
             None => return refusal("No app index", &format!("{} is missing or malformed", path.display())),
