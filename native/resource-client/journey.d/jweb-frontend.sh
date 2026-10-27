@@ -66,7 +66,11 @@ hook|--dry)
   # provisions its own member `jwf` from the sponsor's shell, the way the docuverse provisions its
   # authors (K12C): keygen, enroll plan/seal/submit, provision, the birth context, init.
 if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
-    M=$D/jwf-member; mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
+    # The member's HOME must be short: the client's resident consent socket lives under
+    # HOME/.mini/consent-anchors/ and a Unix socket path is bounded (sun_path). Stable per step
+    # directory, so a run on a box that keeps its world finds the member it provisioned before.
+    M=${XDG_RUNTIME_DIR:-/tmp}/jwf-m-$(printf '%s' "$D" | cksum | cut -c1-8); mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
+    [ "$mode" = hook ] && JWF_MEMBER_DIR=$M
     mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
       "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
     }
@@ -103,7 +107,7 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
   pinned=$(jq -r '.socket // empty' "$WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
   R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
   # Unix sockets need a short path (sun_path); the step directory can be long.
-  RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR"' EXIT
+  RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR" ${JWF_MEMBER_DIR:+"$JWF_MEMBER_DIR"}' EXIT
   HOMEDIR=${JWF_HOME:-$R/home}
   cat >"$R/dev.json" <<EOF
 {"mini":"$MINI","host":"$HOST","config":"$CONFIG","socket":"$SOCKET","wrapper":"$WRAPPER",

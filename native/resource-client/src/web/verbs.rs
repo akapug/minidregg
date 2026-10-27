@@ -101,6 +101,7 @@ fn leaf_alt(leaf: &crate::shell_grammar::Leaf) -> Alt {
         G::Subject | G::Word => Kind::Word,
         G::Number => Kind::Number,
         G::TextOrFile | G::File | G::FileOrStdin | G::Law => Kind::Text,
+        G::KeyFile => Kind::Word,
         G::Rest => Kind::Rest,
         G::Choice(options) => Kind::Choice(options.iter().map(|o| o.to_string()).collect()),
     };
@@ -109,7 +110,7 @@ fn leaf_alt(leaf: &crate::shell_grammar::Leaf) -> Alt {
         tokens.push(Tok::Arg { name: a.name.to_owned(), optional: a.optional, kind: kind(a.kind) });
     }
     for f in leaf.flags {
-        tokens.push(Tok::Flag { name: f.name.to_owned(), value: f.value.map(|(p, k)| (p.to_owned(), kind(k))), optional: true });
+        tokens.push(Tok::Flag { name: f.name.to_owned(), value: f.value.map(|(p, k)| (p.to_owned(), kind(k))), optional: !f.required });
     }
     Alt { tokens }
 }
@@ -317,11 +318,11 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         match tok {
             Tok::Lit(_) => {}
             Tok::Arg { name, optional, kind } => out.push_str(&input(&field, name, *optional, kind)),
-            Tok::Flag { name, value: None, .. } => {
-                out.push_str(&format!("<label class=\"check\"><input type=\"checkbox\" name=\"{field}\" value=\"on\"> <code>{}</code></label>", escape(name)));
+            Tok::Flag { name, value: None, optional } => {
+                out.push_str(&format!("<label class=\"check\"><input type=\"checkbox\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
             }
-            Tok::Flag { name, value: Some((placeholder, kind)), .. } => {
-                out.push_str(&input(&field, &format!("{name} {placeholder}"), true, kind));
+            Tok::Flag { name, value: Some((placeholder, kind)), optional } => {
+                out.push_str(&input(&field, &format!("{name} {placeholder}"), *optional, kind));
             }
         }
     }
@@ -457,6 +458,7 @@ fn placeholder(kind: crate::shell_grammar::Kind, name: &str, refs: &[String]) ->
         G::Subject | G::Number => "1".into(),
         G::TextOrFile => "hello".into(),
         G::File | G::FileOrStdin => "@x.txt".into(),
+        G::KeyFile => "mini.key".into(),
         G::Law => "sealed".into(),
         G::Choice(options) => options.first().map(|o| o.to_string()).unwrap_or_default(),
         G::Rest => "hello there".into(),
@@ -464,6 +466,7 @@ fn placeholder(kind: crate::shell_grammar::Kind, name: &str, refs: &[String]) ->
             let n = name.to_ascii_uppercase();
             if n.contains("JSON") { "@x.json".into() }
             else if n.contains("GRAIN") { "a1".into() }
+            else if n.contains("COSIGN") || n.contains("SIGNATURE") { "ab".repeat(64) }
             else if n.contains("HEX") { "ab".repeat(32) }
             else if n.contains("@FILE") || n.contains("FILE") { "@x.txt".into() }
             else if n.contains("CELL:SEQUENCE") { "1:1".into() }
@@ -494,17 +497,25 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
         let leaf = grammar.and_then(|g| g.leaves.get(index));
         let mut form = std::collections::BTreeMap::new();
         form.insert("alt".to_owned(), index.to_string());
-        // Required positional arguments only (optional ones stay empty), by the grammar's kinds;
-        // flags are left out: the leaf's plain shape is what every form must plan.
+        // Every positional argument (optional ones too: every field of the form) and the required
+        // flags, by the grammar's kinds; optional flags are left out.
         let mut position = 0usize;
         for (i, tok) in alt.tokens.iter().enumerate() {
-            if let Tok::Arg { name: label, optional, .. } = tok {
-                let kind = leaf.and_then(|l| l.args.get(position)).map(|a| a.kind).unwrap_or(crate::shell_grammar::Kind::Word);
-                position += 1;
-                if *optional {
-                    continue;
+            match tok {
+                Tok::Arg { name: label, .. } => {
+                    let kind = leaf.and_then(|l| l.args.get(position)).map(|a| a.kind).unwrap_or(crate::shell_grammar::Kind::Word);
+                    position += 1;
+                    form.insert(format!("a{i}"), placeholder(kind, label, &refs));
                 }
-                form.insert(format!("a{i}"), placeholder(kind, label, &refs));
+                Tok::Flag { name: flag, value, optional: false } => {
+                    let kind = leaf.and_then(|l| l.flags.iter().find(|f| f.name == flag)).and_then(|f| f.value).map(|(_, k)| k);
+                    form.insert(format!("a{i}"), match (value, kind) {
+                        (None, _) => "on".into(),
+                        (Some((label, _)), Some(kind)) => placeholder(kind, label, &refs),
+                        (Some((label, _)), None) => placeholder(crate::shell_grammar::Kind::Word, label, &refs),
+                    });
+                }
+                _ => {}
             }
         }
         let (class, detail) = match assemble(site, name, &form) {

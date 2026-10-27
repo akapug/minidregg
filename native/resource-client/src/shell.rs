@@ -354,8 +354,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             Plan::Client { command: "workspace".into(), flags: flags_out, writes: vec![request_file(path, &law)] }
         }
         ["room", "welcome"] => {
-            let spec = p.flag("--template").flatten()
-                .ok_or_else(|| "room welcome runs a template's member lines: --template T".to_owned())?;
+            let spec = p.required("--template");
             let founder = session_subject(session)?;
             let (label, text) = template::source(&session.home, spec, template::Part::Member)?;
             return template_plan(session, label, &text, &[("ROOM", p.arg(0)), ("ME", &founder), ("MEMBER", p.arg(1))]);
@@ -422,12 +421,6 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             // A room's law is where its roster is enforced: sealing it freezes
             // membership forever. Said out loud, and only on --freeze-roster.
             let name = p.arg(1);
-            if !p.has("--freeze-roster") {
-                return Err(format!(
-                    "room seal {name} installs `sealed` on the room cell: no one can ever be invited or kicked again, \
-                     while members keep reading and writing the cells under it. Repeat with --freeze-roster to do it."
-                ));
-            }
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"install-policy",
                 "name":name,"predicate":{"type":"any","predicates":[]}});
             let mut plan = proposal(session, id, &request);
@@ -442,7 +435,6 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
         ["room", "transition"] => {
             // room transition ID NAME NEXTFILE: hand a private room I founded to my NEXT
             // signing key, BEFORE `rotate-key NEXTFILE` (which refuses a founder until then).
-            session_file(p.arg(2), "next key file")?;
             Plan::Client { command: "workspace".into(), flags: vec![flag("action", "room-key"), flag("op", "transition"), flag("dir", ws),
                 flag("name", p.arg(1)), flag("proposal-id", id), flag("next-key", session.home.join("keys").join(p.arg(2)))], writes: vec![] }
         }
@@ -501,13 +493,13 @@ fn board_law() -> Value {
         {"type":"all","predicates":clauses}]})
 }
 
-fn board_state(value: &str) -> std::result::Result<&'static str, String> {
-    Ok(match value {
-        "0" | "todo" => "0",
-        "1" | "doing" => "1",
-        "2" | "done" => "2",
-        _ => return Err("a board state is todo, doing or done (0, 1, 2)".into()),
-    })
+fn board_state(value: &str) -> &'static str {
+    // The grammar admits exactly these three words.
+    match value {
+        "todo" => "0",
+        "doing" => "1",
+        _ => "2",
+    }
 }
 
 /// Text for a document line: a literal word, or `@FILE` from HOME/requests.
@@ -945,10 +937,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 ["app", "delegate-lifecycle", "prepare"] => {
                     crate::workspace::validate_name(p.arg(0))?;
-                    let (package, snapshot, manager) = match (p.flag("--package").flatten(), p.flag("--snapshot").flatten(), p.flag("--manager").flatten()) {
-                        (Some(a), Some(b), Some(c)) => (a, b, c),
-                        _ => return Err(u.to_owned()),
-                    };
+                    let (package, snapshot, manager) = (p.required("--package"), p.required("--snapshot"), p.required("--manager"));
                     client("workspace", vec![flag("dir", ws()), flag("action", "app-lifecycle"), flag("request-id", p.arg(0)), flag("op", "prepare"),
                         flag("name", p.arg(1)), flag("package-name", package), flag("snapshot-name", snapshot), flag("manager", manager)])
                 }
@@ -1131,8 +1120,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 ["board", "move"] => {
                     let field = task_field(p.arg(2), 0)?;
-                    let from = board_state(p.arg(3))?;
-                    let to = board_state(p.arg(4))?;
+                    let from = board_state(p.arg(3));
+                    let to = board_state(p.arg(4));
                     scalar_proposal(session, p.arg(0), p.arg(1), json!({"type":"write","key":{"type":"object","field":field},"value":to,"expected":from}))
                 }
                 _ => {
@@ -1177,13 +1166,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "keygen" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::KEYGEN, &w)?;
-            session_file(p.arg(0), "key file")?;
             let keys = session.home.join("keys");
             client("keygen", vec![flag("secret", keys.join(p.arg(0))), flag("public", keys.join(format!("{}.pub", p.arg(0)))), flag("hosted", "yes")])
         }
         "init" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::INIT, &w)?;
-            session_file(p.arg(0), "key file")?;
             let context = session.home.join("provision").join("birth-context.json");
             if !context.is_file() {
                 return Ok(Plan::NotHere(format!(
@@ -1350,13 +1337,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 if p.arg(0) == "lookup" {
                     return Err(u.to_owned());
                 }
-                session_file(p.arg(0), "next key file")?;
                 client("adopt-next-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(p.arg(0)))])
             }
         }
         "rotate-key" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::ROTATE_KEY, &w)?;
-            session_file(p.arg(0), "next key file")?;
             client("rotate-key", vec![flag("workspace", ws()), flag("next-key", session.home.join("keys").join(p.arg(0)))])
         }
         "refs" => {

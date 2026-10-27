@@ -561,7 +561,7 @@ pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
                 ["story", "new"] => {
                     let name = story_name(p.arg(0))?;
                     let gm = p.flag("--gm").flatten().map(subject_word).transpose()?;
-                    Ok(Line::New { name, from: p.flag("--from").flatten().map(str::to_owned).ok_or(u)?, gm })
+                    Ok(Line::New { name, from: p.required("--from").to_owned(), gm })
                 }
                 ["story", "seal"] => Ok(Line::Seal(story_name(p.arg(0))?)),
                 ["story", "invite"] => Ok(Line::Invite { name: story_name(p.arg(0))?, subject: subject_word(p.arg(1))?, gm: p.opt(2).is_some() }),

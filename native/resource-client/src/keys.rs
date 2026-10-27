@@ -354,13 +354,11 @@ pub(crate) fn shell_plan(workspace: &Path, home: &Path, w: &[String]) -> Result<
         "grant" => {
             flags.push(flag("provider", p.arg(0).to_owned()));
             flags.push(flag("runner", p.arg(1).to_owned()));
-            for (name, key) in [("--per-call", "per-call"), ("--per-day", "per-day"), ("--until", "until"), ("--model", "model")] {
-                match p.values(name).as_slice() {
-                    [] if key == "model" => {}
-                    [] => return Err(crate::shell_grammar::usage(&crate::shell_grammar::KEY)),
-                    [one] => flags.push(flag(key, (*one).to_owned())),
-                    _ => return Err(crate::shell_grammar::usage(&crate::shell_grammar::KEY)),
-                }
+            for (name, key) in [("--per-call", "per-call"), ("--per-day", "per-day"), ("--until", "until")] {
+                flags.push(flag(key, p.required(name).to_owned()));
+            }
+            if let Some(Some(model)) = p.flag("--model") {
+                flags.push(flag("model", model.to_owned()));
             }
         }
         "revoke" => {
