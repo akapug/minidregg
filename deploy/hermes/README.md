@@ -284,6 +284,11 @@ ACP room resident, with the box's paths and dregg-infra's registration
 
     install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
 
+Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
+operator's sealed pool key, the metered tariff quoted from the upstream's
+usage record) and `J14_HERMES_ROOT` set to the runtime root below; the default
+`J14_ROUTE=user` runs a friend's own key instead.
+
 Before it can run:
 
 - **The Store pins Hermes's purse tariff.** `demo/provider-services.json`

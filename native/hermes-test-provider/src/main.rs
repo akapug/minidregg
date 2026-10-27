@@ -45,8 +45,11 @@ enum Mode {
     ContentStale8901,
     ContentBirth9301,
     /// `--room-librarian`: the librarian program, deterministically, over
-    /// the room tools (PLACE §2.7, J14).
-    RoomLibrarian,
+    /// the room tools (PLACE §2.7, J14). `--room-librarian-metered`: the
+    /// same program as a pool upstream, whose stream ends with a usage event
+    /// (the record the Host quotes a metered call from) and whose log names
+    /// the bearer it was paid with.
+    RoomLibrarian { metered: bool },
 }
 
 fn decimal(value: &str) -> bool {
@@ -1198,7 +1201,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
         None => "none".to_owned(),
         Some(value) => format!("sha256:{}", sha256_hex(value.as_bytes())),
     };
-    if matches!(mode, Mode::RoomLibrarian) {
+    if matches!(mode, Mode::RoomLibrarian { .. }) {
         // The request's own id, logged as it arrives (before any reply is
         // written): the count a controller's "never resent" is checked against.
         let id = request.get("user").and_then(Value::as_str).unwrap_or("-");
@@ -1234,7 +1237,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
         }),
         Mode::ContentStale8901 => stale_8901_reply_for(&request),
         Mode::ContentBirth9301 => birth_reply_for(&request),
-        Mode::RoomLibrarian => room_reply_for(&request),
+        Mode::RoomLibrarian { .. } => room_reply_for(&request),
     } {
         Ok(reply) => reply,
         Err(reason) => {
@@ -1251,7 +1254,8 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let id = format!("chatcmpl-mini-fixture-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
     let streaming = request.get("stream").and_then(Value::as_bool) == Some(true);
     if streaming {
-        write_stream(&mut stream, &id, &message, finish, matches!(mode, Mode::MeteredUsage))
+        write_stream(&mut stream, &id, &message, finish,
+            matches!(mode, Mode::MeteredUsage | Mode::RoomLibrarian { metered: true }))
             .map_err(|e| e.to_string())?;
     } else {
         let (prompt_tokens, completion_tokens, total_tokens) =
@@ -1272,7 +1276,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     }
     // A metered fixture also names the bearer it was paid with (as a digest),
     // so a journey can prove which payer a route used.
-    let paid = if matches!(mode, Mode::MeteredUsage) { format!(" auth={auth}") } else { String::new() };
+    let paid = if matches!(mode, Mode::MeteredUsage | Mode::RoomLibrarian { metered: true }) { format!(" auth={auth}") } else { String::new() };
     let id = request.get("user").and_then(Value::as_str).unwrap_or("-");
     log_event(log, &format!("completion id={id} bytes={size} stream={streaming} stage={stage}{paid}"))
         .map_err(|e| e.to_string())?;
@@ -1306,7 +1310,8 @@ fn main() -> Result<(), String> {
         Some("--content-receipt-8801") => Mode::ContentReceipt8801,
         Some("--content-stale-8901") => Mode::ContentStale8901,
         Some("--content-birth-9301") => Mode::ContentBirth9301,
-        Some("--room-librarian") => Mode::RoomLibrarian,
+        Some("--room-librarian") => Mode::RoomLibrarian { metered: false },
+        Some("--room-librarian-metered") => Mode::RoomLibrarian { metered: true },
         Some(_) => return Err("unknown fixture mode".into()),
     };
     let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {
