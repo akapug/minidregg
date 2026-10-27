@@ -191,3 +191,15 @@ ctime; a later in-process custody recheck then refuses. Once IDs are unmapped,
 treating that change as harmless would also hide an ownership change. The
 already-mounted data remains pinned, and a fresh START can capture a restored
 publication again. No collector or update operation removes old revisions.
+
+The publisher explicitly sets a newly created public-data registry to `0755`,
+even under a restrictive umask. It does not change an existing registry or any
+ancestor. Bubblewrap resolves its passed directory FD through the backing
+pathname, so that ancestry must be searchable by the app. Before BEGIN, the
+existing worker checks that exact pinned FD under its actual app UID/GID and
+zero capabilities, resolves its pathname and confirms the same device/inode.
+This catches mode and ACL access failures without widening private directories.
+The bounded check accepts no caller-selected pathname and does not launch an app;
+the later one-shot launch still requires the admitted claim. Filesystem, LSM or
+I/O failures after this check can still leave a launch uncertain; there is no
+automatic resend.

@@ -335,7 +335,15 @@ fn open_store(path: &Path, create: bool, app_uid: Option<u32>) -> io::Result<Fil
             .and_then(|v| v.to_str())
             .ok_or_else(|| invalid("public data store name absent"))?;
         match mkdir_at(&parent, name, 0o755) {
-            Ok(_) => parent.sync_all()?,
+            Ok(created) => {
+                // This dedicated registry contains deliberately public data.
+                // mkdir's mode is filtered by umask; bubblewrap resolves the
+                // passed directory FD through its backing pathname as the app.
+                // Never widen an existing directory or any ancestor here.
+                created.set_permissions(fs::Permissions::from_mode(0o755))?;
+                created.sync_all()?;
+                parent.sync_all()?;
+            }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => return Err(e),
         }

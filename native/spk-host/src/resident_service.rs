@@ -1438,6 +1438,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // Checked before BEGIN/CLAIM: the current signed archive alone selects the
     // immutable public revision. Continue/restart takes the identical path.
     let public_data = open_signed_public_data(&package, config.app_uid)?;
+    if let Some(data) = &public_data {
+        crate::resident_privilege::check_public_data_access(data.root_fd())?;
+    }
     preflight_custodian(
         &operator,
         &config.completion_custodian_seed,

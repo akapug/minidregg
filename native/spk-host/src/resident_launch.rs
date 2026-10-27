@@ -629,6 +629,7 @@ mod tests {
         let requirement = crate::shared_data::parse_signed_attachment(&declaration).unwrap();
         let store = std::path::PathBuf::from(std::env::var("SPK_PUBLIC_DATA_STORE").unwrap());
         let data = crate::shared_data::open_published(&store, &requirement, audit.uid).unwrap();
+        crate::resident_privilege::check_public_data_access(data.root_fd()).unwrap();
         audit.spec.argv = vec!["/usr/bin/python3.12".into(), "-B".into(), "-c".into(), r#"
 import os,errno,json
 assert open('/opt/oracle-data/probe.txt','rb').read() == b'public fixture\n'
