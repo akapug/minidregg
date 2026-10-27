@@ -139,7 +139,7 @@ theorem answer?_some {vouchers : Vouchers V} {query : SigQuery} {answer : Bool}
 
 /-- **The census witness**: a voucher set states, about its own verifier `V`, that every voucher was
 answered `true` and every observation was answered as recorded. -/
-theorem Vouchers.answered {m : Type → Type} {V : Verifier m} (vouchers : Vouchers V) :
+theorem answered (vouchers : Vouchers V) :
     (∀ query ∈ vouchers.verified, V.Answered query true) ∧
       ∀ answered ∈ vouchers.observed, V.Answered answered.1 answered.2 :=
   ⟨vouchers.verifiedAnswered, vouchers.observedAnswered⟩

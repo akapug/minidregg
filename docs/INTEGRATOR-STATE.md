@@ -38,25 +38,26 @@ the newest built main that passed the gate; each is reported in one line, and in
 | cut | sha | outcome |
 |---|---|---|
 | r1/r2/r3 | 55e483e0 / 45f45d15 / 6236826f | candidates; rows (INTEGRATION-1/2.md) |
-| 4, 6, 7 | a94bed71, 23861533, 3315a908 | candidates `/build/candidates/<sha>`; gate FAIL (named in reports) |
+| 4, 6, 7 | a94bed71, 23861533, 3315a908 | candidates `/build/candidates/<sha>`; gate FAIL (named in reports). Cut 7's six orphans (mini serve/web, link-sqlite-store, credential-verifier; cwd integ5/src) stopped by exact PID 2026-10-27 21:28 (integ8/stop-c7-orphans.list); `/build/lanes/integ5` deleted (24G) |
 | 8, 9 | 26418b6b, 5fdfa393 | no candidate (OOM; stale hard-linked olean) |
 | 12 | f1ce1626 | stopped by PID for cut 13 (integ8/stop-c12.list) |
 | 13 | a75d89d6 | host stage OOM-killed by co-tenant memory on swarm.slice |
 | main a7b5afec | — | stopped by PID on the coordinator's word (integ8/stop-main.list) |
-| 14 | aa9366f8 | phase A running: `integ4/cut14-regen.sh` (pid file cut14-regen.pid): seated host closure, then `codec-shapes-regen.py` once; its diff lands in `integ8/regen.patch` |
+| 14 | aa9366f8 | phase A: host stage rc=1 at 21:14 (integ8/COMMANDS.log) |
+| 14 A2 | 36f719cc5 | running since 21:22: `integ4/cut14b.sh` (pid files cut14b.pid, cut14b-inner.pid): host closure + codec regen in integ8; the regen diff lands in `integ8/regen.patch` |
 
 Main since aa9366f8 (also to build): pd-host-rate 9f9bac79 (its test-host-operations reds fixed), oracle-lifetime-grant
 44d55995, oracle-grant-factory 671e614f, lean-audit-c 86f15d3c (main = bca2cc59). The oracle branches add Lean
 fixtures, so the census may want the regen again over the newer tree.
 
-Next steps: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
+Next steps: when phase A2 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
 build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
 for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly, tell infra (aed5ecf506cf840af) and the coordinator the tree `/build/lanes/integ8/src` for the
-dregg-ref copy. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
+stage ends cleanly (A2's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
+(aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
 batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
 
-Red routing: lean-audit-c reds go to L1c (a855b4edb693e03ae) directly; un-stream-continuity reds
+Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
@@ -64,7 +65,9 @@ jpay2.sh, jpay6.sh, scripts/fn-e1e2/setup-mini.sh) until L2 converts them; rows 
 noncanonical/epoch after the re-genesis.
 
 Rules now in force: the Mac runs cargo check and filtered Rust tests only, never Lean (the regen script runs lake
-itself: box only). Lanes do not build; the integrator is the one validator.
+itself: box only). Lanes may build and run again (ember, baef327e4), but only in warm, incremental trees on
+dregg-ref or hbox, never a fresh tree and never a search from / or ~. The integrator still merges, builds and
+gates main and fixes reds itself.
 
 ## Cut 9's red, and its cause
 
