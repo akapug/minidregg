@@ -102,4 +102,23 @@ records=$(for f in "$NS"/request-*.json; do jq -r 'select(.request=="newcomer") 
 bindings=$(ls "$NS" | grep -c '^binding-' || true)
 [ "$bindings" = 1 ] || { echo "namespace holds $bindings bindings" >&2; exit 1; }
 step lookup ok "$MINI" enroll --action lookup --dir "$A"
-echo "enrol-resume: PASS ($PATH_TAKEN) subject=$SUBJECT keyId=$KEYID"
+# 6. The pinned plan survives the ticker WITHOUT the resume path: a second newcomer is planned (the plan's
+#    sponsor deadline pinned to the observation's height, `pin-enrollment-plan-height`), the clock ticks, the
+#    plan is sealed as it stands, the clock ticks, and the sealed plan is admitted. A Host without the pin verb
+#    cannot pass this row (the plan says so on stderr), and neither can a consent provider or Host that refuses
+#    a past-height observation.
+"$MINI" keygen --secret "$ROOT/second.key" --public "$ROOT/second.pub" >"$ROOT/second-keygen.json"
+B="$ROOT/attempts/second"
+step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
+  --name second --new-key "$ROOT/second.key" --dir "$B"
+if grep -q 'has no pin-enrollment-plan-height' "$LOG/pinned-plan.stderr"; then
+  echo "enrol-resume: FAIL the Host has no pin-enrollment-plan-height; a plan cannot survive a tick before it is sealed" >&2; exit 1
+fi
+[ -s "$B/plan-pinned.bin" ]; [ "$(jq -er .pinnedAtHeight "$B/pin.json")" = "$(jq -er .height "$B/observation/challenge.json")" ]
+tick tick-4
+step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
+tick tick-5
+step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
+[ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
+[ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
+echo "enrol-resume: PASS ($PATH_TAKEN; pinned plan admitted across two ticks) subject=$SUBJECT keyId=$KEYID"
