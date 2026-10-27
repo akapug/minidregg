@@ -777,7 +777,23 @@ pub(super) fn act_as(site: &Site, title: &str, lines: Vec<String>, id: &str, nex
     }
     let refs: Vec<(&str, &str)> = links.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     let status = match ending.code { 0 => 200, 3 => 403, 4 => 202, _ => 400 };
-    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_of(&ending, &refs, transition)) }
+    // Only `can --any`'s own ending may offer its composed line as a one-click submit: any other
+    // verb's stdout can carry a stranger's words (a document, a room, an app's claims), and a
+    // `paste:` line planted there must stay text, never become a button that runs as this member.
+    let paste = if lines.len() == 1 && asks_can_any(&lines[0]) { paste_form(&ending) } else { String::new() };
+    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_parts(&ending, &refs, transition, &paste)) }
+}
+
+/// The line is the shell's `can … --any …` (the one verb that composes a line to paste).
+fn asks_can_any(line: &str) -> bool {
+    crate::shell::words(line).is_ok_and(|w| w.first().map(String::as_str) == Some("can") && w.iter().any(|x| x == "--any"))
+}
+
+/// `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
+fn paste_form(ending: &Ending) -> String {
+    ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
+        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
+    }).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- the shell as the runner
@@ -850,6 +866,10 @@ pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
 /// proposal and its `submit`), the same binary and subcommand the ssh login runs.
 pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     let shell = site.shell.as_ref()?;
+    #[cfg(test)]
+    if let Some(ending) = redteam::FAKE_SHELL.with(|fake| fake.borrow().as_ref().map(|answer| answer(lines))) {
+        return Some(ending);
+    }
     let exe = std::env::current_exe().ok()?;
     let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
     if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
@@ -956,10 +976,14 @@ fn answered(ending: &Ending, next: &[(&str, &str)]) -> String {
 }
 
 pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: bool) -> String {
+    outcome_parts(ending, next, transition, "")
+}
+
+fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste: &str) -> String {
     let (class, headline) = ending.class(transition);
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     if class == "undecided" {
         if let Some(id) = ending.stderr.split("lookup ").nth(1).and_then(|r| r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).next()).filter(|s| !s.is_empty()) {
@@ -967,10 +991,6 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         }
     }
     let detail = ending.text();
-    // `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
-    let paste = ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
-        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
-    }).unwrap_or_default();
     format!(
         "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
@@ -1049,7 +1069,7 @@ fn purse(site: &Site) -> Page {
 fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> Page {
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     Page {
         status: if class == "refused" { 403 } else { 200 },
@@ -1109,6 +1129,10 @@ pub(super) fn quote(word: &str) -> String {
     out.push('"');
     out
 }
+
+#[cfg(test)]
+#[path = "body/redteam.rs"]
+mod redteam;
 
 #[cfg(test)]
 mod tests {

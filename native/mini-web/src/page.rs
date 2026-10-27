@@ -75,13 +75,28 @@ pub fn inject_csrf(html: &str, csrf: &str) -> String {
         let end = start + end + 1;
         let tag = &lower[start..end];
         out.push_str(&html[at..end]);
-        if tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post") {
+        let post = tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post");
+        if post && form_stays_here(&html[start..end]) {
             out.push_str(&field);
         }
         at = end;
     }
     out.push_str(&html[at..]);
     out
+}
+
+/// A form whose `action` is this origin (absent, or a same-origin path): only those carry the
+/// session's token. A form posting elsewhere (a grain's one-time bootstrap to its own origin) is
+/// left as the body drew it, so the token never reaches another origin.
+fn form_stays_here(tag: &str) -> bool {
+    let lower = tag.to_ascii_lowercase();
+    let Some(at) = lower.find(" action=") else { return true };
+    let rest = &tag[at + " action=".len()..];
+    let value = match rest.chars().next() {
+        Some(q @ ('"' | '\'')) => rest[1..].split(q).next().unwrap_or(""),
+        _ => rest.split(|c: char| c.is_whitespace() || c == '>').next().unwrap_or(""),
+    };
+    value.is_empty() || crate::http::same_origin_path(value)
 }
 
 /// The outcome partial the gateway uses for its own actions; the body renders the same shape for
@@ -292,6 +307,9 @@ mod tests {
         assert!(!html.contains("xterm.js"), "xterm loads only with a terminal on the stage");
         let injected = inject_csrf("<form method=\"post\" action=\"/x\"><button>Go</button></form><form method=\"get\"><input></form><FORM METHOD=POST class=\"row\">", "tok");
         assert_eq!(injected.matches("name=\"csrf\" value=\"tok\"").count(), 2, "{injected}");
+        let foreign = inject_csrf("<form method=\"post\" action=\"https://a7.demo.dregg.online/__mini/bootstrap\" target=\"_blank\"><input name=\"token\"></form><form method=post action=//evil.example/x></form><form method=\"post\" action=\"/doc/a/append\"></form><form method=\"post\"></form>", "tok");
+        assert_eq!(foreign.matches("name=\"csrf\"").count(), 2, "only the same-origin forms carry the token: {foreign}");
+        assert!(!foreign.split("</form>").next().unwrap().contains("csrf"), "{foreign}");
         assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
         let anon = page("Mini", None, "/", &term_page("abc"), "");
         assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
