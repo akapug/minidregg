@@ -166,3 +166,6 @@ mirror's tests start a real key broker and need Linux. `tests/native-world.py` c
 with the actual entrance and a fresh native Host/Store; its mirror rows still set `MINI_MIRROR_WEBHOOK_URL`,
 `MINI_MIRROR_CHANNEL_URL` and `MINI_MIRROR_BOT_TOKEN` (`native/discord-entrance/tests/native-world.py:108`),
 which the mirror refuses with exit 78 (`mini-discord-mirror.rs:397`), so those rows do not pass.
+
+`/feedback text:...` files a report: the member's own `feedback --via discord "TEXT"` line, one signed turn in the member's
+`feedback` room (readable by the operator only). Register it from `commands.json` with the other commands.
