@@ -601,7 +601,7 @@ def Core.applied {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} 
 def Core.contextBytes {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
     {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
     {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) : List UInt8 :=
-  "DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT".toUTF8.toList ++ [3] ++
+  "DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT".toUTF8.toList ++ [4] ++
   ObjectiveInvocationClaim.encode claim ++ ObjectiveBendNativeInput.encode core.input ++
   digestStream.encode (ObjectiveBendSourceArtifact.identity core.source.loaded.artifact)
 

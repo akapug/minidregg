@@ -367,7 +367,7 @@ theorem seedEpoch_v1_refusedFor (host : StoreEpoch) (rest : List UInt8) :
     intro same
     have tails := List.append_cancel_left
       (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ [1] = seedFrameName ++ (3 :: host.label.toUTF8.toList))
+      seedFrameName ++ [1] = seedFrameName ++ (4 :: host.label.toUTF8.toList))
     simp at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
@@ -384,7 +384,7 @@ theorem seedEpoch_v2_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
     intro same
     have tails := List.append_cancel_left
       (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ 2 :: label = seedFrameName ++ (3 :: host.label.toUTF8.toList))
+      seedFrameName ++ 2 :: label = seedFrameName ++ (4 :: host.label.toUTF8.toList))
     simp at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
@@ -398,6 +398,31 @@ theorem seedEpoch_v2_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
 theorem seedEpoch_v2_refused (label rest : List UInt8) :
     ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 2 :: label) ++ rest)).refusal =
       some named := seedEpoch_v2_refusedFor StoreEpoch.current label rest
+
+/-- **Every v3 Store refuses by name**, whatever label it carries: its registry predates
+the platform cell kind (loaded-law label `STORE-CELLS/v17`), and a retired frame is not
+read as a labelled epoch. -/
+theorem seedEpoch_v3_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 3 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 3 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
+      seedFrameName ++ 3 :: label = seedFrameName ++ (4 :: host.label.toUTF8.toList))
+    simp at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v3_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 3 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v3_refusedFor StoreEpoch.current label rest
 
 /-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
 theorem seedEpoch_v1_refused (rest : List UInt8) :
@@ -494,6 +519,8 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_currentFor
 #assert_axioms seedEpoch_v2_refusedFor
 #assert_axioms seedEpoch_v2_refused
+#assert_axioms seedEpoch_v3_refusedFor
+#assert_axioms seedEpoch_v3_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
 /-- Version 2: a record carries its signing subject (`IntentRecord.subject`),

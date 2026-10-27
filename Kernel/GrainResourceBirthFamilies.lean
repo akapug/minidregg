@@ -48,7 +48,7 @@ def factoryFamily (tariff : Tariff) (source : Source)
   ModeEvidence := fun _ _ => Unit
   Postcondition := fun _ _ logical => logical = pre.logical
   effectDigest := fun _ => encoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v2".toUTF8.toList ++
+    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v3".toUTF8.toList ++
       source.canonicalBytes tariff)
   patch := fun _ _ => ResourceBirthPolicyController.factoryPatch pre
   nullifier := fun _ _ => none
@@ -122,7 +122,7 @@ def authorityFamily (tariff : Tariff) (source : Source)
   Postcondition := fun _ _ logical =>
     (source.authorityPatch snapshot).ResultAt snapshot.cell.logical logical
   effectDigest := fun _ => encoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v2".toUTF8.toList ++
+    ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v3".toUTF8.toList ++
       source.canonicalBytes tariff)
   patch := fun _ _ => source.authorityPatch snapshot
   nullifier := fun _ _ => some

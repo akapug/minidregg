@@ -69,6 +69,7 @@ import Kernel.SystemCell
 import Theory.CanonicalResourceBookInvariant
 import Kernel.ObjectiveActivityCell
 import Kernel.SeatCell
+import Kernel.PlatformCellLayout
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 
@@ -131,11 +132,15 @@ inductive Kind where
   a seat, an activity's seat holdings or a contract package, each at its
   coordinate; written only by `SeatReceiver` (and an ending activity's turn). -/
   | seat
+  /-- The deployment's platform cell (`Kernel.PlatformCellLayout`): the current platform
+  record (creation and grain-birth tariffs, completion custodian key, owner budget,
+  lifetime) under its version; written only by the platform-install family. -/
+  | platform
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity, .seat]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity, .seat, .platform]
 
 /-! ## Who may write which kind -/
 
@@ -170,6 +175,7 @@ inductive FamilyId where
   | fleetTurn
   | objectiveActivity
   | seat
+  | platformInstall
   deriving DecidableEq, Repr
 
 /-- How a cell kind is judged on write. -/
@@ -243,6 +249,9 @@ def Kind.lawClass : Kind → LawClass
   -- written by the seat kernel turns and by an activity's end (which closes the seats
   -- the activity holds, `ActivitySeatEnd`).
   | .seat => .kernelOnly [.seat, .objectiveActivity]
+  -- The controller's signed install of a valid record above the current version
+  -- (`Kernel.PlatformCell.Admits`); no user law sits at its id.
+  | .platform => .kernelOnly [.platformInstall]
   -- A Nock program is not an external resource (`ResourceTargetAdmission.externalKind`):
   -- no law sits at its id; it is born by a birth plan and immutable after.
   | .nockProgram => .kernelOnly [.resourceBirth, .grainResourceBirth, .applicationShareIssue,
@@ -263,11 +272,13 @@ theorem activity_kernelOnly :
 
 theorem seat_kernelOnly : Kind.seat.lawClass = .kernelOnly [.seat, .objectiveActivity] := rfl
 
+theorem platform_only_install : Kind.platform.lawClass = .kernelOnly [.platformInstall] := rfl
+
 /-- The pinned exemption list: exactly these kinds carry no user law. -/
 theorem kernelOnly_kinds :
     Kind.all.filter (fun kind => kind.lawClass != .lawBearing) =
       [.eventHistory, .authority, .resourceBook, .policySource, .nockProgram, .streamEntry,
-        .system, .objectiveActivity, .seat] := by decide
+        .system, .objectiveActivity, .seat, .platform] := by decide
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority
@@ -292,6 +303,7 @@ def Kind.tag : Kind → UInt8
   | .worldInstance => 18
   | .objectiveActivity => Kernel.ObjectiveActivityCell.registryTag
   | .seat => Kernel.SeatCell.registryTag
+  | .platform => Kernel.PlatformCellLayout.registryTag
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -312,6 +324,7 @@ def kindAtTag : UInt8 → Option Kind
   | 18 => some .worldInstance
   | 19 => some .objectiveActivity
   | 20 => some .seat
+  | 21 => some .platform
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -354,6 +367,7 @@ def schemaRef : Kind → SchemaRef
   | .worldInstance => ⟨⟨91017⟩, 1⟩
   | .objectiveActivity => ⟨⟨Kernel.ObjectiveActivityCell.schemaId⟩, Kernel.ObjectiveActivityCell.wireVersion⟩
   | .seat => ⟨⟨Kernel.SeatCell.schemaId⟩, Kernel.SeatCell.wireVersion⟩
+  | .platform => ⟨⟨Kernel.PlatformCellLayout.schemaId⟩, Kernel.PlatformCellLayout.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -361,7 +375,8 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
     simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion,
       NockProgramCodec.schemaId, NockProgramCodec.wireVersion,
       Kernel.ObjectiveActivityCell.schemaId, Kernel.ObjectiveActivityCell.wireVersion,
-      Kernel.SeatCell.schemaId, Kernel.SeatCell.wireVersion] at same ⊢
+      Kernel.SeatCell.schemaId, Kernel.SeatCell.wireVersion,
+      Kernel.PlatformCellLayout.schemaId, Kernel.PlatformCellLayout.wireVersion] at same ⊢
 
 abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .content => Hyperdocument.layout
@@ -382,6 +397,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .worldInstance => WorldKindCell.instanceLayout
   | .objectiveActivity => Kernel.ObjectiveActivityCell.layout
   | .seat => Kernel.SeatCell.layout
+  | .platform => Kernel.PlatformCellLayout.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -402,6 +418,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .worldInstance => WorldKindCell.instanceMaterializer
   | .objectiveActivity => Kernel.ObjectiveActivityCell.materializer
   | .seat => Kernel.SeatCell.materializer
+  | .platform => Kernel.PlatformCellLayout.materializer
 
 /-- Every materializer codec accepts only encodings: the `StoreCodec` frames by
 `StoreCodec.decode_reencodes`, the resource book by its framed stream
@@ -436,6 +453,7 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .system => some Kernel.SystemCell.wire
   | .worldKind => some WorldKindCell.definitionWire
   | .worldInstance => some WorldKindCell.instanceWire
+  | .platform => some Kernel.PlatformCellLayout.wire
   | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
 
 /-- A kind with a store wire is materialized by it, so its cell root is that
@@ -718,7 +736,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  Minidregg.Compiler.PersistedCodecTags.registry_loaded_and_final_store_cells_v16.toUTF8.toList
+  Minidregg.Compiler.PersistedCodecTags.registry_loaded_and_final_store_cells_v17.toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -750,6 +768,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (Kernel.ObjectiveActivityCell.payloadAt state)
   | .seat, state => PresentLaw (Kernel.SeatCell.CellValid deployment.domain cellId)
       (Kernel.SeatCell.payloadAt state)
+  | .platform, state => cellId = Kernel.PlatformCellLayout.physicalId deployment.domain ∧
+      Kernel.PlatformCellLayout.Law state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -857,7 +877,7 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
   | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
-  | .streamEntry, _ | .system, _ | .objectiveActivity, _ | .seat, _ => False
+  | .streamEntry, _ | .system, _ | .objectiveActivity, _ | .seat, _ | .platform, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by

@@ -67,7 +67,7 @@ def specStream : StreamCodec Spec :=
 
 def specCodec : LawfulCodec Spec :=
   NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v2".toUTF8.toList specStream
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v3".toUTF8.toList specStream
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec :=
@@ -125,7 +125,7 @@ theorem event_retains_domain (domain : Digest) (ingress : Ingress) :
 birth descriptor, so a grant payload cannot be spliced into another birth. -/
 def sourceBytes (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v2".toUTF8.toList ++
+  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v3".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       (specCodec.encode spec,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
@@ -133,7 +133,7 @@ def sourceBytes (spec : Spec)
 def issueMarker (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v2".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v3".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequest (domain semantics : Digest) (federation : FederationId)
@@ -148,10 +148,10 @@ def appRequest (domain semantics : Digest) (federation : FederationId)
   target := ⟨spec.grant.participant.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v2".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v3".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v2".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v3".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   nonce := spec.grant.approval.nonce
   height := height

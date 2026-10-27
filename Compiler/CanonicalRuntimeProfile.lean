@@ -199,7 +199,7 @@ def sourceComponents : List (List UInt8) :=
    Kernel.ClockCell.idCustomization,
    StoreCodec.frame Kernel.SystemCell.wire,
    Kernel.SystemCell.idCustomization,
-   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v3".toUTF8.toList,
+   "DREGG.RUNTIME.TAIL-BOUND.HEAD-LE-CERTIFIED-PLUS-L.EVERY-NON-CERTIFY-RECORD/v4".toUTF8.toList,
    StoreCodec.rootCustomization,
    StoreCodec.saltCustomization,
    StoreCodec.leafCustomization,

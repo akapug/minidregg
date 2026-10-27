@@ -61,6 +61,7 @@ open Minidregg.Theory.IndexedProgram (LawfulCodec)
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.NativeHostGenesis (Config FactoryController)
+open Minidregg.Kernel.PlatformCellLayout (Platform.valid)
 
 set_option autoImplicit false
 
@@ -95,23 +96,9 @@ def Deployment.verifiesKey (d : Deployment) (key bytes signature : List UInt8) :
 
 /-! ## L1: the platform record -/
 
-structure Platform where
-  version : Nat
-  creation : CreationTariff
-  grainBirth : Option NativeHost.GrainBirthTariffPin
-  completionCustodianKey : Option (List UInt8)
-  ownerBudget : Nat
-  lifetime : Nat
-  deriving DecidableEq, Repr
-
-/-- Record validity, the checks `NativeHost.Config.factoryPins` makes of the same fields
-today: a grain-birth base is positive (`grainBirthTariffValue`), a custodian key is 32
-bytes, and the window is positive. The creation tariff carries no validity today (base 0 is
-a lawful free world) and gains none here. -/
-def Platform.valid (p : Platform) : Bool :=
-  (match p.grainBirth with | some g => decide (0 < g.base) | none => true) &&
-  (match p.completionCustodianKey with | some k => decide (k.length = 32) | none => true) &&
-  decide (0 < p.lifetime)
+/-- The record is the platform cell's (`Kernel.PlatformCellLayout.Platform`, with its
+`valid`): the spec and the cell carry one type. -/
+abbrev Platform := PlatformCellLayout.Platform
 
 /-- The deployment's genesis record: what today's runtime parameters pin. -/
 def genesisRecord (host : NativeHost.Config) : Platform :=

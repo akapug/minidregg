@@ -133,7 +133,7 @@ theorem objective_post_bytes (payload : ObjectiveActivityCell.Payload) :
     (ObjectiveActivityCell.spec.wireFrame ++
       (ProtectedCell.wirePayloadStream ObjectiveActivityCell.spec).encode
         (1, some payload)))).length = _
-  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v2".toByteArray.toList.length = 32 := by decide +kernel
+  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v3".toByteArray.toList.length = 32 := by decide +kernel
   have versionLength : (StreamCodec.nat.encode 1).length = 2 := rfl
   simp [ProtectedCell.wirePayloadStream, StreamCodec.product, StreamCodec.option,
     ObjectiveActivityCell.spec, ObjectiveActivityCell.payloadStream, frameLength, versionLength,

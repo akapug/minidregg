@@ -4,6 +4,7 @@ history verification imports this module; ordinary host APIs import the verifier
 There is one profile, one world-root commitment, and one validation path.
 -/
 import Compiler.NativeHostCodec
+import Kernel.PlatformCellLayout
 import Compiler.GenericSimplexSourceAnchor
 import Compiler.GrainResourceBirthController
 
@@ -37,11 +38,10 @@ structure FnGatewayPin where
   deriving DecidableEq, Repr
 
 /-- Permission micro-units charged to a previously reserved tool grain for a
-composite birth. This is independent of the conserved Book creation tariff. -/
-structure GrainBirthTariffPin where
-  base : Nat
-  perBirth : Nat
-  deriving DecidableEq, Repr
+composite birth. This is independent of the conserved Book creation tariff. The structure
+is the platform record's (`Kernel.PlatformCellLayout`), so the record and the runtime
+parameters carry one type. -/
+abbrev GrainBirthTariffPin := Kernel.PlatformCellLayout.GrainBirthTariffPin
 
 /-- C17 (claudesplosion planning/compute/c13-latency-fuel.md): the referee adds
 about 1 s at 1.5e6 steps on persvati; rounded down. -/
@@ -95,7 +95,7 @@ def Config.grainBirthTariffValue (config : Config) :
 /-- This manifest enters runtime semantics. The seed commitment is separate
 because the genesis's source policies themselves contain that semantics. -/
 def Config.runtimeParameters (config : Config) : List UInt8 :=
-  "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
+  "DREGG.NATIVE-HOST.PARAMETERS/v2".toUTF8.toList ++
   (StreamCodec.list StreamCodec.nat).encode
     [config.deployment.domain.value, config.deployment.factoryId,
      config.deployment.resourceBookId, config.deployment.authorityCellId,
@@ -105,32 +105,32 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
   (match config.grainBirthTariff with
   | none => []
   | some tariff =>
-      "DREGG/NATIVE-HOST/GRAIN-BIRTH-TARIFF/v1".toUTF8.toList ++
+      "DREGG/NATIVE-HOST/GRAIN-BIRTH-TARIFF/v2".toUTF8.toList ++
         (StreamCodec.product StreamCodec.nat StreamCodec.nat).encode
           (tariff.base, tariff.perBirth)) ++
   (match config.completionCustodianKey with
   | none => []
   | some key =>
-      "DREGG/NATIVE-HOST/COMPLETION-CUSTODIAN/v1".toUTF8.toList ++
+      "DREGG/NATIVE-HOST/COMPLETION-CUSTODIAN/v2".toUTF8.toList ++
         bytesStream.encode key) ++
   (match config.jointControl with
   | none => []
-  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v2".toUTF8.toList ++
+  | some pin => "DREGG/NATIVE-HOST/JOINT-CONTROL/v3".toUTF8.toList ++
       JointControlFrame.pinStream.encode pin) ++
   (match config.activityControl with
   | none => []
-  | some pin => "DREGG/NATIVE-HOST/ACTIVITY-CONTROL/v1".toUTF8.toList ++
+  | some pin => "DREGG/NATIVE-HOST/ACTIVITY-CONTROL/v2".toUTF8.toList ++
       ContentControlFrame.pinStream.encode pin) ++
   (match config.jointConsensus with
   | none => []
-  | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v1".toUTF8.toList ++
+  | some context => "DREGG/NATIVE-HOST/SOURCE-CONSENSUS/v2".toUTF8.toList ++
       GenericSimplexCodec.contextStream.encode { context with instanceBytes := [] })
 
 /-- Disabling the new mode preserves the complete pre-existing parameter
 preimage, hence its legacy semantics/profile and genesis interpretation. -/
 theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
     ({ config with grainBirthTariff := none, completionCustodianKey := none, jointControl := none, activityControl := none, jointConsensus := none } : Config).runtimeParameters =
-      "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
+      "DREGG.NATIVE-HOST.PARAMETERS/v2".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
            config.deployment.resourceBookId, config.deployment.authorityCellId,
