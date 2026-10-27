@@ -964,6 +964,14 @@ pub(crate) fn invoke_pinned_deadline(
         &frame,
     )
     .map_err(|e| format!("uncertain host request write: {e}"))?;
+    // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): the exact call
+    // was written; the reply is deliberately not read. The Host decides as it would; the attempt
+    // stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
+    if mini_sdk::operator::lose_reply_armed(operation) {
+        std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        drop(stream);
+        return Err("uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call".to_owned());
+    }
     let reply = read_frame(&mut DeadlinePipe {
         reader: &mut stream,
         deadline,
