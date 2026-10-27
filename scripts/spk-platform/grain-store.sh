@@ -47,6 +47,49 @@ sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENC
   fail "provisioner shape changed; review the lifecycle overlay"
 chmod 700 "$ROOT/source-stage/provision-grain.sh"
 
+# Explicit fresh-genesis agent allocation. The overlay generates only native
+# enrollment/birth/delegation source; it never imports a retained Store or key.
+# An absent variable preserves the historical workroom-only provision path.
+PROVISION_GRAIN="$ROOT/source-stage/provision-grain.sh"
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  case "$SPK_AGENT_ALLOCATION" in /*) ;; *) fail "agent allocation must be an absolute file" ;; esac
+  [ -f "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || fail "agent allocation absent or linked"
+  cp "$SPK_AGENT_ALLOCATION" "$ROOT/source-stage/agent-allocation.json"
+  chmod 600 "$ROOT/source-stage/agent-allocation.json"
+  SPK_AGENT_ALLOCATION="$ROOT/source-stage/agent-allocation.json"
+  export SPK_AGENT_ALLOCATION
+  # Stable authoring selectors are pinned before genesis. Historical event22
+  # and event27 indices are deliberately absent: later native authoring still
+  # verifies those exact admitted receipts and current authority.
+  SPK_AGENT_TARGETS=$(jq -ce '
+    def exactnat: if type == "string" and test("^[1-9][0-9]{0,14}$")
+      then tonumber else error("agent selector exceeds exact integer range") end;
+    . as $allocation | [.agents[] | . as $agent | .plannedCaps as $caps |
+      {legacy:{ticketResource:(.ticket|exactnat),
+        packageManifest:($allocation.packageManifest|exactnat),
+        snapshotManifest:($allocation.snapshotManifest|exactnat),
+        sessionObserve:($caps.sessionOwner|exactnat),
+        manifestObserve:($caps.controllerManifestObserve|exactnat),
+        enrollmentObserve:($caps.descriptorOwner|exactnat),
+        parentTask:(.controller.task|exactnat),
+        parentCapability:($caps.parentOwner|exactnat),parentObserve:($caps.parentOwner|exactnat),
+        purseTask:(.dispatch.task|exactnat),purseCapability:($caps.dispatchOwner|exactnat),
+        purseObserve:($caps.dispatchOwner|exactnat),payerSubject:(.dispatch.subject|exactnat),
+        reserveAmount:1,maximumCharge:1},
+       grantResource:(.persistentGrant|exactnat),grantObserveCapability:($caps.grantObserve|exactnat)}]
+  ' "$SPK_AGENT_ALLOCATION") || fail "explicit lifetime authoring targets invalid"
+  export SPK_AGENT_TARGETS
+  # shellcheck disable=SC2016 # Expanded only inside the staged provisioner.
+  sed 's|"lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},|"lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"agentLifetimeDispatchTargets":$SPK_AGENT_TARGETS,|' \
+    "$PROVISION_GRAIN" >"$ROOT/source-stage/provision-grain-agents.sh"
+  [ "$(rg -c 'agentLifetimeDispatchTargets' "$ROOT/source-stage/provision-grain-agents.sh")" = 2 ] ||
+    fail "provisioner lifecycle shape changed"
+  PROVISION_GRAIN="$ROOT/source-stage/provision-grain-agents.sh"
+  sh "$HERE/agent-genesis-overlay.sh" "$PROVISION_GRAIN" "$SPK_AGENT_ALLOCATION" \
+    "$ROOT/source-stage/provision-with-agents.sh"
+  PROVISION_GRAIN="$ROOT/source-stage/provision-with-agents.sh"
+fi
+
 # native-positive-base.sh runs APP_SOURCE from inside its private stage; this
 # one only provisions the member workroom and births nothing.
 cat >"$ROOT/source-stage/workroom-only.sh" <<'EOF'
@@ -66,8 +109,12 @@ sha256sum "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   "$REPO/scripts/application-share-issue/native-positive-base.sh" \
   "$ROOT/source-stage/provision-grain.sh" "$ROOT/source-stage/workroom-only.sh" \
   >"$ROOT/source-stage/input-sha256.txt"
+if [ "$PROVISION_GRAIN" != "$ROOT/source-stage/provision-grain.sh" ]; then
+  sha256sum "$HERE/agent-genesis-overlay.sh" "$SPK_AGENT_ALLOCATION" "$PROVISION_GRAIN" \
+    >>"$ROOT/source-stage/input-sha256.txt"
+fi
 
-PROVISION_SOURCE="$ROOT/source-stage/provision-grain.sh" \
+PROVISION_SOURCE="$PROVISION_GRAIN" \
 MEMBER_SOURCE="$REPO/scripts/grain-birth/native-share-member.sh" \
 APP_SOURCE="$ROOT/source-stage/workroom-only.sh" \
 MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
@@ -81,5 +128,9 @@ jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
   (has("completionManagement") or has("residentBeginManagement") or
    has("residentClaimManagement") | not)' "$CONFIG" >/dev/null ||
   fail "pinned config lacks the host lifecycle identity"
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  jq -e --argjson expected "$SPK_AGENT_TARGETS" '.agentLifetimeDispatchTargets == $expected' \
+    "$CONFIG" >/dev/null || fail "pinned config differs from explicit agent authoring targets"
+fi
 sha256sum -c "$ROOT/source-stage/input-sha256.txt" >"$ROOT/source-stage/input-recheck.txt"
 echo "grain store ready at $ROOT/base/workroom (no application born)"

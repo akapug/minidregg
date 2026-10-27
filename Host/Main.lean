@@ -576,6 +576,121 @@ def AgentLifetimeDispatchFixedSettings.selectors
     grantResource := settings.grantResource
     grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
 
+
+/-- Stable operator coordinates may be pinned before the two source events are
+admitted. The JSON deliberately has neither history index. Zero is only the
+internal erased-coordinate representation, never a proposed receipt position. -/
+structure AgentLifetimeDispatchTargetSettings where
+  legacy : AgentDispatchFixedSettings
+  grantResource : Nat
+  grantObserveCapability : Nat
+  deriving DecidableEq
+
+instance : FromJson AgentLifetimeDispatchTargetSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["legacy", "grantResource", "grantObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "agentLifetimeDispatchTargets entry has missing or unknown fields"
+    let legacyJson ← json.getObjVal? "legacy"
+    let legacyObject ← legacyJson.getObj?
+    if (legacyJson.getObjVal? "issueIndex").toOption.isSome then
+      throw "agentLifetimeDispatchTargets must not predict issueIndex"
+    let legacy : AgentDispatchFixedSettings ← fromJson? <| Lean.Json.mkObj <|
+      legacyObject.foldl (init := [("issueIndex", toJson (0 : Nat))])
+        (fun fields key value => (key, value) :: fields)
+    return ⟨legacy, ← json.getObjValAs? Nat "grantResource",
+      ← json.getObjValAs? Nat "grantObserveCapability"⟩
+
+instance : ToJson AgentLifetimeDispatchTargetSettings where
+  toJson settings :=
+    let legacy := match toJson settings.legacy with
+      | .obj fields => Lean.Json.mkObj <| fields.foldl (init := [])
+          (fun kept key value => if key == "issueIndex" then kept else (key, value) :: kept)
+      | other => other
+    Lean.Json.mkObj [("legacy", legacy), ("grantResource", toJson settings.grantResource),
+      ("grantObserveCapability", toJson settings.grantObserveCapability)]
+
+def AgentLifetimeDispatchTargetSettings.selectors
+    (settings : AgentLifetimeDispatchTargetSettings) :
+    ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors :=
+  { legacy := { settings.legacy.selectors with issueIndex := 0 }
+    grantIssueIndex := 0
+    grantResource := settings.grantResource
+    grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
+
+inductive LifetimeDispatchPin where
+  | indexed (fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+  | targets (fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+
+def LifetimeDispatchPin.matches (pin : LifetimeDispatchPin)
+    (actual : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) : Bool :=
+  match pin with
+  | .indexed fixed => decide (actual = fixed)
+  | .targets fixed => decide (
+      { actual with legacy := { actual.legacy with issueIndex := 0 }, grantIssueIndex := 0 } = fixed)
+
+/-- Resource pins leave precisely the two history positions to source selection.
+All other fixed selectors must equal the operator's value. -/
+theorem LifetimeDispatchPin.targets_exact_except_indices
+    (actual fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (normalized : fixed.legacy.issueIndex = 0 ∧ fixed.grantIssueIndex = 0) :
+    (LifetimeDispatchPin.targets fixed).matches actual = true ↔
+      actual = { fixed with
+        legacy := { fixed.legacy with issueIndex := actual.legacy.issueIndex }
+        grantIssueIndex := actual.grantIssueIndex } := by
+  rcases actual with ⟨a, ai, ar, ao⟩
+  rcases fixed with ⟨b, bi, br, bo⟩
+  cases a
+  cases b
+  simp_all [LifetimeDispatchPin.matches]
+
+private def lifetimeTargetProbe : AgentLifetimeDispatchTargetSettings :=
+  { legacy :=
+      { issueIndex := 0
+        ticketResource := 29520
+        packageManifest := 9102
+        snapshotManifest := 9103
+        sessionObserve := 20241
+        manifestObserve := 20279
+        enrollmentObserve := 20243
+        parentTask := 27920
+        parentCapability := 20201
+        parentObserve := 20201
+        purseTask := 27940
+        purseCapability := 20221
+        purseObserve := 20221
+        payerSubject := 20012
+        reserveAmount := 1
+        maximumCharge := 1 }
+    grantResource := 29530
+    grantObserveCapability := 20283 }
+
+#guard (fromJson? (toJson lifetimeTargetProbe) : Except String AgentLifetimeDispatchTargetSettings).toOption =
+  some lifetimeTargetProbe
+#guard (fromJson? (toJson
+  ({ legacy := lifetimeTargetProbe.legacy
+     grantIssueIndex := 0
+     grantResource := 29530
+     grantObserveCapability := 20283 } : AgentLifetimeDispatchFixedSettings)) :
+  Except String AgentLifetimeDispatchTargetSettings).toOption.isNone
+#guard (LifetimeDispatchPin.targets lifetimeTargetProbe.selectors).matches
+  { lifetimeTargetProbe.selectors with
+    legacy := { lifetimeTargetProbe.selectors.legacy with issueIndex := 123 }, grantIssueIndex := 456 }
+#guard !(LifetimeDispatchPin.indexed lifetimeTargetProbe.selectors).matches
+  { lifetimeTargetProbe.selectors with grantIssueIndex := 456 }
+#guard [
+  { lifetimeTargetProbe.selectors with grantResource := 29531 },
+  { lifetimeTargetProbe.selectors with grantObserveCapability := ⟨20284⟩ },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with ticketResource := 29521 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with parentTask := 27921 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with purseTask := 27941 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with payerSubject := ⟨20013⟩ } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with reserveAmount := 2 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with maximumCharge := 2 } }
+  ].all (fun wrong => !(LifetimeDispatchPin.targets lifetimeTargetProbe.selectors).matches wrong)
+
 structure Settings where
   /-- Operator-local carry registry and independently authorized handoff key.
   Neither value can be selected by a network frame. -/
@@ -624,6 +739,7 @@ structure Settings where
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
+  agentLifetimeDispatchTargets : Option (List AgentLifetimeDispatchTargetSettings) := none
   /-- The operator's synchronous run budget in Lean steps (default
   `NativeHost.defaultNockFSync`, C17's measured 1,000,000). -/
   nockFSync : Option Nat := none
@@ -672,6 +788,12 @@ def Settings.config (settings : Settings) : NativeHost.Config where
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
   invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
 
+/-- Authoring allowlists do not alter the verifier's configuration or the
+meaning of already admitted history. -/
+theorem Settings.config_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List AgentLifetimeDispatchTargetSettings)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).config = settings.config := rfl
+
 /-- Check the complete declared source genesis before opening or authoring
 under this profile. Membership enters runtime semantics with only the anchor
 omitted; the exact anchor and its source policies must reconstruct together.
@@ -719,16 +841,34 @@ def checkedLifetimeDispatchServices (services : List AgentLifetimeDispatchFixedS
     throw "agentLifetimeDispatchServices contains duplicate full fixed selectors"
   return services.map AgentLifetimeDispatchFixedSettings.selectors
 
+def checkedLifetimeDispatchTargets (targets : List AgentLifetimeDispatchTargetSettings) :
+    Except String (List LifetimeDispatchPin) := do
+  unless 0 < targets.length && targets.length ≤ 8 do
+    throw "agentLifetimeDispatchTargets requires one to eight entries"
+  let selectors := targets.map AgentLifetimeDispatchTargetSettings.selectors
+  unless decide selectors.Nodup do
+    throw "agentLifetimeDispatchTargets contains duplicate fixed resource selectors"
+  return selectors.map LifetimeDispatchPin.targets
+
 def Settings.lifetimeDispatchPins (settings : Settings) : Except String
-    (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
+    (List LifetimeDispatchPin) := do
+  if let some targets := settings.agentLifetimeDispatchTargets then
+    unless settings.agentLifetimeDispatchFixed.isNone && settings.agentLifetimeDispatchServices.isNone do
+      throw "agentLifetimeDispatchTargets cannot be combined with indexed lifetime pins"
+    return ← checkedLifetimeDispatchTargets targets
   match settings.agentLifetimeDispatchServices with
   | some services =>
       unless settings.agentLifetimeDispatchFixed.isNone do
         throw "agentLifetimeDispatchServices cannot be combined with legacy pin"
-      checkedLifetimeDispatchServices services
+      return (← checkedLifetimeDispatchServices services).map LifetimeDispatchPin.indexed
   | none =>
       return settings.agentLifetimeDispatchFixed.toList.map
-        AgentLifetimeDispatchFixedSettings.selectors
+        (LifetimeDispatchPin.indexed ∘ AgentLifetimeDispatchFixedSettings.selectors)
+
+#guard (checkedLifetimeDispatchTargets []).toOption.isNone
+#guard (checkedLifetimeDispatchTargets [lifetimeTargetProbe, lifetimeTargetProbe]).toOption.isNone
+#guard (checkedLifetimeDispatchTargets (List.replicate 9 lifetimeTargetProbe)).toOption.isNone
+#guard (checkedLifetimeDispatchTargets [lifetimeTargetProbe]).toOption.isSome
 
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
@@ -2212,20 +2352,20 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
 selectors reach source planning; retained plans are checked again before
 detached signatures are assembled. The final native submit re-admits fresh. -/
 def requireOneLifetimeDispatchPin
-    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
-    (predicate : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors → Bool) : IO Unit := do
-  unless (approved.filter predicate).length == 1 do
+    (approved : List LifetimeDispatchPin)
+    (actual : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) : IO Unit := do
+  unless (approved.filter (fun pin => pin.matches actual)).length == 1 do
     throw (IO.userError "lifetime dispatch request differs from unique full operator pin")
 
 def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (approved : List LifetimeDispatchPin)
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
   | 80 =>
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
         | throw (RequestRefusal.malformed "noncanonical lifetime reserve request")
-      requireOneLifetimeDispatchPin approved request.matchesFixed
+      requireOneLifetimeDispatchPin approved request.fixedSelectors
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
@@ -2239,7 +2379,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.decode
           planBytes
         | throw (RequestRefusal.malformed "noncanonical lifetime reserve plan")
-      requireOneLifetimeDispatchPin approved plan.request.matchesFixed
+      requireOneLifetimeDispatchPin approved plan.request.fixedSelectors
       let signatures ← decodeSignatures signaturesBytes
       let signed ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.assembleReserve plan signatures
@@ -2257,7 +2397,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.decode
           payload
         | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch request")
-      requireOneLifetimeDispatchPin approved request.fixed.matchesFixed
+      requireOneLifetimeDispatchPin approved request.fixed.fixedSelectors
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
@@ -2270,7 +2410,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.decode planBytes
         | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch plan")
-      requireOneLifetimeDispatchPin approved plan.request.fixed.matchesFixed
+      requireOneLifetimeDispatchPin approved plan.request.fixed.fixedSelectors
       let (appBytes, grantAndPayer) ← splitPair signaturesBytes
       let (grantSignature, payerBytes) ← splitPair grantAndPayer
       unless grantSignature.length == 64 do
