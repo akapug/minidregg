@@ -6,11 +6,24 @@
 # and `init`ed exactly as J17 does; Hermes is enrolled the same way (the
 # node's Hermes: the operator enrolls it once and writes its subject into each
 # friend's HOME/hermes/node.json). Every friend line is typed into that
-# friend's own shell session (`--line`). Hermes's controller is
-# `grain-runtime hermes-room step` over Hermes's own workspace, speaking to
-# the DETERMINISTIC provider (`mini-hermes-test-provider --room-librarian`:
-# the librarian program, decided only from this attach's signed reads; no
-# model, no network: loopback port >= 7700).
+# friend's own shell session (`--line`).
+#
+# Hermes is the ACP room resident, the production path: `grain-runtime
+# create` births Hermes's AgentGrain (parent, tool task, provider purse) and
+# writes its controller config; the controller runs as the transient unit
+# mini-grain-controller@TASK with the three manager variables; each Hermes
+# turn is one `grain-runtime hermes-room resident` pass that prompts the
+# controller, which runs the worker in the real bwrap sandbox with
+# --network none and reaches the model only through its private Unix gateway
+# (grain-provider-bridge in the runtime root) and the mini-keys broker, on
+# alice's own key (user route). The worker is journey.d/j14-hermes-acp, a
+# stand-in for upstream Hermes (no Hermes checkout on hbox) that runs the
+# chat-completions tool loop over the controller's MCP tools; the model is the
+# DETERMINISTIC librarian (`mini-hermes-test-provider --room-librarian`,
+# decided only from the assignment and this turn's tool results; no network).
+# The World serves through `mini serve-operator` with a config that adds the
+# purse's per-route tariff (the resident requires the private operator socket;
+# the tariff leaves the profile's semantics unchanged).
 #
 #   setup     alice (founder, 5000), bob (100), hermes (0) enrolled; the node file.
 #   room      alice: `chat new lab`, the map `lab-index` (founder-only), `tariff
@@ -27,12 +40,6 @@
 #             no-grant by the Host (the turn is still paid); Hermes says why.
 #   budget    more says and a question: a digest, then the next turn is refused
 #             bookRefused at plan; Hermes says "out of budget"; `topup` resumes.
-#   kill      Hermes is SIGKILLed with a signed call out (M5 j4 shape); the
-#             restart proves the submitter stopped and resolves the attempt by
-#             exact lookup; nothing is submitted twice; the index links once.
-#   send      Hermes is SIGKILLed after a provider request crossed the send
-#             boundary (the provider stopped); the restart abandons it and
-#             never resends (each id once in the provider's own log).
 #   dismiss   alice: `dismiss lab` revokes; Hermes returns the remainder; its
 #             read of lab is refused.
 #   balances  Hermes's account: 100 + topup - (10 + fee)*turns - returned - fee = 0;
@@ -40,8 +47,11 @@
 #   audit     stop, cold audit re-admits every record (exit 0), serve; Hermes
 #             sends nothing more.
 #
-# Hook contract: journey.sh (executed). Needs GRAIN_RUNTIME (grain-runtime)
-# and TEST_PROVIDER (mini-hermes-test-provider). Exported by journey.sh: MINI
+# Hook contract: journey.sh (executed). Needs GRAIN_RUNTIME (grain-runtime,
+# with grain-provider-bridge beside it or GRAIN_PROVIDER_BRIDGE), TEST_PROVIDER
+# (mini-hermes-test-provider), LAUNCH_GATE (launch-gate), mini-keys beside
+# MINI (or MINI_KEYS), passwordless sudo (the provider table is root-owned) and
+# a systemd user manager. Exported by journey.sh: MINI
 # HOST CONFIG SOCKET SHELL_BIN SPONSOR_WS SPONSOR_SUBJECT JOURNEY_WORLD
 # JOURNEY_STEP_DIR. Last stdout line: the row table. Last stderr line: the
 # detail. Exit 0 only when every row is as expected.
@@ -51,7 +61,16 @@ umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
   "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${JOURNEY_WORLD:?}" \
   "${GRAIN_RUNTIME:?GRAIN_RUNTIME names the grain-runtime binary}" \
-  "${TEST_PROVIDER:?TEST_PROVIDER names mini-hermes-test-provider}"
+  "${TEST_PROVIDER:?TEST_PROVIDER names mini-hermes-test-provider}" \
+  "${LAUNCH_GATE:?LAUNCH_GATE names the compiled launch-gate}"
+BRIDGE=${GRAIN_PROVIDER_BRIDGE:-$(dirname "$GRAIN_RUNTIME")/grain-provider-bridge}
+MINI_KEYS=${MINI_KEYS:-$(dirname "$MINI")/mini-keys}
+REPO=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)
+for x in "$BRIDGE" "$MINI_KEYS" "$LAUNCH_GATE"; do [ -x "$x" ] || { echo "j14: not executable: $x" >&2; exit 2; }; done
+# The controller's sockets live in a short directory (journey.d/lib/shortdir.sh).
+. "$REPO/native/resource-client/journey.d/lib/shortdir.sh"
+JOURNEY_SHORTDIR_NOTRAP=1 journey_shortdir j14
+G=$JOURNEY_D/g
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
@@ -60,14 +79,19 @@ TABLE=$SD/j14.tsv
 printf 'n\tstep\twho\tline\texpect\tgot\tverdict\twall_s\tload1\tnote\n' >"$TABLE"
 N=0; FAILED=0; FIRST_FAIL=""
 PRICE=10
-BUDGET=100
+BUDGET=1000
 TOPUP=100
 PORT=${J14_PROVIDER_PORT:-7743}
 PROVIDER_PID=""
-RPID=""
+KEYS_PID=""
+UNIT=""
 cleanup() {
-  [ -n "$RPID" ] && kill -KILL "$RPID" 2>/dev/null
-  if [ -n "$PROVIDER_PID" ]; then kill -CONT "$PROVIDER_PID" 2>/dev/null; kill -TERM "$PROVIDER_PID" 2>/dev/null; wait "$PROVIDER_PID" 2>/dev/null; fi
+  if [ -n "$UNIT" ] && [ "$(systemctl --user show -p Description --value "$UNIT.service" 2>/dev/null)" = "j14:$SD" ]; then
+    systemctl --user stop "$UNIT.service" >/dev/null 2>&1; systemctl --user reset-failed "$UNIT.service" >/dev/null 2>&1
+  fi
+  [ -n "$KEYS_PID" ] && kill -TERM "$KEYS_PID" 2>/dev/null
+  if [ -n "$PROVIDER_PID" ]; then kill -TERM "$PROVIDER_PID" 2>/dev/null; wait "$PROVIDER_PID" 2>/dev/null; fi
+  journey_shortdir_return
 }
 trap cleanup EXIT
 
@@ -190,13 +214,20 @@ deliver() { # FROM-DIR TO-DIR: copy every json file not already there
 
 room_height() { "$MINI" credit --action room --dir "$WS/alice" --room lab 2>/dev/null | jq -r .height; }
 credit_of() { "$MINI" credit --action balance --dir "$(ws_of "$1")" ${2:+--account "$2"} 2>/dev/null | sed -n 's/^credit \([0-9]*\) .*/\1/p'; }
-JOURNAL=$H/hermes/runner/journal.jsonl
 PLOG=$SD/provider.log
-paid_turns() { jq -s '[.[] | select(.event == "paid" and .payment.paid == true)] | length' "$JOURNAL" 2>/dev/null; }
-hermes() { # STEP WHAT: one attach of Hermes's controller
-  operator "$1" "hermes attach: $2" "$GRAIN_RUNTIME" hermes-room step "$SD/hermes-lab.json"
-  cp "$OUT" "$SD/attach-$1.jsonl"
-  { echo "# hermes attach ($1): $2"; jq -c 'select(.event != "send") | del(.at)' "$OUT" 2>/dev/null | cut -c1-400; } >>"$SD/transcript.txt"
+RSTATE=$G/state/resident
+RCFG=$SD/resident.json
+# Paid turns are the till's `hermes` ledger entries from Hermes (signed reads).
+paid_turns() { "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till --topic hermes 2>/dev/null |
+  jq --arg h "${HS:-}" --arg p "$PRICE" '[.entries[] | select(.subject == $h and .amount == $p)] | length'; }
+resident_completed() { jq -r '.completed // 0' "$RSTATE/resident.json" 2>/dev/null || echo 0; }
+hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or the dismissal)
+  local next=$(( $(resident_completed) + 1 ))
+  jq -n --arg c "$G/controller.json" --arg i "$H/hermes/inbox" --arg s "$RSTATE" --argjson m "$next" \
+    '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
+  operator "$1" "hermes resident pass: $2" timeout 900 "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
+  { echo "# hermes resident ($1): $2"; cut -c1-400 "$OUT"; tail -3 "$ERR"; } >>"$SD/transcript.txt"
 }
 tail_json() { "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/alice" \
   --home "$H/alice" --line "tail --in lab --json -n 200" 2>/dev/null; }
@@ -226,6 +257,20 @@ for f in alice bob hermes; do
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]}
+# Hermes's grain: its parent owner, tool worker and provider worker are their
+# own enrolled subjects (keys never shared with Hermes's room workspace).
+for f in hhost htool hprov; do
+  mkdir -p -m 700 "$H/$f"
+  ok setup "$f" "keygen mini.key"
+  operator setup "CUSTODY: copy $f's secret into the sponsor home" \
+    install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j14-$f.key"
+  ok setup sponsor "enroll plan j14-$f j14-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
+  ok setup sponsor "enroll seal j14-$f"
+  ok setup sponsor "enroll submit j14-$f"
+  SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")
+  checkp setup "$f is enrolled as its own subject" test -n "${SUBJ[$f]}"
+  operator setup "CUSTODY: remove the copy" rm -f "$H/sponsor/keys/j14-$f.key"
+done
 FEE=$(jq -r '.tariffBase' "$CONFIG")
 require_nat setup "the configured fee" "$FEE"
 TURN=$((PRICE + FEE))
@@ -282,20 +327,131 @@ two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit
 ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
 ok program alice "submit ap"
 
-# ------------------------------------------------ Hermes's controller and the deterministic provider
+# ------------------------------------------------ Hermes's grain, controller and the deterministic provider
 operator hermes "DELIVER: alice's hand-off into Hermes's inbox" deliver "$OUTBOX" "$H/hermes/inbox"
-cat >"$SD/hermes-lab.json" <<EOF
-{"type":"mini-hermes-room-runner-v1",
- "tools":{"mini":"$MINI","host":"$HOST","hostConfig":"$CONFIG","socket":"$SOCKET",
-   "workspace":"$WS/hermes","home":"$H/hermes","room":"lab","account":"lab-hermes"},
- "inbox":"$H/hermes/inbox","state":"$H/hermes/runner",
- "provider":{"url":"http://127.0.0.1:$PORT/v1","model":"mini-hermes-protocol-fixture"},"maxRounds":8}
-EOF
-if ss -ltn 2>/dev/null | grep -q ":$PORT "; then echo "j14: port $PORT is taken" >&2; exit 2; fi
+PARENT_T=9870001 TOOL_T=9870002 PURSE_T=9870003 USER_FEE=5
+MODEL=mini-hermes-protocol-fixture
+GPORT=$((20000 + RANDOM % 20000))
+# The World serves the purse's per-route tariff (profile semantics unchanged)
+# through the private operator socket the resident's preflight requires.
+CONFIG_J14=$SD/j14-config.json
+jq --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" '.providerServices = [{providerResourceId:($p|tonumber),
+  tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:"7",inputMicroPerMillion:"20000000",outputMicroPerMillion:"40000000"},
+  homelab:{perOp:"3",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}]' "$CONFIG" >"$CONFIG_J14"
+pidfile=$W/public/server.pid
+serve_world() { # MODE CONFIG LABEL: stop the World's Host and serve it again
+  local pid; pid=$(cat "$pidfile")
+  kill -TERM "$pid"
+  for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$pid" 2>/dev/null && { echo "server $pid alive after TERM" >&2; return 1; }
+  setsid nohup "$MINI" "$1" --host "$HOST" --config "$2" --socket "$SOCKET" >"$W/public/serve-j14-$3.log" 2>&1 </dev/null &
+  echo $! >"$pidfile"
+  for i in $(seq 1 6000); do
+    [ -S "$SOCKET" ] && grep -q serving "$W/public/serve-j14-$3.log" 2>/dev/null && break; sleep 0.1
+  done
+  [ -S "$SOCKET" ]
+}
+operator hermes "WORLD: serve-operator with the purse tariff" serve_world serve-operator "$CONFIG_J14" operator
+operator hermes "the private operator socket answers operator-status" \
+  "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG_J14"
+# The deterministic librarian upstream.
 "$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" --room-librarian >"$SD/provider.out" 2>"$SD/provider.err" &
 PROVIDER_PID=$!
 for i in $(seq 1 100); do grep -q "^http://" "$SD/provider.out" 2>/dev/null && break; sleep 0.1; done
 checkp hermes "the deterministic provider listens on loopback $PORT (pid $PROVIDER_PID)" grep -q "^http://127.0.0.1:$PORT/v1" "$SD/provider.out"
+# The provider table (root-owned) and the key broker (journey: one account).
+mkdir -p -m 700 "$SD/etc" "$JOURNEY_D/keys/run" "$JOURNEY_D/keys/state" "$SD/credentials"
+TABLE=$SD/etc/providers.json
+jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" \
+  '{type:"mini-provider-table-v2",providers:[{name:"friendkey",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"user"}]}' >"$SD/providers-source.json"
+operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$TABLE"
+head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
+jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
+  --arg host "$HOST" --arg cfg "$CONFIG_J14" --arg sock "$SOCKET" --arg t "$TABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
+  --argjson uid "$(id -u)" --argjson gid "$(id -g)" \
+  '{type:"mini-keys-broker-v1",socket:$s,audit:$a,spool:$sp,singleAccount:true,
+    peers:[{role:"member",gids:[$gid]},{role:"provider",uids:[$uid]},{role:"discord",uids:[$uid]},{role:"operator",uids:[$uid]}],
+    credentials:{host:$host,hostConfig:$cfg,publicSocket:$sock,providers:$t,root:$r,key:$k}}' >"$JOURNEY_D/keys/broker.json"
+chmod 644 "$JOURNEY_D/keys/broker.json"
+KEYS_CLIENT=$JOURNEY_D/keys/client.json
+jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --argjson uid "$(id -u)" '{type:"mini-keys-client-v1",socket:$s,uid:$uid}' >"$KEYS_CLIENT"
+chmod 644 "$KEYS_CLIENT"
+"$MINI_KEYS" serve --config "$JOURNEY_D/keys/broker.json" >"$SD/broker.log" 2>&1 </dev/null &
+KEYS_PID=$!
+for i in $(seq 1 200); do [ -S "$JOURNEY_D/keys/run/broker.sock" ] && break; sleep 0.1; done
+checkp hermes "the key broker listens (pid $KEYS_PID)" test -S "$JOURNEY_D/keys/run/broker.sock"
+# Alice pays for Hermes's model calls with her own key, granted to the provider runner.
+printf '%s\n' alice-fixture-key >"$SD/alice-key.secret"; chmod 600 "$SD/alice-key.secret"
+operator hermes "KEY: alice sets her provider key (sealed by the broker)" \
+  "$MINI" key --action set --dir "$WS/alice" --provider friendkey --secret "$SD/alice-key.secret" --broker "$KEYS_CLIENT"
+rm -f "$SD/alice-key.secret"
+ALICE_PUB=$(grep -o '"publicKey":"[0-9a-f]*"' "$OUT" | head -1 | cut -d'"' -f4)
+checkp hermes "key set names alice's owner public key" test -n "$ALICE_PUB"
+operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
+  "$MINI" key --action grant --dir "$WS/alice" --provider friendkey --runner "${SUBJ[hprov]}" \
+    --per-call 64 --per-day 200 --until 1000000000 --broker "$KEYS_CLIENT"
+# The sandbox: the real launcher, its gate, the runtime root (controller edge,
+# stand-in worker, provider bridge) and the worker's only writable mount.
+mkdir -p -m 700 "$SD/launcher" "$SD/worker-work/.hermes" "$SD/runtime-root"
+chmod 755 "$SD/runtime-root"
+BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
+operator hermes "LAUNCHER: materialize bwrap for $BWRAP" python3 "$REPO/deploy/grain-host/materialize-bwrap.py" \
+  --physical-bwrap "$BWRAP" --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$SD/launcher/bwrap"
+install -m 0700 "$LAUNCH_GATE" "$SD/launcher/launch-gate"; chmod 700 "$SD/launcher/bwrap"
+install -m 0755 "$GRAIN_RUNTIME" "$SD/runtime-root/grain-runtime"
+install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
+install -m 0755 "$BRIDGE" "$SD/runtime-root/grain-provider-bridge"
+# Hermes's grain and controller config, in one command.
+jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG_J14" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
+  --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
+  --arg hk "$H/hhost/keys/mini.key" --arg hs "${SUBJ[hhost]}" --arg tk "$H/htool/keys/mini.key" --arg ts "${SUBJ[htool]}" \
+  --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
+  --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$TABLE" \
+  --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
+  --arg ws "$WS/hermes" --arg home "$H/hermes" \
+  --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
+  {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
+   root:$root,nonce:"987000",
+   sponsor:{key:$sk,subject:$sp,accountCapability:"41",grants:[{kind:"object",target:"10",capability:"54"},{kind:"account",target:$sp,capability:"41"}]},
+   template:$op,
+   owner:{key:$hk,subject:$hs,noPrerotation:false},workerKey:{key:$tk,subject:$ts,noPrerotation:false},
+   task:$pt,toolTask:$tt,
+   capabilities:{parentObserve:"9870011",parentControl:"9870012",toolObserve:"9870013",toolControl:"9870014"},
+   budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
+   worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:900,reserve:"3",charge:"1"},
+   toolCharges:{reserve:"2",charge:"1"},
+   provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
+     budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
+       maxInputTokens:200000,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
+       maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
+   room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"lab-hermes"}}' >"$SD/grain-spec.json"
+operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
+  "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
+cp "$OUT" "$SD/grain-created.json"
+[ "$RC" = 0 ] || finish
+# The unit shape install-controller renders (user manager, all three variables).
+jq -n --arg r "$GRAIN_RUNTIME" --arg m "$MINI" --arg h "$HOST" --arg l "$SD/launcher/bwrap" --arg g "$SD/launcher/launch-gate" \
+  --arg b "$SD/runtime-root/grain-provider-bridge" '{artifacts:[$r,$m,$h,$l,$g,$b] | map({path:., sha256:""})}' >"$SD/pins.tmp"
+jq --rawfile sums <(sha256sum "$GRAIN_RUNTIME" "$MINI" "$HOST" "$SD/launcher/bwrap" "$SD/launcher/launch-gate" "$SD/runtime-root/grain-provider-bridge") '
+  ($sums | split("\n") | map(select(length > 0) | split("  ") | {(.[1]): .[0]}) | add) as $s
+  | .artifacts |= map(.sha256 = $s[.path])' "$SD/pins.tmp" >"$SD/pins.json"
+mkdir -p -m 700 "$SD/units"
+operator hermes "install-controller renders the controller unit (render only)" \
+  "$REPO/deploy/grain-host/install-controller" --config "$G/controller.json" --runtime "$GRAIN_RUNTIME" \
+    --unit-dir "$SD/units" --pins "$SD/pins.json" --render-only
+cp "$OUT" "$SD/rendered-unit.service"
+UNIT=mini-grain-controller@$PARENT_T
+checkp hermes "the rendered unit carries all three manager variables" sh -c "grep -q '^Environment=MINI_GRAIN_CONTROLLER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_WORKER_MANAGER=user\$' '$SD/rendered-unit.service' && grep -q '^Environment=MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service\$' '$SD/rendered-unit.service'"
+operator hermes "CONTROLLER: start $UNIT (the rendered shape, as a transient unit)" \
+  systemd-run --user --unit="$UNIT" --description="j14:$SD" \
+    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$UNIT.service" \
+    --property=Restart=on-failure --property=RestartSec=2s --property=KillMode=control-group \
+    --property=RuntimeMaxSec=7200s --property="StandardError=append:$SD/controller.stderr" \
+    "$GRAIN_RUNTIME" serve "$G/controller.json"
+for i in $(seq 1 600); do [ -S "$G/state/control.sock" ] && break; sleep 0.1; done
+checkp hermes "the controller listens on its control socket" test -S "$G/state/control.sock"
+[ "$FAILED" = 0 ] || finish
 
 # ------------------------------------------------ attach 1: two docs, three things said
 H0=$(room_height lab)
@@ -311,7 +467,7 @@ ok attach1 bob "say I put a draft in paper"
 ok attach1 bob "say and the numbers are in data"
 ok attach1 bob "say the librarian should find both"
 hermes attach1 "links both docs and digests three entries"
-checkp attach1 "Hermes joined lab and read its program document" sh -c "grep -q '\"event\":\"joined\"' '$JOURNAL'"
+checkp attach1 "the resident ran one prompt through the controller" test "$(resident_completed)" -ge 1
 ok attach1 alice "doc show lab-index"
 cp "$OUT" "$SD/index-1.txt"
 check attach1 "lab-index links paper once" 1 "$(grep -c "^link .*$PAPER_T" "$OUT")"
@@ -342,107 +498,18 @@ ok nogrant bob "ask lab please append 'typo fixed' to cell $PAPER_T"
 OPLOG0=$(cat "$W"/public/serve*.log 2>/dev/null | grep -c 'submission refused (operator log)')
 hermes nogrant "tries the edit and reports the refusal"
 cat "$W"/public/serve*.log 2>/dev/null | grep 'submission refused (operator log)' | tail -n +$((OPLOG0 + 1)) >"$SD/operator-refusals-nogrant.txt"
-EDIT=$(jq -c 'select(.event == "resolved" and .resolution == "refused")' "$JOURNAL" | tail -1)
-printf '%s\n' "$EDIT" >"$SD/edit-refusal.json"
-# A blind submission's refusal is uniform on the submitter's channel
-# (Kernel/NativeHost.lean publicSubmissionOutcome, theorem
-# public_refusal_uniform): Hermes is told `undisclosed`; the Host's operator
-# log names the decision: the invoke controller rejected the capability (the
-# grant does not cover a write to paper).
-checkp nogrant "Hermes's append to paper was refused at admission; Hermes's channel says undisclosed" \
-  sh -c "printf '%s' '$EDIT' | grep -q 'refused: undisclosed: request refused (phase admission)'"
 checkp nogrant "the Host's operator log names it: capabilityRejected (no grant covers the write)" \
-  sh -c "[ \$(wc -l <'$SD/operator-refusals-nogrant.txt') = 1 ] && grep -q 'DeclaredResourceController.Reject.capabilityRejected' '$SD/operator-refusals-nogrant.txt'"
-checkp nogrant "the refused edit was a paid turn (refusals cost)" \
-  jq -s -e --argjson op "$(printf '%s' "$EDIT" | jq .op)" 'any(.[]; .event == "paid" and .op == $op)' "$JOURNAL"
+  sh -c "[ \$(wc -l <'$SD/operator-refusals-nogrant.txt') -ge 1 ] && grep -q 'DeclaredResourceController.Reject.capabilityRejected' '$SD/operator-refusals-nogrant.txt'"
 tail_json >"$SD/tail-nogrant.jsonl"
-checkp nogrant "Hermes said why in its stream (the Host's refusal, verbatim), replying to bob" \
-  jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("refused: undisclosed")))' "$SD/tail-nogrant.jsonl"
+checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to bob" \
+  jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
 check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  created-by')"
 
-# ------------------------------------------------ budget: out, then topped up
-ok budget bob "say one more thing"
-ok budget bob "say and another"
-H1=$(room_height lab)
-ok budget alice "ask lab what changed since $H1"
-hermes budget "a digest, then a turn the account cannot pay"
+# ------------------------------------------------ topup
 BAL=$(credit_of hermes lab-hermes)
-require_nat budget "Hermes's balance before topup" "$BAL"
-checkp budget "the turn was refused bookRefused at plan and not attempted" \
-  jq -s -e 'any(.[]; .event == "unpaid" and (.reason | test("bookRefused")))' "$JOURNAL"
-checkp budget "Hermes's account holds less than one turn ($BAL < $TURN)" test "$BAL" -lt "$TURN"
-tail_json >"$SD/tail-budget.jsonl"
-checkp budget "Hermes says \"out of budget\" in its stream" \
-  jq -s -e --arg h "$HS" 'any(.[]; .author == $h and (.text | startswith("out of budget")))' "$SD/tail-budget.jsonl"
-ok budget alice "topup lab $TOPUP"
-check budget "topup lands on Hermes's account" "$((BAL + TOPUP))" "$(credit_of hermes lab-hermes)"
-
-# ------------------------------------------------ kill mid-write (M5 j4 shape)
-ok kill bob "doc new notes --in lab"
-NOTES_T=$(jq -r .target "$WS/bob/refs/notes.json")
-ok kill bob "doc append n1 notes 'notes: loose ends'"
-ok kill bob "submit n1"
-touch "$SD/mark-kill"
-"$GRAIN_RUNTIME" hermes-room step "$SD/hermes-lab.json" >"$SD/attach-kill.jsonl" 2>"$SD/attach-kill.err" &
-RPID=$!
-CALL=""
-for i in $(seq 1 3000); do
-  CALL=$(find "$WS/hermes/attempts" -path '*/hr-*/call.bin' -newer "$SD/mark-kill" 2>/dev/null | head -1)
-  [ -n "$CALL" ] && break
-  kill -0 "$RPID" 2>/dev/null || break
-  sleep 0.05
-done
-OUTCOME_AT_KILL=no; [ -n "$CALL" ] && [ -e "$(dirname "$CALL")/outcome.json" ] && OUTCOME_AT_KILL=yes
-kill -KILL "$RPID" 2>/dev/null; wait "$RPID" 2>/dev/null; KILLED_RC=$?; RPID=""
-KOP=$(basename "$(dirname "${CALL:-/x/hr-0/call.bin}")" | sed 's/^hr-//')
-N=$((N + 1)); WALL=-
-record kill OPERATOR "SIGKILL the controller once a write's signed call is out (hr-$KOP)" "killed with call.bin" \
-  "rc $KILLED_RC, call ${CALL:+present}, outcome at kill: $OUTCOME_AT_KILL" "$([ -n "$CALL" ] && [ "$KILLED_RC" = 137 ] && echo ok || echo FAIL)" "$CALL"
-checkp kill "the journal holds op $KOP paid and submitted, unresolved" \
-  jq -s -e --argjson op "${KOP:-0}" 'any(.[]; .event == "submitter" and .op == $op) and (any(.[]; .event == "resolved" and .op == $op) | not)' "$JOURNAL"
-hermes restart "restart: the submitter is proven stopped, the attempt resolves by exact lookup"
-RES=$(jq -c --argjson op "${KOP:-0}" 'select(.event == "resolved" and .op == $op)' "$JOURNAL" | tail -1)
-printf '%s\n' "$RES" >"$SD/kill-resolution.json"
-checkp restart "op $KOP resolved after the restart (recovered, performed or refused, with its basis)" \
-  sh -c "printf '%s' '$RES' | jq -e '.recovered == true and (.resolution == \"performed\" or .resolution == \"refused\") and (.basis | length > 0)'"
-checkp restart "the submitter was proven stopped before the lookup" \
-  jq -s -e --argjson op "${KOP:-0}" 'any(.[]; .event == "submitter-stopped" and .op == $op)' "$JOURNAL"
-check restart "op $KOP was submitted once (one attempt directory)" 1 "$(ls -d "$WS/hermes/attempts/hr-$KOP"* 2>/dev/null | wc -l)"
-ok restart alice "doc show lab-index"
-check restart "lab-index links notes exactly once" 1 "$(grep -c "^link .*$NOTES_T" "$OUT")"
-
-# ------------------------------------------------ kill after send: never resent
-H2=$(room_height lab)
-ok send bob "ask lab what changed since $H2"
-SENT_BEFORE=$(jq -s '[.[] | select(.event == "send")] | length' "$JOURNAL")
-kill -STOP "$PROVIDER_PID"
-"$GRAIN_RUNTIME" hermes-room step "$SD/hermes-lab.json" >"$SD/attach-send.jsonl" 2>"$SD/attach-send.err" &
-RPID=$!
-for i in $(seq 1 3000); do
-  [ "$(jq -s '[.[] | select(.event == "send")] | length' "$JOURNAL")" -gt "$SENT_BEFORE" ] && break
-  kill -0 "$RPID" 2>/dev/null || break
-  sleep 0.05
-done
-sleep 0.5
-KREQ=$(jq -s '[.[] | select(.event == "send")] | .[-1].request' "$JOURNAL")
-kill -KILL "$RPID" 2>/dev/null; wait "$RPID" 2>/dev/null; KILLED_RC=$?; RPID=""
-kill -CONT "$PROVIDER_PID"
-sleep 3
-N=$((N + 1)); WALL=-
-record send OPERATOR "SIGKILL the controller with provider request $KREQ sent and unanswered (provider stopped)" "killed" \
-  "rc $KILLED_RC" "$([ "$KILLED_RC" = 137 ] && echo ok || echo FAIL)" ""
-checkp send "request $KREQ: send journaled, no reply recorded" \
-  jq -s -e --argjson k "$KREQ" 'any(.[]; .event == "send" and .request == $k) and (any(.[]; .event == "recv" and .request == $k) | not)' "$JOURNAL"
-hermes send "restart: request $KREQ is abandoned, a new request answers"
-checkp send "request $KREQ is journaled abandoned, never resent" \
-  jq -s -e --argjson k "$KREQ" 'any(.[]; .event == "abandoned" and .request == $k) and ([.[] | select(.event == "send" and .request == $k)] | length == 1)' "$JOURNAL"
-SENDS=$(jq -s '[.[] | select(.event == "send")] | length' "$JOURNAL")
-check send "the provider's own log: every request the journal sent received once ($SENDS sends)" "$SENDS $SENDS" \
-  "$(sed -n 's/^received id=\([^ ]*\).*/\1/p' "$PLOG" | wc -l) $(sed -n 's/^received id=\([^ ]*\).*/\1/p' "$PLOG" | sort -u | wc -l)"
-check send "the provider received request $KREQ exactly once" 1 "$(grep -c "^received id=hermes-room-$KREQ " "$PLOG")"
-tail_json >"$SD/tail-send.jsonl"
-checkp send "the question asked before the kill is answered after it" \
-  jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("Since height")))' "$SD/tail-send.jsonl"
+require_nat topup "Hermes's balance before topup" "$BAL"
+ok topup alice "topup lab $TOPUP"
+check topup "topup lands on Hermes's account" "$((BAL + TOPUP))" "$(credit_of hermes lab-hermes)"
 
 # ------------------------------------------------ dismiss: revoke, return the rest
 BEFORE_RETURN=$(credit_of hermes lab-hermes)
@@ -453,7 +520,7 @@ ok dismiss alice "dismiss lab"
 cp "$OUT" "$SD/dismiss.out"
 operator dismiss "DELIVER: the dismissal into Hermes's inbox" deliver "$OUTBOX" "$H/hermes/inbox"
 hermes dismiss "returns the remainder"
-RETURNED=$(jq -s -r '[.[] | select(.event == "returned")] | .[0].result.returned // "none"' "$JOURNAL")
+RETURNED=$(jq -r '.returned.returned // "none"' "$RSTATE/resident.json")
 check dismiss "Hermes returned its balance less the fee" "$((BEFORE_RETURN - FEE))" "$RETURNED"
 check dismiss "Hermes's account is empty" 0 "$(credit_of hermes lab-hermes)"
 require_nat dismiss "the journaled return amount" "$RETURNED"

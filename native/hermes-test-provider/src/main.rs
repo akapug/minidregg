@@ -793,13 +793,26 @@ fn room_tool(request: &Value, base: &str) -> Option<String> {
     })
 }
 
-/// A tool message's content as JSON (`{"ok":…}` or `{"error":…}`).
+/// A tool message's content as `{"ok":…}` or `{"error":…}`. The legacy room
+/// runner sends that shape; an ACP agent relaying the controller's MCP result
+/// sends `{"result":…}` (the MCP text, itself JSON) or the bare value.
 fn room_result(messages: &[Value], id: &str) -> Option<Value> {
     let content = tool_result(messages, id)?.get("content")?;
-    match content {
-        Value::String(text) => nested_json(text),
-        other => Some(other.clone()),
+    let value = match content {
+        Value::String(text) => nested_json(text)?,
+        other => other.clone(),
+    };
+    if value.get("ok").is_some() || value.get("error").is_some() {
+        return Some(value);
     }
+    if let Some(result) = value.get("result") {
+        let inner = match result {
+            Value::String(text) => serde_json::from_str(text).unwrap_or_else(|_| result.clone()),
+            other => other.clone(),
+        };
+        return Some(json!({"ok": inner}));
+    }
+    Some(json!({"ok": value}))
 }
 
 fn clip(text: &str, max: usize) -> String {
