@@ -1800,9 +1800,14 @@ pub(crate) mod test_broker {
             None => Route { endpoint: endpoint.into(), provider: "fixturehome".into(), broker, ticket: None },
             Some(_) => {
                 use sha2::Digest;
+                // As the controller does (main.rs provider_route): the ticket's
+                // ceiling is the exact body's own max_tokens, which the broker
+                // checks again against the forwarded body.
+                let max_tokens = serde_json::from_slice::<Value>(body).ok()
+                    .and_then(|b| b.get("max_tokens").and_then(Value::as_u64));
                 let t = broker
                     .call(&json!({"op":"provider-authorize","kind":"pool","provider":"fixturepool","runner":"9",
-                        "maxTokens":1,"bodySha256":hex(&sha2::Sha256::digest(body))}), Duration::from_secs(10))
+                        "maxTokens":max_tokens,"bodySha256":hex(&sha2::Sha256::digest(body))}), Duration::from_secs(10))
                     .unwrap();
                 Route { endpoint: endpoint.into(), provider: "fixturepool".into(), broker, ticket: t["ticket"].as_str().map(str::to_owned) }
             }
@@ -1914,7 +1919,7 @@ mod tests {
         let response = post(endpoint.local_addr(), TOKEN, body);
         assert!(response.starts_with("HTTP/1.1 400 "));
         assert!(requests.try_recv().is_err());
-        let extension = br#"{"model":"operator-model","models":["unmetered-fallback"],"messages":[{"role":"user","content":"hello"}]}"#;
+        let extension = br#"{"model":"operator-model","max_tokens":1,"models":["unmetered-fallback"],"messages":[{"role":"user","content":"hello"}]}"#;
         let response = post(endpoint.local_addr(), TOKEN, extension);
         assert!(response.starts_with("HTTP/1.1 400 "));
         assert!(requests.try_recv().is_err());
@@ -2104,7 +2109,7 @@ mod tests {
             assert_eq!(local_write_success, acknowledge);
             reply.send(Ok(())).unwrap();
         });
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let mut client = UnixStream::connect(&socket).unwrap();
         client
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -2269,7 +2274,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
-        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"row"}]}"#
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"row"}]}"#
             .to_vec();
         let endpoint = format!("http://{upstream_addr}/v1/chat/completions");
         let controller = thread::spawn(move || {
@@ -2325,7 +2330,7 @@ mod tests {
             ProviderCommand::Reserve { reply, .. } => reply.send(Err(error.into())).unwrap(),
             _ => panic!("only a reserve may arrive"),
         });
-        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"x"}]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"x"}]}"#;
         let response = post(gateway.local_addr(), TOKEN, body);
         controller.join().unwrap();
         upstream.set_nonblocking(true).unwrap();
@@ -2481,7 +2486,7 @@ mod tests {
             }
             reply.send(Ok(())).unwrap();
         });
-        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"local"}]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"local"}]}"#;
         let response = post(gateway.local_addr(), TOKEN, body);
         assert!(response.starts_with("HTTP/1.1 502"), "{response}");
         controller.join().unwrap();
@@ -2519,7 +2524,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
-        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"local"}]}"#
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[{"role":"user","content":"local"}]}"#
             .to_vec();
         let expected = body.clone();
         let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
@@ -2621,7 +2626,7 @@ mod tests {
                     _ => panic!("unexpected command"),
                 },
             );
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let refused = post(gateway.local_addr(), TOKEN, body);
         assert!(refused.starts_with("HTTP/1.1 503"));
         controller.join().unwrap();
@@ -2649,7 +2654,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let address = gateway.local_addr();
         let first = thread::spawn(move || post(address, TOKEN, body));
         let ProviderCommand::Reserve { reply, .. } =
@@ -2726,7 +2731,7 @@ mod tests {
             }
             assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
         });
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let first = post(gateway.local_addr(), TOKEN, body);
         assert!(first.starts_with("HTTP/1.1 503"), "{first}");
         assert!(!first.contains("once"));
@@ -2757,7 +2762,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
-        let body = br#"{"model":"operator-model","messages":[]}"#.to_vec();
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#.to_vec();
         let expected = body.clone();
         let controller = thread::spawn(move || {
             for _ in 0..2 {
@@ -2868,7 +2873,7 @@ mod tests {
                 _ => panic!("retry must first ask controller"),
             }
         });
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let mut client = TcpStream::connect(gateway.local_addr()).unwrap();
         write!(client, "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
         client.write_all(body).unwrap();
@@ -2942,7 +2947,7 @@ mod tests {
         let response = post(
             gateway.local_addr(),
             TOKEN,
-            br#"{"model":"operator-model","messages":[]}"#,
+            br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#,
         );
         assert!(response.starts_with("HTTP/1.1 503"), "{response}");
         controller.join().unwrap();
@@ -3002,7 +3007,7 @@ mod tests {
         let response = post(
             gateway.local_addr(),
             TOKEN,
-            br#"{"model":"operator-model","messages":[]}"#,
+            br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#,
         );
         assert!(response.starts_with("HTTP/1.1 503"), "{response}");
         controller.join().unwrap();
@@ -3073,7 +3078,7 @@ mod tests {
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
-            let body = br#"{"model":"operator-model","messages":[]}"#;
+            let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
             write!(stream, "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
             stream.write_all(body).unwrap();
             let mut received = Vec::new();
@@ -3136,7 +3141,7 @@ mod tests {
                 _ => panic!("uncertain outcome expected"),
             }
         });
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let response = post(gateway.local_addr(), TOKEN, body);
         assert!(response.starts_with("HTTP/1.1 502"), "{response}");
         controller.join().unwrap();
@@ -3194,7 +3199,7 @@ mod tests {
                 _ => panic!("secret-containing response must be withheld"),
             }
         });
-        let body = br#"{"model":"operator-model","messages":[]}"#;
+        let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
         let response = post(gateway.local_addr(), TOKEN, body);
         assert!(response.starts_with("HTTP/1.1 502"));
         assert!(!response.contains("private-provider-key"));
@@ -3259,7 +3264,7 @@ mod tests {
         });
         let address = gateway.local_addr();
         let client = thread::spawn(move || {
-            let body = br#"{"model":"operator-model","messages":[]}"#;
+            let body = br#"{"model":"operator-model","max_tokens":1,"messages":[]}"#;
             let mut stream = TcpStream::connect(address).unwrap();
             write!(stream, "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len()).unwrap();
             stream.write_all(body).unwrap();
