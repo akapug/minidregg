@@ -2,7 +2,7 @@
 # journey.d/jjob1.sh — COMPUTE C1 JOB-LAW: the job law installs on fresh cells, and every edge of the
 # lifecycle (COMPUTE.md §2.3) is driven with the right subject and with a wrong subject or a wrong
 # time; every refusal is asserted by the CLAUSE the Host names: the refusal must carry the clause
-# exactly as deploy/shell/templates/job/law.job.shell spells it, with the write guard dropped (the
+# exactly as native/resource-client/templates/job/law.job.shell spells it, with the write guard dropped (the
 # Host's `LawLeaf.explained`).
 #
 # The law is law.job.json bound at CALLER = the sponsor (A), PROGRAM = collatz's programId (born
@@ -30,7 +30,7 @@ for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR JOB_PROGRAMS; do
   if [ -z "${!name:-}" ]; then echo "jjob1: $name is required" >&2; exit 2; fi
 done
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-TPL=$(CDPATH='' cd -- "$HERE/../../deploy/shell/templates/job" && pwd)
+TPL=$(CDPATH='' cd -- "$HERE/templates/job" && pwd)
 D=$JOURNEY_STEP_DIR/jjob1
 [ ! -e "$D" ] || { echo "jjob1: refusing to reuse $D" >&2; exit 2; }
 mkdir -p "$D/req"

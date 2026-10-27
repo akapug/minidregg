@@ -1,7 +1,7 @@
 /-
 # Assurance.SheetLaw — the MUD sheet law, as written, judged by the kernel
 
-`deploy/shell/templates/mud/sheet/law.sheet.json` (branch `mud-law-fix`, commit `8280b8d7`), composed
+`native/resource-client/templates/mud/sheet/law.sheet.json` (branch `mud-law-fix`, commit `8280b8d7`), composed
 as the templates' README says: `all [law.management, clause 1, …, clause 33]`. §2 is that JSON written
 out as a `Pred` term, one `def` per clause, placeholder `{X}` ↦ `p.X`; nothing is re-sorted, dropped or
 simplified. §2 is generated, not hand-edited: the mechanical embed (one recursive render of the JSON

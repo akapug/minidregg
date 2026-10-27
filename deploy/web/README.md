@@ -69,8 +69,8 @@ $AS mini keygen --secret /var/lib/mini-pubread/keys/public.key --public /var/lib
 ```
 
 Enroll it from the sponsor session exactly as `deploy/shell/OPERATOR.md` steps
-4–5 enroll a friend (NAME `public`, the custody copy of `public.key`, the two
-words `keygen` printed), and note SUBJECT. **Skip step 6**: the public reader
+4–5 enroll a hosted friend (NAME `public`; the custody copy of `public.key`,
+removed afterwards; the two words `keygen` printed), and note SUBJECT. **Skip step 6**: the public reader
 gets no funding and no factory grant; it can only hold observe grants. Then:
 
 ```

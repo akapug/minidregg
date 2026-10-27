@@ -3,7 +3,7 @@
 # born from a template has a map, and the template is the lines a friend types.
 #
 #   list      `room template list` names workroom, social, story; `room template
-#             show workroom` prints deploy/shell/templates/room/workroom/template.shell
+#             show workroom` prints native/resource-client/templates/room/workroom/template.shell
 #             byte for byte.
 #   workroom  alice: `room new lab --template workroom` births lab, lab/index (the
 #             map: a doc only alice writes, that only grows), lab/wall (a stream),
@@ -43,7 +43,7 @@ umask 077
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
-TPL=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/room" && pwd)
+TPL=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/room" && pwd)
 mkdir -p -m 700 "$H" "$WS" "$L"
 TABLE=$SD/jtemplates.tsv
 printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"
@@ -247,7 +247,7 @@ check list "room template list names workroom, social and story" \
   sh -c "grep -q '^workroom	' '$OUT' && grep -q '^social	' '$OUT' && grep -q '^story	' '$OUT'"
 for t in workroom social story; do
   ok list alice "room template show $t"
-  check list "room template show $t prints deploy/shell/templates/room/$t/template.shell byte for byte" \
+  check list "room template show $t prints native/resource-client/templates/room/$t/template.shell byte for byte" \
     cmp -s "$OUT" "$TPL/$t/template.shell"
 done
 cp "$TPL/workroom/template.shell" "$SD/workroom.shell"

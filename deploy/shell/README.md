@@ -137,6 +137,15 @@ ssh newcomer@host "import shared $ref"
 
 (This is the form `native/resource-client/shell-journey.sh` runs in J3.)
 
+## Templates
+
+The files shell verbs compile in or load unchanged (room templates, the chat,
+private-room, job, market and story laws, the Hermes roles, the MUD sheets) live
+with the client that embeds them, in `native/resource-client/templates/`
+(its README maps each verb to its files). They moved there from
+`deploy/shell/templates/` so that one home holds them; nothing on a box reads
+them from disk.
+
 ## Endings
 
 stdout carries the client's own output. stderr ends every failed verb with one

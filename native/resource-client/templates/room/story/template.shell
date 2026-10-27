@@ -4,7 +4,7 @@
 # order as you with $ROOM and $ME bound (room template show workroom says
 # more). `story new NAME --from tale` runs these lines and then adds the
 # story's table, which `story seal` makes the law of every player's cell
-# (deploy/shell/templates/story/README.md).
+# (native/resource-client/templates/story/README.md).
 
 room new $ROOM --law open
 
