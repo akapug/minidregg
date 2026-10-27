@@ -127,3 +127,61 @@ design names a `platformInstall` family and a `platform` kind `.lawBearing`; the
 for M2 is extending `realmWell` or a `purseRefill` sibling, and reserving a separate `METER_REFILL_*`
 family pre-empts that choice without recording it. (c) Every active SUBMIT in the registry is `effect: append`; these two must flip at activation, and the
 registry check should refuse an active SUBMIT with `effect: none`.
+
+## 2026-10-27, second pass: the restatement at cc5ebd26
+
+Deltas only.
+
+| statement | verdict |
+|---|---|
+| `Authorized`, `Admits` | WEAK: right shape, but `Context.auth` and `Context.encode` are free |
+| `StaysSorted`, `VersionMonotone`, `RecordsValid`, `Reachable` | SOUND, except `Reachable.genesis` accepts any valid record, not the deployment's |
+| `ReceiverAuthenticated`, `forged_refused`, `trustsSubjectField_not_decides` | SOUND relative to `auth`; teeth real |
+| `CustodianStep` / `CustodianNeverDropped` | Drop branch SOUND. Rotation branch has NO POLES |
+| `premises_inhabited`, `sorted_load_bearing`, `stale_version_refused`, `invalid_refused`, `zero_lifetime_invalid` | SOUND (poles over `toyAuth`) |
+| `BirthsReadCurrent`, `BirthQuoteCurrent` | WEAK: `platformAt = none` is an escape; `BirthQuoteCurrent` has no poles |
+| M2 exemption (`RefillChargeExempt`, both poles) | TRUE of `preflight` |
+| `RefillLawful` raise | A HOPE: `install` cannot raise `available` |
+| `replay_refused`, `forgetful_not_lawful`, `anySigner_not_lawful` | SOUND |
+| registry | SOUND |
+
+**The exemption is true; the refill is not realisable.** `DurableCommitProtocol.preflight` refuses
+`noCells` only when `rootWrites = [] ∧ nullifiers = []` (line 300), so a nullifier-only intent passes,
+and a zero `exactCharge` passes `fundedCheck` (line 310). But `install` (line 162) sets
+`available := before.available - intent.exactCharge`, and `Intent` (lines 55-61) has no credit field.
+A nullifier-only, zero-charge intent leaves the meter exactly where it was. No intent the protocol can
+express produces `raised m.remaining r.amount`. `Meter` is a parallel model of `Snapshot` with no theorem
+linking them (law 5). Fix, stated here first: add `Intent.credit`, set `available := before.available - exactCharge + credit`, and
+state who may set a nonzero credit: only the refill family, via `RefillAdmits`. Without that, any family
+could mint meter. The conservation theorem at lines 227-228 then has to carry the credit term. Add a teeth pole refusing an overflowing credit (the `Theory.ResourceCost` width
+boundary).
+
+**Rotation hole: closed on paper, untested.** Naming a first key (`none → _`), drop refused, rotation
+only with `verifiesKey old bytes s`: the rule is right. But `toyAuth.verifiesKey` is constantly
+`false`, so no pole exhibits a cosigned rotation being admitted. No pole shows an uncosigned rotation
+(`some a → some b`, `a ≠ b`, no cosign) refused either; `custodian_drop_refused` covers only the drop.
+Add both. `CustodianNeverDropped` is a corollary of `custodian_drop_refused`, not a keystone.
+
+**Realizer slots are still prose (law 1).** `Context` is any `(config, auth, encode)`.
+`verifies := fun _ _ _ => true` makes `forged_refused` vacuous (its premise never holds) and every
+statement accept forgeries. `verifiesKey := true` reopens rotation. Worse, `encode` need not cover
+the record: `toyContext.encode` signs only `[version]`, so a relay could swap the tariff or the new
+custodian key under a valid controller signature and custodian cosign. The fix: define
+`Context.deployed snapshot config`, with `verifyNative`, `capabilityEvidenceChecked` and the family
+codec, quantify the keystones over that alone, and state `encode` injective on `(next, nonce)`.
+The same applies to `RefillContext.encode` (the toy signs only the nonce, so the amount goes unsigned).
+
+**Births.** `BirthsReadCurrent` and `BirthQuoteCurrent` constrain only stores where `platformAt` returns
+`some`. A store whose platform cell is missing or undecodable may be priced arbitrarily. Add the
+conjunct `platformAt store = none → terms store = none` (and `quote … = none`). `BirthView` is free in
+the same way `Authority` is, so `currentReader_reads_current` holds by definition. Its teeth
+(`genesisReader_stale`) are real. `BirthQuoteCurrent` needs a satisfiable pole and a stale-tariff teeth
+pole.
+
+**Small.** `Install.nonce` is never read by `Admits`; install replay is refused by the version clause,
+so either drop the nonce or say it is codec-only. `Reachable.genesis` should be
+`g = genesisRecord ctx.config`. Refill nullifiers `(subject, nonce)` share the durable nullifier space
+with every other family, so they need a family tag.
+
+**Before proof work:** the `Intent.credit` statement, deployed-context quantification with injective
+`encode`, and the two rotation poles.
