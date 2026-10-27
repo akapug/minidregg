@@ -2,6 +2,7 @@
 
 `CoAuthor.obend` is a story a crowd writes one chapter at a time. Preview evidence only
 (`preview-cohort.json`, 33 rows); no native receipt exists for this package.
+Native: native scenario `story` in world-activity-admit.py (not yet run; runs in the central gate).
 
 ## What it does
 

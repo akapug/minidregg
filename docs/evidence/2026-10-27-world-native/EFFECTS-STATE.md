@@ -82,4 +82,5 @@ which is not committed.
   - `scripts/world-native-admit.sh bounty --route activity --scenario bounty --method world/bounty/BountyBoard.obend --entry bounty --deposit 300000000`
   - `scripts/world-native-admit.sh play --route activity --scenario play --entry play --deposit 300000000`
   - `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot --deposit 100000000`
+  - `scripts/world-native-admit.sh story --route activity --scenario story --entry tell --deposit 100000000`
   - For `dues`, the driver builds the `Opening` input and the `{paid: Nat}` state type itself.

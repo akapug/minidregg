@@ -507,6 +507,50 @@ try:
                     and scalar_of(a3.get('state'), 'published', 'boolean') is False
                     and World.await_of(a3).get('id') == World.await_of(c2).get('id'),
                     {'state': a3.get('state'), 'version': [c2.get('stateVersion'), a3.get('stateVersion')]})
+    if a.scenario == 'story':
+        # Story law natively (world/story/README.md:10 "The proposal with the most votes becomes the next chapter for
+        # good"; CoAuthor.obend `publish` :401, `Shelf` :313). One chapter (total 1): authors 1 and 2 propose (ids 1, 2),
+        # elector 10 votes for id 2, the seal after the window is the one `commit {write}` that sets the shelf to
+        # chapter 1 by author 2 with that text, decided `settled` at the yield. Events: propose/vote/seal (:107).
+        rec = v['recordCell']
+        propose = lambda author, text, now: ev('propose', author=nat(author), text=label(text), now=nat(now))
+        vote = lambda voter, pick, now: ev('vote', voter=nat(voter), pick=nat(pick), now=nat(now))
+        seal_ = lambda now: ev('seal', now=nat(now))
+        with w.group('story'):
+            w.check('born-awaiting-the-keeper-shelf-empty',
+                    source_of(v).get('kind') == 'reply' and field_of(v.get('state'), 'chapters') == 0,
+                    {'source': source_of(v), 'state': v.get('state')})
+            _, v1 = drive('obj', 'propose-1', tx, rec, v, propose(1, 'a light on the rock', 1))
+            _, v2 = drive('obj', 'propose-2', tx, rec, v1, propose(2, 'a ship in the fog', 2))
+            _, v3 = drive('obj', 'vote-2', tx, rec, v2, vote(10, 2, 3))
+            _, v4 = drive('obj', 'seal', tx, rec, v3, seal_(11))
+            st = v4.get('state')
+            w.check('seal-commits-the-winning-chapter',
+                    source_of(v4) == performed('settled') and field_of(st, 'chapters') == 1 and field_of(st, 'author') == 2
+                    and scalar_of(st, 'text', 'label') == 'a ship in the fog', {'source': source_of(v4), 'state': st})
+            v5 = deliver_only('obj', 'settled', tx, rec, v4)
+            w.check('sealed-once-and-complete',
+                    v5.get('state') == st and v5.get('stateVersion') == v4.get('stateVersion')
+                    and v5['record'].get('phase', {}).get('kind') != 'awaiting',
+                    {'phase': v5['record'].get('phase'), 'state': v5.get('state')})
+        # Teeth: an object whose law is `chapters <= 0` refuses the seal's chapter write: the seal's delivery is
+        # refused `objectWrite` as a whole turn, the shelf stays empty and the activity stays at its yield.
+        with w.group('story-teeth-law-refuses-seal'):
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('chapters', 0), 'installed', state_type=STORY_STATE)
+            tx3, b = birth_of('lawful', STORY_OPENING(), a.deposit, 'birth-lawful')
+            rec3 = b['recordCell']
+            _, c1 = drive('lawful', 'propose-lawful', tx3, rec3, b, propose(1, 'a light on the rock', 1))
+            _, c2 = drive('lawful', 'vote-lawful', tx3, rec3, c1, vote(10, 1, 3))
+            w.turn('resolve-seal-lawful', w.second, {'kind': 'resolve', 'slot': source_of(c2)['slot'],
+                                                      'answer': {'reply': seal_(11)}}, 'installed')
+            w.turn('deliver-seal-law-refused', w.sponsor, {'kind': 'deliver', 'record': rec3,
+                   'await': World.await_of(c2)['id'], 'account': '0', 'accountCapability': '0'}, 'refused', 'objectWrite')
+            a3 = w.state('lawful', 'after-law-refusal', tx3)
+            w.check('law-refused-seal-writes-nothing',
+                    a3.get('state') == c2.get('state') and a3.get('stateVersion') == c2.get('stateVersion')
+                    and field_of(a3.get('state'), 'chapters') == 0
+                    and World.await_of(a3).get('id') == World.await_of(c2).get('id'),
+                    {'state': a3.get('state'), 'version': [c2.get('stateVersion'), a3.get('stateVersion')]})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()
