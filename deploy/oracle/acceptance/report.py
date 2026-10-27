@@ -94,7 +94,10 @@ def consent_evidence(run, require):
     require('controller_consent_exact_config_bytes',
             sha(directory / 'controller-stage/host-config.json') == expected['configSha256'])
     starts = {}
-    for label, filename in (('bootstrap', session / 'controller-bootstrap-start.json' if session.exists() else 'controller-bootstrap-start.json'),
+    checkpoint_starts = list((run / 'continuations').glob('checkpoint-*/controller-bootstrap-start.json'))
+    require('at_most_one_checkpoint_bootstrap', len(checkpoint_starts) <= 1)
+    bootstrap = checkpoint_starts[0] if checkpoint_starts else (session / 'controller-bootstrap-start.json' if session.exists() else 'controller-bootstrap-start.json')
+    for label, filename in (('bootstrap', bootstrap),
                             ('initial', 'controller-start-initial.json'),
                             ('restart', 'controller-start-restart.json')):
         receipt = read(directory / filename)
@@ -302,6 +305,53 @@ def session_continuation(run, require):
             'continuation_exit_path': str(directory / 'exit.json'),
             'scope': 'Same retained Store; original null-operation refusal preserved without ACK or resend. '
                      'Explicit source policy and native binding enrollments precede the new session attempt.'}
+
+
+def checkpoint_continuation(run, require):
+    executions = list((run / 'continuations').glob('checkpoint-*/checkpoint.json'))
+    if not executions:
+        return None
+    require('one_checkpoint_execution', len(executions) == 1)
+    path = executions[0]
+    execution = read(path)
+    checkpoint_path = Path(execution['checkpoint'])
+    checkpoint = read(checkpoint_path)
+    require('checkpoint_exact_boundary',
+            execution.get('schema') == 'mini-oracle-checkpoint-execution-v1'
+            and execution.get('checkpoint_sha256') == sha(checkpoint_path)
+            and checkpoint.get('schema') == 'mini-oracle-phase-checkpoint-v1'
+            and checkpoint.get('run') == str(run)
+            and checkpoint.get('boundary') == 'after-physical-repairs-before-source'
+            and checkpoint.get('completed_phases') == ['consent-storage', 'controller-runtime-upgrade']
+            and checkpoint.get('next_phase') == execution.get('next_phase') == 'public-listener'
+            and execution.get('repeated_phases') == checkpoint.get('repeated_source_phases') == [])
+    for name, digest in checkpoint['receipts'].items():
+        require('checkpoint_predecessor_' + name, sha(Path(name)) == digest)
+    for name, digest in execution['sources'].items():
+        require('checkpoint_source_' + name, sha(Path(name)) == digest)
+    for name, archived in execution['archived_original_paths'].items():
+        require('checkpoint_archive_' + name, Path(name).is_relative_to(run)
+                and Path(archived['path']).is_relative_to(path.parent / 'prior')
+                and sha(Path(archived['path'])) == archived['sha256'])
+    phases = {}
+    for name in ('public-listener', 'services', 'bootstrap-target', 'worker-policy',
+                 'bootstrap-enrollment', 'controller-start', 'session-and-grant'):
+        start = path.parent / 'phases' / (name + '.started.json')
+        completed = read(path.parent / 'phases' / (name + '.completed.json'))
+        require('checkpoint_phase_' + name, completed.get('phase') == name and completed.get('state') == 'completed'
+                and completed.get('started_sha256') == sha(start) and completed.get('permits_automatic_retry') is False)
+        for artifact, digest in completed['evidence'].items():
+            require('checkpoint_phase_evidence_' + artifact, sha(Path(artifact)) == digest)
+        phases[name] = completed
+    listener = read(path.parent / 'public-listener.json')
+    require('checkpoint_registered_public_listener',
+            {key: value for key, value in listener.items() if key != 'publicListener'} == checkpoint['installer_state']
+            and listener['publicListener']['controllerUid'] == listener['controllerUid']
+            and listener['publicListener']['socket'] == str(run / 'world/sock/participant/host.sock'))
+    # Detailed native owner-policy, enrollment, session, grant and application
+    # assertions remain the report's independent obligations below/above.
+    return {'checkpoint': checkpoint, 'execution': execution, 'phases': phases,
+            'public_listener': listener, 'execution_exit_path': str(path.parent / 'exit.json')}
 
 
 def main():
@@ -540,6 +590,7 @@ def main():
     consent = consent_evidence(run, require)
     continuation = controller_continuation(run, require)
     resumed_session = session_continuation(run, require)
+    checkpoint_result = checkpoint_continuation(run, require)
     enrollments = controller_enrollments(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
@@ -632,7 +683,8 @@ def main():
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
               'controller_consent': consent,
               'controller_continuation': continuation,
-              'session_continuation': resumed_session, 'controller_enrollment': enrollments,
+              'session_continuation': resumed_session, 'checkpoint_continuation': checkpoint_result,
+              'controller_enrollment': enrollments,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}

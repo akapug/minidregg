@@ -47,7 +47,7 @@ pub(super) fn market(site: &Site, target: &str) -> Page {
                     String::new()
                 } else {
                     format!(
-                        "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"app\" value=\"{}\"><select name=\"class\" aria-label=\"class\"><option value=\"\">auto</option><option>S</option><option>M</option><option>L</option></select> <button class=\"quiet\">Install</button></form>",
+                        "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"app\" value=\"{}\"><select name=\"class\" aria-label=\"App size class\"><option value=\"\">auto</option><option>S</option><option>M</option><option>L</option></select> <button class=\"quiet\">Install</button></form>",
                         escape(app["appId"].as_str().unwrap_or(""))
                     )
                 };
@@ -180,7 +180,7 @@ pub(super) fn grain(site: &Site, n: &str) -> Page {
              <form method=\"post\" action=\"/grain/{id}/open\" class=\"inline\"><button>Open</button></form> \
              <form method=\"post\" action=\"/grain/{id}/start\" class=\"inline\"><button class=\"quiet\">Start</button></form> \
              <form method=\"post\" action=\"/grain/{id}/stop\" class=\"inline\"><button class=\"quiet\">Stop</button></form> \
-             <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><input name=\"file\" type=\"text\" placeholder=\"export.spk\" required pattern=\"[A-Za-z0-9._-]+\"><button class=\"quiet\">Export</button></form> \
+             <form method=\"post\" action=\"/grain/{id}/export\" class=\"inline\"><input name=\"file\" type=\"text\" placeholder=\"export.spk\" aria-label=\"Export file name\" required pattern=\"[A-Za-z0-9._-]+\"><button class=\"quiet\">Export</button></form> \
              <form method=\"post\" action=\"/grain/{id}/delete\" class=\"inline\"><button class=\"quiet\">Delete</button></form></p>\
              <form method=\"post\" action=\"/grain/{id}/share\" class=\"row\"><div><label for=\"sh\">Share with (member name)</label><input id=\"sh\" name=\"member\" type=\"text\" pattern=\"[a-z][a-z0-9-]*\" required></div><button class=\"quiet\">Share</button></form></section>"
         ));

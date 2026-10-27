@@ -10,7 +10,9 @@
   --accent: #0b5cad;
   --admitted: #2a7a3b;
   --refused: #b3261e;
-  --undecided: #9a6b00;
+  /* undecided is also text (.stale): #8f6300 holds 4.5:1 on paper (5.09) and paper-2
+     (4.62); #9a6b00 was 4.49/4.08 and failed AA on the outcome background. */
+  --undecided: #8f6300;
   --term-bg: #15161a;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -26,6 +28,13 @@
   --paper: #16171a; --paper-2: #1f2024; --ink: #e8e6e1; --ink-2: #a5a29b; --rule: #34363b;
   --accent: #6fb1ff; --admitted: #63c27a; --refused: #ff7b72; --undecided: #e3b341; --term-bg: #0e0f12;
 }
+
+/* accessibility: the skip link (hidden until focused) and the visually-hidden class
+   (text alternatives that are there for assistive tech, not sight) */
+.skip { position: absolute; left: -10rem; top: .3rem; z-index: 20; background: var(--accent); color: var(--paper); padding: .4rem .8rem; border-radius: 4px; }
+.skip:focus { left: .8rem; }
+.vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.term-mirror { margin: 0; font: 12px var(--mono); }
 
 * { box-sizing: border-box; }
 html { height: 100%; }

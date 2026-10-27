@@ -1167,7 +1167,7 @@ fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste
     }
     let detail = ending.text();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -1225,7 +1225,7 @@ fn purse_meter(site: &Site, live: bool) -> String {
             let scale = balance.max(1000);
             format!(
                 "<section class=\"purse\"{}><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
-                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
+                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\" aria-label=\"Purse balance: {balance} credits\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
                 if live { " data-live=\"15000\"" } else { "" },
                 scale / 10,
@@ -1255,7 +1255,7 @@ fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[
         status: if class == "refused" { 403 } else { 200 },
         title: title.to_owned(),
         stamp: Stamp::None,
-        body: format!("<div class=\"outcome {class}\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
+        body: format!("<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
     }
 }
 
@@ -1335,6 +1335,34 @@ mod tests {
             let words = crate::shell::words(&line).unwrap();
             assert_eq!(words, vec!["say".to_owned(), word.to_owned()], "{line}");
         }
+    }
+
+    /// The one outcome partial is a live region for every class: the line a form post
+    /// produces (admitted, refused with its clause, undecided with its retry) must reach
+    /// assistive tech, and the word — never the colour alone — carries the outcome.
+    #[test]
+    fn web_outcome_partial_is_a_live_region() {
+        for (code, transition, class, word) in [
+            (0, true, "admitted", "Admitted"),
+            (0, false, "answered", "Answered"),
+            (3, true, "refused", "refused"),
+            (4, true, "undecided", "undecided"),
+            (2, false, "error", "Usage"),
+        ] {
+            let ending = Ending { code, stdout: "done\n".into(), stderr: String::new() };
+            let html = outcome_of(&ending, &[("next", "/x")], transition);
+            assert!(
+                html.contains(&format!("class=\"outcome {class}\" role=\"status\"")) && html.contains("aria-live=\"polite\"") && html.contains("aria-atomic=\"true\""),
+                "{class}: {html}"
+            );
+            assert!(html.contains(word), "{class} carries its word: {html}");
+        }
+        // The partial the gateway renders for the anonymous POST refusal, same shape.
+        let page = outcome_page("Refused", "refused", "This body is the public reader", ANONYMOUS, &[]);
+        assert!(page.body.contains("role=\"status\"") && page.body.contains("aria-live=\"polite\""));
+        // A refusal's clause is highlighted, and the word stays beside it.
+        let refused = outcome_of(&Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n".into() }, &[], true);
+        assert!(refused.contains("refused") && refused.contains("mark class=\"clause\""), "{refused}");
     }
 
     #[test]

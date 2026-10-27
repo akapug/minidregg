@@ -69,6 +69,8 @@ import Theory.CrossModulus  -- one canonical integer with exact quotient/remaind
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
 import Theory.BinaryTower  -- [OB-8-tower] the GF(2) binary-tower field substrate (Binius path)
 import Theory.BinaryTowerCodec  -- exact recursive Fan--Paar coordinates and fixed-width 32-byte round-trip; native code remains opaque
+import Theory.BinaryCubeAddress  -- the LSB-first Boolean-cube address equivalence shared by the Merkle controller and the lookups
+import Theory.CollisionFloor  -- the global collision floor is true at every fixed-width digest (cshake256Bytes, finite node digests): the teeth of the CollisionAmong restatement
 import Theory.BinaryTowerFanPaarCodec  -- concrete recursive Fan--Paar coordinate codec and canonical fixed-width byte realization; still no native representation theorem
 import Theory.BinaryTowerFanPaar  -- [BTOWER-fanpaar] the Fan–Paar generator recursion + fast tower multiplication
 import Theory.BinaryTowerTrace  -- [BTOWER-fanpaar-basis] CLOSED (Wiedemann trace induction) — FanPaarRecursion holds

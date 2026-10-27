@@ -5,9 +5,10 @@
 # shellcheck disable=SC2024,SC2154,SC2174
 set -euo pipefail
 umask 077
+invocation_args=("$@")
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session|--continue-checkpoint CHECKPOINT_JSON] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -22,6 +23,8 @@ failure after both installs, publication and share. It never repeats those phase
 qualified stopped-controller repairs, and uses a new tool ID after native enrollment.
 Its --resume-prepared suffix is limited to the recorded source-manifest refusal
 with a durable backup, identical stopped state, and no repair or tool attempt.
+--continue-checkpoint accepts an explicitly sealed unstarted phase boundary;
+completed effects remain retained and any started phase requires inspection.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -33,11 +36,13 @@ HELP
 }
 [[ ${1:-} != --help ]] || { usage; exit 0; }
 mode=new
+checkpoint=
 session_resume_prepared=0
 case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
+  --continue-checkpoint) mode=continue-checkpoint; checkpoint=${2:?checkpoint required}; shift 2 ;;
 esac
 if [[ ${1:-} == --resume-prepared ]]; then
   [[ $mode == continue-session ]] || { usage >&2; exit 2; }
@@ -53,10 +58,17 @@ fail() { echo "Oracle shared-data journey: $*" >&2; exit 1; }
 for path in "$base" "$own" "$run" "$spk" "$source" "$inventory" "$benchmark"; do
   [[ $path == /* && $path != *[!a-zA-Z0-9_./-]* && $path != */../* && $path != */./* && $path != *//* ]] || fail "simple absolute canonical path required: $path"
 done
+if [[ $mode != new ]]; then
+  if [[ -z ${ORACLE_ACCEPTANCE_LOCK_FD:-} ]]; then
+    exec python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" \
+      --locked-exec "$run" bash "$0" "${invocation_args[@]}"
+  fi
+  python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --verify-lock "$run"
+fi
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  if [[ $mode == continue-session ]]; then
+  if [[ $mode == continue-session || $mode == continue-checkpoint ]]; then
     python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
   else
     [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
@@ -117,14 +129,16 @@ export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_T
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
-[[ $mode != continue-controller && $mode != continue-session ]] || preserve_existing_exit=1
+[[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
 controller_create_verb=controller-create
-if [[ $mode == continue-session ]]; then
+if [[ $mode == continue-checkpoint ]]; then
+  world_continue_checkpoint "$run" "$repo"
+elif [[ $mode == continue-session ]]; then
   world_continue_session "$run" "$repo"
 elif [[ $mode == continue-controller ]]; then
   world_continue_controller "$run" "$repo"
@@ -148,7 +162,7 @@ cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
-if [[ $mode != continue-controller && $mode != continue-session ]]; then
+if [[ $mode != continue-controller && $mode != continue-session && $mode != continue-checkpoint ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -164,7 +178,8 @@ world_disk_snapshot after-publication
 phase share-a
 fi
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
-if [[ $mode != continue-session ]]; then world_controller_prepare; fi
+if [[ $mode != continue-session && $mode != continue-checkpoint ]]; then world_controller_prepare; fi
+if [[ $mode == continue-checkpoint ]]; then world_phase_record admitted-application-journey started; fi
 phase start-a
 world_controller_activate "$run/world/evidence/start-a.stdout" initial
 world_controller_probe initial probe
@@ -352,4 +367,5 @@ if [[ -f $run/resume-retained-install-sha256.txt ]]; then
 fi
 journalctl --user --no-pager -u "mini-spk-ingest-s$store-*.service" -o json >"$run/import-units.jsonl"
 python3 "$repo/deploy/oracle/acceptance/report.py" "$run" "$inventory_sha"
+if [[ $mode == continue-checkpoint ]]; then world_phase_record admitted-application-journey completed "$run/report.json"; fi
 echo "Oracle shared-data acceptance passed: $run/report.json"

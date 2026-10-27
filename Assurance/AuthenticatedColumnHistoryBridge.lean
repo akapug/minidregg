@@ -16,7 +16,7 @@ one exact floor rather than parallel assumptions.
 -/
 
 import Assurance.SemanticHistoryWARPAdditiveJoin
-import Compiler.AuthenticatedColumnPlan
+import Compiler.AuthenticatedColumnSelvage
 
 namespace Minidregg.Assurance.AuthenticatedColumnHistoryBridge
 
