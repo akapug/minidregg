@@ -15,8 +15,12 @@
 //! attempt asks for a challenge on the current source. A challenge for another
 //! intent stays a terminal refusal (`remote challenge differs ...`).
 //! Workspace text append additionally requires a final decoded admission
-//! refusal or the controller's exact typed prepare staleTarget refusal, plus
-//! a fresh authorized read proving its client-selected preimage changed.
+//! refusal, the Host's named `stale-target` refusal of the append's own target
+//! (`submit_stale_target`), or the controller's exact typed prepare staleTarget
+//! refusal, plus a fresh authorized read proving its client-selected preimage
+//! changed; it then submits a new call (fresh nonce, identical text) against
+//! the new root, recording the class in the retired attempt's
+//! `replan-reason.json`.
 //! No uncertain or undecoded decision qualifies for either path.
 //! A `stale-root` is a refusal: nothing was admitted, so the
 //! retired attempt can never install, and the next attempt carries a fresh
@@ -127,6 +131,43 @@ pub(crate) fn is_prepare_stale_target(decision: Option<&HostDecision>) -> bool {
     command == "prepare" && value["type"] == "refused" && value["reason"] == "operation-rejected"
         && value["phase"] == "70726570617265"
         && value["detail"] == crate::hex(b"invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget")
+}
+
+/// The Host's named moved-target refusal of a signed submission: the decoded
+/// outcome `refused`, reason `operation-rejected`, phase `stale-target`, detail
+/// `target N moved since the plan was signed` (`Kernel/NativeHost.lean`
+/// `staleOutcome`, `stalePhase`). Returns N. The Host names the target only to
+/// its authenticated signer, and only when the signer observes the whole cell,
+/// so the client can prove the move itself with a fresh signed read. The byte
+/// that carried it (255, or the positive `NO_RECORD` 253 the Host is growing for
+/// proven no-append outcomes) does not matter: only the Host's own decoding
+/// classifies.
+///
+/// Why a NEW call is legitimate here and nowhere else in the append path: the
+/// refusal is decided in `prepareFrom`, before `DurableServed.receiveServed`
+/// is reached, so nothing was appended, and the re-planned call carries the
+/// identical text against the new root. Whether every `staleTarget` refusal at
+/// admission is proven no-append is the open Lean question Q2/Q3
+/// (docs/review/2026-10-26-native-crates/resource-client.md §8, "Questions for
+/// the Lean side"; lane L1 owns the answer and the `NO_RECORD` frame). Until
+/// L1 lands it, this classifier trusts the decoded phase, as the existing
+/// `stale-root` path trusts its reason.
+pub(crate) fn submit_stale_target(decision: Option<&HostDecision>) -> Option<String> {
+    let outcome = match decision {
+        Some(HostDecision::RefusedFrame { command, decoded: Some(value), .. }) if command == "submit" => value,
+        Some(HostDecision::Outcome(value)) => value,
+        _ => return None,
+    };
+    if outcome["type"] != "refused" || outcome["reason"] != "operation-rejected"
+        || outcome["phase"] != crate::hex(b"stale-target") {
+        return None;
+    }
+    let detail = crate::decode_hex(outcome["detail"].as_str()?).ok()?;
+    let target = std::str::from_utf8(&detail).ok()?
+        .strip_prefix("target ")?
+        .strip_suffix(" moved since the plan was signed")?;
+    (!target.is_empty() && target.len() <= 40 && target.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| target.to_owned())
 }
 
 /// Run `attempt` until it succeeds, or until a failure that `race` does not
@@ -587,4 +628,28 @@ mod tests {
         assert!(attempt.join("outcome.json").exists());
         let _ = fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn append_submit_stale_target_names_the_moved_target_only() {
+        let value = |phase: &[u8], detail: &[u8]| serde_json::json!({"type":"refused","reason":"operation-rejected",
+            "phase":crate::hex(phase),"detail":crate::hex(detail)});
+        let good = value(b"stale-target", b"target 42 moved since the plan was signed");
+        for byte in [253u8, 255] {
+            let frame = HostDecision::RefusedFrame { command: "submit".into(), byte, encoded: vec![], decoded: Some(good.clone()) };
+            assert_eq!(submit_stale_target(Some(&frame)).as_deref(), Some("42"));
+        }
+        assert_eq!(submit_stale_target(Some(&HostDecision::Outcome(good.clone()))).as_deref(), Some("42"));
+        let prepare = HostDecision::RefusedFrame { command: "prepare".into(), byte: 255, encoded: vec![], decoded: Some(good.clone()) };
+        assert_eq!(submit_stale_target(Some(&prepare)), None);
+        for other in [value(b"invoke", b"target 42 moved since the plan was signed"),
+            value(b"stale-target", b"target 4x2 moved since the plan was signed"),
+            value(b"stale-target", b"target 42 moved"), value(b"stale-target", b"target  moved since the plan was signed")] {
+            assert_eq!(submit_stale_target(Some(&HostDecision::Outcome(other))), None);
+        }
+        let mut uncertain = good.clone(); uncertain["type"] = serde_json::json!("uncertain");
+        assert_eq!(submit_stale_target(Some(&HostDecision::Outcome(uncertain))), None);
+        assert_eq!(submit_stale_target(Some(&HostDecision::RefusedFrame {
+            command: "submit".into(), byte: 255, encoded: vec![1], decoded: None })), None);
+    }
+
 }

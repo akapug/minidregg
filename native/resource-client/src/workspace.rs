@@ -3630,14 +3630,20 @@ pub(crate) fn submit_intent(
                     &selected_source.borrow(), OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
             },
             |_, decision| {
-                if crate::replan::is_stale_root(decision) { return true; }
-                let final_refused = crate::replan::is_final_admission_refusal(decision)
-                    && attempt.join("call.bin").is_file();
-                if !final_refused && !crate::replan::is_prepare_stale_target(decision) { return false; }
+                if crate::replan::is_stale_root(decision) {
+                    record_replan_reason(&attempt, "stale-root", decision);
+                    return true;
+                }
+                let Some(class) = append_recovery_class(decision, &selected_source.borrow(),
+                    attempt.join("call.bin").is_file()) else { return false };
                 // A refusal alone does not establish preimage drift. The
                 // original observer proves it independently through a signed read.
                 match append_preimage_moved(root, workspace, &request, &selected_source.borrow()) {
-                    Ok(moved) => { refresh.set(moved); moved },
+                    Ok(moved) => {
+                        if moved { record_replan_reason(&attempt, class, decision); }
+                        refresh.set(moved);
+                        moved
+                    }
                     Err(error) => { eprintln!("append recovery read failed: {error}"); false }
                 }
             },
@@ -3673,6 +3679,39 @@ pub(crate) fn submit_intent(
         renounce_note(&source);
     }
     Ok(())
+}
+
+/// Which proven-unadmitted refusal of one append attempt lets the append be
+/// re-planned against the new target root, if any: a decoded final admission
+/// refusal or the Host's named `stale-target` refusal of this append's own
+/// target (both after a sealed call), or the controller's typed prepare
+/// `staleTarget` (before one). The caller still proves the move with a fresh
+/// signed read before authoring a new call. See `replan::submit_stale_target`
+/// for why a fresh call is legitimate and the Lean questions Q2/Q3 it rests on.
+fn append_recovery_class(decision: Option<&crate::HostDecision>, source: &Path, sealed: bool) -> Option<&'static str> {
+    if sealed && crate::replan::is_final_admission_refusal(decision) {
+        return Some("admission-refused");
+    }
+    if sealed {
+        if let Some(named) = crate::replan::submit_stale_target(decision) {
+            let intent = bounded_json(source).ok()?;
+            let targets = intent["purpose"]["draft"]["command"]["targets"].as_array()?;
+            return (targets.len() == 1 && targets[0]["target"].as_str() == Some(named.as_str()))
+                .then_some("stale-target");
+        }
+    }
+    crate::replan::is_prepare_stale_target(decision).then_some("prepare-stale-target")
+}
+
+/// Keep the exact reason one append attempt was re-planned beside its retained
+/// call (`replan-reason.json`; the retirement moves it into `replanned/NN`).
+fn record_replan_reason(attempt: &Path, class: &str, decision: Option<&crate::HostDecision>) {
+    let reason = json!({"type":"minidregg-append-replan-reason-v1","class":class,
+        "outcome":decision.and_then(crate::HostDecision::outcome)});
+    if let Err(error) = replace_private_file(&attempt.join("replan-reason.json"),
+        &serde_json::to_vec(&reason).unwrap_or_default()) {
+        eprintln!("append recovery: cannot record the re-plan reason: {error}");
+    }
 }
 
 /// A second submission of an intent that an earlier attempt of this workspace already holds is
@@ -7202,6 +7241,85 @@ mod tests {
             assert!(super::append_recovery_input(&root,&source,kind,prepare_only).unwrap_err().contains("belongs to proposal op"));
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Two members append to one shared document concurrently against a fake
+    /// Host that holds the document's root. Both plan over root 0; the first
+    /// call lands; the second is refused with the Host's named `stale-target`
+    /// (carried on the positive `NO_RECORD` byte), re-planned once over the new
+    /// root, and submitted as a NEW call (fresh nonce, identical text) that
+    /// lands. Each text appears exactly once, and the loser's recorded reason
+    /// is `stale-target`. An uncertain answer is never re-planned.
+    #[test]
+    fn append_concurrent_members_replan_on_stale_target() {
+        use crate::HostDecision;
+        use std::sync::{Arc, Barrier, Mutex};
+        let _lock = crate::replan::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        let dir = std::env::temp_dir().join(format!("mini-append-concurrent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("intent.json");
+        std::fs::write(&source, br#"{"purpose":{"draft":{"command":{"targets":[{"target":"10"}]}}}}"#).unwrap();
+        // The fake Host: the document's root, its lines, every call's nonce.
+        struct Host { root: u64, lines: Vec<String>, nonces: Vec<u64>, next_nonce: u64 }
+        let host = Arc::new(Mutex::new(Host { root: 0, lines: vec![], nonces: vec![], next_nonce: 0 }));
+        let stale = |target: &str| HostDecision::RefusedFrame {
+            command: "submit".into(), byte: 253, encoded: vec![],
+            decoded: Some(json!({"type":"refused","reason":"operation-rejected","phase":hex(b"stale-target"),
+                "detail":hex(format!("target {target} moved since the plan was signed").as_bytes())})),
+        };
+        let barrier = Arc::new(Barrier::new(2));
+        let member = |text: &'static str| {
+            let (host, barrier, source) = (host.clone(), barrier.clone(), source.clone());
+            std::thread::spawn(move || {
+                let mut first = true;
+                let mut classes = Vec::new();
+                let result = crate::replan::replan("document append",
+                    || {
+                        // Plan: observe the root the call will name, with a fresh nonce.
+                        let (planned, nonce) = { let mut h = host.lock().unwrap(); h.next_nonce += 1; (h.root, h.next_nonce) };
+                        if std::mem::take(&mut first) { barrier.wait(); }
+                        let mut h = host.lock().unwrap();
+                        h.nonces.push(nonce);
+                        if h.root != planned {
+                            crate::note_host_decision(stale("10"));
+                            return Err("host refused submit: target 10 moved since the plan was signed".into());
+                        }
+                        h.root += 1;
+                        h.lines.push(text.to_owned());
+                        Ok(())
+                    },
+                    |_, decision| match super::append_recovery_class(decision, &source, true) {
+                        Some(class) => { classes.push(class); true }
+                        None => false,
+                    },
+                    |_| Ok(()));
+                (result, classes)
+            })
+        };
+        let (a, b) = (member("member-1 text"), member("member-2 text"));
+        let (a, b) = (a.join().unwrap(), b.join().unwrap());
+        assert!(a.0.is_ok() && b.0.is_ok(), "{:?} {:?}", a.0, b.0);
+        let mut classes = [a.1, b.1].concat();
+        classes.sort();
+        assert_eq!(classes, ["stale-target"], "exactly one member re-planned, for the named stale target");
+        let h = host.lock().unwrap();
+        let mut lines = h.lines.clone(); lines.sort();
+        assert_eq!(lines, ["member-1 text", "member-2 text"]);
+        assert_eq!(h.root, 2);
+        let mut nonces = h.nonces.clone(); nonces.sort(); nonces.dedup();
+        assert_eq!(nonces.len(), 3, "three calls, each with its own nonce");
+        drop(h);
+        // Another target's stale refusal, an uncertain answer, an undecoded
+        // frame and an unsealed attempt are never re-planned.
+        assert_eq!(super::append_recovery_class(Some(&stale("11")), &source, true), None);
+        assert_eq!(super::append_recovery_class(Some(&stale("10")), &source, false), None);
+        assert_eq!(super::append_recovery_class(Some(&HostDecision::Outcome(json!({"type":"uncertain"}))), &source, true), None);
+        assert_eq!(super::append_recovery_class(Some(&HostDecision::RefusedFrame {
+            command: "submit".into(), byte: 255, encoded: vec![1], decoded: None }), &source, true), None);
+        assert_eq!(super::append_recovery_class(None, &source, true), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
