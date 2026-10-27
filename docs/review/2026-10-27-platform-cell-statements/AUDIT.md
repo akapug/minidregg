@@ -623,3 +623,18 @@ appears in no gate. Nothing ties it to the MAC'd body's `state` (or to `State.of
 so the law is relative to whatever starting state `ffState` reports. Add `stateCheckpoint state =
 body.body.state` to `suffixGate` and `stateCheckpoint state = State.ofSeed seed` to `genesisGate`.
 Then `buildSound` is about the checkpoint the reader authenticated.
+
+**Addendum, un-effects 2aaf5ec9: the pass-11 additions are stated. Proofs may proceed.**
+- `FundsAgreeStatement` states agreement on purse balance and open accounts for every `written`. Its
+  birth clause holds by definition. The disagreement it found (the submitter or the collector is the
+  purse) is now refused before the verdict (`Delivery.purseApart`). That is a new refusal, which is right,
+  though `payerInvalid` is a loose name for "the collector is the purse".
+- `DepositIndependentStatement` quantifies over both verdicts and every other yield field, so it is the
+  general form.
+- `BirthCommitJudgedStatement` covers births.
+- `DeliverLawRefusesStatement` follows `deliver`'s order and names `.objectWrite reason`.
+- `commitYield_spec` keeps equality except for a refused transfer, as asked.
+
+One remaining weakness: `CommitLawRefusedPole` exhibits only the `judgeWritten` refusal. No witness
+satisfies `DeliverLawRefusesStatement`'s twelve premises jointly. Add one through a concrete delivery
+when the fixtures allow; until then, that statement's premises are not shown inhabited.
