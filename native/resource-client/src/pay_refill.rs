@@ -40,17 +40,6 @@ fn inspect(ctx: &Context, stem: &str, kind: &str, bytes: &[u8]) -> Result<Value>
     serde_json::from_slice(&body).map_err(|error| format!("invalid {kind} inspection: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
-    let length: u32 = first.len().try_into().map_err(|_| "pair exceeds u32")?;
-    let mut bytes = length.to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    if first.is_empty() || second.is_empty() || bytes.len() >= transport::HOST_MAX_FRAME {
-        return Err("pay refill pair exceeds Host bound or has an empty component".into());
-    }
-    Ok(bytes)
-}
-
 fn decimal(args: &mut Args, name: &str) -> Result<String> {
     canonical(args.required(name)?, name)
 }
@@ -122,7 +111,7 @@ fn submit(mut args: Args) -> Result<()> {
         .ok_or("refill plan lacks a canonical header")?;
     let header = crate::decode_hex(header)?;
     let signature = signing.sign(&header).to_bytes();
-    let ingress = invoke(&ctx, "ingress", mini_sdk::host_operations::PAY_REFILL_ASSEMBLE, &pair(&plan, &signature)?)?;
+    let ingress = invoke(&ctx, "ingress", mini_sdk::host_operations::PAY_REFILL_ASSEMBLE, &mini_sdk::local::pair_nonempty(&plan, &signature)?)?;
     retain(&ctx.dir, "ingress.bin", &ingress)?;
     let result = invoke(&ctx, "submit", mini_sdk::host_operations::PAY_REFILL_SUBMIT, &ingress)?;
     outcome(&ctx, "outcome", &result)

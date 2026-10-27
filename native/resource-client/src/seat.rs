@@ -84,13 +84,6 @@ fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
         .map_err(|error| format!("seat: invalid Host inspection of {kind}: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
 fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -130,7 +123,7 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
     let header = crate::decode_hex(canonical).map_err(|error| format!("seat: {error}"))?;
     let donation = donation_gate(&inspected, file)?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
-    let ingress = invoke(ws, mini_sdk::host_operations::SEAT_ASSEMBLE, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::SEAT_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     write_new(&out.join("ingress.bin"), &ingress)?;
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
     let seat = inspected.pointer("/command/seatAccount").cloned().unwrap_or(Value::Null);

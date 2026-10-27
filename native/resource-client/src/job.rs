@@ -104,14 +104,6 @@ fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
         .map_err(|error| format!("job: invalid Host inspection of {kind}: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
-
 fn int(value: &Value, what: &str) -> Result<i128> {
     value
         .as_str()
@@ -356,7 +348,7 @@ fn money(
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&crate::decode_hex(canonical).map_err(|e| format!("job: {e}"))?).to_bytes();
-    let ingress = invoke(ws, mini_sdk::host_operations::JOB_MONEY_ASSEMBLE, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::JOB_MONEY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)
 }
