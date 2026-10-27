@@ -147,8 +147,6 @@ theorem durableRefusal_tailBound (head certified bound : Nat) :
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
-  | .platformUnavailable => "platform cell unavailable: an ordinary birth has no price"
-  | .platformStale => "stale creation tariff: the pins are not the platform record's"
   | .admission reason => s!"admission: {repr reason}"
   | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
@@ -167,8 +165,6 @@ private def grainBirthRejection : GrainResourceBirthReceiver.Reject → String
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
-  | .platformUnavailable => .operationRejected
-  | .platformStale => .operationRejected
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
   | .durable (.overBound ..) => .overBound
