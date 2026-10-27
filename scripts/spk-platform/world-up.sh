@@ -26,8 +26,8 @@ while :; do
 done
 # A standing world hosts many apps: every app birth reserves 5 on the workroom's tool task and
 # every share issues a metered ticket of 3, so the provisioner's single-journey tool budget (50)
-# runs out after about six apps. A standing world takes 100, the tool balance's own bound (w7 and
-# w8, with 1000000, failed their store phase without a named reason).
+# runs out after about six apps. A standing world takes 100 (scripts/grain-birth/native-acceptance.sh
+# checks the provisioned remainder against this budget).
 export WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET:-100}
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
