@@ -617,3 +617,9 @@ reuses a prefix nullifier. Either instantiate `Loaded4 := Loaded`, so the real r
 by type (say so in the spec), or add `buildSound : ofOpened opened = .ok loaded → (impl.view
 loaded).snapshot = (protocol resume of the image)`, with a teeth pole: a suffix record carrying a prefix
 nullifier makes `ofOpened` refuse.
+
+**Addendum, fce764f7.** `buildSound` (`:391`) has the right shape, but `Impl.stateCheckpoint` (`:214`)
+appears in no gate. Nothing ties it to the MAC'd body's `state` (or to `State.ofSeed seed` from genesis),
+so the law is relative to whatever starting state `ffState` reports. Add `stateCheckpoint state =
+body.body.state` to `suffixGate` and `stateCheckpoint state = State.ofSeed seed` to `genesisGate`.
+Then `buildSound` is about the checkpoint the reader authenticated.
