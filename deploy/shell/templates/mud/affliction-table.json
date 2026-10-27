@@ -1,6 +1,6 @@
 {
   "type": "mud-affliction-table-v1",
-  "readBy": "programs/resolver.hoon (compiled INTO the resolver: the table is data, but a Nock sample carries only field values, so a table change = a new resolver jam = a new {VK_RESOLVER}); sim.py; the MUD-REFEREE lane",
+  "readBy": "programs/resolver.hoon (compiled INTO the resolver: the table is data, but a Nock sample carries only field values, so a table change = a new resolver jam = a new {VK_RESOLVER}); the MUD-REFEREE lane",
   "units": {
     "bal": "K-CLOCK ticks",
     "eq": "K-CLOCK ticks",

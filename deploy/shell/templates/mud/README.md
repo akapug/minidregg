@@ -1,8 +1,10 @@
 # MUD templates
 
 These are the files the MUD verbs load without changing them (MUD.md §5 item 5). Everything here is a
-file. Nothing here was built, installed or run against a Host. `sim.py` and `validate.py` are copies of
-the rules, not the kernel.
+file. Nothing here was built, installed or run against a Host. `validate.py` is a copy of the rules, not
+the kernel. `sim.py`, a hand Python twin of `Pred.eval` that "asserted" the J-MUD rows, was deleted on
+2026-10-26 (RUST-TRIAGE 2.1 row 38); nothing it printed is evidence, and the rows it covered are unchecked
+until a kernel run (a journey step) checks them.
 
 Each item below is marked **READ** (seen at source, with file:line), **MEASURED** (from a run's artifact) or
 **ASSUMED** (my choice, or something unchecked).
@@ -32,8 +34,7 @@ reported in. Appended files (`law.sheet-witnessed`, `law.sheet-cure-lawful`, `la
 
 **Placeholders.** `{UPPER}` words are substituted textually, as `story/` does. After substitution every
 value is a canonical decimal string (`Host/Json.lean:139-145`, READ via p-templates). The realm-level
-numbers are in `tidewrack/realm.json` `constants`, together with their derivation. `sim.py` refuses to
-evaluate a law that still has an unbound placeholder.
+numbers are in `tidewrack/realm.json` `constants`, together with their derivation.
 
 ## Field-number maps (fields are `Nat`, READ `Kernel/DeclaredResourceProjection.lean:18-22`; p-templates finding 2)
 
@@ -69,7 +70,7 @@ a `maxhit` field. It is `{MAXHIT_LT}` in `realm.json` (`sheet/fields.json` `notF
 **`go e` with no east exit.** MUD J-MUD-1 expects this refused with `law-denied: exits`. The law never sees a
 direction, only the new `at` and the two rooms. So a `go e` that has no `exit-e` produces **no destination and
 no write**, and the shell has to refuse it itself. What the kernel refuses is a forged destination that no
-exit of the current room reaches (`sim.py` J-MUD-1 r4, clause 16 **exits**). To make the literal row a kernel
+exit of the current room reaches (clause 16 **exits**; ASSUMED, no kernel run checks it). To make the literal row a kernel
 refusal, the move would have to carry its direction as a field. I judged that not worth a field. It is flagged
 in the lane report.
 
@@ -129,6 +130,6 @@ deployed candidate.
    append, not declared fields (READ `planning/PLACE.md` §4.4). Putting the intent on the sheet gives the
    same binding with slots that exist, and "signed by the attacker" comes free from clause 1.
 5. Joint slots of observe-only targets are visible to the primary target's law (MUD A2, not traced).
-6. A subject id that nobody signs as exists for empty ballot seats (`{NOBODY}`; `sim.py` binds 0).
+6. A subject id that nobody signs as exists for empty ballot seats (`{NOBODY}`).
 7. `valid_until`/`notAfter` in `org/offices.json` is a block height (09-29 decision).
 8. The Hoon programs' sample: `now` in ctx, keys `'I/N'`, `@s` values (`programs/README.md`).

@@ -7,8 +7,8 @@ only ever appended.
 ## Two gives from one pre-state: the law is per-step, and ordering belongs to the CAS
 
 SHEET-ITEM-LAW proved `concurrent_gives_both_law_admitted`. The holder's `give → B` and `give → C`, each
-judged against the same pre-state (owner = holder), are **both** admitted by this law. `sim.py` J-MUD-2 r4 and
-r4b show the same thing. This is intended, not a gap in the law:
+judged against the same pre-state (owner = holder), are **both** admitted by this law. This is intended, not a
+gap in the law:
 
 - A cell law is a predicate over one step's `(old, new)` projection. It cannot see a second transaction, so no
   clause can tell "the other give landed first" apart from "there is no other give".
@@ -16,7 +16,7 @@ r4b show the same thing. This is intended, not a gap in the law:
   `write owner NEW expected OLD`, and the store refuses a write whose `expected` is no longer current
   (`guardFailed`; `DurableDataIntent.stale_read_guard_rejected`). That check runs before any law.
 - Once the first give has landed, the law also refuses the second one on the new pre-state
-  (`second_give_refused_after_first`; `sim.py` J-MUD-2 r4c, clause 1 holder).
+  (`second_give_refused_after_first`, clause 1 holder).
 - So `no_dupe_unique` is stated over **chained** steps: an accepted log in which each step's pre-state is the
   previous step's post-state. That chaining is the CAS's guarantee. It is not derived yet. Deriving it from
   `DurableDataIntent`'s guard is the open item in SHEET-ITEM-LAW's "what is not done" list.

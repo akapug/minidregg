@@ -3,8 +3,8 @@
 `law.sheet` is the source. `law.sheet.json` is rendered from it by `../render.py` and must never be edited by
 hand. The installed law is `law.management ; law.sheet`, so clause 0 is management. Numbers are indices in
 that composed law and are the numbers refusals print. **Clauses are only ever appended.** Inserting one would
-renumber every clause after it, which breaks every refusal string, every `sim.py` expectation and the clause
-numbers SHEET-ITEM-LAW's theorems cite. The appended files continue the numbering.
+renumber every clause after it, which breaks every refusal string and the clause numbers SHEET-ITEM-LAW's
+theorems cite. The appended files continue the numbering.
 
 | # | name | guards | needs |
 |---|---|---|---|
@@ -51,14 +51,12 @@ numbers SHEET-ITEM-LAW's theorems cite. The appended files continue the numberin
   `alive` and bump `deaths` on a sheet at hp 3 with no attacker, and every clause admitted it: 6 forced only
   "hp ≤ 0 ⇒ dead", and 26 fires only when hp falls. The death is one step, because the resolver writes hp and
   alive in one product, and 6 already refuses a lethal hp that leaves alive at 1. The pole is
-  `fixed_law_refuses_smite_admits_strike`, and in `sim.py` it is J-MUD-3 r8c (smite refused at 33) and r8
-  (the combat death is still admitted).
+  `fixed_law_refuses_smite_admits_strike`.
 - **25, 27, 28, 29** used to read `not (leSlotsOff X clock now K-1)`. With no `clock/now` slot the atom is
   false, so the `not` is true, and the clause admitted anything. They now read
   `leSlotsOff clock now X {NEG_K}`, which is the same inequality over the integers (`X ≥ now + K` ⇔
   `now ≤ X − K`) and is false when either slot is missing. Constants: `NEG_COST = −COST`,
   `NEG_ECOST = −ECOST`, `NEG_RESPAWN = −RESPAWN`, written `"0"` when RESPAWN is 0. `validate.py` derives and
-  checks all three. `sim.py` rows r2c, r2h, r8d, r8f and J-MUD-4 r2f are the no-clock refusals. Rows r2d, r2g
-  and J-MUD-4 r2e are the one-short boundaries.
+  checks all three.
 - **Rule:** never put an atom that reads a possibly-absent slot (clock, joint, Book) under `not`. Write the
   positive bound.
