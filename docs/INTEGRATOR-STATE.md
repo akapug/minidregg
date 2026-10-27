@@ -56,7 +56,7 @@ stage ends cleanly, tell infra (aed5ecf506cf840af) and the coordinator the tree 
 dregg-ref copy. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
 batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
 
-Red routing: lean-audit-c reds go to L1c (a855b4edb693e03ae) directly; un-stream-continuity reds
+Red routing: lean-audit-c reds go to L1c (acf52d65283ef4ebc) directly; un-stream-continuity reds
 (ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
 others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
 application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
