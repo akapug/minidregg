@@ -46,8 +46,6 @@ mod homelab;
 mod pending_prepare;
 mod legacy_custody_audit;
 mod mcp;
-#[cfg(test)]
-mod hermes_catalogue_probe;
 mod provider;
 mod provider_failure;
 mod provider_profile;
