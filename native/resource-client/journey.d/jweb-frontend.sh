@@ -189,6 +189,9 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
+# The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
+# point and not as a proof (A10's inclusion opening is pending).
+row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
 # The subscriber tier's page: what it buys (from the provider table, when the box has the row),
 # the policy line marked for ember, the price and window from the room, the two forms.
 page=$(req GET /subscribe)
@@ -223,9 +226,6 @@ XM="$R/export/mini-export/manifest.json"
 row export-document "$([ -f "$XM" ] && grep -qF "$TEXT" "$R/export/mini-export/documents/$DOC.txt" 2>/dev/null && echo 1 || echo 0)" "$(head -c 200 "$R/export.err") documents=$(jq '.documents|length' "$XM" 2>/dev/null) attempts=$(jq '.attempts|length' "$XM" 2>/dev/null)"
 XH=$(jq -r '.height // ""' "$XM" 2>/dev/null); XW=$(jq -r '.worldRoot // ""' "$XM" 2>/dev/null)
 row export-root "$([ -n "$XW" ] && [ "$XW" = "$LIVE_W" ] && [ "$XH" = "$LIVE_H" ] && echo 1 || echo 0)" "manifest height $XH root $(cut -c1-16 <<<"$XW") | live height $LIVE_H root $(cut -c1-16 <<<"$LIVE_W")"
-# The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
-# point and not as a proof (A10's inclusion opening is pending).
-row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
 # The private-room shape of `room invite` (parity's one world leaf): this member founds a private
 # room; the sponsor, as invitee, signs its key declaration into HOME/requests/decl.json.
 shell_as_member() { "$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line "$1" 2>"$R/shell.err"; }
