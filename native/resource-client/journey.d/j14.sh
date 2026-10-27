@@ -105,6 +105,10 @@ PRICE=10
 BUDGET=1000
 TOPUP=100
 PORT=${J14_PROVIDER_PORT:-7743}
+# One resident pass (a prompt: provider reserve/settle per model call plus the
+# tool writes, each a Host transaction) and the worker unit's wall time. A
+# shared build box at load 2x its cores spends ~30 s per transaction.
+J14_PASS_SECONDS=${J14_PASS_SECONDS:-1800}  # the launcher caps a worker at 1800 s
 PROVIDER_PID=""
 KEYS_PID=""
 UNIT=""
@@ -249,7 +253,7 @@ hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or 
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
-  operator "$1" "hermes resident pass: $2" timeout 900 "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  operator "$1" "hermes resident pass: $2" timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
   { echo "# hermes resident ($1): $2"; cut -c1-400 "$OUT"; tail -3 "$ERR"; } >>"$SD/transcript.txt"
 }
@@ -399,7 +403,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
   --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
-  --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" \
+  --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" --arg pass "$J14_PASS_SECONDS" \
   --arg ws "$G/state/resource-workspace" --arg home "$G/state/room-home" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
   {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
@@ -410,7 +414,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    task:$pt,toolTask:$tt,
    capabilities:{parentObserve:"9870011",parentControl:"9870012",toolObserve:"9870013",toolControl:"9870014"},
    budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
-   worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:900,reserve:"3",charge:"1"},
+   worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:($pass|tonumber),reserve:"3",charge:"1"},
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
      budget:"20000",gateway:({providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:$reserve,
