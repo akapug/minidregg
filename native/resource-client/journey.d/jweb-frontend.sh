@@ -254,7 +254,9 @@ row verb-run "$(grep -q 'outcome answered' <<<"$page" && grep -q "$SUBJECT" <<<"
 # through /tour/4 and its outcome lands under the step.
 page=$(req GET /tour)
 row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
-page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
+# `can DOC`, one reference: bare `can` dry-runs every grant the member holds (op 130 each) and on a
+# used workspace outlasts the gateway's two minutes, and the body answers one request at a time.
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC")
 # `can` is a read (op 130 dry-runs, never submits): its outcome class is `answered`, never a
 # world transition; a Host that lacks op 130 answers it undecided, which is red here by design.
 row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -q 'outcome answered' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
@@ -328,7 +330,7 @@ INVITE=$(pre_of <<<"$page" | sed -n "s/^story join $TALE //p" | head -1)
 row story-invite "$(grep -q 'outcome admitted' <<<"$page" && [ -n "$INVITE" ] && echo 1 || echo 0)" "$(st) $(headline "$page") invitation=$(cut -c1-60 <<<"$INVITE")"
 a=$(alt_of "$tour" "story join"); set -- $(fields_of "$tour" "story join"); F_NAME=${1:-a2}; F_INV=${2:-a3}
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=story" --data-urlencode "alt=${a:-0}" --data-urlencode "$F_NAME=$TALE" --data-urlencode "$F_INV=$INVITE")
-row story-join "$(grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+row story-join "$(grep -q 'outcome answered' <<<"$page" && grep -q 'joined' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
 row story-move "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'anteroom' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
