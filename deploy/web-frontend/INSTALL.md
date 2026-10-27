@@ -130,7 +130,7 @@ native/resource-client/journey.d/jweb-frontend.sh --box NAME           # as root
 
 The journey writes a login record as the door would, opens a session through the gateway with the
 public Origin, runs `whoami` in a terminal over the WebSocket, creates and appends a document through
-the forms, reads the receipt, checks every shell verb has a form (`verb-parity`), logs out, and
+the forms, reads the receipt, checks every shell leaf has a form that plans (`parity`), logs out, and
 checks the public reader answers `/`.
 
 ## 9. What an RCE reaches

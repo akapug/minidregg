@@ -41,7 +41,7 @@ pub(super) struct Alt {
 
 impl Alt {
     /// The leading literal words: the leaf's name (`doc append`, `room template show`), as the
-    /// journey's face-coverage row reads it from `help`.
+    /// journey's parity row reads it from `help`.
     pub fn literals(&self) -> String {
         self.tokens.iter().map_while(|t| if let Tok::Lit(l) = t { Some(l.as_str()) } else { None }).collect::<Vec<_>>().join(" ")
     }
