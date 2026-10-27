@@ -2,6 +2,7 @@
 import Host.ClientConsentCore
 import Host.NativeLifecycleConsent
 import Host.ObjectiveConsent
+import Host.MemberPlanConsent
 open Minidregg.Kernel
 namespace Minidregg.Host.ClientConsentSession
 private def lifecycleExpected : ClientConsentCore.ExtraExpected := fun settings config session operation request => do
@@ -12,6 +13,8 @@ private def lifecycleExpected : ClientConsentCore.ExtraExpected := fun settings 
       | throw (IO.userError "local lifecycleManagement pin required before signing")
     NativeLifecycleConsent.expectedManagedPlanBytes config session.2
       management.managementSubject management.managementKeyId operation request
+  else if MemberPlanConsent.supported operation then
+    MemberPlanConsent.expectedPlanBytes config session.2 operation request
   else throw (IO.userError "unsupported specialized consent adapter")
 def run (arguments : List String) : IO UInt32 :=
   ClientConsentCore.run lifecycleExpected arguments ObjectiveConsent.extraObjective

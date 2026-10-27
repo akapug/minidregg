@@ -2400,15 +2400,15 @@
     "RESERVE_RESOURCE_BIRTH_PLAN",
     "APPLICATION_FAILED_START_RECOVERY_PREPARE",
     "ACTIVITY_PLAN",
-    "SEAT_PLAN"
+    "SEAT_PLAN",
+    "NEXT_KEY_ADOPTION_PLAN",
+    "APPLICATION_DISPATCH_AUTHENTICATED_PLAN"
   ],
   "consent_exempt": {
     "FN_NAMESPACE_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider (frame 222/224 has no arm for its plan codec). Owed: a specialized arm if a member ever signs it (Phase 3 C5, one wire)",
     "GRAIN_SHARE_ISSUE_PLAN": "operator-only spk route; the signer is the operator's grain tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
     "FN_FRONTIER_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
-    "NEXT_KEY_ADOPTION_PLAN": "UNCHECKED: a public, member-signed plan (next-key commitment adoption) that the client signs without the consent provider; whether frame 222's checkIntentPlan accepts its plan codec is unverified. Owed to the custody/consent lane (resource-client D F-9 family); recorded here so the registry check refuses silence, not the gap",
-    "APPLICATION_DISPATCH_READY": "UNCHECKED: a public, member-signed app dispatch plan (bounded canonical plan and participant signatures) outside the consent list; op 36's operator plan is checked (specialized consent), the member path is not. Owed to the custody/consent lane",
-    "APPLICATION_DISPATCH_AUTHENTICATED_PLAN": "UNCHECKED: a public, member-authenticated app request plan outside the consent list. Owed to the custody/consent lane",
+    "APPLICATION_DISPATCH_READY": "not a signing plan: `ApplicationDispatchReady.assembledReadyVerified` takes an already signed plan and its signatures and returns a Json record (`Host/ApplicationDispatchReady.lean:138`, type `IO Json`); nothing is signed after it. Named *_READY, listed here so the registry check does not read the suffix as a plan",
     "AUTHORIZED_PREPARE": "the member's own ordinary signing plan: every submit routes it through the local consent provider's frame 222 (NativeClientConsent.checkIntentPlan against the retained intent), not through the operator-plan list; listed here so the check knows it is covered elsewhere"
   },
   "client_constants": [
