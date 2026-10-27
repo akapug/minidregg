@@ -182,6 +182,9 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 # The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# The birth intent below carries the genesis: it must be the filled one (the
+# Host refuses a birth whose genesis lacks clockGenesisNow).
+genesis = json.load(open(path("genesis.json")))
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
