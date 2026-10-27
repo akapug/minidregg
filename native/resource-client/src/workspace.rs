@@ -1160,11 +1160,17 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
                 println!("    {context}");
             }
         } else {
+            // A target this workspace names is printed by name and, in
+            // parentheses, by its resource ID, so a reader (a room resident's
+            // mini_doc_show) can match links against cells.
+            let target = member(row, "target")?;
+            let label = cell_label(root, target);
+            let label = if label == target { label } else { format!("{label} (target {target})") };
             println!(
                 "link {} -> {} {} relation {} revision {} since {}",
                 member(row, "link")?,
                 member(row, "kind")?,
-                cell_label(root, member(row, "target")?),
+                label,
                 member(row, "relation")?,
                 member(row, "revision")?,
                 member(row, "height")?

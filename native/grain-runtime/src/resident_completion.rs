@@ -267,10 +267,14 @@ fn closed_boundary(status: &Status) -> Result<()> {
                 "resident_completion"
                     | "resident_delivery"
                     | "resident_pending_prompt"
-                    // A maintenance prompt (the program revision changed) is
-                    // the pending prompt itself; it clears only when this
-                    // completion is received (resident_requests::reconcile).
+                    // A maintenance prompt (the program revision changed) or
+                    // the started request this prompt serves is the pending
+                    // prompt itself; each clears only when this completion is
+                    // received (resident_requests::reconcile). Queued requests
+                    // are unstarted inbox entries with no effect yet.
                     | "resident_maintenance_pending"
+                    | "resident_started_request"
+                    | "resident_queued_requests"
                     | "hermes_pending_prompt"
                     | "hermes_retention_issue"
             )
@@ -898,11 +902,15 @@ mod tests {
     }
 
     #[test]
-    fn a_maintenance_prompt_completion_is_received_at_its_closed_boundary() {
+    fn a_maintenance_or_request_prompt_completion_is_received_at_its_closed_boundary() {
         let (root, turn, _) = fixture("completion-maintenance");
         let mut status = receiving_status(&turn, &root);
         status.retained.push("resident_maintenance_pending");
         closed_boundary(&status).unwrap();
+        status.retained.extend(["resident_started_request", "resident_queued_requests"]);
+        closed_boundary(&status).unwrap();
+        status.retained.push("resident_return_pending");
+        assert!(closed_boundary(&status).is_err(), "a pending budget return is never a closed boundary");
         fs::remove_dir_all(root).unwrap();
     }
 

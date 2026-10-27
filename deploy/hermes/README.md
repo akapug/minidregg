@@ -286,19 +286,25 @@ ACP room resident, with the box's paths and dregg-infra's registration
 
 Before it can run:
 
-- **The Store pins Hermes's purse tariff.** `demo/provider-services.json` is
-  the `providerServices` section of `operator.json`; it is pinned at genesis
-  (a serving Store refuses a changed config), so it ships with the next
-  re-genesis. Default prices: 1 credit is about 1 micro-dollar on the pool
+- **The Store pins Hermes's purse tariff.** `demo/provider-services.json`
+  goes into genesis-params.json as `providerServices`; `genesis.sh` checks it
+  and copies it into `operator.json`. It is pinned at genesis (a serving
+  Store refuses a changed config), so it ships with the next re-genesis:
+  `jq --slurpfile ps provider-services.json '.providerServices = $ps[0]'`. Default prices: 1 credit is about 1 micro-dollar on the pool
   route; `meta-llama/llama-3.1-8b-instruct` at 20000 / 50000 micro-credits per
   million input / output tokens (OpenRouter's $0.02 / $0.05 per million) plus
   100 per call; the user (BYOK) route pays 5 per call.
 - **The worker is upstream Hermes Agent.** `build-runtime-root SOURCE OUT
-  GRAIN_RUNTIME BRIDGE` stages it from a hermes-agent checkout at 6d8a8beb
-  with `hermes-agent/mini-tool-catalogue.patch` (the restricted resident
-  admits a session only when Hermes reports exactly the Mini room tools);
-  `HERMES_ROOT` names the result at the `runtime` step. It needs python3
-  (3.11–3.13) and uv on the build host, and network for the venv.
+  CANDIDATE` stages it from a hermes-agent checkout at 6d8a8beb with
+  `hermes-agent/mini-tool-catalogue.patch` (the restricted resident admits a
+  session only when Hermes reports exactly the Mini room tools) and the
+  candidate's grain-runtime and grain-provider-bridge, checked against its
+  manifest; `OUT/pins.json` records every digest. It needs python3 (3.11–3.13),
+  uv and network on the build host. For a later candidate,
+  `build-runtime-root --rebind OUT CANDIDATE` swaps the two binaries and
+  rewrites the pins (no rebuild). `HERMES_ROOT` names the root at the
+  `runtime` step, which refuses a root pinned to another candidate's
+  grain-runtime.
 - **dregg-infra's controller-entry.py** still calls `grain-runtime
   controller-write-scopes`, which no longer exists (the source parses the
   config at `controller-launch`); its registration must check the broker pin

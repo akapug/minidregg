@@ -95,8 +95,28 @@ check_grain_platform() {
   jq -e '.grainPlatform.completionCustodianKey | . == null or (type == "string" and test("^[0-9a-f]{64}$"))' "$1" >/dev/null ||
     { echo 'genesis: completionCustodianKeyInvalid: null (to be generated at init) or 64 lowercase hex digits' >&2; exit 2; }
 }
+# The Host's per-route provider tariffs (deploy/hermes/README.md "Charges"):
+# `providerServices [{providerResourceId, tariff {version, model, routes}}]`,
+# copied verbatim into operator.json. A serving Store refuses a changed config,
+# so a provider purse's tariff exists only if genesis pins it. Optional; when
+# present it is one to eight entries with positive, distinct resource IDs and a
+# tariff object each (the Host's checkedServices parses the tariff itself), and
+# the refusal names what is wrong.
+check_provider_services() {
+  jq -e 'has("providerServices") | not' "$1" >/dev/null && return 0
+  jq -e '.providerServices | type == "array" and length >= 1 and length <= 8' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: .providerServices must be an array of one to eight entries' >&2; exit 2; }
+  jq -e 'def int: type == "number" and . > 0 and . == floor and . < 9007199254740992;
+    .providerServices | all(type == "object" and (keys | sort) == ["providerResourceId", "tariff"]
+      and (.providerResourceId | int)
+      and (.tariff | type == "object" and (.version | type == "string") and (.model | type == "string" and length > 0)
+           and (.routes | type == "object" and length > 0)))
+    and (map(.providerResourceId) | length == (unique | length))' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: each entry is {providerResourceId: positive distinct integer, tariff: {version, model, routes}}' >&2; exit 2; }
+}
 if [ "$#" -eq 2 ] && [ "$1" = --check ]; then
   check_params "$2"
+  check_provider_services "$2"
   exit 0
 fi
 # The platform block alone (params.sh require-platform), usable before the clock is filled.
@@ -128,6 +148,7 @@ check_params "$params"
 if jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$params" >/dev/null; then
   echo 'genesis: completionCustodianKeyUnfilled: run.sh init generates keys/completion.seed and fills .grainPlatform.completionCustodianKey before the genesis template runs' >&2; exit 2
 fi
+check_provider_services "$params"
 
 jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg verifier "$verifier" '
   $p[0] as $p |
@@ -142,7 +163,8 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
   + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)
   + (if $p.grainPlatform then {completionCustodianKey: $p.grainPlatform.completionCustodianKey,
         lifecycleManagement: $p.grainPlatform.lifecycleManagement,
-        grainBirthTariff: $p.grainPlatform.grainBirthTariff} else {} end)' >"$dir/operator.json"
+        grainBirthTariff: $p.grainPlatform.grainBirthTariff} else {} end)
+  + (if $p.providerServices then {providerServices: $p.providerServices} else {} end)' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \

@@ -1047,7 +1047,10 @@ impl RoomTools<'_> {
                 only_keys(arguments, &["doc"])?;
                 let doc = bounded_name(arguments, "doc")?;
                 let run = Self::ok_or_ending(self.line(&format!("doc show {doc}"))?)?;
-                Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&run.stdout)}))
+                // `doc show` prints the text only; the links come from the
+                // Host's link index (`doc links`).
+                let links = Self::ok_or_ending(self.line(&format!("doc links {doc}"))?)?;
+                Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&links.stdout)}))
             }
             _ => Err(format!("{name} is not a room read tool")),
         }
@@ -1618,6 +1621,9 @@ mod tests {
     fn rendered_links_name_their_targets() {
         let text = "# doc lab-index: document 77 cell root 1 at height 9\n  1  created-by 7   map\nlink 3 -> lab-cell-501 (document 501) relation 0 created-by 42\nlink 4 -> object 502 relation 0 created-by 42\n# 3 cell entries\n";
         assert_eq!(super::rendered_links(text), vec!["501".to_owned(), "502".to_owned()]);
+        // `doc links` as the client prints it: by ID, or by name with the ID.
+        let links = "# links from lab-index (document 77) at height 9\nlink 3 -> object 501 relation 0 revision 4 since 8\nlink 5 -> object lab-cell-502 (target 502) relation 0 revision 6 since 9\n# 2 links\n";
+        assert_eq!(super::rendered_links(links), vec!["501".to_owned(), "502".to_owned()]);
     }
 
     #[test]
