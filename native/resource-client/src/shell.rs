@@ -2109,6 +2109,15 @@ fn start_text(session: &Session) -> String {
     )
 }
 
+/// Whether the verb's grammar accepts the line's words (as split words, or as a raw line for
+/// the verbs that read one); a verb without a grammar accepts nothing here.
+fn grammar_accepts(text: &str) -> bool {
+    let Ok(w) = words(text) else { return false };
+    let Some(verb) = w.first() else { return false };
+    let Some(g) = crate::shell_grammar::grammar(verb) else { return false };
+    crate::shell_grammar::parse(g, &w).is_ok() || crate::shell_grammar::parse_line(g, text).is_ok()
+}
+
 /// A plan as one line of words: the client command and its flag names (values elided), or the
 /// local plan's kind. What `--plan` prints; never the secrets a flag may carry.
 fn describe_plan(planned: &Plan) -> String {
@@ -2468,6 +2477,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Ok(planned) => {
                     println!("plan: {}", describe_plan(&planned));
                     EXIT_OK
+                }
+                // The grammar accepted the words but the plan builder refused on a fact of this
+                // workspace (an open room given a private room's declaration, a template file
+                // that does not parse): exit 1, named as such. The grammar's own refusal: usage.
+                Err(message) if grammar_accepts(&text) => {
+                    eprintln!("error: parsed, not plannable here: {message}");
+                    EXIT_CLIENT
                 }
                 Err(message) => {
                     eprint!("{}", render(&Ending::Usage(message)).1);

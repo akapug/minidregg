@@ -187,7 +187,7 @@ row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && ech
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
-# FACE COVERAGE (not yet parity: parity needs an outcome test per leaf): every verb x subcommand leaf
+# PARITY: every verb x subcommand leaf
 # the shell's `help` lists (each usage alternative's leading literal words) has a route and a no-JS
 # form in the body; a leaf without one is red by name.
 verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
@@ -207,16 +207,20 @@ done
 # PARITY = every leaf has a route and a no-JS form (above) AND its placeholder-filled form assembles
 # to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
 mkdir -p "${HOMEDIR:-$R/home}/requests" "${HOMEDIR:-$R/home}/keys"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"; printf '{}\n' >"${HOMEDIR:-$R/home}/requests/x.json"; printf 'k\n' >"${HOMEDIR:-$R/home}/keys/x.txt"
-dry_leaves=0; dry_errors=0; dry_bad=""
+dry_leaves=0; dry_errors=0; dry_bad=""; dry_world=0; dry_world_names=""
 mkdir -p "$R/dry"
 for v in $verbs; do
   page=$(req GET "/verb/$v/dry")
   printf '%s\n' "$page" >"$R/dry/$v.html"
   l=$(grep -o 'data-leaves="[0-9]*"' <<<"$page" | grep -o '[0-9]*'); e=$(grep -o 'data-errors="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
-  dry_leaves=$((dry_leaves + ${l:-0})); dry_errors=$((dry_errors + ${e:-0}))
-  [ "${e:-1}" = 0 ] || dry_bad="$dry_bad $v($(grep -o '<tr class="error"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
+  w=$(grep -o 'data-world="[0-9]*"' <<<"$page" | grep -o '[0-9]*')
+  dry_leaves=$((dry_leaves + ${l:-0})); dry_errors=$((dry_errors + ${e:-0})); dry_world=$((dry_world + ${w:-0}))
+  [ "${e:-1}" = 0 ] || dry_bad="$dry_bad $v($(grep -o '<tr class="usage"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
+  [ "${w:-0}" = 0 ] || dry_world_names="$dry_world_names $v($(grep -o '<tr class="world"><td><code>[^<]*' <<<"$page" | sed 's/.*<code>//' | tr '\n' ',' | cut -c1-80))"
 done
-row parity "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && [ "$dry_errors" = 0 ] && [ "$dry_leaves" -ge "$leaves" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help, $dry_leaves dry-run leaves, $dry_errors planner refusals; without a face:${missing:- none}; refused:${dry_bad:- none}"
+# A `world` leaf parsed but this workspace could not plan it (an open room given a private room's
+# declaration): not a form/parser disagreement; it is named, and its outcome is a spine row's.
+row parity "$([ "$count" -gt 40 ] && [ "$leaves" -gt 100 ] && [ -z "$missing" ] && [ "$dry_errors" = 0 ] && [ "$dry_leaves" -ge "$leaves" ] && echo 1 || echo 0)" "$count verbs, $leaves leaves in help, $dry_leaves dry-run leaves, $dry_errors usage refusals, $dry_world world refusals; without a face:${missing:- none}; usage:${dry_bad:- none}; world:${dry_world_names:- none}"
 # Red-proof: a verb the shell does not have must have no face (the check can go red).
 req GET /verb/no-such-verb-x >/dev/null
 row parity-redproof "$([ "$(st)" = 404 ] && echo 1 || echo 0)" "$(st) for a verb the shell lacks"

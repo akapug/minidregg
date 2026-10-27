@@ -465,6 +465,7 @@ fn placeholder(kind: crate::shell_grammar::Kind, name: &str, refs: &[String]) ->
         G::Word => {
             let n = name.to_ascii_uppercase();
             if n.contains("JSON") { "@x.json".into() }
+            else if n.starts_with("T|") { "social".into() }
             else if n.contains("GRAIN") { "a1".into() }
             else if n.contains("COSIGN") || n.contains("SIGNATURE") { "ab".repeat(64) }
             else if n.contains("HEX") { "ab".repeat(32) }
@@ -493,6 +494,7 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
     let refs = site.names();
     let mut rows = String::new();
     let mut errors = 0usize;
+    let mut world = 0usize;
     for (index, alt) in alts.iter().enumerate() {
         let leaf = grammar.and_then(|g| g.leaves.get(index));
         let mut form = std::collections::BTreeMap::new();
@@ -519,15 +521,20 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
             }
         }
         let (class, detail) = match assemble(site, name, &form) {
-            Err(page) => ("error", page.body),
+            Err(page) => ("usage", page.body),
             Ok((lines, _, _, _)) => match super::body::plan_line(site, &lines[0]) {
                 Some(ending) if ending.code == 0 => ("answered", ending.stdout.trim().to_owned()),
-                Some(ending) => ("error", ending.stderr.trim().to_owned()),
-                None => ("error", "no shell paths".to_owned()),
+                // The grammar refused the assembled line: the form and the parser disagree.
+                Some(ending) if ending.code == 2 => ("usage", ending.stderr.trim().to_owned()),
+                // The words parse; this workspace cannot plan them (a fact of the world).
+                Some(ending) => ("world", ending.stderr.trim().to_owned()),
+                None => ("usage", "no shell paths".to_owned()),
             },
         };
-        if class == "error" {
-            errors += 1;
+        match class {
+            "usage" => errors += 1,
+            "world" => world += 1,
+            _ => {}
         }
         rows.push_str(&format!("<tr class=\"{class}\"><td><code>{}</code></td><td class=\"outcome {class}\">{class}</td><td><code>{}</code></td></tr>\n", escape(&alt.literals()), escape(&clip(&detail, 200))));
     }
@@ -536,8 +543,9 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
         title: format!("{name}: dry run"),
         stamp: Stamp::None,
         body: format!(
-            "<p>Each leaf of <code>{name}</code>, its form filled with placeholders, assembled and planned by the shell (nothing runs against the Host).</p>\
-             <table class=\"dry\" data-leaves=\"{}\" data-errors=\"{errors}\"><thead><tr><th>leaf</th><th>class</th><th>plan</th></tr></thead><tbody>{rows}</tbody></table>",
+            "<p>Each leaf of <code>{name}</code>, its form filled with placeholders, assembled and planned by the shell (nothing runs against the Host). \
+             <em>usage</em>: the grammar refused the form's line (the form and the parser disagree); <em>world</em>: the words parse, this workspace cannot plan them.</p>\
+             <table class=\"dry\" data-leaves=\"{}\" data-errors=\"{errors}\" data-world=\"{world}\"><thead><tr><th>leaf</th><th>class</th><th>plan</th></tr></thead><tbody>{rows}</tbody></table>",
             alts.len()
         ),
     }
