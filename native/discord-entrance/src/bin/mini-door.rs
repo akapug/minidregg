@@ -128,14 +128,24 @@ const WALLET_PAGE: &str = r#"(async () => {
     const quote = JSON.parse(document.getElementById("quote").textContent);
     const web3 = solanaWeb3;
     const conn = new web3.Connection(quote.rpc, "confirmed");
-    const wallets = await passwapWallets.list(web3);
+    const pay = makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) });
+    const late = pay.stale();
+    if (late) { say(late); return; }
+    const wallets = await passwapWallets.list(web3, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
     if (!wallets.length) { say("No Solana wallet extension was found in this browser (Phantom, Solflare, Backpack, Talisman, ...); the paste path below works with any wallet."); return; }
     for (const w of wallets) {
       const b = document.createElement("button"); b.textContent = "Pay with " + w.name;
       b.onclick = async () => {
         for (const x of out.querySelectorAll("button")) x.disabled = true;
         try {
-          const r = await makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) }).pay(w, say);
+          // The signature is shown, and put into the paste form, the moment the cluster returns it.
+          const sent = (sig) => {
+            out.querySelector(".sent").innerHTML = "Your transaction: <code></code>";
+            out.querySelector(".sent code").textContent = sig;
+            const field = document.querySelector("form[action='/join/paid'] input[name=transaction]");
+            if (field) field.value = sig;
+          };
+          const r = await pay.pay(w, say, sent);
           say("Sent and posted: " + r.signature + ". The door decides within a minute; this page reloads to show it.");
           setTimeout(() => location.reload(), 65000);
         } catch (e) { say(String(e && e.message || e)); for (const x of out.querySelectorAll("button")) x.disabled = false; }
@@ -263,7 +273,7 @@ impl Door {
                  <section id=\"wallet-pay\"><h2>Pay with your wallet</h2>\
                  <p>Your browser builds the transfer (your token account to the recipient's, with the memo above, byte for byte), your wallet signs it, \
                  your browser sends it to <code>{}</code> and posts the signature here. The box never sees your wallet. <noscript>This needs JavaScript; the paste path below does not.</noscript></p>\
-                 <p class=wallets></p><p class=status role=status></p></section>\
+                 <p class=wallets></p><p class=status role=status></p><p class=sent></p></section>\
                  <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
                  <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
