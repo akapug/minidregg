@@ -538,7 +538,8 @@ impl Ending {
     /// The class and the headline the one partial shows (shell.rs: 0 ok, 1 client error,
     /// 2 usage, 3 refused, 4 undecided).
     fn class(&self) -> (&'static str, String) {
-        let first = self.stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("").to_owned();
+        // Script mode echoes `mini> LINE` before each line; the ending's own first line follows.
+        let first = self.stderr.lines().find(|l| !l.trim().is_empty() && !l.starts_with("mini> ")).unwrap_or("").to_owned();
         match self.code {
             0 => ("admitted", "Admitted".into()),
             3 => ("refused", if first.is_empty() { "Refused".into() } else { first }),
