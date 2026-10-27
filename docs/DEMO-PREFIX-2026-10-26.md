@@ -93,7 +93,9 @@ the demo on 2026-11-11): Lean + Rust toolchains, warm Lake cache, the `lanes` us
 from GitHub, no push, no production secret. Lanes run their Linux checks and the integration build
 there; hbox keeps the standing run and the warm base on `/tank`, lane hot work on its SSD
 (`/othersys/lanes`), every job in its own `swarm-build` cgroup, in parallel. The Mac holds a warm
-`.lake` of the host closure (3,739 jobs, 51 min cold) and is the per-file Lean box.
+`.lake` of the host closure (3,739 jobs, 51 min cold) and is the per-file Lean box. The first clean
+cold Lean build of the host umbrella on `dregg-build`: 1,308 modules in 2 h 00 min at 2 seats, cgroup
+peak 17.2 GiB (heaviest module 18.5 GiB); 4 seats are safe with the measured per-module RSS table.
 
 **Discord, settled.** Ember lost admin access to the account owning application 1507638321877090374
 (Dragon's Egg), so no Interactions Endpoint URL will be set; the portal saves that failed were made
@@ -122,8 +124,8 @@ mode); L6 43ede087 (WAL store, grant caps against the body, op-144 pinned); L7 7
 repairs; the summon fix: one document-creation path, loud refusal); L8 6e9ea3bb; L9 d74947d2
 (workspace gate, journey split, 9,348 lines gone); L11 ed73009c/bef88d32 (the breakdown; the fsync
 fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theorems, O(1) consent,
-codec resident, image hashed once); coordination 34460623 (`docs/COORDINATION-2026-10-27.md`,
-−116,517 lines of gate bookkeeping). Working: **L1** (above); **L12 web front end**
+codec resident, image hashed once); coordination 571f304b (`docs/COORDINATION-2026-10-27.md`,
+−116,631 lines of gate bookkeeping). Working: **L1** (above); **L12 web front end**
 (`lane/web-frontend` 9f7de524: the gateway + root helper + body, xterm.js vendored, forms derived from
 the shell verb table per the parity law, refusal clause highlighted, purse meter, grants tree, live
 room stream; headless-Chromium end-to-end green without a Host; `jwebparity` next); **L13 app market**
