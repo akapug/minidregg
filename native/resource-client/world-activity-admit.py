@@ -27,6 +27,22 @@ repo = HERE.parent.parent
 w = World(a.bin, a.root, repo)
 method = pathlib.Path(a.method).resolve()
 ticks = int(a.ticks or aw.TICKS)
+DUES_AMOUNT = 200000000
+PAID_STATE = {'tag': 'field', 'name': 'paid', 'member': {'tag': 'natural'}, 'tail': {'tag': 'emptyRow'}}
+
+
+def field_of(state, name):
+    """A natural field of a record datum (None when absent)."""
+    if not state or state.get('tag') != 'record':
+        return None
+    value = next((f['value'] for f in state.get('fields', []) if f.get('name') == name), {})
+    return int(value['value']) if value.get('tag') == 'natural' else None
+
+
+def source_of(v):
+    return World.await_of(v).get('source', {})
+
+
 def two_object_route(w, a, method):
     """world/call and world/send: objects that pin one package of methods (the call and send kernels, not a
     birth). Mirrors the call and send groups of objective-call-native-journey.py / objective-send-native-journey.py."""
@@ -88,6 +104,18 @@ try:
         code = two_object_route(w, a, method)
         sys.exit(code)
     w.bring_up(['obj'])
+    if a.scenario == 'effect':
+        # world/activity/Effects.obend: commit {total: set 5}, then transfer 1 to the second subject's account
+        a.birth_input = json.dumps(record(init=variant('set', nat(5)), to=nat(int(w.SECOND)), amount=nat(1)))
+    if a.scenario == 'dues':
+        # world/dues/StandingDues.obend: the payer is the sponsor (it funds the purse), the room the second
+        # subject's account; one period's amount is more than half the deposit, so the purse pays it once and
+        # the kernel refuses the second (`unfunded`): the period stays owed.
+        a.birth_input = json.dumps(record(
+            terms=record(payer=nat(int(w.SPONSOR_ACCOUNT)), room=nat(int(w.SECOND)), amount=nat(DUES_AMOUNT),
+                         period=nat(10), start=nat(0), periods=nat(4), window=nat(3), lease={'tag': 'boolean', 'value': False}),
+            deposit=nat(int(a.deposit)), keeper=nat(int(w.SECOND)), fresh={'tag': 'boolean', 'value': True}))
+        a.state_type = a.state_type or json.dumps(PAID_STATE)
     mod = {'name': method.stem, 'sourcePath': str(method), 'imports': []}
     pin, art = w.publication('publication', [mod], '0', a.entry)
     w.PIN = pin
@@ -133,6 +161,84 @@ try:
                                   'height': cur.get('height')}))
             w.check('replies-add-never-overwrite', total(cur) == 12 and cur['record'].get('generation') == '2',
                     {'total': total(cur), 'generation': cur['record'].get('generation')})
+    if a.scenario == 'effect':
+        # The statement's poles natively: an effect Plan is decided AT its yield. Satisfiable: the birth's commit is
+        # performed (`settled`, total 5); the delivery's transfer of 1 is performed (the second subject's balance
+        # rises by exactly 1, the write lands). Teeth: a transfer far above the purse is refused `unfunded`, one to
+        # the collector `reserved`; each moves nothing and writes nothing (balance and state version unchanged).
+        rec, bal = v['recordCell'], World.balance
+        deliver = lambda label, cur, tx_rec: w.turn(label, w.sponsor, {'kind': 'deliver', 'record': tx_rec,
+                                                    'await': World.await_of(cur)['id'], 'account': '0',
+                                                    'accountCapability': '0'}, 'installed')
+        with w.group('effect-satisfiable'):
+            w.check('commit-performed-at-birth', source_of(v) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
+                    and World.total_of(v) == 5, {'source': source_of(v), 'state': v.get('state')})
+            second0 = bal(v, w.SECOND)
+            deliver('deliver-commit', v, rec)
+            v1 = w.state('obj', 'after-transfer', tx)
+            w.check('transfer-performed-moves-exactly-1',
+                    source_of(v1) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
+                    and bal(v1, w.SECOND) == second0 + 1 and World.total_of(v1) == 6,
+                    {'source': source_of(v1), 'second': [second0, bal(v1, w.SECOND)], 'state': v1.get('state')})
+            deliver('deliver-transfer', v1, rec)
+        for name, to, amount, reason in [('unfunded', int(w.SECOND), 10 ** 15, 'unfunded'),
+                                         ('reserved', int(w.COLLECTOR), 1, 'reserved')]:
+            with w.group(f'effect-teeth-{name}'):
+                body = {'kind': 'birth', 'object': o['object'], 'objectCapability': o['capability'],
+                        'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND, 'pin': pin,
+                        'input': record(init=variant('add', nat(0)), to=nat(to), amount=nat(amount)),
+                        'envelope': aw.cap(ticks), 'resume': aw.cap(ticks), 'timeout': aw.cap(ticks),
+                        'deposit': str(a.deposit)}
+                t2 = w.turn(f'birth-{name}', w.sponsor, body, 'installed').get('transaction')
+                b = w.state('obj', f'born-{name}', t2)
+                deliver(f'deliver-commit-{name}', b, b['recordCell'])
+                after = w.state('obj', f'refused-{name}', t2)
+                w.check(f'transfer-refused-{reason}-moves-nothing',
+                        source_of(after) == {'kind': 'performed', 'verdict': 'refused', 'reason': reason}
+                        and bal(after, w.SECOND) == bal(b, w.SECOND) and bal(after, w.COLLECTOR) >= bal(b, w.COLLECTOR)
+                        and after.get('stateVersion') == b.get('stateVersion'),
+                        {'source': source_of(after), 'second': [bal(b, w.SECOND), bal(after, w.SECOND)],
+                         'version': [b.get('stateVersion'), after.get('stateVersion')]})
+    if a.scenario == 'dues':
+        # Dues law (world/dues/StandingDues.obend) natively: period k is paid once, in order, exactly `amount`,
+        # FROM THE PURSE to the room, decided by the kernel at the transfer's yield; a payment the purse cannot
+        # cover is refused by name (`unfunded`) and the period stays owed; a replayed period pays nothing.
+        rec, bal = v['recordCell'], World.balance
+        resolve = lambda label, cur, event: w.turn(label, w.second, {'kind': 'resolve', 'slot': source_of(cur)['slot'],
+                                                    'answer': {'reply': event}}, 'installed')
+        deliver = lambda label, cur: w.turn(label, w.sponsor, {'kind': 'deliver', 'record': rec,
+                                            'await': World.await_of(cur)['id'], 'account': '0',
+                                            'accountCapability': '0'}, 'installed')
+        discharge = lambda period, now: variant('discharge', record(period=nat(period), now=nat(now)))
+        with w.group('dues'):
+            w.check('born-awaiting-the-keeper-ledger-0', source_of(v).get('kind') == 'reply'
+                    and field_of(v.get('state'), 'paid') == 0, {'source': source_of(v), 'state': v.get('state')})
+            room0 = bal(v, w.SECOND)
+            resolve('discharge-0', v, discharge(0, 0))
+            deliver('deliver-discharge-0', v)
+            v1 = w.state('obj', 'paid-0', tx)
+            w.check('period-0-paid-exactly-amount-from-the-purse',
+                    source_of(v1) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
+                    and bal(v1, w.SECOND) == room0 + DUES_AMOUNT and field_of(v1.get('state'), 'paid') == DUES_AMOUNT,
+                    {'source': source_of(v1), 'room': [room0, bal(v1, w.SECOND)], 'state': v1.get('state'),
+                     'purse': [v.get('purse'), v1.get('purse')]})
+            deliver('deliver-settled-0', v1)
+            v2 = w.state('obj', 'awaiting-1', tx)
+            resolve('replay-0', v2, discharge(0, 5))
+            deliver('deliver-replay-0', v2)
+            v3 = w.state('obj', 'replay-refused', tx)
+            w.check('replayed-period-pays-nothing', source_of(v3).get('kind') == 'reply'
+                    and bal(v3, w.SECOND) == room0 + DUES_AMOUNT, {'source': source_of(v3), 'room': bal(v3, w.SECOND)})
+            resolve('discharge-1', v3, discharge(1, 10))
+            deliver('deliver-discharge-1', v3)
+            v4 = w.state('obj', 'unfunded-1', tx)
+            w.check('period-1-refused-unfunded-moves-nothing',
+                    source_of(v4) == {'kind': 'performed', 'verdict': 'refused', 'reason': 'unfunded'}
+                    and bal(v4, w.SECOND) == room0 + DUES_AMOUNT and field_of(v4.get('state'), 'paid') == DUES_AMOUNT,
+                    {'source': source_of(v4), 'room': bal(v4, w.SECOND), 'state': v4.get('state'), 'purse': v4.get('purse')})
+            deliver('deliver-refused-1', v4)
+            v5 = w.state('obj', 'still-owed-1', tx)
+            w.check('period-1-still-owed-awaiting', source_of(v5).get('kind') == 'reply', {'source': source_of(v5)})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()

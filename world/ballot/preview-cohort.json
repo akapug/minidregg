@@ -401,6 +401,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -440,6 +441,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -447,303 +462,1283 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "444005"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
-    "payload": {
-     "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "666006"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "12"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "60"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "222"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "61"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "444005"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "333"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "62"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "tally",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "666006"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "12"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "60"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "222"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "61"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "333"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "62"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "tally",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "2"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": true
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": true
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -790,43 +1785,71 @@
   },
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "regime",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "ballot"
-      }
-     },
-     {
-      "name": "yes",
-      "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "no",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "abstain",
-      "value": {
-       "tag": "natural",
-       "value": "0"
-      }
-     },
-     {
-      "name": "passed",
-      "value": {
-       "tag": "boolean",
-       "value": true
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "2"
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "0"
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": true
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": true
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -844,6 +1867,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -883,6 +1907,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -890,163 +1928,723 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "444005"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
-    "payload": {
-     "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "60"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "tally",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "444005"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "60"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "tally",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "1"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": true
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1093,43 +2691,71 @@
   },
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "publish",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "regime",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "ballot"
-      }
-     },
-     {
-      "name": "yes",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "no",
-      "value": {
-       "tag": "natural",
-       "value": "0"
-      }
-     },
-     {
-      "name": "abstain",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "passed",
-      "value": {
-       "tag": "boolean",
-       "value": false
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "0"
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": false
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": true
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -1147,6 +2773,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -1186,6 +2813,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -1193,85 +2834,295 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "60"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "60"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1283,31 +3134,92 @@
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "revealEnd",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "100"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "commits",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "0"
+       "value": "64"
       }
      }
     ]
@@ -1325,6 +3237,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -1364,6 +3277,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -1371,78 +3298,288 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "10002"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "11"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "10002"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "11"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1454,31 +3591,92 @@
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "revealEnd",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "100"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "commits",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "0"
+       "value": "64"
       }
      }
     ]
@@ -1496,6 +3694,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -1535,6 +3734,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -1542,134 +3755,484 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "60"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "61"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "60"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "61"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1681,31 +4244,92 @@
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "revealEnd",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "100"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "commits",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "1"
+       "value": "64"
       }
      }
     ]
@@ -1723,6 +4347,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -1762,6 +4387,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -1769,85 +4408,295 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1859,31 +4708,92 @@
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "revealEnd",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "100"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "commits",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "0"
+       "value": "64"
       }
      }
     ]
@@ -1901,6 +4811,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -1940,6 +4851,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -1947,113 +4872,463 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "reveal",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "vote",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "salt",
-        "value": {
-         "tag": "natural",
-         "value": "111"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "60"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "tally",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "99"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "reveal",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "vote",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "salt",
+            "value": {
+             "tag": "natural",
+             "value": "111"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "60"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "tally",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "99"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -2065,31 +5340,92 @@
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "revealEnd",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "100"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "commits",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "1"
+       "value": "64"
       }
      }
     ]
@@ -2098,7 +5434,7 @@
   "expectedTurns": 6
  },
  {
-  "name": "BallotActivityRefusedPublicationWaits",
+  "name": "BallotActivityTallyYieldsPublication",
   "modules": [
    {
     "name": "SealedBallot",
@@ -2107,6 +5443,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -2146,6 +5483,20 @@
        "tag": "natural",
        "value": "100"
       }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
+      }
      }
     ]
    }
@@ -2153,114 +5504,351 @@
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "commit",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "voter",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "digest",
-        "value": {
-         "tag": "natural",
-         "value": "222003"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "10"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "tally",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "commit",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "voter",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "digest",
+            "value": {
+             "tag": "natural",
+             "value": "222003"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "10"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "refused",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "unknown",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "tally",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "yes",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "no",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "abstain",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            },
+            {
+             "name": "passed",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            },
+            {
+             "name": "published",
+             "value": {
+              "tag": "boolean",
+              "value": false
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
   "expectedStatus": "yielded",
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "await",
+   "label": "commit",
    "payload": {
     "tag": "record",
     "fields": [
      {
-      "name": "commitEnd",
+      "name": "write",
       "value": {
-       "tag": "natural",
-       "value": "50"
-      }
-     },
-     {
-      "name": "revealEnd",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "commits",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
-     {
-      "name": "openings",
-      "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "yes",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "0"
+          }
+         }
+        },
+        {
+         "name": "no",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "0"
+          }
+         }
+        },
+        {
+         "name": "abstain",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "natural",
+           "value": "1"
+          }
+         }
+        },
+        {
+         "name": "passed",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": false
+          }
+         }
+        },
+        {
+         "name": "published",
+         "value": {
+          "tag": "variant",
+          "label": "set",
+          "payload": {
+           "tag": "boolean",
+           "value": true
+          }
+         }
+        }
+       ]
       }
      }
     ]
    }
   },
-  "expectedTurns": 5
+  "expectedTurns": 4
  },
  {
   "name": "BallotActivityVoidTermsNeverRun",
@@ -2272,6 +5860,7 @@
    }
   ],
   "entry": "ballot",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
@@ -2310,6 +5899,20 @@
       "value": {
        "tag": "natural",
        "value": "100"
+      }
+     },
+     {
+      "name": "keeper",
+      "value": {
+       "tag": "natural",
+       "value": "3"
+      }
+     },
+     {
+      "name": "fresh",
+      "value": {
+       "tag": "boolean",
+       "value": true
       }
      }
     ]
