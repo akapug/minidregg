@@ -22,6 +22,9 @@ use std::time::{Duration, Instant};
 
 const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
+// Linux's maximum extended-attribute value size. The shared launcher can have
+// an entry for every operator-provisioned app identity, not merely 64 entries.
+const MAX_ACCESS_ACL_BYTES: usize = 64 * 1024;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -146,12 +149,13 @@ pub(crate) fn acl_execute_permits(acl: Option<&[u8]>, owner: u32, group: u32, mo
 
 fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
     let name = c"system.posix_acl_access";
-    let mut buffer = vec![0_u8; 4 + 8 * 64];
+    let mut buffer = vec![0_u8; MAX_ACCESS_ACL_BYTES];
     let n = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
     if n < 0 {
         let e = io::Error::last_os_error();
         return match e.raw_os_error() {
             Some(libc::ENODATA) | Some(libc::EOPNOTSUPP) => Ok(None),
+            Some(libc::ERANGE) => Err(invalid("launch executable access ACL exceeds 64 KiB bound")),
             _ => Err(e),
         };
     }
@@ -651,6 +655,33 @@ mod tests {
         // The owner class is the mode's owner bits, never a named entry.
         assert_eq!(acl_execute_permits(Some(&a), 165536, 1000, 0o650, 165536, 165536), Some(false));
         assert_eq!(acl_execute_permits(Some(&a[..7]), 0, 1000, 0o750, 165536, 165536), None);
+    }
+
+    #[test]
+    fn launch_acl_reads_more_than_64_entries_from_actual_inode() {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = std::env::temp_dir().join(format!("mini-launch-acl-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o700).open(&path).unwrap();
+        // The inode remains held, while even a failed assertion leaves no path.
+        std::fs::remove_file(&path).unwrap();
+        let u = u32::MAX;
+        let mut entries = vec![(1, 7, u)];
+        for uid in 200000..200128 {
+            entries.push((2, if uid == 200127 { 4 } else { 5 }, uid));
+        }
+        entries.extend([(4, 5, u), (0x10, 5, u), (0x20, 0, u)]);
+        let expected = acl(&entries);
+        assert!(expected.len() > 4 + 8 * 64);
+        let rc = unsafe { libc::fsetxattr(file.as_raw_fd(), c"system.posix_acl_access".as_ptr(),
+            expected.as_ptr().cast(), expected.len(), 0) };
+        assert_eq!(rc, 0, "{}", io::Error::last_os_error());
+        let actual = access_acl(&file).unwrap().unwrap();
+        assert_eq!(actual, expected);
+        let meta = file.metadata().unwrap();
+        for (uid, expected) in [(200000, true), (200126, true), (200127, false), (200128, false)] {
+            assert_eq!(acl_execute_permits(Some(&actual), meta.uid(), meta.gid(), meta.mode(), uid, uid), Some(expected));
+        }
     }
 
     #[test]

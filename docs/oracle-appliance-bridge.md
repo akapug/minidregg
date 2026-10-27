@@ -223,3 +223,9 @@ bridge regression checks full response bytes and this header through both
 receiving layers, including 429 and server errors that lack exact union variants.
 Multiplexed entrances also retain dispatch failure details in the operator log,
 while clients receive the existing bounded error response.
+
+Launcher ACL reads are bounded by Linux's 64 KiB extended-attribute value limit,
+so provisioning more than 64 app identities does not exhaust an artificial ACL
+entry cap. The existing named-user, group and mask checks remain unchanged;
+oversized attributes still refuse explicitly. Existing launcher ACLs and old
+Store records are not rewritten by this reader.
