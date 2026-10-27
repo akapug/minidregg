@@ -57,11 +57,12 @@ try:
     height = lambda label: int(w.view(label, {})['height'])
 
     with w.group('bend-publish'):
-        before = height('height-before-publish')
         rc, out, err = shell('publish', 'bend publish tally @Tally.obend --entry tally')
         w.check('publish-admitted', rc == 0 and out.startswith('admitted: bend publish tally'), {'rc': rc, 'out': out, 'err': err[-300:]})
         m = re.search(r'height (\d+), world root (\d+), receipt tx (\d+) event (\d+)', out)
-        w.check('publish-line-names-height-root-receipt', m is not None and int(m.group(1)) > before, {'before': before, 'line': out})
+        # the line's height is the Host's accepted count (the receipt's), not the view's ledger height
+        w.check('publish-line-names-height-root-receipt', m is not None and int(m.group(1)) > 0, {'line': out})
+        published_at = int(m.group(1)) if m else 0
         publication = json.loads((w.sponsor / 'bend' / 'tally' / 'out' / 'publication.json').read_text())
         pin = publication['artifactId']
         w.published['tally'] = pin
@@ -81,6 +82,7 @@ try:
         w.check('run-line-names-the-decision', m is not None, out)
         if m:
             height_n, root, tx, event, state, purse, deposit, was, now, charge = m.groups()
+            w.check('run-is-admitted-after-the-publish', int(height_n) > published_at, {'publish': published_at, 'run': height_n})
             w.check('line-state-is-the-tallys', state == '{total=0}', state)
             w.check('deposit-is-seven-envelope-prices', int(deposit) == 7 * AW.PRICE, {'line': deposit, 'world': 7 * AW.PRICE})
             w.check('purse-holds-the-deposit', 0 < int(purse) <= int(deposit), {'purse': purse, 'deposit': deposit})
