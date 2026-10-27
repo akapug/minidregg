@@ -12,7 +12,7 @@ Wants=mini-spk-broker@%i.service
 
 [Service]
 Type=exec
-ExecStart=/var/lib/mini/candidate/current/bin/mini apps-worker --state /var/lib/mini-apps --world /var/lib/mini-spk-worlds/%i/apps-world.json --socket /run/mini-apps/worker.sock --edge-socket /var/lib/mini-apps/edge.sock --member-group mini-sessions --edge-group mini-edge
+ExecStart=/var/lib/mini/candidate/current/bin/mini apps-worker --state /var/lib/mini-apps --world /var/lib/mini-spk-worlds/%i/apps-world.json --member-socket /run/mini-apps/worker.sock --edge-socket /var/lib/mini-apps/edge.sock --member-group mini-sessions --edge-group mini-edge
 Restart=on-failure
 RestartSec=5
 UMask=0077

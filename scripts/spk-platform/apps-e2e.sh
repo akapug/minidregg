@@ -82,7 +82,7 @@ jq -n --arg profile "$PROFILE" --arg mini "$MINI" --arg psock "$PSOCK" --arg gen
   {protocol:"mini-apps-world-v1",profile:$profile,mini:$mini,publicSocket:$psock,managementKeyId:"8008",
    toolTask:"7902",toolCapability:"81",parentTask:"7901",parentCapability:"73",genesis:$genesis,
    quarantine:$q,wanted:$w,verdicts:$v,domain:"demo.test",nonceFile:$nonce,roleBasis:{type:"allAccess"}}' >"$out/apps-world.json"
-nohup "$MINI" apps-worker --state "$out/state" --world "$out/apps-world.json" --socket "$out/worker.sock" --edge-socket "$out/edge.sock" --dev-member member >"$out/worker.log" 2>&1 &
+nohup "$MINI" apps-worker --state "$out/state" --world "$out/apps-world.json" --member-socket "$out/worker.sock" --edge-socket "$out/edge.sock" --dev-member member >"$out/worker.log" 2>&1 &
 echo $! >"$out/worker.pid"
 for _ in $(seq 1 50); do [ -S "$out/worker.sock" ] && break; sleep 0.1; done
 row "the worker serves its member socket" "$([ -S "$out/worker.sock" ] && echo 1 || echo 0)" "pid $(cat "$out/worker.pid")"

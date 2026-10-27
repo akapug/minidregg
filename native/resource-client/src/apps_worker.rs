@@ -1149,12 +1149,13 @@ impl World for ProcessWorld {
     }
 }
 
-/// `mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH]
+/// `mini apps-worker --state DIR --world WORLD.json [--member-socket PATH] [--edge-socket PATH]
 /// [--member-group mini-sessions] [--edge-group mini-edge] [--dev-member NAME]`
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let state = absolute(&path(args.required("state")?))?;
     let world_path = absolute(&path(args.required("world")?))?;
-    let socket = args.optional("socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| PathBuf::from("/run/mini-apps/worker.sock"));
+    // `--socket` is the client's Host-socket option, consumed before dispatch: the member socket has its own name.
+    let socket = args.optional("member-socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| PathBuf::from("/run/mini-apps/worker.sock"));
     let edge = args.optional("edge-socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| state.join("edge.sock"));
     let dev_member = args.optional("dev-member").map(|v| v.into_string().map_err(|_| "--dev-member must be UTF-8".to_owned())).transpose()?;
     let member_group = args.optional("member-group").map(|v| v.into_string().map_err(|_| "--member-group must be UTF-8".to_owned())).transpose()?;
