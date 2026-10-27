@@ -2045,7 +2045,7 @@ def pairFirst? (payload : List UInt8) : Option (List UInt8) :=
   if width ≤ payload.length - 4 then some ((payload.drop 4).take width) else none
 
 def claimOf (bytes : List UInt8) : Option Nat :=
-  (NativeObservationCodec.signedCodec.decode bytes).map (·.challenge.intent.subject)
+  (NativeObservationCodec.signedCodec.decode bytes).map (·.challenge.intent.subject.value)
 
 /-- The subjects a rated request claims, read before any Store work: the signed observation's
 intent subject, for authorized prepare (1), authorized query (5; each member of a batch, in
