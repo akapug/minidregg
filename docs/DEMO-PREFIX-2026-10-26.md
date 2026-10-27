@@ -122,7 +122,10 @@ tested rule). The date is re-estimated from each rehearsal's evidence, never pro
   endpoint saves failed because the URL was set on a different application in the portal
   (1554678232631091200; the PING body names it); the box is configured for the Dragon's Egg application
   1507638321877090374, whose bot is in Wyrmware and whose commands are registered. The key and the
-  entrance were right all along; the capture proved it.
+  entrance were right all along; the capture proved it. Ember has lost admin access to the account
+  that owns 1507638321877090374, so no endpoint URL will ever be set: the entrance gains a GATEWAY
+  mode (the bot connects out to Discord's gateway and receives interactions there; outbound 443 only,
+  no inbound Discord route), using the bot token we hold and the commands already registered.
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
