@@ -3,7 +3,7 @@
 //! room did not declare at birth (K-FIELD-CLOSURE).
 //!
 //! A room declares its fixed fields (the tariff, the names index, the open
-//! flag, the Hermes assignment: 1001..1012) and one unbounded tail, every
+//! flag, the Hermes assignment, the summoned Hermes's provider purse: 1001..1013) and one unbounded tail, every
 //! field from `ROSTER_FROM` up (`fieldsFrom`, `state-key/tagged-v4`). The
 //! roster lives in the tail: field `ROSTER_FROM` is the founder; member `k`
 //! (from 1) is field `ROSTER_FROM + 2k - 1` (subject) and `ROSTER_FROM + 2k`
@@ -31,6 +31,7 @@ pub(crate) const ROSTER_FROM: u64 = 2000;
 pub(crate) const NAMES_FIELD: &str = "1010";
 pub(crate) const OPEN_FIELD: &str = "1011";
 pub(crate) const ASSIGNMENT_FIELD: &str = "1012";
+pub(crate) const PROVIDER_FIELD: &str = "1013";
 pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
     ("week", "1001"),
     ("birth", "1002"),
@@ -43,6 +44,10 @@ pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
     ("hermes/account", "1009"),
     ("open", OPEN_FIELD),
     ("hermes/assignment", ASSIGNMENT_FIELD),
+    // The provider purse the summoned Hermes's model calls are paid from
+    // (a `providerServices` resource id; 0 = none named). The founder sets
+    // it at summon; a reader names the route by that purse's tariff model.
+    ("hermes/provider", PROVIDER_FIELD),
 ];
 
 /// The founder's roster row.
@@ -147,12 +152,12 @@ mod tests {
         assert!(fields.ends_with(",2000-"));
     }
 
-    /// The declaration is as wide as the room's own fields: twelve fields and
+    /// The declaration is as wide as the room's own fields: thirteen fields and
     /// one tail, where v1 declared 1,011.
     #[test]
-    fn the_room_declares_twelve_fields_and_one_tail() {
+    fn the_room_declares_thirteen_fields_and_one_tail() {
         let fields = crate::workspace::parse_fields(&declared_fields()).unwrap();
-        assert_eq!(fields["fields"].as_array().unwrap().len(), 12);
+        assert_eq!(fields["fields"].as_array().unwrap().len(), 13);
         assert_eq!(fields["from"], json!("2000"));
     }
 
@@ -168,10 +173,10 @@ mod tests {
     #[test]
     fn a_v1_room_is_refused_by_name_and_a_v2_room_is_read() {
         let mut v1: Vec<String> = (2..=1000).map(|f| f.to_string()).collect();
-        v1.extend((1001..=1012).map(|f| f.to_string()));
+        v1.extend((1001..=1013).map(|f| f.to_string()));
         let old = json!({"cell":{"declaration":v1,"entries":[]}});
         assert!(check_room_view(&old).unwrap_err().contains("room schema v1"));
-        let v2: Vec<String> = (1001..=1012).map(|f| f.to_string()).collect();
+        let v2: Vec<String> = (1001..=1013).map(|f| f.to_string()).collect();
         let new = json!({"cell":{"declaration":v2,"declaredFrom":"2000","entries":[]}});
         assert!(check_room_view(&new).is_ok());
         let plain = json!({"cell":{"declaration":["1","2"],"entries":[]}});

@@ -10,7 +10,7 @@ run exactly these client operations. `law.author.json` is the one law the templa
 - **The room** `ROOM` is a `declared` cell. Its law is `law.author.json` with the founder's
   subject: only the founder writes it (mutate 2, append 7); reads and grants pass.
 - **The roster** is the room cell's tail (ROOM-SCHEMA v2, `native/resource-client/src/room_schema.rs`):
-  the room declares its own fields 1001..1012 and every field from 2000 up (`--fields
+  the room declares its own fields 1001..1013 and every field from 2000 up (`--fields
   1001,…,1012,2000-`, one `fieldsFrom` declaration entry). Field 2000 = the founder's subject;
   member `k` (from 1) = field `2000+2k-1` (subject) and field `2000+2k` (the member's stream
   cell). Rows are allocated on join and kept after a kick; there is no member ceiling. A room

@@ -334,12 +334,14 @@ ok room alice "submit map"
 ok room alice "tariff lab set hermes/turn $PRICE"
 if [ -n "$J14_TIER" ]; then
   # ---------------------------------------------- subscribe: pay, the concierge's window and roster row
-  mkdir -p -m 700 "$H/con/programs" "$H/con/inbox" "$H/con/outbox"
+  mkdir -p -m 700 "$H/con/programs" "$H/con/inbox" "$H/con/outbox" "$SD/homes"
+  # The hosted homes by subject (on the box: MEMBER_HOMES); here a link to bob's.
+  ln -sfn "$H/bob" "$SD/homes/$B"
   jq -n --arg mini "$MINI" --arg ws "$WS/con" --arg p "$H/con/programs/lab.json" --arg i "$H/con/inbox" \
     --arg o "$H/con/outbox" --arg j "$H/con/journal-lab.jsonl" --arg host "$HOST" --arg cfg "$CONFIG" \
-    --arg sock "$SOCKET" --arg fws "$WS/alice" --arg fh "$H/alice" \
+    --arg sock "$SOCKET" --arg fws "$WS/alice" --arg fh "$H/alice" --arg mh "$SD/homes" \
     '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j,
-      roster:{room:"lab",host:$host,config:$cfg,socket:$sock,workspace:$fws,home:$fh}}' >"$SD/concierge-lab.json"
+      roster:{room:"lab",host:$host,config:$cfg,socket:$sock,workspace:$fws,home:$fh,memberHomes:$mh}}' >"$SD/concierge-lab.json"
   operator subscribe "DELIVER: alice's grants to the concierge" sh -c "cp '$H/alice/outbox/$CON'/*.json '$H/con/inbox/'"
   operator subscribe "INSTALL: the program alice's room wrote" install_private 0600 "$H/alice/concierge/lab.json" "$H/con/programs/lab.json"
   operator subscribe "concierge pass: adopts its grants" "$GRAIN_RUNTIME" concierge step "$SD/concierge-lab.json"
@@ -351,7 +353,8 @@ if [ -n "$J14_TIER" ]; then
   require_nat subscribe "bob's window end (the concierge's issued decision)" "$BNA"
   checkp subscribe "the concierge put bob on lab's roster (no grant: the window is the grant)" \
     jq -e --arg b "$B" 'any(.decisions[]; .decision == "rostered" and .subject == $b)' "$SD/concierge-pay.json"
-  operator subscribe "DELIVER: bob's window reference" sh -c "install -m 0600 \"\$(ls -t '$H/con/outbox/$B'/renew-t*.json | head -1)\" '$H/bob/requests/lab-invite.json'"
+  checkp subscribe "the concierge left bob's window reference in his HOME/requests (no operator copy)" \
+    jq -e --arg b "$B" '.recipient == $b' "$H/bob/requests/lab-invite.json"
   ok subscribe bob "chat join lab @lab-invite.json"
   checkp subscribe "bob joined with a stream (he can say)" grep -q "joined lab" "$OUT"
   ok subscribe bob "room status lab"
@@ -499,6 +502,11 @@ check hermes "the registry lists exactly Hermes's task for lab" "$HS $PARENT_T $
 # summon. Preserve the first failed row rather than cascading into empty state.
 [ "$FAILED" = 0 ] || finish
 ok summon alice "summon lab as librarian --budget $BUDGET"
+# The room names the purse Hermes's model calls are paid from (a reader
+# shows its route by that purse's tariff model).
+ok summon alice "tariff lab set hermes/provider $PURSE_T"
+ok summon bob "tariff lab"
+checkp summon "the room shows hermes/provider $PURSE_T" grep -q "hermes/provider *$PURSE_T" "$OUT"
 cp "$OUT" "$SD/summon.out"
 [ "$RC" = 0 ] || finish
 OUTBOX=$(sed -n 's/.*hand-off in //p' "$OUT" | tail -1)

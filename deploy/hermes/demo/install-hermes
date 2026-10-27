@@ -281,6 +281,9 @@ step_summon() {
   sh_line founder "summon $ROOM as librarian --budget $BUDGET" | as_svc tee "$RECORD/summon.out"
   sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_svc tee "$RECORD/outbox" >/dev/null
   [ -s "$(cat "$RECORD/outbox")/handoff.json" ] || die "summon left no sealed hand-off"
+  # The room names Hermes's provider purse (the page shows its route by that
+  # purse's tariff model: meta-llama/... for hermes-lab, glm-5.3 for subscribers).
+  sh_line founder "tariff $ROOM set hermes/provider $PURSE_T" >/dev/null
   mark summon
 }
 
