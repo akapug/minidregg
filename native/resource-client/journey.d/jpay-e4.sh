@@ -324,7 +324,7 @@ def tick(tag, tip=None):
         dirs.append(d)
     env = dict(os.environ, MINI=MINI, PAY_WATCHER=WATCHER, PAY_STATE=STATE,
                PAY_OBSERVER_WS=OBS, PAY_OBSERVER_CAPABILITY=str(OBSERVER_CAP),
-               PAY_ENROL_INDEX="0", PAY_JOURNAL_FLOOR=str(FLOOR),
+               PAY_WATCH_ENROL="yes",
                PAY_ENROL_CAPABILITY=str(ENROL_CAP), PAY_OPERATOR_SOCKET=OPSOCK,
                PAY_RPC_FIXTURES=" ".join(dirs))
     env.pop("PAY_RPC_ENDPOINTS", None)
@@ -609,7 +609,7 @@ row("control: the same deposit through the tick → journalled memoMissing via t
 pay("frank-waits", PRICE, memos=[printed(join("frank"), "memo")])
 env = dict(os.environ); env.pop("PAY_RPC_ENDPOINTS", None)
 cfg = path("frank-watcher.json")
-mini("pay", "watch-config", "--dir", OBS, "--out", cfg, "--enrol-index", "0", "--journal-floor", FLOOR, check=True)
+mini("pay", "watch-config", "--dir", OBS, "--out", cfg, "--enrol", "tariff", check=True)
 os.makedirs(path("frank-out"))
 TIPF = TIP[0] + 10
 for side in ("a", "b"):

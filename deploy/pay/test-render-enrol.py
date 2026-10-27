@@ -84,8 +84,9 @@ class Rendered(unittest.TestCase):
     def test_the_tick_env_carries_the_enrollment_quartet_and_no_address_or_rate(self):
         env = (self.out / "watcher.env").read_text()
         lines = dict(l.split("=", 1) for l in env.splitlines() if l and not l.startswith("#"))
-        self.assertEqual(lines["PAY_ENROL_INDEX"], "0")
-        self.assertEqual(lines["PAY_JOURNAL_FLOOR"], "1000000")
+        self.assertEqual(lines["PAY_WATCH_ENROL"], "yes")
+        self.assertNotIn("PAY_ENROL_INDEX", lines)
+        self.assertNotIn("PAY_JOURNAL_FLOOR", lines)
         self.assertEqual(lines["PAY_ENROL_CAPABILITY"], "4032")
         self.assertEqual(lines["PAY_OPERATOR_SOCKET"], "/var/lib/mini/store/node/operator/mini.sock")
         self.assertNotIn(ADDRESS, env)

@@ -294,6 +294,8 @@ mod tests {
         assert!(refusal_of(&json!({"type":"mini-member-provider-challenge-v1"})).is_none());
     }
 
+    // F_SETPIPE_SZ is Linux's; on other hosts the crate's tests did not compile.
+    #[cfg(target_os = "linux")]
     #[test]
     fn partially_saturated_pipe_stalled_reader_obeys_deadline() {
         let mut fds = [0; 2];

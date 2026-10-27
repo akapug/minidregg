@@ -174,8 +174,7 @@ def render(terms, args):
         "# the tick reads them from the Host's signed pay view (the tariff and book `mini pay book` installed).",
         "PAY_OBSERVER_WS=/var/lib/mini/pay/observer",
         f"PAY_OBSERVER_CAPABILITY={args.observer_capability}",
-        f"PAY_ENROL_INDEX={index}",
-        f"PAY_JOURNAL_FLOOR={floor_}",
+        "PAY_WATCH_ENROL=yes",
         f"PAY_ENROL_CAPABILITY={args.enrol_capability}",
         f"PAY_OPERATOR_SOCKET={terms['operatorSocket']}",
         ""])

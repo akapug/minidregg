@@ -123,15 +123,16 @@ tariff before any enrollment can be decided; it is not an operating source of th
    ```
    PAY_OBSERVER_WS=/var/lib/mini/pay/observer
    PAY_OBSERVER_CAPABILITY=C                 # genesis payObserver.capability
-   PAY_ENROL_INDEX=0                         # from enrol-terms.json (PAY §11: the enrollment row)
-   PAY_JOURNAL_FLOOR=1000000                 # from enrol-terms.json, atomic units
+   PAY_WATCH_ENROL=yes                       # watch the enrollment row (PAY §11)
    PAY_ENROL_CAPABILITY=E                    # genesis payObserver.enrolCapability (C_enrol)
    PAY_OPERATOR_SOCKET=/var/lib/mini/store/node/operator/mini.sock
    ```
 
    (`MINI`, `PAY_WATCHER` and `PAY_STATE` are the unit's, set from the candidate; they do not go here.)
-   The file holds neither the address nor the rate: the tick reads both from the Host's signed pay view,
-   i.e. from what step 3 installed.
+   The file holds neither the address, the rate, the enrollment row nor the journal floor: the tick
+   reads all four from the Host's signed pay view (`mini pay watch-config --enrol tariff`), i.e. from
+   what step 3 installed. A floor taken from an operator variable could drift from the tariff's and
+   skip real enrollments for good, so `PAY_ENROL_INDEX`/`PAY_JOURNAL_FLOOR` are refused by name.
 
    **Self-enrollment needs the Host's operator socket.** Ops 117-120 (the self-enrollment plan,
    assembly, submit and lookup) are admitted only on an owner-private operator socket, never on the

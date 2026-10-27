@@ -294,7 +294,7 @@ def tick(tag):
         dirs.append(target)
     env=dict(os.environ,MINI=MINI,PAY_WATCHER=WATCHER,PAY_STATE=STATE,
              PAY_OBSERVER_WS=OBS,PAY_OBSERVER_CAPABILITY=str(OBSERVER_CAP),
-             PAY_ENROL_INDEX="0",PAY_JOURNAL_FLOOR=str(FLOOR),
+             PAY_WATCH_ENROL="yes",
              PAY_ENROL_CAPABILITY=str(ENROL_CAP),PAY_OPERATOR_SOCKET=OPSOCK,
              PAY_RPC_FIXTURES=" ".join(dirs),PAY_ENROL_ROUNDS="0")
     env.pop("PAY_RPC_ENDPOINTS",None)

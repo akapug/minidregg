@@ -851,7 +851,22 @@ struct WatchOptions {
     min_endpoints: Option<u128>,
     max_pages: Option<u128>,
     page_size: Option<u128>,
-    enrol: Option<(u128, u128)>,
+    /// Watch the tariff's enrollment row with the tariff's journal floor (both from the
+    /// signed view, never from flags: an operator floor that drifted from the tariff's
+    /// skipped real enrollments for good).
+    enrol: bool,
+}
+
+/// The enrollment row and journal floor the watcher uses: the signed tariff's, or none.
+fn tariff_enrol(view: &Value, enrol: bool) -> Result<Option<(u128, u128)>> {
+    if !enrol {
+        return Ok(None);
+    }
+    let index = enrol_index_of(view)?.ok_or(
+        "--enrol: the signed tariff has no enrolIndex (self-enrollment is off); install a tariff naming the enrollment row first",
+    )?;
+    let tariff = view.get("tariff").ok_or("pay view lacks its tariff")?;
+    Ok(Some((index, number(tariff, "journalFloor")?)))
 }
 
 /// The watcher's configuration, derived from the signed pay view: the tariff's asset, the
@@ -871,8 +886,8 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
     let assigned: usize = text(&view, "nextFree")?
         .parse()
         .map_err(|_| "nextFree out of range")?;
-    let enrol_index = options
-        .enrol
+    let enrol = tariff_enrol(&view, options.enrol)?;
+    let enrol_index = enrol
         .map(|(index, _)| usize::try_from(index).map_err(|_| "enrol index out of range"))
         .transpose()?;
     let mut book = Vec::new();
@@ -884,7 +899,7 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
     }
     if let Some(index) = enrol_index {
         if index >= rows.len() {
-            return Err("--enrol-index names no book row".into());
+            return Err("the tariff's enrolIndex names no book row".into());
         }
     }
     let mut config = json!({
@@ -904,7 +919,7 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
             config[field] = json!(value as u64);
         }
     }
-    if let Some((index, floor)) = options.enrol {
+    if let Some((index, floor)) = enrol {
         config["enrol"] = json!({"index":index as u64,"journalFloor":floor as u64,
             "cursorFile":utf8_path(&session.pay_dir().join("enrol-cursor.json"))?});
     }
@@ -2279,13 +2294,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 min_endpoints: decimal_flag(&mut args, "min-endpoints")?,
                 max_pages: decimal_flag(&mut args, "max-pages")?,
                 page_size: decimal_flag(&mut args, "page-size")?,
-                enrol: match (
-                    decimal_flag(&mut args, "enrol-index")?,
-                    decimal_flag(&mut args, "journal-floor")?,
-                ) {
-                    (Some(index), Some(floor)) => Some((index, floor)),
-                    (None, None) => None,
-                    _ => return Err("--enrol-index and --journal-floor go together".into()),
+                // `--enrol tariff`: the row and floor are the signed tariff's; there is no
+                // operator value to give.
+                enrol: match args.optional("enrol") {
+                    None => false,
+                    Some(value) if value == "tariff" => true,
+                    Some(_) => return Err("--enrol takes the one value `tariff`: the enrollment row and journal floor come from the signed tariff".into()),
                 },
             };
             args.finish()?;
@@ -2530,6 +2544,13 @@ mod tests {
     #[test]
     fn the_enrollment_index_comes_from_the_tariff_or_is_off() {
         assert_eq!(enrol_index_of(&json!({"tariff": null})).unwrap(), None);
+        assert_eq!(
+            tariff_enrol(&json!({"tariff": {"enrolIndex": "2", "journalFloor": "500000"}}), true).unwrap(),
+            Some((2, 500000))
+        );
+        assert_eq!(tariff_enrol(&json!({"tariff": {"enrolIndex": "2", "journalFloor": "1"}}), false).unwrap(), None);
+        assert!(tariff_enrol(&json!({"tariff": {"enrolIndex": null, "journalFloor": "1"}}), true).is_err());
+        assert!(tariff_enrol(&json!({"tariff": {"enrolIndex": "0"}}), true).is_err());
         assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": null}})).unwrap(), None);
         assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": "0"}})).unwrap(), Some(0));
         assert!(enrol_index_of(&json!({"tariff": {"enrolIndex": "01"}})).is_err());
