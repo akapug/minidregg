@@ -22,10 +22,9 @@
 #      member-1..5`, cut 4's red): plan, seal, submit each; a seal the consent provider refuses
 #      because a tick landed points at `plan`, which re-plans the SAME request; five admissions, five
 #      subjects, each the subject its first plan printed;
-#   7. a pinned plan (`pin-enrollment-plan-height`) sealed after a tick: PASS when the consent provider
-#      accepts it; while the provider authorizes only the current source
-#      (NativeObservationController.authorize in NativeHost.enrollmentPlanAuthorizedLoaded) the row
-#      prints OWED by name and the script still passes on the steps above.
+#   7. a pinned plan (`pin-enrollment-plan-height`) sealed after a tick and admitted after another: L1's
+#      `pinHeaderAt` (92341df2) keeps the authored deadline and the consent provider re-derives the plan
+#      at a later height within it. A Host without the pin, or older than 92341df2, fails this step.
 # Steps 2 and 4 take the path the consent provider decides for a pinned plan after a tick (resumed and
 # signed as it stands, or re-planned under the same request), each path with its own assertions.
 # Every step leaves cmd/stdout/stderr/exit under ROOT/log (provisioning-acceptance.sh's shape).
@@ -163,26 +162,18 @@ kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true
 members=$(for i in 1 2 3 4 5; do jq -er .subject "$ROOT/attempts/member-$i/enrollment.json"; done | sort -u | wc -l | tr -d ' ')
 [ "$members" = 5 ] || { echo "five members admitted $members distinct subjects" >&2; exit 1; }
 seals=$(grep -c '^member-.-seal-' "$ROOT/steps.tsv")
-# 7. A pinned plan sealed after a tick (the pin's purpose). OWED while the consent provider authorizes only
-#    the current source; the row names it rather than failing the steps above.
-PIN7=no-pin
-if [ -n "$PINNED" ]; then
-  "$MINI" keygen --secret "$ROOT/second.key" --public "$ROOT/second.pub" >"$ROOT/second-keygen.json"
-  B="$ROOT/attempts/second"
-  step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
-    --name second --new-key "$ROOT/second.key" --dir "$B"
-  [ -s "$B/plan-pinned.bin" ]; [ "$(jq -er .pinnedAtHeight "$B/pin.json")" = "$(jq -er .height "$B/observation/challenge.json")" ]
-  tick tick-4
-  set +e; "$MINI" enroll --action seal --dir "$B" >"$LOG/pinned-seal.stdout" 2>"$LOG/pinned-seal.stderr"; code=$?; set -e
-  printf 'pinned-seal\t%s\n' "$code" >>"$ROOT/steps.tsv"
-  if [ "$code" -eq 0 ]; then
-    step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
-    [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
-    PIN7=pinned-plan-sealed-across-a-tick
-  else
-    said pinned-seal 'plan'
-    PIN7="OWED: the consent provider refused the pinned plan after one tick (it authorizes the current source only)"
-    echo "enrol-resume: $PIN7" >&2
-  fi
-fi
-echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; five members back to back under a 15 s ticker in $seals seals; step 7: $PIN7) subject=$SUBJECT keyId=$KEYID"
+# 7. A pinned plan survives ticks: planned, a tick, sealed as it stands, a tick, admitted.
+[ -n "$PINNED" ] || { echo "enrol-resume: FAIL the Host has no pin-enrollment-plan-height; a plan cannot survive a tick" >&2; exit 1; }
+"$MINI" keygen --secret "$ROOT/second.key" --public "$ROOT/second.pub" >"$ROOT/second-keygen.json"
+B="$ROOT/attempts/second"
+step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
+  --name second --new-key "$ROOT/second.key" --dir "$B"
+[ -s "$B/plan-pinned.bin" ]; [ "$(jq -er .pinnedAtHeight "$B/pin.json")" = "$(jq -er .height "$B/observation/challenge.json")" ]
+tick tick-4
+step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
+tick tick-5
+step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
+[ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
+[ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
+[ ! -e "$B/replanned" ]
+echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; five members back to back under a 15 s ticker in $seals seals; pinned plan admitted across two ticks) subject=$SUBJECT keyId=$KEYID"
