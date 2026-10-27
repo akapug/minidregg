@@ -283,6 +283,69 @@ fn civil(z: i64) -> (i64, u32, u32) {
 mod tests {
     use super::*;
 
+    /// The heading levels of a rendered page, in document order. `<h2` names a heading
+    /// only as a whole tag (`<header` is not one), so the character after the level is
+    /// checked; the scan collects (offset, level) pairs and sorts once.
+    fn heading_levels(html: &str) -> Vec<u8> {
+        let mut levels: Vec<(usize, u8)> = Vec::new();
+        for n in 1..=6u8 {
+            let marker = format!("<h{n}");
+            let mut at = 0;
+            while let Some(start) = html[at..].find(&marker) {
+                let start = at + start;
+                let after = html[start + 3..].chars().next();
+                if after.is_none_or(|c| c == ' ' || c == '>' || c == '\n' || c == '\t') {
+                    levels.push((start, n));
+                }
+                at = start + 3;
+            }
+        }
+        levels.sort_unstable();
+        levels.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// Headings nest: no level jumps more than one step down (h1 then h3 is the failure).
+    fn headings_nest(html: &str) -> bool {
+        let mut last = 0u8;
+        for n in heading_levels(html) {
+            if n > last + 1 {
+                return false;
+            }
+            last = n;
+        }
+        true
+    }
+
+    /// The shell is one landmark set with a keyboard route past the chrome: one `main`, one
+    /// `nav`, a skip link as the first thing focusable, headings that nest, the outcome
+    /// partial as a live region, and a terminal pane that names itself and its alternative.
+    #[test]
+    fn a11y_page_shell_landmarks_skip_link_and_nested_headings() {
+        let who = Who { sid: "s".into(), name: "al".into(), csrf: "c".into() };
+        let stage = "<section><h2>A place</h2><p>body</p><h3>Under it</h3></section><div class=\"outcome admitted\" role=\"status\"><p class=\"headline\">Admitted</p></div>";
+        let html = page("Documents", Some(&who), "/doc", stage, "");
+        assert_eq!(html.matches("<main").count(), 1, "exactly one main");
+        assert_eq!(html.matches("<nav").count(), 1, "exactly one nav");
+        assert!(html.contains("<nav class=\"rail\" aria-label=\"Places\""));
+        assert!(html.contains("<main class=\"stage\" id=\"stage\" tabindex=\"-1\""));
+        let skip = html.find("<a class=\"skip\" href=\"#stage\"").expect("a skip link to the stage");
+        let first_other_link = html.find("<a ").filter(|at| *at != skip);
+        assert!(skip < html.find("<nav").unwrap(), "the skip link comes before the rail");
+        assert!(first_other_link.is_none_or(|at| skip < at), "the skip link is the page's first link");
+        assert!(html.contains(">Skip to content</a>"));
+        assert_eq!(heading_levels(&html).first(), Some(&1), "the page's first heading is the h1 title");
+        assert!(headings_nest(&html), "headings nest under the h1: {:?}", heading_levels(&html));
+        // Red-proof the walker: a stage that opens at h3 must be named.
+        let bad = page("Bad", Some(&who), "/doc", "<section><h3>Skipped a level</h3></section>", "");
+        assert!(!headings_nest(&bad), "the nesting check must catch an h1 to h3 jump");
+        // The gateway's own outcome partial and the terminal.
+        let outcome_html = outcome("undecided", "Undecided", "the attempt is retained", &[("the receipt", "/receipts/w-1")]);
+        assert!(outcome_html.contains("role=\"status\"") && outcome_html.contains("aria-live=\"polite\"") && outcome_html.contains("Undecided"));
+        let term = term_page("abc123");
+        assert!(term.contains("role=\"region\"") && term.contains("aria-label=\"Terminal"), "{term}");
+        assert!(term.contains("href=\"/verb\""), "the terminal names the keyboard route to the same verbs");
+    }
+
     #[test]
     fn the_shell_carries_the_rail_identity_and_the_sentence() {
         let who = Who { sid: "s".into(), name: "alice".into(), csrf: "c".into() };

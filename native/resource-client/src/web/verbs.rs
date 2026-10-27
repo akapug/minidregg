@@ -585,6 +585,79 @@ mod tests {
         assert!(verbs > 60, "{verbs} verbs");
     }
 
+    /// The tags of one kind in generated HTML: `<input …>`, `<select …>`, whole opening tags.
+    fn tags(html: &str, kind: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = 0;
+        while let Some(start) = html[at..].find(&format!("<{kind}")) {
+            let start = at + start;
+            let end = start + html[start..].find('>').unwrap_or(html[start..].len());
+            out.push(html[start..=end].to_owned());
+            at = end + 1;
+        }
+        out
+    }
+
+    /// `attr="value"` of one tag, unescaped-enough for ids and labels (ids are `[a-z0-9-]`).
+    fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+        let marker = format!("{name}=\"");
+        let start = tag.find(&marker)? + marker.len();
+        let end = tag[start..].find('"')? + start;
+        Some(&tag[start..end])
+    }
+
+    /// Every leaf form of every verb labels its fields and holds page-unique ids: the
+    /// accessibility contract of the derived forms, checked at the one place they render
+    /// (a `label for` resolving past its own form is the failure this catches).
+    #[test]
+    fn web_leaf_forms_label_every_field() {
+        let mut verbs = 0;
+        let mut forms = 0;
+        let mut controls = 0;
+        for v in crate::shell::command_catalog() {
+            verbs += 1;
+            let alts = alternatives_of(v.name, v.usage);
+            // The page a verb renders: one form per alternative, concatenated.
+            let page: String = alts
+                .iter()
+                .enumerate()
+                .map(|(i, alt)| form(v.name, i, alt, v.operation, &format!("/verb/{}", v.name), ""))
+                .collect();
+            assert!(!page.is_empty(), "{} renders no form", v.name);
+            forms += alts.len();
+            // Every id (fields, checkboxes, the submit box) appears once on the page.
+            let mut ids: Vec<String> = Vec::new();
+            for tag in ["input", "select", "textarea", "datalist"].iter().flat_map(|k| tags(&page, k)) {
+                if let Some(id) = attr(&tag, "id") {
+                    ids.push(id.to_owned());
+                }
+            }
+            let mut sorted = ids.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), ids.len(), "{}: duplicate field ids on one page", v.name);
+            let label_fors: Vec<String> = tags(&page, "label")
+                .iter()
+                .filter_map(|label| attr(label, "for").map(str::to_owned))
+                .collect();
+            for tag in ["input", "select", "textarea"].iter().flat_map(|k| tags(&page, k)) {
+                if attr(&tag, "type") == Some("hidden") {
+                    continue; // hidden fields carry no meaning to label
+                }
+                controls += 1;
+                let labelled = attr(&tag, "aria-label").is_some_and(|a| !a.is_empty())
+                    || attr(&tag, "id").is_some_and(|id| label_fors.iter().any(|f| f == id));
+                assert!(labelled, "{}: unlabelled control: {tag}", v.name);
+            }
+            // Every `label for` names exactly one field of this page and says something.
+            for id in &label_fors {
+                let named = ids.iter().filter(|x| *x == id).count();
+                assert_eq!(named, 1, "{}: label for={id} names {named} fields", v.name);
+            }
+        }
+        assert!(verbs >= 60 && forms >= 200 && controls > 500, "{verbs} verbs, {forms} forms, {controls} controls");
+    }
+
     #[test]
     fn grammar_shapes_render_and_assemble() {
         let alts = alternatives("delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST");
@@ -629,5 +702,8 @@ mod tests {
             assert_eq!(transition(v.usage, v.operation, 0, name), is, "{name}: {}", v.operation);
         }
         assert!(html.contains("name=\"a1\"") && html.contains("list=\"refs\"") && html.contains("name=\"submit\""), "{html}");
+        // The page-unique ids: this form's fields are `delegate-0-*`, not the bare `a{i}`
+        // (token 0 is the literal `delegate`, so the first field is index 1).
+        assert!(html.contains("id=\"delegate-0-1\"") && html.contains("id=\"delegate-0-submit\""), "{html}");
     }
 }

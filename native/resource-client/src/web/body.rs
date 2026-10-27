@@ -1123,6 +1123,34 @@ mod tests {
         }
     }
 
+    /// The one outcome partial is a live region for every class: the line a form post
+    /// produces (admitted, refused with its clause, undecided with its retry) must reach
+    /// assistive tech, and the word — never the colour alone — carries the outcome.
+    #[test]
+    fn web_outcome_partial_is_a_live_region() {
+        for (code, transition, class, word) in [
+            (0, true, "admitted", "Admitted"),
+            (0, false, "answered", "Answered"),
+            (3, true, "refused", "refused"),
+            (4, true, "undecided", "undecided"),
+            (2, false, "error", "Usage"),
+        ] {
+            let ending = Ending { code, stdout: "done\n".into(), stderr: String::new() };
+            let html = outcome_of(&ending, &[("next", "/x")], transition);
+            assert!(
+                html.contains(&format!("class=\"outcome {class}\" role=\"status\"")) && html.contains("aria-live=\"polite\"") && html.contains("aria-atomic=\"true\""),
+                "{class}: {html}"
+            );
+            assert!(html.contains(word), "{class} carries its word: {html}");
+        }
+        // The partial the gateway renders for the anonymous POST refusal, same shape.
+        let page = outcome_page("Refused", "refused", "This body is the public reader", ANONYMOUS, &[]);
+        assert!(page.body.contains("role=\"status\"") && page.body.contains("aria-live=\"polite\""));
+        // A refusal's clause is highlighted, and the word stays beside it.
+        let refused = outcome_of(&Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n".into() }, &[], true);
+        assert!(refused.contains("refused") && refused.contains("mark class=\"clause\""), "{refused}");
+    }
+
     #[test]
     fn endings_classify_by_exit_code_and_first_stderr_line() {
         let refused = Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n  outcome: x\n".into() };
