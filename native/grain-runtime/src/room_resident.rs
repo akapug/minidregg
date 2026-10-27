@@ -398,9 +398,9 @@ mod tests {
         let preparing_config=rt.config.clone();let preparing_path=rt.config_path.clone();
         let preflight=thread::spawn(move||{
             let (mut socket,_)=admin.accept().unwrap();
-            let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();reader.read_line(&mut line).unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();
             let sha=line.trim().strip_prefix("resident prepare ").unwrap();
-            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);writeln!(socket,"{ready}").unwrap();
+            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);control::admin_write_frame(&mut socket,&ready.to_string()).unwrap();
         });
         let listener = std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let journal_path = root.join("resident.json");
@@ -467,8 +467,8 @@ mod tests {
         let proof=rt.resident_admission(&id,&sha).unwrap();
         let thread=thread::spawn(move||{
             for value in [proof_unrecorded,proof] {
-                let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();
-                reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),request_line);writeln!(socket,"{value}").unwrap();
+                let (mut socket,_)=admin.accept().unwrap();
+                let line=control::admin_read_frame(&mut socket).unwrap();assert_eq!(line.trim(),request_line);control::admin_write_frame(&mut socket,&value.to_string()).unwrap();
             }
         });
         assert!(!drain_preadmission_refusal(&rt.config,&rt.config_path,&mut resident,&state).unwrap());
@@ -491,9 +491,9 @@ mod tests {
         let admin=std::os::unix::net::UnixListener::bind(rt.config.state_dir.join("admin.sock")).unwrap();
         let control=std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let preflight=thread::spawn(move||{
-            let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());
-            let mut line=String::new();reader.read_line(&mut line).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
-            writeln!(socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
+            let (mut socket,_)=admin.accept().unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
+            control::admin_write_frame(&mut socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
         });
         let server=thread::spawn(move||{
             let (mut socket,_)=control.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();

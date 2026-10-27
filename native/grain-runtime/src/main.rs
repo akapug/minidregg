@@ -16,6 +16,7 @@ mod quiescence_transport;
 mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
+mod prompt_outcome;
 mod hermes_session_verify;
 mod session_failure;
 mod resident_outcomes;
@@ -675,12 +676,29 @@ fn managed_law_candidates(status: &str, desired: u64, own: Option<u64>) -> Resul
 
 /// Unresolved-effect notes whose only possible effects, for a network-none
 /// scoped worker with every Mini attempt resolved, are already accounted for.
-fn derivable_effect_note(note: &str) -> bool {
+fn derivable_effect_note(state_dir: &Path, note: &str) -> bool {
     (note.starts_with("worker operation ")
         && note.ends_with(" stopped after controller restart; external effects need acknowledgement"))
         || note == "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement"
         || note == "parent reserved operation may have external effects; explicit operator acknowledgement required"
-        || note.starts_with("Hermes prompt ")
+        || derivable_prompt_note(state_dir, note)
+}
+
+/// A failed Hermes prompt's note is derivable only through its typed outcome
+/// record (R11): the record must be `undecided` for exactly this note, retain
+/// no native attempt, and name no retry beyond the parent hold and the
+/// effects acknowledgement. A note prefix alone is never evidence.
+fn derivable_prompt_note(state_dir: &Path, note: &str) -> bool {
+    let Some(id) = note.strip_prefix("Hermes prompt ")
+        .and_then(|rest| rest.split_once(": "))
+        .and_then(|(id, _)| id.parse::<u64>().ok().filter(|n| n.to_string() == id))
+    else { return false };
+    let Ok(Some(record)) = prompt_outcome::read(state_dir, id) else { return false };
+    matches!(&record.outcome, prompt_outcome::Outcome::Undecided { retry, detail }
+        if detail == note
+            && retry.operation.is_none()
+            && retry.admin.last().map(String::as_str) == Some("reconcile effects")
+            && retry.admin.iter().all(|c| c == "reconcile parent audited" || c == "reconcile effects"))
 }
 
 /// Startup proof that no process of an earlier run of this controller's
@@ -3398,6 +3416,9 @@ struct Runtime {
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
     provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
+    /// The prompt allocated by the current `hermes_session`, and the decision
+    /// reached at its boundary; written as one typed record when it ends.
+    prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
@@ -6964,6 +6985,7 @@ impl Runtime {
             provider_control: Arc::new(Mutex::new(None)),
             provider_lease: None,
             prompt_active: false,
+            prompt_decision: None,
             foreground_operation: None,
             output: None,
             process_first_operation_id,
@@ -14591,14 +14613,63 @@ impl Runtime {
             }
             self.enter_resident_prompt(id,sha)?;
         }
+        self.prompt_decision = None;
         let outcome=self.hermes_session_inner(invocation,input);
         if !invocation.is_prompt() { return outcome; }
         let retirement=self.retire_refused_provider_request();
-        match (outcome,retirement) {
+        let result = match (outcome,retirement) {
             (result,Ok(())) => result,
             (Ok(()),Err(error)) => Err(format!("provider refusal remains retained: {error}")),
             (Err(original),Err(error)) => Err(format!("{original}; provider refusal remains retained: {error}")),
+        };
+        // The record is written whatever the result; a write failure is
+        // reported with the prompt's own outcome and never replaces it.
+        match (result, self.record_prompt_outcome(invocation)) {
+            (result, Ok(())) => result,
+            (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
+            (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
         }
+    }
+
+    fn decide_prompt(&mut self, id: u64, decision: prompt_outcome::Outcome) {
+        if let Some((current, slot)) = self.prompt_decision.as_mut() {
+            if *current == id { *slot = Some(decision); }
+        }
+    }
+
+    /// Exactly one typed record per allocated prompt (gr §4.3). A decision
+    /// the prompt reached stands only if the journal retains nothing for it;
+    /// otherwise the prompt is undecided and the record names the exact
+    /// admin retry. With no decision and nothing retained, the controller
+    /// refused after allocation and nothing can still commit.
+    fn record_prompt_outcome(&mut self, invocation: hermes_session_verify::Invocation<'_>) -> Result<()> {
+        let Some((id, decision)) = self.prompt_decision.take() else { return Ok(()) };
+        let retained = prompt_outcome::retry_for(&self.journal);
+        let outcome = match (decision, retained) {
+            (_, Some(retry)) => prompt_outcome::Outcome::Undecided {
+                retry,
+                detail: self.journal.unresolved_external.iter()
+                    .find(|note| note.starts_with(&format!("Hermes prompt {id}: ")))
+                    .cloned().unwrap_or_else(|| "custody retained at the prompt boundary".into()),
+            },
+            (Some(decision), None) => decision,
+            (None, None) => prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Controller,
+                reason: "the controller ended the prompt before a decision and retains no custody for it".into(),
+            },
+        };
+        let origin = invocation.resident_identity();
+        let session_id = self.journal.resident_prompt_origin.as_ref()
+            .filter(|o| o.prompt_operation_id == id).and_then(|o| o.session_id.clone())
+            .or_else(|| self.journal.hermes_session.as_ref().map(|s| s.id.clone()));
+        prompt_outcome::write(&self.config.state_dir, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(),
+            prompt_operation_id: id,
+            resident_prompt_id: origin.map(|(rid, _)| rid.to_owned()),
+            prompt_sha256: origin.map(|(_, sha)| sha.to_owned()),
+            session_id,
+            outcome,
+        })
     }
     fn hermes_session_inner(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
         let prompt = invocation.prompt().unwrap_or("");
@@ -14830,6 +14901,7 @@ impl Runtime {
         }
         let id = self.next_id()?;
         if invocation.is_prompt() {
+            self.prompt_decision = Some((id, None));
             self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
                 resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),
                     prompt_sha256:digest.into(),prompt_operation_id:id,session_id:None});
@@ -15188,6 +15260,10 @@ impl Runtime {
                 "settle",
                 &format!("hermes-acp setup failed exit:{exit}"),
             )?;
+            self.decide_prompt(id, prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Setup,
+                reason: format!("Hermes setup failed before prompt: {error}"),
+            });
             self.journal.settlement_due = None;
             self.journal.prompt_witness = None;
             self.save()?;
@@ -15225,6 +15301,28 @@ impl Runtime {
             "settle",
             &format!("hermes-acp exit:{exit}"),
         )?;
+        if invocation.is_prompt() {
+            if let Ok(value) = &outcome {
+                let decision = match hermes_outcome::failure(value) {
+                    Some(failure) => prompt_outcome::Outcome::Refused {
+                        stage: prompt_outcome::RefusalStage::TurnFailure,
+                        reason: failure.pointer("/data/reason").and_then(Value::as_str)
+                            .map(str::to_owned).unwrap_or_else(|| failure.to_string()),
+                    },
+                    None => {
+                        let replay = self.journal.provider_replays.iter()
+                            .rfind(|r| r.prompt_operation_id == id && r.status == 200);
+                        prompt_outcome::Outcome::Admitted {
+                            stop_reason: value["stopReason"].as_str().unwrap_or("").to_owned(),
+                            settled_charge: invocation.charge(&spec.charge).to_owned(),
+                            provider_response_sha256: replay.map(|r| r.response_sha256.clone()),
+                            provider_metered_charge: replay.and_then(|r| r.metered_charge.clone()),
+                        }
+                    }
+                };
+                self.decide_prompt(id, decision);
+            }
+        }
         self.journal.settlement_due = None;
         self.journal.prompt_witness = None;
         self.save()?;
@@ -17127,7 +17225,7 @@ impl Runtime {
             return Ok(());
         }
         let notes = self.journal.unresolved_external.clone();
-        if !notes.iter().all(|note| derivable_effect_note(note)) {
+        if !notes.iter().all(|note| derivable_effect_note(&self.config.state_dir, note)) {
             return Err("an external-effect note needs operator acknowledgement".into());
         }
         let network_none = self.config.commands.iter().all(|command| {
@@ -20137,14 +20235,37 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
 
     #[test]
     fn derived_effect_acknowledgement_covers_only_accounted_channels() {
+        let state = std::env::temp_dir().join(format!("derivable-notes-{}", std::process::id()));
+        fs::create_dir_all(&state).unwrap();
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = state.as_path();
         for note in [
             "worker operation 12 stopped after controller restart; external effects need acknowledgement",
             "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
             "parent reserved operation may have external effects; explicit operator acknowledgement required",
-            "Hermes prompt 9: ACP stream closed",
         ] {
-            assert!(derivable_effect_note(note), "{note}");
+            assert!(derivable_effect_note(state, note), "{note}");
         }
+        // R11: a Hermes prompt note is derivable only through its typed record.
+        let note = "Hermes prompt 9: ACP stream closed";
+        assert!(!derivable_effect_note(state, note), "a prefix without a record is not evidence");
+        let record = |id: u64, admin: &[&str], operation: Option<u64>, detail: &str| prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: id, resident_prompt_id: None,
+            prompt_sha256: None, session_id: None,
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry { admin: admin.iter().map(|c| c.to_string()).collect(), operation },
+                detail: detail.into() } };
+        prompt_outcome::write(state, &record(9, &["reconcile parent audited", "reconcile effects"], None, note)).unwrap();
+        assert!(derivable_effect_note(state, note));
+        assert!(!derivable_effect_note(state, "Hermes prompt 9: a different failure"));
+        prompt_outcome::write(state, &record(10, &["reconcile provider audited", "reconcile effects"], None,
+            "Hermes prompt 10: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 10: x"), "provider custody is never waved through");
+        prompt_outcome::write(state, &record(11, &["recover", "reconcile effects"], Some(4), "Hermes prompt 11: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 11: x"), "a retained Mini attempt is never waved through");
+        prompt_outcome::write(state, &prompt_outcome::Record { outcome: prompt_outcome::Outcome::Refused {
+            stage: prompt_outcome::RefusalStage::TurnFailure, reason: "r".into() }, ..record(12, &["reconcile effects"], None, "") }).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 12: x"));
         for note in [
             "tool reserved operation may have external effects; explicit operator acknowledgement required",
             "delegated tool reservation fenced with uncertain external effects",
@@ -20153,8 +20274,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "parent confirmed reservation was externally settled; explicit effects acknowledgement required",
             "worker operation 12 stopped after controller restart; external effects need acknowledgement; and more",
         ] {
-            assert!(!derivable_effect_note(note), "{note}");
+            assert!(!derivable_effect_note(state, note), "{note}");
         }
+        fs::remove_dir_all(state).unwrap();
     }
 
     pub(super) fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {
