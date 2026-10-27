@@ -17,10 +17,9 @@ edition ObjectiveBend 1
 # replay_rejected, behind_schedule_rejected) and Deos/PrepaidLease.lean (meter and
 # draw fused in one write), and of the starbridge-apps/subscription idea of a
 # standing grant. Layers, as in world/bounty: (1) pure transitions over an Account;
-# (2) the same lifecycle as an Activity that yields one Plan per step. The Plans are
-# proposals: a transfer is lowered by the kernel (a seat held by the payer, or the
-# lease escrow), never by this program. Preview evidence only; no native receipt
-# exists for this package.
+# (2) the same lifecycle as an Activity on the activity kernel: one Plan per step, the
+# kernel's own (`await`, `transfer`); a payment is performed by the kernel from the
+# activity's purse (the birth deposit) at the yield, never by this program.
 
 record Terms:
   payer: Nat

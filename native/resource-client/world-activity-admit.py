@@ -103,7 +103,7 @@ try:
     if a.scenario in ('call', 'send'):
         code = two_object_route(w, a, method)
         sys.exit(code)
-    w.bring_up(['obj'])
+    w.bring_up(['obj', 'lawful'] if a.scenario == 'effect' else ['obj'])
     if a.scenario == 'effect':
         # world/activity/Effects.obend: commit {total: set 5}, then transfer 1 to the second subject's account
         a.birth_input = json.dumps(record(init=variant('set', nat(5)), to=nat(int(w.SECOND)), amount=nat(1)))
@@ -174,6 +174,10 @@ try:
             w.check('commit-performed-at-birth', source_of(v) == {'kind': 'performed', 'verdict': 'settled', 'reason': None}
                     and World.total_of(v) == 5, {'source': source_of(v), 'state': v.get('state')})
             second0 = bal(v, w.SECOND)
+            # FundsAgree's kernel check: a delivery whose submitter account is the purse itself is refused by name
+            # (its added envelope would be paid from the purse the transfer is judged against)
+            w.turn('deliver-from-the-purse-refused', w.sponsor, {'kind': 'deliver', 'record': rec,
+                   'await': World.await_of(v)['id'], 'account': rec, 'accountCapability': '0'}, 'refused', 'payerInvalid')
             deliver('deliver-commit', v, rec)
             v1 = w.state('obj', 'after-transfer', tx)
             w.check('transfer-performed-moves-exactly-1',
@@ -199,6 +203,28 @@ try:
                         and after.get('stateVersion') == b.get('stateVersion'),
                         {'source': source_of(after), 'second': [bal(b, w.SECOND), bal(after, w.SECOND)],
                          'version': [b.get('stateVersion'), after.get('stateVersion')]})
+    if a.scenario == 'effect':
+        # DeliverLawRefuses inhabited natively: an object whose law is `total <= 5`; the birth's commit sets 5
+        # (admitted), the delivery's transfer writes `total add 1` = 6, which the law refuses: every earlier
+        # step of that delivery is admitted and the whole turn is refused `objectWrite`, nothing moves or is written.
+        with w.group('effect-law-refuses-delivery'):
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('total', 5), 'installed')
+            lo = w.objects['lawful']
+            body = {'kind': 'birth', 'object': lo['object'], 'objectCapability': lo['capability'],
+                    'account': w.SPONSOR_ACCOUNT, 'accountCapability': w.SPONSOR_SPEND, 'pin': pin,
+                    'input': record(init=variant('set', nat(5)), to=nat(int(w.SECOND)), amount=nat(1)),
+                    'envelope': aw.cap(ticks), 'resume': aw.cap(ticks), 'timeout': aw.cap(ticks),
+                    'deposit': str(a.deposit)}
+            t3 = w.turn('birth-lawful', w.sponsor, body, 'installed').get('transaction')
+            b3 = w.state('lawful', 'born-lawful', t3)
+            w.turn('deliver-law-refused', w.sponsor, {'kind': 'deliver', 'record': b3['recordCell'],
+                   'await': World.await_of(b3)['id'], 'account': '0', 'accountCapability': '0'}, 'refused', 'objectWrite')
+            a3 = w.state('lawful', 'after-law-refusal', t3)
+            w.check('law-refused-delivery-writes-and-moves-nothing',
+                    World.total_of(a3) == 5 and a3.get('stateVersion') == b3.get('stateVersion')
+                    and World.balance(a3, w.SECOND) == World.balance(b3, w.SECOND)
+                    and World.await_of(a3).get('id') == World.await_of(b3).get('id'),
+                    {'total': World.total_of(a3), 'version': [b3.get('stateVersion'), a3.get('stateVersion')]})
     if a.scenario == 'dues':
         # Dues law (world/dues/StandingDues.obend) natively: period k is paid once, in order, exactly `amount`,
         # FROM THE PURSE to the room, decided by the kernel at the transfer's yield; a payment the purse cannot
