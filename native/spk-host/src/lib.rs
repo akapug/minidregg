@@ -28,8 +28,6 @@ mod agent_api_wire;
 #[cfg(target_os = "linux")]
 pub mod broker;
 #[cfg(target_os = "linux")]
-mod claim_descriptor;
-#[cfg(target_os = "linux")]
 #[cfg(target_os = "linux")]
 mod completion_custodian;
 #[cfg(target_os = "linux")]
