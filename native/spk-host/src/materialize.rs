@@ -323,7 +323,12 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     let store = image_dir
         .parent()
         .ok_or_else(|| invalid("image store parent absent"))?;
-    let spk = stream::verify_in_private_temp_at(&package_path, store, profile.limits())?;
+    // The image store's custody is `open_protected_directory`'s above (the resident's own
+    // rule, walked by descriptor). The stream reader's ancestor walk is not used here: a
+    // resident wakes inside its user namespace, where root-owned ancestors of the store
+    // (`/var/lib/mini-spk-worlds`, the world) carry the unmapped overflow uid and that walk
+    // refused every START on Debian 13 ("scratch parent custody refused", 2026-10-27).
+    let spk = stream::verify(&package_path, store, profile.limits())?;
     let verified = verified_identity(&spk, image_dir.to_owned());
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())

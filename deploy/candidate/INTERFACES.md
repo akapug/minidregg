@@ -386,6 +386,7 @@ Everything is created owner-only (`umask 077`, directories `0700`).
 | `genesis-params.json` | init | copy of the operator's params (schema below) |
 | `keys/sponsor.key`, `keys/sponsor.pub`, `keys/sponsor.pub.hex` | `mini keygen` | the genesis sponsor's key (format in §8) |
 | `keys/clock.key`, `keys/clock.pub`, `keys/clock.pub.hex` | `mini keygen` | the clock subject's key: its only authority is `C_tick`; its workspace is made with `mini clock --action init` (deploy: `/var/lib/mini/clock`) |
+| `keys/completion.seed`, `keys/completion.pub`, `keys/completion.pub.hex` | `mini keygen` (only with `.grainPlatform.completionCustodianKey: null`) | the grain platform's completion custodian: its public key is pinned into the genesis config, its seed signs lifecycle completions (`spk-host grain`'s profile); never copied out of `keys/` |
 | `clock-birth-context.json` | init | the clock subject's birth context (the factory law refuses it every birth) |
 | `operator.json` | init | Host operator config (schema below) |
 | `profile.json` | `minidregg-host operator.json profile` | semantics digest and metering profile |
@@ -413,7 +414,15 @@ factoryObserveCapabilityId tickCapabilityId genesisNow maxStepSeconds}` (the ded
 distinct from the sponsor; `tickCapabilityId` is its `C_tick`; `genesisNow` the genesis's Unix
 second and `maxStepSeconds` the most one clock tick may advance, both positive), and
 `meterAllowance` with the ten keys `incidences turnBytes memoryTouches witnessBytes proofWork
-storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`.
+storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`, and, for a world that hosts SPK
+grains (deploy/market/INSTALL.md §0), `grainPlatform {lifecycleManagement {managementSubject
+managementKeyId} grainBirthTariff {base perBirth} completionCustodianKey}`: the management subject
+is the sponsor (its key pair is the one `run.sh init` generates), the tariff the metered cost of a
+grain birth (base > 0), and `completionCustodianKey` the completion custodian's 32-byte public key as
+64 lowercase hex, `null` in the operator's file until `run.sh init` generates `keys/completion.seed`
+and fills it (`params.sh require-platform` refuses a genesis without the block, naming the field).
+Without `grainPlatform` the world refuses every grain install by name (`same-store-profile.py`,
+`composed-inputs.sh`: `operatorPolicyRequired`).
 `genesis-params.example.json` holds the values the recorded qualification runs
 used, except the genesis clock: its `clock.genesisNow` and `clock.maxStepSeconds` are `null`
 (unfilled), and `run.sh init` and `genesis.sh` refuse an unfilled or non-positive value

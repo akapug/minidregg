@@ -281,6 +281,27 @@ RSS** (`expectAppHooks=true`, it ships `ttrss-apphooks`); both were refused by n
 2026-10-27 and are accepted now that the facilities are served (§3a), which the row checks from
 `qualify`'s `bridgeFacilities` field.
 
+### 6a. The lane box's tooling and what it found
+
+- `scripts/spk-platform/world-up.sh BASE_BIN OWN_BIN RUN` / `world-down.sh RUN`: one standing grain
+  world on a lane box (the same ROOT SETUP, operator broker and Store phases `two-world-journey.sh`
+  performs, without its teardown trap), `RUN/WORLD.env` for `japps.sh --box` (`JAPPS_WORLD_ENV`) and
+  for `scripts/spk-platform/apps-e2e.sh WORLD.env OUT APP-ID…`, the first real `mini apps install`
+  end to end: the workroom's subject 8 as manager, subject 9 as member, the metered references
+  delegated and left in `HOME/inbox` as the frame does, the worker on its PID file, the install with
+  exact retries, the origin check through the route socket.
+- `scripts/spk-platform/composed-inputs.sh WORLD-IDENTITY.json CANDIDATE OUT`: the composed
+  scenario's apps, connector and resident inputs derived from a jworld-scratch world through the real
+  installers; it refuses `operatorPolicyRequired` while the world's genesis lacks the grain
+  platform's operator policy, which is now a genesis field (`grainPlatform`, `deploy/market/INSTALL.md`
+  §0; `params.sh require-platform`): rehearsal #3 is the re-genesis that carries it.
+- Found on the first START on Debian 13 (2026-10-27): the stream reader's scratch-parent custody walk,
+  run by the resident inside its user namespace, saw the world's root-owned ancestors as the unmapped
+  overflow uid and refused every START (`resident bootstrap refused: scratch parent custody refused`).
+  The wake verification now relies on the image store's own descriptor-walked custody
+  (`open_protected_directory`) and calls the reader without the ancestor walk (`materialize.rs`); the
+  ingest path, which runs outside the namespace, keeps the walk.
+
 ## 7. Compost
 
 Lands as the market path lands, in this lane's commits:
