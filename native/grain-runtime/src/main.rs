@@ -1,6 +1,7 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
 mod journal_io;
+mod deadline;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
@@ -12,13 +13,10 @@ mod room_task;
 mod room_resident;
 mod resident_context;
 mod quiescence;
-mod quiescence_transport;
-mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
+mod prompt_outcome;
 mod hermes_session_verify;
-mod session_failure;
-mod resident_outcomes;
 mod resident_origin;
 mod resident_requests;
 mod resident_preflight;
@@ -29,24 +27,21 @@ mod birth_lifecycle_tests;
 mod control;
 mod cgroup_stop;
 mod systemd_manager;
-mod controller_write_scopes;
-// One source shared with `mini key` (resource-client includes it by path):
-// the write verbs are used there, the reserve-time lookups here.
-#[allow(dead_code)]
-mod credentials;
+// The provider table, grants and owners: the key broker's parsers (its sealed
+// store compiles only inside the broker).
+use mini_keys::credentials;
 mod custody_gate;
 mod dispatch_custody;
 #[cfg(test)]
 mod dispatch_runtime_tests;
 mod gitweb_worker;
 mod grain_source;
+mod grain_create;
 mod homelab;
 mod pending_prepare;
-mod legacy_custody_audit;
 mod mcp;
-#[cfg(test)]
-mod hermes_catalogue_probe;
 mod provider;
+mod provider_failure;
 mod provider_profile;
 mod provider_provision;
 mod provider_owner;
@@ -584,6 +579,11 @@ struct Journal {
     prior_hermes_sessions: Vec<HermesSession>,
     #[serde(default)]
     prompt_witness: Option<Value>,
+    /// Bounded retry-with-backoff of one request's bytes across NEW reserves,
+    /// after a definite retryable reply (429, 5xx). Never covers a send whose
+    /// outcome is unknown: those attempts stay held until their settle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_retry_gate: Option<provider_failure::RetryGate>,
     unresolved_external: Vec<String>,
 }
 
@@ -688,12 +688,29 @@ fn managed_law_candidates(status: &str, desired: u64, own: Option<u64>) -> Resul
 
 /// Unresolved-effect notes whose only possible effects, for a network-none
 /// scoped worker with every Mini attempt resolved, are already accounted for.
-fn derivable_effect_note(note: &str) -> bool {
+fn derivable_effect_note(state_dir: &Path, note: &str) -> bool {
     (note.starts_with("worker operation ")
         && note.ends_with(" stopped after controller restart; external effects need acknowledgement"))
         || note == "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement"
         || note == "parent reserved operation may have external effects; explicit operator acknowledgement required"
-        || note.starts_with("Hermes prompt ")
+        || derivable_prompt_note(state_dir, note)
+}
+
+/// A failed Hermes prompt's note is derivable only through its typed outcome
+/// record (R11): the record must be `undecided` for exactly this note, retain
+/// no native attempt, and name no retry beyond the parent hold and the
+/// effects acknowledgement. A note prefix alone is never evidence.
+fn derivable_prompt_note(state_dir: &Path, note: &str) -> bool {
+    let Some(id) = note.strip_prefix("Hermes prompt ")
+        .and_then(|rest| rest.split_once(": "))
+        .and_then(|(id, _)| id.parse::<u64>().ok().filter(|n| n.to_string() == id))
+    else { return false };
+    let Ok(Some(record)) = prompt_outcome::read(state_dir, id) else { return false };
+    matches!(&record.outcome, prompt_outcome::Outcome::Undecided { retry, detail }
+        if detail == note
+            && retry.operation.is_none()
+            && retry.admin.last().map(String::as_str) == Some("reconcile effects")
+            && retry.admin.iter().all(|c| c == "reconcile parent audited" || c == "reconcile effects"))
 }
 
 /// Startup proof that no process of an earlier run of this controller's
@@ -1271,6 +1288,12 @@ struct ProviderAttempt {
     metered_charge: Option<String>,
     /// Table row and credential kind this attempt was permitted to use.
     route: ProviderRouteRecord,
+    /// The decided failure class, its settle state and the exact retry, set
+    /// the moment an attempt leaves the 200 path. It replaces every free-text
+    /// provider note: the attempt (and its hold) stays until a Host-admitted
+    /// settle clears it, and `retry` names the command that drives that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    decision: Option<provider_failure::Decision>,
 }
 
 /// One exact app dispatch attempt under the separate AgentGrain purse. The
@@ -1598,10 +1621,13 @@ struct ProviderSettlement {
     receipt: ReserveAnchor,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum MeteredAuditPath {
     ProvenNoSend,
     CompleteResponse,
+    /// Crossed the send boundary with no complete reply: settled only by the
+    /// Host's outcome-class quote (v4 metering frame), never by inference.
+    ClassSettle(provider_failure::FailureClass),
 }
 
 fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<MeteredAuditPath> {
@@ -1611,6 +1637,11 @@ fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<Meter
         Ok(MeteredAuditPath::ProvenNoSend)
     } else if send_started && outcome.is_some_and(|kind| kind.starts_with("received:")) {
         Ok(MeteredAuditPath::CompleteResponse)
+    } else if send_started && outcome.is_none_or(|kind| kind.starts_with("uncertain:")) {
+        provider_failure::classify(send_started, outcome, None)
+            .filter(|class| class.after_send() && !class.has_complete_response())
+            .map(MeteredAuditPath::ClassSettle)
+            .ok_or_else(|| "metered provider audit could not classify the retained outcome".into())
     } else {
         Err("metered provider audit has no complete retained response or proven no-send".into())
     }
@@ -1714,10 +1745,50 @@ fn provider_metering_metadata(
     reserve: &str,
 ) -> Result<Value> {
     provider_route_code(&pin.route)?;
-    Ok(json!({"version":"3","providerResourceId":pin.provider_resource_id,
-        "route":pin.route,"status":status.to_string(),"contentType":content_type,
-        "reserve":reserve}))
+    Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"leg":"complete","status":status.to_string(),
+        "contentType":content_type,"reserve":reserve}))
 }
+
+/// The Host's leg (`Kernel/ProviderMetering.lean` `Leg`) for an after-send
+/// class without a complete reply.
+fn provider_class_leg(class: &str) -> Result<&'static str> {
+    match class {
+        "timeout-after-send" => Ok("timeout"),
+        "malformed" => Ok("truncated"),
+        "crash-after-send" => Ok("lost"),
+        _ => Err("provider class settle names an unknown outcome class".into()),
+    }
+}
+
+/// A settle request for a call that crossed the send boundary with no
+/// complete retained reply (`Host/ProviderUsage.lean` `quotePayload` v4): the
+/// leg names what happened, `status` is "0" and `contentType` empty; the
+/// response bytes are whatever partial body was retained (possibly empty).
+fn provider_class_metadata(pin: &ProviderMeteringPin, reserve: &str, class: &str) -> Result<Value> {
+    provider_route_code(&pin.route)?;
+    let leg = provider_class_leg(class)?;
+    Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"leg":leg,"status":"0","contentType":"","reserve":reserve}))
+}
+
+/// The Host's report statuses and claims (`Host/ProviderUsage.lean` `reportJson`).
+const QUOTED_PER_OPERATION: (&str, &str) = (
+    "quoted-per-operation",
+    "per-operation fee under operator tariff; the provider bill is the key owner's",
+);
+const QUOTED_REPORTED_USAGE: (&str, &str) = (
+    "quoted-reported-usage",
+    "provider-reported usage under operator tariff; not invoice-verified",
+);
+const QUOTED_REFUSED_REPLY: (&str, &str) = (
+    "quoted-refused-reply",
+    "complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call",
+);
+const QUOTED_UNDECIDED_AT_HOLD: (&str, &str) = (
+    "quoted-undecided-at-hold",
+    "no usage record could be read for this leg: the whole hold, the maximum the provider may have billed",
+);
 
 fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
     let per_op = pin
@@ -1753,19 +1824,35 @@ fn provider_quote_charge(
     reserve: &str,
     request_bytes: usize,
     response_bytes: usize,
+    outcome_class: Option<&str>,
 ) -> Result<String> {
     let user = pin.route == "user";
-    let (status, claim) = if user {
-        (
-            "quoted-per-operation",
-            "per-operation fee under operator tariff; the provider bill is the key owner's",
-        )
-    } else {
-        (
-            "quoted-reported-usage",
-            "provider-reported usage under operator tariff; not invoice-verified",
-        )
+    // `outcome_class`: None for a complete 200, "complete-non-200" for a
+    // complete refused reply, else the after-send class (no complete reply).
+    let (leg, http_status) = match outcome_class {
+        None => ("complete", None),
+        Some("complete-non-200") => ("complete", None),
+        Some(class) => (provider_class_leg(class)?, Some("0")),
     };
+    let reported_status = report.get("status").and_then(Value::as_str);
+    // The user route is quoted its per-operation fee whatever the leg; a
+    // metered route by the leg and reply; a complete 200 whose usage cannot
+    // be read is quoted undecided at the hold.
+    let (status, claim) = if user {
+        QUOTED_PER_OPERATION
+    } else {
+        match outcome_class {
+            None if reported_status == Some(QUOTED_UNDECIDED_AT_HOLD.0) => QUOTED_UNDECIDED_AT_HOLD,
+            None => QUOTED_REPORTED_USAGE,
+            Some("complete-non-200") => QUOTED_REFUSED_REPLY,
+            Some(_) => QUOTED_UNDECIDED_AT_HOLD,
+        }
+    };
+    if report.get("leg").and_then(Value::as_str) != Some(leg)
+        || http_status.is_some_and(|code| report.get("httpStatus").and_then(Value::as_str) != Some(code))
+    {
+        return Err("provider quote names another leg or HTTP status than the retained attempt".into());
+    }
     if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v2")
         || report.get("status").and_then(Value::as_str) != Some(status)
         || report.get("route").and_then(Value::as_str) != Some(pin.route.as_str())
@@ -1816,6 +1903,21 @@ fn provider_quote_charge(
             return Err(format!("provider quote {name} exceeds decimal bound"));
         }
         decimal(value, name)?;
+    }
+    let no_usage = ["promptTokens", "completionTokens", "totalTokens"]
+        .iter()
+        .all(|name| report.get(*name).is_none());
+    if !user && status == QUOTED_REFUSED_REPLY.0 {
+        if charge != pin.per_op || !no_usage {
+            return Err("refused-reply quote is not exactly the route fee without usage".into());
+        }
+        return Ok(charge.to_owned());
+    }
+    if !user && status == QUOTED_UNDECIDED_AT_HOLD.0 {
+        if charge != reserve || !no_usage {
+            return Err("undecided-leg quote is not exactly the hold without usage".into());
+        }
+        return Ok(charge.to_owned());
     }
     if user {
         // The friend's own key paid the provider: the fee alone, no counts.
@@ -2282,6 +2384,7 @@ impl Journal {
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
             prompt_witness: None,
+            provider_retry_gate: None,
             unresolved_external: Vec::new(),
         }
     }
@@ -2327,6 +2430,13 @@ fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
 
 fn sha256_file(path: &Path) -> Result<String> {
     controller_digest::file(path).map_err(|e| format!("file digest: {e}"))
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> Result<String> {
@@ -2498,16 +2608,14 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     let body = inspect_dir.join("outcome.bin");
     let result = inspect_dir.join("outcome.json");
     write_new(&body, &frame[1..])?;
-    let status = Command::new(&config.host)
+    let status = deadline::output(Command::new(&config.host)
         .arg(&config.host_config)
         .arg("inspect")
         .arg("outcome")
         .arg(&body)
-        .arg(&result)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("native prepare refusal inspection: {e}"))?;
+        .arg(&result), deadline::NATIVE_CALL)
+        .map_err(|e| deadline::describe("native prepare refusal inspection", e))?
+        .status;
     if !status.success() {
         return Err("native Host did not decode prepare refusal Outcome".into());
     }
@@ -3357,6 +3465,9 @@ struct Runtime {
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
     provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
+    /// The prompt allocated by the current `hermes_session`, and the decision
+    /// reached at its boundary; written as one typed record when it ends.
+    prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
@@ -3463,10 +3574,9 @@ impl Runtime {
         launch_gate(&self.config.state_dir, program, unit, action)
     }
     fn prove_launcher_gate(program: &Path) -> Result<()> {
-        let output = Command::new(program)
-            .arg("--launch-gate-protocol")
-            .output()
-            .map_err(|e| format!("grain launcher protocol: {e}"))?;
+        let output = deadline::output(Command::new(program)
+            .arg("--launch-gate-protocol"), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("grain launcher protocol", e))?;
         if !output.status.success() || output.stdout != b"mini-grain-launch-gate-v1\n" {
             return Err("configured grain launcher lacks launch-gate v1 protocol".into());
         }
@@ -3882,142 +3992,7 @@ impl Runtime {
             }
             return Ok((id, anchor.clone()));
         }
-        if !hold.reserve_confirmed
-            || hold.reserve_refused
-            || hold.reserve
-                != self
-                    .config
-                    .dispatch_task
-                    .as_ref()
-                    .ok_or("dispatchTask absent")?
-                    .reserve
-        {
-            return Err("dispatch audit lacks exact confirmed reserve hold".into());
-        }
-        let path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *path != self.config.state_dir.join(format!("attempt-{id:016}"))
-            || attempt
-                .reserve_operation_id
-                .is_some_and(|saved| saved != id)
-        {
-            return Err(
-                "dispatch reserve attempt path/operation differs from retained origin".into(),
-            );
-        }
-        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
-        if sha256_file(&source_path)?
-            != hold
-                .reserve_source_sha256
-                .as_deref()
-                .ok_or("dispatch reserve source digest absent")?
-        {
-            return Err("dispatch reserve signed source bytes changed".into());
-        }
-        let source: Value = serde_json::from_slice(&bounded_regular_file(&source_path, 131_072)?)
-            .map_err(|e| format!("dispatch reserve source: {e}"))?;
-        let task = self
-            .config
-            .dispatch_task
-            .as_ref()
-            .ok_or("dispatchTask absent")?;
-        let payload = format!(
-            "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{}",
-            attempt.source_request_digest
-        );
-        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
-            || source.pointer("/grain/subject").and_then(Value::as_str)
-                != Some(task.subject.as_str())
-            || source
-                .pointer("/grain/operation/type")
-                .and_then(Value::as_str)
-                != Some("reserve")
-            || source
-                .pointer("/grain/operation/amount")
-                .and_then(Value::as_str)
-                != Some(hold.reserve.as_str())
-            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, id)
-            || source
-                .pointer("/grain/context/payload")
-                .and_then(Value::as_str)
-                != Some(payload.as_str())
-            || source
-                .pointer("/grain/before/generation")
-                .and_then(Value::as_str)
-                != Some(hold.before_generation.as_str())
-            || source
-                .pointer("/grain/expectedTargetRoot")
-                .and_then(Value::as_str)
-                != Some(hold.before_target_root.as_str())
-        {
-            return Err("dispatch reserve source differs from exact held request".into());
-        }
-        let call_hash = hold
-            .reserve_call_sha256
-            .as_deref()
-            .ok_or("dispatch reserve call digest absent")?;
-        let outcome_path = hold
-            .reserve_outcome_path
-            .as_ref()
-            .ok_or("dispatch reserve outcome path absent")?;
-        let outcome_hash = hold
-            .reserve_outcome_sha256
-            .as_deref()
-            .ok_or("dispatch reserve outcome digest absent")?;
-        if sha256_file(&path.join("call.bin"))? != call_hash
-            || sha256_file(outcome_path)? != outcome_hash
-            || outcome_path.parent() != Some(path.as_path())
-        {
-            return Err("dispatch reserve retained native call/outcome changed".into());
-        }
-        let receipt_path = outcome_path.with_extension("json");
-        let original: Value =
-            serde_json::from_slice(&bounded_regular_file(&receipt_path, 131_072)?)
-                .map_err(|e| format!("dispatch reserve receipt: {e}"))?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve anchor absent")?;
-        if ReserveAnchor::from_confirmed(&original)? != *anchor {
-            return Err("dispatch reserve receipt differs from retained anchor".into());
-        }
-        let retry_result = next_retry_json(path)?;
-        let mut args = vec![
-            "retry",
-            "--attempt",
-            path.to_str().ok_or("dispatch reserve attempt path UTF-8")?,
-            "--mode",
-            "lookup",
-        ];
-        if let Some(socket) = &self.config.host_socket {
-            args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
-        }
-        self.command_output(&self.config.mini, &args)?;
-        let current: Value = serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
-            .map_err(|e| format!("dispatch reserve lookup: {e}"))?;
-        if current.get("type").and_then(Value::as_str) != Some("confirmed")
-            || !matches!(
-                current.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-            || ReserveAnchor::from_confirmed(&current)? != *anchor
-        {
-            return Err("dispatch reserve is absent from current native image".into());
-        }
-        Ok((id, anchor.clone()))
+        Err("dispatch reserve has neither v2 nor lifetime custody (dispatch v1 is retired)".into())
     }
     /// Retain one exact source-authored HTTP request before its separately
     /// paid AgentGrain reserve. The source digest is checked against the full
@@ -5768,217 +5743,6 @@ impl Runtime {
             "planSha256":plan_sha,"signatures":values}))
     }
 
-    fn dispatch_reserve(
-        &mut self,
-        canonical_request: &[u8],
-        source_request_digest: &str,
-        http_operation_id: &str,
-    ) -> Result<Value> {
-        decimal(source_request_digest, "source request digest")?;
-        decimal(http_operation_id, "HTTP operation ID")?;
-        if source_request_digest.len() > 78
-            || http_operation_id.parse::<u64>().is_err()
-            || canonical_request.is_empty()
-            || canonical_request.len() > 10 * 1024 * 1024
-        {
-            return Err("dispatch request coordinates exceed bounds".into());
-        }
-        if self.cancelled.load(Ordering::SeqCst)
-            || !self.prompt_active
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || (self.journal.child.is_none() && self.foreground_operation.is_none())
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-        {
-            return Err("dispatch task or parent prompt is unavailable".into());
-        }
-        let task = self
-            .config
-            .dispatch_task
-            .clone()
-            .ok_or("dispatchTask absent")?;
-        let parent = self.query()?;
-        let parent_state = parent.get("grain").ok_or("parent grain absent")?;
-        let parent_generation = parent_state
-            .get("generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?;
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent root absent")?;
-        if !matches!(
-            parent_state.get("status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("parent prompt is not reserved".into());
-        }
-        let attempt_id = self.next_id()?;
-        let request_path = self
-            .config
-            .state_dir
-            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
-        write_new(&request_path, canonical_request)?;
-        self.journal.dispatch_attempt = Some(DispatchAttempt {
-            id: attempt_id,
-            http_operation_id: http_operation_id.into(),
-            parent_generation: parent_generation.into(),
-            parent_root: parent_root.into(),
-            request_path: request_path.clone(),
-            request_bytes: canonical_request.len(),
-            request_sha256: sha256_file(&request_path)?,
-            source_request_digest: source_request_digest.into(),
-            reserve_operation_id: None,
-            reserve_v2_dir: None,
-            reserve_v2_request_sha256: None,
-            reserve_v2_plan_sha256: None,
-            reserve_v2_source_sha256: None,
-            lifetime: None,
-            dispatch_generation: None,
-            dispatch_post_root: None,
-            no_send_release_started: false,
-            audited_charge: None,
-            settlement: None,
-            send_started: false,
-            committed_dispatch_transaction: None,
-            committed_dispatch_event: None,
-            committed_permit_sha256: None,
-            response_sha256: None,
-        });
-        self.save()?;
-        let authority = self.dispatch()?;
-        let status = self
-            .query_as(&authority)?
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            .ok_or("dispatch grain status absent")?
-            .to_owned();
-        if status == "0" {
-            self.check_not_cancelled()?;
-            self.transition_as(
-                &authority,
-                json!({"type":"attach","soft":false}),
-                "dispatch attach",
-                "agent app dispatch attach",
-                vec![],
-            )?;
-        } else if status != "1" {
-            return Err(format!(
-                "dispatch task status {status} requires reconciliation"
-            ));
-        }
-        self.check_not_cancelled()?;
-        self.mark_hold_as(
-            AuthoritySlot::Dispatch,
-            &authority,
-            &task.reserve,
-            &task.charge,
-        )?;
-        let payload =
-            format!("DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{source_request_digest}");
-        self.transition_as(
-            &authority,
-            json!({"type":"reserve","amount":task.reserve}),
-            "dispatch reserve",
-            &payload,
-            vec![],
-        )?;
-        let dispatch_state = self.query_as(&authority)?;
-        if dispatch_state
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            != Some("3")
-            || dispatch_state
-                .pointer("/grain/reserved")
-                .and_then(Value::as_str)
-                != Some(task.reserve.as_str())
-        {
-            return Err("confirmed dispatch reserve lacks exact signed reserved state".into());
-        }
-        let dispatch_generation = dispatch_state
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("dispatch generation absent after reserve")?
-            .to_owned();
-        let dispatch_post_root = dispatch_state
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("dispatch root absent after reserve")?
-            .to_owned();
-        let hold = self
-            .journal
-            .dispatch_hold
-            .as_ref()
-            .filter(|hold| hold.reserve_confirmed)
-            .ok_or("dispatch reserve has no exact confirmed native hold")?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve has no exact confirmed native anchor")?
-            .clone();
-        let reserve_path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let reserve_name = reserve_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = reserve_name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let reserve_operation_id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *reserve_path
-                != self
-                    .config
-                    .state_dir
-                    .join(format!("attempt-{reserve_operation_id:016}"))
-        {
-            return Err("dispatch reserve attempt path differs from retained source".into());
-        }
-        let reserve_index = anchor
-            .accepted_count
-            .parse::<u64>()
-            .ok()
-            .and_then(|count| count.checked_sub(1))
-            .ok_or("dispatch reserve receipt has no selected history index")?;
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_mut()
-            .ok_or("dispatch attempt disappeared")?;
-        attempt.reserve_operation_id = Some(reserve_operation_id);
-        attempt.dispatch_generation = Some(dispatch_generation.clone());
-        attempt.dispatch_post_root = Some(dispatch_post_root.clone());
-        self.save()?;
-        Ok(json!({
-            "type":"dispatch-reserved-v1",
-            "attemptId":attempt_id.to_string(),
-            "httpOperationId":http_operation_id,
-            "requestSha256":sha256_file(&request_path)?,
-            "sourceRequestDigest":source_request_digest,
-            "reserveOperationId":reserve_operation_id.to_string(),
-            "reserveIndex":reserve_index.to_string(),
-            "dispatchTask":task.task,
-            "dispatchSubject":task.subject,
-            "parentTask":self.config.task,
-            "parentGeneration":parent_generation,
-            "parentRoot":parent_root,
-            "dispatchGeneration":dispatch_generation,
-            "dispatchPostRoot":dispatch_post_root,
-            "reserve":task.reserve,
-            "charge":task.charge,
-            "reserveReceipt":anchor,
-        }))
-    }
-    /// Persist the one-shot external boundary before the physical host writes
-    /// to fd3. The host must already have inspected the exact committed Mini
-    /// permit; this marker does not inspect or mint that permit.
     fn dispatch_mark_send(
         &mut self,
         attempt_id: u64,
@@ -6031,15 +5795,18 @@ impl Runtime {
         if sha256_file(&attempt.request_path)? != request_sha256 {
             return Err("retained dispatch request bytes changed".into());
         }
-        if attempt.reserve_v2_dir.is_some() {
-            self.verified_dispatch_reserve_hold(
-                &attempt,
-                self.journal
-                    .dispatch_hold
-                    .as_ref()
-                    .ok_or("v2 reserve hold absent")?,
-            )?;
+        // Dispatch v1 (a reserve the SPK host's word could settle) is retired:
+        // a send is marked only on a v2 reserve whose custody re-verifies.
+        if attempt.reserve_v2_dir.is_none() {
+            return Err("dispatch attempt has no v2 reserve custody".into());
         }
+        self.verified_dispatch_reserve_hold(
+            &attempt,
+            self.journal
+                .dispatch_hold
+                .as_ref()
+                .ok_or("v2 reserve hold absent")?,
+        )?;
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
             || (!self.prompt_active && self.foreground_operation.is_none())
@@ -6608,61 +6375,6 @@ impl Runtime {
     /// A definite pre-send refusal releases this one purse at zero. Once the
     /// send marker exists, only a definite response or audited reconciliation
     /// may settle it; an old HTTP operation cannot obtain a second attempt.
-    fn dispatch_abort_no_send(&mut self, attempt_id: u64) -> Result<Value> {
-        if self.cancelled.load(Ordering::SeqCst)
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-        {
-            return Err("agent hard EOF requires audited dispatch reconciliation".into());
-        }
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_ref()
-            .ok_or("no dispatch attempt")?;
-        if attempt.id != attempt_id
-            || attempt.send_started
-            || self.journal.dispatch_pending.is_some()
-        {
-            return Err("dispatch may have crossed an external boundary".into());
-        }
-        if let Some(hold) = self.journal.dispatch_hold.clone() {
-            let authority = self.dispatch()?;
-            if hold.reserve_confirmed && hold.reserve_anchor.is_some() {
-                self.journal
-                    .dispatch_attempt
-                    .as_mut()
-                    .ok_or("dispatch attempt disappeared before release")?
-                    .no_send_release_started = true;
-                self.save()?;
-                self.transition_as(
-                    &authority,
-                    json!({"type":"settle","charge":"0"}),
-                    "dispatch release",
-                    "definite refusal before app send",
-                    vec![],
-                )?;
-            } else if hold.reserve_refused || hold.reserve_attempt.is_none() {
-                let current = self.query_as(&authority)?;
-                if current.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-                    || current.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-                    || current.get("targetRoot").and_then(Value::as_str)
-                        != Some(hold.before_target_root.as_str())
-                {
-                    return Err("unsubmitted dispatch reserve differs from held origin".into());
-                }
-                self.journal.dispatch_hold = None;
-                self.save()?;
-            } else {
-                return Err("dispatch reserve may have committed; exact lookup required".into());
-            }
-        } else if attempt.reserve_operation_id.is_some() {
-            return Err("dispatch reserve marker disappeared without settlement".into());
-        }
-        self.journal.dispatch_attempt = None;
-        self.save()?;
-        Ok(json!({"type":"dispatch-aborted-before-send-v1",
-            "attemptId":attempt_id.to_string(),"charge":"0"}))
-    }
     fn dispatch_rpc(&mut self, command: dispatch_custody::Command) -> Result<Value> {
         use dispatch_custody::Command as C;
         let attempt_id = |value: &str| -> Result<u64> {
@@ -6672,14 +6384,6 @@ impl Runtime {
                 .map_err(|_| "dispatch attempt ID exceeds u64".into())
         };
         match command {
-            C::Reserve {
-                http_operation_id,
-                source_request_digest,
-                canonical_request_hex,
-            } => {
-                let request = dispatch_custody::decode_hex(&canonical_request_hex)?;
-                self.dispatch_reserve(&request, &source_request_digest, &http_operation_id)
-            }
             C::ReserveV2 {
                 route_name,
                 forward_operation_id,
@@ -6777,33 +6481,6 @@ impl Runtime {
                 attempt_id: id,
                 response_sha256,
             } => self.dispatch_settle_definite(attempt_id(&id)?, &response_sha256),
-            C::AbortNoSend { attempt_id: id } => self.dispatch_abort_no_send(attempt_id(&id)?),
-            C::Inspect { attempt_id: id } => {
-                let id = attempt_id(&id)?;
-                let attempt = self
-                    .journal
-                    .dispatch_attempt
-                    .as_ref()
-                    .ok_or("no dispatch attempt")?;
-                if attempt.id != id {
-                    return Err("dispatch attempt ID differs".into());
-                }
-                let hold = self.journal.dispatch_hold.as_ref();
-                Ok(json!({"type":"dispatch-attempt-v1",
-                    "attemptId":id.to_string(),
-                    "httpOperationId":attempt.http_operation_id,
-                    "sourceRequestDigest":attempt.source_request_digest,
-                    "requestSha256":attempt.request_sha256,
-                    "parentGeneration":attempt.parent_generation,
-                    "reserveOperationId":attempt.reserve_operation_id.map(|n| n.to_string()),
-                    "reserveConfirmed":hold.is_some_and(|h| h.reserve_confirmed),
-                    "reserveReceipt":hold.and_then(|h| h.reserve_anchor.as_ref()),
-                    "sendStarted":attempt.send_started,
-                    "dispatchTransaction":attempt.committed_dispatch_transaction,
-                    "dispatchEvent":attempt.committed_dispatch_event,
-                    "permitSha256":attempt.committed_permit_sha256,
-                    "responseSha256":attempt.response_sha256}))
-            }
         }
     }
     fn answer_dispatch(&mut self, request: dispatch_custody::Request) {
@@ -6839,11 +6516,6 @@ impl Runtime {
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
-        Self::open_mode(config, config_path, None)
-    }
-    // The migration entrypoint never calls serve or any worker/provider action.
-    // Its only relaxed seam is cross-file transport validation before publication.
-    fn open_mode(config: Config, config_path: PathBuf, migration: Option<&Path>) -> Result<Self> {
         if !config_path.is_absolute() {
             return Err("controller config path must be absolute".into());
         }
@@ -6871,14 +6543,8 @@ impl Runtime {
         }
         let locked_state_dir = config.state_dir.clone();
         systemd_manager::initialize(&config, &config_path)?;
-        session_failure::ensure_publication_known(&config.state_dir)?;
-        let startup = config_migration::recover_startup(&config, &config_path)?;
-        let config: Config = if startup.is_some() {
-            serde_json::from_slice(&bounded_regular_file(&config_path, 262_144)?)
-                .map_err(|e| format!("controller config after migration recovery: {e}"))?
-        } else { config };
         if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
-        if migration.is_none() { validate(&config)?; }
+        validate(&config)?;
         let binding = json!({"config":config,"configPath":config_path});
         let path = config.state_dir.join("journal.json");
         let journal = if path.exists() {
@@ -6894,17 +6560,13 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
-            if let Some(request) = migration {
-                config_migration::check_stopped_open(&config, &config_path, &j, request)?;
-            } else { j.validate_workspace(&config)?; }
+            j.validate_workspace(&config)?;
             j
         } else {
-            if migration.is_some() { return Err("configuration migration requires an existing journal".into()); }
             let j = Journal::fresh(binding);
             atomic_json(&path, &j)?;
             j
         };
-        config_migration::activate_startup(&config.state_dir, startup)?;
         let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
@@ -6924,6 +6586,7 @@ impl Runtime {
             provider_control: Arc::new(Mutex::new(None)),
             provider_lease: None,
             prompt_active: false,
+            prompt_decision: None,
             foreground_operation: None,
             output: None,
             process_first_operation_id,
@@ -6932,10 +6595,10 @@ impl Runtime {
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
-        if migration.is_none() && (rt.journal.child.is_some()
+        if rt.journal.child.is_some()
             || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
-            || rt.journal.hard_reconnect_pending)
+            || rt.journal.hard_reconnect_pending
         {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
@@ -6943,8 +6606,6 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
     fn confirmed_publication_receipt(
@@ -7613,10 +7274,8 @@ impl Runtime {
         Ok(id)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
-        let output = Command::new(program)
-            .args(args)
-            .output()
-            .map_err(|e| format!("{}: {e}", program.display()))?;
+        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL)
+            .map_err(|e| deadline::describe(&program.display().to_string(), e))?;
         if !output.status.success() {
             return Err(format!(
                 "{} exited {}: {}",
@@ -7796,13 +7455,7 @@ impl Runtime {
         self.query_as(&a)
     }
     fn query_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_as_via(authority, None)
-    }
-    // Only the query-only topology receiver can construct this transport token.
-    // The shared bounded read path preserves this exact admitted socket on retries.
-    fn query_as_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        self.query_observation_via(authority, transport)
+        self.query_observation_as(authority)
     }
     fn query_policy(&mut self) -> Result<Value> {
         self.query_policy_observation()
@@ -9307,11 +8960,10 @@ impl Runtime {
                                 })
                         })
                 {
-                    let note = format!("metered provider request {attempt_id} retained a response without a valid Lean quote; held allowance needs reconciliation");
-                    if !self.journal.unresolved_external.contains(&note) {
-                        self.journal.unresolved_external.push(note);
-                        let _ = self.save();
-                    }
+                    // No free-text note: the attempt carries its decided class
+                    // and the exact retry (`reconcile provider audited`), and
+                    // the hold stays until a Host-admitted settle clears it.
+                    self.provider_await_host(attempt_id);
                 }
                 let not_sent = recorded.as_ref().ok().copied().flatten() == Some("0");
                 let acknowledged = reply.send(recorded.map(|_| ())).is_ok();
@@ -9447,6 +9099,9 @@ impl Runtime {
         if let Some(replay) = Self::provider_replay(&self.journal.provider_replays, &request)? {
             return Ok(replay);
         }
+        if let Some(gate) = &self.journal.provider_retry_gate {
+            gate.admits(&sha256_bytes(&request.exact_body)?, unix_ms())?;
+        }
         self.provider_prompt_budget(&task)?;
         provider_history::require_native_support(&profile)?;
         if self.journal.provider_replays.len() >= 16 {
@@ -9578,6 +9233,7 @@ impl Runtime {
             meter_report_sha256: None,
             metered_charge: None,
             route: route_record,
+            decision: None,
         });
         self.save()?;
         let authority = self.provider()?;
@@ -9697,14 +9353,13 @@ impl Runtime {
     /// admission remains authoritative; this check rejects incompatible bundles
     /// before a fresh request can reserve funds or reach a provider.
     fn provider_native_profile(&self) -> Result<Value> {
-        let output = Command::new(&self.config.mini)
+        let output = deadline::output(Command::new(&self.config.mini)
             .arg("profile")
             .arg("--host")
             .arg(&self.config.host)
             .arg("--config")
-            .arg(&self.config.host_config)
-            .output()
-            .map_err(|e| format!("provider metering profile: {e}"))?;
+            .arg(&self.config.host_config), deadline::NATIVE_CALL)
+            .map_err(|e| deadline::describe("provider metering profile", e))?;
         if !output.status.success() || output.stdout.len() > 16_384 {
             return Err("pinned Host provider metering profile unavailable".into());
         }
@@ -10003,8 +9658,8 @@ impl Runtime {
                         headers_valid,
                     )
                 }
-                provider::ProviderOutcome::NotSent { reason } => (
-                    format!("not-sent:{reason}"),
+                provider::ProviderOutcome::NotSent { kind, reason } => (
+                    format!("not-sent:{}:{reason}", kind.tag()),
                     Vec::new(),
                     None,
                     Some("0"),
@@ -10014,9 +9669,10 @@ impl Runtime {
                 ),
                 provider::ProviderOutcome::Uncertain {
                     partial_body,
+                    kind,
                     reason,
                 } => (
-                    format!("uncertain:{reason}"),
+                    format!("uncertain:{}:{reason}", kind.tag()),
                     partial_body,
                     None,
                     None,
@@ -10057,21 +9713,181 @@ impl Runtime {
             attempt.response_headers_bytes = Some(len);
             attempt.response_headers_sha256 = Some(digest);
         }
-        if charge.is_none() {
-            self.journal.unresolved_external.push(format!(
-                "provider request {attempt_id} may have reached upstream; exact response uncertain"
-            ));
+        if !headers_valid {
+            attempt.outcome = Some("uncertain:malformed:raw-header-metadata-mismatch".into());
+        }
+        let decision = provider_failure::classify(
+            attempt.send_started,
+            attempt.outcome.as_deref(),
+            attempt.response_status.filter(|_| headers_valid),
+        )
+        .map(|class| provider_failure::decide(class, &attempt.route.credential));
+        let request_sha256 = attempt.request_sha256.clone();
+        attempt.decision = decision.clone();
+        match &decision {
+            Some(d) if d.resend == provider_failure::Resend::NewReserveBackoff => {
+                let gate = provider_failure::RetryGate::after_failure(
+                    self.journal.provider_retry_gate.as_ref(),
+                    &request_sha256,
+                    unix_ms(),
+                    attempt_id,
+                );
+                self.journal.provider_retry_gate = Some(gate);
+            }
+            None if charge == Some("configured") => {
+                // A 200 reply ends this request's retry budget.
+                if self.journal.provider_retry_gate.as_ref().is_some_and(|g| g.request_sha256 == request_sha256) {
+                    self.journal.provider_retry_gate = None;
+                }
+            }
+            _ => {}
+        }
+        if let Some(d) = &decision {
+            eprintln!(
+                "provider attempt {attempt_id}: decided {} -> {:?}{}",
+                d.class.wire_name(),
+                d.state,
+                d.retry.as_deref().map(|r| format!("; retry: {r}")).unwrap_or_default()
+            );
         }
         if !headers_valid {
-            attempt.outcome = Some("uncertain:raw-header-metadata-mismatch".into());
-            self.journal.unresolved_external.push(format!(
-                "provider request {attempt_id} returned raw headers inconsistent with reported metadata"
-            ));
             self.save()?;
             return Err("provider response metadata differs from retained raw headers".into());
         }
         self.save()?;
         Ok(charge)
+    }
+    /// The Host did not admit a settle for this attempt's reply: record the
+    /// decided class in the awaiting-host state with the exact retry. The
+    /// hold and attempt stay; nothing else releases them.
+    fn provider_await_host(&mut self, attempt_id: u64) {
+        let Some(attempt) = self.journal.provider_attempt.as_mut() else { return };
+        if attempt.id != attempt_id {
+            return;
+        }
+        let mut decision = attempt.decision.clone().unwrap_or_else(|| {
+            provider_failure::decide(
+                provider_failure::FailureClass::Malformed {
+                    reason: "complete reply without a Host-admitted quote".into(),
+                },
+                &attempt.route.credential,
+            )
+        });
+        decision.state = provider_failure::DecidedState::SettleAwaitingHost;
+        decision.retry = Some(provider_failure::AUDITED_RETRY.to_owned());
+        attempt.decision = Some(decision);
+        let _ = self.save();
+    }
+    /// Read-only Host quote for a metered call that crossed the send boundary
+    /// with no complete reply. A crash before any outcome first retains an
+    /// empty response file as the exact evidence the frame carries.
+    fn provider_meter_class_inner(
+        &mut self,
+        attempt_id: u64,
+        class: &provider_failure::FailureClass,
+    ) -> Result<()> {
+        let task = self.config.provider_task.clone().ok_or("providerTask absent")?;
+        let mut attempt = self.journal.provider_attempt.clone().ok_or("provider attempt absent")?;
+        if attempt.id != attempt_id || !attempt.send_started || attempt.meter_report_path.is_some() {
+            return Err("provider class settle lacks the exact held attempt".into());
+        }
+        if attempt.outcome.is_none() {
+            if *class != provider_failure::FailureClass::CrashAfterSend {
+                return Err("only a crash leaves an after-send attempt without an outcome".into());
+            }
+            let path = self
+                .config
+                .state_dir
+                .join(format!("provider-{attempt_id:016}.controller-outcome"));
+            write_new(&path, b"")?;
+            attempt.outcome_sha256 = Some(sha256_file(&path)?);
+            attempt.outcome_path = Some(path);
+            attempt.outcome_bytes = Some(0);
+            attempt.outcome =
+                Some("uncertain:crash-after-send:no outcome journaled before restart".into());
+            self.journal.provider_attempt = Some(attempt.clone());
+            self.save()?;
+        }
+        let pin = attempt.metering_pin.clone().ok_or("provider tariff pin absent")?;
+        let hold = self.journal.provider_hold.clone().ok_or("provider signed hold absent")?;
+        if !hold.reserve_confirmed
+            || hold.reserve != provider_hold_amount(&task, &pin)
+            || pin.provider_resource_id != task.task
+            || pin.model != task.model
+        {
+            return Err("provider class settle differs from the signed hold".into());
+        }
+        let provider_authority = self.provider()?;
+        let signed_provider = self.query_as(&provider_authority)?;
+        if !provider_audit_coordinates(&signed_provider, &hold) {
+            return Err("signed provider state differs from the held reserve".into());
+        }
+        let request = retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            task.max_request_bytes,
+        )?;
+        let response_path = attempt.outcome_path.clone().ok_or("provider partial response absent")?;
+        let response = retained_exact(
+            &response_path,
+            attempt.outcome_bytes.ok_or("provider response byte count absent")?,
+            attempt.outcome_sha256.as_deref().ok_or("provider response digest absent")?,
+            task.max_response_bytes,
+        )?;
+        let socket = self.config.host_socket.clone().ok_or("metering requires pinned Host socket")?;
+        let id = self.next_id()?;
+        let metadata_path = self
+            .config
+            .state_dir
+            .join(format!("provider-meter-{id:016}.metadata.json"));
+        let metadata = provider_class_metadata(&pin, &hold.reserve, class.wire_name())?;
+        write_new(&metadata_path, metadata.to_string().as_bytes())?;
+        let directory = self.config.state_dir.join(format!("provider-meter-{id:016}"));
+        let cfg = &self.config;
+        self.command_output(
+            &cfg.mini,
+            &[
+                "meter",
+                "--host",
+                cfg.host.to_str().ok_or("host path UTF-8")?,
+                "--config",
+                cfg.host_config.to_str().ok_or("config path UTF-8")?,
+                "--socket",
+                socket.to_str().ok_or("Host socket path UTF-8")?,
+                "--metadata",
+                metadata_path.to_str().ok_or("meter metadata path UTF-8")?,
+                "--request",
+                attempt.request_path.to_str().ok_or("request path UTF-8")?,
+                "--response",
+                response_path.to_str().ok_or("response path UTF-8")?,
+                "--dir",
+                directory.to_str().ok_or("meter attempt path UTF-8")?,
+            ],
+        )
+        .map_err(|e| format!("provider class quote retained at {}: {e}", directory.display()))?;
+        let report_path = directory.join("meter.json");
+        let report_bytes = bounded_regular_file(&report_path, 16_384)?;
+        let report: Value = serde_json::from_slice(&report_bytes)
+            .map_err(|e| format!("provider class quote JSON: {e}"))?;
+        let charge = provider_quote_charge(
+            &report,
+            &pin,
+            &hold.reserve,
+            request.len(),
+            response.len(),
+            Some(class.wire_name()),
+        )?;
+        let mut current = self.journal.provider_attempt.clone().ok_or("provider attempt disappeared")?;
+        if current.id != attempt_id || current.meter_report_path.is_some() {
+            return Err("provider attempt changed during read-only class quote".into());
+        }
+        current.meter_report_path = Some(report_path);
+        current.meter_report_sha256 = Some(sha256_bytes(&report_bytes)?);
+        current.metered_charge = Some(charge);
+        self.validated_metered_charge(&current)?;
+        self.journal.provider_attempt = Some(current);
+        self.save()
     }
     fn provider_meter_quote(&mut self, attempt_id: u64) -> Result<()> {
         self.provider_meter_quote_inner(attempt_id, true)
@@ -10219,8 +10035,14 @@ impl Runtime {
         let report_bytes = bounded_regular_file(&report_path, 16_384)?;
         let report: Value = serde_json::from_slice(&report_bytes)
             .map_err(|e| format!("provider Lean quote JSON: {e}"))?;
-        let charge =
-            provider_quote_charge(&report, pin, &hold.reserve, request.len(), response.len())?;
+        let charge = provider_quote_charge(
+            &report,
+            pin,
+            &hold.reserve,
+            request.len(),
+            response.len(),
+            (status != 200).then_some("complete-non-200"),
+        )?;
         if require_live_lease {
             self.provider_lease_current(&lease)?;
         }
@@ -10291,27 +10113,41 @@ impl Runtime {
                 .ok_or("metered response digest absent")?,
             task.max_response_bytes,
         )?;
-        let headers = retained_exact(
-            attempt
-                .response_headers_path
-                .as_deref()
-                .ok_or("metered raw headers absent")?,
-            attempt
-                .response_headers_bytes
-                .ok_or("metered raw headers length absent")?,
-            attempt
-                .response_headers_sha256
-                .as_deref()
-                .ok_or("metered raw headers digest absent")?,
-            131_072,
-        )?;
-        let (status, content_type) = provider::response_headers(&headers)
-            .map_err(|e| format!("metered raw headers invalid: {e}"))?;
-        if Some(status) != attempt.response_status
-            || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
-        {
-            return Err("metered status or Content-Type differs from raw headers".into());
-        }
+        let (metadata, outcome_class) = if attempt.response_headers_path.is_some() {
+            let headers = retained_exact(
+                attempt
+                    .response_headers_path
+                    .as_deref()
+                    .ok_or("metered raw headers absent")?,
+                attempt
+                    .response_headers_bytes
+                    .ok_or("metered raw headers length absent")?,
+                attempt
+                    .response_headers_sha256
+                    .as_deref()
+                    .ok_or("metered raw headers digest absent")?,
+                131_072,
+            )?;
+            let (status, content_type) = provider::response_headers(&headers)
+                .map_err(|e| format!("metered raw headers invalid: {e}"))?;
+            if Some(status) != attempt.response_status
+                || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
+            {
+                return Err("metered status or Content-Type differs from raw headers".into());
+            }
+            let class = (status != 200).then_some("complete-non-200");
+            (provider_metering_metadata(pin, status, &content_type, reserve)?, class)
+        } else {
+            let class = provider_failure::classify(
+                attempt.send_started,
+                attempt.outcome.as_deref(),
+                None,
+            )
+            .filter(|class| class.after_send() && !class.has_complete_response())
+            .ok_or("metered attempt has neither raw headers nor an after-send class")?;
+            let name = class.wire_name();
+            (provider_class_metadata(pin, reserve, name)?, Some(name))
+        };
         let report_path = attempt
             .meter_report_path
             .as_ref()
@@ -10351,7 +10187,6 @@ impl Runtime {
                 "metered Host frame or copied inputs differ from the retained attempt".into(),
             );
         }
-        let metadata = provider_metering_metadata(pin, status, &content_type, reserve)?;
         if bounded_regular_file(&directory.join("metadata.json"), 4096)?
             != metadata.to_string().as_bytes()
             || bounded_regular_file(&directory.join("config.json"), 131_072)?
@@ -10361,7 +10196,14 @@ impl Runtime {
         }
         let report: Value = serde_json::from_slice(&report_bytes)
             .map_err(|e| format!("metered report JSON: {e}"))?;
-        let charge = provider_quote_charge(&report, pin, reserve, request.len(), response.len())?;
+        let charge = provider_quote_charge(
+            &report,
+            pin,
+            reserve,
+            request.len(),
+            response.len(),
+            outcome_class,
+        )?;
         if attempt.metered_charge.as_deref() != Some(charge.as_str()) {
             return Err("metered charge differs from source-authored retained report".into());
         }
@@ -14416,14 +14258,90 @@ impl Runtime {
             }
             self.enter_resident_prompt(id,sha)?;
         }
+        self.prompt_decision = None;
         let outcome=self.hermes_session_inner(invocation,input);
         if !invocation.is_prompt() { return outcome; }
         let retirement=self.retire_refused_provider_request();
-        match (outcome,retirement) {
+        let result = match (outcome,retirement) {
             (result,Ok(())) => result,
             (Ok(()),Err(error)) => Err(format!("provider refusal remains retained: {error}")),
             (Err(original),Err(error)) => Err(format!("{original}; provider refusal remains retained: {error}")),
+        };
+        // The record is written whatever the result; a write failure is
+        // reported with the prompt's own outcome and never replaces it.
+        let recorded = self.record_prompt_outcome(invocation);
+        if recorded.is_ok() {
+            self.reconcile_after_prompt_record();
         }
+        match (result, recorded) {
+            (result, Ok(())) => result,
+            (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
+            (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
+        }
+    }
+
+    /// A failed prompt pushes its note and trips the breaker, whose automatic
+    /// reconcile runs before the prompt's outcome record exists (R11 derives
+    /// the note only from that record), so the note would wait for an
+    /// operator. Once the record is durable, derive what it proves, for a
+    /// detached task with no child; a refusal is logged like the
+    /// post-disconnect one.
+    fn reconcile_after_prompt_record(&mut self) {
+        if self.journal.unresolved_external.is_empty()
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.connection != Connection::Detached
+        {
+            return;
+        }
+        if let Err(error) = self.automatic_reconcile() {
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                "automatic":true,"result":error}));
+            let _ = self.save();
+        }
+    }
+
+    fn decide_prompt(&mut self, id: u64, decision: prompt_outcome::Outcome) {
+        if let Some((current, slot)) = self.prompt_decision.as_mut() {
+            if *current == id { *slot = Some(decision); }
+        }
+    }
+
+    /// Exactly one typed record per allocated prompt (gr §4.3). A decision
+    /// the prompt reached stands only if the journal retains nothing for it;
+    /// otherwise the prompt is undecided and the record names the exact
+    /// admin retry. With no decision and nothing retained, the controller
+    /// refused after allocation and nothing can still commit.
+    fn record_prompt_outcome(&mut self, invocation: hermes_session_verify::Invocation<'_>) -> Result<()> {
+        let Some((id, decision)) = self.prompt_decision.take() else { return Ok(()) };
+        let retained = prompt_outcome::retry_for(&self.journal);
+        let outcome = match (decision, retained) {
+            (_, Some(retry)) => prompt_outcome::Outcome::Undecided {
+                retry,
+                detail: self.journal.unresolved_external.iter()
+                    .find(|note| note.starts_with(&format!("Hermes prompt {id}: ")))
+                    .cloned().unwrap_or_else(|| "custody retained at the prompt boundary".into()),
+            },
+            (Some(decision), None) => decision,
+            (None, None) => prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Controller,
+                reason: "the controller ended the prompt before a decision and retains no custody for it".into(),
+            },
+        };
+        let origin = invocation.resident_identity();
+        let session_id = self.journal.resident_prompt_origin.as_ref()
+            .filter(|o| o.prompt_operation_id == id).and_then(|o| o.session_id.clone())
+            .or_else(|| self.journal.hermes_session.as_ref().map(|s| s.id.clone()));
+        prompt_outcome::write(&self.config.state_dir, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(),
+            prompt_operation_id: id,
+            resident_prompt_id: origin.map(|(rid, _)| rid.to_owned()),
+            prompt_sha256: origin.map(|(_, sha)| sha.to_owned()),
+            session_id,
+            outcome,
+        })
     }
     fn hermes_session_inner(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
         let prompt = invocation.prompt().unwrap_or("");
@@ -14655,6 +14573,7 @@ impl Runtime {
         }
         let id = self.next_id()?;
         if invocation.is_prompt() {
+            self.prompt_decision = Some((id, None));
             self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
                 resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),
                     prompt_sha256:digest.into(),prompt_operation_id:id,session_id:None});
@@ -15013,6 +14932,10 @@ impl Runtime {
                 "settle",
                 &format!("hermes-acp setup failed exit:{exit}"),
             )?;
+            self.decide_prompt(id, prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Setup,
+                reason: format!("Hermes setup failed before prompt: {error}"),
+            });
             self.journal.settlement_due = None;
             self.journal.prompt_witness = None;
             self.save()?;
@@ -15050,6 +14973,28 @@ impl Runtime {
             "settle",
             &format!("hermes-acp exit:{exit}"),
         )?;
+        if invocation.is_prompt() {
+            if let Ok(value) = &outcome {
+                let decision = match hermes_outcome::failure(value) {
+                    Some(failure) => prompt_outcome::Outcome::Refused {
+                        stage: prompt_outcome::RefusalStage::TurnFailure,
+                        reason: failure.pointer("/data/reason").and_then(Value::as_str)
+                            .map(str::to_owned).unwrap_or_else(|| failure.to_string()),
+                    },
+                    None => {
+                        let replay = self.journal.provider_replays.iter()
+                            .rfind(|r| r.prompt_operation_id == id && r.status == 200);
+                        prompt_outcome::Outcome::Admitted {
+                            stop_reason: value["stopReason"].as_str().unwrap_or("").to_owned(),
+                            settled_charge: invocation.charge(&spec.charge).to_owned(),
+                            provider_response_sha256: replay.map(|r| r.response_sha256.clone()),
+                            provider_metered_charge: replay.and_then(|r| r.metered_charge.clone()),
+                        }
+                    }
+                };
+                self.decide_prompt(id, decision);
+            }
+        }
         self.journal.settlement_due = None;
         self.journal.prompt_witness = None;
         self.save()?;
@@ -16039,12 +15984,17 @@ impl Runtime {
         }
         self.retry_pending_slot(AuthoritySlot::Provider)?;
         if let Some(attempt) = &self.journal.provider_attempt {
-            if attempt.send_started && attempt.outcome.is_none() {
-                let note = format!("provider request {} crossed durable send boundary before controller restart; upstream result uncertain", attempt.id);
-                if !self.journal.unresolved_external.contains(&note) {
-                    self.journal.unresolved_external.push(note);
-                    self.save()?;
+            if attempt.send_started && attempt.outcome.is_none() && attempt.decision.is_none() {
+                let id = attempt.id;
+                let decision = provider_failure::decide(
+                    provider_failure::FailureClass::CrashAfterSend,
+                    &attempt.route.credential,
+                );
+                eprintln!("provider attempt {id}: decided crash-after-send; retry: {}", provider_failure::AUDITED_RETRY);
+                if let Some(attempt) = self.journal.provider_attempt.as_mut() {
+                    attempt.decision = Some(decision);
                 }
+                self.save()?;
             }
         }
         if self.journal.birth_pending.is_some() && self.journal.birth_operation.is_none() {
@@ -16335,9 +16285,6 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
-        if tool && legacy_custody_audit::zero_phase_active(self) {
-            return Err("legacy B44 audit requires its exact zero-charge settlement".into());
-        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -16580,15 +16527,29 @@ impl Runtime {
         } else {
             match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
                 MeteredAuditPath::ProvenNoSend => "0".to_owned(),
-                MeteredAuditPath::CompleteResponse => {
+                path @ (MeteredAuditPath::CompleteResponse | MeteredAuditPath::ClassSettle(_)) => {
                     if attempt.meter_report_path.is_none()
                         && attempt.meter_report_sha256.is_none()
                         && attempt.metered_charge.is_none()
                     {
                         // Audited recovery may run after the prompt lease ended. This
-                        // read-only native quote uses the exact retained response and
-                        // signed hold; it never authorizes another upstream send.
-                        self.provider_meter_quote_inner(attempt.id, false)?;
+                        // read-only native quote uses the exact retained response (or
+                        // the declared outcome class) and the signed hold; it never
+                        // authorizes another upstream send.
+                        let quoted = match &path {
+                            MeteredAuditPath::ClassSettle(class) => {
+                                self.provider_meter_class_inner(attempt.id, class)
+                            }
+                            _ => self.provider_meter_quote_inner(attempt.id, false),
+                        };
+                        if let Err(error) = quoted {
+                            self.provider_await_host(attempt.id);
+                            return Err(format!(
+                                "provider attempt {} settle awaits a Host that quotes it: {error}; hold kept; retry: {}",
+                                attempt.id,
+                                provider_failure::AUDITED_RETRY
+                            ));
+                        }
                         attempt = self
                             .journal
                             .provider_attempt
@@ -16603,6 +16564,7 @@ impl Runtime {
             let outcome = match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
                 MeteredAuditPath::ProvenNoSend => minidregg_inference_scheduler::core::Outcome::NotSent,
                 MeteredAuditPath::CompleteResponse => minidregg_inference_scheduler::core::Outcome::Ended,
+                MeteredAuditPath::ClassSettle(_) => minidregg_inference_scheduler::core::Outcome::Uncertain,
             };
             placement.finish(outcome)?;
         }
@@ -16622,6 +16584,7 @@ impl Runtime {
             "sendBoundaryDurable":attempt.send_started,
             "outcome":attempt.outcome,
             "auditedCharge":audited_charge,
+            "decision":attempt.decision,
             "meterReportPath":attempt.meter_report_path,
             "meterReportSha256":attempt.meter_report_sha256,
             "meteringPin":attempt.metering_pin,
@@ -16908,6 +16871,7 @@ impl Runtime {
             "result":match &result { Ok(()) => "recovered".to_owned(), Err(e) => e.clone() },
             "connection":self.journal.connection,
             "unresolvedExternal":self.journal.unresolved_external,
+            "providerDecision":self.journal.provider_attempt.as_ref().and_then(|a| a.decision.as_ref()),
         }));
         if let Err(error) = self.save() {
             eprintln!("grain-runtime: startup recovery journal: {error}");
@@ -16932,7 +16896,7 @@ impl Runtime {
             return Ok(());
         }
         let notes = self.journal.unresolved_external.clone();
-        if !notes.iter().all(|note| derivable_effect_note(note)) {
+        if !notes.iter().all(|note| derivable_effect_note(&self.config.state_dir, note)) {
             return Err("an external-effect note needs operator acknowledgement".into());
         }
         let network_none = self.config.commands.iter().all(|command| {
@@ -17294,7 +17258,7 @@ fn signal_group(pgid: i32, signal: i32) -> Result<()> {
 
 fn prove_controller_unit(task: &str) -> Result<()> {
     let unit = format!("mini-grain-controller@{task}.service");
-    let output = systemd_manager::controller_command(task)?
+    let output = deadline::output(systemd_manager::controller_command(task)?
         .args([
             "show",
             "-p",
@@ -17302,9 +17266,8 @@ fn prove_controller_unit(task: &str) -> Result<()> {
             "-p",
             "ActiveState",
             &unit,
-        ])
-        .output()
-        .map_err(|e| format!("controller service proof: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("controller service proof", e))?;
     if !output.status.success() {
         return Err("controller service is unavailable".into());
     }
@@ -17324,15 +17287,14 @@ fn prove_controller_unit(task: &str) -> Result<()> {
 
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
+    let output = deadline::output(systemd_manager::worker_command(unit)?
         .args([
             "kill",
             "--signal=SIGKILL",
             "--kill-whom=all",
             &name,
-        ])
-        .output()
-        .map_err(|e| format!("systemd worker kill: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd worker kill", e))?;
     if output.status.success() {
         return Ok(());
     }
@@ -17352,8 +17314,8 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
     let mut command = Command::new(&helper);
     command.arg(action).arg(state_dir).arg(unit);
     systemd_manager::gate_environment(unit, action, &mut command)?;
-    let output = command.output()
-        .map_err(|e| format!("launch gate {}: {e}", helper.display()))?;
+    let output = deadline::output(&mut command, deadline::LAUNCH_GATE)
+        .map_err(|e| deadline::describe(&format!("launch gate {}", helper.display()), e))?;
     if !output.status.success() {
         return Err(format!(
             "launch gate {action} refused for {unit}: {}",
@@ -17365,10 +17327,9 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
 
 fn unit_inactive(unit: &str) -> Result<bool> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
-        .args(["show", "-p", "ActiveState", "--value", &name])
-        .output()
-        .map_err(|e| format!("systemd unit observation: {e}"))?;
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ActiveState", "--value", &name]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd unit observation", e))?;
     if !output.status.success() {
         return Err("systemd unit observation failed".into());
     }
@@ -17383,9 +17344,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
     let name = format!("{unit}.service");
     let observe = || -> Result<String> {
         prove_controller_unit(task)?;
-        let output = systemd_manager::worker_command(unit)?
-            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name])
-            .output().map_err(|e| format!("worker cgroup observation: {e}"))?;
+        let output = deadline::output(systemd_manager::worker_command(unit)?
+            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name]), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("worker cgroup observation", e))?;
         if !output.status.success() || output.stdout.len() > 16384 {
             return Err("worker cgroup observation failed".into());
         }
@@ -17429,10 +17390,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
 /// unreaped until this count reaches zero, keeping its PGID unavailable for
 /// reuse while the controller signals it.
 fn group_has_live_member(pgid: i32) -> Result<bool> {
-    let output = Command::new("/bin/ps")
-        .args(["-axo", "pgid=,stat="])
-        .output()
-        .map_err(|e| format!("process table unavailable: {e}"))?;
+    let output = deadline::output(Command::new("/bin/ps")
+        .args(["-axo", "pgid=,stat="]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("process table unavailable", e))?;
     if !output.status.success() {
         return Err("process table inspection failed".into());
     }
@@ -17675,14 +17635,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
-        if let Err(error) = config_migration::ensure_process_current(&rt.config.state_dir)
-            .and_then(|()|session_failure::ensure_publication_known(&rt.config.state_dir)) {
-            if let Input::Admin(request) = next {
-                request.phase.store(2, Ordering::SeqCst);
-                let _ = request.reply.send(format!("error: {error}"));
-            } else { rt.emit(format!("error: {error}\n")); }
-            continue;
-        }
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
@@ -17745,15 +17697,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         .send("admin action expired before dispatch".into());
                     continue;
                 }
-                if let Some(path) = request.command.strip_prefix("config migrate ") {
-                    let result = rt.migrate_config(Path::new(path), false);
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
                 if let Some(sha)=request.command.strip_prefix("resident prepare ") {
                     let result=rt.prepare_resident_prompt(sha);
                     let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
@@ -17796,33 +17739,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let result = rt.deliver_resident_final(Path::new(path));
                     request.phase.store(2, Ordering::SeqCst);
                     let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("resident supersede-completion ") {
-                    let result = rt.supersede_unsupported_completion(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("session reconcile-failure ") {
-                    let result = rt.reconcile_session_failure(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("quiescence transport ") {
-                    let result = rt.inspect_quiescence_transport(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
                     continue;
                 }
                 if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
@@ -17880,8 +17796,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
-                    "reconcile tool legacy b44" => legacy_custody_audit::audit_b44(&mut rt),
-                    "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
@@ -18006,22 +17920,16 @@ fn main() -> ExitCode {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;
     }
+    if args.len() >= 2 && args[1] == "create" {
+        return match grain_create::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime create: {error}"); ExitCode::FAILURE }
+        };
+    }
     if args.len() >= 2 && args[1] == "controller-launch" {
         return match systemd_manager::launch_client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime controller-launch: {error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "controller-write-scopes" {
-        return match controller_write_scopes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "config-migrate" {
-        return match config_migration::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime config-migrate: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "resident-completion" {
@@ -18034,24 +17942,6 @@ fn main() -> ExitCode {
         return match resident_delivery::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime resident-delivery: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "resident-outcome" {
-        return match resident_outcomes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime resident-outcome: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "session-failure" {
-        return match session_failure::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "quiescence-transport" {
-        return match quiescence_transport::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime quiescence-transport: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "quiescence" {
@@ -18302,7 +18192,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -19494,7 +19384,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             max_output_tokens: Some(3),
         };
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-reported-usage",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-reported-usage",
             "providerResourceId":"7004", "route":"pool", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "promptTokens":"2",
@@ -19503,34 +19393,34 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "claim":"provider-reported usage under operator tariff; not invoice-verified"
         });
         assert_eq!(
-            provider_quote_charge(&report, &pin, "10", 20, 30).unwrap(),
+            provider_quote_charge(&report, &pin, "10", 20, 30, None).unwrap(),
             "7"
         );
         report["charge"] = json!("11");
         report["operation"]["charge"] = json!("11");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["charge"] = json!("7");
         report["operation"]["charge"] = json!("6");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["operation"]["charge"] = json!("7");
         report["tariffDigest"] = json!("124");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["tariffDigest"] = json!("123");
         report["responseBytes"] = json!("31");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["responseBytes"] = json!("30");
         report["promptTokens"] = json!("3");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["promptTokens"] = json!("2");
         report["completionTokens"] = json!("4");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["completionTokens"] = json!("3");
         // A quote for another route, or settling under another route, refuses.
         report["route"] = json!("user");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["route"] = json!("pool");
         report["operation"]["route"] = json!("user");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
     }
 
     #[test]
@@ -19549,20 +19439,20 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         };
         assert_eq!(provider_max_charge_bound(&pin, 1000, 1000).unwrap(), 4);
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-per-operation",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-per-operation",
             "providerResourceId":"7004", "route":"user", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "perOp":"4", "reserve":"4", "charge":"4",
             "operation":{"type":"settle","charge":"4","route":"user"},
             "claim":"per-operation fee under operator tariff; the provider bill is the key owner's"
         });
-        assert_eq!(provider_quote_charge(&report, &pin, "4", 20, 30).unwrap(), "4");
+        assert_eq!(provider_quote_charge(&report, &pin, "4", 20, 30, None).unwrap(), "4");
         report["promptTokens"] = json!("2");
-        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30, None).is_err());
         report.as_object_mut().unwrap().remove("promptTokens");
         report["charge"] = json!("3");
         report["operation"]["charge"] = json!("3");
-        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30, None).is_err());
         let signed = json!({"grain":{"route":"2"}});
         assert!(provider_signed_route(&signed, &pin)
             .unwrap_err()
@@ -19604,9 +19494,64 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             metered_audit_path(true, Some("received:200:application/json")).unwrap(),
             MeteredAuditPath::CompleteResponse
         );
-        assert!(metered_audit_path(true, None).is_err());
-        assert!(metered_audit_path(true, Some("uncertain:lost-reply")).is_err());
+        // An after-send unknown is never a zero charge and never a dead end:
+        // it is settled only by the Host's outcome-class quote.
+        use provider_failure::FailureClass;
+        assert_eq!(
+            metered_audit_path(true, None).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::CrashAfterSend)
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("uncertain:lost-reply")).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::TimeoutAfterSend)
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("uncertain:malformed:truncated provider reply")).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::Malformed { reason: "truncated provider reply".into() })
+        );
         assert!(metered_audit_path(false, Some("received:200:application/json")).is_err());
+        assert!(metered_audit_path(false, Some("uncertain:lost-reply")).is_err());
+    }
+
+    #[test]
+    fn provider_leg_quotes_follow_the_host_report() {
+        let pin = ProviderMeteringPin {
+            provider_resource_id: "7".into(), model: "m".into(), tariff_version: "1".into(),
+            tariff_digest: "9".into(), route: "pool".into(), per_op: "3".into(),
+            input_micro_per_million: "0".into(), output_micro_per_million: "0".into(),
+            max_input_tokens: Some(10), max_output_tokens: Some(10),
+        };
+        // The shape `Host/ProviderUsage.lean` `reportJson` answers.
+        let report = |(status, claim): (&str, &str), leg: &str, http: &str, charge: &str| json!({
+            "type":"minidregg-provider-metering-v2","status":status,"basis":"b","leg":leg,
+            "httpStatus":http,"providerResourceId":"7","route":"pool","model":"m",
+            "tariffVersion":"1","tariffDigest":"9","requestDigest":"1","responseDigest":"2",
+            "requestBytes":"20","responseBytes":"0","perOp":"3","reserve":"10","charge":charge,
+            "operation":{"type":"settle","charge":charge,"route":"pool"},"claim":claim});
+        // An undecided leg settles at the whole hold, with its leg named.
+        for (class, leg) in [("timeout-after-send", "timeout"), ("malformed", "truncated"), ("crash-after-send", "lost")] {
+            assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "10"), &pin, "10", 20, 0,
+                Some(class)).unwrap(), "10");
+            assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "3"), &pin, "10", 20, 0,
+                Some(class)).is_err());
+            let meta = provider_class_metadata(&pin, "10", class).unwrap();
+            assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some(leg), Some("0")));
+        }
+        assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "lost", "0", "10"), &pin, "10", 20, 0,
+            Some("malformed")).is_err());
+        // A complete refused reply settles at the route fee.
+        assert_eq!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "3"), &pin, "10", 20, 0,
+            Some("complete-non-200")).unwrap(), "3");
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "10"), &pin, "10", 20, 0,
+            Some("complete-non-200")).is_err());
+        // A complete 200 whose usage the Host could not read: the hold.
+        assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "complete", "200", "10"), &pin, "10", 20, 0,
+            None).unwrap(), "10");
+        // A refused-reply report is never accepted for a 200.
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "200", "3"), &pin, "10", 20, 0, None).is_err());
+        let meta = provider_metering_metadata(&pin, 409, "application/json", "10").unwrap();
+        assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some("complete"), Some("409")));
+        assert!(provider_class_metadata(&pin, "10", "complete-non-200").is_err());
     }
 
     #[test]
@@ -19689,7 +19634,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         let metadata = provider_metering_metadata(&pool, 200, "application/json", "50").unwrap();
         assert_eq!(
             metadata,
-            json!({"version":"3","providerResourceId":"7004","route":"pool","status":"200",
+            json!({"version":"4","providerResourceId":"7004","route":"pool","leg":"complete","status":"200",
                 "contentType":"application/json","reserve":"50"})
         );
         // The HERMES-KEYS task shape (fixed charge, opt-in metering) refuses.
@@ -19893,14 +19838,37 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
 
     #[test]
     fn derived_effect_acknowledgement_covers_only_accounted_channels() {
+        let state = std::env::temp_dir().join(format!("derivable-notes-{}", std::process::id()));
+        fs::create_dir_all(&state).unwrap();
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = state.as_path();
         for note in [
             "worker operation 12 stopped after controller restart; external effects need acknowledgement",
             "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
             "parent reserved operation may have external effects; explicit operator acknowledgement required",
-            "Hermes prompt 9: ACP stream closed",
         ] {
-            assert!(derivable_effect_note(note), "{note}");
+            assert!(derivable_effect_note(state, note), "{note}");
         }
+        // R11: a Hermes prompt note is derivable only through its typed record.
+        let note = "Hermes prompt 9: ACP stream closed";
+        assert!(!derivable_effect_note(state, note), "a prefix without a record is not evidence");
+        let record = |id: u64, admin: &[&str], operation: Option<u64>, detail: &str| prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: id, resident_prompt_id: None,
+            prompt_sha256: None, session_id: None,
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry { admin: admin.iter().map(|c| c.to_string()).collect(), operation },
+                detail: detail.into() } };
+        prompt_outcome::write(state, &record(9, &["reconcile parent audited", "reconcile effects"], None, note)).unwrap();
+        assert!(derivable_effect_note(state, note));
+        assert!(!derivable_effect_note(state, "Hermes prompt 9: a different failure"));
+        prompt_outcome::write(state, &record(10, &["reconcile provider audited", "reconcile effects"], None,
+            "Hermes prompt 10: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 10: x"), "provider custody is never waved through");
+        prompt_outcome::write(state, &record(11, &["recover", "reconcile effects"], Some(4), "Hermes prompt 11: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 11: x"), "a retained Mini attempt is never waved through");
+        prompt_outcome::write(state, &prompt_outcome::Record { outcome: prompt_outcome::Outcome::Refused {
+            stage: prompt_outcome::RefusalStage::TurnFailure, reason: "r".into() }, ..record(12, &["reconcile effects"], None, "") }).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 12: x"));
         for note in [
             "tool reserved operation may have external effects; explicit operator acknowledgement required",
             "delegated tool reservation fenced with uncertain external effects",
@@ -19909,8 +19877,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "parent confirmed reservation was externally settled; explicit effects acknowledgement required",
             "worker operation 12 stopped after controller restart; external effects need acknowledgement; and more",
         ] {
-            assert!(!derivable_effect_note(note), "{note}");
+            assert!(!derivable_effect_note(state, note), "{note}");
         }
+        fs::remove_dir_all(state).unwrap();
     }
 
     pub(super) fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {

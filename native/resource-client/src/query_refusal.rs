@@ -16,8 +16,8 @@ pub(crate) fn retain(
     config: &Path,
     frame: &[u8],
 ) -> Result<(), String> {
-    if frame.len() < 2 || frame.len() > super::transport::HOST_MAX_FRAME + 1 || frame[0] != 255 {
-        return Err("query refusal is not a bounded op 255 frame".into());
+    if frame.len() < 2 || frame.len() > super::transport::HOST_MAX_FRAME + 1 || !crate::is_outcome_frame(frame[0]) {
+        return Err("query refusal is not a bounded Host outcome frame (253 or 255)".into());
     }
     let attempt = destination
         .parent()

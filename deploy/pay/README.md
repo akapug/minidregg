@@ -12,21 +12,33 @@ The pay rail is described in PAY.md. This directory has what runs it on the box:
 The watcher keeps no ledger, and no cursor except the enrollment row's (P1b, gated by receipts). The ticks connect only through the observer
 workspace's retained attempts and the kernel's nullifiers.
 
-## The price and the address: one source
+## The price, the address and the network
 
-Ember's ruling (2026-10-04): enrollment costs **50 DREGG per node week**, paid to the Solana pubkey
-**`5N2uUG4TEwvM4acjWRpZ981CJa4p5e9RcuAYQvuUZLp6`** (a fresh devnet-quality key). Both live in
-exactly one file, `enrol-terms.json`, and `render-enrol` turns it into every consumer:
+Ember's ruling (2026-10-04): enrollment costs **50 DREGG per node week**. The price lives in exactly one
+file, `enrol-terms.json`.
+
+**The receiving address is a deployment parameter, never a literal in the repo.** At install time
+`mini-enrol-keygen` (deploy/door/infra/) makes a FRESH Ed25519 key with the candidate's own `mini keygen`:
+the seed stays in `/var/lib/mini-core/secret/enrol.key` (mini-core 0600, with a Solana CLI keypair copy
+`enrol-solana.json` for ember to move what it receives), and it prints the base58 address. `render-enrol`
+reads the public half; `mini pay book` signs it into the book (row 0, the tariff's `enrolIndex`); the
+door's join page shows it from the rendered pin.
+
+**The network is a switch.** `--network mainnet` uses the terms' DREGG mint. `--network devnet` has no
+DREGG mint and needs the devnet mint and token program given explicitly; nothing defaults silently. The
+RPC endpoints follow the same switch (step 4).
 
 ```
 python3 deploy/pay/render-enrol --out OUT --version N --control CAP \
-    --observer-capability C --enrol-capability E [--book-extra FILE]
+    --observer-capability C --enrol-capability E \
+    --enrol-address-file /var/lib/mini-core/secret/enrol.pub --network mainnet \
+    [--book-extra FILE] [--mint BASE58 --token-program BASE58]
 ```
 
 (`CAP` is genesis `factoryControllerCapability`, `C`/`E` are `payObserver.capability` / `.enrolCapability`
 of THIS genesis, `N` exceeds the installed tariff version.) It writes `book.json` and `tariff-on.json`
-(for `mini pay book`, below), `enrol.json` / `enrol-v2.json` (the friend's pin) and `watcher.env`. Nothing
-else in the repo states the address or the rate; `test-render-enrol.py` pins the integers.
+(for `mini pay book`, below), `enrol.json` / `enrol-v2.json` (the pins) and `watcher.env`.
+`test-render-enrol.py` pins the integers and refuses an address in the terms.
 
 **The exact integers.** The mint has 6 decimals (`decimals: 6`, READ `native/pay-watcher/README.md`) and
 `creditPerAtomic` is 1, so 50 DREGG is `weekPriceAtomic = 50000000` atomic units. The tariff's unit is the
@@ -91,7 +103,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
 
    ```
    mini pay book --dir EMBER-WS --source OUT/book.json       # row 0 = the receiving address; tariff N, enrolIndex null
-   mini pay address --dir FLOAT-WS                           # the enrollment float takes row 0 (prints "index 0 → 5N2u…")
+   mini pay address --dir FLOAT-WS                           # the enrollment float takes row 0 (prints "index 0 → " and the enrollment address)
    mini pay book --dir EMBER-WS --source OUT/tariff-on.json  # tariff N+1 names the enrollment index
    ```
 
@@ -110,28 +122,37 @@ tariff before any enrollment can be decided; it is not an operating source of th
    - Rows are appended at the view's `bookSize`.
    - `"tariff": null` changes only the book.
    - A tariff's version must increase.
-4. **`/etc/mini/pay/rpc.env`** (0600, `mini`):
+4. **`/etc/mini/pay/rpc.env`** (root 0600, read by systemd): the endpoints, which carry the API key.
+   The demo's provider is Helius; its key lives in ember's `~/.helius-key` and the infra lane installs
+   this file from it on the box. It is never in git, argv or a log.
 
    ```
-   PAY_RPC_ENDPOINTS=https://…?api-key=… https://…
+   # --network mainnet
+   PAY_RPC_ENDPOINTS=https://mainnet.helius-rpc.com/?api-key=KEY https://api.mainnet-beta.solana.com
+   # --network devnet
+   PAY_RPC_ENDPOINTS=https://devnet.helius-rpc.com/?api-key=KEY https://api.devnet.solana.com
    ```
 
-   Use two providers. The URLs never reach argv or a log.
+   The watcher requires every configured endpoint to agree (`minEndpoints` defaults to 2), so a second,
+   independent endpoint stands beside Helius; the public cluster endpoint is the default second. With one
+   endpoint only, `PAY_MIN_ENDPOINTS=1` in `watcher.env` is an explicit weakening (one provider's word
+   decides what is final).
 5. **`/etc/mini/pay/watcher.env`:** `render-enrol` writes it (installed with
    `mini-config install pay-watcher-env`). The enrollment variables are all or none:
 
    ```
    PAY_OBSERVER_WS=/var/lib/mini/pay/observer
    PAY_OBSERVER_CAPABILITY=C                 # genesis payObserver.capability
-   PAY_ENROL_INDEX=0                         # from enrol-terms.json (PAY §11: the enrollment row)
-   PAY_JOURNAL_FLOOR=1000000                 # from enrol-terms.json, atomic units
+   PAY_WATCH_ENROL=yes                       # watch the enrollment row (PAY §11)
    PAY_ENROL_CAPABILITY=E                    # genesis payObserver.enrolCapability (C_enrol)
    PAY_OPERATOR_SOCKET=/var/lib/mini/store/node/operator/mini.sock
    ```
 
    (`MINI`, `PAY_WATCHER` and `PAY_STATE` are the unit's, set from the candidate; they do not go here.)
-   The file holds neither the address nor the rate: the tick reads both from the Host's signed pay view,
-   i.e. from what step 3 installed.
+   The file holds neither the address, the rate, the enrollment row nor the journal floor: the tick
+   reads all four from the Host's signed pay view (`mini pay watch-config --enrol tariff`), i.e. from
+   what step 3 installed. A floor taken from an operator variable could drift from the tariff's and
+   skip real enrollments for good, so `PAY_ENROL_INDEX`/`PAY_JOURNAL_FLOOR` are refused by name.
 
    **Self-enrollment needs the Host's operator socket.** Ops 117-120 (the self-enrollment plan,
    assembly, submit and lookup) are admitted only on an owner-private operator socket, never on the
@@ -152,7 +173,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
 6. **Install the units:**
 
    ```
-   install -m 755 mini-pay-watcher /opt/mini/bin/
+   install -m 755 mini-pay-watcher /usr/local/lib/mini/
    install -m 644 mini-pay-watcher.service mini-pay-watcher.timer /etc/systemd/system/
    systemctl daemon-reload && systemctl enable --now mini-pay-watcher.timer
    ```
@@ -163,6 +184,11 @@ tariff before any enrollment can be decided; it is not an operating source of th
    watcher events, observations, tip, and cursor transition. A tick awaiting an exact
    observer decision stays in `tick/pending.json`; it is retained before the cursor advances.
    Existing `journal/YYYY-MM-DD.jsonl` files are historical and remain untouched.
+
+   A pending tick the observer can never settle stalls every later payment. After reading why
+   (`tick/pending.json`, the observer workspace's last attempt), move it aside with
+   `mini-pay-watcher --quarantine-tick ID REASON...`: it lands whole in `tick/quarantine/ID.json`
+   and the next tick re-reads its unreceipted transfers at a fresh tip (native/pay-watcher/README.md).
 
    To inspect retained events (including an unresolved pending tick):
 
@@ -188,8 +214,8 @@ tariff before any enrollment can be decided; it is not an operating source of th
   | `confirmed` | Credited. Each record gets a receipt, `pay/receipts/SIGNATURE.ADDRESS` → the attempt. |
   | `stalePay` / `staleAuthority` | An assignment or tariff change landed after the read. Re-read and re-sign once. |
   | `tickTooSoon` / `tipBehindClock` | Wait for the next tick. |
-  | `alreadyConsumed` at a tip equal to the clock | That tip is already reported. Wait. |
-  | `alreadyConsumed` at a newer tip, or a per-observation refusal | Probe the records one per report (below). |
+  | `alreadyConsumed` while the clock is at the tip (in the view read before the submit, or in a view read after the refusal and retained as `after-refusal/`) | That tip is already reported, possibly by another report. Wait. |
+  | `alreadyConsumed` with the clock behind the tip in both views, or a per-observation refusal | Probe the records one per report (below). |
   | anything else | Stop: exit 3 (refused) or 4 (undecided). |
 
   - **Probing.** A refused report consumes nothing, so the client submits the records one per
@@ -223,7 +249,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   |---|---|
   | `confirmed` | Decided (enrolled, renewed or journalled). Receipt `pay/receipts/SIGNATURE.ADDRESS` → the attempt; the enrollment cursor may pass it. |
   | `alreadyConsumed` at a newer tip than the clock | Decided before (`already-decided`). Receipt. Next record at the same tip. |
-  | `alreadyConsumed` at the clock's tip, `tipBehindClock` | Wait for the next tip. |
+  | `alreadyConsumed` with the clock at the tip (either view, as above), `tipBehindClock` | Wait for the next tip. |
   | `stalePay` / `staleAuthority` | Re-read and re-sign once. |
   | `verifier:…` (the native verifier failed) | Nothing decided or consumed: wait, exit 4, retry next tick. |
   | `decision:…`, `keyTaken`, `allocation`, … (refused, nothing consumed) | Quarantined, no receipt (read again next tick). Next record. |

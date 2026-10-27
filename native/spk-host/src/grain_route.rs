@@ -511,6 +511,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         check_retained_policy(&p, "4601", &d, &req).unwrap();
         req.export_capture = true;

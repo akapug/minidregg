@@ -1,8 +1,9 @@
 //! Bounded Unix-only HTTP entrance for one participant credential custodian.
 //!
 //! Transport tokens authenticate use of that custodian; they are not Mini
-//! resource authority. The current public binary serves an unavailable
-//! response; the resident signer/permit path is staged separately.
+//! resource authority. The resident serves every route of its grain through
+//! `serve_dynamic_with_aux`; each request is authored, signed and admitted by
+//! Mini before fd 3 delivery (`dispatch_delivery`).
 
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
@@ -44,7 +45,6 @@ pub(crate) enum Method {
 }
 
 impl Method {
-    #[allow(dead_code)] // Consumed by the reviewed resident Mini HTTP caller.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
@@ -77,7 +77,6 @@ impl Method {
 pub(crate) struct ReceivedRequest {
     response_stream: Option<UnixStream>,
     pub method: Method,
-    #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
     pub path_and_query: String,
     pub ordinary_headers: Vec<(String, String)>,
     /// `x-mini-export-capture`: entrance-level capture intent. It is kept
@@ -108,21 +107,20 @@ pub(crate) enum EntranceKind {
 pub(crate) struct CustodianPolicy {
     /// The one participant's configured HTTPS origin. It is not HTTP input.
     pub expected_host: String,
-    #[allow(dead_code)] // Becomes Mini authoring input only after its native route exists.
     pub fixed_app: String,
-    #[allow(dead_code)]
     pub fixed_subject: String,
-    #[allow(dead_code)]
     pub fixed_session: String,
     /// Bound to the Mini session, never inferred from the bearer or cookie.
     pub fixed_session_kind: EntranceKind,
     pub export_capture: bool,
     pub export_capture_path: Option<String>,
-    #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
     pub bootstrap_token_sha256: [u8; 32],
     pub api_token_sha256: [u8; 32],
+    /// The TLS edge's group (Caddy), admitted to `http.sock` beside this
+    /// operator uid. Absent (the default): only the operator uid connects.
+    pub edge_gid: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -142,6 +140,8 @@ struct PolicyFile {
     browser_token_sha256: String,
     bootstrap_token_sha256: String,
     api_token_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edge_gid: Option<String>,
 }
 
 fn canonical_nat(value: &str) -> bool {
@@ -259,6 +259,15 @@ impl CustodianPolicy {
         {
             return Err(refuse("custodian origin or fixed Mini coordinate refused"));
         }
+        // A system group only by number, never root's group.
+        let edge_gid = match parsed.edge_gid.as_deref() {
+            None => None,
+            Some(gid) if canonical_nat(gid) && gid != "0" => Some(
+                gid.parse::<u32>()
+                    .map_err(|_| refuse("custodian edge gid refused"))?,
+            ),
+            Some(_) => return Err(refuse("custodian edge gid refused")),
+        };
         Ok(Self {
             expected_host: parsed.expected_host,
             fixed_app: parsed.fixed_app,
@@ -275,6 +284,7 @@ impl CustodianPolicy {
             browser_token_sha256: hex_digest(&parsed.browser_token_sha256)?,
             bootstrap_token_sha256: hex_digest(&parsed.bootstrap_token_sha256)?,
             api_token_sha256: hex_digest(&parsed.api_token_sha256)?,
+            edge_gid,
         })
     }
 }
@@ -366,6 +376,7 @@ fn initialize_custodian_policy(
         browser_token_sha256: digest(&browser),
         bootstrap_token_sha256: digest(&bootstrap),
         api_token_sha256: digest(&api),
+        edge_gid: None,
     };
     write_private(directory, "browser.token", browser.as_bytes())?;
     write_private(directory, "bootstrap.token", bootstrap.as_bytes())?;
@@ -932,7 +943,10 @@ fn write_response_bounded(stream: &UnixStream, mut bytes: &[u8]) -> io::Result<(
     Ok(())
 }
 fn dispatch_error_response(method: Method, error: &io::Error) -> Vec<u8> {
-    if error.kind() == io::ErrorKind::WouldBlock {
+    if let Some(outcome) = crate::dispatch_fence::DispatchOutcome::of(error) {
+        eprintln!("spk-host: {outcome}");
+        outcome.http_response(method == Method::Head)
+    } else if error.kind() == io::ErrorKind::WouldBlock {
         admission_response(method, "busy")
     } else if error.kind() == io::ErrorKind::Interrupted {
         admission_response(method, "uncertain")
@@ -1031,6 +1045,7 @@ impl PrivateHttpEntrance {
         let mut served: HashMap<String, u64> = HashMap::new();
         let mut clock = 0_u64;
         let mut next_route = 0_usize;
+        let mut retired_auxiliary = std::collections::HashSet::<usize>::new();
         loop {
             if entrances.len() > crate::resident_route_control::MAX_ROUTES {
                 return Err(refuse("resident route limit reached"));
@@ -1045,12 +1060,13 @@ impl PrivateHttpEntrance {
                     revents: 0,
                 })
                 .collect();
-            for fd in auxiliary_fds {
+            for (index, fd) in auxiliary_fds.iter().enumerate() {
                 if *fd < 0 || polls.iter().any(|poll| poll.fd == *fd) {
                     return Err(refuse("resident auxiliary fd refused"));
                 }
                 polls.push(libc::pollfd {
-                    fd: *fd,
+                    // poll(2) ignores a negative fd: a retired slot keeps its index.
+                    fd: if retired_auxiliary.contains(&index) { -1 } else { *fd },
                     events: libc::POLLIN,
                     revents: 0,
                 });
@@ -1059,10 +1075,17 @@ impl PrivateHttpEntrance {
             // while they exist, and block normally when the app is idle.
             let (promoted, expired) = promote_waiting(&admission, &mut waiting, Instant::now())?;
             for (connection, guard) in promoted {
-                spawn_reader(connection, guard)?;
+                // A reader that cannot start fails its own request (the
+                // connection closes, its admission slot is released); the
+                // generation keeps serving.
+                if let Err(error) = spawn_reader(connection, guard) {
+                    eprintln!("spk-host: HTTP reader not started: {error}");
+                }
             }
             for stream in expired {
-                refuse_busy(stream)?;
+                if let Err(error) = refuse_busy(stream) {
+                    eprintln!("spk-host: busy refusal not started: {error}");
+                }
             }
             let active = admission
                 .lock()
@@ -1078,7 +1101,14 @@ impl PrivateHttpEntrance {
             let _ = poll_entrances(&mut polls, timeout)?;
             for (index, auxiliary) in polls.iter().skip(prior_count).enumerate() {
                 if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    return Err(refuse("resident auxiliary poll error"));
+                    // The owner decides: its handler ends the generation (app
+                    // exit) or answers; an answered fd still in error is
+                    // retired from the poll set, loudly, instead of ending
+                    // every member's grain.
+                    let _ = dispatch(Err(index), &mut entrances)?;
+                    eprintln!("spk-host: resident auxiliary fd {index} in error; retired from polling");
+                    retired_auxiliary.insert(index);
+                    continue;
                 }
                 if auxiliary.revents & libc::POLLIN != 0 {
                     let _ = dispatch(Err(index), &mut entrances)?;
@@ -1086,18 +1116,31 @@ impl PrivateHttpEntrance {
             }
             // Rotate listener acceptance, then select queued work by principal's
             // last service turn. Multiple routes do not buy a principal priority.
+            let mut accept_failed = false;
             for offset in 0..prior_count {
                 let index = (next_route + offset) % prior_count;
                 let poll = &polls[index];
                 if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    return Err(refuse("resident entrance poll error"));
+                    eprintln!("spk-host: resident entrance {index} poll error; skipped this turn");
+                    accept_failed = true;
+                    continue;
                 }
                 if poll.revents & libc::POLLIN == 0 {
                     continue;
                 }
                 let entrance = &entrances[index];
-                let (stream, _) = entrance.listener.accept()?;
-                if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) {
+                // EMFILE, ENFILE, ENOBUFS or an aborted connection fails that
+                // one connection (it stays in the backlog or is gone), never
+                // the generation.
+                let stream = match entrance.listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) => {
+                        eprintln!("spk-host: resident entrance {index} accept failed: {error}");
+                        accept_failed = true;
+                        continue;
+                    }
+                };
+                if !peer_admitted(&stream, &entrance.policy) {
                     continue;
                 }
                 let connection = WaitingConnection {
@@ -1108,10 +1151,23 @@ impl PrivateHttpEntrance {
                     accepted_at: Instant::now(),
                 };
                 match admit_or_wait(&admission, &mut waiting, connection)? {
-                    Ok(Some((connection, guard))) => spawn_reader(connection, guard)?,
+                    Ok(Some((connection, guard))) => {
+                        if let Err(error) = spawn_reader(connection, guard) {
+                            eprintln!("spk-host: HTTP reader not started: {error}");
+                        }
+                    }
                     Ok(None) => {}
-                    Err(stream) => refuse_busy(stream)?,
+                    Err(stream) => {
+                        if let Err(error) = refuse_busy(stream) {
+                            eprintln!("spk-host: busy refusal not started: {error}");
+                        }
+                    }
                 }
+            }
+            if accept_failed {
+                // A listener that stays readable while accept fails (EMFILE)
+                // must not spin the dispatch thread.
+                std::thread::sleep(Duration::from_millis(50));
             }
             next_route = (next_route + 1) % entrances.len();
             pending.extend(receiver.try_iter());
@@ -1137,12 +1193,21 @@ impl PrivateHttpEntrance {
                 };
                 let stream = queued.stream;
                 let guard = queued._guard;
-                std::thread::Builder::new()
+                let fallback = stream.try_clone();
+                let spawned = std::thread::Builder::new()
                     .name("mini-spk-http-response".into())
                     .spawn(move || {
                         let _ = write_response_bounded(&stream, &response);
                         drop(guard);
-                    })?;
+                    });
+                if let Err(error) = spawned {
+                    // The response was moved into the failed closure; close
+                    // the connection rather than end the generation.
+                    eprintln!("spk-host: HTTP response writer not started: {error}");
+                    if let Ok(stream) = fallback {
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
+                    }
+                }
             }
         }
     }
@@ -1182,7 +1247,7 @@ impl PrivateHttpEntrance {
             Ok(old) => {
                 if !old.file_type().is_socket()
                     || old.uid() != unsafe { libc::geteuid() }
-                    || old.permissions().mode() & 0o777 != 0o600
+                    || ![0o600, socket_mode(&policy)].contains(&(old.permissions().mode() & 0o777))
                     || old.nlink() != 1
                 {
                     return Err(refuse("custodian HTTP stale socket identity drift"));
@@ -1207,8 +1272,16 @@ impl PrivateHttpEntrance {
         }
         let listener = UnixListener::bind(&socket)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+        if let Some(edge) = policy.edge_gid {
+            // Group first, then the group bits: never group-open to another group.
+            std::os::unix::fs::lchown(&socket, None, Some(edge))?;
+            fs::set_permissions(&socket, fs::Permissions::from_mode(socket_mode(&policy)))?;
+        }
         let meta = fs::symlink_metadata(&socket)?;
-        if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
+        if !meta.file_type().is_socket()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || policy.edge_gid.is_some_and(|edge| meta.gid() != edge)
+        {
             return Err(refuse("custodian HTTP socket identity drift"));
         }
         Ok(Self {
@@ -1219,26 +1292,6 @@ impl PrivateHttpEntrance {
             _lock: lock,
             policy,
         })
-    }
-
-    pub fn serve_unavailable(&self) -> io::Result<()> {
-        self.serve_resident(|request, _, _| Ok(unavailable_response(request.method)))
-    }
-
-    /// The caller owns the sole resident RpcDriver and fixed participant
-    /// signer. This entrance authenticates transport before invoking it; the
-    /// callback must still obtain a fresh Mini permit for every request.
-    pub(crate) fn serve_resident(
-        &self,
-        mut dispatch: impl FnMut(ReceivedRequest, EntranceKind, &CustodianPolicy) -> io::Result<Vec<u8>>,
-    ) -> io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept()?;
-            if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
-                let _ =
-                    handle_stream_with(stream, &self.policy, self.socket.parent(), &mut dispatch);
-            }
-        }
     }
 }
 
@@ -1252,6 +1305,49 @@ fn poll_entrances(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<boo
         return Err(error);
     }
     Ok(ready > 0)
+}
+
+/// The connecting peer is this operator, or a member of the configured edge
+/// group (W6: the TLS edge connects as its own uid with that group).
+fn peer_admitted(stream: &UnixStream, policy: &CustodianPolicy) -> bool {
+    match peer_credential(stream) {
+        Some((uid, gid)) => edge_admits(uid, gid, unsafe { libc::geteuid() }, policy.edge_gid),
+        None => false,
+    }
+}
+
+fn edge_admits(uid: u32, gid: u32, operator: u32, edge_gid: Option<u32>) -> bool {
+    uid == operator || edge_gid.is_some_and(|edge| gid == edge)
+}
+
+/// The socket mode a route's `http.sock` carries: owner-only by default,
+/// group read/write when an edge group is configured.
+fn socket_mode(policy: &CustodianPolicy) -> u32 {
+    if policy.edge_gid.is_some() {
+        0o660
+    } else {
+        0o600
+    }
+}
+
+fn peer_credential(stream: &UnixStream) -> Option<(u32, u32)> {
+    let mut credential = unsafe { std::mem::zeroed::<libc::ucred>() };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    if unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credential as *mut libc::ucred).cast(),
+            &mut length,
+        )
+    } != 0
+        || length as usize != std::mem::size_of::<libc::ucred>()
+    {
+        None
+    } else {
+        Some((credential.uid, credential.gid))
+    }
 }
 
 pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
@@ -1448,7 +1544,6 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    include!("http_entrance_gitweb_probe.rs");
 
     #[test]
     fn admission_bounds_principals_and_apps_independently() {
@@ -1884,6 +1979,32 @@ mod tests {
             browser_token_sha256: hash("browser-token-abcdefghijklmnopqrstuvwxyz"),
             bootstrap_token_sha256: hash("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),
             api_token_sha256: hash("api-token-abcdefghijklmnopqrstuvwxyz123"),
+            edge_gid: None,
+        }
+    }
+
+    /// W6: the edge group is admitted only when configured; the default
+    /// admits the operator uid alone and keeps the socket owner-only.
+    #[test]
+    fn route_socket_admits_the_configured_edge_group_only() {
+        assert!(edge_admits(1000, 1000, 1000, None));
+        assert!(!edge_admits(997, 997, 1000, None));
+        assert!(edge_admits(997, 997, 1000, Some(997)));
+        assert!(!edge_admits(997, 998, 1000, Some(997)));
+        let mut configured = policy();
+        assert_eq!(socket_mode(&configured), 0o600);
+        configured.edge_gid = Some(997);
+        assert_eq!(socket_mode(&configured), 0o660);
+        let file = |edge: &str| format!(
+            "{{\"protocol\":\"mini-spk-custodian-v1\",\"expectedHost\":\"calc.example.test\",\"fixedApp\":\"1\",\"fixedSubject\":\"2\",\"fixedSession\":\"3\",\"fixedSessionKind\":\"web\",\"fixedTicket\":\"4\",\"browserTokenSha256\":\"{h}\",\"bootstrapTokenSha256\":\"{h}\",\"apiTokenSha256\":\"{h}\"{edge}}}",
+            h = "a".repeat(64));
+        assert_eq!(CustodianPolicy::from_bytes(file("").as_bytes()).unwrap().edge_gid, None);
+        assert_eq!(
+            CustodianPolicy::from_bytes(file(",\"edgeGid\":\"997\"").as_bytes()).unwrap().edge_gid,
+            Some(997)
+        );
+        for bad in [",\"edgeGid\":\"0\"", ",\"edgeGid\":\"07\"", ",\"edgeGid\":\"x\"", ",\"edgeGid\":\"4294967296\""] {
+            assert!(CustodianPolicy::from_bytes(file(bad).as_bytes()).is_err(), "{bad}");
         }
     }
 

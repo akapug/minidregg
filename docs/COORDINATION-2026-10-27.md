@@ -1,0 +1,160 @@
+# How minidregg is developed (present state, 2026-10-27)
+
+The one description of how this project is coordinated. It is rewritten whole when the state
+changes, never appended to. It replaces the process parts of `CLAUDE.md`, `AGENTS.md`,
+`docs/PIPELINE-HBOX.md` and the plan's §4 (`docs/DEMO-PREFIX-2026-10-26.md`), and the dated
+orientation documents named in §7. Ember's ruling that it answers (2026-10-27): "We've been
+accepting various limitations and restrictions as if they are a fact of life … please stop
+accepting these things. We need to pursue development rapidity and product excellence and that
+includes taking a critical eye to the 'gates' we are trying to achieve."
+
+## 1. What we optimise
+
+**Development rapidity and product excellence.** The one gate that matters to anyone outside this
+tree is the demo's public-opening contract (plan §1: advertised surfaces work, tenancy holds,
+uncertain effects recover safely, performance is measured and published). Everything else in the
+apparatus is instrumentation: it exists to tell us something true, faster than a stranger would,
+and it is judged by that. An instrument that costs a commit per landing, or an hour of a lane's
+day, or that goes red on ordinary edits, is measured against what it has ever caught; when the
+answer is "its own bookkeeping", it goes.
+
+**Performance is published, never a gate** (ember, 2026-10-27). Numbers go on the join page and in
+the plan; they never block a rehearsal or the opening. One consequence is already measured: the
+journey's 57 s `growth` outlier on hbox was 80 client fsyncs inside a co-tenant I/O episode on an
+HDD mirror with no SLOG (disks 69 % busy, load 22); the same write on the demo box's SSD is p50
+1.35 s, max 1.56 s. hbox's `/tank` measures disk contention, not Mini (§5).
+
+The measured shape we are leaving (`docs/review/2026-10-26-history/HISTORY.md` §4): 61 % of 222
+lane-hours spent waiting; 0.86 commits per lane-hour; 89 gate-bookkeeping commits on one day;
+"delete" the most expensive move a lane could make; the deploy that was batched behind a composed
+gate that never went green. The rule that follows: **the gate never grows ahead of the surfaces**,
+and nothing is added to the apparatus without naming the landing cost it adds.
+
+## 2. The gates, triaged
+
+Every gate, pin, census and ledger in the tree, with what it protects, what it has cost per landing
+(October's history), and the verdict. KEEP = strong, end-to-end, cheap. FOLD = merged into one
+cheaper check or moved to the nightly. DELETE = bookkeeping that measured itself. The DELETE and
+FOLD rows marked ✓ are executed in this document's commit series; the Lean axiom pins are KEEP.
+
+| instrument | protects | cost per landing (Oct) | verdict |
+|---|---|---|---|
+| the demo journey rows (`scripts/pipeline/journey-rows`, `required-rows` names; J0–J8, m3/m4, hermes, jpay, exchange, hostupgrade…) | the opening contract's part 1, on a fresh Store | one standing run (~15 min) | **KEEP**: the only gate the public feels |
+| `jdeploy3` + `ship.sh --rehearsal` (dregg-infra) | the candidate that ships ran its journey, world and composed scenario; reds named | one run per candidate | **KEEP**; growth/perf/births rows non-blocking (plan §1.4) |
+| the workspace membership gate (L9) | every crate builds or is excluded by name; ran-from-passed | seconds | **KEEP** |
+| `lake build` umbrella / `build-native-host.sh` | the tree elaborates; the Host links | the build itself | **KEEP** (it is the work) |
+| `host-operations` registry check | request bytes ↔ Host receivers ↔ routes | seconds | **KEEP** |
+| `import-boundary` (`check-import-boundary.sh`) | `Theory/`, `Selvage/` candidate-independent | seconds | **KEEP** |
+| wire-byte controls: `fn-wire` (pinned BLAKE3 grammar), codec identity (`codec-shapes-regen.py`; 4 `codec!` bumps Oct 16–17), `prover-glue`, `drift`, `native-transcripts`, `zkml-suite-artifact`, `kernel-transport` | persisted bytes and emitted twins never move silently | a re-emit commit only when a persisted identity really changes | **KEEP**: that commit is the honest cost of a wire change |
+| Assurance axiom pins (`#guard_msgs … #print axioms`, 4,257) | a proof's axiom footprint is where it is stated | re-pin only when a footprint moves | **KEEP**: cheap and honest |
+| `proof-hygiene`, `build-closure`, `exports` (3-row allowlist), `shell-paths` (4-row allowlist), `unit-tests` floors, `cold-start`, `axiom-census`, `world-sim`, `rust-tests` (filtered rows), `spk-shell`, `deploy-scripts`, `objective-frontend`/`world-cohorts`/`objective-examples`, `canonical-policy-portal`, `tower-controller`, `audit-corrupted-leaf`, `website`, `fixture-authority` (git-only) | each a named, cheap, end-to-end property | seconds to minutes, no ledger churn | **KEEP** |
+| `objective-c`, `objective-cgen`, `transparency` | the C machine agrees with `runBounded` | minutes; need bun | **KEEP until R10**: they retire with `runtime.c` |
+| `check-host-closure.sh` + `host-closure.pin` (841 lines) | the Host does not silently grow | re-pinned **53 times since Oct 1**; red on every edit that adds or removes a module | **FOLD ✓** → `host-closure.max`: one number, refuses growth, `--update REASON` moves it |
+| the known-red ceremony (`known-red-verdict`, `known-red-modules`, `known-red ROW CV-TASK` lines, landing.sh's cv-task demand) | a red is owned | **10 commits** to required-rows/known-red since Oct 1; a base refused when a listed module *builds* | **DELETE ✓**: reds are named in the run's output; a pre-existing red prints PRE-RED and blocks nothing; the lane brief names the owner |
+| the Objective contract manifests (`scripts/gates/objective-manifest/` 610 files, 42,711 rows, 32 MB; `objective-contract-decisions.txt` 9,011 lines; `objective-manifest.py`; two scanner scripts; `Verify/ObjectiveManifest*.lean`) | a restated theorem is noticed | **33 commits since Oct 1** ("531 events, each with its reason"; "1334 events"); two full scanner elaborations + six planted copies per gate run | **DELETE ✓**: the axiom pins and the build keep what mattered; a restated top-level theorem is caught by its adversarial audit (statement-first) |
+| `guard-discipline` (655-line checker + baseline) | `#guard` counts only fall | ~2 s, a self-test, a ledger | **DELETE ✓**: the count is 0 |
+| waste-model (`check-waste-model` 439 lines, fixture, decisions, `docs/WASTE-MODEL.md`) | instruction-count ceilings per journey step | a decisions line per raise | **DELETE ✓**: performance is published |
+| hypothesis ledger as a gate row (`check-hypothesis-ledger.sh`, empty baseline, the `ledger` job) | no vacuous / toothless statement families | builds `AxiomCensusResearch` + a ledger run per landing | **FOLD ✓** → on demand before a research move (C2); only a lane's top-level theorem must be non-vacuous (plan rule 3) |
+| `TokenCensus` (+ fixtures, plants, defects ratchet), `scripts-elab`, `char2-vacuity` | private tokens minted at home; every script elaborates; no empty-carrier quantification | elaborates the research umbrella per landing | **FOLD ✓** → the nightly on `dregg-build` (§6) |
+| carrier census + `check-repository-trust.sh` | "521 unwitnessed carriers is today's honest number" | a census that gated only itself | **DELETE ✓** |
+| `check-objective-machine-perf.sh` | a perf floor | wired to nothing | **DELETE ✓** |
+| rust-tests/unit-tests `known_red` rows (a test "must still fail") | ran-from-passed on a known failure | one row each; red the day it passes | **FOLD**: delete each row with its fix; add no new ones (name the red in the run instead) |
+| `journey-unbuilt.tsv` (one row: M6) | a pinned step that passes is noticed | one line | **DELETE** with L9's `m6.sh` (the row vanishes with the reason) |
+| required-rows `pending` lines (`births`, `HERMES-LIVE`, `jcertify`) | the opening contract's not-yet rows | none | **KEEP** (they are the contract's names) |
+| `instruments.tsv` (which self-tests run when) | a changed instrument re-proves itself | none | **KEEP**, shrunk to the instruments that remain |
+
+What a landing costs now, per the gate scripts after this commit series: the umbrella (warm,
+minutes), the demo journey's standing run, and the cheap end-to-end checks. No per-landing pin
+regeneration, no decisions ledger, no census of the research tree, no accepted-red list.
+
+## 3. How a lane works
+
+- **One worktree per lane, on a `lane/<name>` branch**, under `/Users/ember/dev/minidregg-lanes/<name>`
+  (or `/build/lanes/<name>` on the build box). Never the main worktree; never `git stash`; named-file
+  commits with prose messages via `git commit -F <own-file>` (the shared scratchpad is shared:
+  name message files uniquely).
+- **The brief carries**: the system framing (what the lane changes and why it is on the critical
+  path), the exact report sections, `path:line` pointers to every file it touches, the deliverable,
+  the verification it must run and where (§5), and the deletions it owns (plan rules 1–2).
+- **Think ahead; run a check once per coherent batch.** A lane does not rerun a build to see what
+  changed; it reads the first run, plans the whole fix, applies it, and runs again. One build per
+  batch, filtered tests only (`-E 'test(<pattern>)'`), never an unfiltered suite.
+- **Linux checks run where Linux is**: `ssh dregg-build`, a worktree under `/build/lanes/<lane>`,
+  `cargo nextest run -p <crate> -E '...'`, `lake env lean <file>`, every build under `swarm-build`.
+  There is no more "owed to hbox": a lane that cannot run something on the Mac runs it there
+  itself. What truly cannot run anywhere the lane reaches (a demo-box drill, a mainnet pay) goes in
+  the lane's **BATCH FOR THE PARENT**, one list at the end of the report, not a message per item.
+- **Decisions are taken by default and recorded**, in the report, in system terms; questions are
+  batched into the same list. Only money, dates and credentials go to ember (§4).
+- **Finish fast, push, report in ≤ 20 lines**: what landed (branch tip), what was verified and
+  where, the reds by name, the batch for the parent.
+
+## 4. How the orchestrator works
+
+- **One root per project.** minidregg's root does minidregg; fn and nano have their own sessions
+  and cwds (HISTORY §4.5: Mini went dark exactly when its launch was due).
+- **Veterans are resumed, never respawned.** The agent that diagnosed a failure fixes it; a
+  successor is spawned only when context is the problem, and then from the predecessor's own
+  continuation file.
+- **A multi-model council reads any ruling before it reaches ember**, as the plan's council did
+  (`docs/review/2026-10-26-council/`). Engineering decisions are the orchestrator's after that
+  synthesis; **only money, dates and credentials go to ember**, stated in system terms with the
+  default that applies while she is away.
+- **One integrator** merges lane branches in dependency order (Lean interfaces first, plan Phase 1)
+  and runs the whole-tree build ONCE on `dregg-build`; per-file green hides a red umbrella.
+- **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
+  the opening waits for the §1 contract and nothing else. The gate is never relaxed and never grown
+  ahead of the surfaces.
+- No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
+
+## 5. Boxes
+
+| box | what it is for | the one wrapper | never |
+|---|---|---|---|
+| **the Mac** | editing, `cargo check`, filtered unit tests that run on macOS, `lake env lean` only when `.lake` is warm | none | a Lean rebuild (its `.lake` is stale); an unfiltered suite |
+| **`dregg-build`** (Hetzner `ccx33`, 8 dedicated vCPU / 32 GB, Debian 13, fsn1, `178.105.4.114`; dregg-infra `edge/tofu-build/`) | every lane's Linux checks (the fake Lean Host, `mini-spk-volume-helper`, broker fixtures, hermes), Lean builds, the integration build, candidates, the nightly (§6), **and every journey row that times anything** (`growth`, `births`, `perf`) on its SSD volume | `swarm-build <cmd>` (MemoryMax 28 G, swap 0, prints the build's peak RSS); Lean fan-out bounded by `scripts/build-native-host.sh`'s seats (`MINIDREGG_LEAN_SEATS=2`) | production secrets; any key to the demo box; the hcloud token; `pkill`/`killall` (stop by PID file only) |
+| **hbox** | the pipeline's standing run and the warm base; co-tenant (nanodregg builds, codex's `poly`); a one-slot queue | `swarm-build` (there: 96 G cap, `taskset 0-15`) | a lane's default box; any timing measurement (`/tank` is an HDD mirror with no SLOG: §1) |
+| **`dregg-demo`** (`ccx23`, `167.233.199.225`) | rehearsals and the opening; the box drills; the published performance numbers (the baseline is the demo's own: write p50 1.35 s, max 1.56 s at the measured level) | `ship.sh` from the Mac | a build; a credential for another box |
+
+The first measured cold Lean build, on `dregg-build` at main `c77ef2f9` (the number three council
+reviewers asked for): 1,308 modules (the 787-module Host closure plus the umbrella) in **7,197 s =
+2 h 00 min** with 2 seats × 4 threads under a 28 G cap, cgroup peak 17.2 GiB, the heaviest module
+18.5 GiB (`Kernel.PayEnrolReceiver`); mathlib from the cache in 77 s. With the measured RSS table the
+same build runs at 4 seats. A warm `cargo check --workspace` is 22 s. Details and the table:
+dregg-infra `edge/tofu-build/README.md`.
+
+Teardown: `dregg-build` carries `expires = 2026-11-11`, the demo's shutdown date; `tofu destroy` in
+`edge/tofu-build/` is the whole teardown. Disk pressure on any box is a pause-and-tell condition,
+never a delete.
+
+## 6. Cadence
+
+- **Definition of done** = the public-opening contract holds on a rehearsal candidate (plan §1).
+  Nothing else is "done" in a way the project reports upward.
+- **Rehearsal ships** every few days from the integrated tip, reds named.
+- **The nightly** is the only scheduled run: the kernel journey (L9's split of the journey into a
+  demo journey inside the gate and a nightly kernel journey), the timing rows (`growth` at 1000,
+  `births` at 1000, the 10k soak when designed) on `dregg-build`'s SSD or the demo box, and the
+  censuses folded out of the landing gate: `lake build TokenCensus TokenCensus.Fixtures`,
+  `bash scripts/check-scripts-elab.sh`, `bash scripts/check-char2-vacuity.sh`. Its reds are named
+  in the morning report; it blocks nothing.
+- **No per-landing ceremony**: a landing is the umbrella green (or its reds named), the standing
+  run with no new red against main's baseline, and the cheap checks of §2.
+
+## 7. What this replaces
+
+Superseded and deleted in this commit series (git keeps them): `GOAL.md` (the September standing
+goal, 1,314 lines), `REORIENTATION.md` (August), `FORCODEX.md` (August), `docs/WASTE-MODEL.md`,
+`scripts/gates/objective-manifest/` and its decisions ledger, `host-closure.pin`, the known-red
+scripts and lines, `guard-discipline`, `check-waste-model`, the carrier census.
+
+Superseded and shrunk to a pointer here: `CLAUDE.md` and `AGENTS.md` (they now say only what is
+true and point here), `PROJECT.md`'s "Work discipline", "Performance and evidence discipline" and
+"Public-claim gate" sections, `docs/PIPELINE-HBOX.md`'s "Baseline-relative landing rule" and "The
+bar per landing" (hbox is the standing run; the rule is §2's), the plan's §4 (this document's §3–§6
+are the rules; the plan keeps the work).
+
+Still authority: `ATLAS.md` §6 (the sixteen laws; law 8 "gate the gates" is why §2 deletes
+instruments that cannot red-proof themselves, law 16 "one lane can hold it" is why §3 is one
+worktree per lane), `docs/DEMO-PREFIX-2026-10-26.md` (the work and the opening contract),
+`HANDOFF.md` (where to start), the review corpus under `docs/review/`.

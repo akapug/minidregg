@@ -2,7 +2,7 @@
 //! (COMPUTE, the J-JOB floor).
 //!
 //! A job is one declared cell born in a room under the job law
-//! (`deploy/shell/templates/job/law.job`, `Kernel/Job.lean`), bound here at
+//! (`native/resource-client/templates/job/law.job`, `Kernel/Job.lean`), bound here at
 //! CALLER = this workspace's subject, PROGRAM, WINDOW. Its money is the Book's,
 //! moved by the job-money receiver (ops 160-163, `Kernel/JobMoneyReceiver.lean`):
 //!
@@ -31,9 +31,9 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 /// The job law's JSON (`scripts/gen-joblaw.py` keeps it equal to `Kernel/Job.lean` §2).
-const LAW: &str = include_str!("../../../deploy/shell/templates/job/law.job.json");
+const LAW: &str = include_str!("../templates/job/law.job.json");
 /// The same law, one clause per line, as the Host renders a refused clause.
-const LAW_SHELL: &str = include_str!("../../../deploy/shell/templates/job/law.job.shell");
+const LAW_SHELL: &str = include_str!("../templates/job/law.job.shell");
 
 const STATES: [&str; 7] = ["open", "claimed", "answered", "upheld", "slashed", "void", "closed"];
 const NAMES: [&str; 16] = [
@@ -80,7 +80,7 @@ fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     let frame = session_invoke(&ws.host, &ws.socket, &ws.config, operation, payload)?;
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "refused: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(400)..]).split_whitespace().collect::<Vec<_>>().join(" ")
         )),
@@ -169,7 +169,7 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<()> {
     // A Host refusal is reported as the Host decoded it (the law's clause, by name).
     result.map_err(|error| {
         let decided = match take_host_decision() {
-            Some(HostDecision::RefusedFrame { decoded: Some(outcome), .. }) | Some(HostDecision::Outcome(outcome)) => {
+            Some(HostDecision::Frame { decoded: Some(outcome), .. }) | Some(HostDecision::Outcome(outcome)) => {
                 refusal_line(&outcome)
             }
             _ => None,

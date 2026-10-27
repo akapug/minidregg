@@ -3,7 +3,6 @@
 //! Rust supplies exact signed bytes and decoded bridge roles. Mini owns the
 //! canonical schema, fixed web/API mapping and package root; the returned
 //! bytes are compared to the physical parse before any BEGIN plan uses them.
-#![allow(dead_code)] // Joined INSTALL/START resident caller follows native link.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::materialize::{signed_schema_source, InstalledPackage};
@@ -104,14 +103,13 @@ pub(crate) fn author_signed_package<T: SourceTool>(
         .as_deref()
         .ok_or_else(|| invalid("signed bridge config absent"))?;
     let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
-    if bridge.save_identity_caps
-        || bridge.expect_app_hooks
-        || bridge
-            .api_path
-            .as_deref()
-            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+    // saveIdentityCaps and expectAppHooks are served; an unchecked apiPath is not.
+    if bridge
+        .api_path
+        .as_deref()
+        .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
     {
-        return Err(invalid("signed bridge outside resident Mini mapping"));
+        return Err(invalid("signed bridge outside resident Mini mapping: apiPath"));
     }
     let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
     let schema_input = write_new(

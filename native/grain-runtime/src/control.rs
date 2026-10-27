@@ -17,6 +17,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_LINE: u64 = 16_384;
+/// The admin socket speaks length-prefixed frames: a u32 big-endian byte
+/// count, then exactly that many UTF-8 bytes. The bound is the same on both
+/// sides and is checked before any allocation, so a long reply (a delivery
+/// plan, an inventory) can never be written by the controller and then
+/// refused by the reader.
+pub const MAX_ADMIN_FRAME: usize = 4 << 20;
 const MAX_TOOL_FRAME: usize = 262_144;
 const QUEUE: usize = 128;
 
@@ -107,9 +113,11 @@ pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
 }
 
 fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) {
+    // The listener is nonblocking; an accepted stream inherits that on BSDs.
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let response = match read_line(&mut stream) {
+    let response = match admin_read_frame(&mut stream) {
         Ok(command) => {
             let (reply, recv) = mpsc::channel();
             let phase = Arc::new(AtomicU8::new(0));
@@ -143,19 +151,58 @@ fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) 
         }
         Err(error) => format!("invalid admin request: {error}"),
     };
-    let _ = writeln!(stream, "{response}");
+    // A reply over the frame bound is replaced by a bounded refusal rather
+    // than being cut: the caller never sees a truncated plan.
+    let response = if response.len() > MAX_ADMIN_FRAME {
+        "error: admin reply exceeds the admin frame bound".to_owned()
+    } else {
+        response
+    };
+    let _ = admin_write_frame(&mut stream, &response);
+}
+
+/// Write one admin frame. Refuses (without writing) a body over the bound.
+pub fn admin_write_frame(stream: &mut impl Write, body: &str) -> io::Result<()> {
+    if body.len() > MAX_ADMIN_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "admin frame exceeds bound",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(4 + body.len());
+    bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(body.as_bytes());
+    stream.write_all(&bytes)?;
+    stream.flush()
+}
+
+/// Read one admin frame. The declared length is checked against the bound
+/// before the body buffer is allocated.
+pub fn admin_read_frame(stream: &mut impl Read) -> io::Result<String> {
+    let mut prefix = [0u8; 4];
+    stream.read_exact(&mut prefix)?;
+    let len = u32::from_be_bytes(prefix) as usize;
+    if len > MAX_ADMIN_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "admin frame length exceeds bound",
+        ));
+    }
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body)?;
+    String::from_utf8(body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn admin_call(path: &Path, command: &str) -> Result<String, String> {
-    if !path.is_absolute() || command.contains('\n') || command.len() > MAX_LINE as usize {
+    if !path.is_absolute() || command.contains('\n') || command.len() > MAX_ADMIN_FRAME {
         return Err("admin socket/command invalid".into());
     }
     let mut stream = UnixStream::connect(path).map_err(|e| format!("admin connect: {e}"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(310)))
         .map_err(|e| e.to_string())?;
-    writeln!(stream, "{command}").map_err(|e| e.to_string())?;
-    read_line(&mut stream).map_err(|e| e.to_string())
+    admin_write_frame(&mut stream, command).map_err(|e| e.to_string())?;
+    admin_read_frame(&mut stream).map_err(|e| e.to_string())
 }
 
 struct Attachment {
@@ -944,5 +991,39 @@ mod tests {
         drop(admin);
         drop(ordinary);
         fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn admin_frame_reply_over_the_old_line_bound_round_trips() {
+        let dir = PathBuf::from("/tmp").join(format!("gaf-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let admin_path = dir.join("admin.sock");
+        let admin = start_admin(&admin_path).unwrap();
+        let path = admin_path.clone();
+        let caller = thread::spawn(move || admin_call(&path, "resident delivery-plan"));
+        let request = admin.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        // A delivery plan embedding a long final once was 3x 12 KiB: past the
+        // 16 KiB line bound the old reader enforced (H14).
+        let long = format!("{{\"plan\":\"{}\nsecond line\"}}", "x".repeat(40_000));
+        request.reply.send(long.clone()).unwrap();
+        assert_eq!(caller.join().unwrap().unwrap(), long);
+        drop(admin);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn admin_frame_oversize_length_is_refused_before_allocation() {
+        let mut declared = Vec::new();
+        declared.extend_from_slice(&u32::MAX.to_be_bytes());
+        let error = admin_read_frame(&mut io::Cursor::new(declared)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let mut just_over = Vec::new();
+        just_over.extend_from_slice(&((MAX_ADMIN_FRAME + 1) as u32).to_be_bytes());
+        assert!(admin_read_frame(&mut io::Cursor::new(just_over)).is_err());
+        let mut sink = Vec::new();
+        assert!(admin_write_frame(&mut sink, &"y".repeat(MAX_ADMIN_FRAME + 1)).is_err());
+        assert!(sink.is_empty(), "an oversize reply writes nothing");
+        admin_write_frame(&mut sink, "ok").unwrap();
+        assert_eq!(admin_read_frame(&mut io::Cursor::new(sink)).unwrap(), "ok");
     }
 }

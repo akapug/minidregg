@@ -106,6 +106,7 @@ fn terminal_text(status:&str,evidence:&Value)->String {
         ("refused",Some("bounded-admission"))=>"refused: Hermes's queue is full; ask again later".into(),
         ("refused",Some(basis))=>format!("refused: {basis}"),
         ("completed",_)=>"completed: replied".into(),
+        ("failed-after-admission",_)=>"failed: Hermes's turn ended without a reply after it started; ask again".into(),
         _=>status.into(),
     }
 }
@@ -215,7 +216,7 @@ fn withdrawal<'a>(entries:&'a [Value],request:&Request,subject:&str)->Option<&'a
 }
 fn terminal(state: &Path, request: &Request) -> Result<bool> {
     let id=digest(&request.identity)?;
-    for status in ["completed","refused","cancelled"] {
+    for status in ["completed","refused","cancelled","failed-after-admission"] {
         let p=state.join(format!("request-{id}-{status}.json"));
         if !p.exists() {continue;}
         let receipt:Value=serde_json::from_slice(&bounded_regular_file(&p,1_048_576)?).map_err(|e|e.to_string())?;
@@ -423,6 +424,27 @@ pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)-
     let Some(frame)=completion else{return Ok(())};
     if frame["residentOrigin"]["residentPromptId"]!=start["residentPromptId"] {return Ok(())};
     let op=frame["residentOrigin"]["promptOperationId"].as_u64().ok_or("request completion origin absent")?;
+    // The controller's typed record decides the prompt (gr §4.3); the
+    // frame's outcome label is presentation and is never consulted.
+    let started_id=start["residentPromptId"].as_str().ok_or("started request has no prompt identity")?;
+    let sha=frame["residentOrigin"]["promptSha256"].as_str().ok_or("request completion origin has no prompt digest")?;
+    let outcome=prompt_outcome::read_bound(controller,op,started_id,sha)?;
+    match &outcome.outcome {
+        prompt_outcome::Outcome::Undecided{retry,..}=>{
+            return Err(format!("selected request's prompt {op} is undecided; resolve it with admin {:?} (operation {:?}) before another request starts",retry.admin,retry.operation));
+        }
+        prompt_outcome::Outcome::Refused{..}=>{
+            let file=prompt_outcome::path(controller,op);
+            let bytes=bounded_regular_file(&file,65_536)?;
+            // H13: a failed admitted prompt closes its request; no delivery
+            // receipt can exist for it, and the next request becomes selectable.
+            record(state,r,"failed-after-admission",json!({"basis":"typed-prompt-outcome","promptOutcome":file,
+                "sha256":sha256_bytes(&bytes)?,"outcome":outcome.outcome,"origin":frame["residentOrigin"]}))?;
+            q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;
+            return atomic_json(&path(state),&q);
+        }
+        prompt_outcome::Outcome::Admitted{..}=>{}
+    }
     let performed_path=controller.join(format!("resident-delivered-{op:016}.json"));
     let refused_path=controller.join(format!("resident-final-refused-{op:016}.json"));
     if performed_path.exists() && refused_path.exists() {return Err("request has conflicting native terminal receipts".into());}
@@ -491,17 +513,51 @@ mod tests {
         assert_eq!(discovery(&state,&p["requestBinding"]).unwrap()["cursors"]["21"],2);
         fs::remove_dir_all(state).unwrap();
     }
+    fn outcome(controller:&Path,op:u64,id:&str,outcome:prompt_outcome::Outcome) {
+        prompt_outcome::write(controller,&prompt_outcome::Record {kind:prompt_outcome::KIND.into(),prompt_operation_id:op,
+            resident_prompt_id:Some(id.into()),prompt_sha256:Some("b".repeat(64)),session_id:None,outcome}).unwrap();
+    }
+    fn admitted()->prompt_outcome::Outcome {
+        prompt_outcome::Outcome::Admitted {stop_reason:"end_turn".into(),settled_charge:"1".into(),provider_response_sha256:None,provider_metered_charge:None}
+    }
     #[test]fn completion_recovery_requires_exact_native_delivery_and_never_zero_models_claim() {
         let state=fixture("receipt");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
-        let p=prepared(vec![entry("20",1),entry("21",2)]);select(&p,&state,Limits::default()).unwrap();started(&state,"source-id","input").unwrap();
-        let frame=json!({"residentOrigin":{"residentPromptId":"source-id","promptOperationId":1}});
-        assert!(reconcile(&state,&controller,Some(&frame)).is_err());
+        let id="a".repeat(64);
+        let p=prepared(vec![entry("20",1),entry("21",2)]);select(&p,&state,Limits::default()).unwrap();started(&state,&id,"input").unwrap();
+        let frame=json!({"residentOrigin":{"residentPromptId":id,"promptSha256":"b".repeat(64),"promptOperationId":1}});
+        assert!(reconcile(&state,&controller,Some(&frame)).is_err(),"no outcome record: undecided");
+        outcome(&controller,1,&id,admitted());
+        assert!(reconcile(&state,&controller,Some(&frame)).is_err(),"admitted still needs its delivery receipt");
         let receipt=json!({"type":"mini-resident-delivered-v1","origin":frame["residentOrigin"],"result":{"expectedReply":["20",1],"arguments":{"to":"20"},"result":{"resolution":"performed"}}});
         atomic_json(&controller.join("resident-delivered-0000000000000001.json"),&receipt).unwrap();
         reconcile(&state,&controller,Some(&frame)).unwrap();reconcile(&state,&controller,Some(&frame)).unwrap();
         assert!(open(&state).unwrap().selected.is_none());
         let file=fs::read_dir(&state).unwrap().flatten().find(|e|e.file_name().to_string_lossy().ends_with("-completed.json")).unwrap().path();
         let record:Value=serde_json::from_slice(&fs::read(file).unwrap()).unwrap();assert!(record.get("modelRequests").is_none());
+        assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
+        fs::remove_dir_all(state).unwrap();
+    }
+    #[test]fn failed_admitted_prompt_closes_its_request_and_the_next_is_selectable() {
+        let state=fixture("failed-admitted");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let id="d".repeat(64);
+        let p=prepared(vec![entry("20",1),entry("21",2)]);select(&p,&state,Limits::default()).unwrap();started(&state,&id,"input").unwrap();
+        // The frame label says "failed", but only the record decides. While
+        // the record is undecided the request stays started and names its retry.
+        let frame=json!({"outcome":"failed","residentOrigin":{"residentPromptId":id,"promptSha256":"b".repeat(64),"promptOperationId":5}});
+        let undecided=prompt_outcome::Outcome::Undecided {retry:prompt_outcome::Retry {admin:vec!["reconcile parent audited".into(),"reconcile effects".into()],operation:None},detail:"ACP stream closed".into()};
+        outcome(&controller,4,&id,undecided);
+        assert!(reconcile(&state,&controller,Some(&json!({"outcome":"failed","residentOrigin":{"residentPromptId":id,"promptSha256":"b".repeat(64),"promptOperationId":4}})))
+            .unwrap_err().contains("reconcile parent audited"));
+        assert!(open(&state).unwrap().selected.unwrap().started.is_some(),"undecided is never a refusal");
+        // H13: the turn failed at a settled boundary. No delivery receipt can
+        // ever exist; the record closes the request instead of wedging it.
+        outcome(&controller,5,&id,prompt_outcome::Outcome::Refused {stage:prompt_outcome::RefusalStage::TurnFailure,reason:"format_error".into()});
+        reconcile(&state,&controller,Some(&frame)).unwrap();
+        reconcile(&state,&controller,Some(&frame)).unwrap();
+        assert!(open(&state).unwrap().selected.is_none());
+        let closed=fs::read_dir(&state).unwrap().flatten().find(|e|e.file_name().to_string_lossy().ends_with("-failed-after-admission.json")).unwrap().path();
+        let receipt:Value=serde_json::from_slice(&fs::read(closed).unwrap()).unwrap();
+        assert_eq!(receipt["evidence"]["outcome"]["state"],"refused");assert!(receipt.get("modelRequests").is_none());
         assert_eq!(select(&p,&state,Limits::default()).unwrap().unwrap()["recentMemberEntries"][0]["author"],"21");
         fs::remove_dir_all(state).unwrap();
     }
@@ -561,8 +617,10 @@ mod tests {
     #[test]fn selected_completion_satisfies_unchanged_maintenance_without_another_prompt() {
         let state=fixture("maintenance");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         let p=prepared(vec![entry("20",1)]);select(&p,&state,Limits::default()).unwrap();
-        started(&state,"selected-source","request-input").unwrap();maintenance_started(&state,"selected-source","maintenance-revision").unwrap();
-        let frame=json!({"outcome":"completed","residentOrigin":{"residentPromptId":"selected-source","promptOperationId":1}});
+        let id="c".repeat(64);
+        started(&state,&id,"request-input").unwrap();maintenance_started(&state,&id,"maintenance-revision").unwrap();
+        let frame=json!({"outcome":"completed","residentOrigin":{"residentPromptId":id,"promptSha256":"b".repeat(64),"promptOperationId":1}});
+        outcome(&controller,1,&id,admitted());
         let receipt=json!({"type":"mini-resident-delivered-v1","origin":frame["residentOrigin"],"result":{"expectedReply":["20",1],"arguments":{"to":"20"},"result":{"resolution":"performed"}}});
         atomic_json(&controller.join("resident-delivered-0000000000000001.json"),&receipt).unwrap();
         reconcile(&state,&controller,Some(&frame)).unwrap();

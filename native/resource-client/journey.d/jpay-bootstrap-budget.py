@@ -106,7 +106,7 @@ try:
             dirs.append(str(d))
             for rel, body in ep.files.items():
                 gen.dump(str(d / rel), body)
-        env = dict(os.environ, MINI=a.mini, PAY_WATCHER=a.watcher, PAY_STATE=str(out / 'watcher-state'), PAY_OBSERVER_WS=str(f / 'ws/30'), PAY_OBSERVER_CAPABILITY='4030', PAY_ENROL_INDEX='0', PAY_JOURNAL_FLOOR='1000000', PAY_ENROL_CAPABILITY='4032', PAY_OPERATOR_SOCKET=str(private), PAY_RPC_FIXTURES=' '.join(dirs))
+        env = dict(os.environ, MINI=a.mini, PAY_WATCHER=a.watcher, PAY_STATE=str(out / 'watcher-state'), PAY_OBSERVER_WS=str(f / 'ws/30'), PAY_OBSERVER_CAPABILITY='4030', PAY_WATCH_ENROL='yes', PAY_ENROL_CAPABILITY='4032', PAY_OPERATOR_SOCKET=str(private), PAY_RPC_FIXTURES=' '.join(dirs))
         env.pop('PAY_RPC_ENDPOINTS', None)
         baseline = run([a.mini, 'enrollment-view', '--socket', public])
         baseline.check_returncode()

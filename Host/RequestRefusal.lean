@@ -23,6 +23,8 @@ already been written (a second frame would desynchronise the pipe).
 `mini serve` restarts the Host in both cases.
 -/
 import Compiler.NativeHostCodec
+import Compiler.NativeHostEffectClass
+import Host.HostOperations
 import Kernel.Bounds
 import Theory.AssertAxioms
 
@@ -148,6 +150,205 @@ theorem oneShotAnswer_refused (operation : UInt8) (error : IO.Error) :
 theorem oneShotFrame_decodes (operation : UInt8) (error : IO.Error) :
     outcomeCodec.decode (oneShotFrame operation error) = some (oneShotAnswer operation error) :=
   outcomeCodec.decode_encode _
+
+/-! ## The answer discipline: NO_RECORD (253) against the undecided envelope (255)
+
+Until lane/lean-critical the session answered EVERY thrown handler `255 refused`
+(`answer`), and so did the fn dispatcher's catch (`"fn-session"`), while 255 also
+carried `unavailable` (session invalidated), `uncertain` and `contention` (op 125).
+Four client sites read the byte 255 as "refused, author a fresh attempt"
+(resource-client §4.7; SYNTHESIS §B row 4). The discipline below makes the byte
+honest by making it say less and the payload say more:
+
+* **`NO_RECORD` (`HostOperations.noRecordMarker`, 253)** carries a `refused`
+  outcome and is answered ONLY when the request provably left no record:
+  (i) a grammar verdict on the client's own bytes (`malformed`, `overBound`:
+  constructed by this module alone, raised by the Host's decoders before any
+  receiver runs; no module under `Kernel/` or `Compiler/` imports this file);
+  (ii) a handler of an operation the registry declares append-free
+  (`protocol/host-operations.json` `effect: none`, generated into
+  `HostOperations.noAppendOperations`) that threw; (iii) a `refused` outcome a
+  handler RETURNED under 255, i.e. a receiver's own `rejected`, which the durable
+  receiver decides with no transport effect
+  (`DurableReceiverIO.receiveCandidateWithFresh_rejected_at_prepare` /
+  `_at_judge`).
+* **NO_RECORD also carries a receiver's `contention` or `unavailable`** returned
+  as a value: the durable receiver decides both before any append
+  (`DurableReceiverIO.publishAfter_conflict`: a conflicting append writes nothing;
+  every `unavailable` arm of `receiveCandidateWithFresh` precedes `publish`), and so
+  does the dispatch receiver (`ApplicationDispatchReceiver.receiveVerified`, whose
+  `contention`/`unavailable` arms precede the permit). The grain fence (spk-host)
+  settles a dispatch on this frame.
+* **255 (`hostRefusalMarker`)** carries only undecided outcomes: `uncertain`, a
+  handler of an append operation that threw a non-grammar error (answered
+  `uncertain`, "look up the exact call"), and the Host's own
+  `unavailable "host session reopening"`, which `serveFrame` writes directly and
+  never passes through `returnedMarker`.
+
+The theorems: `exceptionAnswer_class` (a thrown handler is answered either
+no-record under 253 or undecided under 255, never otherwise),
+`exceptionAnswer_noRecord_sound` (253 only on (i) or (ii)),
+`returnedMarker_noRecord_refused` / `returnedMarker_hostOutcome_undecided` (the
+value path), and the teeth pair `exceptionAnswer_submit_fault_undecided` (the
+previous mapping classes a submit fault as a refusal; this one does not). What
+is NOT a theorem and is confessed as such: that every receiver's `refused`
+value is decided before its append (true of the durable receiver by the two
+theorems above; a per-receiver audit for the others), and that the registry's
+`effect: none` set is correct (a declaration, checked by reading the arms). -/
+
+/-- A grammar verdict on the client's own bytes: only `malformed` and `overBound`
+construct these errors. -/
+def grammarVerdict : IO.Error → Bool
+  | .invalidArgument (some marker) _ _ => marker == tag || marker == boundTag
+  | _ => false
+
+/-- Whether the registry declares `operation`'s receiver append-free. -/
+def noAppend (operation : UInt8) : Bool :=
+  HostOperations.noAppendOperations.contains operation
+
+/-- The detail of an undecided answer to a thrown handler. -/
+def undecidedDetail (operation : UInt8) (error : IO.Error) : List UInt8 :=
+  clip s!"op {operation}: handler ended by exception after dispatch; look up the exact call: {error}"
+
+/-- The reply (response byte, payload) to a request whose handler threw `error`. -/
+def exceptionAnswer (operation : UInt8) (error : IO.Error) : UInt8 × List UInt8 :=
+  if grammarVerdict error || noAppend operation then
+    (HostOperations.noRecordMarker, frame operation error)
+  else
+    (HostOperations.hostOutcomeMarker,
+      outcomeCodec.encode (.uncertain (undecidedDetail operation error)))
+
+/-- The outcomes a receiver decides before any append: a refusal, contention (a
+conflicting append writes nothing) and unavailability (decided before `publish`). -/
+def noRecordPayload : Outcome → Bool
+  | .refused .. => true
+  | .contention => true
+  | .unavailable _ => true
+  | _ => false
+
+/-- The response byte for a handler that RETURNED `(responseOperation, payload)`:
+a no-record outcome returned under 255 is a receiver's decision and goes out as
+NO_RECORD; every other 255 payload stays undecided; an operation's own frame is
+untouched. -/
+def returnedMarker (responseOperation : UInt8) (payload : List UInt8) : UInt8 :=
+  if responseOperation == HostOperations.hostOutcomeMarker then
+    match outcomeCodec.decode payload with
+    | some outcome => if noRecordPayload outcome then HostOperations.noRecordMarker
+        else HostOperations.hostOutcomeMarker
+    | none => HostOperations.hostOutcomeMarker
+  else responseOperation
+
+theorem exceptionAnswer_cases (operation : UInt8) (error : IO.Error) :
+    exceptionAnswer operation error = (HostOperations.noRecordMarker, frame operation error) ∨
+    exceptionAnswer operation error = (HostOperations.hostOutcomeMarker,
+      outcomeCodec.encode (.uncertain (undecidedDetail operation error))) := by
+  unfold exceptionAnswer
+  split <;> simp
+
+/-- A thrown handler is answered a no-record refusal under NO_RECORD or an undecided
+outcome under 255: never a refusal under 255, never an undecided outcome under NO_RECORD. -/
+theorem exceptionAnswer_class (operation : UInt8) (error : IO.Error) (outcome : Outcome)
+    (decoded : outcomeCodec.decode (exceptionAnswer operation error).2 = some outcome) :
+    ((exceptionAnswer operation error).1 = HostOperations.noRecordMarker ∧
+        outcome.effectClass = .noRecord) ∨
+    ((exceptionAnswer operation error).1 = HostOperations.hostOutcomeMarker ∧
+        outcome.effectClass = .undecided) := by
+  rcases exceptionAnswer_cases operation error with e | e <;> rw [e] at decoded ⊢
+  · left
+    refine ⟨rfl, ?_⟩
+    simp only [frame_decodes, Option.some.injEq] at decoded
+    obtain ⟨reason, detail, answered⟩ := answer_refused operation error
+    rw [← decoded, answered]
+    rfl
+  · right
+    refine ⟨rfl, ?_⟩
+    rw [outcomeCodec.decode_encode, Option.some.injEq] at decoded
+    rw [← decoded]
+    rfl
+
+/-- NO_RECORD for a thrown handler needs a grammar verdict or an append-free operation. -/
+theorem exceptionAnswer_noRecord_sound (operation : UInt8) (error : IO.Error)
+    (marked : (exceptionAnswer operation error).1 = HostOperations.noRecordMarker) :
+    grammarVerdict error = true ∨ noAppend operation = true := by
+  unfold exceptionAnswer at marked
+  split at marked
+  · rename_i condition
+    simpa [Bool.or_eq_true] using condition
+  · exact absurd marked (by dsimp only; decide)
+
+/-- The undecided envelope for a thrown handler means neither held. -/
+theorem exceptionAnswer_undecided_sound (operation : UInt8) (error : IO.Error)
+    (marked : (exceptionAnswer operation error).1 = HostOperations.hostOutcomeMarker) :
+    grammarVerdict error = false ∧ noAppend operation = false := by
+  unfold exceptionAnswer at marked
+  split at marked
+  · exact absurd marked (by dsimp only; decide)
+  · rename_i condition
+    simp only [Bool.or_eq_true, not_or, Bool.not_eq_true] at condition
+    exact condition
+
+/-- A returned frame goes out as NO_RECORD only when it was a no-record outcome
+(refused, contention or unavailable) under 255. -/
+theorem returnedMarker_noRecord_sound (responseOperation : UInt8) (payload : List UInt8)
+    (own : responseOperation ≠ HostOperations.noRecordMarker)
+    (marked : returnedMarker responseOperation payload = HostOperations.noRecordMarker) :
+    responseOperation = HostOperations.hostOutcomeMarker ∧
+      ∃ outcome, outcomeCodec.decode payload = some outcome ∧ noRecordPayload outcome = true := by
+  unfold returnedMarker at marked
+  split at marked
+  · rename_i envelope
+    refine ⟨by simpa using envelope, ?_⟩
+    split at marked
+    · rename_i outcome decoded
+      split at marked
+      · exact ⟨outcome, decoded, by assumption⟩
+      · exact absurd marked (by decide)
+    · exact absurd marked (by decide)
+  · exact absurd marked own
+
+/-- A payload that stays under 255 is never a refusal, contention or unavailability:
+it is uncertain (or a receipt no site returns under 255). -/
+theorem returnedMarker_hostOutcome_undecided (payload : List UInt8) (outcome : Outcome)
+    (kept : returnedMarker HostOperations.hostOutcomeMarker payload = HostOperations.hostOutcomeMarker)
+    (decoded : outcomeCodec.decode payload = some outcome) :
+    noRecordPayload outcome = false := by
+  cases h : noRecordPayload outcome
+  · rfl
+  · simp [returnedMarker, decoded, h, HostOperations.noRecordMarker,
+      HostOperations.hostOutcomeMarker] at kept
+
+/-- A refusal is a no-record payload, so the class the client reads off the
+constructor agrees with the marker on every refusal. -/
+theorem noRecordPayload_of_refused (outcome : Outcome) (refused : outcome.effectClass = .noRecord) :
+    noRecordPayload outcome = true := by
+  obtain ⟨_, _, _, _, rfl⟩ := (effectClass_noRecord_iff outcome).mp refused
+  rfl
+
+/-- Satisfiable: a submit (op 2, an append operation) whose call bytes the decoder
+refused is a proven no-append refusal under NO_RECORD. -/
+theorem exceptionAnswer_submit_malformed :
+    exceptionAnswer 2 (malformed "noncanonical native host call") =
+      (HostOperations.noRecordMarker, frame 2 (malformed "noncanonical native host call")) := by
+  simp [exceptionAnswer, grammarVerdict, malformed]
+
+/-- Teeth: a submit whose handler threw a non-grammar error after dispatch is answered
+undecided under 255, while `answer` (the previous discipline, kept for the no-record
+cases) classes the same end as a refusal: the masquerade SYNTHESIS §B row 4 names. -/
+theorem exceptionAnswer_submit_fault_undecided :
+    (exceptionAnswer 2 (.userError "durable append failed")).1 =
+        HostOperations.hostOutcomeMarker ∧
+      (answer 2 (.userError "durable append failed")).effectClass = .noRecord :=
+  ⟨rfl, rfl⟩
+
+#assert_axioms exceptionAnswer_cases
+#assert_axioms exceptionAnswer_class
+#assert_axioms exceptionAnswer_noRecord_sound
+#assert_axioms exceptionAnswer_undecided_sound
+#assert_axioms returnedMarker_noRecord_sound
+#assert_axioms returnedMarker_hostOutcome_undecided
+#assert_axioms noRecordPayload_of_refused
+#assert_axioms exceptionAnswer_submit_malformed
+#assert_axioms exceptionAnswer_submit_fault_undecided
 
 #assert_axioms answer_malformed
 #assert_axioms answer_overBound

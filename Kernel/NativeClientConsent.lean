@@ -16,6 +16,7 @@ of every record after the client's own retained anchor.
 -/
 import Kernel.NativeHost
 import Kernel.ConsentAnchor
+import Kernel.NativePlanHeight
 
 namespace Minidregg.Kernel.NativeClientConsent
 
@@ -166,8 +167,22 @@ structure PlanConsent (config : Config) {target : Durable}
   private mk ::
   plan : SigningPlan
   derived : prepareLoaded config basis.opened draft = .ok plan
-  exactBytes : signingPlanCodec.encode plan = candidate
+  /-- The plan whose canonical bytes the remote offered and the signer signs: the
+  local plan itself, or the local plan with every slot deadline pinned to its height
+  (`NativePlanHeight.pin`, the Host's `pin-plan-height`), which `provider_continuity`
+  applies before signing a provider settle. The pin changes nothing else
+  (`NativePlanHeight.pin_only_slots`) and never extends a deadline
+  (`NativePlanHeight.pinHeader_never_extends`), so consenting to it consents to less. -/
+  accepted : SigningPlan
+  pinned : accepted = plan ∨ NativePlanHeight.pin plan = .ok accepted
+  exactBytes : signingPlanCodec.encode accepted = candidate
 
+/-- Consent to a signing plan: the candidate bytes are the LOCAL preparation's, exactly,
+or the local preparation's with its slot deadlines pinned to the height the signer
+saw. Anything else, in any field, is refused (`changed_plan_refused`). Until
+lane/lean-critical only the first form was accepted, so every height-pinned provider
+settle was refused as "remote signing plan differs" and no Hermes provider call could
+settle (HERMES-LIVE). -/
 def checkPlan (config : Config) {target : Durable}
     (basis : ConsentAnchor.Basis config target) (draft : Draft)
     (candidate : List UInt8) : Except String (PlanConsent config basis draft candidate) :=
@@ -175,14 +190,21 @@ def checkPlan (config : Config) {target : Durable}
   | .error _ => .error "local transaction preparation refused"
   | .ok plan =>
       if exactBytes : signingPlanCodec.encode plan = candidate then
-        .ok ⟨plan, derived, exactBytes⟩
-      else .error "remote signing plan differs from locally prepared intent"
+        .ok ⟨plan, derived, plan, .inl rfl, exactBytes⟩
+      else
+        match pinnedPlan : NativePlanHeight.pin plan with
+        | .ok pinned =>
+            if pinnedBytes : signingPlanCodec.encode pinned = candidate then
+              .ok ⟨plan, derived, pinned, .inr pinnedPlan, pinnedBytes⟩
+            else .error "remote signing plan differs from locally prepared intent"
+        | .error _ => .error "remote signing plan differs from locally prepared intent"
 
+/-- The headers the signer signs: the accepted plan's (pinned when the remote pinned). -/
 def PlanConsent.headers {config : Config} {target : Durable}
     {basis : ConsentAnchor.Basis config target} {draft : Draft}
     {candidate : List UInt8}
     (consent : PlanConsent config basis draft candidate) : List (List UInt8) :=
-  consent.plan.slots.map SigningSlot.header
+  consent.accepted.slots.map SigningSlot.header
 
 /-- Connect preparation to the locally retained observation intent. Query-only
 intents have no transaction consent path. This checks consent, not admission:
@@ -215,18 +237,54 @@ theorem plan_origin {config : Config} {target : Durable}
     {basis : ConsentAnchor.Basis config target} {draft : Draft}
     {candidate : List UInt8}
     (consent : PlanConsent config basis draft candidate) :
-    ∃ plan, prepareLoaded config basis.opened draft = .ok plan ∧
-      signingPlanCodec.encode plan = candidate ∧
-      consent.headers = plan.slots.map SigningSlot.header :=
-  ⟨consent.plan, consent.derived, consent.exactBytes, rfl⟩
+    ∃ plan accepted, prepareLoaded config basis.opened draft = .ok plan ∧
+      (accepted = plan ∨ NativePlanHeight.pin plan = .ok accepted) ∧
+      signingPlanCodec.encode accepted = candidate ∧
+      consent.headers = accepted.slots.map SigningSlot.header :=
+  ⟨consent.plan, consent.accepted, consent.derived, consent.pinned, consent.exactBytes, rfl⟩
 
-/-- No modified frame can receive consent against the same local prefix/draft,
-even when its separate server-authored presentation claims identical metadata. -/
+/-- Satisfiable: the height-pinned local plan is accepted, and what the signer signs is
+the pinned plan's headers. -/
+theorem pinned_plan_accepted {config : Config} {target : Durable}
+    (basis : ConsentAnchor.Basis config target) (draft : Draft) (plan pinned : SigningPlan)
+    (derived : prepareLoaded config basis.opened draft = .ok plan)
+    (pinnedPlan : NativePlanHeight.pin plan = .ok pinned) :
+    ∃ consent, checkPlan config basis draft (signingPlanCodec.encode pinned) = .ok consent ∧
+      consent.accepted = pinned := by
+  unfold checkPlan
+  split
+  next error actual => simp [derived] at actual
+  next expected actual =>
+    have same : plan = expected := Except.ok.inj (derived.symm.trans actual)
+    subst expected
+    by_cases exact : signingPlanCodec.encode plan = signingPlanCodec.encode pinned
+    · rw [dif_pos exact]
+      refine ⟨_, rfl, ?_⟩
+      have decoded := congrArg signingPlanCodec.decode exact
+      rw [signingPlanCodec.decode_encode, signingPlanCodec.decode_encode] at decoded
+      exact Option.some.inj decoded
+    · rw [dif_neg exact]
+      split
+      next other otherPlan =>
+        have same : other = pinned := Except.ok.inj (otherPlan.symm.trans pinnedPlan)
+        subst other
+        rw [dif_pos rfl]
+        exact ⟨_, rfl, rfl⟩
+      next otherPlan =>
+        rw [pinnedPlan] at otherPlan
+        cases otherPlan
+
+/-- No modified frame can receive consent against the same local prefix/draft, even when
+its separate server-authored presentation claims identical metadata. Teeth: a candidate
+that is neither the local plan nor its height pin is refused, whatever else it claims: a
+different effect, amount, subject, key or any header byte other than the deadline. -/
 theorem changed_plan_refused {config : Config} {target : Durable}
     (basis : ConsentAnchor.Basis config target) (draft : Draft)
     (plan : SigningPlan) (candidate : List UInt8)
     (derived : prepareLoaded config basis.opened draft = .ok plan)
-    (different : signingPlanCodec.encode plan ≠ candidate) :
+    (different : signingPlanCodec.encode plan ≠ candidate)
+    (differentPinned : ∀ pinned, NativePlanHeight.pin plan = .ok pinned →
+      signingPlanCodec.encode pinned ≠ candidate) :
     checkPlan config basis draft candidate =
       .error "remote signing plan differs from locally prepared intent" := by
   unfold checkPlan
@@ -235,7 +293,31 @@ theorem changed_plan_refused {config : Config} {target : Durable}
   next expected actual =>
     have same : plan = expected := Except.ok.inj (derived.symm.trans actual)
     subst expected
-    simp only [dif_neg different]
+    rw [dif_neg different]
+    split
+    next pinned pinnedPlan => rw [dif_neg (differentPinned pinned pinnedPlan)]
+    next => rfl
+
+/-- What consent accepts is the local plan or its pin and nothing else: the accepted
+plan's non-slot fields are the local plan's, and each accepted slot is the local slot
+with at most its header's deadline pinned. -/
+theorem accepted_is_plan_or_pin {config : Config} {target : Durable}
+    {basis : ConsentAnchor.Basis config target} {draft : Draft} {candidate : List UInt8}
+    (consent : PlanConsent config basis draft candidate) :
+    consent.accepted = consent.plan ∨
+      (consent.accepted = { consent.plan with slots := consent.accepted.slots } ∧
+        consent.accepted.slots.length = consent.plan.slots.length ∧
+        ∀ i (hi : i < consent.plan.slots.length) (hi' : i < consent.accepted.slots.length),
+          NativePlanHeight.pinSlot consent.plan.height consent.plan.slots[i] =
+            .ok consent.accepted.slots[i]) := by
+  rcases consent.pinned with same | pinned
+  · exact .inl same
+  · exact .inr (NativePlanHeight.pin_only_slots _ _ pinned)
+
+#assert_axioms plan_origin
+#assert_axioms pinned_plan_accepted
+#assert_axioms changed_plan_refused
+#assert_axioms accepted_is_plan_or_pin
 
 #assert_axioms classify_stale
 #assert_axioms stale_observation_is_this_intent

@@ -2,7 +2,6 @@
 //! START consumes current-image BEGIN/claim plans once, launches the one fd3
 //! owner, and opens HTTP only after fresh native physical completion. INSTALL
 //! materialization and stopped wake remain separate lifecycle operations.
-#![allow(dead_code)] // Enabled only after root reviews the exact native cut.
 
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
@@ -313,7 +312,7 @@ impl StartLane {
         }
     }
 
-    fn admitted_protocol(self) -> &'static str {
+    pub(crate) fn admitted_protocol(self) -> &'static str {
         match self {
             Self::V3 => "mini-spk-resident-start-admitted-v3",
             Self::RetryV4 => "mini-spk-resident-start-admitted-retry-v4",
@@ -365,6 +364,32 @@ impl StartLane {
             Self::V3 => "claim-v3.bin",
             Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::CLAIM_INGRESS_FILE,
         }
+    }
+
+    /// The exact BEGIN ingress, CLAIM ingress and committed CLAIM of this
+    /// lane's retained START, for failed-START recovery. `v3_begin_dir` and
+    /// `v3_claim_dir` are the resident config's v3 attempt directories; the
+    /// v4 lane's live at fixed names under the journal.
+    pub(crate) fn recovery_artifacts(
+        self,
+        journal_dir: &Path,
+        v3_begin_dir: &Path,
+        v3_claim_dir: &Path,
+    ) -> [PathBuf; 3] {
+        let (begin, claim_dir) = match self {
+            Self::V3 => (v3_begin_dir.join("begin-v3.bin"), v3_claim_dir.to_path_buf()),
+            Self::RetryV4 => (
+                journal_dir
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_ATTEMPT_DIR)
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_INGRESS_FILE),
+                journal_dir.join(crate::lifecycle_v4_retry_claim_native::CLAIM_ATTEMPT_DIR),
+            ),
+        };
+        [
+            begin,
+            claim_dir.join(self.claim_ingress_file()),
+            claim_dir.join(self.committed_file()),
+        ]
     }
 
     fn committed_file(self) -> &'static str {
@@ -1248,7 +1273,8 @@ impl ResidentConfig {
 /// This is the systemd ExecStart body for a fresh native START claim. The
 /// stopped unit is installed from operator-reviewed pins; HTTP has no path to
 /// choose a package, task UID, Mini signer, command, or app generation.
-/// The resident never runs as root. Its unit (rendered by the root broker)
+/// The resident never runs as root. Its user unit (rendered by the operator's
+/// per-world broker)
 /// names the app UID/GID, grains root and Store. The trusted bootstrap has
 /// already dropped both parsers to zero capabilities before this config is
 /// read; its app identity must agree with the native source-bound launch.
@@ -2001,7 +2027,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             } else if let Some((listener, _, _)) = agent_routes.get(index) {
                 // No agent frame is read or admitted while paused. EOF cannot
                 // certify a no-record outcome; its client retains exact recovery.
-                drop(listener.accept_authenticated()?);
+                if let Err(error) = listener.accept_authenticated() {
+                    eprintln!("spk-host: paused agent connection refused at accept: {error}");
+                }
             }
             return Ok(None);
         }

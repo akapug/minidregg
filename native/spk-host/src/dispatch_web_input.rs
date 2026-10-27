@@ -1,7 +1,6 @@
 //! Physical mapping of an already matched Mini request to packaged WebSession
 //! values. Only the source checked principal and effective ordered bits enter
 //! Sandstorm session identity/permissions; HTTP labels and headers grant none.
-#![allow(dead_code)] // No HTTP delivery until native op34/claim join is complete.
 
 use crate::dispatch_inspection::{
     HttpProjection, MatchedInspection, Route, STREAMED_OPEN_METHOD,

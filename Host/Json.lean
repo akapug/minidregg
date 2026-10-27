@@ -4,6 +4,7 @@ notation: successful authoring constructs the real source values and invokes
 their canonical codecs. All unbounded integers are decimal strings.
 -/
 import Kernel.NativeHost
+import Compiler.NativeHostEffectClass
 import Kernel.PayStarterAllowance
 import Host.BirthRuntimeProfile
 import Host.CapabilityInspection
@@ -335,7 +336,7 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       pure <| if tag = "all" then Pred.all children else Pred.any children
   | _ => failAt (path ++ ".type") "unknown predicate constructor"
 
-private partial def predicateJson : Pred → Lean.Json
+partial def predicateJson : Pred → Lean.Json
   | .eq slot value => .mkObj [("type", "eq"), ("slot", .str slot),
       ("value", signedDecimal value)]
   | .le slot value => .mkObj [("type", "le"), ("slot", .str slot),
@@ -4782,7 +4783,16 @@ private def lawLeafJson (leaf : LawLeaf) : Lean.Json :=
     ("text", .str (LawLeaf.renderClause leaf.clause)), ("before", value leaf.before),
     ("after", value leaf.after)]
 
-private def outcomeJson : Outcome → Lean.Json
+/-- The outcome's effect class (`NativeHostCodec.Outcome.effectClass`): the one field a
+client classifies by. `no-record` (author a fresh attempt), `admitted`, `undecided`
+(retry the exact call or look it up). -/
+private def effectField (outcome : Outcome) : String × Lean.Json :=
+  ("effect", .str outcome.effectClass.name)
+
+private def outcomeJson (outcome : Outcome) : Lean.Json :=
+  (outcomeBody outcome).setObjVal! (effectField outcome).1 (effectField outcome).2
+where
+  outcomeBody : Outcome → Lean.Json
   | .confirmed kind receipt =>
       let confirmation : Lean.Json := match kind with
         | .installed => "installed"

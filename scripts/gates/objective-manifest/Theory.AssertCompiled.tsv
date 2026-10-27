@@ -1,5 +1,0 @@
-# Theory.AssertCompiled: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
-# an added, removed, restated, redefined or re-axiomed row needs a line in scripts/gates/objective-contract-decisions.txt.
-def	Minidregg.Theory.AssertCompiled.isCoreReduceAxiom	ba7c6de57770940e826d09b09a4ebc0250ea1a6f30a48eb2ad7ceb0ef469c5a9	78f82c13f1bd3df58eb06fcb8097f2cc1d3ee1f29a6414d78d9e666e5e8136d7	9229b3bd20263598b2030fda41c82d77412ce6057a70a6bfaa10fa68cd10ee74	444bbb649d6f2bf0	-	Lean.Name → Bool
-def	Minidregg.Theory.AssertCompiled.nativeOracleClaim?	08752ebee3a938fb2bb12abb5bb8224eeceed8ff0918ff214fcd3cf9088d03af	fc2855cbccc5267fe0e9d737a3470b98571d913e94c1ed645b5fb489734e6d5c	4a626ce5fbec101b8a9ee484734c298818c9fd4ec71e448302233bd9703da436	d5bcbd9011aece33	propext	Lean.Expr → Option Lean.Expr
-def	«command#assert_compiled_»	7cd1def86bebc7ec966eab0369b40dc9a6c2a4d89f82a6bdc0c0a6e0e3e83b4c	c959d62f91aa9c65e4943e42235c11098b3235f9c3a7cf43c6252a448a24dfa3	a5810b9b3a9667b19a6e0e9329ffef93440e1d73e02c0eb51736146cb9131975	700d4086f523481a	-	Lean.ParserDescr

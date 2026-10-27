@@ -712,8 +712,9 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RoomToolsConfig {
     /// Offer and accept only room tools for this resident. Generic workspace
-    /// mutations would bypass the room turn payment. Existing setups opt in.
-    #[serde(default)]
+    /// mutations would bypass the room turn payment, so this is on unless a
+    /// config says `"restrictTools": false` explicitly.
+    #[serde(default = "restrict_tools_default")]
     pub restrict_tools: bool,
     /// The pinned `mini` client.
     pub mini: PathBuf,
@@ -730,6 +731,8 @@ pub(crate) struct RoomToolsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
 }
+
+fn restrict_tools_default() -> bool { true }
 
 /// The room tools' MCP schemas (also the provider's function list).
 pub(crate) fn room_tool_specs() -> Vec<Value> {
@@ -921,7 +924,7 @@ impl RoomTools<'_> {
 
     fn line_with_input(&self, line: &str, input: Option<&[u8]>, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
         let config = self.config;
-        let mut child = Command::new(&config.mini)
+        let mut child = crate::deadline::spawn(Command::new(&config.mini)
             .arg("shell")
             .arg("--socket")
             .arg(&config.socket)
@@ -935,10 +938,7 @@ impl RoomTools<'_> {
             .arg(&config.home)
             .arg("--line")
             .arg(line)
-            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }))
             .map_err(|e| format!("{}: {e}", config.mini.display()))?;
         spawned(child.id());
         if let Some(bytes) = input {
@@ -950,7 +950,10 @@ impl RoomTools<'_> {
                 return Err(format!("discovery stdin: {error}"));
             }
         }
-        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        // On the deadline the submitter's process group is killed and reaped
+        // before this returns, so the journaled submitter is provably stopped.
+        let out = crate::deadline::wait(child, crate::deadline::NATIVE_CALL)
+            .map_err(|e| crate::deadline::describe("mini shell", e))?;
         Ok(LineRun {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -1077,11 +1080,11 @@ impl RoomTools<'_> {
             Err(error) => return Err(format!("operation record metadata: {error}")),
             Ok(_) => {}
         }
-        let output = Command::new(&self.config.mini)
+        let output = crate::deadline::output(Command::new(&self.config.mini)
             .args(["credit", "--action", "lookup-operation", "--dir"])
             .arg(&self.config.workspace).arg("--operation-record").arg(&record)
-            .arg("--socket").arg(&self.config.socket)
-            .stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+            .arg("--socket").arg(&self.config.socket), crate::deadline::NATIVE_CALL)
+            .map_err(|e| crate::deadline::describe("operation lookup", e))?;
         let recovered = last_json(&String::from_utf8_lossy(&output.stdout));
         let resolution = match recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str()) {
             Some("confirmed") => "performed",
@@ -1099,7 +1102,7 @@ impl RoomTools<'_> {
         let Some(account) = &self.config.account else {
             return Ok(json!({"paid":false,"note":"unmetered"}));
         };
-        let output = Command::new(&self.config.mini)
+        let output = crate::deadline::output(Command::new(&self.config.mini)
             .arg("credit")
             .arg("--action")
             .arg("turn")
@@ -1114,10 +1117,10 @@ impl RoomTools<'_> {
             .arg("--operation-record")
             .arg(self.operation_record(op, "payment")?)
             .arg("--socket")
-            .arg(&self.config.socket)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("{}: {e}", self.config.mini.display()))?;
+            .arg(&self.config.socket), crate::deadline::NATIVE_CALL)
+            // A timed-out payment may have been sent: the caller recovers it by
+            // its exact operation record, never by this error's text.
+            .map_err(|e| crate::deadline::describe("the turn's payment", e))?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
             let run = LineRun { code: output.status.code().unwrap_or(-1), stdout: String::new(), stderr: stderr.into_owned() };
@@ -1277,6 +1280,18 @@ impl RoomTools<'_> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn restrict_tools_is_on_unless_a_config_turns_it_off() {
+        let base = json!({"mini":"/m","host":"/h","hostConfig":"/c","socket":"/s",
+            "workspace":"/w","home":"/home","room":"lab"});
+        let config: RoomToolsConfig = serde_json::from_value(base.clone()).unwrap();
+        assert!(config.restrict_tools);
+        let mut off = base;
+        off["restrictTools"] = json!(false);
+        let config: RoomToolsConfig = serde_json::from_value(off).unwrap();
+        assert!(!config.restrict_tools);
+    }
 
     #[test]
     fn discovery_pipes_bounded_json_and_never_reads_model_paths() {

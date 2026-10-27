@@ -264,6 +264,7 @@ impl Drop for Client {
     }
 }
 impl Client {
+    #[cfg(test)]
     pub(crate) fn wait(&mut self, pid: u32) -> io::Result<i32> {
         loop {
             let r = self.command(2, pid)?;
@@ -507,28 +508,13 @@ pub(crate) fn require_parser() -> io::Result<()> {
     }
     dropped(Identity::unit("OPERATOR")?)
 }
-/// Broker-rendered operator unit environment selects mapped identities. No app packet
-/// can name an operator/app UID/GID; neither parser retains switch privileges.
-pub fn run(path: &Path) -> io::Result<()> {
-    let operator = Identity::unit("OPERATOR")?;
-    let app = Identity::unit("APP")?;
-    if operator.uid == app.uid {
-        return Err(refused("operator and app identities must differ"));
-    }
-    let root=std::env::var("MINI_SPK_GRAINS_ROOT").map_err(|_|refused("broker world root absent"))?;
-    let store=std::env::var("MINI_SPK_STORE").map_err(|_|refused("broker store absent"))?;
-    let unit=std::env::var("MINI_SPK_UNIT").map_err(|_|refused("broker resident unit absent"))?;
-    let (named,grain,generation)=crate::broker::parse_resident_unit(&unit).ok_or_else(||refused("broker resident unit refuses missing store"))?;
-    let registry=crate::volume_helper::Registry::load(&store)?;
-    if named!=store || registry.grains_root!=Path::new(&root)
-        || registry.operator_uid!=operator.uid || registry.operator_gid!=operator.gid
-        || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
-        || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
-    { return Err(refused("namespace bootstrap differs from root-registered world")); }
-    let bwrap=std::env::var_os("MINI_SPK_BWRAP").ok_or_else(||refused("broker namespace bwrap absent"))?;
-    let bwrap_sha256=std::env::var("MINI_SPK_BWRAP_SHA256").map_err(|_|refused("broker namespace bwrap pin absent"))?;
-    crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
-    crate::namespace_identity::enter(Path::new(&bwrap),&bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid)?;
+/// Enter the mapped {operator, app} namespace, fork the launch worker as the
+/// app, drop this process to the operator, install the parser's namespace
+/// filter, and arm the generation's one launch channel. `run` and the
+/// sandbox-floor audit share this, so the audit measures the production
+/// spawn path (`spawn_gate::spawn_bounded` through the worker).
+fn bootstrap(bwrap: &Path, bwrap_sha256: &str, operator: Identity, app: Identity) -> io::Result<()> {
+    crate::namespace_identity::enter(bwrap,bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid)?;
     let (parent, child) = UnixStream::pair()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -551,7 +537,39 @@ pub fn run(path: &Path) -> io::Result<()> {
             pid: 0,
             worker: pid,
         })))
-        .map_err(|_| refused("resident bootstrap already initialized"))?;
+        .map_err(|_| refused("resident bootstrap already initialized"))
+}
+
+/// The floor audit's entry to `bootstrap`: this process is the operator and
+/// `app` is a subordinate identity its /etc/subuid grant maps.
+#[cfg(test)]
+pub(crate) fn bootstrap_for_audit(bwrap: &Path, bwrap_sha256: &str, app_uid: u32, app_gid: u32) -> io::Result<()> {
+    let operator = Identity { uid: unsafe { libc::geteuid() }, gid: unsafe { libc::getegid() } };
+    bootstrap(bwrap, bwrap_sha256, operator, Identity { uid: app_uid, gid: app_gid })
+}
+
+/// Broker-rendered operator unit environment selects mapped identities. No app packet
+/// can name an operator/app UID/GID; neither parser retains switch privileges.
+pub fn run(path: &Path) -> io::Result<()> {
+    let operator = Identity::unit("OPERATOR")?;
+    let app = Identity::unit("APP")?;
+    if operator.uid == app.uid {
+        return Err(refused("operator and app identities must differ"));
+    }
+    let root=std::env::var("MINI_SPK_GRAINS_ROOT").map_err(|_|refused("broker world root absent"))?;
+    let store=std::env::var("MINI_SPK_STORE").map_err(|_|refused("broker store absent"))?;
+    let unit=std::env::var("MINI_SPK_UNIT").map_err(|_|refused("broker resident unit absent"))?;
+    let (named,grain,generation)=crate::broker::parse_resident_unit(&unit).ok_or_else(||refused("broker resident unit refuses missing store"))?;
+    let registry=crate::volume_helper::Registry::load(&store)?;
+    if named!=store || registry.grains_root!=Path::new(&root)
+        || registry.operator_uid!=operator.uid || registry.operator_gid!=operator.gid
+        || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
+        || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
+    { return Err(refused("namespace bootstrap differs from root-registered world")); }
+    let bwrap=std::env::var_os("MINI_SPK_BWRAP").ok_or_else(||refused("broker namespace bwrap absent"))?;
+    let bwrap_sha256=std::env::var("MINI_SPK_BWRAP_SHA256").map_err(|_|refused("broker namespace bwrap pin absent"))?;
+    crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
+    bootstrap(Path::new(&bwrap), &bwrap_sha256, operator, app)?;
     let result = crate::resident_service::run(path);
     if let Some(lock) = LAUNCH.get() {
         if let Ok(mut client) = lock.lock() {
@@ -683,6 +701,15 @@ mod tests {
         if operator_pid == 0 {
             drop(receiver);
             let result = (|| -> io::Result<()> {
+                // Every host input this test needs, refused by name when absent
+                // (never a bare ENOENT): the mapping helpers, the subordinate-id
+                // grants, the namespace holder's and the launched app's programs.
+                for input in ["/etc/subuid", "/etc/subgid", "/usr/bin/newuidmap", "/usr/bin/newgidmap",
+                    "/usr/bin/true", "/usr/bin/sleep"] {
+                    if fs::symlink_metadata(input).is_err() {
+                        return Err(refused(&format!("tenancy bootstrap test input absent: {input}")));
+                    }
+                }
                 let operator = Identity {
                     uid: unsafe{libc::geteuid()},
                     gid: unsafe{libc::getegid()},

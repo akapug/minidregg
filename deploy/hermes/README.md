@@ -8,8 +8,8 @@ is also the **route** the purse records and is charged by:
 
 | `credential` (route) | bearer | what gates it | what the purse pays |
 |---|---|---|---|
-| `user` | the friend's own key (`mini key set`) | the friend's grant naming this Hermes runner: a per-call `max_tokens` ceiling, calls per UTC day, and a last block height | the user route's per-operation fee, nothing else: the provider bills the friend |
-| `pool` | the operator's key (`mini key … --pool true`) | the row's `caps` (per-call `max_tokens`, calls per UTC day per runner) and the purse: Mini must admit the provider reserve (PAY.md §2.7) | the pool fee plus the metered tariff |
+| `user` | the friend's own key (`mini key set`, sealed per friend by the broker) | the friend's grant naming this Hermes runner: a per-call output-token ceiling, an optional model, calls per UTC day, and a last block height. The broker reads the body it forwards against the grant, not what the controller says | the user route's per-operation fee, nothing else: the provider bills the friend |
+| `pool` | the operator's key (`mini-keys pool --action set`, as root) | the row's `caps` (per-call output tokens, calls per UTC day per runner, and the broker's own spend ceiling on the key) and the purse: Mini must admit the provider reserve (PAY.md §2.7) | the pool fee plus the metered tariff |
 | `homelab` | no `Authorization` header at all | the purse (a homelab endpoint on the operator's own network) | the homelab fee plus its metered rates |
 
 A call with no payer (a `user` row and no key or grant) is refused before
@@ -45,16 +45,34 @@ only under the subject and public key that ember pinned for your Hermes
 
 ## What ember does (once per box)
 
-As root on the box:
+The deployed shape is split tenancy, and its pieces are installed by
+**dregg-infra**, not by this repo: the accounts (`mini-core` for the Host and
+the Hermes controller, `mini-keys` for the broker, one `mini-s-NAME` per hosted
+member with primary group `mini-sessions`, `mini-pubread`, `mini-door`,
+`mini-grain`), `mini-keys.service` and its confinement drop-in, the root-owned
+broker config `/etc/mini/keys/broker.json` (`edge/mini/mini-service-config.py`),
+the client pointer `/etc/mini/keys-client.json`, the credential root with its
+pre-created `_service/` and `_pool/` leaves (`mini-keys` 0700; the broker
+creates nothing under a root-owned root), the namespace helper with its sudoers
+rule, and the seal key. This repo ships the binary and states the contract:
 
-```sh
-# dregg-infra install.sh does this, and runs the broker (mini-keys.service):
-install -d -m 0711 -o root -g root /var/lib/mini/credentials
-head -c 32 /dev/urandom | install -m 0600 -o mini-keys -g mini-keys /dev/stdin /etc/mini/credentials.key
-install -m 0644 -o root -g root providers.json /etc/mini/providers.json
-# the pool key, sealed by the broker (root holds the operator role):
-mini-keys pool --action set --provider openrouter-pool --secret - < POOL_KEY_FILE
-```
+- **Broker config** (`mini-keys-broker-v1`, root 0644, every ancestor root's):
+  no `singleAccount` (a root-owned config cannot select it: it is the
+  journeys' and tests' one-account shape); `socketGroup` = `mini-sessions`;
+  peers `member` by gid, `provider` = the `mini-core` uid, `operator` = 0,
+  `discord` = the mirror's uid; `credentials.hostSha256` = the candidate
+  manifest's SHA-256 of `bin/minidregg-host` (the broker hashes the image once
+  at start and refuses a different one: restart `mini-keys` on every candidate
+  switch, with the new digest); `credentials.publicSocketUid` = the uid serving
+  the Host's public socket (the only account whose operation-144 answer counts).
+- **Seal key** `/etc/mini/credentials.key`: 32 random bytes, `mini-keys` 0600,
+  never in a backup.
+- **Provider table** `/etc/mini/providers.json`: root 0644. Every `pool` row
+  carries `caps.ceilingMicroUsd` and `caps.callMicroUsd`, or a deployed broker
+  refuses to start.
+- **Pool key**, as root: `mini-keys pool --action set --provider pool --secret - < POOL_KEY_FILE`.
+  The file is the operator's, and is deleted after; the broker seals it into
+  `/var/lib/mini/credentials/_pool/pool.key` (`mini-keys` 0600).
 
 - **Back up `/etc/mini/credentials.key` separately from `/var/lib/mini`, or
   not at all.** Without it, the store is unreadable. The cost of losing it is
@@ -94,18 +112,72 @@ Example table (`type` and every field are required; `caps` exactly on a
   `tariff`, or `credential: none`) refuses to load.
 - **`caps`** on a `pool` row: `perCall` is the largest `max_tokens` one call
   may ask for (also never above the task's `maxOutputTokens`, which the hold
-  covers), `perDay` the calls per UTC day, per runner.
+  covers), `perDay` the calls per UTC day, per runner. `ceilingMicroUsd` is
+  the broker's own all-time ceiling on the key and `callMicroUsd` the worst
+  case of one call (`perCall` output tokens plus the task's input bound, at the
+  model's price): each authorized call is charged `callMicroUsd` before it is
+  counted, and a call that would pass the ceiling refuses `spend-ceiling`. Set
+  the ceiling below the provider-side hard cap (the demo: $50 at OpenRouter, a
+  ceiling of at most `40000000`), so that cap is never the first line.
+  `mini-keys pool --action ls` shows the charged total; `--action spend-reset
+  --provider pool` resets it after the operator re-checks the provider side.
 
 **The pool is optional.** Set it only if you want to fund Hermes for friends
 who bring no key:
 
 ```sh
-sudo -u mini mini key --action set --pool true --provider pool --secret - < pool-key.txt
+mini-keys pool --action set --provider pool --secret - < pool-key.txt   # as root
 ```
 
-Its spend is bounded by each Hermes grain's purse. A pool request whose
-reserve Mini refuses gets `no-credit`. Put a spend limit on the pool key at
-OpenRouter too.
+Its spend is bounded three times: by each Hermes grain's purse (a pool request
+whose reserve Mini refuses gets `no-credit`), by the broker's own
+`ceilingMicroUsd`, and by the hard spend limit on the key at OpenRouter.
+
+## What the broker decides, and what it still trusts
+
+The broker is the one process that holds provider keys; it acts for peers the
+kernel names (`SO_PEERCRED`). What it checks itself:
+
+- the **forwarded body**, not the controller's claims: one JSON object without
+  duplicate keys, a `model` on the row (and the granted one), `max_tokens`
+  (and `max_completion_tokens`, `max_output_tokens`) within the grant's or
+  pool row's per-call ceiling, `n` absent or 1; otherwise
+  `provider-refused:body-exceeds-grant` and nothing is sent;
+- **tickets are durable** and written before the day's call is counted; an
+  exact `provider-authorize` retry gets the same ticket and counts nothing; a
+  forward is journaled, and an exact retry replays the retained answer
+  (retained one hour, plaintext, in the broker's 0700 spool) or refuses
+  `forward-uncertain`; it never calls the provider twice;
+- **operation 144** (is this key the subject's current, unrevoked key) is
+  accepted only from `publicSocketUid`, on a connection carrying exactly that
+  query; Lean's `isCurrent` is "the current key equals the queried key"
+  (`Kernel/Receivers/SubjectKeyRotation.lean` `status`);
+- **slots** by role class (provider 8, operator 2, discord 2, members 20 with
+  at most 4 per uid) and a first frame sized by role (a member's is 4 KiB);
+- **audit**: every operation with an effect writes and syncs a `begin` line
+  first; if it cannot, the operation refuses `audit-unavailable`.
+
+What it still takes on trust, and the Lean asks that remove it (for
+`lane/lean-critical`):
+
+1. **Operation 144 should name the key and the height.** In `Host/Json.lean`,
+   `subjectKeyStatusJson` takes the queried `publicKey : List UInt8` and the
+   opened Store's logical height, and emits `("publicKey", hex publicKey)` and
+   `("height", decimal height)`; `Host/Main.lean` (the `| 144 =>` arm) and
+   `Host/SourceAgreementReader.lean` pass them. The broker already compares a
+   `publicKey` it is given (`native/mini-keys/src/server/native.rs`
+   `current_epoch`) and uses `height` for a grant's `notAfter`; until `height`
+   is emitted, `notAfter` is checked against the controller's stated height,
+   the one remaining claim.
+2. **The provider reserve should bind the grant.** Lean's provider purse
+   records only the route (`Kernel/ProviderRoute.lean`); no reserve receipt
+   carries `(model, max_tokens, height)`, so the broker cannot check one and
+   reads the body instead. A Lean-admitted member grant cell (perCall, perDay,
+   notAfter, model, runner) checked at provider reserve, with the broker
+   verifying the reserve receipt before it unseals, would move the grant and
+   quota decisions out of Rust (SYNTHESIS §B row 9).
+
+
 
 **Each Hermes controller** (`/var/lib/mini/hermes/controller.json`) needs these
 fields in its `providerTask`:
@@ -129,8 +201,13 @@ fields in its `providerTask`:
 - **The runner.** The friend's grant names the provider task's `subject` (the
   runner). Tell the friend that number.
 
-Then run `systemctl enable --now mini-hermes`. The unit is
-`deploy/hermes/mini-hermes.service`. It has no key and no `EnvironmentFile`.
+Then install the controller with
+`deploy/grain-host/install-controller --system --service-user ACCOUNT ...`
+(the system shape: `mini-grain-controller@TASK.service` plus the root
+registration `/etc/mini/controllers/TASK.json`) and start that unit. The unit
+has no key and no `EnvironmentFile`. The old `mini-hermes.service` is retired:
+its name failed the controller's own unit proof, so no sandboxed Hermes
+prompt could run under it.
 
 ## What a friend does
 
@@ -196,3 +273,51 @@ one credit per purse micro-unit):
   per-operation fees the Host pinned when it was born. A Host tariff with
   different fees refuses the user-route reserve (its hold must equal the law's
   fee) and fails a metered settle closed; a fee change means a new purse.
+
+## The demo box: Hermes's grain and controller config
+
+`controller.json` is not written by hand: two of its fields are capabilities
+allocated when the owner delegates the parent witness, so it comes out of
+`grain-runtime create deploy/hermes/grain-create.demo.json` (run as the Hermes
+grain account against the serving Store). `controller.demo.json` is the exact
+shape that command writes for this spec, kept for review; its
+`WITNESS-FROM-CREATE` values are the two fields create fills, and the
+controller refuses the file until they are real. Then
+`install-controller --system --service-user ACCOUNT --config /var/lib/mini/hermes/g/controller.json ...`
+renders `mini-grain-controller@9870001.service` (controller manager `system`,
+worker `user`, unit name) and writes `/etc/mini/controllers/9870001.json`.
+
+Where each spec field comes from:
+
+- `mini`, `host`: the shipped candidate (`/var/lib/mini/candidate/current/bin`).
+- `hostConfig`, `genesis`, `namespaceRoot`, `sponsor.key`: the Store's own
+  deployment files; `hostConfig` must carry the purse's `providerServices`
+  tariff (the profile's semantics do not change when it is added).
+- `hostSocket`, `room.socket`: the **private operator** socket (`mini
+  serve-operator`); the resident refuses anything that does not answer
+  `operator-status`.
+- `sponsor.subject`/`accountCapability`/`grants`, `template`: the Store's
+  genesis (sponsor enrollment, factory observation) and operator template.
+- `owner`, `workerKey`, `provider.key`: three subjects enrolled for Hermes's
+  grain, keys private to the grain account, never Hermes's room key.
+- `task`, `toolTask`, `provider.task`, `capabilities.*`: unused resource IDs
+  the operator picks (create refuses duplicates among them; the Host refuses
+  IDs in use).
+- `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices (Rust
+  policy today, gr R1).
+- `worker`: the shipped `bwrap` launcher (sibling `launch-gate`), a runtime
+  root holding `hermes-acp`, `grain-runtime` and `grain-provider-bridge`, and
+  `network: none` (the production topology: the worker reaches the model only
+  through the bridge and the controller's Unix gateway).
+- `provider.gateway`: `providers`/`credentialBroker` are the root-owned table
+  and broker client; `provider: "pool"` pins the pool row (set it, or the
+  first row listing the model is chosen); `model` is the infra lane's choice;
+  `reserve` must cover the pool fee plus the metered charge at
+  `maxInputTokens`/`maxOutputTokens` under the Host profile's pool tariff.
+- `room`: the room Hermes is summoned into, its room workspace and account;
+  `restrictTools: true` (also the default).
+
+Hermes cannot settle a provider call until the client consent accepts the
+height-pinned provider settle plan (main's `checkPlan` compares it with the
+unpinned local prepare and refuses; L1 owns the fix). The grain and unit can
+be installed now; turn the unit on with the candidate that carries that fix.

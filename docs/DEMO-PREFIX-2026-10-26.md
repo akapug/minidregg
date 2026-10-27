@@ -246,11 +246,16 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 
 ## 4. Rules for the prefix (binding on every lane brief)
 
+How lanes, the orchestrator, the boxes and the cadence work is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md) §3–§6
+(2026-10-27; it replaced the seven rules that stood here). Three rules are specific to this prefix
+and stay here:
+
 1. Rescue, repair, delete, in that order; "delete the twin" keeps and repairs the better one.
-2. Every lane's deletions are named in its brief; the first deletion commit lands within a
-   day of the lane's repair going green; a size ratchet refuses growth of the host closure.
-3. Lean interface changes land first and rebuild early; no statement packets for code being
-   removed; only a lane's top-level theorem must be non-vacuous.
+2. Every lane's deletions are named in its brief; the first deletion commit lands within a day of the
+   lane's repair going green; `scripts/gates/host-closure.max` (one number) refuses growth of the Host
+   closure.
+3. Lean interface changes land first and rebuild early (on `dregg-build`); no statement packets for
+   code being removed; only a lane's top-level theorem must be non-vacuous.
 4. Rehearsals ship on the day with reds named; the opening waits for the §1 contract and
    nothing else; the gate is the tour plus the composed scenario and never grows ahead of the
    surfaces; standing rows are nightly and never a candidate's reds.

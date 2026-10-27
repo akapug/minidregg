@@ -38,7 +38,8 @@ native() {  # OUTPUT_DIR BINARY [builder args...]
 # move what a build at an earlier commit produced; one that changes any of them does.
 compiled=(':(glob)**/*.lean' lakefile.toml lake-manifest.json lean-toolchain rust-toolchain.toml Cargo.toml Cargo.lock ':(glob).cargo/**'
           ':(glob)native/*/Cargo.toml' ':(glob)native/*/Cargo.lock' ':(glob)native/*/build.rs'
-          ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh)
+          ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh
+          deploy/grain-host/launch-gate.rs)  # native/launch-gate's [[bin]] source
 unchanged_since() {  # BUILD (host|rust): refuse unless HEAD's compiled inputs equal that build's commit
   local b=$1 at changed
   [ -f "$LANE_DIR/logs/$b-build.commit" ] || { echo "lane-build: no $b build recorded; run $b" >&2; exit 1; }
@@ -80,6 +81,20 @@ case $step in
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
     done <"$LANE_DIR/logs/rust-roles.txt"
+    # Journey fixtures (package.py --fixture-roles): same tree, same flags, never candidate outputs.
+    # (This builder also packs older tips, whose package.py still ships them as roles: an empty list.)
+    rm -rf "$LANE_DIR/fixtures"; mkdir -p "$LANE_DIR/fixtures"
+    : >"$LANE_DIR/logs/fixture-roles.txt"
+    if grep -q -- '--fixture-roles' deploy/candidate/package.py; then
+      python3 deploy/candidate/package.py --fixture-roles >"$LANE_DIR/logs/fixture-roles.txt"
+    fi
+    while read -r _ crate bin; do
+      echo "== fixture $crate/$bin $(date -u +%H:%M:%S)"
+      (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        || { echo "FAIL fixture $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
+      install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/fixtures/$bin"
+    done <"$LANE_DIR/logs/fixture-roles.txt"
     echo "rust done $(date -u +%H:%M:%S)" ;;
   pack)
     OUT=${1:?OUT_DIR}
@@ -110,6 +125,15 @@ case $step in
         nativeHost: "scripts/build-native-host.sh via lane-build.sh (incremental or full), consent as its companion"}' \
       >"$LANE_DIR/logs/toolchains-$head.json"
     python3 deploy/candidate/package.py --roles "$LANE_DIR/logs/roles-$head.json" --source-archive "$LANE_DIR/logs/source-$head.tar" \
-      --out "$OUT" --toolchains "$LANE_DIR/logs/toolchains-$head.json" --host-build-manifest "$LANE_DIR/native-out/manifest.txt" ;;
+      --out "$OUT" --toolchains "$LANE_DIR/logs/toolchains-$head.json" --host-build-manifest "$LANE_DIR/native-out/manifest.txt"
+    # Journey fixtures ride beside the candidate, outside bin/, the manifest and SHA256SUMS.
+    if grep -q -- '--fixture-roles' deploy/candidate/package.py; then
+      mkdir "$OUT/fixtures"
+      while read -r _ _ bin; do
+        [ -f "$LANE_DIR/fixtures/$bin" ] || { echo "lane-build: missing fixture $bin; run rust" >&2; exit 1; }
+        install -m 0555 "$LANE_DIR/fixtures/$bin" "$OUT/fixtures/$bin"
+      done < <(python3 deploy/candidate/package.py --fixture-roles)
+      (cd "$OUT/fixtures" && sha256sum -- * >SHA256SUMS)
+    fi ;;
   *) echo "lane-build: unknown step $step" >&2; exit 64 ;;
 esac

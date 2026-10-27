@@ -1,5 +1,11 @@
 # Offer a fresh hosted Hermes pair
 
+> **Cannot be run as written (2026-10-26).** Its per-UID frontend, `host-frontend.rs`, was deleted: a
+> hand-written public-operation allowlist (`0..=11, 17, 19` with hand payload limits) twinning
+> `protocol/host-operations.json` and `mini serve-public-proxy` (RUST-TRIAGE 2.1 row 37). The frontend role
+> is `mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json --socket-gid GID`;
+> `install-operator-stack` still renders the deleted binary's argument shape and needs that change first.
+
 This is the operator sequence for **one new Mini Store** with the fixed workroom profile: parent/tool grains 7801/7802 and 7803/7804, shared content 8001, four signing subjects, and two separate Unix task accounts. It composes the existing signed [hosted provisioner](../../scripts/workroom/hosted-provision.sh), the per-UID Mini host frontend, [controller installer](install-controller), gated `bwrap`/Hermes runtime, and a separate operator fn bridge. The existing [single-account hosted pair](HOSTED-PAIR.md) proved two controllers and physical workers; it is not an account-isolation installation recipe. Never point this procedure at that live Store or reuse its task accounts.
 
 The four `offer-*` commands in this directory have deliberately narrow jobs. `offer-check-provision` decodes retained canonical Mini outcomes and views with the pinned Lean Host and checks exact build, source, resource, and grant pins. Its verdict says `currentAuthorityVerified:false`. `offer-render-task` runs as one task account and stages **one** config, executable pin list, and `install-controller --render-only` unit. Its `stage.json` hashes the input manifest and all rendered outputs; rerunning verifies exact bytes, while an incomplete stage refuses inspection-free overwrite. `offer-check-authority` uses that account's frontend and custody keys to make **fresh signed Mini queries** before unit installation. `offer-check-pair` compares those two account handoffs before either controller is installed. A successful query does not authorize a future publication if a grant is revoked or the target root changes; the actual MCP write remains a native admission at use time.

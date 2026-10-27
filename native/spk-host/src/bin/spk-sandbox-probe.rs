@@ -256,7 +256,7 @@ mod linux {
         // succeed (PTRACE_TRACEME, a new mount), and the probe itself must survive to
         // report the rest.
         type Attempt = fn() -> Outcome;
-        let denied: [(&str, Attempt, i32); 9] = [
+        let denied: [(&str, Attempt, i32); 14] = [
             ("mount", || outcome(unsafe {
                 libc::mount(c"none".as_ptr(), c"/tmp".as_ptr(), c"tmpfs".as_ptr(), 0, std::ptr::null())
             } as i64), libc::EPERM),
@@ -270,11 +270,37 @@ mod linux {
                 libc::syscall(libc::SYS_ioctl, 0, (1_u64 << 32) | libc::TIOCSTI, c"x".as_ptr())
             }), libc::EPERM),
             ("unlisted-syscall", || outcome(unsafe { libc::syscall(1023) }), libc::ENOSYS),
+            // The Sandstorm-supervisor refusals the policy carries.
+            ("seccomp", || outcome(unsafe { libc::syscall(libc::SYS_seccomp, 0, 0, 0) }), libc::EPERM),
+            ("prctl-set-seccomp", || outcome(unsafe { libc::prctl(libc::PR_SET_SECCOMP, 1, 0, 0, 0) } as i64), libc::EPERM),
+            ("io_setup", || outcome(unsafe { libc::syscall(libc::SYS_io_setup, 1, 0) }), libc::ENOSYS),
+            ("vmsplice", || outcome(unsafe { libc::syscall(libc::SYS_vmsplice, 0, 0, 0, 0) }), libc::ENOSYS),
+            ("set_mempolicy", || outcome(unsafe { libc::syscall(libc::SYS_set_mempolicy, 0, 0, 0) }), libc::ENOSYS),
         ];
         for (name, attempt, errno) in denied {
             let result = in_child(attempt);
             report.check(&format!("{name}-refused"), refused_with(result, errno), describe(result));
         }
+
+        // --- the namespace's view: dummy hostname, minimal /dev, descriptor bound ---
+        let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .map(|s| s.trim().to_owned())
+            .unwrap_or_default();
+        report.check("hostname-sandbox", hostname == "sandbox", json!({"hostname": hostname}));
+        let present: Vec<&str> = ["/dev/tty", "/dev/pts", "/dev/ptmx", "/dev/shm", "/dev/console"]
+            .into_iter()
+            .filter(|path| std::fs::symlink_metadata(path).is_ok())
+            .collect();
+        let dev_ro = std::fs::write("/dev/.probe", b"x").is_err();
+        let data = ["/dev/null", "/dev/zero", "/dev/urandom"].iter().all(|p| std::fs::File::open(p).is_ok());
+        report.check("dev-minimal", present.is_empty() && dev_ro && data,
+            json!({"present": present, "read-only": dev_ro, "data-devices": data}));
+        let mut files = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        let limited = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut files) } == 0
+            && files.rlim_max <= 1024;
+        report.check("rlimit-nofile-bounded", limited,
+            json!({"soft": files.rlim_cur, "hard": files.rlim_max}));
+
 
         // --- positive control: what a web app resident needs still works ---
         let thread = std::thread::spawn(|| 7).join().ok() == Some(7);

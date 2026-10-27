@@ -40,16 +40,26 @@ const PUBLIC_DATA_ARGS: [&str; 3] = ["--ro-bind-fd", "7", "/opt/oracle-data"];
 /// Every token before the package's environment, in order. `--disable-userns`
 /// follows `--unshare-user` (it requires it); `--seccomp 6` is the compiled
 /// `seccomp/resident-web.policy`.
-const FIXED_ARGS: [&str; 39] = [
+const FIXED_ARGS: [&str; 63] = [
     "--die-with-parent", "--new-session",
     "--unshare-user", "--disable-userns", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
     "--unshare-cgroup", "--unshare-net",
+    // Sandstorm's dummy hostname: the host's name is not the app's business.
+    "--hostname", "sandbox",
     "--cap-drop", "ALL",
     "--seccomp", "6",
     "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
     // /tmp is a 128 MiB tmpfs.
     "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
-    "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
+    // A minimal read-only /dev, as Sandstorm's supervisor gives: the four data
+    // devices and /dev/full, no tty, no devpts, no ptmx, no shm.
+    "--size", "65536", "--tmpfs", "/dev",
+    "--dev-bind", "/dev/null", "/dev/null", "--dev-bind", "/dev/zero", "/dev/zero",
+    "--dev-bind", "/dev/full", "/dev/full", "--dev-bind", "/dev/random", "/dev/random",
+    "--dev-bind", "/dev/urandom", "/dev/urandom",
+    "--symlink", "/proc/self/fd", "/dev/fd",
+    "--remount-ro", "/dev",
+    "--chdir", "/", "--setenv", "HOME", "/var",
     "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
 ];
 
@@ -454,11 +464,18 @@ mod tests {
             "--die-with-parent", "--new-session",
             "--unshare-user", "--disable-userns", "--unshare-pid", "--unshare-ipc",
             "--unshare-uts", "--unshare-cgroup", "--unshare-net",
+            "--hostname", "sandbox",
             "--cap-drop", "ALL",
             "--seccomp", "6",
             "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
             "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
-            "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
+            "--size", "65536", "--tmpfs", "/dev",
+            "--dev-bind", "/dev/null", "/dev/null", "--dev-bind", "/dev/zero", "/dev/zero",
+            "--dev-bind", "/dev/full", "/dev/full", "--dev-bind", "/dev/random", "/dev/random",
+            "--dev-bind", "/dev/urandom", "/dev/urandom",
+            "--symlink", "/proc/self/fd", "/dev/fd",
+            "--remount-ro", "/dev",
+            "--chdir", "/", "--setenv", "HOME", "/var",
             "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
             "--setenv", "A", "first", "--setenv", "A", "last",
             "--", "/bin/sh", "continue.sh",
@@ -510,6 +527,9 @@ mod tests {
         let args = bwrap_args(&spec(vec!["/start".into()], vec![])).unwrap();
         let at = |token: &str| args.iter().position(|a| a == token).unwrap();
         assert!(at("--unshare-user") < at("--disable-userns"));
+        assert!(at("--unshare-uts") < at("--hostname"));
+        assert!(!args.iter().any(|a| a == "--dev"), "bwrap's full /dev carries tty and devpts");
+        assert!(at("--tmpfs") < at("--remount-ro"));
         assert_eq!(args[at("--cap-drop") + 1], "ALL");
         assert_eq!(args[at("--seccomp") + 1], SECCOMP_FD.to_string());
         assert!(at("--seccomp") < at("--"));

@@ -266,7 +266,6 @@ pub(super) fn client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::FromRawFd;
     #[test]
     fn bounded_frames_round_trip_and_refuse_length_before_body() {
         use std::os::unix::net::UnixStream;
@@ -294,8 +293,11 @@ mod tests {
         assert!(refusal_of(&json!({"type":"mini-member-provider-challenge-v1"})).is_none());
     }
 
+    /// `F_SETPIPE_SZ` is Linux's; the deadline it measures is the Linux pipe buffer's.
+    #[cfg(target_os = "linux")]
     #[test]
     fn partially_saturated_pipe_stalled_reader_obeys_deadline() {
+        use std::os::fd::FromRawFd;
         let mut fds = [0; 2];
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
         let _reader = unsafe { std::fs::File::from_raw_fd(fds[0]) };
@@ -356,7 +358,8 @@ mod tests {
         });
         let config = json!({"type":"mini-keys-broker-v1","socket":dir.join("run/broker.sock"),"audit":dir.join("state/audit.jsonl"),
             "spool":dir.join("state/spool"),"singleAccount":true,"peers":[{"role":"member","gids":[peer::egid()]}],
-            "credentials":{"host":dir.join("etc/host"),"hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),
+            "credentials":{"host":dir.join("etc/host"),"hostSha256":mini_keys::server::native::host_sha256(&dir.join("etc/host")).unwrap(),
+                "hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),"publicSocketUid":mini_keys::peer::euid(),
                 "providers":dir.join("etc/providers.json"),"root":dir.join("credentials"),"key":dir.join("keys/credentials.key")}});
         put(&dir.join("etc/broker.json"), config.to_string().as_bytes(), 0o644);
         let (b, listener) = server::Broker::start(server::Config::load(&dir.join("etc/broker.json"), peer::euid()).unwrap()).unwrap();

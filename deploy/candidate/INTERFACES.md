@@ -7,11 +7,11 @@ controllers, app broker and their configuration. The manifest records shipped
 executables; their presence does not establish that those services are configured
 or that a combined deployment has passed its receiving journeys.
 
-Updated October 8, 2026. Three routes produce a candidate directory, and all of them
-go through one packager, `package.py` (section "One packaging format, one packager"
-below): `build.sh` (the procedure here), `lane-build.sh` (an incremental build on a
-build box) and a sealed hbox capsule (`package.py --capsule`). Every candidate carries
-the signing-consent pair. Protocol allocations and socket exposure are owned by
+Updated October 26, 2026. Two routes produce a candidate directory, and both go
+through one packager, `package.py --roles` (section "One packaging format, one
+packager" below): `build.sh` (the procedure here) and `lane-build.sh` (an
+incremental build on a build box; `scripts/pipeline/publish-artifacts` drives it).
+Every candidate carries the signing-consent pair. Protocol allocations and socket exposure are owned by
 [`protocol/host-operations.json`](../../protocol/host-operations.json), checked
 against the actual receivers. Use that registry from the selected source archive
 when examining a deployed image.
@@ -24,7 +24,7 @@ deploy/candidate/build.sh --out /srv/mini/candidate-<commit>          # binaries
 C=/srv/mini/candidate-<commit>
 cp $C/genesis-params.example.json /srv/mini/genesis-params.json      # edit: operator decisions
 $C/params.sh fill-genesis /srv/mini/genesis-params.json              # the genesis clock, chosen now
-$C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a
+$C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a [--pay-observer /srv/mini/pay-observer.json]
 $C/run.sh start --state /srv/mini/store-a                             # or: run.sh unit ... | systemd
 $C/run.sh sponsor --state /srv/mini/store-a
 $C/run.sh stop  --state /srv/mini/store-a
@@ -66,7 +66,7 @@ that can find the versioned one) for the Store helper.
 | path | what |
 | --- | --- |
 | `OUT/bin/minidregg-host` | Lean-authored native Host, built by `scripts/build-native-host.sh` (bounded Lean compiler; shared seats in `MINIDREGG_LEAN_SEAT_ROOT`, independent of per-build evidence) |
-| `OUT/bin/minidregg-client-consent` | local signing consent provider (`Host.ClientConsentSession`), built by the same builder as a companion of the Host build (`--root Host.ClientConsentSession --companion-of OUT/work/host-build`): every module the Host build compiled is byte-checked and reused, only consent-only modules compile; evidence `OUT/work/consent-build/`. Pinned as `provenance.json` `.binaries.consent` and `manifest.json` `.consentHost`. `package.py` REQUIRES it (a roles manifest or sealed family without it is refused: a candidate whose friends cannot sign is not shippable), and `build.sh` re-checks the pins and the bundle after packaging. `deploy/candidate/test-package.py` runs the packager on stub roles (no Lean) |
+| `OUT/bin/minidregg-client-consent` | local signing consent provider (`Host.ClientConsentSession`), built by the same builder as a companion of the Host build (`--root Host.ClientConsentSession --companion-of OUT/work/host-build`): every module the Host build compiled is byte-checked and reused, only consent-only modules compile; evidence `OUT/work/consent-build/`. Pinned as `provenance.json` `.binaries.consent` and `manifest.json` `.consentHost`. `package.py` REQUIRES it (a roles manifest without it is refused: a candidate whose friends cannot sign is not shippable), and `build.sh` re-checks the pins and the bundle after packaging. `deploy/candidate/test-package.py` runs the packager on stub roles (no Lean) |
 | `OUT/bin/mini` | client (`native/resource-client`); also the Linux x86-64 friend client (`provenance.json` `.clients["x86_64-unknown-linux-gnu"]`) |
 | `OUT/bin/clients/x86_64-unknown-linux-gnu/` | the Linux friend bundle, hard links of `bin/mini`, `bin/minidregg-host` (`MINI_LOCAL_HOST`), `bin/minidregg-client-consent` (`MINI_CONSENT_HOST`), the verifier and the Store helper; `.clients["x86_64-unknown-linux-gnu"].consent` pins them (see section 8, signing consent) |
 | `OUT/bin/clients/TARGET/mini` | friend clients for each target in `MINI_CLIENT_TARGETS` (default `aarch64-apple-darwin`, cross-linked with `zig cc -target aarch64-macos`, ad-hoc signed by the linker; `zig` is then required). Hashed in `provenance.json` `.clients`, `SHA256SUMS`, and `manifest.json` `.clients` (absolute paths). `MINI_CLIENT_TARGETS=` builds none. `--client-only` builds only `bin/mini` and these, writes `provenance.json` of type `minidregg-client-provenance-v1` and `SHA256SUMS`, and no manifest |
@@ -74,10 +74,12 @@ that can find the versioned one) for the Store helper.
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
 | `OUT/bin/grain-runtime`, `OUT/bin/grain-provider-bridge` | Durable agent controller and sandbox provider bridge (`native/grain-runtime`) |
 | `OUT/bin/mini-inference-scheduler` | Shared inference admission, placement and fairness (`native/inference-scheduler`) |
-| `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy` | Application custody/broker and browser entrance (`native/spk-host`) |
+| `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy`, `OUT/bin/mini-spk-broker`, `OUT/bin/mini-spk-volume-helper` | Application custody, browser entrance, per-world broker and volume helper (`native/spk-host`) |
+| `OUT/bin/mini-keys` | Key broker: seal key, provider and Discord secrets (`native/mini-keys`); a required role |
+| `OUT/bin/launch-gate` | Grain worker launch gate beside the `bwrap` launcher (`native/launch-gate`, source `deploy/grain-host/launch-gate.rs`) |
 | `OUT/bin/pay-watcher` | Solana payment observer (`native/pay-watcher`) |
 | `OUT/bin/mini-discord` | Optional Discord entrance (`native/discord-entrance`) |
-| `OUT/run.sh`, `OUT/lib.sh`, `OUT/params.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
+| `OUT/run.sh`, `OUT/lib.sh`, `OUT/params.sh`, `OUT/check-tamper.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
 | `OUT/source.tar` | the exact source archive |
 | `OUT/provenance.json` | source, toolchains, relative binary paths and hashes, timings (below) |
 | `OUT/SHA256SUMS` | `sha256sum` lines for everything above and `logs/source-files.sha256`, relative to `OUT` |
@@ -122,11 +124,13 @@ friend bundle and any cross-compiled clients. Every output records:
 The actual flags objects are nonempty: Rust records its remaps, release profile,
 locked resolution and incremental setting; native records its builder and entry
 modules. Native build manifests separately bind the compiled closure. The tree
-id comes from the archive commit in the packaging repository, never the current
-checkout's HEAD. The packager requires builder toolchain/flag evidence, reads
-pins from the source archive, and writes the same output identities into
-`provenance.json`. Packaging must run in a repository containing that commit.
-Sealed capsules without this evidence refuse and must be rebuilt/repackaged.
+id is the git tree of the archive's own files, written in a throw-away repository,
+so packaging needs no checkout (build.sh `--source-archive` runs in an extracted
+tree). When the packager runs in a repository that holds the commit, that
+repository's `COMMIT^{tree}` must equal it, or the archive is refused as not
+`git archive COMMIT`. It is never the current checkout's HEAD. The packager
+requires builder toolchain/flag evidence, reads pins from the source archive,
+and writes the same output identities into `provenance.json`.
 
 `run.sh` requires v2, verifies the pinned provenance and its complete output map,
 and hashes **every** output before any `init`, `serve`, `start`, or `sponsor`
@@ -153,7 +157,7 @@ check to fail with its pinned refusal-test message.
 ```json
 {"type": "minidregg-candidate-provenance-v1",
  "source": {"commit": "<40 hex>", "archive": "source.tar", "archiveSha256": "<64 hex>",
-            "origin": "build.sh | sealed-capsule | <roles manifest origin>",
+            "origin": "build.sh | lane-build | <roles manifest origin>",
             "fileList": "logs/source-files.sha256", "fileListSha256": "<64 hex>"},
  "target": "x86_64-linux",
  "toolchains": {"recorded": "build.sh", "leanToolchain": "...", "lean": "...", "lake": "...",
@@ -163,7 +167,7 @@ check to fail with its pinned refusal-test message.
               "store": {}, "verifier": {}, "grainRuntime": {}},
  "abi": {"glibcRequired": "2.39", "binaries": {"mini": {"glibcRequired": "2.39",
          "glibcStrong": [], "glibcWeakOnly": [], "needed": ["libc.so.6"]}}},
- "packaging": {"type": "build.sh | sealed-capsule | <roles manifest origin>"},
+ "packaging": {"type": "build.sh | lane-build | <roles manifest origin>"},
  "hostBuildManifest": {"path": "/abs/.../manifest.txt", "sha256": "..."},
  "clients": {"x86_64-unknown-linux-gnu": {"path": "bin/mini", "sha256": "..."}},
  "builtUtc": "..."}
@@ -177,12 +181,20 @@ binaries already in `OUT/bin`), a lane build on a build box calls it with its ow
 role manifest (`--roles ROLES.json --source-archive SOURCE.tar`; `deploy/candidate/lane-build.sh
 host|consent|rust|pack` is that path: an incremental native build from a warm base, the consent
 companion, the Rust roles, and a `pack` that refuses unless no compiled input changed since the
-build commits), and a sealed
-hbox family is packaged with `--capsule FAMILY_DIR`. Every binary is claimed to
-be built from the archive's one commit: `--roles` requires the manifest's
-`sourceCommit` to be the archive's commit, and `--capsule` refuses a family any
-of whose shipped roles was built at another commit (an "unchanged-role-reuse"
-row is a claim, not a build) or whose seal does not cover its manifest.
+build commits). Every binary is claimed to be built from the archive's one commit:
+`--roles` requires the manifest's `sourceCommit` to be the archive's commit, and a
+roles manifest that lacks any role of `package.py --rust-roles` is refused (a builder
+whose list drifted). The one role list is `package.py`'s; `run.sh` requires only the
+roles every Store needs (`host consent mini store verifier keys`) and verifies every
+other role a candidate carries.
+
+**Journey fixtures are not candidate outputs.** `package.py --fixture-roles` lists the
+binaries the journeys need that no operator runs (today the deterministic provider
+`mini-hermes-test-provider`, `native/hermes-test-provider`). `lane-build.sh rust` builds
+them from the same tree into `LANE_DIR/fixtures`, and `pack` copies them to
+`OUT/fixtures/` with their own `fixtures/SHA256SUMS`, outside `bin/`, `manifest.json`
+and the shipped `SHA256SUMS`; `scripts/pipeline/journey-runner` reads them there and
+`scripts/check-journey.sh` builds them from the checkout. `build.sh` builds none.
 `.abi` records each ELF's non-weak `GLIBC_*` version needs (`readelf -V`):
 `edge/mini/ship.sh` (dregg-infra) refuses a box whose glibc is older than
 `.abi.glibcRequired`, and the box's own loader resolves every shipped binary
@@ -200,13 +212,15 @@ reference build named by `M7_REFERENCE` (or `.m7Reference` in the manifest).
 ```
 supervisor ─ run.sh serve ─exec→ mini serve --host H --config PINNED --socket STATE/public/mini.sock
                                    └─ H PINNED stdio            (one long-lived Host child, stdin/stdout)
-                                        ├─ STORE read-to|cas ...  (one short process per durable read/CAS)
-                                        └─ VERIFIER verify ...    (one short process per signature check)
+                                        ├─ STORE serve            (one long-lived coprocess; each call answered in-process)
+                                        └─ VERIFIER serve         (one long-lived coprocess; each check answered in-process)
 clients: mini ... --socket STATE/public/mini.sock   (connect, one request, one reply, close)
 ```
 
-* `mini serve` owns the socket and one Host child. It handles one request at a
-  time. If the Host exits or a reply exceeds its bound the service stops
+* `mini serve` owns the socket and one Host child. Connections are concurrent
+  (64 connections, a Host queue of 32 with 60 s residence); the Host exchange
+  itself is serial, one request at a time (`native/resource-client/src/transport.rs`).
+  If the Host exits or a reply exceeds its bound the service stops
   (status of that request: uncertain; the client retains the exact call and
   `mini retry` recovers the original outcome).
 * SIGTERM to `mini serve` ends it; the Host sees EOF on stdin and exits. A
@@ -349,11 +363,12 @@ stdout, stderr and the exit status.
 | `STORE read-to ROOT OUT` | exit 0, empty stdout/stderr, image bytes in `OUT` | exit 3 = no image yet; anything else = read failed |
 | `STORE cas ROOT EXPECTED\|- POST` | exit 0, stdout `Installed` or `AlreadyPresent`, empty stderr | exit 4 with empty stdout = conflict; anything else = **uncertain** |
 
-`-` means "expect no image". The whole durable image (genesis plus every
-accepted entry) is **one** record in `ROOT/forward-link.sqlite3`, replaced by
-compare-and-swap; a record is at most 64 MiB. The helper also has test-only
-commands (`cas-crash`, `publish-crash`, `publish-hold`) that the Host never
-calls in production.
+`-` means "expect no image" (the legacy one-slot record). The durable log,
+its checkpoints, the history nodes and the fn archive journal use the
+`durable-*` and `journal-*` verbs; their files, exit codes (3 absent, 4 CAS
+conflict, 6 bound violation, 7 disk full or read-only) and the sibling anchor
+are specified in `docs/DURABLE-STORE.md`. The binary has no test-only verbs:
+the crash and hold fixtures live in the crate's tests.
 
 **Signature verifier** (`signatureBinary`): `VERIFIER verify PUBLIC FRAME SIG`
 with a 32-byte raw public key file, the frame file and a 64-byte raw signature
@@ -371,6 +386,7 @@ Everything is created owner-only (`umask 077`, directories `0700`).
 | `genesis-params.json` | init | copy of the operator's params (schema below) |
 | `keys/sponsor.key`, `keys/sponsor.pub`, `keys/sponsor.pub.hex` | `mini keygen` | the genesis sponsor's key (format in §8) |
 | `keys/clock.key`, `keys/clock.pub`, `keys/clock.pub.hex` | `mini keygen` | the clock subject's key: its only authority is `C_tick`; its workspace is made with `mini clock --action init` (deploy: `/var/lib/mini/clock`) |
+| `keys/completion.seed`, `keys/completion.pub`, `keys/completion.pub.hex` | `mini keygen` (only with `.grainPlatform.completionCustodianKey: null`) | the grain platform's completion custodian: its public key is pinned into the genesis config, its seed signs lifecycle completions (`spk-host grain`'s profile); never copied out of `keys/` |
 | `clock-birth-context.json` | init | the clock subject's birth context (the factory law refuses it every birth) |
 | `operator.json` | init | Host operator config (schema below) |
 | `profile.json` | `minidregg-host operator.json profile` | semantics digest and metering profile |
@@ -398,7 +414,16 @@ factoryObserveCapabilityId tickCapabilityId genesisNow maxStepSeconds}` (the ded
 distinct from the sponsor; `tickCapabilityId` is its `C_tick`; `genesisNow` the genesis's Unix
 second and `maxStepSeconds` the most one clock tick may advance, both positive), and
 `meterAllowance` with the ten keys `incidences turnBytes memoryTouches witnessBytes proofWork
-storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`.
+storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`, and, for a world that hosts SPK
+grains (deploy/market/INSTALL.md §0), `grainPlatform {lifecycleManagement {managementSubject
+managementKeyId} grainBirthTariff {base perBirth} completionCustodianKey}`: the management subject
+is a Host setting (`run.sh platform` changes it on a stopped Store; the sponsor, whose key pair
+`run.sh init` generates, is the natural first value), the tariff the metered cost of a
+grain birth (base > 0), and `completionCustodianKey` the completion custodian's 32-byte public key as
+64 lowercase hex, `null` in the operator's file until `run.sh init` generates `keys/completion.seed`
+and fills it (`params.sh require-platform` refuses a genesis without the block, naming the field).
+Without `grainPlatform` the world refuses every grain install by name (`same-store-profile.py`,
+`composed-inputs.sh`: `operatorPolicyRequired`).
 `genesis-params.example.json` holds the values the recorded qualification runs
 used, except the genesis clock: its `clock.genesisNow` and `clock.maxStepSeconds` are `null`
 (unfilled), and `run.sh init` and `genesis.sh` refuse an unfilled or non-positive value
@@ -453,7 +478,7 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
   `NoNewPrivileges=yes`, `PrivateTmp=yes`) or any other supervisor.
 * `start`/`stop`/`status` are a minimal supervisor for hosts without one:
   `start` backgrounds `serve`, records `public/server.pid`, and waits (≤ 120 s)
-  for the socket and the `mini: serving` line in `logs/serve.log`; `stop` only
+  for the socket and a `mini: host process <pid>` line in `logs/serve.log`; `stop` only
   signals a pid whose command line is `mini serve ... --socket STATE/public/mini.sock`,
   and waits (≤ 60 s) for it and its Host child to exit.
 * `sponsor` creates the genesis sponsor's workspace and imports the factory

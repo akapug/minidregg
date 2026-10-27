@@ -17,7 +17,10 @@ The enrollment index (`enrol.index`, PAY.md §11.2) is the one exception. It pag
 `enrol.cursorFile`, with no page bound.
 
 The reason is the difference between the two kinds of address:
-- **A per-payer address** receives a few transfers, all from its payer, so a newest-N window over it loses nothing.
+- **A per-payer address** usually receives a few transfers, all from its payer. But the address is public once used,
+  and dust can fill the newest-N window while a payment is unreceipted (an endpoint disagreement, an outage). A run that
+  reads a full window therefore records `pageBound` as a **refusal** (exit 3, in the journal), not a skip; a per-index
+  cursor like the enrollment index's is the complete fix and is not built.
 - **The enrollment address** is public: it is a shared queue that anyone can fill. On-chain, memo-bearing dust costs a
   spammer only the transaction fee, so the address's history can grow without bound. Under a newest-N window, enough dust
   pushes a real enrollment out of the window, and it is never read again. That is PAY §2.2's dust hole.
@@ -85,6 +88,18 @@ original events once. Existing daily journal files remain historical; new audit
 consumers read archived bundles plus the pending bundle. Nothing deletes them.
 The service holds a lock through scan, observation and acknowledgement. The
 binary separately locks the durable spool while publishing or acknowledging.
+
+A pending tick the observer can never settle (it exits 4, or anything outside 0/3, on
+every tick) stalls every later payment. The operator's verb is
+
+```
+pay-watcher --config FILE --out DIR --quarantine-tick ID --reason TEXT
+```
+
+(`mini-pay-watcher --quarantine-tick ID REASON...` on the box). It moves the bundle whole to
+`OUT/quarantine/ID.json` with the reason and the time, deletes nothing, and never reuses the
+ID. Nothing is lost: the enrollment cursor only ever passes settled listings, and every
+unreceipted transfer the quarantined tick held is listed and emitted again by the next tick.
 
 An uncertain observer result keeps the pending tick. Recovery still uses the
 resource client's exact retained call; this spool does not replace kernel

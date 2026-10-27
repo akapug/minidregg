@@ -9,8 +9,8 @@
 # last stdout line; the last stdout line is the deciding artifact (rows.tsv).
 #
 # Standalone: HOST=... MINI=... STORE=... VERIFIER=... GRAIN=grain-runtime
-#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (rustc of
-#   deploy/grain-host/launch-gate.rs) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
+#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (the candidate's
+#   bin/launch-gate, native/launch-gate) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
 #
 # The Hermes half runs the real grain-runtime controller (a transient
 # `systemd-run --user` unit with Restart=on-failure) with a metered
@@ -171,6 +171,9 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 # The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# The birth intent embeds the FILLED genesis: the Host refuses a birth whose genesis lacks the clock
+# fields the helper wrote ("$.birth.genesis: missing field clockGenesisNow", the real JPAY6 red of a0db11f8).
+genesis = json.load(open(path("genesis.json")))
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
@@ -503,13 +506,21 @@ TABLE_ROWS = {
              "models": [MODEL], "credential": "user"},
     "pool": {"name": "local", "endpoint": ENDPOINT, "kind": "openai-compatible",
              "models": [MODEL], "credential": "pool", "caps": {"perCall": "64", "perDay": "10"}}}
+INSTALL = "/usr/bin/install"
+# The one root step of this journey, probed as the one rule it needs (a targeted sudoers rule satisfies it;
+# a broad one is never required): RUNNER ALL=(root) NOPASSWD: /usr/bin/install
+probe = subprocess.run(["sudo", "-n", "-l", INSTALL], capture_output=True)
+if probe.returncode != 0:
+    import pwd
+    fail(f"missing input: sudoers rule {pwd.getpwuid(os.getuid()).pw_name} ALL=(root) NOPASSWD: {INSTALL} "
+         "(the provider table is root-owned, as in production): " + probe.stderr.decode("utf-8", "replace")[-160:])
 def install_table(*routes):
     json.dump({"type": "mini-provider-table-v2", "providers": [TABLE_ROWS[r] for r in routes]},
               open(TABLE_SOURCE, "w"))
-    installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
+    installed = subprocess.run(["sudo", "-n", INSTALL, "-o", "root", "-g", "root", "-m", "0644",
                                 TABLE_SOURCE, TABLE], capture_output=True)
     if installed.returncode != 0:
-        fail("the provider table must be root-owned; sudo -n install failed: "
+        fail(f"the provider table must be root-owned; sudo -n {INSTALL} failed: "
              + installed.stderr.decode("utf-8", "replace")[-200:])
 install_table("user", "pool")
 # Credential custody is the key broker's (native/mini-keys): same account in this
@@ -534,8 +545,12 @@ mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", sec
 # The friend's own provider key, in the friend's own namespace (their
 # workspace's subject and signing key), granted to the provider runner 9.
 FRIEND_WS = path("friend-workspace")
-ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
-                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS],
+# `workspace init` and the key grants reach the Host through --socket, so the Hermes half's Serve
+# starts here and lives until that half stops it.
+serve = Serve()
+ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG, "--socket", SOCKET,
+                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS,
+                     "--no-prerotation"],  # a fixture key with no next key (jpay-v2.sh idiom)
                     capture_output=True)
 if ws.returncode != 0:
     fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
@@ -628,7 +643,6 @@ if CONFIG_B != CONFIG:
 upstream = subprocess.Popen([TEST_PROVIDER, f"127.0.0.1:{UPORT}", path("upstream.log"), "--metered-usage"],
                             stdout=open(path("upstream.stdout"), "wb"), stderr=open(path("upstream.stderr"), "wb"))
 LIVE.append(upstream)
-serve = Serve()
 # grain-runtime's systemdScope requires the controller to be the active
 # MainPID of exactly mini-grain-controller@<task>.service.
 UNIT = f"mini-grain-controller@{PARENT}"
@@ -643,6 +657,12 @@ controller = subprocess.run(["systemd-run", "--user", "--collect", f"--unit={UNI
                              "--property=KillMode=control-group", "--property=Restart=on-failure",
                              "--property=RestartSec=2", "--property=RuntimeMaxSec=3600s",
                              f"--setenv=MINI_CONSENT_ANCHOR_DIR={os.environ['MINI_CONSENT_ANCHOR_DIR']}",
+                             # Explicit user fixture selection (grain-runtime systemd_manager::fixture): no
+                             # root registration exists for a journey task, and without it the controller
+                             # refuses "managed proof requires root registration or explicit user fixture
+                             # selection" and never launches the worker (the Hermes-half red on hbox).
+                             "--setenv=MINI_GRAIN_CONTROLLER_MANAGER=user", "--setenv=MINI_GRAIN_WORKER_MANAGER=user",
+                             f"--setenv=MINI_GRAIN_CONTROLLER_UNIT={UNIT}.service",
                              f"--property=StandardOutput=append:{path('controller.stdout')}",
                              f"--property=StandardError=append:{path('controller.stderr')}",
                              GRAIN, "serve", path("runtime-config.json")], capture_output=True, text=True)

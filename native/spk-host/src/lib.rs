@@ -28,8 +28,6 @@ mod agent_api_wire;
 #[cfg(target_os = "linux")]
 pub mod broker;
 #[cfg(target_os = "linux")]
-mod claim_descriptor;
-#[cfg(target_os = "linux")]
 #[cfg(target_os = "linux")]
 mod completion_custodian;
 #[cfg(target_os = "linux")]
@@ -39,15 +37,16 @@ mod dispatch_author;
 #[cfg(target_os = "linux")]
 mod dispatch_delivery;
 #[cfg(target_os = "linux")]
+mod dispatch_fence;
+#[cfg(target_os = "linux")]
 mod dispatch_inspection;
 #[cfg(target_os = "linux")]
 pub mod dispatch_native;
 #[cfg(target_os = "linux")]
 mod dispatch_web_input;
 #[cfg(target_os = "linux")]
-pub mod endpoint;
-#[cfg(target_os = "linux")]
 pub mod hostd;
+pub mod identity_custody;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
 #[cfg(target_os = "linux")]
@@ -91,6 +90,8 @@ mod lifecycle_v3_stop_begin_native;
 #[cfg(target_os = "linux")]
 mod lifecycle_v3_stop_assembly_native;
 #[cfg(target_os = "linux")]
+mod lifecycle_v3_stop_recovery;
+#[cfg(target_os = "linux")]
 pub mod lifecycle_v3_stop_service;
 #[cfg(target_os = "linux")]
 pub mod materialize;
@@ -112,8 +113,6 @@ pub mod sandbox;
 pub mod shared_data;
 #[cfg(target_os = "linux")]
 pub mod seccomp;
-#[cfg(target_os = "linux")]
-mod setid_bound;
 #[cfg(target_os = "linux")]
 mod spawn_gate;
 #[cfg(target_os = "linux")]

@@ -66,13 +66,13 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 /// a diagnostic, never parsed into a decision.
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, body @ ..] => {
+        [byte @ (crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD), body @ ..] => {
             // The refusal frame is the Host's own encoded outcome; it is kept
             // as the Host's decision (the shell renders it through the Host),
             // never parsed here.
-            crate::note_host_decision(crate::HostDecision::RefusedFrame {
+            crate::note_host_decision(crate::HostDecision::Frame {
                 command: format!("fleet op{operation}"),
-                byte: 255,
+                byte: *byte,
                 encoded: body.to_vec(),
                 decoded: None,
             });
@@ -322,7 +322,7 @@ fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
 /// caller's report.
 fn observation_stale() -> bool {
     match crate::take_host_decision() {
-        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        Some(crate::HostDecision::Frame { decoded: Some(outcome), .. })
             if outcome.get("reason").and_then(Value::as_str) == Some("stale-root") =>
         {
             true
@@ -389,10 +389,61 @@ fn retained_file(path: &Path) -> Result<bool> {
     }
 }
 
+/// `confirmed`, `refused` (the Host's DECODED refusal only) or `uncertain`. `contention`,
+/// `unavailable`, `absent` and anything undecoded are uncertain: none says the exact call was
+/// not admitted (review Q1/Q3 in `docs/review/2026-10-26-native-crates/resource-client.md` §8),
+/// so none licenses a new payment.
 fn exact_status(outcome: &Value) -> &'static str {
     if confirmed(outcome) && receipt_of(outcome).is_ok() { "confirmed" }
-    else if matches!(outcome.get("type").and_then(Value::as_str), Some("refused" | "contention")) { "refused" }
+    else if outcome.get("type").and_then(Value::as_str) == Some("refused") { "refused" }
     else { "uncertain" }
+}
+
+/// The operation record a money verb uses when the caller names none: a chain
+/// `WS/operations/FAMILY-KEY-N.json`, KEY the digest of the request's stable `context`. The
+/// record is the request's identity, so a rerun after a lost reply or a crash finds it and
+/// recovers the exact retained call instead of paying again (`recover_operation`). A further
+/// operation of the same request is the member's explicit decision (`again`), and is refused
+/// while the previous one is undecided; a previous one that never reached submission
+/// (`not-submitted`) may be followed only once its submitter has stopped, which `again` asserts.
+pub(crate) fn default_operation(root: &Path, family: &str, context: &Value, again: bool) -> Result<PathBuf> {
+    let dir = root.join("operations");
+    crate::fsio::ensure_private_dir(&dir)?;
+    let key = &digest(&serde_json::to_vec(context).map_err(|e| e.to_string())?)[..16];
+    let name = |n: u32| dir.join(format!("{family}-{key}-{n}.json"));
+    let mut n = 1;
+    while retained_file(&name(n + 1))? {
+        n += 1;
+    }
+    if !retained_file(&name(n))? {
+        return Ok(name(n));
+    }
+    let latest = name(n);
+    let recovered = recover_bound_operation(root, &latest, context)?.ok_or("operation record vanished")?;
+    let status = recovered["status"].as_str().unwrap_or("uncertain");
+    let lookup = format!("mini credit --action lookup-operation --dir {} --operation-record {}", root.display(), latest.display());
+    match (status, again) {
+        ("confirmed" | "refused", true) => Ok(name(n + 1)),
+        ("not-submitted", true) => Ok(name(n + 1)),
+        ("confirmed", false) => {
+            print_json(&recovered)?;
+            Err(format!("this {family} is already confirmed (record {}); a new one is a new operation: repeat with --again", latest.display()))
+        }
+        ("refused", false) => {
+            print_json(&recovered)?;
+            Err(format!("the Host refused this {family} (record {}); a new attempt is your own decision: repeat with --again", latest.display()))
+        }
+        ("not-submitted", false) => {
+            print_json(&recovered)?;
+            Err(format!("a previous {family} of this request was recorded but never submitted (record {}); \
+                once that command has stopped, repeat with --again", latest.display()))
+        }
+        _ => {
+            print_json(&recovered)?;
+            Err(format!("undecided: a previous {family} of this request may have been admitted (status {status}); \
+                nothing new is paid: look the exact call up with `{lookup}`"))
+        }
+    }
 }
 
 fn decided_outcome(path: &Path) -> Result<Option<Value>> {
@@ -882,21 +933,10 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
 
 // ---------------------------------------------------------------- for `mini credit`
 
-/// One paid fleet turn from this workspace's account reference `name`:
-/// `amount` of `asset` (the pinned tariff asset when `None`) to account `to`,
-/// publishing `payload` on `topic` of the paying account when given. The
-/// result is the fleet turn result (`minidregg-fleet-turn-result-v1`), printed.
-pub(crate) fn pay_turn(
-    root: &Path,
-    name: &str,
-    to: &str,
-    amount: &str,
-    asset: Option<&str>,
-    publication: Option<(&str, &[u8])>,
-) -> Result<Value> {
-    pay_turn_recorded(root, name, to, amount, asset, publication, None, Value::Null)
-}
-
+/// One paid fleet turn from this workspace's account reference `name`: `amount` of `asset` (the
+/// pinned tariff asset when `None`) to account `to`, publishing `payload` on `topic` when given,
+/// under the operation record `operation` (exact recovery on rerun). Without a record it is one
+/// fleet turn (`turn`); every money verb passes one (`credit::money_record`).
 pub(crate) fn pay_turn_recorded(
     root: &Path, name: &str, to: &str, amount: &str, asset: Option<&str>,
     publication: Option<(&str, &[u8])>, operation: Option<&Path>, context: Value,

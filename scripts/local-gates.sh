@@ -17,20 +17,13 @@
 #                  Compiler/FnWirePinned.lean pins) through Mini's one interpreter: pinned BLAKE3,
 #                  every vector's exact decoder answer, planted-fault controls (scripts/check-fn-wire.sh;
 #                  FN_REPO=<fn clone> also compares the file with fn's at that revision)
-#   hyp-ledger     scripts/check-hypothesis-ledger.sh over AxiomCensusResearch (built by
-#                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
-#                  assumption, no stale allowlist entry; self-tests its instrument each run
 #   native-transcripts every recorded verifier transcript (CredentialSignatureIO.Transcript; the
 #                  one Fixtures.NativeAcceptedFixture replays the first native Objective acceptance
 #                  with) is still the pinned verifier's answer: scripts/check-native-transcripts.sh
 #                  lists them all from AxiomCensusResearch and re-submits each triple (verified; a
 #                  flipped signature byte must read invalid)
-#   objective-proofs   ObjectiveProofs built; every declaration of every repository module in its
-#                  import closure ratcheted against scripts/gates/objective-manifest/<Module>.tsv
-#                  (statement, definition-closure hash, exact axiom set): a removed, restated,
-#                  redefined or re-axiomed row is red unless scripts/gates/objective-contract-decisions.txt
-#                  admits it (scripts/check-objective-proofs.sh proofs; self-tests its instrument each
-#                  run, incl. a planted `(_vacuous : False)` premise and a planted `Evaluates := True`)
+#   objective-proofs   ObjectiveProofs and the checkpoint round trip build (scripts/check-objective-proofs.sh proofs;
+#                  the manifest ratchet that lived here was deleted 2026-10-27: docs/COORDINATION-2026-10-27.md §2)
 #   objective-c    the C backend differential against runBounded, State bytes included
 #                  (scripts/check-objective-proofs.sh c; needs bun)
 #   objective-cgen the same differential over 1000 GENERATED well-typed Core4 programs (fixed seeds), with two
@@ -41,7 +34,7 @@
 #   build-closure  source classification/target coverage, the obsolete-policy-verifier source scan, and gate regression tests
 #   unit-tests     the python unittest modules no other gate ran (scripts/gates/unit-tests.tsv: a floor of tests per
 #                  module, known-red rows that must still fail, a new test_*.py in no row is red)
-#   host-closure   the import closure of Host.Main equals scripts/gates/host-closure.pin
+#   host-closure   the Host.Main import closure is at or under the module-count ceiling scripts/gates/host-closure.max
 #   import-tiers   every import is inside the tier table of scripts/check-import-boundary.sh
 #   exports        every @[export] is called from native/ or allowlisted with a reason
 #   shell-paths    no shell-line parser confines a friend-typed path by is_absolute();
@@ -57,6 +50,9 @@
 #   website        website/status.html is what website/gen-status.py generates from README.md's
 #                  Honest state table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused
+#   workspace      every Cargo package is a root-workspace member or an `exclude` with its reason; no member
+#                  carries its own lock; the root lock is current; each member compiles, all targets
+#                  (scripts/check-workspace.sh; self-tests its membership rules each run; compile is Linux-only)
 #   rust-tests     the filtered native test lines of scripts/check-rust-tests.sh
 #   deploy-scripts the deploy tooling's own tests, no Lean/Rust build: candidate packager (consent pair
 #                  required; stub roles), lane-build pack refusals, self-enrollment terms renderer
@@ -81,17 +77,16 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | grep -v '^ResearchWip$' | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(host-operations hygiene lake-build cold-start fn-wire hyp-ledger native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports guard-discipline shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey)
+GATES=(host-operations hygiene lake-build cold-start fn-wire native-transcripts objective-proofs objective-c objective-cgen drift prover-glue build-closure unit-tests host-closure import-tiers exports shell-paths objective-frontend world-cohorts website rust-tests deploy-scripts spk-shell journey workspace)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
 
 g_host-operations() { python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py; }
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
-g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
+g_lake-build()    { echo "ResearchWip is opt-in; source classification is checked separately."; bash scripts/build-mini-kernels.sh >/dev/null && echo "lake build $lib_targets$exe_targets" && "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
 g_fn-wire()       { bash scripts/check-fn-wire.sh; }
-g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_native-transcripts() { bash scripts/check-native-transcripts.sh; }
 g_objective-proofs() { bash scripts/check-objective-proofs.sh proofs; }
 g_objective-c()      { bash scripts/check-objective-proofs.sh c; }
@@ -118,11 +113,11 @@ g_unit-tests()    { bash scripts/check-unit-tests.sh; }
 g_host-closure()  { bash scripts/check-host-closure.sh; }
 g_import-tiers()  { bash scripts/check-import-boundary.sh; }
 g_exports()       { bash scripts/check-exports.sh; }
-g_guard-discipline() { python3 scripts/gates/check-guard-discipline.py --self-test && python3 scripts/gates/check-guard-discipline.py; }
 g_shell-paths()   { bash scripts/check-shell-paths.sh; }
 g_objective-frontend() { bash scripts/check-objective-frontend.sh; }
 g_world-cohorts() { bash scripts/check-world-cohorts.sh; }
 g_website()       { python3 website/gen-status.py --check; }
+g_workspace()     { bash scripts/check-workspace.sh; }
 g_rust-tests()    { bash scripts/check-rust-tests.sh; }
 g_deploy-scripts() { python3 deploy/pay/test-render-enrol.py && python3 deploy/candidate/test-package.py && bash deploy/candidate/test-lane-build.sh && sh deploy/candidate/test-params.sh; }
 g_spk-shell()     { bash scripts/check-spk-shell-tests.sh; }

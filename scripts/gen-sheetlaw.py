@@ -5,13 +5,13 @@ usage (from the repository root):
   scripts/gen-sheetlaw.py           rewrite §2 (`def management` .. `end Law`) from the JSON
   scripts/gen-sheetlaw.py --check   exit 1 if §2 differs from what the JSON generates
 
-Sources: deploy/shell/templates/mud/law.management.json (clause 0) and
-deploy/shell/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N). Placeholder `{X}`
+Sources: native/resource-client/templates/mud/law.management.json (clause 0) and
+native/resource-client/templates/mud/sheet/law.sheet.json (an `all` of clauses 1..N). Placeholder `{X}`
 becomes `p.X`; negative literals are parenthesised; nothing is re-sorted, dropped or simplified.
 Changing the JSON without re-running this script leaves the theorems about a different law."""
 import json, re, sys
 
-T = "deploy/shell/templates/mud"
+T = "native/resource-client/templates/mud"
 F = "Assurance/SheetLaw.lean"
 
 def val(v):

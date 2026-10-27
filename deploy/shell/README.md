@@ -137,6 +137,15 @@ ssh newcomer@host "import shared $ref"
 
 (This is the form `native/resource-client/shell-journey.sh` runs in J3.)
 
+## Templates
+
+The files shell verbs compile in or load unchanged (room templates, the chat,
+private-room, job, market and story laws, the Hermes roles, the MUD sheets) live
+with the client that embeds them, in `native/resource-client/templates/`
+(its README maps each verb to its files). They moved there from
+`deploy/shell/templates/` so that one home holds them; nothing on a box reads
+them from disk.
+
 ## Endings
 
 stdout carries the client's own output. stderr ends every failed verb with one
@@ -147,11 +156,13 @@ line whose first word says who decided:
 | 0 | | done |
 | 1 | `error:` | the client stopped; the Host was not asked or did not answer |
 | 2 | `usage:` | the line did not parse |
-| 3 | `refused:` | the Host refused; its outcome is decoded by the Host's own `inspect outcome` and the frame kept in `HOME/refusals/` |
-| 4 | `undecided:` | the Host answered uncertain, contention, unavailable or absent; `lookup ID` asks again |
+| 3 | `refused:` / `charged:` | the Host answered with no record (reply byte 253: decided before any append, so nothing happened; its outcome decoded by the Host's own `inspect outcome`, the frame kept in `HOME/refusals/`), the socket never forwarded the request (reply byte 254), or the Host admitted a charged failure (only the price posted) |
+| 4 | `undecided:` | the Host answered under its outcome envelope (reply byte 255, whatever it decodes to), or uncertain, contention, unavailable or absent as an answer: the effect is unknown; `lookup ID` asks again, and nothing is repeated |
 
-A refusal is recognised from the Host's reply byte or outcome type, recorded by
-the client where the Host answered, never from error text.
+A refusal is recognised only from the Host's no-record marker (253), recorded by
+the client where the Host answered: never from a 255 frame, whatever it decodes
+to, and never from error text. `pay` and `topup` keep a record per request: a rerun after a lost
+reply looks the payment up instead of paying again; `again` pays once more.
 
 ## Known limit
 

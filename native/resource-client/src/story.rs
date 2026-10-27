@@ -2,7 +2,7 @@
 //! and from then on the table is the LAW on every player's cell.
 //!
 //! THE TABLE is a document in the story's room (`NAME/table`), one row per
-//! line (`deploy/shell/templates/story/README.md` has the grammar):
+//! line (`native/resource-client/templates/story/README.md` has the grammar):
 //!   title TEXT | scene N TITLE | TEXT | start N | end N | item NAME N
 //!   exit N WORD M [needs ITEM] | act N VERB M [needs ITEM]
 //! `table_of` parses and checks it (fail closed: a dangling exit, an
@@ -62,18 +62,18 @@ use std::fs;
 use std::path::PathBuf;
 
 /// The built-in tale's table.
-pub(crate) const TALE: &str = include_str!("../../../deploy/shell/templates/story/tale/table");
+pub(crate) const TALE: &str = include_str!("../templates/story/tale/table");
 
 /// The fields every player cell has before its items, in field order.
 pub(crate) const PLAYER_FIELDS: [&str; 2] = ["scene", "turn"];
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "story", usage: "story new NAME --from tale|@FILE [--gm SUBJECT] | story seal NAME | story invite NAME SUBJECT [gm] | story join NAME INVITATION|@FILE | story enter NAME | story list | story law NAME|tale|@FILE [SUBJECT]", operation: "a story: a room, a table document the author seals, and one cell per player under the law the table generates; `help story`" },
-    Verb { name: "look", usage: "look", operation: "signed reads: the table, my cell and both their laws; print my scene, its exits, items and the GM's last words" },
-    Verb { name: "go", usage: "go EXIT|SCENE", operation: "one write to my cell: scene := the exit's scene, turn + 1 (the sealed law judges it)" },
-    Verb { name: "take", usage: "take ITEM", operation: "one write to my cell: carries/ITEM := 1, turn + 1" },
-    Verb { name: "act", usage: "act VERB", operation: "one write to my cell: scene := the act's scene, turn + 1" },
-    Verb { name: "narrate", usage: "narrate TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to the story's scenes stream (the GM's)" },
+    Verb { name: "story", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "look", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "go", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "take", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "act", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "narrate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 pub(crate) const HELP: &str = "\
@@ -544,56 +544,34 @@ fn subject_word(w: &str) -> Result<String, String> {
 }
 
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
-    let (verb, rest) = split(line)?;
-    let usage_of = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("").to_owned();
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let one = |name: &str| -> Result<String, String> {
-        match words.as_slice() {
-            [w] => Ok((*w).to_owned()),
-            _ => Err(usage_of(name)),
-        }
-    };
+    use crate::shell_grammar::{parse_line, usage, ACT, GO, LOOK, NARRATE, STORY, TAKE};
+    let (verb, _rest) = split(line)?;
     Some(match verb {
-        "look" if words.is_empty() => Ok(Line::Look),
-        "look" => Err(usage_of("look")),
-        "go" => one("go").map(Line::Go),
-        "take" => one("take").map(Line::Take),
-        "act" => one("act").map(Line::Act),
-        "narrate" => {
-            let t = free_text(rest);
+        "look" => parse_line(&LOOK, line).map(|_| Line::Look),
+        "go" => parse_line(&GO, line).map(|p| Line::Go(p.arg(0).to_owned())),
+        "take" => parse_line(&TAKE, line).map(|p| Line::Take(p.arg(0).to_owned())),
+        "act" => parse_line(&ACT, line).map(|p| Line::Act(p.arg(0).to_owned())),
+        "narrate" => parse_line(&NARRATE, line).and_then(|p| {
+            let t = free_text(p.arg(0));
             if t.is_empty() || t.len() > 2048 { Err("narrate TEXT (1..2048 bytes)".into()) } else { Ok(Line::Narrate(t)) }
-        }
-        "story" => (|| -> Result<Line, String> {
-            let u = usage_of("story");
-            match words.as_slice() {
-                ["new", name, rest @ ..] => {
-                    let name = story_name(name)?;
-                    let (mut from, mut gm) = (None, None);
-                    let mut i = 0;
-                    while i < rest.len() {
-                        match (rest[i], rest.get(i + 1)) {
-                            ("--from", Some(v)) if from.is_none() => from = Some((*v).to_owned()),
-                            ("--gm", Some(v)) if gm.is_none() => gm = Some(subject_word(v)?),
-                            _ => return Err(u),
-                        }
-                        i += 2;
-                    }
-                    Ok(Line::New { name, from: from.ok_or(u)?, gm })
+        }),
+        "story" => parse_line(&STORY, line).and_then(|p| {
+            let u = usage(&STORY);
+            match p.leaf.path {
+                ["story", "new"] => {
+                    let name = story_name(p.arg(0))?;
+                    let gm = p.flag("--gm").flatten().map(subject_word).transpose()?;
+                    Ok(Line::New { name, from: p.required("--from").to_owned(), gm })
                 }
-                ["seal", name] => Ok(Line::Seal(story_name(name)?)),
-                ["invite", name, subject] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: false }),
-                ["invite", name, subject, "gm"] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: true }),
-                ["join", name, _, ..] => {
-                    let invitation = rest.trim_start()[4..].trim_start()[name.len()..].trim().to_owned();
-                    Ok(Line::Join { name: story_name(name)?, invitation })
-                }
-                ["enter", name] => Ok(Line::Enter(story_name(name)?)),
-                ["list"] => Ok(Line::List),
-                ["law", from] => Ok(Line::Law { from: (*from).to_owned(), subject: None }),
-                ["law", from, subject] => Ok(Line::Law { from: (*from).to_owned(), subject: Some(subject_word(subject)?) }),
+                ["story", "seal"] => Ok(Line::Seal(story_name(p.arg(0))?)),
+                ["story", "invite"] => Ok(Line::Invite { name: story_name(p.arg(0))?, subject: subject_word(p.arg(1))?, gm: p.opt(2).is_some() }),
+                ["story", "join"] => Ok(Line::Join { name: story_name(p.arg(0))?, invitation: p.arg(1).trim().to_owned() }),
+                ["story", "enter"] => Ok(Line::Enter(story_name(p.arg(0))?)),
+                ["story", "list"] => Ok(Line::List),
+                ["story", "law"] => Ok(Line::Law { from: p.arg(0).to_owned(), subject: p.opt(1).map(subject_word).transpose()? }),
                 _ => Err(u),
             }
-        })(),
+        }),
         _ => return None,
     })
 }
@@ -789,8 +767,10 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
     }
 }
 
-fn create(session: &Session, name: &str, storage: &str, law: &Value, room: &str) -> Result<Value, Done> {
-    crate::chat::create_cell(session, name, storage, law, Some(room), None)
+/// The story's table: a document in the story's room (born with its document,
+/// since its rows are appended lines).
+fn create_document(session: &Session, name: &str, law: &Value, room: &str) -> Result<Value, Done> {
+    crate::chat::create_document(session, name, law, Some(room))
 }
 
 fn install(session: &Session, name: &str, law: &Value) -> Result<(), Done> {
@@ -817,7 +797,7 @@ fn story_new(session: &Session, name: &str, from: &str, gm: Option<String>) -> R
     if gm != author {
         install(session, &format!("{name}/scenes"), &scenes_law(&gm))?;
     }
-    let table_ref = create(session, &format!("{name}/table"), "content", &table_open_law(&author), name)?;
+    let table_ref = create_document(session, &format!("{name}/table"), &table_open_law(&author), name)?;
     let actions: Vec<Value> = rows(&text).iter().map(|r| json!({"type":"append","text":r})).collect();
     propose_submit(
         session,
@@ -965,13 +945,31 @@ fn story_join(session: &Session, name: &str, invitation: &str) -> Result<(), Don
     if value.pointer("/grant/recipient").and_then(Value::as_str) != Some(me.as_str()) {
         return Err(usage(format!("this invitation is not addressed to you ({me})")));
     }
-    import_from(session, name, &value["grant"])?;
+    // The author joining their own table (invited by themself, to play as well as to run it)
+    // already holds the room's and the scenes' references and the story's record: those are
+    // kept, and the player's cell is added to the record; everyone else imports the grant.
+    let mine = value["author"].as_str() == Some(me.as_str());
+    if !(mine && reference(session, name).is_ok()) {
+        import_from(session, name, &value["grant"])?;
+    }
     let grant = reference(session, name).map_err(error)?;
     let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
     let s = |k: &str| value.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| usage(format!("the invitation lacks {k}")));
-    import_stream(session, &format!("{name}/scenes"), &s("scenes")?, &capability)?;
-    let mut record = json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
-        "grant":name,"table":s("table")?,"scenes":s("scenes")?});
+    let scenes_ref = format!("{name}/scenes");
+    if !(mine && reference(session, &scenes_ref).is_ok()) {
+        import_stream(session, &scenes_ref, &s("scenes")?, &capability)?;
+    }
+    let existing = if mine { fs::read(record_path(session, name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) } else { None };
+    let mut record = match existing {
+        // The author's record keeps its author and GM fields; the role becomes the invitation's
+        // (a player's cell is what the moves need; narrating stays the GM's by the gm field).
+        Some(mut r) if r.is_object() => {
+            r["role"] = json!(s("role")?);
+            r
+        }
+        _ => json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
+            "grant":name,"table":s("table")?,"scenes":s("scenes")?}),
+    };
     if value["role"] == "player" {
         import_stream(session, &format!("{name}/me"), &s("cell")?, &capability)?;
         record["cell"] = json!(s("cell")?);

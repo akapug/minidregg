@@ -111,12 +111,13 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 
 | Claim | Source |
 | --- | --- |
-| accounts by hand; FRIENDS.md is the guide | FRIENDS:1-9, 86-96 |
-| make an ssh key; send the public half and a session name; `mini>` prompt | FRIENDS:88-96 |
-| works on the node; journey J0–J8 | FRIENDS:13-22; README.md:69 |
-| not on the node: rooms, chat, private rooms, key rotation, proxy mode, librarian, paying to enrol | FRIENDS:23-35 |
-| pay to enrol: 50 DREGG a week, built, fixtures only, not deployed | FRIENDS:35, 510-540; README.md:84; commits cb4235b6, b0bcb7d0, 243fb343 |
-| re-genesis keeps ssh and signing keys and erases what you made | FRIENDS:41-44 |
-| hosted key on the box, readable by the operator and, on the single shared account, by other members' sessions; keep nothing precious | FRIENDS:46-52, 62 |
-| a split-account setup (only your own account and root read the key) is built and on no box | FRIENDS:53-58; README.md (Split tenancy row); commits 1d4b683f, 73e06411, f991da1d, 7bb016a3 |
+| sign up yourself at demo.dregg.online/join; no account by hand | deploy/door/README.md (Two routes); deploy/shell/FRIENDS.md "getting in" |
+| everything on the box is world-readable; the hosted key is on the box, readable by the operator and your own account, no other member's | docs/DEMO-PREFIX-2026-10-26.md §5 (D8); docs/review/2026-10-26-deploy/WEB-SPK-PUBLIC.md §5.3; deploy/door/README.md (Rate limits and abuse; Custody contract); FRIENDS "beta, read this first" |
+| reading needs no account: a static snapshot at demo.dregg.online, refreshed every few minutes | deploy/web/README.md; deploy/web/mini-pubread.timer; `mini web --render-static` (native/resource-client/src/web.rs) |
+| the status page's address is the request's only key | deploy/door/README.md (Trust boundary) |
+| free (a small sponsor-funded balance while it lasts) or pay 50 DREGG a week on Solana; wallet, ssh key and account publicly linked | deploy/door/README.md (Funding and caps); FRIENDS "joining by yourself" |
+| `ssh -t mini-s-NAME@demo.dregg.online`; FRIENDS.md is the guide | FRIENDS "getting in" |
+| `/mini line:link CODE` links Discord | deploy/discord/README.md (Linking) |
+| redeployed every few days, may be re-genesised; ssh key stays, what you made goes | docs/DEMO-PREFIX-2026-10-26.md §3 Phase 2; FRIENDS "beta, read this first" |
+| publish: delegate observe to the public reader, submit, publish; revoke takes it down at the next refresh | deploy/web/README.md (Authors) |
 | README, AGENTS.md, developer guide; no users; a format change is a rebuild; old shapes refuse; say what breaks | README.md:109-110, 187-192 |

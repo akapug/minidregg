@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# journey.d/jweb.sh — WEB-ENTRANCE + WEB-2: `mini web`, the read-only loopback
-# hypertext face, on the docuverse braid. Runs after K12C (paper, notes, an
+# journey.d/jweb.sh — WEB-ENTRANCE: `mini web`, the loopback hypertext face
+# (reads, plus the document editor and creation POST forms the member server
+# serves; this journey drives the reads) on the docuverse braid; the same renders
+# reach the browser through the web front end (journey.d/jweb-frontend.sh). Runs after K12C (paper, notes, an
 # annotation; carol and dave), K12M (mpaper, marked), K12T (wall, page with
 # three transclusions; the readers tdave and the late joiner tlate) and K12H
 # (hist, six edits, the third key granted after h2).
@@ -92,8 +94,8 @@ same_html() { # PAGE SHOW-RUN -> equal | differs (the page's document vs `doc sh
 }
 show_elements() { jq -r '[.lines[].element] | join(" ")' "$D/$1.out"; }
 
-start() { # NAME WS -> sets URL_<NAME> and PORT_<NAME>
-  "$MINI" web --dir "$2" --listen 127.0.0.1:0 >"$D/web-$1.out" 2>"$D/web-$1.err" &
+start() { # NAME WS [FLAGS...] -> sets URL_<NAME> and PORT_<NAME>
+  "$MINI" web --dir "$2" --listen 127.0.0.1:0 "${@:3}" >"$D/web-$1.out" 2>"$D/web-$1.err" &
   PIDS+=($!)
   local i url
   for i in $(seq 1 100); do
@@ -247,5 +249,5 @@ cleanup; PIDS=()
 cat "$rows" >&2
 total=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad of $total web rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$total/$total web rows as expected: loopback-only, no write route, foreign Host/Origin refused before any read; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
+echo "$total/$total web rows as expected: loopback-only, foreign Host/Origin refused before any read; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
 echo "$rows"

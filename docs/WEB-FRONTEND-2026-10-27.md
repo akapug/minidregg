@@ -1,0 +1,216 @@
+# The Mini web front end
+
+Present-state design, 2026-10-27. One application, one design language, one front end: a member's
+browser session **is their world**. Ember's bar: "at minimum some high quality lightweight embedded
+terminal plus nice reasonably minimal html forms for dealing with the rest of it", raised the same
+night to "design the Mini web experience whole". Everything older (the loopback `mini web` with a
+path secret, the `--read-only` face, the `--render-static` snapshot, `deploy/web`'s pubread timer)
+is compost: its document rendering, shared-name link handling and escape hygiene move into the one
+front end; the rest is deleted in this series. There is no degraded mode and no "week 1".
+
+## 1. What a person sees
+
+`https://demo.dregg.online/` is the application. Without a session it shows the world as the
+`public` subject may observe it (what members chose to publish) and one door: **Join** (the
+self-serve door at `/join`) / **Open your session** (the one-time link the door issued). With a
+session it is the member's workspace. One HTML page shell for both: a top bar (Mini · the subject ·
+search · Log out), a rail of places, and the stage.
+
+| place | route | what it holds | the verbs behind it |
+|---|---|---|---|
+| Documents | `/doc`, `/doc/N`, `/doc/N/history`, `/doc/N/diff/A/B`, `/at/H/doc/N`, `/doc/N/edit`, `/new-document` | the list, a page (element-tree order, transclusions inline, links and backlinks), history, a page at a height, a diff, append/edit, create | signed reads (`workspace::signed_view`, `rendered_document`), the editor's pinned diff + durable attempt, `doc append`, `doc link` |
+| Boards | `/board/N` | columns and tasks; add / move / take | `board add|move|take` |
+| Rooms | `/room/N` | members, the room's streams as chat, say; the index; a resident's turns | `room ls`, `say`, `tail`, `room members`, `summon` |
+| Apps | `/apps[?q=]`, `/apps/APP`, `/grain`, `/grain/N`, `/grain/N/pane` | the Sandstorm app market (`apps search --json`: the publisher's claims beside the box's verdict), one entry, install; the member's grains, a grain's state / routes / held identities with open, start, stop, share, export, delete, revoke-identity; the one-time bootstrap posted to the grain's own origin, then the grain in a pane | `apps search|show|install|list|status|open|share|…` (L13, `docs/APP-MARKET-2026-10-27.md` §5a) |
+| Residents | `/room/N/resident` | summon a Hermes resident into a room; its turns as they land | `summon`, `tail` |
+| Receipts | `/receipts`, `/receipts/ID` | every retained attempt with its decoded outcome: **admitted** / **refused** with the clause / **undecided** with the exact retry; `why`; `lookup`; `retry` | `history all`, `inspect receipt`, `why`, `lookup`, `retry` |
+| Grants & laws | `/grants`, `/laws` | what my grants cover (`can`), delegate, revoke; the law on a reference, install a law | `can`, `delegate`, `revoke`, `inspect law`, `law` |
+| Keys & sessions | `/keys`, `/sessions` | the hosted-custody statement (the key lives on the box, world-readable world), key status and rotation; this account's web sessions, revoke any | `whoami`, `key-status`, `rotate-key`; the helper's session list |
+| Purse | `/purse` | the account as a meter (`credit`), pay status, top up, tariffs | `credit`, `pay status`, `topup`, `tariff` |
+| Commands | `/verb`, `/verb/NAME` | **every shell verb as a form, derived from the shell's verb table** (`shell::command_catalog`: shell, chat, hermes, story): one form per usage alternative, reference arguments as pickers over the workspace's refs, text through `@FILE`, a fresh proposal id with "and `submit ID`"; the answer is the one outcome partial | all of them |
+| Terminal | `/term` | `mini shell` as this member, in the page (a convenience, never the parity mechanism) | the shell itself |
+| Tour | `/tour`, `/tour/N` | the twelve steps of `docs/DEMO-EXPERIENCE-2026-10-27.md` §1 as one page whose forms are the real derived forms; a step's outcome lands under it | the steps' verbs |
+| Registry | `/registry` | the operation registry (bytes, receivers, effects, markers, consent plans) and the Lean-emitted default laws, for every visitor | data files of the candidate |
+| the front page (public) | `/` | what the public reader may observe: published documents, the operations room (`operations`, posted into by `mini-s-box`; named when absent), the receipts stream newest first, the laws | the public body |
+
+**Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
+the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is
+visual the day its row enters the table; the journey's `parity` row checks every verb × subcommand leaf
+`help` lists against `/verb/NAME`'s forms and names any without a face (and red-proofs itself on a
+verb the shell lacks); it is coverage, not parity, until every leaf also has an outcome test. The
+usage-derived forms are the interim; the structured command grammar (A0) replaces them verb by verb.
+Outcome truth: admitted / refused / undecided name world transitions only; a read or a local verb
+answers (`answered`, `read refused`), classified per usage alternative from the verb table. Bespoke views sit where a place deserves
+one: the document page, history and diff pages, the board, the room as a live stream (the chat
+section refreshes), the receipt, the grants drawn as a tree from the Host's capability view, the
+purse as a meter, and a refusal as its clause highlighted.
+
+**Forms work without JavaScript**: every route is a whole page; every action is a `<form method=post>`
+whose answer is the decoded outcome rendered by one partial (`outcome`), with the next step as a link
+(`retry` for undecided, `why` for refused, the receipt for admitted). **With JavaScript** (one file,
+`app.js`, ~400 lines, no framework) the same links open as **panes** on the stage: the server answers a
+request carrying `X-Mini-Fragment: 1` with the stage region only; panes tile and overlap, have a title
+bar, close, maximize, and their set is kept in the URL hash so reload restores a workspace. The
+Terminal pane is xterm.js (`@xterm/xterm` 5.5.0 + `addon-fit` 0.10.0, vendored under
+`native/mini-web/assets/vendor/`, pinned by sha256; no CDN; the box has no egress and the page loads
+no third-party script). Copy/paste, resize, mobile keyboard, reconnect to a live shell.
+
+**One design language** (`app.css`, ~300 lines): paper and ink, system font stack, monospace for ids
+and the terminal, one accent; outcome colours are the only colours (admitted green, refused red,
+undecided amber), used as a left rule, never as decoration; `prefers-color-scheme: dark` honoured; 16px
+gutters, no horizontal scroll at phone width; every control reachable by keyboard. The world-readable
+sentence (D8) stands in the page footer for every visitor, member or not.
+
+## 2. The mechanism: sshd's privilege separation, for the browser
+
+```
+browser ──443──▶ Caddy ──loopback 8797──▶ mini-web (uid mini-web: NO key, NO Store, NO socket paths)
+                                             │ one Unix socket, 0660 root:mini-web, SO_PEERCRED-checked
+                                             ▼
+                                    mini-web-spawn (root; tiny; synchronous; the ONLY privilege)
+                                       ├─ login CODE          → session (the door wrote CODE)
+                                       ├─ shell SID COLS ROWS → pty master fd  (mini shell as mini-s-NAME)
+                                       ├─ body SID            → connected fd   (mini web as mini-s-NAME)
+                                       ├─ body public         → connected fd   (mini web as mini-pubread)
+                                       └─ logout / sessions / revoke
+```
+
+- **The gateway** (`native/mini-web`, binary `mini-web`) serves HTTP/1.1 on loopback with the same
+  hand-rolled, bounded style as `mini web` and `mini-door` (16 KiB head, 192 KiB body, 10 s ingress,
+  a pool, `Connection: close`); the tree has no HTTP framework and this adds none. It holds the page
+  shell, the assets, and cookies. It never sees a key, a Store path or a socket path: everything it
+  knows about a member it learns from the helper, by an opaque session id.
+- **The helper** (`native/mini-web-spawn`, root) is the analogue of the door's `mini-session-run`,
+  with a pty and fd passing instead of a captured line. One request per connection, one line in,
+  one line out, an fd by `SCM_RIGHTS` when the answer is a shell or a body. It refuses any peer whose
+  uid is not `mini-web`, any malformed line, any name that is not a hosted account in
+  `mini-hosted` with its 0700 home, and any session it did not itself create. It spawns through the
+  **same line** `mini-session-run` uses (`setpriv --reuid=mini-s-NAME --regid=mini-sessions
+  --init-groups --reset-env -- env -i PATH=/usr/bin:/bin LANG=C.UTF-8 … mini-shell-ssh MINI HOST
+  CONFIG SOCKET WORKSPACE HOME`), inside `systemd-run --scope --slice=user-UID.slice` with the
+  member's quotas, so ssh and web sessions share one cap (`user-mini.slice.conf`, 1G per tenant;
+  the demo's `user.slice` 8G). The pty's lifetime is the shell's: when the gateway drops the master
+  (or revokes the session) the shell gets SIGHUP.
+- **The body** is `mini web --body`: the compost of today's `web.rs`, grown into the member's
+  rendering process. It listens on the inherited fd 3 (a Unix listener the helper bound under
+  `/run/mini-web-spawn/bodies/`, a root-only directory, so no uid but root can connect to any body)
+  and answers fragment requests: GET renders (the `Site` methods, links under `/`), POST actions that
+  run `shell::line` with the verb the form names and render the `(exit, text)` ending as the outcome
+  partial (exit 3 = refused, 4 = undecided, 0 = admitted; the text is the classifier's, never the
+  reply byte's). The public body runs as `mini-pubread` over the `public` workspace with
+  `--anonymous`: no write affordance, every POST refused before any read.
+- **Sessions.** The door's root processor, when it enrols an account, writes
+  `/var/lib/mini-web-spawn/logins/<sha256(code)>.json` (`{name, expires}`, root 0600) and shows
+  `https://demo.dregg.online/login/CODE` on the stranger's status page beside the ssh line. The
+  gateway shows a confirm form (so a link preview never burns the code); the POST sends `login CODE`
+  to the helper, which deletes the record and mints a session: 32 random bytes, stored by sha256
+  under `sessions/`, with the name, a CSRF secret, created / last-seen / expires (idle 24 h, hard
+  7 d). The cookie is `__Host-mini_session`, `Secure; HttpOnly; SameSite=Strict; Path=/`; it names a
+  session, never a key. Every POST carries the session's CSRF token (the gateway adds the hidden field to every
+  POST form on the page it serves, the body's forms included, so the token never reaches the body)
+  and must arrive with `Sec-Fetch-Site: same-origin` (or none) and an `Origin` equal to the public
+  origin; the WebSocket upgrade checks `Origin` the same way. `/sessions` lists this account's sessions and revokes any;
+  logout revokes the current one and ends its body and shells.
+- **Terminal transport.** `/ws/term/ID`: RFC 6455 server side in the gateway (SHA-1 via `ring`, which
+  the workspace already links); binary frames carry pty bytes both ways, one text frame
+  `{"resize":[cols,rows]}` sets the window size (`TIOCSWINSZ`); the gateway keeps a 64 KiB replay
+  ring per terminal and holds the pty 60 s after a socket drops, so a reload or a flaky network
+  rejoins the same shell. N shells per session, bounded (8).
+
+**What an RCE reaches** (stated honestly, CONFINEMENT §6 style): in the gateway, the session ids of
+requests it is serving, so those members' bodies and shells while the sessions live, and nothing on
+disk but its own state directory; no key, no Store, no socket path, no network. In the helper: root,
+by construction the only such process; it is ~600 lines, synchronous, and refuses everything but the
+six verbs from one uid. In a body or shell: that member's key and the world-readable Store, exactly
+what the ssh shell reaches. Nothing listens on a public port except through Caddy.
+
+## 3. What is reused, what is deleted
+
+Reused: `web.rs`'s `Site` renders (document, history, diff, board, room, inspect, search, resident),
+`editor.rs`/`create.rs` (pinned diff, durable attempt), the shared-name link repair and the
+escape hygiene L7 landed, `web_admission.rs`'s pool (now over TCP and Unix streams), `parse_request`,
+`mini shell` in script mode and its classifier, the door's `mini-session-run` spawn line and its
+refusals, the demo drop-in floor (`host/systemd/placeholders/web-gateway.conf`). Deleted in this
+series (commit "compost"): `--read-only` and its gate branches, `--public-origin`, `--render-static`,
+`render_static`/`write_snapshot`, `Face::Static`, `STATIC_HISTORY_PAGES`, `SNAPSHOT_NOTE`, their
+tests, `deploy/web/` (pubread timer, collect scripts, `Caddyfile.docuverse`), jweb's `ro-*` and
+`static-*` rows, and the join page's "static snapshot" sentences. Kept: the loopback TCP face with its
+per-launch secret, as the developer's and the journeys' direct face over the same `Site` (jweb,
+jdocuverse J24 drive the renders through it; it is one renderer behind two transports, not a twin).
+Studio stays routed nowhere in the body (its deletion is L2's, D7).
+
+## 4. Files
+
+| path | what |
+|---|---|
+| `native/mini-web/` | the gateway: `main.rs` (listener, pool, router), `http.rs`, `session.rs` (cookie, CSRF, helper client), `ws.rs` (RFC 6455), `term.rs` (pty bridge, replay ring), `proxy.rs` (the body over the helper's fd), `page.rs` (the page shell and partials), `assets/` (`app.css`, `app.js`, `vendor/xterm*` pinned in `VENDOR.md`); `tests/dev_flow.rs` runs the real helper (`--dev`) and gateway end to end without a Host |
+| `native/mini-web-spawn/` | the helper: `main.rs` (socket loop, peer check, verbs), `spawn.rs` (pty, setpriv line, scope), `store.rs` (logins, sessions) |
+| `native/resource-client/src/web.rs` + `web/` | the body face |
+| `deploy/web-frontend/` | `mini-web.service`, `mini-web-spawn.{socket,service}`, the 60-demo-confine drop-ins against the demo floor, `Caddyfile.app`, `door.patch`, `INSTALL.md` |
+| `native/resource-client/journey.d/jweb-frontend.sh` (+ `jweb-frontend-ws.py`) | the JWF step after WEB: login code → cookie → terminal `whoami` over the WebSocket → `doc new` and append through the forms → receipt admitted → logout revokes → public reader; as a journey hook, `--dry` from the environment, `--box NAME` on the box |
+
+## 5. Seams owned elsewhere
+
+L13's `apps` verb (lane/app-market 1c7a7f30) is the market: `web/apps.rs` runs it as the member and
+draws its `--json` replies; `MINI_WEB_FRAME_SRC` names the grain origins for the pane; the
+`identityNotice` on its receipts is shown on the receipt and the Grants page. L5 owns
+the door; the patch in `deploy/web-frontend/door.patch` adds the login record and the one status
+line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
+gateway (the fallback `handle` and the `/` snapshot route go).
+
+## 6. A0: the structured command grammar, verb by verb (the series after this batch)
+
+The council's finding stands: `Verb` is three strings and the forms are read from usage prose, so
+"derived from the verb table" is an interim. The honest artifact (ATLAS law 13) is ONE grammar per
+verb, as data, that the shell's parsing, `help`, Tab completion and the web body all consume. The
+series, each step a commit that keeps the usage-string form for every verb whose grammar is not
+yet data and labels the page accordingly:
+
+1. **The type** (`shell::Grammar`): a verb is a list of leaves; a leaf is its literal path
+   (`doc append`), its positional arguments (name, kind: `Id | Ref(kind) | Subject | Text | Json |
+   File | Number | Height | Choice(..) | Word`, optional), its flags (name, value kind, dangerous:
+   needs confirmation, as `--i-know`, `--freeze-roster`, `--i-lock-myself-out`), its effect
+   (`Read | Local | Transition { proposes: bool }`) and its outcome schema (what the ending prints:
+   a JSON view, a receipt, a text). `usage` and `operation` are RENDERED from the grammar (one
+   printer), so `help` cannot drift from the parser; `subcommands()` reads the leaves, not prose.
+2. **The parser arm consumes the grammar**: `plan()` for a converted verb walks the leaf's
+   arguments (arity, validators per kind) and hands the plan builder typed values; the per-verb
+   `match` arm shrinks to the builder. The web body renders the form from the same leaf (kinds →
+   fields, dangerous flags → an explicit confirmation checkbox, effect → the outcome class, the
+   outcome schema → the bespoke renderer or the one partial).
+3. **Order**: `doc` (the forty leaves: the tour's step 3), `room`/`chat`/`say`/`tail`, `delegate`/
+   `revoke`/`renounce`/`law`/`can`/`why`/`inspect`, the money verbs (`pay`/`credit`/`tariff`/
+   `topup`/`market`/`bid`/`reveal`/`bids`/`job`/`jobs`), the lifecycle (`propose`/`submit`/`lookup`/
+   `retry`/`publish`/`history`), `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story`, keys, the rest.
+4. **The gate** (reached): `parity` holds when every leaf has (a) a route and a no-JS
+   form from its grammar and (b) an outcome test: a journey row per spine flow (steps 3–7 of the
+   tour) asserting the decoded outcome class and the receipt, plus a per-leaf dry-run where the
+   verb has one (`can`, op 130) and a usage-ending test where it does not. The red-proof stays.
+5. **Deletions as each verb lands**: its usage/operation strings (rendered now), its hand-written
+   arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
+   `subcommands()` once the last verb converts.
+
+State (2026-10-27, lane tip): every verb of the four tables is grammar data in `shell_grammar.rs`
+(69 verbs, 203 leaves: `doc`, `room`, the money verbs, the lifecycle, the reads and local verbs,
+the chat, Hermes and story verbs through `parse_line` on the raw line, `apps` on L13's final verb,
+keys, identity, births, `kind`/`program`/`instance`, `app`, `forget`, `board`). The shell parses
+through `parse`/`parse_line`; `help`, `usage_of` and Tab completion read the grammar (the usage
+scraper is gone; `command_catalog` renders every row); the body renders every form from the leaves
+(effect → outcome class, dangerous switches as explicit ticks, required flags as required fields,
+`Rest` as free text). A flag can be `required` (printed bare, refused by name) and `Kind::KeyFile`
+types the plain names under HOME/keys; both came from the dry run, which found fifteen leaves whose
+forms promised what their arms refused. The hand-written usage strings, arity checks and the arm
+guards the grammar now covers are deleted (shell.rs about −1,450 lines over the series; chat.rs −211,
+hermes.rs −83, story.rs −51, keys.rs −60).
+
+**Parity is the journey's row now**: `/verb/NAME/dry` fills every leaf's form with placeholders
+(each positional field and the required flags), assembles it through the one assembler the POST
+uses, and plans it with `mini shell --line L --plan` (the real parser and plan builder, no Host).
+`usage` (exit 2: the grammar refused the form's line) is red; `world` (exit 1: the words parse but
+this workspace cannot plan them, e.g. an open room given a private room's declaration) is named
+and left to the spine rows (jchat's private room). The row requires zero usage refusals over all
+203 leaves, is red-proofed by a verb the shell lacks, and the spine rows assert the decoded
+outcomes of the flows (doc new and append admitted, their receipt, whoami answered, logout
+revokes). JWF provisions its own member with a birth context from the sponsor's shell (as the
+docuverse provisions its authors), so the document rows run on the spine world too; the member's
+HOME is short because the client's resident consent socket lives under it.

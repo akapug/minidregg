@@ -1,0 +1,4 @@
+floor unit=spk-sandbox-floor-audit-20261027T065556Z-floor test=resident_launch::tests::operator_probe_holds_inside_production_resident_sandbox exit=0
+floor: bwrap hit ENOSYS under the unit's hardening (openat2 filtered?)
+pre-floor unit=spk-sandbox-floor-audit-20261027T065556Z-pre-floor test=resident_launch::tests::operator_probe_breaches_under_pre_floor_arguments exit=0
+pre-floor: bwrap hit ENOSYS under the unit's hardening (openat2 filtered?)

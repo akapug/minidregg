@@ -4,6 +4,13 @@
 # through the ssh entrance's own forced command (mini-shell-ssh).
 # Configuration is /etc/mini/discord.env (root:root 0600, read by systemd);
 # nothing is passed on argv. See deploy/discord/README.md.
+# Split tenancy: dregg-infra's drop-in sets User=mini-discord, StateDirectory,
+# MINI_SESSION_RUNNER=/run/mini-session-run.sock and MINI_DISCORD_STATE. The
+# runner is a socket, not sudo, so NoNewPrivileges=yes and RestrictSUIDSGID=yes
+# below hold in both shapes (deploy/door/infra/INSTALL.md).
+# Mode: HTTP (Discord POSTs to the Interactions Endpoint URL, Caddy forwards /interactions) by
+# default; MINI_DISCORD_MODE=gateway with the drop-in mini-discord.service.d-50-gateway.conf for
+# an application with no endpoint URL (deploy/discord/INSTALL.md).
 [Unit]
 Description=Mini Discord entrance (interactions endpoint)
 After=network-online.target mini-store.service
@@ -18,7 +25,7 @@ Slice=mini.slice
 Nice=10
 UMask=0077
 EnvironmentFile=/etc/mini/discord.env
-ExecStart=/usr/local/lib/mini/mini-discord
+ExecStart=/var/lib/mini/candidate/current/bin/mini-discord
 # Follow-up bodies are spooled here (0600, removed after each call).
 RuntimeDirectory=mini-discord
 RuntimeDirectoryMode=0700

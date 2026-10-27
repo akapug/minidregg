@@ -37,9 +37,9 @@ pub(crate) fn call(
 ) -> Result<Vec<u8>> {
     let frame = session_invoke(host, socket, config, operation, payload)?;
     match frame.as_slice() {
-        [byte @ (255 | 254), encoded @ ..] => {
+        [byte @ (crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), encoded @ ..] => {
             let decoded = inspect_bytes(host, socket, config, "outcome", encoded).ok();
-            note_host_decision(HostDecision::RefusedFrame {
+            note_host_decision(HostDecision::Frame {
                 command: format!("rotate-key op{operation}"),
                 byte: *byte,
                 encoded: encoded.to_vec(),
@@ -127,7 +127,7 @@ pub(crate) fn status_if_enrolled(
         [144, body @ ..] if !body.is_empty() => serde_json::from_slice(body)
             .map(Some)
             .map_err(|error| format!("invalid key status: {error}")),
-        [255 | 254, encoded @ ..] => {
+        [crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED, encoded @ ..] => {
             let decoded = inspect_bytes(host, socket, config, "outcome", encoded)?;
             let detail = decoded
                 .get("detail")

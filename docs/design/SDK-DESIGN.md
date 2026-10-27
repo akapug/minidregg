@@ -130,7 +130,7 @@ native-messaging host (§8). The SDK builds and signs; the Host executes.
 
 Each move deletes a copy; no move keeps both. (1) Attempt custody: `retained_attempt_outcome`,
 `accepted_outcome` and the per-family status machines in `app_document.rs`, `job.rs`,
-`selected_exchange.rs`, `publisher.rs`, Discord `custody.rs`, the Hermes step ledger, the
+`selected_exchange.rs`, Discord `custody.rs`, the Hermes step ledger, the
 provider spool (scout D: 40 files). (2) The plan/seal/submit/lookup sequence (`submit_once`,
 `retry`) and its 30 per-family re-spellings. (3) The consent frame client (`client_consent.rs`
 `invoke/round_trip/pair/headers`) — after W1.2 lands the Objective half, `resource-client`

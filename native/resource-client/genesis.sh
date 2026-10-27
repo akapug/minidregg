@@ -70,9 +70,38 @@ check_params() {
     and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
     and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
+  check_grain_platform "$1"
+}
+# The grain platform's operator policy (deploy/market/INSTALL.md §0), pinned at genesis so the world
+# can host SPK grains at all: `grainPlatform {lifecycleManagement {managementSubject, managementKeyId},
+# grainBirthTariff {base, perBirth}, completionCustodianKey}`. Optional as a whole; when present every
+# field must be, and the refusal names the one that is not. `lifecycleManagement` is a Host setting
+# (`run.sh platform` changes it on a stopped Store; the sponsor's key is the natural first choice,
+# since `run.sh init` generates it); the completion custodian key is a 32-byte public key, `null` in
+# the operator's file until `run.sh init` generates the pair and fills it.
+check_grain_platform() {
+  jq -e 'has("grainPlatform") | not' "$1" >/dev/null && return 0
+  for field in lifecycleManagement grainBirthTariff completionCustodianKey; do
+    jq -e --arg f "$field" '.grainPlatform | type == "object" and has($f)' "$1" >/dev/null ||
+      { echo "genesis: grainPlatformIncomplete: .grainPlatform.$field is absent (INSTALL.md §0 genesis)" >&2; exit 2; }
+  done
+  jq -e 'def int: type == "number" and . >= 0 and . == floor and . < 9007199254740992;
+    .grainPlatform | (keys - ["lifecycleManagement", "grainBirthTariff", "completionCustodianKey"] | length == 0)
+    and (.lifecycleManagement | type == "object" and (keys | sort) == ["managementKeyId", "managementSubject"]
+         and ([.managementSubject, .managementKeyId] | all(int)))
+    and (.grainBirthTariff | type == "object" and (keys | sort) == ["base", "perBirth"]
+         and ([.base, .perBirth] | all(int)) and .base > 0)' "$1" >/dev/null ||
+    { echo 'genesis: grainPlatformInvalid: lifecycleManagement {managementSubject, managementKeyId} and grainBirthTariff {base > 0, perBirth} must be JSON integers' >&2; exit 2; }
+  jq -e '.grainPlatform.completionCustodianKey | . == null or (type == "string" and test("^[0-9a-f]{64}$"))' "$1" >/dev/null ||
+    { echo 'genesis: completionCustodianKeyInvalid: null (to be generated at init) or 64 lowercase hex digits' >&2; exit 2; }
 }
 if [ "$#" -eq 2 ] && [ "$1" = --check ]; then
   check_params "$2"
+  exit 0
+fi
+# The platform block alone (params.sh require-platform), usable before the clock is filled.
+if [ "$#" -eq 2 ] && [ "$1" = --check-platform ]; then
+  check_grain_platform "$2"
   exit 0
 fi
 if [ "$#" -ne 7 ]; then
@@ -95,6 +124,10 @@ for target in operator.json profile.json genesis.json sponsor-birth-context.json
 done
 
 check_params "$params"
+# At genesis the completion custodian key is pinned, never null: run.sh init fills it first.
+if jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$params" >/dev/null; then
+  echo 'genesis: completionCustodianKeyUnfilled: run.sh init generates keys/completion.seed and fills .grainPlatform.completionCustodianKey before the genesis template runs' >&2; exit 2
+fi
 
 jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg verifier "$verifier" '
   $p[0] as $p |
@@ -106,7 +139,10 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
    asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
    storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}
   + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)
-  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)' >"$dir/operator.json"
+  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)
+  + (if $p.grainPlatform then {completionCustodianKey: $p.grainPlatform.completionCustodianKey,
+        lifecycleManagement: $p.grainPlatform.lifecycleManagement,
+        grainBirthTariff: $p.grainPlatform.grainBirthTariff} else {} end)' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \

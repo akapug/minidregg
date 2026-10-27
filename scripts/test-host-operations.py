@@ -23,7 +23,7 @@ class GateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         data, _ = ops.load(ROOT)
-        paths = {ops.REGISTRY, ops.GENERATED, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
+        paths = {ops.REGISTRY, ops.GENERATED, ops.GENERATED_LEAN, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
         paths.update(Path(binding["path"]) for binding in data["client_constants"])
         for path in paths:
             (self.root / path).parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +183,18 @@ class GateTests(unittest.TestCase):
     def test_generated_output_drift_refuses(self):
         with (self.root / ops.GENERATED).open("a") as file: file.write("// stale\n")
         self.rejects("generated request constants drift")
+
+    def test_consent_plan_must_be_an_active_operation(self):
+        def unknown(data):
+            data["consent_plans"].append("NO_SUCH_PLAN")
+        self.registry(unknown)
+        self.rejects("consent plan is not an active operation: NO_SUCH_PLAN")
+
+    def test_consent_plan_is_listed_once(self):
+        def duplicate(data):
+            data["consent_plans"].append(data["consent_plans"][0])
+        self.registry(duplicate)
+        self.rejects("duplicate consent plan")
 
     def test_echoed_response_and_payload_literals_are_not_allocations(self):
         # This test asserts the gate's scope, not correctness of the deliberately

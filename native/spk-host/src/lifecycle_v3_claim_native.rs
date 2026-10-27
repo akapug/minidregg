@@ -1,7 +1,6 @@
 //! Source-owned v3 launch claim plan, detached assembly, and fresh op26
 //! committed callback inspection. Physical INSTALL/START remains gated until
 //! the linked source receiver, completion, and volume joins qualify.
-#![allow(dead_code)] // Awaiting the physical v3 lifecycle caller.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};

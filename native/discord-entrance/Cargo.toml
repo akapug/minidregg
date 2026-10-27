@@ -18,6 +18,14 @@ path = "src/main.rs"
 name = "mini-discord-mirror"
 path = "src/bin/mini-discord-mirror.rs"
 
+[[bin]]
+name = "mini-door"
+path = "src/bin/mini-door.rs"
+
+[[bin]]
+name = "mini-door-process"
+path = "src/bin/mini-door-process.rs"
+
 [[example]]
 name = "fake-discord"
 path = "examples/fake-discord.rs"
@@ -28,6 +36,13 @@ libc = "=0.2.189"
 # Durable custody (owner-private leased records, external-delivery custody) is the SDK's one implementation.
 minidregg-mini-sdk = { path = "../mini-sdk", features = ["native"] }
 serde_json = "=1.0.151"
+# Gateway mode (MINI_DISCORD_MODE=gateway): the WebSocket framing and handshake, over our own
+# rustls stream (the tree's rustls, with ring; trust anchors from the system bundle).
+tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["std", "ring", "tls12"] }
+rustls-pemfile = "=2.2.0"
+# The web login record is named by the SHA-256 of its one-time code (mini-web-spawn reads it).
+sha2 = "=0.10.9"
 # The key broker client: the mirror posts and reads through it and holds no Discord secret.
 minidregg-mini-keys = { path = "../mini-keys", default-features = false }
 

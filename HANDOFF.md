@@ -23,8 +23,10 @@ Linux box; both die 2026-11-11. Box truth is `~/dev/dregg-infra` branch `demo-vm
 (`edge/demo/CONFINEMENT.md`, `CHECKLIST.md`). The old `dregg-workhorse` Mini slice goes at the opening.
 How the project is developed: `docs/COORDINATION-2026-10-27.md` (on `lane/coordination` until round 2 merges). The deploy frame, runbook and gate live in `~/dev/dregg-infra/edge/mini`.
 
-**The rules every lane obeys** are in the plan's §4 and in [`CLAUDE.md`](CLAUDE.md) /
-[`AGENTS.md`](AGENTS.md); the founding laws are in [`ATLAS.md`](ATLAS.md) §6.
+**How we work** is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md): what we optimise, the gates and
+their verdicts, how a lane and the orchestrator work, the boxes (`dregg-build` is where Linux
+checks and Lean builds run), the cadence. [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md)
+point there; the founding laws are in [`ATLAS.md`](ATLAS.md) §6.
 
 **Sibling repositories:** `~/dev/nanodregg` (the object of study; its laws are the target
 shape of the consolidation), `~/dev/breadstuffs` (the whole first system, resumed or composted
@@ -32,5 +34,6 @@ later), `~/dev/zkml-research` and `~/dev/degg-research` (where the proof-system 
 in this tree moves), `~/dev/o7vn` (veri7vn, arriving here as an SPK appliance), `~/dev/fn`
 (the NNTP transport; its own sessions).
 
-Older orientation (`GOAL.md`, `REORIENTATION.md`, `PROJECT.md`, the dregg-assortia pointers)
-is history, kept for its dated scope; nothing in it is current authority.
+Older orientation is history: `GOAL.md`, `REORIENTATION.md` and `FORCODEX.md` were deleted on
+2026-10-27 (git keeps them); `PROJECT.md`'s design sections remain, its process sections point at
+the coordination document; nothing dated before the plan is current authority.

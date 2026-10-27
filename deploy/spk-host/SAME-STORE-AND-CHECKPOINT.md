@@ -147,9 +147,11 @@ journal must never be rearmed. Retain uncertain dispatch evidence. Recovery must
 perform an authenticated source/physical STOP audit, retire only the exact stopped
 checkpoint fence, START a new generation, and let returning members re-enroll with
 their existing authority and retained role/ticket through an ordinary client flow.
-The existing `session-reenroll` compatible-upgrade admission is not that ordinary
-client flow. Its new same-source reconnect mode and audited stopped-fence retirement
-are explicit remaining implementation/receiving work; automatic disaster restore
+No client re-enrollment flow exists: the former `mini session-reenroll` (which
+authored a raw session-close state transition in Rust) was deleted on 2026-10-26
+(RUST-TRIAGE row 10); a re-enroll must come from a Lean lifecycle command. The
+same-source reconnect mode and audited stopped-fence retirement are explicit
+remaining implementation/receiving work; automatic disaster restore
 has not been delivered by these callbacks.
 
 

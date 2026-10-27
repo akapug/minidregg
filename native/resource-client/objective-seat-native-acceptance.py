@@ -525,11 +525,13 @@ check('E8-roots-unchanged', roots(v) == before, {'changed': [k for k in roots(v)
 
 
 def activity_submit(tag, workspace, body):
+    # `--again true`: a scripted journey never reruns a step by accident, so the same body submitted once more
+    # (a top-up per height below) is its decision and the row asserts the Host's answer (activity_world.py).
     out = attempts / tag
     command = root / f'{tag}.turn.json'
     command.write_text(json.dumps(body))
     return last_json(sh(tag, mini, 'activity', '--action', 'submit', '--workspace', workspace,
-                        '--command', command, '--out', out, ok=(0, 1, 2)))
+                        '--command', command, '--out', out, '--again', 'true', ok=(0, 1, 2)))
 
 
 def activity(tag, workspace, body, expect, detail=None):
@@ -603,10 +605,13 @@ check('E8-held-seat-funded', b.get((held_seat, X)) == 2
 held_cell = cell(v, held_seat)
 check('E8-held-seat-names-holder', held_cell.get('seat', {}).get('holder') == HREC, held_cell)
 passes = 0
-while int(activity_view('height-held', {})['height']) <= int(hawait['deadline']):
+# one paid turn per height; a loop that has not passed the deadline after 500 is a red row, never a full disk
+while int(activity_view('height-held', {})['height']) <= int(hawait['deadline']) and passes < 500:
     passes += 1
     activity(f'E8-pass-height-{passes}', alice_ws, {'kind': 'topUp', 'record': HREC, 'account': ALICE_ACCOUNT,
              'accountCapability': ALICE_SPEND, 'amount': '1'}, 'installed')
+check('E8-deadline-passed', int(activity_view('height-held-passed', {})['height']) > int(hawait['deadline']),
+      {'passes': passes, 'deadline': hawait['deadline']})
 activity('E8-activity-ends', bob_ws, {'kind': 'deliver', 'record': HREC, 'await': hawait['id'],
          'account': '0', 'accountCapability': '0'}, 'installed')
 _, hrec_after = held_state('held-ended')

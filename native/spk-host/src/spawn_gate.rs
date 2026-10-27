@@ -4,7 +4,6 @@
 //! native-admitted lifecycle adapter may choose its SPK image, app UID/GID,
 //! exact bubblewrap image and fd3/4/5 bindings. The caller must hold the
 //! operation journal's flock throughout `spawn_bounded` and its Running fsync.
-#![allow(dead_code)] // Staged until the native BEGIN adapter can call it; no public launch path.
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
@@ -22,6 +21,8 @@ use std::time::{Duration, Instant};
 
 const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
+/// RLIMIT_NOFILE for the app generation (bubblewrap and everything under it).
+pub(crate) const APP_MAX_FILES: libc::rlim_t = 1024;
 // Linux's maximum extended-attribute value size. The shared launcher can have
 // an entry for every operator-provisioned app identity, not merely 64 entries.
 const MAX_ACCESS_ACL_BYTES: usize = 64 * 1024;
@@ -161,14 +162,6 @@ fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
     }
     buffer.truncate(n as usize);
     Ok(Some(buffer))
-}
-
-/// Refuse an unexecutable pinned launcher before consuming a native START
-/// claim. Repeat the same check at the actual one-shot spawn boundary.
-pub(crate) fn preflight(spec: &SpawnSpec) -> io::Result<()> {
-    validate(spec, false)?;
-    let _executable = pinned_executable(spec)?;
-    Ok(())
 }
 
 fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
@@ -328,6 +321,23 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
         fail(write_fd);
     }
+    // The app's descriptor bound (Sandstorm's supervisor sets one; the unit's
+    // inherited limit is the resident's, not the app's). Hard and soft, so the
+    // app cannot raise it.
+    let mut files = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut files) != 0 {
+        fail(write_fd);
+    }
+    // Never above the inherited hard limit: only lowering needs no privilege.
+    let bound = files.rlim_max.min(APP_MAX_FILES);
+    files.rlim_cur = bound;
+    files.rlim_max = bound;
+    if libc::setrlimit(libc::RLIMIT_NOFILE, &files) != 0 {
+        fail(write_fd);
+    }
     if !crate::os::child_assume_app_identity(spec.app_uid, spec.app_gid) {
         fail(write_fd);
     }
@@ -343,6 +353,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     fail(write_fd)
 }
 
+#[cfg(test)]
 fn wait_reap(pid: libc::pid_t) -> io::Result<i32> {
     let mut status = 0;
     loop {
@@ -418,6 +429,7 @@ impl BoundedChild {
         }
         self.reaped
     }
+    #[cfg(test)]
     pub fn wait(&mut self) -> io::Result<i32> {
         if !self.reaped {
             let status = if let Some(client)=&mut self.remote {client.wait(self.pid as u32)?} else {wait_reap(self.pid)?};

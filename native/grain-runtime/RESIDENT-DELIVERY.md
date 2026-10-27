@@ -18,8 +18,7 @@ checks that number still resolves to the expected stream cell and sequence befor
 submission. Model content is published as model content, never as a signed view.
 
 The durable residentDelivery marker precedes its sidecar and the clearing of the
-old session pending fence. It blocks another prompt, unrelated writes and ordinary
-configuration migration, and participates in the shared quiescence inventory.
+old session pending fence. It blocks another prompt and unrelated writes, and participates in the shared quiescence inventory.
 Historical strict Journal readers refuse the new active marker. A preallocated
 room operation ID then enters the existing ToolTask reservation, Book turn payment
 and immutable native operation-record receiver. Recovery looks up that exact

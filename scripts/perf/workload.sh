@@ -41,7 +41,7 @@ if [ "${PERF_INSTRUCTIONS:-1}" = 1 ] && command -v perf >/dev/null && perf stat 
   perf_ok=1; run=(perf stat --no-scale -I 250 -x, -e instructions:u -o "$root.perf.csv" -- "${run[@]}")
 fi
 t0=$(date +%s.%N)
-[ "$perf_ok" = 1 ] && echo "$t0" >"$root.perf.t0"   # perf's start: scripts/gates/check-waste-model attributes intervals to steps by it
+[ "$perf_ok" = 1 ] && echo "$t0" >"$root.perf.t0"   # perf's start: step attribution of intervals starts from it
 "${run[@]}" >"$root.log" 2>&1
 rc=$?
 t1=$(date +%s.%N)
@@ -50,7 +50,7 @@ if [ -f "$root/summary.json" ]; then
   if [ "$q" != 0 ]; then jq '.underLoad = true' "$root/summary.json" >"$root/summary.tmp" && mv "$root/summary.tmp" "$root/summary.json"; fi
   jq --slurpfile s "$root/settings.json" '.inputKey = $s[0].inputKey' "$root/summary.json" >"$root/summary.tmp" \
     && mv "$root/summary.tmp" "$root/summary.json"
-  # raw counts (--no-scale): the waste-model gate refuses a run that does not say so
+  # raw counts (--no-scale): a run that does not say so is not comparable
   [ "$perf_ok" = 1 ] && jq '.perfCounting = "raw"' "$root/summary.json" >"$root/summary.tmp" && mv "$root/summary.tmp" "$root/summary.json"
   [ "$perf_ok" = 1 ] && { python3 "$here/box.py" instructions "$root" "$root/perf.csv" "$t0" || echo "workload: instruction attribution failed" >&2; }
 fi

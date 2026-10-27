@@ -1,7 +1,6 @@
 //! Distinct v3 launch completion plan and one-shot event25 submission.
 //! A source-authored, custodian-signed v2 physical report is required; this
 //! module never encodes that report or infers process/volume evidence.
-#![allow(dead_code)] // Awaiting v2 report Host route and physical caller.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -28,17 +27,6 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn number(value: &Value) -> io::Result<String> {
-    let result = value
-        .as_str()
-        .map(str::to_owned)
-        .or_else(|| value.as_u64().map(|number| number.to_string()))
-        .ok_or_else(|| invalid("v3 completion management number malformed"))?;
-    if !decimal(&result) {
-        return Err(invalid("v3 completion management number noncanonical"));
-    }
-    Ok(result)
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -643,17 +631,6 @@ mod tests {
         write_new(&attempt, "completion-v2.bin", ingress).unwrap();
         assert!(load_retained(&attempt, &begin, &claim, report).is_ok());
         assert!(load_retained(&attempt, &begin, &claim, b"other report").is_err());
-        let submit = serde_json::to_vec(&json!({
-            "protocol":"mini-spk-launch-completion-submit-requested-v1",
-            "ingressSha256":hex(&Sha256::digest(ingress)),
-            "claimSha256":hex(&Sha256::digest(&claim.committed)),
-        }))
-        .unwrap();
-        write_new(&attempt, "op38-requested.json", &submit).unwrap();
-        assert_eq!(
-            fs::read(attempt.join("op38-requested.json")).unwrap(),
-            submit
-        );
         fs::remove_dir_all(parent).unwrap();
     }
 }

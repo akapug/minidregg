@@ -1,5 +1,11 @@
 # The landing pipeline on hbox
 
+> **2026-10-27.** hbox is the pipeline's standing run and warm base, nothing else: lanes run their
+> Linux checks and Lean builds on `dregg-build`, timing rows never run on `/tank` (an HDD mirror with no
+> SLOG), and the landing rule below is the one in [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md) §2: reds are named in
+> the run, never ledgered. The mechanics on this page (layout, slots, the standing run, the nightly
+> commands) are current; its rules defer to that document.
+
 Goal: a lane can **land by the rule** on hbox without a rented burst box (PROTOCOL-20261009 §6–7). "Landed" means
 the commit is on GitHub main AND a full static gate is red=0 at that sha AND the standing journey run at that sha has
 every required row PASS. A required row may also be UNCONFIGURED, but only when the missing input is one the box
@@ -153,13 +159,16 @@ to `JOURNEY_ROWS` only when `PIPELINE_NIGHTLY=1`.
 
 The nightly is the 1000-create run plus the full growth soak, against the `main` set, into its own results root
 (never `$JOURNEY_ROOT`: run_tip moves an existing `TIP/` aside, which would hide the standing run from landing.sh).
-With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides) and `growth` is in the row set:
+With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides), and `growth` and `kernel` (the
+kernel journey: `journey.sh` `JOURNEY_SET=kernel` without G, the steps no public surface needs; docs/JOURNEY.md
+"Two journeys") are in the row set:
 
 ```
 cd /tank/dregg-build/pipeline && T=$(readlink artifacts/main) && tree=journeys/.trees/$T && \
   PIPELINE_ROOT=$PWD PIPELINE_NIGHTLY=1 PIPELINE_ROW_TIMEOUT_S=7200 setsid nohup bash $tree/scripts/pipeline/journey-runner \
     --tip $T --row births --results-root $PWD/nightly > logs/nightly-births-$T.log 2>&1 < /dev/null & echo $! > logs/nightly-births.pid
-# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished
+# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished,
+# and with --row kernel (logs/nightly-kernel-$T.log, logs/nightly-kernel.pid)
 ```
 
 Results: `nightly/<tip>/{results.tsv,table.txt,rows/}`. The nightly blocks nothing; it is the measurement a Store
@@ -239,21 +248,17 @@ it executes; its `lib.sh`, `journey-red-lines` and `journey-rows` were planted b
   (c) "50 connections that send nothing". It PASSED in the d37eee80 run an hour earlier. It is not declared absent:
   a jserve that was PASS at main's baseline and fails in a candidate counts as a new red.
 
-## Baseline-relative landing rule (ROOT, 2026-10-14; the header of scripts/pipeline/required-rows)
+## Baseline-relative landing rule (the header of scripts/pipeline/required-rows; docs/COORDINATION-2026-10-27.md §2)
 
 A candidate lands when all three hold:
 
-1. Its gate is red=0.
+1. Its gate is red=0 (or its reds are named and owned by a lane in flight).
 2. Its standing run has **no line non-PASS (or missing) that was PASS in main's own most recent standing run on
    this box**. landing.sh prints `new reds vs baseline: N`, and each one as `NEW RED`.
-3. Every required line is PASS or declared absent by name. The exception is a line that was already non-PASS at
-   main's baseline **and** is listed in required-rows as `known-red ROW CV-TASK note`; that line prints as
-   `PRE-RED` and blocks nothing until fixed. A pre-existing red with no `known-red` line still blocks, so its cv
-   task must be opened first.
+3. Every required line is PASS, declared absent by name, or was already non-PASS at main's baseline: such a line
+   prints as `PRE-RED` by name and blocks nothing. There is no accepted-red list to maintain (the `known-red`
+   lines and `known-red-verdict` were deleted on 2026-10-27); the run's output names the reds and the lane
+   brief names the owner.
 
 The verdict prints `required unmet: [...] (of which pre-existing at main: [...])`. Exit 0 iff new reds = 0 and
 nothing blocks.
-
-- Known-red today: fleetsign (cv 01a13985).
-- Plant for the rule: the d37eee80 results with m3 set to FAIL and rooms removed against the main baseline gave
-  `NEW RED rooms MISSING` and `NEW RED m3 FAIL`, and exited 1.

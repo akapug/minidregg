@@ -54,19 +54,21 @@ pub const SSH_PREFIX: &str = "ssh:";
 
 /// Operator-socket operations the SDK drives (`main.rs` `socket_process`).
 pub mod op {
-    pub const PREPARE: u8 = 1;
-    pub const SUBMIT: u8 = 2;
-    pub const LOOKUP: u8 = 3;
-    pub const CHALLENGE: u8 = 4;
-    pub const QUERY: u8 = 5;
+    pub use crate::host_operations::{
+        AUTHORIZED_PREPARE as PREPARE, AUTHORIZED_QUERY as QUERY, LOOKUP, OBSERVATION_CHALLENGE as CHALLENGE, SUBMIT,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     /// The Host answered `op` with this body.
     Answer(Vec<u8>),
-    /// The Host refused; the body is its encoded outcome (decode with `inspect outcome`).
-    Refused(Vec<u8>),
+    /// `NO_RECORD` (253): the Host decided before any append (refused, contention or unavailable;
+    /// never uncertain); a fresh attempt is safe. The body is its encoded outcome.
+    NoRecord(Vec<u8>),
+    /// `HOST_OUTCOME` (255): an outcome the Host has not proven no-append, so UNDECIDED whatever
+    /// it decodes to: look the exact call up. The body is its encoded outcome.
+    Outcome(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +77,17 @@ pub enum Failure {
     Unsent(String),
     /// The request may have reached the Host; its decision is unknown.
     Uncertain(String),
+}
+
+/// The environment switch of the lost-reply fault: its value names the operation byte (decimal) whose
+/// next exchange writes and does not read. Consumed on first use.
+pub const LOSE_REPLY_ENV: &str = "MINI_FAULT_LOSE_REPLY_ONCE";
+
+/// Whether the lost-reply fault is armed for this operation byte (`MINI_FAULT_LOSE_REPLY_ONCE`
+/// holds the byte). Every socket path a client sends a Host call on honours it: the SDK's own
+/// below, and the resource client's `transport::invoke_pinned_deadline`.
+pub fn lose_reply_armed(operation: u8) -> bool {
+    std::env::var(LOSE_REPLY_ENV).ok().and_then(|v| v.trim().parse::<u8>().ok()) == Some(operation)
 }
 
 /// Where operator requests go.
@@ -402,6 +415,25 @@ impl Operator {
     pub fn call(&self, operation: u8, payload: &[u8]) -> std::result::Result<Reply, Failure> {
         let frame = request(&self.config, self.host_sha256.as_ref(), operation, payload)
             .map_err(|e| Failure::Unsent(e.0))?;
+        // The lost-reply switch (`submit ID --lose-reply-once`; DEMO-EXPERIENCE A11): a client-side
+        // fault, armed once by the client's own environment, that writes the exact call and then
+        // deliberately never reads the answer. The Host decides as it would; the custody record
+        // holds the call as uncertain; `lookup`/`retry` ask for the same decided outcome.
+        if lose_reply_armed(operation) {
+            std::env::remove_var(LOSE_REPLY_ENV);
+            if let Route::Unix(socket) = &self.route {
+                let mut stream = UnixStream::connect(socket)
+                    .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                stream
+                    .write_all(&(frame.len() as u32).to_le_bytes())
+                    .and_then(|_| stream.write_all(frame.as_slice()))
+                    .and_then(|_| stream.flush())
+                    .map_err(|e| Failure::Uncertain(format!("uncertain host request write: {e}")))?;
+                drop(stream);
+            }
+            return Err(Failure::Uncertain("reply deliberately not read (--lose-reply-once): the Host decided as it would; this exact call is looked up or retried, never re-sent as a second write".into()));
+        }
         let reply = match &self.route {
             Route::Unix(socket) => self.call_unix(socket, &frame)?,
             Route::Ssh(_) => self.channel.as_ref().expect("an ssh route has its channel").exchange(&frame, self.read_deadline)?,
@@ -410,6 +442,7 @@ impl Operator {
     }
 
     fn call_unix(&self, socket: &Path, frame: &[u8]) -> std::result::Result<Vec<u8>, Failure> {
+        let _ = LOSE_REPLY_ENV;
         let mut stream = UnixStream::connect(socket)
             .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
         let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
@@ -555,11 +588,16 @@ impl Default for SshPool {
 
 /// Classify a reply frame for `operation`.
 pub fn classify_reply(operation: u8, mut reply: Vec<u8>) -> std::result::Result<Reply, Failure> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
     match reply.first().copied() {
-        Some(254) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
-        Some(255) => {
+        Some(RESPONSE_NEVER_FORWARDED) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
+        Some(RESPONSE_NO_RECORD) => {
             reply.remove(0);
-            Ok(Reply::Refused(reply))
+            Ok(Reply::NoRecord(reply))
+        }
+        Some(RESPONSE_HOST_OUTCOME) => {
+            reply.remove(0);
+            Ok(Reply::Outcome(reply))
         }
         Some(tag) if tag == operation => {
             reply.remove(0);
@@ -587,7 +625,8 @@ mod tests {
     #[test]
     fn replies_classify_into_answer_refusal_unsent_uncertain() {
         assert_eq!(classify_reply(2, vec![2, 9]), Ok(Reply::Answer(vec![9])));
-        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Refused(vec![9])));
+        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Outcome(vec![9])));
+        assert_eq!(classify_reply(2, vec![253, 9]), Ok(Reply::NoRecord(vec![9])));
         assert!(matches!(classify_reply(2, vec![254, b'b']), Err(Failure::Unsent(_))));
         assert!(matches!(classify_reply(2, vec![3]), Err(Failure::Uncertain(_))));
     }
@@ -616,10 +655,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ---- the ssh route, against the `ssh` stand-in (`frame::fake::SSH_STANDIN`) ----
+    // ---- the ssh route, against the `ssh` stand-in (`local::fake::SSH_STANDIN`) ----
 
     fn standin(dest: &str) -> (Operator, PathBuf) {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let dir = std::env::temp_dir().join(format!("mini-sdk-ssh-cfg-{}-{dest}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("config.json"), b"{}").unwrap();
@@ -701,7 +740,7 @@ mod tests {
     #[test]
     fn an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket() {
         let (op, _) = standin("serve-refuse");
-        assert_eq!(op.call(2, b"c"), Ok(Reply::Refused(b"no".to_vec())));
+        assert_eq!(op.call(2, b"c"), Ok(Reply::Outcome(b"no".to_vec())));
         let (op, _) = standin("serve-reject");
         assert!(matches!(op.call(2, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
     }
@@ -728,7 +767,7 @@ mod tests {
     }
 
     fn standin_ssh(dest: &str, remote_command: Option<&str>) -> Ssh {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let mut ssh = Ssh::new(dest).unwrap();
         ssh.command = vec![sh.into(), script.into()];
         ssh.connect_timeout = Duration::from_secs(2);

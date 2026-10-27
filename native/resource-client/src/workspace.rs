@@ -68,8 +68,6 @@ mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
-#[path = "world_surface.rs"]
-pub(crate) mod world_surface;
 #[path = "world_prototype.rs"]
 mod world_prototype;
 
@@ -154,7 +152,7 @@ pub(crate) fn ref_name_of_file(stem: &str) -> String {
     stem.replace('.', "/")
 }
 
-fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     let parent=path.parent().ok_or("retained JSON lacks parent")?;
     private_dir(parent)?;
     let filename=path.file_name().and_then(OsStr::to_str).ok_or("record name is not UTF-8")?;
@@ -825,7 +823,7 @@ fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &s
     Ok(())
 }
 
-fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
+pub(crate) fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
     let value = bounded_json(source)?;
     if member(&value, "type")? != "minidregg-delegated-reference-v1"
         || member(&value, "recipient")? != member(workspace, "subject")?
@@ -2521,7 +2519,7 @@ fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> R
 /// read, a transport error) stays an error, not a placeholder.
 fn history_refused() -> bool {
     match crate::take_host_decision() {
-        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        Some(crate::HostDecision::Frame { decoded: Some(outcome), .. })
         | Some(crate::HostDecision::Outcome(outcome)) => reason_is_no_grant(&outcome),
         _ => false,
     }
@@ -3632,14 +3630,20 @@ pub(crate) fn submit_intent(
                     &selected_source.borrow(), OsStr::new(kind), &member_path(workspace, "key")?, &attempt, false, None, false)
             },
             |_, decision| {
-                if crate::replan::is_stale_root(decision) { return true; }
-                let final_refused = crate::replan::is_final_admission_refusal(decision)
-                    && attempt.join("call.bin").is_file();
-                if !final_refused && !crate::replan::is_prepare_stale_target(decision) { return false; }
+                if crate::replan::is_stale_root(decision) {
+                    record_replan_reason(&attempt, "stale-root", decision);
+                    return true;
+                }
+                let Some(class) = append_recovery_class(decision, &selected_source.borrow(),
+                    attempt.join("call.bin").is_file()) else { return false };
                 // A refusal alone does not establish preimage drift. The
                 // original observer proves it independently through a signed read.
                 match append_preimage_moved(root, workspace, &request, &selected_source.borrow()) {
-                    Ok(moved) => { refresh.set(moved); moved },
+                    Ok(moved) => {
+                        if moved { record_replan_reason(&attempt, class, decision); }
+                        refresh.set(moved);
+                        moved
+                    }
                     Err(error) => { eprintln!("append recovery read failed: {error}"); false }
                 }
             },
@@ -3655,6 +3659,7 @@ pub(crate) fn submit_intent(
         }
         return result;
     }
+    refuse_rerun(root, &source, kind)?;
     if crate::client_consent::thin_mode() {
         if kind != "intent" {
             return Err("thin consent signs retained invocation intents only; nothing signed".into());
@@ -3672,6 +3677,73 @@ pub(crate) fn submit_intent(
     )?;
     if !prepare_only {
         renounce_note(&source);
+    }
+    Ok(())
+}
+
+/// Which proven-unadmitted refusal of one append attempt lets the append be
+/// re-planned against the new target root, if any: a decoded final admission
+/// refusal or the Host's named `stale-target` refusal of this append's own
+/// target (both after a sealed call), or the controller's typed prepare
+/// `staleTarget` (before one). The caller still proves the move with a fresh
+/// signed read before authoring a new call. See `replan::submit_stale_target`
+/// for why a fresh call is legitimate and the Lean questions Q2/Q3 it rests on.
+fn append_recovery_class(decision: Option<&crate::HostDecision>, source: &Path, sealed: bool) -> Option<&'static str> {
+    if sealed && crate::replan::is_final_admission_refusal(decision) {
+        return Some("admission-refused");
+    }
+    if sealed {
+        if let Some(named) = crate::replan::submit_stale_target(decision) {
+            let intent = bounded_json(source).ok()?;
+            let targets = intent["purpose"]["draft"]["command"]["targets"].as_array()?;
+            return (targets.len() == 1 && targets[0]["target"].as_str() == Some(named.as_str()))
+                .then_some("stale-target");
+        }
+    }
+    crate::replan::is_prepare_stale_target(decision).then_some("prepare-stale-target")
+}
+
+/// Keep the exact reason one append attempt was re-planned beside its retained
+/// call (`replan-reason.json`; the retirement moves it into `replanned/NN`).
+fn record_replan_reason(attempt: &Path, class: &str, decision: Option<&crate::HostDecision>) {
+    let reason = json!({"type":"minidregg-append-replan-reason-v1","class":class,
+        "outcome":decision.and_then(crate::HostDecision::outcome)});
+    if let Err(error) = replace_private_file(&attempt.join("replan-reason.json"),
+        &serde_json::to_vec(&reason).unwrap_or_default()) {
+        eprintln!("append recovery: cannot record the re-plan reason: {error}");
+    }
+}
+
+/// A second submission of an intent that an earlier attempt of this workspace already holds is
+/// refused unless that attempt is decided as refused or never sealed a call: the attempt is the
+/// intent's record, and a rerun after a lost reply must look up its exact call, not author a second
+/// one (review §5.2 P4). The retained copy (`intent.json`, or `intent-source.bin` for binary
+/// intents) identifies it, byte for byte.
+fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
+    let retained = if kind == "binary" { "intent-source.bin" } else { "intent.json" };
+    let bytes = fs::read(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
+    let Ok(entries) = fs::read_dir(root.join("attempts")) else { return Ok(()) };
+    for entry in entries.flatten() {
+        let attempt = entry.path();
+        let copy = attempt.join(retained);
+        if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
+            continue;
+        }
+        if !attempt.join("call.bin").is_file() {
+            continue; // never sealed: nothing can have been submitted
+        }
+        let retry = format!("`mini retry --dir {} --mode lookup`", attempt.display());
+        match retained_attempt_outcome(&attempt)? {
+            AttemptOutcome::Refused => continue,
+            AttemptOutcome::Confirmed(_) => return Err(format!(
+                "this intent is already confirmed by attempt {}; it is not submitted again (its receipt: {retry})",
+                attempt.display())),
+            AttemptOutcome::Charged(_) => return Err(format!(
+                "this intent was admitted as a charged failure by attempt {}; it is not submitted again", attempt.display())),
+            AttemptOutcome::Pending => return Err(format!(
+                "undecided: attempt {} holds this intent's exact call and may have been admitted; nothing new is submitted: {retry}",
+                attempt.display())),
+        }
     }
     Ok(())
 }
@@ -4018,6 +4090,8 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
 /// Reading this status does not advance receipt-continuity custody.
 pub(crate) enum AttemptOutcome {
     Confirmed(Value),
+    /// Admitted with only its price posted (`disposition: charged`): terminal, not accepted.
+    Charged(Value),
     Refused,
     Pending,
 }
@@ -4026,6 +4100,7 @@ pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome>
     // The rule and the reading of the retained files are the SDK's (`AttemptDir::standing`).
     Ok(match mini_sdk::store::AttemptDir(attempt.to_path_buf()).standing()? {
         mini_sdk::custody::Standing::Confirmed(value) => AttemptOutcome::Confirmed(value),
+        mini_sdk::custody::Standing::Charged(value) => AttemptOutcome::Charged(value),
         mini_sdk::custody::Standing::Refused => AttemptOutcome::Refused,
         mini_sdk::custody::Standing::Pending => AttemptOutcome::Pending,
     })
@@ -4045,6 +4120,10 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
             receipt_continuity::finish_attempt(continuity, &value, true)?;
             Ok(Some(value))
         }
+        // Not accepted, and never pending either: the call is decided and must not be resent.
+        AttemptOutcome::Charged(value) => Err(format!(
+            "the Host admitted this call as a charged failure: only its price was posted, nothing else was written (cause {})",
+            value.get("cause").unwrap_or(&Value::Null))),
         AttemptOutcome::Refused | AttemptOutcome::Pending => Ok(None),
     }
 }
@@ -4084,7 +4163,7 @@ pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path)
     let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     if attempt.parent() != Some(attempts.as_path())
         || !attempt.join("call.bin").is_file()
-        || fs::read(attempt.join("intent.json")).map_err(|error| error.to_string())? != bytes
+        || crate::fsio::read_bounded_or_empty(&attempt.join("intent.json"), MAX_RECORD as usize)? != bytes
     {
         return Err("delegation attempt lacks this exact retained proposal call".into());
     }
@@ -4258,7 +4337,7 @@ fn put_fields(target: &mut Value, fields: &Value) {
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
-fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
     let mut numbers = Vec::new();
     for entry in fs::read_dir(base).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -4291,7 +4370,7 @@ fn authoring_refused(generation: &Path) -> Result<bool> {
         return Ok(false);
     }
     let bytes = fs::read(&reply).map_err(|error| error.to_string())?;
-    Ok(bytes.first() == Some(&255))
+    Ok(bytes.first().is_some_and(|b| crate::is_outcome_frame(*b)))
 }
 
 /// A generation whose intent belonged to an attempt that was definitely
@@ -4305,7 +4384,7 @@ fn authoring_released(generation: &Path) -> bool {
 /// assembled an exact call (so nothing was ever submitted), or the newest Host
 /// outcome for its exact call is a final `refused`. A confirmed, uncertain,
 /// unavailable, contended or absent outcome is not definite and keeps custody.
-fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
+pub(crate) fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
     if !attempt.join("call.bin").is_file() {
         return Ok(true);
     }
@@ -4320,7 +4399,7 @@ fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
 /// release the namespace binding, and retire the attempt directory (kept as
 /// `NAME.released-N` with all its evidence). Each step is idempotent and the
 /// retirement, which removes the trigger, is last.
-fn release_unadmitted_attempt(
+pub(crate) fn release_unadmitted_attempt(
     authoring: &Path,
     attempt: &Path,
     reservation: &participant_namespace::Reservation,
@@ -4378,7 +4457,7 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
 /// a generation observed in this call is superseded only when `stale` finds
 /// the Host answering its own `stale-root` to that observation (the timer race
 /// at birth), at most `replan::max()` times (the shared `replan` loop).
-fn author_generations(
+pub(crate) fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
     mut observe: impl FnMut() -> Result<PathBuf>,
@@ -4786,6 +4865,15 @@ fn birth(
         let receipt = accepted_outcome(&attempt)?
             .ok_or("historical create lookup did not confirm installed birth")?;
         return Ok((source, receipt, reservation));
+    }
+    // Thin consent (`Kernel.NativeThinConsent.checkPlanThin`) displays invocations and
+    // delegations; a birth's plan (factory, authority, allocation and source slots) is derived by
+    // the planner from the Store's pins, height and authority snapshot, which thin consent does not
+    // read. Named here, before anything is signed, instead of the provider's "no served target
+    // views" (JP2 row 19). A re-run of an already bound attempt answers above without consent.
+    if crate::client_consent::thin_mode() {
+        return Err("thin consent signs invocations and delegations only; a birth (create) is planned \
+            against the Store and needs the full consent provider (MINI_THIN_CONSENT unset); nothing signed".into());
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
     // A Host `stale-root` between the signed observation and prepare (or a
@@ -5301,6 +5389,20 @@ fn runs_at_tail(document: &Value) -> Result<Vec<String>> {
         .collect()
 }
 
+/// An append needs the document's root element to join (K-ELEMENT-TREE
+/// `appendLeaf`). A content cell born without `createDocument` has none: the
+/// Host's `view-document` names no root, and a line appended there would stand
+/// in no tree and never be read back. Refuse before anything is signed.
+fn no_document_refusal(name: &str, document: &Value) -> Result<()> {
+    if document.get("root").is_some_and(Value::is_null) {
+        return Err(format!(
+            "{name} has no document (its cell was born without one, so an appended line would stand in no \
+             tree); `doc new` births a cell with its document"
+        ));
+    }
+    Ok(())
+}
+
 /// Lower line-level document actions into the Host's content grammar.
 /// `append {text}` · `edit {line,text}` · `link {to,relation}`.
 fn document_actions(
@@ -5351,7 +5453,9 @@ fn document_actions(
             let atom = random_nonce()?;
             if tail_runs.is_none() {
                 let reference = reference(root, name)?;
-                tail_runs = Some(runs_at_tail(&host_document(root, workspace, &reference)?)?);
+                let document = host_document(root, workspace, &reference)?;
+                no_document_refusal(name, &document)?;
+                tail_runs = Some(runs_at_tail(&document)?);
             }
             lowered.extend(append_actions(&atom, text_argument(action)?, tail_runs.iter().flatten()));
             continue;
@@ -7083,6 +7187,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// A summoned program document (and every cell a verb appends lines to)
+    /// must be born with its document: Bob's `doc show` and the resident's
+    /// context read of the J14 room found none (the Host's "context source has
+    /// no document") because `summon` birthed a bare content cell. The append
+    /// refuses such a cell before signing, and no verb births one.
+    #[test]
+    fn document_append_refuses_cell_born_without_document_and_summon_births_one() {
+        let bare = json!({"type":"document","height":null,"state":"live","cellRoot":"9","root":null,
+            "rootRevision":null,"order":[],"runs":[],"transclusions":[]});
+        let error = no_document_refusal("lab-hermes-librarian", &bare).unwrap_err();
+        assert!(error.contains("has no document") && error.contains("doc new"), "{error}");
+        let born = json!({"type":"document","root":"77","rootRevision":"78","order":[],"runs":[],"transclusions":[]});
+        assert!(no_document_refusal("lab-hermes-librarian", &born).is_ok());
+        // Every verb that appends lines to a cell it births uses doc-new.
+        for (file, source) in [("hermes.rs", include_str!("hermes.rs")), ("story.rs", include_str!("story.rs")),
+            ("chat.rs", include_str!("chat.rs"))] {
+            for (n, line) in source.lines().enumerate() {
+                let code = line.trim_start();
+                assert!(code.starts_with("//") || !(code.contains("create_cell(") && code.contains("\"content\"")),
+                    "{file}:{}: a content cell born without its document: {line}", n + 1);
+            }
+        }
+        let summon = include_str!("hermes.rs");
+        assert!(summon.contains("chat::create_document(session, &program_name,"), "summon births the program document");
+    }
+
     #[test]
     fn invocation_family_is_preserved_in_actual_unsigned_command() {
         use serde_json::json;
@@ -7162,6 +7292,85 @@ mod tests {
             assert!(super::append_recovery_input(&root,&source,kind,prepare_only).unwrap_err().contains("belongs to proposal op"));
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Two members append to one shared document concurrently against a fake
+    /// Host that holds the document's root. Both plan over root 0; the first
+    /// call lands; the second is refused with the Host's named `stale-target`
+    /// (carried on the positive `NO_RECORD` byte), re-planned once over the new
+    /// root, and submitted as a NEW call (fresh nonce, identical text) that
+    /// lands. Each text appears exactly once, and the loser's recorded reason
+    /// is `stale-target`. An uncertain answer is never re-planned.
+    #[test]
+    fn append_concurrent_members_replan_on_stale_target() {
+        use crate::HostDecision;
+        use std::sync::{Arc, Barrier, Mutex};
+        let _lock = crate::replan::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        crate::replan::set_max(crate::replan::DEFAULT_MAX);
+        let dir = std::env::temp_dir().join(format!("mini-append-concurrent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("intent.json");
+        std::fs::write(&source, br#"{"purpose":{"draft":{"command":{"targets":[{"target":"10"}]}}}}"#).unwrap();
+        // The fake Host: the document's root, its lines, every call's nonce.
+        struct Host { root: u64, lines: Vec<String>, nonces: Vec<u64>, next_nonce: u64 }
+        let host = Arc::new(Mutex::new(Host { root: 0, lines: vec![], nonces: vec![], next_nonce: 0 }));
+        let stale = |target: &str| HostDecision::Frame {
+            command: "submit".into(), byte: 253, encoded: vec![],
+            decoded: Some(json!({"type":"refused","reason":"operation-rejected","phase":hex(b"stale-target"),
+                "detail":hex(format!("target {target} moved since the plan was signed").as_bytes())})),
+        };
+        let barrier = Arc::new(Barrier::new(2));
+        let member = |text: &'static str| {
+            let (host, barrier, source) = (host.clone(), barrier.clone(), source.clone());
+            std::thread::spawn(move || {
+                let mut first = true;
+                let mut classes = Vec::new();
+                let result = crate::replan::replan("document append",
+                    || {
+                        // Plan: observe the root the call will name, with a fresh nonce.
+                        let (planned, nonce) = { let mut h = host.lock().unwrap(); h.next_nonce += 1; (h.root, h.next_nonce) };
+                        if std::mem::take(&mut first) { barrier.wait(); }
+                        let mut h = host.lock().unwrap();
+                        h.nonces.push(nonce);
+                        if h.root != planned {
+                            crate::note_host_decision(stale("10"));
+                            return Err("host refused submit: target 10 moved since the plan was signed".into());
+                        }
+                        h.root += 1;
+                        h.lines.push(text.to_owned());
+                        Ok(())
+                    },
+                    |_, decision| match super::append_recovery_class(decision, &source, true) {
+                        Some(class) => { classes.push(class); true }
+                        None => false,
+                    },
+                    |_| Ok(()));
+                (result, classes)
+            })
+        };
+        let (a, b) = (member("member-1 text"), member("member-2 text"));
+        let (a, b) = (a.join().unwrap(), b.join().unwrap());
+        assert!(a.0.is_ok() && b.0.is_ok(), "{:?} {:?}", a.0, b.0);
+        let mut classes = [a.1, b.1].concat();
+        classes.sort();
+        assert_eq!(classes, ["stale-target"], "exactly one member re-planned, for the named stale target");
+        let h = host.lock().unwrap();
+        let mut lines = h.lines.clone(); lines.sort();
+        assert_eq!(lines, ["member-1 text", "member-2 text"]);
+        assert_eq!(h.root, 2);
+        let mut nonces = h.nonces.clone(); nonces.sort(); nonces.dedup();
+        assert_eq!(nonces.len(), 3, "three calls, each with its own nonce");
+        drop(h);
+        // Another target's stale refusal, an uncertain answer, an undecoded
+        // frame and an unsealed attempt are never re-planned.
+        assert_eq!(super::append_recovery_class(Some(&stale("11")), &source, true), None);
+        assert_eq!(super::append_recovery_class(Some(&stale("10")), &source, false), None);
+        assert_eq!(super::append_recovery_class(Some(&HostDecision::Outcome(json!({"type":"uncertain"}))), &source, true), None);
+        assert_eq!(super::append_recovery_class(Some(&HostDecision::Frame {
+            command: "submit".into(), byte: 255, encoded: vec![1], decoded: None }), &source, true), None);
+        assert_eq!(super::append_recovery_class(None, &source, true), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -7754,9 +7963,10 @@ mod tests {
         fs::create_dir_all(root.join("refs")).unwrap();
         let workspace = json!({"subject":"7"});
         let current = page(vec![atom("401", "first", "7"), atom("402", "second", "1103")]);
-        let lowered =
-            document_actions(&root, &workspace, "paper", &current, false, &json!([{"type":"append","text":"hi"}]))
-                .unwrap();
+        // An append reads the document's tail runs from the Host first (K-RUNS-RANGES: every run
+        // ending at the last line grows by the new one), which a unit test has no Host for; the
+        // lowering itself is `append_actions`, pure, and asserted here on no runs.
+        let lowered = Value::Array(append_actions("401", hex(b"hi"), std::iter::empty::<&String>()));
         assert_eq!(lowered[0]["type"], "createAtom");
         assert_eq!(lowered[0]["payload"], "6869");
         assert_eq!(lowered[0]["kind"], json!({"type":"text"}));
@@ -7871,7 +8081,7 @@ mod tests {
             vec![91, 7]
         };
         fs::write(generation.join("reply.frame"), &reply).unwrap();
-        if reply[0] == 255 {
+        if crate::is_outcome_frame(reply[0]) {
             Err("current resource birth authoring refused".into())
         } else {
             Ok(())

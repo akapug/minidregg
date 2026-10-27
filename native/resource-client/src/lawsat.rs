@@ -166,6 +166,43 @@ pub(crate) fn unsat_lines(answer: &Value, query_part: &str) -> Vec<String> {
     lines
 }
 
+/// The shell line a document's witnessed write is, from the grammar leaf of the content verb the
+/// witness's slots name (atom edits: `doc edit`; tombstones: `doc remove`; otherwise `doc
+/// append`), with the reference filled and `ID`/`'hello'` left for the member. A pure render of
+/// the Host's answer: nothing here decides admissibility. `None` when the witness reads no
+/// content slot (not a document).
+pub(crate) fn content_line(name: &str, write: &Value) -> Option<String> {
+    use crate::shell_grammar::{compose, leaf, DOC};
+    let slot = |which: &str| -> Option<String> {
+        write
+            .get("new")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|s| text(s, "slot").contains(which) || text(s, "name").contains(which))
+            .map(|s| text(s, "text").trim_matches('"').to_owned())
+    };
+    let edits = slot("content/atom-edits");
+    let tombstones = slot("content/tombstones");
+    if edits.is_none() && tombstones.is_none() {
+        return None;
+    }
+    let path: &[&str] = if edits.as_deref().is_some_and(|v| v != "0") {
+        &["doc", "edit"]
+    } else if tombstones.as_deref().is_some_and(|v| v != "0") {
+        &["doc", "remove"]
+    } else {
+        &["doc", "append"]
+    };
+    let l = leaf(&DOC, path)?;
+    Some(compose(l, &|a| match a.name {
+        "ID" => "ID".to_owned(),
+        "NAME" => name.to_owned(),
+        n if n.starts_with("TEXT") => "'hello'".to_owned(),
+        _ => "1".to_owned(),
+    }))
+}
+
 /// A witness step, as the friend reads it: the new state's slots by name, and
 /// the old state's where they differ in meaning.
 pub(crate) fn witness_text(answer: &Value) -> String {
@@ -543,7 +580,17 @@ pub(super) fn can_any(root: &Path, workspace: &Value, name: &str) -> Result<()> 
     let mut candidates: Vec<&String> = now.keys().filter(|f| read.contains(*f)).collect();
     candidates.extend(now.keys().filter(|f| !read.contains(*f)));
     if candidates.is_empty() {
-        println!("  a write exists in principle (e.g. {}), but this cell holds no field to write; create one first", witness_text(&write));
+        println!("  a write exists in principle (e.g. {})", witness_text(&write));
+        match content_line(name, &write) {
+            // A document (content cell): the witnessed write is one of the content verbs; the
+            // line is composed from that verb's grammar leaf and the witness's slot values.
+            Some(line) => {
+                println!("  paste:");
+                println!("    {line}");
+                println!("  [judged as: verb = write; ID is the proposal id you choose]");
+            }
+            None => println!("  but this cell holds no field to write; create one first"),
+        }
         return Ok(());
     }
     let mut last = None;

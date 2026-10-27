@@ -26,6 +26,77 @@ theorem changed_plan_refused (expected candidate : List UInt8) (changed : expect
     checkExact expected candidate = .error "operator plan differs from complete local native preparation" := by
   simp [checkExact, changed]
 
+/-- Consent to the re-derived plan, or to its height pin when the operation has one
+(today op 86, `pinnedExpectedBytes`): nothing else. -/
+structure ExactOrPinned (expected : List UInt8) (pinned : Option (List UInt8))
+    (candidate : List UInt8) : Type where
+  private mk ::
+  exact : expected = candidate ∨ pinned = some candidate
+
+def checkExactOrPinned (expected : List UInt8) (pinned : Option (List UInt8))
+    (candidate : List UInt8) : Except String (ExactOrPinned expected pinned candidate) :=
+  if h : expected = candidate then .ok ⟨.inl h⟩
+  else if p : pinned = some candidate then .ok ⟨.inr p⟩
+  else .error "operator plan differs from complete local native preparation"
+
+/-- Teeth: a candidate that is neither the re-derived plan nor its pin is refused. -/
+theorem changed_or_pinned_refused (expected : List UInt8) (pinned : Option (List UInt8))
+    (candidate : List UInt8) (changed : expected ≠ candidate) (notPinned : pinned ≠ some candidate) :
+    checkExactOrPinned expected pinned candidate =
+      .error "operator plan differs from complete local native preparation" := by
+  simp [checkExactOrPinned, changed, notPinned]
+
+/-- Satisfiable: the re-derived plan is accepted. -/
+theorem rederived_plan_accepted (expected : List UInt8) (pinned : Option (List UInt8)) :
+    ∃ consent, checkExactOrPinned expected pinned expected = .ok consent := by
+  unfold checkExactOrPinned
+  rw [dif_pos rfl]
+  exact ⟨_, rfl⟩
+
+/-- Satisfiable: the pinned re-derived plan is accepted. -/
+theorem pinned_plan_accepted (expected pinned : List UInt8) :
+    ∃ consent, checkExactOrPinned expected (some pinned) pinned = .ok consent := by
+  unfold checkExactOrPinned
+  split
+  · exact ⟨_, rfl⟩
+  · rw [dif_pos rfl]
+    exact ⟨_, rfl⟩
+
+private def splitPair? (payload : List UInt8) : Option (List UInt8 × List UInt8) :=
+  if payload.length < 4 then none else
+  let length := (payload.take 4).foldr (fun b rest => b.toNat + 256 * rest) 0
+  if length ≤ payload.length - 4 then some ((payload.drop 4).take length, payload.drop (4 + length))
+  else none
+
+/-- The height-pinned form of the re-derived plan, for the operations whose plan a signer
+pins before signing. Op 86 (enrollment): the sponsor header's deadline pinned to the height
+of the authorizing observation in the retained request (`Challenge.height`), the height the
+signer saw and the client passes to `pin-enrollment-plan-height`; a pin to any other height
+differs and is refused. Every other operation: none (op 1's invocation pin is accepted by
+`NativeClientConsent.checkPlan`). -/
+def pinnedExpectedBytes (operation : UInt8) (request expected : List UInt8) : Option (List UInt8) :=
+  match operation with
+  | 86 => do
+      let (observation, _) ← splitPair? request
+      let signed ← NativeObservationCodec.signedCodec.decode observation
+      let plan ← ParticipantKeyEnrollment.signingPlanCodec.decode expected
+      let pinned ← (NativePlanHeight.pinEnrollment signed.challenge.height plan).toOption
+      pure (ParticipantKeyEnrollment.signingPlanCodec.encode pinned)
+  | _ => none
+
+/-- Only the enrollment plan has a pinned form here. -/
+theorem pinnedExpectedBytes_only_enrollment (operation : UInt8) (request expected : List UInt8)
+    (other : operation ≠ 86) : pinnedExpectedBytes operation request expected = none := by
+  unfold pinnedExpectedBytes
+  split
+  · exact absurd rfl other
+  · rfl
+
+#assert_axioms changed_or_pinned_refused
+#assert_axioms rederived_plan_accepted
+#assert_axioms pinned_plan_accepted
+#assert_axioms pinnedExpectedBytes_only_enrollment
+
 def supported (operation : UInt8) : Bool :=
   [86, 92, 96, 103, 108, 113, 117, 123, 126, 140, 160, 170, 183, 210, 215].contains operation
 

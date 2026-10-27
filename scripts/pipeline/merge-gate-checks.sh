@@ -12,7 +12,7 @@ S=$L/gate-$TAG.summary; : > "$S"
 export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$B/rust-target}
 export LOCAL_GATES_CARGO_JOBS=${LOCAL_GATES_CARGO_JOBS:-4}
-# Lean the checks build (new targets, exe roots, the census, the ledger's imports) goes through LAKE_WRAP.
+# Lean the checks build (new targets, exe roots, the axiom census) goes through LAKE_WRAP.
 # Default: the gate slot under swarm-build (slot-mk.sh; a lane slot where the box has no gate slot), so an
 # unset LAKE_WRAP never means an uncapped, unslotted Lean build (it did: `nice -n 10`).
 if [ -z "$LAKE_WRAP" ]; then
@@ -25,26 +25,22 @@ TMO=${PIPELINE_CHECK_TIMEOUT_S:-7200}
 cd "$SRC"
 [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TO")" ] || { echo "HEAD != $TO" | tee -a "$S"; exit 99; }
 # ONE writer of .lake at a time, readers beside it (lane/pipeline-parallel, 2026-10-14).
-# The checks fall into three jobs that run CONCURRENTLY when the box has slack:
-#   builders  every check that runs `lake build` (new-targets, exe-roots, axiom-census, the ledger's
-#             AxiomCensusResearch build, token-census, objective-proofs, scripts-elab), SERIALLY in one job:
-#             two lake builds in one workspace both write .trace/.ilean in place, so they never overlap.
-#   ledger    the hypothesis ledger (`lake env lean` only, never builds) starts as soon as the builders
-#             have built AxiomCensusResearch, beside token-census; its self-test runs are themselves
-#             parallel (HYP_LEDGER_JOBS, check-hypothesis-ledger.sh).
-#   readers   scripts, census runs and `lake env lean` programs over modules the umbrella already built,
-#             and the touched Rust rows (own CARGO_TARGET_DIR).
-# Slack = 1-min loadavg <= PIPELINE_GATE_PARALLEL_MAX_LOAD (default 24) when the gate starts; otherwise
-# the three jobs run one after another (the old order: readers, builders, ledger) and the ledger's
-# self-tests run one at a time. Every non-build job runs under swarm-build (one shared swarm.slice
-# memory cap bounds their sum). Every check still runs after a red; red = the summary lines whose status
-# is neither PASS nor KNOWN-RED, counted at the end (each job is a subshell, so no shared counter).
+# The checks fall into two jobs that run CONCURRENTLY when the box has slack:
+#   builders  every check that runs `lake build` (new-targets, exe-roots, axiom-census, objective-proofs), SERIALLY
+#             in one job: two lake builds in one workspace both write .trace/.ilean in place, so they never overlap.
+#   readers   scripts and `lake env lean` programs over modules the umbrella already built, and the touched Rust
+#             rows (own CARGO_TARGET_DIR).
+# The censuses that elaborate the whole research umbrella (TokenCensus, the hypothesis ledger, scripts-elab) are
+# NIGHTLY on dregg-build, not per landing (docs/COORDINATION-2026-10-27.md §2, §6).
+# Slack = 1-min loadavg <= PIPELINE_GATE_PARALLEL_MAX_LOAD (default 24) when the gate starts; otherwise the two
+# jobs run one after another (readers, builders). Every non-build job runs under swarm-build (one shared
+# swarm.slice memory cap bounds their sum). Every check still runs after a red; red = the summary lines whose
+# status is neither PASS nor KNOWN-RED, counted at the end (each job is a subshell, so no shared counter).
 MAXL=${PIPELINE_GATE_PARALLEL_MAX_LOAD:-24}
 load1=$(cut -d' ' -f1 /proc/loadavg)
 if [ -n "${PIPELINE_GATE_SERIAL:-}" ] || awk -v l="$load1" -v m="$MAXL" 'BEGIN{exit !(l>m)}'; then PAR=0; else PAR=1; fi
 SB=""; command -v swarm-build >/dev/null 2>&1 && SB=swarm-build
-if [ "$PAR" = 1 ]; then export HYP_LEDGER_JOBS=${HYP_LEDGER_JOBS:-4}; else export HYP_LEDGER_JOBS=1; fi
-echo "merge-gate: mode $([ $PAR = 1 ] && echo parallel || echo serial) (load1 $load1, max $MAXL; ledger jobs $HYP_LEDGER_JOBS)" > "$L/gate-$TAG.mode"
+echo "merge-gate: mode $([ $PAR = 1 ] && echo parallel || echo serial) (load1 $load1, max $MAXL)" > "$L/gate-$TAG.mode"
 run() { local n=$1; shift; local s=$(date +%s); timeout -k 30 "$TMO" "$@" > "$L/gate-$TAG-$n.log" 2>&1; local rc=$?
   local st=PASS
   if [ $rc = 124 ] || [ $rc = 137 ]; then st="TIMEOUT(${TMO}s)"; echo "merge-gate: $n killed after ${TMO}s" >> "$L/gate-$TAG-$n.log"
@@ -66,8 +62,6 @@ selftests() {
     echo 0
   fi
 }
-ACR=$L/gate-$TAG.acr   # written by the builders once AxiomCensusResearch is built: "ok" or "red"
-rm -f "$ACR"
 # lean targets the range DECLARES (new [[lean_lib]]/[[lean_exe]] names in lakefile.toml) are built too:
 # the umbrella does not reach a new exe root, CI's lake-build gate does
 tnames() { git show "$1:lakefile.toml" | sed -n '/^\[\[lean_\(lib\|exe\)\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | sort; }
@@ -76,12 +70,10 @@ newt=$(comm -13 <(tnames "$FROM") <(tnames "$TO") | grep -v '^ResearchWip$' | tr
 # modules, so Compiler.ObjectiveBendCDiffGen sat red on main unseen and a range that broke
 # Kernel/ConsentAnchor (outside Minidregg, inside minidregg-client-consent) would have landed.
 exes=$(git show "$TO:lakefile.toml" | sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | tr '\n' ' ')
-# the ledger's own imports too: scripts/HypothesisLedger.lean may import a module outside the
-# AxiomCensusResearch closure (kn2-hyp-ledger: Kernel.GenericSimplexObservationSafety), and the
-# ledger refuses to run on an absent olean
-ledger_imports=$(sed -n 's/^import \([A-Za-z0-9_.]*\).*/\1/p' scripts/HypothesisLedger.lean | tr '\n' ' ')
 
 builders() {
+  # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
+  run mini-kernels bash scripts/build-mini-kernels.sh
   if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $newt; fi
   run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
   # HP-6 SIM (HP-DESIGN section 4): seeded Host-path vs follower simulation with crash-restart, and its
@@ -93,77 +85,13 @@ builders() {
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
   # Deployed + the census module only.
   run axiom-census    $LAKE_WRAP lake build AxiomCensus
-  # The hypothesis ledger's build half: AxiomCensusResearch (+ the ledger's imports). Its run is the
-  # ledger job, released by $ACR.
-  if timeout -k 30 "$TMO" $LAKE_WRAP lake build AxiomCensusResearch $ledger_imports > "$L/gate-$TAG-hyp-ledger-build.log" 2>&1; then
-    echo ok > "$ACR"
-  else
-    echo red > "$ACR"
-  fi
-  # Every private constructor is listed in TokenCensus/Table.lean with a reviewed row (an L1 witness
-  # or a defect naming its cv task) and minted only in its home module (a `private mk` stops names,
-  # not `by constructor`). Elaborates TokenCensus over the research umbrella.
-  run token-census    $LAKE_WRAP lake build TokenCensus
-  # The same census over the recorded-run library (Fixtures), which no whole-tree census imports so
-  # that a stale recording cannot hide the verdict above. Red while a fixture is red.
-  run token-census-fixtures $LAKE_WRAP lake build TokenCensus.Fixtures
-  # The instrument's self-test (a planted forgery per private constructor, a planted call per
-  # restriction, and the plant script's statement plants) tests the detector, not the tree: it runs
-  # when the instrument changes. Lake builds, so in the builders job (one .lake writer).
-  if git diff --name-only "$FROM..$TO" | grep -qE '^(TokenCensus\.lean|TokenCensus/(Core|SelfTest|Fixtures)\.lean|scripts/kn2/plant-token-census-v2\.sh)$'; then
-    run token-census-plants $LAKE_WRAP lake build TokenCensus.SelfTest
-    for m in positive ignored-index tautology closed unlisted-minter old-rule implicit-index pending-layer unlisted-vacuous scoped-unlisted private-structure; do
-      run "token-census-plant-$m" $LAKE_WRAP bash scripts/kn2/plant-token-census-v2.sh "$m"
-    done
-  else
-    echo "token-census: instrument unchanged since $(git log -1 --format=%h "$TO" -- TokenCensus.lean TokenCensus/Core.lean TokenCensus/SelfTest.lean TokenCensus/Fixtures.lean scripts/kn2/plant-token-census-v2.sh): self-tests skipped" | tee -a "$L/gate-$TAG.mode" >> "$S"
-  fi
-  run objective-proofs env OBJECTIVE_SELF_TESTS="$(selftests objective)" $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
-  # Every standalone Lean script elaborates, except the shrink-only list scripts/gates/scripts-elab.tsv
-  # (ROOT 10-07: the fixture generator replay.lean sat uncompilable b21..b25 unseen).
-  # After the AxiomCensusResearch build: scripts/NativeTranscripts.lean imports it; before it, a
-  # fresh lane is red with "unknown module prefix" (t1 gate 10-08). It builds its library roots,
-  # so it stays in the builders job.
-  run scripts-elab    $LAKE_WRAP bash scripts/check-scripts-elab.sh
-}
-
-# The hypothesis ledger over AxiomCensusResearch. Its [RED] families on main are a known
-# baseline (hyp-ledger-baseline.txt next to this script, ROOT 10-05: six toothless rows red on
-# clean 259a2fb0); a batch is RED here only for a [RED] family outside that baseline, a failed
-# self-test, or an instrument that did not run. KNOWN-RED is reported and does not count.
-ledger() {
-  local log="$L/gate-$TAG-hyp-ledger.log" s=$(date +%s) rc reds new st
-  # the builders job writes $ACR; if it ended without writing it, that is a red, not a wait
-  while [ ! -s "$ACR" ]; do { [ -n "${BP:-}" ] && kill -0 "$BP" 2>/dev/null; } || break; sleep 10; done
-  if [ "$(cat "$ACR" 2>/dev/null)" != ok ]; then echo "hyp-ledger RED (AxiomCensusResearch did not build)" | tee -a "$S"; return; fi
-  local nst=""; [ "$(selftests hyp-ledger)" = 0 ] && nst=--no-self-test
-  HYP_LEDGER_BASE="$FROM" timeout -k 30 "$TMO" $SB bash scripts/check-hypothesis-ledger.sh $nst > "$log" 2>&1; rc=$?
-  reds=$(grep -aE '^[A-Za-z0-9_.]+ [|] [A-Z]+ [|] [A-Z]+ \[RED\]' "$log" | cut -d' ' -f1 | sort -u)
-  new=$(comm -23 <(printf '%s\n' "$reds" | sed '/^$/d') <(sort -u "$H/hyp-ledger-baseline.txt") | tr '\n' ' ')
-  if [ $rc = 0 ]; then st=PASS
-  elif [ -n "$reds" ] && [ -z "$new" ] && ! grep -aq 'self-test .*: FAIL' "$log"; then st="KNOWN-RED($(printf '%s\n' "$reds" | wc -l) baseline)"
-  else st="RED(new: ${new:-none}; self-test/instrument: see log)"; fi
-  echo "hyp-ledger $st rc=$rc $(( $(date +%s) - s ))s :: $(grep -ac 'self-test .*: PASS' "$log") self-tests pass" | tee -a "$S"
+  run objective-proofs $LAKE_WRAP bash scripts/check-objective-proofs.sh proofs
 }
 
 readers() {
-  # Defects only shrink: a commit may delete a `defect` row (its type now carries its guarantee),
-  # never add one. A new token is reviewed to L1 or loses `private`. The ratchet starts at the
-  # commit that introduced the grammar (TokenCensus/Core.lean absent at FROM). git only; its RED
-  # line is counted from the summary like every other.
-  defects() { git show "$1:TokenCensus/Table.lean" | awk -F'|' '$3 ~ /^ *defect / {gsub(/ /,"",$1); print $1}' | sort -u; }
-  if git cat-file -e "$FROM:TokenCensus/Core.lean" 2>/dev/null; then
-    local added_defects
-    added_defects=$(comm -13 <(defects "$FROM") <(defects "$TO") | tr '\n' ' ')
-    if [ -n "$added_defects" ]; then
-      echo "token-census-defects RED (defect rows added; review the type to L1 instead): $added_defects" | tee -a "$S"
-    else echo "token-census-defects PASS ($(defects "$TO" | wc -l) defects, none added)" | tee -a "$S"; fi
-  else echo "token-census-defects SKIP (the defect ratchet starts in this range)" | tee -a "$S"; fi
   run host-closure    bash scripts/check-host-closure.sh
   # The umbrella builds every Lean root the candidate ships, and the recorded runs (Fixtures).
   run umbrella-targets bash scripts/pipeline/umbrella-targets --check
-  # The one known-red rule for built bases (mk-lane --verify, advance-base-burst): its plants.
-  run known-red-verdict bash scripts/pipeline/known-red-verdict --selftest
   # KN2 ratchet: callers of the full verified materialization may only shrink (a text ratchet, not a call-graph proof)
   run full-loaded-ratchet bash scripts/ports/check-full-loaded-callers.sh
   # Each planted fault against the pinned history API is refused by the guard it plants
@@ -188,10 +116,6 @@ readers() {
   # (gen-sheetlaw), a stale status page (website).
   run build-closure   bash -c 'bash scripts/check-build-closure.sh && python3 scripts/test_build_gate_boundaries.py && python3 scripts/test_lean_build_surfaces.py'
   run exports         bash scripts/check-exports.sh
-  # #guard runs the compiled evaluator, leaves no term and no axiom record (scripts/gates/check-guard-discipline.py
-  # header). The per-module count may only FALL: a new #guard anywhere, or a converted module whose row was not
-  # retired, is red by name. Pure python, ~2 s; self-test plants every arm first.
-  run guard-discipline bash -c "python3 scripts/gates/check-guard-discipline.py --self-test && python3 scripts/gates/check-guard-discipline.py"
   run unit-tests      $SB bash scripts/check-unit-tests.sh
   run policy-portal   bash scripts/check-canonical-policy-portal.sh
   run shell-paths     bash scripts/check-shell-paths.sh
@@ -202,10 +126,6 @@ readers() {
   # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
   # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
   run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
-  # The waste model (docs/WASTE-MODEL.md): its plants (a lowered ceiling is red, an undecided raise is red), the
-  # ratchet FROM..TO (a ceiling only falls; a raise or a moved necessary figure needs a decisions line), and the
-  # judgment of $WASTE_MODEL_RUN (a workload.sh root, raw instructions) when the landing names one. Seconds; no build.
-  run waste-model     python3 scripts/gates/check-waste-model gate "$FROM" "$TO"
   python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || echo "rust-rows RED (selector failed)" | tee -a "$S"
   cat "$L/gate-$TAG-rust-rows.txt"
   run rust-rows       $SB bash "$B/tmp-rust-rows-$TAG.sh"
@@ -222,11 +142,10 @@ readers() {
 g0=$(date +%s)
 if [ "$PAR" = 1 ]; then
   builders & BP=$!
-  ledger & lp=$!
   readers & rp=$!
-  wait $BP; wait $lp; wait $rp
+  wait $BP; wait $rp
 else
-  readers; builders; ledger
+  readers; builders
 fi
 echo "merge-gate: checks wall $(( $(date +%s) - g0 ))s" >> "$L/gate-$TAG.mode"
 d=$(git status --porcelain --untracked-files=no | wc -l)

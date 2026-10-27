@@ -65,13 +65,13 @@ use std::path::{Path, PathBuf};
 
 /// The verbs this module adds to the shell (rows for `help`).
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "say", usage: "say [--to NAME] [--re N] [--in ROOM] [--operation-record ABS_PATH] TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to my stream in the current room (propose + submit)" },
-    Verb { name: "tail", usage: "tail [-n N] [--since HEIGHT] [--follow] [--json] [--held] [--in ROOM]", operation: "a signed tail of every member stream in the current room, merged by (height, author, cell, sequence)" },
-    Verb { name: "topic", usage: "topic [TEXT]", operation: "show the room topic, or append {\"type\":\"topic\"} (the founder's counts)" },
-    Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
-    Verb { name: "unpin", usage: "unpin", operation: "append {\"type\":\"unpin\"} in the current room (the founder's counts)" },
-    Verb { name: "react", usage: "react N EMOJI", operation: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
-    Verb { name: "chat", usage: "chat new ROOM [--private: devnet quality; privacy not audited] | chat adopt ROOM | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] [--i-know] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
+    Verb { name: "say", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "tail", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "topic", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "pin", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "unpin", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "react", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "chat", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 pub(crate) const HELP: &str = "\
@@ -132,9 +132,9 @@ pub(crate) const LS_USAGE: &str = "room ls [ROOM] [--since HEIGHT] [--import] [-
 const MAX_TOPIC: usize = 64;
 const MAX_PAYLOAD: usize = 4096;
 
-/// The room template's per-author law (`deploy/shell/templates/room/chat/law.author.json`):
+/// The room template's per-author law (`native/resource-client/templates/room/chat/law.author.json`):
 /// every write (mutate 2, append 7) is signed by `@SUBJECT`; reads and grants pass.
-const AUTHOR_LAW: &str = include_str!("../../../deploy/shell/templates/room/chat/law.author.json");
+const AUTHOR_LAW: &str = include_str!("../templates/room/chat/law.author.json");
 
 pub(crate) fn author_law(subject: &str) -> Value {
     let text = AUTHOR_LAW.replace("@SUBJECT", subject);
@@ -235,20 +235,21 @@ fn emoji(value: &str) -> Result<String, String> {
 /// Map a raw shell line to a chat line. `None`: not a chat verb. Chat verbs
 /// take the rest of the line as text, so apostrophes and `#` need no quoting.
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
+    use crate::shell_grammar::{parse_line, usage, CHAT, PIN, REACT, ROOM, SAY, TAIL, TOPIC, UNPIN};
     let (verb, rest) = split(line)?;
     if verb == "room" && split(rest).is_some_and(|(action, _)| action == "ls") {
-        let (_, after) = split(rest)?;
-        return Some(parse_ls(after));
+        return Some(parse_line(&ROOM, line).and_then(parse_ls));
     }
     if let Some(hermes) = crate::hermes::plan(verb, rest) {
         return Some(hermes.map(Line::Hermes));
     }
-    let usage = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("");
+    // The grammar reads the line's structure (flags, words, the free text); the checks below are
+    // the verbs' own semantics (a petname, an emoji, what goes together).
     let parsed = match verb {
-        "say" => parse_say(rest).map_err(|e| if e.is_empty() { usage("say").to_owned() } else { e }),
-        "tail" => parse_tail(rest).map_err(|e| if e.is_empty() { usage("tail").to_owned() } else { e }),
-        "topic" => {
-            let text = free_text(rest);
+        "say" => parse_line(&SAY, line).and_then(parse_say).map_err(|e| if e.is_empty() { usage(&SAY) } else { e }),
+        "tail" => parse_line(&TAIL, line).and_then(parse_tail).map_err(|e| if e.is_empty() { usage(&TAIL) } else { e }),
+        "topic" => parse_line(&TOPIC, line).and_then(|p| {
+            let text = free_text(p.opt(0).unwrap_or(""));
             if text.is_empty() {
                 Ok(Line::Topic(None))
             } else if text.len() > MAX_TOPIC {
@@ -256,73 +257,44 @@ pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
             } else {
                 Ok(Line::Topic(Some(text)))
             }
-        }
-        "pin" => match split(rest) {
-            Some((n, more)) if more.trim().is_empty() => number(n, "pin").map(Line::Pin),
-            _ => Err(usage("pin").to_owned()),
-        },
-        "unpin" if rest.trim().is_empty() => Ok(Line::Unpin),
-        "unpin" => Err(usage("pin").to_owned()),
-        "react" => match split(rest).and_then(|(n, more)| split(more).map(|(e, tail)| (n, e, tail))) {
-            Some((n, e, tail)) if tail.trim().is_empty() => {
-                number(n, "react").and_then(|number| emoji(e).map(|emoji| Line::React { number, emoji }))
-            }
-            _ => Err(usage("react").to_owned()),
-        },
-        "chat" => parse_chat(rest).map_err(|e| if e.is_empty() { usage("chat").to_owned() } else { e }),
+        }),
+        "pin" => parse_line(&PIN, line).and_then(|p| number(p.arg(0), "pin").map(Line::Pin)),
+        "unpin" => parse_line(&UNPIN, line).map(|_| Line::Unpin),
+        "react" => parse_line(&REACT, line).and_then(|p| number(p.arg(0), "react").and_then(|number| emoji(p.arg(1)).map(|emoji| Line::React { number, emoji }))),
+        "chat" => parse_line(&CHAT, line).and_then(parse_chat).map_err(|e| if e.is_empty() { usage(&CHAT) } else { e }),
         _ => return None,
     };
     Some(parsed)
 }
 
-fn parse_say(mut rest: &str) -> Result<Line, String> {
+fn parse_say(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    let value = |name: &str| p.flag(name).flatten().map(str::to_owned);
     let mut room = None;
-    let mut to = None;
-    let mut re = None;
-    let mut file = None;
-    let mut operation_record = None;
-    let mut status = None;
-    let (mut expected_cell, mut expected_sequence) = (None, None);
-    let (mut network, mut id, mut name) = (None, None, None);
-    while let Some((word, after)) = split(rest) {
-        if !word.starts_with("--") {
-            break;
-        }
-        let (value, next) = split(after).ok_or_else(|| format!("{word} needs a value"))?;
-        match word {
-            "--in" => {
-                ref_name(value, "room name")?;
-                room = Some(value.to_owned());
-            }
-            "--to" => to = Some(value.trim_start_matches('@').to_owned()),
-            "--re" => re = Some(number(value, "--re")?),
-            // A resident's typed request-status entry, replying to the request.
-            "--status" => {
-                if !REQUEST_STATES.contains(&value) || status.replace(value.to_owned()).is_some() {
-                    return Err(format!("--status is one of {}", REQUEST_STATES.join(", ")));
-                }
-            }
-            "--expect-re-cell" => {
-                decimal(value, "--expect-re-cell")?;
-                if expected_cell.replace(value.to_owned()).is_some() { return Err("duplicate --expect-re-cell".into()); }
-            }
-            "--expect-re-sequence" => {
-                let sequence = number(value, "--expect-re-sequence")?;
-                if sequence == 0 || expected_sequence.replace(sequence).is_some() { return Err("invalid or duplicate --expect-re-sequence".into()); }
-            }
-            // The spelling decides nothing: `operation_path` accepts only a
-            // plain record name in HOME/requests or WORKSPACE/room-operations,
-            // reached from the session roots by descriptor.
-            "--operation-record" => operation_record = Some(PathBuf::from(value)),
-            "--file" => file = Some(value.to_owned()),
-            "--via" => network = Some(value.to_owned()),
-            "--via-id" => id = Some(value.to_owned()),
-            "--via-name" => name = Some(value.to_owned()),
-            _ => return Err(format!("unknown say option {word}")),
-        }
-        rest = next;
+    if let Some(v) = value("--in") {
+        ref_name(&v, "room name")?;
+        room = Some(v);
     }
-    let via = match (network, id, name) {
+    let to = value("--to").map(|v| v.trim_start_matches('@').to_owned());
+    let re = value("--re").map(|v| number(&v, "--re")).transpose()?;
+    let file = value("--file");
+    let operation_record = value("--operation-record").map(PathBuf::from);
+    // A resident's typed request-status entry, replying to the request.
+    let status = match value("--status") {
+        Some(v) if REQUEST_STATES.contains(&v.as_str()) && p.values("--status").len() == 1 => Some(v),
+        Some(_) => return Err(format!("--status is one of {}", REQUEST_STATES.join(", "))),
+        None => None,
+    };
+    let expected_cell = match p.values("--expect-re-cell").as_slice() {
+        [] => None,
+        [one] => { decimal(one, "--expect-re-cell")?; Some((*one).to_owned()) }
+        _ => return Err("duplicate --expect-re-cell".into()),
+    };
+    let expected_sequence = match p.values("--expect-re-sequence").as_slice() {
+        [] => None,
+        [one] => { let n = number(one, "--expect-re-sequence")?; if n == 0 { return Err("invalid or duplicate --expect-re-sequence".into()); } Some(n) }
+        _ => return Err("invalid or duplicate --expect-re-sequence".into()),
+    };
+    let via = match (value("--via"), value("--via-id"), value("--via-name")) {
         (None, None, None) => None,
         (Some(network), Some(id), Some(name)) => {
             if network != "discord" {
@@ -343,7 +315,7 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
     }
     let text = match file {
         Some(file) => {
-            if !rest.trim().is_empty() {
+            if p.opt(0).is_some() {
                 return Err("say --file FILE takes no other text".into());
             }
             if file.is_empty() || file.starts_with('.') || file.contains('/') || file.len() > 64 {
@@ -352,7 +324,7 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
             Text::File(file)
         }
         None => {
-            let text = free_text(rest);
+            let text = free_text(p.opt(0).unwrap_or(""));
             if text.is_empty() {
                 return Err(String::new());
             }
@@ -370,148 +342,92 @@ fn parse_say(mut rest: &str) -> Result<Line, String> {
     Ok(Line::Say { room, to, re, text, via, operation_record, expected_reply, status })
 }
 
-fn parse_tail(rest: &str) -> Result<Line, String> {
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let (mut count, mut since, mut follow, mut json, mut held) = (20usize, None, false, false, false);
-    let mut room = None;
-    let mut entry = None;
-    let mut discovery = None;
-    let mut i = 0;
-    while i < words.len() {
-        match words[i] {
-            "--discover-json" => {
-                if words.get(i+1) != Some(&"-") { return Err("--discover-json takes '-' for bounded JSON on standard input".into()); }
-                if discovery.replace("@stdin-discovery".to_owned()).is_some() { return Err("duplicate discovery input".into()); }
-                i += 1;
-            }
-            "--discover" => {
-                let file=words.get(i+1).ok_or("--discover takes a cursor file")?;
-                if *file == "@stdin-discovery" { return Err("use --discover-json - for stdin".into()); }
-                if discovery.replace((*file).to_owned()).is_some() {return Err("duplicate --discover".into());}
-                i+=1;
-            }
-            "--entry" => {
-                let value = words.get(i + 1).ok_or("--entry takes CELL:SEQUENCE")?;
-                let (cell, sequence) = value.split_once(':').ok_or("--entry takes CELL:SEQUENCE")?;
-                decimal(cell, "entry cell")?;
-                let sequence = sequence.parse::<u64>().ok().filter(|n| *n > 0).ok_or("entry sequence must be positive")?;
-                if entry.replace((cell.to_owned(), sequence)).is_some() { return Err("duplicate --entry".into()); }
-                i += 1;
-            }
-            "-n" => {
-                count = words
-                    .get(i + 1)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|n| (1..=100_000).contains(n))
-                    .ok_or("-n takes 1..100000")?;
-                i += 1;
-            }
-            "--since" => {
-                since = Some(words.get(i + 1).and_then(|v| v.parse::<u64>().ok()).ok_or("--since takes a height")?);
-                i += 1;
-            }
-            "--in" => {
-                let value = words.get(i + 1).ok_or("--in names a room")?;
-                ref_name(value, "room name")?;
-                room = Some((*value).to_owned());
-                i += 1;
-            }
-            "--follow" | "-f" => follow = true,
-            "--held" => held = true,
-            "--json" => json = true,
-            _ => return Err(String::new()),
+fn parse_tail(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    let value = |name: &str| p.flag(name).flatten();
+    let count = match value("-n") {
+        Some(v) => v.parse::<usize>().ok().filter(|n| (1..=100_000).contains(n)).ok_or("-n takes 1..100000")?,
+        None => 20usize,
+    };
+    let since = value("--since").map(|v| v.parse::<u64>().map_err(|_| "--since takes a height".to_owned())).transpose()?;
+    let follow = p.has("--follow") || p.has("-f");
+    let (json, held) = (p.has("--json"), p.has("--held"));
+    let room = match value("--in") {
+        Some(v) => { ref_name(v, "room name")?; Some(v.to_owned()) }
+        None => None,
+    };
+    let entry = match p.values("--entry").as_slice() {
+        [] => None,
+        [one] => {
+            let (cell, sequence) = one.split_once(':').ok_or("--entry takes CELL:SEQUENCE")?;
+            decimal(cell, "entry cell")?;
+            let sequence = sequence.parse::<u64>().ok().filter(|n| *n > 0).ok_or("entry sequence must be positive")?;
+            Some((cell.to_owned(), sequence))
         }
-        i += 1;
-    }
+        _ => return Err("duplicate --entry".into()),
+    };
+    let discovery = match (p.values("--discover").as_slice(), p.values("--discover-json").as_slice()) {
+        ([], []) => None,
+        ([file], []) => {
+            if *file == "@stdin-discovery" { return Err("use --discover-json - for stdin".into()); }
+            Some((*file).to_owned())
+        }
+        ([], [dash]) => {
+            if *dash != "-" { return Err("--discover-json takes '-' for bounded JSON on standard input".into()); }
+            Some("@stdin-discovery".to_owned())
+        }
+        ([], [_, ..]) | ([_, ..], [_, ..]) => return Err("duplicate discovery input".into()),
+        _ => return Err("duplicate --discover".into()),
+    };
     if follow && held {
         return Err("--held renders what this session already holds; it cannot --follow".into());
     }
     if entry.is_some() && (follow || held || since.is_some()) { return Err("--entry requires a fresh finite signed read without --since".into()); }
-    if discovery.is_some() && (entry.is_some() || follow || held || since.is_some() || count>256) {return Err("--discover requires finite fresh pages of at most256 entries per stream".into());}
+    if discovery.is_some() && (entry.is_some() || follow || held || since.is_some() || count>256) {return Err("--discover requires finite fresh pages of at most256 entries".into());}
     Ok(Line::Tail { room, count, since, follow, json, held, entry, discovery })
 }
 
-fn parse_ls(rest: &str) -> Result<Line, String> {
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let (mut room, mut since, mut import, mut json) = (None, 0u64, false, false);
-    let mut i = 0;
-    while i < words.len() {
-        match words[i] {
-            "--in" => {
-                let value = words.get(i + 1).ok_or("--in names a room")?;
-                ref_name(value, "room name")?;
-                room = Some((*value).to_owned());
-                i += 1;
-            }
-            "--since" => {
-                since = words.get(i + 1).and_then(|v| v.parse::<u64>().ok()).ok_or("--since takes a height")?;
-                i += 1;
-            }
-            "--import" => import = true,
-            "--json" => json = true,
-            word if room.is_none() && !word.starts_with("--") => {
-                ref_name(word, "room name")?;
-                room = Some(word.to_owned());
-            }
-            _ => return Err(LS_USAGE.to_owned()),
-        }
-        i += 1;
+fn parse_ls(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    if p.leaf.path != ["room", "ls"] {
+        return Err(LS_USAGE.to_owned());
     }
-    Ok(Line::Ls { room, since, import, json })
+    let room = match p.opt(0).or_else(|| p.flag("--in").flatten()) {
+        Some(v) => { ref_name(v, "room name")?; Some(v.to_owned()) }
+        None => None,
+    };
+    let since = p.flag("--since").flatten().map(|v| v.parse::<u64>().map_err(|_| "--since takes a height".to_owned())).transpose()?.unwrap_or(0);
+    Ok(Line::Ls { room, since, import: p.has("--import"), json: p.has("--json") })
 }
 
-fn parse_chat(rest: &str) -> Result<Line, String> {
-    let mut words: Vec<&str> = rest.split_whitespace().collect();
-    // `--enc ENC-PUB|@FILE` and `--i-know` (chat invite into a private room): taken out first.
-    let mut enc = None;
-    let mut i_know = false;
-    if words.first() == Some(&"invite") {
-        if let Some(i) = words.iter().position(|w| *w == "--i-know") {
-            i_know = true;
-            words.remove(i);
-        }
-        if let Some(i) = words.iter().position(|w| *w == "--enc") {
-            let value = words.get(i + 1).ok_or("--enc names the invitee's encryption key (64 hex digits, or @FILE)")?;
-            enc = Some((*value).to_owned());
-            words.drain(i..i + 2);
-        }
-    }
-    match words.as_slice() {
-        ["new", room] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: false }),
-        ["new", room, "--private"] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: true }),
-        ["adopt", room] => ref_name(room, "room name").map(|()| Line::Adopt { room: (*room).to_owned() }),
-        ["invite", room, subject, more @ ..] if more.len() <= 3 => {
-            ref_name(room, "room name")?;
-            decimal(subject, "subject")?;
-            let (mut name, mut verbs) = (None, MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
-            let mut rest = more.iter();
-            while let Some(word) = rest.next() {
-                if *word == "--verbs" {
-                    let list = rest.next().ok_or("--verbs takes V,V,…")?;
-                    verbs = list.split(',').map(str::to_owned).collect();
+fn parse_chat(p: crate::shell_grammar::Parsed) -> Result<Line, String> {
+    match p.leaf.path {
+        ["chat", "new"] => ref_name(p.arg(0), "room name").map(|()| Line::New { room: p.arg(0).to_owned(), private: p.has("--private") }),
+        ["chat", "adopt"] => ref_name(p.arg(0), "room name").map(|()| Line::Adopt { room: p.arg(0).to_owned() }),
+        ["chat", "invite"] => {
+            ref_name(p.arg(0), "room name")?;
+            decimal(p.arg(1), "subject")?;
+            let name = match p.opt(2) {
+                Some(word) => { petname_ok(word)?; Some(word.to_owned()) }
+                None => None,
+            };
+            let verbs: Vec<String> = match p.flag("--verbs").flatten() {
+                Some(list) => {
+                    let verbs: Vec<String> = list.split(',').map(str::to_owned).collect();
                     if !verbs.iter().all(|v| ROOM_VERBS.contains(&v.as_str())) || !verbs.iter().any(|v| v == "observe") {
                         return Err(format!("--verbs: observe and any of {} under the room", ROOM_VERBS.join(", ")));
                     }
-                } else if name.is_none() {
-                    petname_ok(word)?;
-                    name = Some((*word).to_owned());
-                } else {
-                    return Err(String::new());
+                    verbs
                 }
-            }
-            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc, verbs, i_know })
+                None => MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect(),
+            };
+            Ok(Line::Invite { room: p.arg(0).to_owned(), subject: p.arg(1).to_owned(), name, enc: p.flag("--enc").flatten().map(str::to_owned), verbs, i_know: p.has("--i-know") })
         }
-        ["join", room, ..] if words.len() >= 3 => {
-            ref_name(room, "room name")?;
-            let (_, after) = split(rest).and_then(|(_, r)| split(r)).ok_or("")?;
-            Ok(Line::Join { room: (*room).to_owned(), invitation: after.trim().to_owned() })
-        }
-        ["enter", room] => ref_name(room, "room name").map(|()| Line::Enter((*room).to_owned())),
-        ["rooms"] => Ok(Line::Rooms),
-        ["name", subject, name] => {
-            decimal(subject, "subject")?;
-            petname_ok(name)?;
-            Ok(Line::Name { subject: (*subject).to_owned(), name: (*name).to_owned() })
+        ["chat", "join"] => { ref_name(p.arg(0), "room name")?; Ok(Line::Join { room: p.arg(0).to_owned(), invitation: p.arg(1).trim().to_owned() }) }
+        ["chat", "enter"] => ref_name(p.arg(0), "room name").map(|()| Line::Enter(p.arg(0).to_owned())),
+        ["chat", "rooms"] => Ok(Line::Rooms),
+        ["chat", "name"] => {
+            decimal(p.arg(0), "subject")?;
+            petname_ok(p.arg(1))?;
+            Ok(Line::Name { subject: p.arg(0).to_owned(), name: p.arg(1).to_owned() })
         }
         _ => Err(String::new()),
     }
@@ -676,16 +592,6 @@ fn fresh_id(prefix: &str) -> Result<String, Done> {
     Ok(format!("{prefix}-{}", &nonce[nonce.len().saturating_sub(12)..]))
 }
 
-/// How many times a signed exchange is repeated when the Host answers
-/// `stale-root`: its challenge named a world root that another admission has
-/// since moved, so nothing was decided and the same request is signed again
-/// over a fresh challenge.
-const FRESH_CHALLENGES: u32 = 10;
-
-fn stale_root(done: &Done) -> bool {
-    done.0 == EXIT_REFUSED && done.1.starts_with("refused: stale-root")
-}
-
 /// A short pause before a fresh challenge, longer each time and different per
 /// process, so racing writers do not keep meeting.
 fn backoff(attempt: u32) {
@@ -693,10 +599,10 @@ fn backoff(attempt: u32) {
     std::thread::sleep(std::time::Duration::from_millis(150 * u64::from(attempt) + jitter % 250));
 }
 
-/// Propose and submit one request; Ok: `{id, outcome, resigned}`. A
-/// `stale-root` answer at either step is not a decision about the request:
-/// the plan is made again from a fresh signed read (propose), or the same
-/// intent is signed again over a fresh challenge (submit, a new attempt).
+/// Propose and submit one request; Ok: `{id, outcome}`. Each step is ONE client
+/// operation: a `stale-root` answer is re-signed over a fresh challenge inside it, by the one
+/// retry budget (`replan.rs`), on the same attempt. Chat no longer wraps it in a loop of its own
+/// that authored a new attempt (`ID-rN`) per stale answer: up to sixty signed attempts per `say`.
 pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
     propose_submit_in(session, prefix, request, None)
 }
@@ -707,54 +613,30 @@ pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -
 fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
     crate::fsio::ensure_private_dir_all(&session.home.join("requests")).map_err(error)?;
     let ws = session.workspace.clone();
-    let mut resigned = 0u32;
-    let mut tries = 0u32;
-    let id = loop {
-        let id = fresh_id(prefix)?;
-        let path = session.home.join("requests").join(format!("{id}.json"));
-        let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
-        bytes.push(b'\n');
-        create_private(&path, &bytes).map_err(error)?;
-        let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
-        if let Some(room) = sealed {
-            flags.push(("private", os(room)));
-        }
-        match client("workspace", &flags) {
-            Ok(_) => break id,
-            Err(done) if stale_root(&done) && tries + 1 < FRESH_CHALLENGES => {
-                tries += 1;
-                resigned += 1;
-                backoff(tries);
-            }
-            Err(done) => return Err(done),
-        }
-    };
-    let mut attempt = 0u32;
-    let out = loop {
-        let name = if attempt == 0 { id.clone() } else { format!("{id}-r{attempt}") };
-        match client(
-            "workspace",
-            &[
-                ("action", os("submit")),
-                ("dir", os(&ws)),
-                ("intent", os(ws.join("proposals").join(&id).join("intent.json"))),
-                ("attempt", os(ws.join("attempts").join(&name))),
-            ],
-        ) {
-            Ok(out) => break out,
-            Err(done) if stale_root(&done) && attempt + 1 < FRESH_CHALLENGES => {
-                attempt += 1;
-                resigned += 1;
-                backoff(attempt);
-            }
-            Err(done) => return Err(done),
-        }
-    };
+    let id = fresh_id(prefix)?;
+    let path = session.home.join("requests").join(format!("{id}.json"));
+    let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
+    bytes.push(b'\n');
+    create_private(&path, &bytes).map_err(error)?;
+    let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
+    if let Some(room) = sealed {
+        flags.push(("private", os(room)));
+    }
+    client("workspace", &flags)?;
+    let out = client(
+        "workspace",
+        &[
+            ("action", os("submit")),
+            ("dir", os(&ws)),
+            ("intent", os(ws.join("proposals").join(&id).join("intent.json"))),
+            ("attempt", os(ws.join("attempts").join(&id))),
+        ],
+    )?;
     let mut outcome = Value::Null;
     for doc in serde_json::Deserializer::from_str(&out).into_iter::<Value>().flatten() {
         outcome = doc;
     }
-    Ok(json!({"id":id,"outcome":outcome,"resigned":resigned}))
+    Ok(json!({"id":id,"outcome":outcome}))
 }
 
 /// A signed read in this process (no JSON on the terminal). The attempt is
@@ -782,28 +664,16 @@ pub(crate) fn signed_read(
     }
     let path = |k| member_path(ws, k).map_err(error);
     let (host, config, key) = (path("host")?, path("config")?, path("key")?);
-    let mut attempt = 0u32;
-    let (dir, result, refusal) = loop {
-        let nonce = if attempt == 0 { nonce.clone() } else { random_nonce().map_err(error)? };
-        intent["nonce"] = json!(nonce);
-        let source = folder.join(format!("q-{nonce}.json"));
-        create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
-        let dir = folder.join(format!("{label}.{nonce}"));
-        let _ = crate::take_host_decision();
-        let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
-        let _ = fs::remove_file(&source);
-        let refusal = match &result {
-            Ok(_) => None,
-            Err(_) => crate::take_host_decision().as_ref().and_then(crate::host_refusal_ending),
-        };
-        // A read whose challenge went stale decided nothing: read again.
-        if refusal.as_deref().is_some_and(|l| l.starts_with("refused: stale-root")) && attempt + 1 < FRESH_CHALLENGES {
-            let _ = fs::remove_dir_all(&dir);
-            attempt += 1;
-            backoff(attempt);
-            continue;
-        }
-        break (dir, result, refusal);
+    // One signed read: `query_retained` re-signs a stale challenge itself (`replan.rs`).
+    let source = folder.join(format!("q-{nonce}.json"));
+    create_private(&source, &serde_json::to_vec(&intent).expect("JSON")).map_err(error)?;
+    let dir = folder.join(format!("{label}.{nonce}"));
+    let _ = crate::take_host_decision();
+    let result = crate::query_retained(&host, &config, &source, OsStr::new("intent"), &key, &format!("view-{view}"), &dir);
+    let _ = fs::remove_file(&source);
+    let ending = match &result {
+        Ok(_) => None,
+        Err(_) => crate::take_host_decision().as_ref().and_then(crate::host_ending),
     };
     match result {
         Ok(value) => {
@@ -817,8 +687,8 @@ pub(crate) fn signed_read(
             }
             Ok(value)
         }
-        Err(e) => Err(match refusal {
-            Some(line) => (EXIT_REFUSED, format!("{line}\n  read: {view} of {label} in {room}\n")),
+        Err(e) => Err(match ending {
+            Some((code, line)) => (i32::from(code), format!("{line}\n  read: {view} of {label} in {room}\n")),
             None => error(format!("{e} (read {view} of {label} in {room})")),
         }),
     }
@@ -1637,9 +1507,9 @@ fn append_operation(session: &Session, path: &Path, stream: &str, request: &Valu
 
 fn said(room: &Room, what: &str, result: &Value) {
     let tx = result.pointer("/outcome/transactionId").and_then(Value::as_str).unwrap_or("");
-    let again = match (result["replanned"].as_u64().unwrap_or(0), result["resigned"].as_u64().unwrap_or(0)) {
-        (0, 0) => String::new(),
-        (p, r) => format!("; other writes landed first: re-planned {p}, re-signed {r}"),
+    let again = match result["replanned"].as_u64().unwrap_or(0) {
+        0 => String::new(),
+        p => format!("; other writes landed first: re-planned {p}"),
     };
     println!("{what} in {} (transaction …{}{again})", room.name, &tx[tx.len().saturating_sub(10)..]);
 }
@@ -1937,6 +1807,26 @@ pub(crate) fn write_request(session: &Session, name: &str, value: &Value) -> Res
 
 pub(crate) fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
     create_cell_with_fields(session, name, storage, law, room, owner, None)
+}
+
+/// A content cell born with its document (`workspace --action doc-new`: the
+/// birth, then `createDocument`), the only way a verb makes a cell it will
+/// append lines to. A cell born by `create_cell(.., "content", ..)` holds no
+/// document: lines appended to it stand in no tree, and every signed read of
+/// it (`doc show`, a resident's context read) finds no document.
+pub(crate) fn create_document(session: &Session, name: &str, law: &Value, room: Option<&str>) -> Result<Value, Done> {
+    let predicate = write_request(session, &format!("chat-law-{}", name.replace('/', ".")), law)?;
+    let mut flags = vec![
+        ("action", os("doc-new")),
+        ("dir", os(&session.workspace)),
+        ("name", os(name)),
+        ("predicate", os(&predicate)),
+    ];
+    if let Some(room) = room {
+        flags.push(("in", os(room)));
+    }
+    client("workspace", &flags)?;
+    reference(session, name).map_err(error)
 }
 
 /// A declared cell names its exact field set at birth; content and stream
@@ -2367,9 +2257,9 @@ mod tests {
         assert!(operation_path(&session, &mine.join("hr-op-write.json")).is_err());
         fs::set_permissions(&mine, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(operation_path(&session, &mine.join("hr-op-write.json")).is_ok());
-        assert!(parse_tail("--discover-json - --json -n 10").is_ok());
-        assert!(parse_tail("--discover @stdin-discovery --json").is_err());
-        assert!(parse_tail("--discover-json /etc/passwd").is_err());
+        assert!(plan("tail --discover-json - --json -n 10").unwrap().is_ok());
+        assert!(plan("tail --discover @stdin-discovery --json").unwrap().is_err());
+        assert!(plan("tail --discover-json /etc/passwd").unwrap().is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2537,9 +2427,9 @@ mod tests {
         assert_eq!(shown_entries(&feed,None,Some(&("99".into(),1))),vec![1]);
         assert!(shown_entries(&feed,None,Some(&("98".into(),1))).is_empty());
         assert_eq!(shown_entries(&feed,Some(130),None).len(),10);
-        assert!(parse_tail("--entry 99:1 --since 5").is_err());
-        assert!(parse_tail("--entry 99:0").is_err());
-        assert!(matches!(parse_tail("--entry 99:1 --json").unwrap(),Line::Tail {entry:Some(_),..}));
+        assert!(plan("tail --entry 99:1 --since 5").unwrap().is_err());
+        assert!(plan("tail --entry 99:0").unwrap().is_err());
+        assert!(matches!(plan("tail --entry 99:1 --json").unwrap().unwrap(),Line::Tail {entry:Some(_),..}));
     }
 
     #[test]

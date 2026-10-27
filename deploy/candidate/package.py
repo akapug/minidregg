@@ -3,8 +3,8 @@
 
   package.py --roles ROLES.json --source-archive SOURCE.tar --out NEW_DIR [--toolchains T.json]
              [--host-build-manifest MANIFEST.txt] [--into-existing]
-  package.py --capsule FAMILY_DIR --out NEW_DIR
   package.py --rust-roles        one line per Rust role: ROLE CRATE BINARY (the builders' list)
+  package.py --fixture-roles     one line per journey fixture: ROLE CRATE BINARY (built beside, never shipped)
 
 A candidate directory (deploy/candidate/INTERFACES.md) is what every consumer
 reads: edge/mini/ship.sh, verify.sh, service-upgrade.sh, run.sh, the journey's
@@ -22,16 +22,6 @@ The archive's commit (git get-tar-commit-id) must equal sourceCommit: every
 binary is claimed to be built from exactly that commit, and nothing else.
 build.sh calls this after building (with --into-existing, the binaries already
 in NEW_DIR/bin); a lane build on hbox calls it with its own role manifest.
-
---capsule: a sealed hbox family (/home/hbox/build/mini-bigstep/family-*/):
-seal-result.json's manifestSha256 must be the manifest's bytes, every shipped
-role must hash to its pin, source.tar must hash to sourceArchiveSha256 and
-carry sourceCommit, and every shipped role's recorded sourceCommit
-(provenance.json .roles) must BE that commit. A family that reuses a role
-built at another commit ("unchanged-role-reuse") is refused: the candidate's
-provenance says one commit built every binary, and a reuse claim is not a
-build. Qualification variants (integration-qualification features) and
-box-external roles (bwrap) are never shipped.
 
 ABI: every ELF's non-weak GLIBC version needs (readelf -V) are recorded in
 provenance.json .abi; ship.sh refuses a box whose glibc is older than
@@ -66,30 +56,41 @@ ROLES = {
     "spkHost": "spk-host",
     "spkBrowserProxy": "spk-browser-proxy",
     "spkBroker": "mini-spk-broker",
-    "spkHostd": "spk-hostd",
     "spkVolumeHelper": "mini-spk-volume-helper",
     "discord": "mini-discord",
+    # The self-serve door (deploy/door/README.md): the /join form and its root processor.
+    "door": "mini-door",
+    "doorProcess": "mini-door-process",
+    # The room mirror ships so it can be enabled; it is off unless configured (deploy/discord/README.md).
+    "discordMirror": "mini-discord-mirror",
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
-    # Test fixtures the standing journey runs against THIS set (journey-runner product_inputs defaults to
-    # $set/bin/<name>): the deterministic OpenAI-compatible provider and the grain launch gate. In the set so
-    # they are built from the tip they test and pinned in SHA256SUMS (cv 01a13c42-dc75), never a box path.
-    "testProvider": "mini-hermes-test-provider",
+    # The grain launch gate: deploy/grain-host/install-controller and bwrap require it beside the
+    # launcher, so it is a product binary (native/launch-gate builds deploy/grain-host/launch-gate.rs).
     "launchGate": "launch-gate",
+    # The web front end (deploy/web-frontend/INSTALL.md): the gateway and its root session helper.
+    "web": "mini-web",
+    "webSpawn": "mini-web-spawn",
 }
 # The Rust roles, role -> crate (the binary is ROLES[role]). The ONE list both builders read
 # (`package.py --rust-roles`): build.sh and lane-build.sh each kept their own copy, and the lane
-# copy silently lacked mini-keys, mini-spk-broker and spk-hostd. host and consent are Lean roles.
+# copy silently lacked mini-keys and mini-spk-broker. host and consent are Lean roles.
 RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-store"),
               ("verifier", "credential-signature-verifier"), ("grainRuntime", "grain-runtime"),
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
-              ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
-              ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
-              ("keys", "mini-keys"),
-              ("testProvider", "hermes-test-provider"), ("launchGate", "launch-gate"))
+              ("spkVolumeHelper", "spk-host"),
+              ("discord", "discord-entrance"), ("door", "discord-entrance"), ("doorProcess", "discord-entrance"), ("discordMirror", "discord-entrance"),
+              ("payWatcher", "pay-watcher"),
+              ("keys", "mini-keys"), ("launchGate", "launch-gate"),
+              ("web", "mini-web"), ("webSpawn", "mini-web-spawn"))
+# Journey fixtures: built from the tip they test by the journey tooling (lane-build.sh rust puts them in
+# LANE_DIR/fixtures, pack copies them to OUT/fixtures/ with their own SHA256SUMS; journey-runner reads
+# $set/fixtures/<binary>; scripts/check-journey.sh builds them from the tree), never in bin/, the
+# manifest or the shipped SHA256SUMS: the deterministic OpenAI-compatible provider is not a product.
+FIXTURES = (("testProvider", "hermes-test-provider", "mini-hermes-test-provider"),)
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a
-# locally selected consent pair) is not shippable, so a roles manifest or sealed family without it is refused.
+# locally selected consent pair) is not shippable, so a roles manifest without it is refused.
 # keys is required: split tenancy (step B) is the box's shape, and install.sh under split has no
 # broker without bin/mini-keys, so a candidate without it cannot be installed there.
 REQUIRED = ("host", "consent", "mini", "store", "verifier", "keys")
@@ -138,6 +139,35 @@ def tar_commit(archive):
     if out.returncode != 0 or not HEX40.fullmatch(commit):
         die(f"{archive} carries no commit id; create it with `git archive <commit>`")
     return commit
+
+
+def archive_tree(archive):
+    """The git tree id of the archive's files, written in a throw-away repository. It needs no
+    checkout of the commit, and for `git archive COMMIT` (the tree has no export-subst or
+    export-ignore attributes) it equals COMMIT^{tree}."""
+    with tempfile.TemporaryDirectory(prefix="package-tree-") as tmp:
+        tmp = Path(tmp)
+        work = tmp / "files"
+        work.mkdir()
+        subprocess.run(["tar", "-xf", str(Path(archive).resolve()), "-C", str(work)], check=True)
+        env = {**os.environ, "GIT_DIR": str(tmp / "git"), "GIT_WORK_TREE": str(work),
+               "GIT_INDEX_FILE": str(tmp / "index"), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        def git(*args):
+            out = subprocess.run(["git", *args], cwd=work, env=env, capture_output=True, text=True)
+            if out.returncode:
+                die(f"{archive}: cannot compute its tree (git {' '.join(args)}): {out.stderr.strip()}")
+            return out.stdout.strip()
+        init = subprocess.run(["git", "init", "-q", "--bare", str(tmp / "git")], capture_output=True, text=True,
+                              env={k: v for k, v in env.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")})
+        if init.returncode:
+            die(f"{archive}: cannot compute its tree (git init): {init.stderr.strip()}")
+        for key, value in (("core.filemode", "true"), ("core.symlinks", "true"), ("core.autocrlf", "false")):
+            git("config", key, value)
+        git("add", "-A", "-f", ".")
+        tree = git("write-tree")
+    if not HEX40.fullmatch(tree):
+        die(f"{archive}: no tree id computed")
+    return tree
 
 
 def version_key(v):
@@ -222,59 +252,6 @@ def roles_from_manifest(manifest, label):
     return chosen
 
 
-def capsule(family):
-    family = Path(family).resolve()
-    manifest_path, seal_path = family / "manifest.json", family / "seal-result.json"
-    if not manifest_path.is_file() or not seal_path.is_file():
-        die(f"{family} is not a sealed family (manifest.json + seal-result.json)")
-    seal, manifest = read(seal_path), read(manifest_path)
-    if seal.get("manifestSha256") != sha(manifest_path):
-        die("manifest.json is not the bytes seal-result.json sealed")
-    commit = manifest.get("sourceCommit")
-    if not (isinstance(commit, str) and HEX40.fullmatch(commit)) or seal.get("sourceCommit") != commit:
-        die("family sourceCommit is not one 40-hex commit agreed by seal and manifest")
-    archive = Path(manifest.get("sourceArchive", ""))
-    if not archive.is_file() or sha(archive) != manifest.get("sourceArchiveSha256") \
-            or seal.get("sourceArchiveSha256") != manifest.get("sourceArchiveSha256"):
-        die("source.tar is not the archive the family sealed")
-    if tar_commit(archive) != commit:
-        die("source.tar is not an archive of the family's sourceCommit")
-    chosen = roles_from_manifest(manifest, str(manifest_path))
-    provenance = read(manifest.get("roleProvenance") or family / "provenance.json")
-    recorded = provenance.get("roles", {})
-    mixed = []
-    for role in chosen:
-        row = recorded.get(role)
-        if row is None:
-            mixed.append(f"{role} (no role provenance)")
-        elif row.get("sourceCommit") != commit:
-            mixed.append(f"{role} built at {str(row.get('sourceCommit'))[:12]} ({row.get('mode', '?')})")
-        elif row.get("sha256") != chosen[role][1]:
-            mixed.append(f"{role} (role provenance pins other bytes)")
-    build = manifest.get("buildSourceCommit", {})
-    for part, at in (build.items() if isinstance(build, dict) else []):
-        if at != commit:
-            mixed.append(f"buildSourceCommit.{part} = {str(at)[:12]}")
-    if mixed:
-        die(f"family {family.name} is not one build of {commit[:12]}: " + "; ".join(mixed)
-            + ". Rebuild those roles at that commit (or seal a family whose roles agree); a reuse claim is not a build.")
-    toolchains = {"recorded": "capsule", "rustBuild": None, "nativeHostManifest": None}
-    rust = family / "rust-build.json"
-    if rust.is_file():
-        toolchains["rustBuild"] = {"path": str(rust), "sha256": sha(rust)}
-    native = family / "native-host-manifest.txt"
-    if native.is_file():
-        toolchains["nativeHostManifest"] = {"path": str(native), "sha256": sha(native)}
-        for line in native.read_text().splitlines():
-            if line.startswith("lean="):
-                toolchains["lean"] = line[5:]
-    excluded = sorted(k for k in manifest.get("sha256", {}) if k not in ROLES and k not in ALIASES)
-    origin = {"type": "sealed-capsule", "family": str(family), "manifestSha256": seal["manifestSha256"],
-              "rolesVerified": seal.get("rolesVerified"), "notShipped": excluded,
-              "nativeQualification": manifest.get("nativeQualification")}
-    return chosen, archive, commit, toolchains, origin, native if native.is_file() else None
-
-
 def build_identity(archive, commit, toolchains):
     """Require builder evidence; never substitute the packager's compiler for it."""
     rustc = toolchains.get("rustc", "")
@@ -284,9 +261,14 @@ def build_identity(archive, commit, toolchains):
         die("build provenance requires the builder's rustc -vV")
     if not isinstance(flags, dict) or not flags.get("rust") or not flags.get("native"):
         die("build provenance requires buildFlags.rust and buildFlags.native")
-    tree = subprocess.run(["git", "rev-parse", commit + "^{tree}"], capture_output=True, text=True)
-    if tree.returncode or not HEX40.fullmatch(tree.stdout.strip()):
-        die("source tree unavailable: package in a repository containing the archive commit")
+    tree = archive_tree(archive)
+    # A repository that holds the commit (lane-build, a checkout) must agree with the archive's own
+    # tree: the archive is `git archive COMMIT` or it is refused. Without one (build.sh
+    # --source-archive in an extracted tree) the archive's tree is the identity.
+    repo = subprocess.run(["git", "rev-parse", "--verify", "-q", commit + "^{tree}"], capture_output=True, text=True)
+    if repo.returncode == 0 and repo.stdout.strip() != tree:
+        die(f"{archive}: its files hash to tree {tree}, but {commit[:12]}^{{tree}} in this repository is "
+            f"{repo.stdout.strip()}: the archive is not `git archive {commit[:12]}`")
     with tarfile.open(archive) as tar:
         try:
             lean = tar.extractfile("lean-toolchain").read().decode()
@@ -296,7 +278,7 @@ def build_identity(archive, commit, toolchains):
             locks = {"Cargo.lock": hashlib.sha256(tar.extractfile("Cargo.lock").read()).hexdigest()}
         except KeyError:
             die("source archive lacks workspace Cargo.lock")
-    return {"sourceTree": tree.stdout.strip(), "rustcVerbose": rustc,
+    return {"sourceTree": tree, "rustcVerbose": rustc,
             "leanToolchain": lean, "cargoLockSha256": locks, "flags": flags}
 
 
@@ -416,7 +398,6 @@ def package(chosen, archive, commit, out, toolchains, origin, host_build_manifes
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--roles")
-    parser.add_argument("--capsule")
     parser.add_argument("--source-archive")
     parser.add_argument("--out", required=True)
     parser.add_argument("--toolchains")
@@ -426,17 +407,15 @@ def main():
         for role, crate in RUST_ROLES:
             print(role, crate, ROLES[role])
         return
+    if sys.argv[1:] == ["--fixture-roles"]:
+        for role, crate, binary in FIXTURES:
+            print(role, crate, binary)
+        return
     a = parser.parse_args()
     if shutil.which("readelf") is None or shutil.which("git") is None:
         die("readelf (binutils) and git are required")
-    if bool(a.roles) == bool(a.capsule):
-        die("choose exactly one of --roles or --capsule")
-    if a.capsule:
-        if a.source_archive or a.toolchains or a.into_existing or a.host_build_manifest:
-            die("--capsule takes its archive, toolchains and host build manifest from the family")
-        chosen, archive, commit, toolchains, origin, hbm = capsule(a.capsule)
-        package(chosen, archive, commit, a.out, toolchains, origin, hbm, False)
-        return
+    if not a.roles:
+        die("--roles is required")
     if not a.source_archive:
         die("--roles needs --source-archive")
     manifest = read(a.roles)

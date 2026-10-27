@@ -1,15 +1,19 @@
-"""A same-account key broker for a journey (sandbox, one uid).
+"""A same-account key broker for a journey (sandbox, one uid): the TEST shape.
 
-The production broker runs as its own account with a root-owned config; a
-journey runs every process as one account, so its config says singleAccount
-and names this account in every role. Everything else is the production
-binary and the production checks.
+The deployed broker runs as its own account (`mini-keys`) with a root-owned
+config, and a root-owned config cannot say singleAccount. A journey runs every
+process as one account, so its config (owned by that account) says
+singleAccount and names this account in every role. Everything else is the
+production binary and the production checks, including the Host-image pin
+(hostSha256) and the pinned uid that answers operation 144 (this account,
+which runs the journey's public-socket proxy).
 
     import journey_broker
     proc, client = journey_broker.start(root, mini, providers=..., host=..., host_config=..., public_socket=...)
     # client: the mini-keys client config; give it to `mini key --broker`,
     # a controller's providerTask.credentialBroker, or mini-socket-proxy's third argument.
 """
+import hashlib
 import json
 import os
 import pathlib
@@ -20,6 +24,14 @@ import time
 def _private_dir(path):
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(path, 0o700)
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def binary(mini):
@@ -49,7 +61,8 @@ def start(root, mini, *, providers, host, host_config, public_socket, seal_key=N
               'singleAccount': True,
               'peers': [{'role': 'member', 'gids': [gid]}, {'role': 'provider', 'uids': [uid]},
                         {'role': 'discord', 'uids': [uid]}, {'role': 'operator', 'uids': [uid]}],
-              'credentials': {'host': str(host), 'hostConfig': str(host_config), 'publicSocket': str(public_socket),
+              'credentials': {'host': str(host), 'hostSha256': _sha256(host),
+                              'hostConfig': str(host_config), 'publicSocket': str(public_socket), 'publicSocketUid': uid,
                               'providers': str(providers), 'root': str(credentials), 'key': str(seal_key)}}
     if discord_mirror:
         config['discord'] = {'mirror': str(discord_mirror)}

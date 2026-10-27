@@ -23,10 +23,12 @@ if [ "$#" -ne 6 ]; then
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 GRAIN=$5 RUN=$6
+# The grain launch gate is the candidate's own (bin/launch-gate, native/launch-gate), never a local rustc build.
+LAUNCH_GATE=${LAUNCH_GATE:?LAUNCH_GATE names the launch gate (a candidate bin/launch-gate, or cargo build -p launch-gate)}
 TASK=${HERMES_JOURNEY_TASK:-8751}
 TOOL_TASK=$((TASK + 1))
 UNIT=mini-grain-controller@$TASK
-for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN"; do
+for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$LAUNCH_GATE" "$RUN"; do
   case "$item" in /*) ;; *) echo "paths must be absolute: $item" >&2; exit 2;; esac
 done
 for item in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN"; do
@@ -76,30 +78,29 @@ trap cleanup EXIT
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$0" \
   "$HERE/fixture/hermes-deterministic-acp" "$REPO/deploy/grain-host/bwrap" \
   "$REPO/deploy/grain-host/resolve-bwrap" "$REPO/deploy/grain-host/materialize-bwrap.py" "$BWRAP" \
-  "$REPO/deploy/grain-host/launch-gate.rs" \
+  "$LAUNCH_GATE" \
   "$REPO/native/resource-client/newparticipant-acceptance.sh" >"$EV/inputs.sha256"
 confirmed() {
   jq -e '.type == "confirmed" and (.confirmation == "installed" or .confirmation == "replayed")' "$1" >/dev/null
 }
 
 # --- Store: sponsor + the hosted grain's two genesis subjects ---------------
-"$MINI" keygen --secret "$RUN/keys/hermes-host.key" --public "$RUN/keys/hermes-host.pub" >/dev/null
-"$MINI" keygen --secret "$RUN/keys/hermes.key" --public "$RUN/keys/hermes.pub" >/dev/null
-HOST_PUB=$(od -An -tx1 -v "$RUN/keys/hermes-host.pub" | tr -d ' \n')
-HERMES_PUB=$(od -An -tx1 -v "$RUN/keys/hermes.pub" | tr -d ' \n')
-jq -n --arg h "$HOST_PUB" --arg w "$HERMES_PUB" '[
-  {key:{keyId:"8008",keyEpoch:"2",algorithm:"1",subject:"8",publicKey:$h,
+# Subjects 8 (the host) and 9 (hermes) are enrolled at genesis with keys the fixture makes
+# (NEWPARTICIPANT_EXTRA_SUBJECTS -> ROOT/extra/8.key, 9.key): a genesis with no per-run key is the
+# same world every run, so the fixture has a template for it.
+jq -n '[
+  {key:{keyId:"8008",keyEpoch:"2",algorithm:"1",subject:"8",
     activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
    accountId:"8",spendCapabilityId:"42",controlCapabilityId:"52",
    factoryObserveCapabilityId:"55",initialBalance:"100",
    accountPredicate:{type:"all",predicates:[]}},
-  {key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",publicKey:$w,
+  {key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
     activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
    accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
    factoryObserveCapabilityId:"57",initialBalance:"100",
    accountPredicate:{type:"all",predicates:[]}}]' >"$RUN/hermes-genesis-enrollments.json"
 mark "bootstrap start"
-EXTRA_GENESIS_ENROLLMENTS=$RUN/hermes-genesis-enrollments.json \
+NEWPARTICIPANT_EXTRA_SUBJECTS=$RUN/hermes-genesis-enrollments.json \
   sh "$REPO/native/resource-client/newparticipant-acceptance.sh" \
   "$HOST" "$MINI" "$STORE" "$VERIFIER" "$ROOT" >"$EV/bootstrap.stdout" 2>"$EV/bootstrap.stderr"
 CONFIG=$ROOT/deployment/pinned-config.json
@@ -130,7 +131,7 @@ mark "hosted grain born: parent $TASK owner 8 worker 9, tool $TOOL_TASK owner 9"
 # e7d2fb9c00a5: these genesis records commit to no next key; initialization must
 # explicitly select --no-prerotation even though keygen made local next keys.
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
-  --key "$RUN/keys/hermes-host.key" --subject 8 --namespace-root "$ROOT/namespace" \
+  --key "$ROOT/extra/8.key" --subject 8 --namespace-root "$ROOT/namespace" \
   --no-prerotation --dir "$RUN/host-workspace" >/dev/null
 "$MINI" workspace --action import --dir "$RUN/host-workspace" --name parent --kind object \
   --target "$TASK" --observe-capability 8761 --control-capability 8762 >/dev/null
@@ -177,12 +178,12 @@ mark "sponsor created 'shared' and published a recipient reference for subject 9
 H=$RUN/hermes
 mkdir -m 700 "$H" "$H/state" "$H/worker-work" "$H/worker-runtime" "$H/launcher"
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
-  --key "$RUN/keys/hermes.key" --subject 9 --namespace-root "$ROOT/namespace" \
+  --key "$ROOT/extra/9.key" --subject 9 --namespace-root "$ROOT/namespace" \
   --no-prerotation --dir "$H/state/resource-workspace" >/dev/null
 python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$BWRAP" \
   --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$H/launcher/bwrap" >"$EV/launcher.json"
 mark "worker launcher materialized for $BWRAP"
-rustc -O --edition 2021 -o "$H/launcher/launch-gate" "$REPO/deploy/grain-host/launch-gate.rs" 2>"$EV/launch-gate-build.log"
+install -m 0700 "$LAUNCH_GATE" "$H/launcher/launch-gate"
 cp "$GRAIN" "$H/worker-runtime/grain-runtime"
 cp "$HERE/fixture/hermes-deterministic-acp" "$H/worker-runtime/hermes-acp"
 chmod 700 "$H/launcher/bwrap" "$H/worker-runtime/hermes-acp"
@@ -190,8 +191,8 @@ mkdir -m 700 "$H/worker-work/.hermes"
 printf 'timeouts:\n  mcp:\n    tool_call: 600\n' >"$H/worker-work/.hermes/config.yaml"
 chmod 600 "$H/worker-work/.hermes/config.yaml"
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCK" \
-  --arg state "$H/state" --arg cwd "$H" --arg hk "$RUN/keys/hermes-host.key" \
-  --arg wk "$RUN/keys/hermes.key" --arg t "$TASK" --arg tt "$TOOL_TASK" \
+  --arg state "$H/state" --arg cwd "$H" --arg hk "$ROOT/extra/8.key" \
+  --arg wk "$ROOT/extra/9.key" --arg t "$TASK" --arg tt "$TOOL_TASK" \
   --arg launcher "$H/launcher/bwrap" --arg work "$H/worker-work" --arg rt "$H/worker-runtime" \
   --arg witness "$WITNESS" '
   {mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,custodyKey:$hk,

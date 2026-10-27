@@ -2,7 +2,6 @@
 //! derives signing headers from the current image; this module compares every
 //! source slot to an operator-pinned key before signing exact header bytes.
 //! Neither an HTTP request nor a Host plan chooses a new signer.
-#![allow(dead_code)] // Joined operator broker/supervisor route is in progress.
 
 use crate::dispatch_inspection::{app_route_path, HttpProjection, Route};
 use ed25519_dalek::{Signer, SigningKey};

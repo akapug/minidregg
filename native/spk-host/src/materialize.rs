@@ -189,18 +189,11 @@ pub fn qualify_bridge_spk_with_profile(
         .as_deref()
         .ok_or_else(|| invalid("bridge-only SPK lacks signed config"))?;
     let bridge = decode_bridge_config(member).map_err(invalid)?;
-    // Each refusal names the bridge-config field, so a survey of real
-    // packages can say which Sandstorm facility a package needs.
-    if bridge.save_identity_caps {
-        return Err(invalid(
-            "signed bridge requires unsupported physical profile: saveIdentityCaps",
-        ));
-    }
-    if bridge.expect_app_hooks {
-        return Err(invalid(
-            "signed bridge requires unsupported physical profile: expectAppHooks",
-        ));
-    }
+    // saveIdentityCaps (identity_custody; SandstormApi save/restore/drop) and
+    // expectAppHooks (the bridge answers getViewInfo through the app's hooks;
+    // app-object restore stays unknownToken) are served. The refusal that
+    // remains names the bridge-config field, so a survey of real packages can
+    // say which Sandstorm facility a package needs.
     if let Some(path) = bridge.api_path.as_deref() {
         if let Err(error) = minidregg_signed_api_path::checked_prefix(path) {
             return Err(invalid(format!(
@@ -353,7 +346,12 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     let store = image_dir
         .parent()
         .ok_or_else(|| invalid("image store parent absent"))?;
-    let spk = stream::verify_in_private_temp_at_with_root_custody(&package_path, store, profile.limits(), crate::namespace_identity::root_owned)?;
+    // The image store's custody is `open_protected_directory`'s above (the resident's own
+    // rule, walked by descriptor). The stream reader's ancestor walk is not used here: a
+    // resident wakes inside its user namespace, where root-owned ancestors of the store
+    // (`/var/lib/mini-spk-worlds`, the world) carry the unmapped overflow uid and that walk
+    // refused every START on Debian 13 ("scratch parent custody refused", 2026-10-27).
+    let spk = stream::verify(&package_path, store, profile.limits())?;
     let verified = verified_identity(&spk, image_dir.to_owned())?;
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())

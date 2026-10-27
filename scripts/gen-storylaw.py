@@ -2,7 +2,7 @@
 """The story law files and Assurance/StoryLaw.lean §8 are the client's generator output; this script writes them.
 
 usage (from the repository root):
-  scripts/gen-storylaw.py --mini PATH           run `PATH story-law --table deploy/shell/templates/story/tale/table`
+  scripts/gen-storylaw.py --mini PATH           run `PATH story-law --table native/resource-client/templates/story/tale/table`
                                                 (the parser and generator `story seal` runs) and write
                                                 tale/law.player.json, tale/law.player and tale/law.table.json,
                                                 then rewrite the GENERATED region of Assurance/StoryLaw.lean
@@ -15,7 +15,7 @@ client's generator and the Lean `law` ever disagree on the tale, and the theorem
 the law `story seal` installs."""
 import json, re, subprocess, sys
 
-T = "deploy/shell/templates/story/tale"
+T = "native/resource-client/templates/story/tale"
 F = "Assurance/StoryLaw.lean"
 BEGIN, END = "-- BEGIN GENERATED (scripts/gen-storylaw.py)\n", "-- END GENERATED"
 PH = re.compile(r"\{([A-Z_0-9]+)\}")

@@ -5,7 +5,6 @@
 //! committed-permit inspector, and compare that inspection to these exact
 //! retained bytes before using any projected value. Caller-supplied bytes,
 //! op35 historical lookup, and a candidate projection grant no delivery.
-#![allow(dead_code)] // Staged behind Mini's source-owned op34 inspector route.
 
 use std::io;
 
@@ -22,7 +21,11 @@ fn invalid(reason: &'static str) -> io::Error {
 /// retains this payload for exact comparison with source-owned inspection.
 pub(crate) enum Op34Reply<'a> {
     CommittedBytes(&'a [u8]),
-    OutcomeBytes(&'a [u8]),
+    /// The outcome frame; read by the qualification fixture and the tests.
+    OutcomeBytes(
+        #[cfg_attr(not(any(test, feature = "integration-qualification")), allow(dead_code))]
+        &'a [u8],
+    ),
 }
 
 /// Decode exactly one Host stdio response frame: LE32 length, opcode 34, then

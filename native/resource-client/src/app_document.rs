@@ -567,7 +567,7 @@ fn draft(v: &Value) -> Result<Vec<u8>> {
 fn typed_refusal(decision: Option<crate::HostDecision>) -> Option<Value> {
     let value = match decision? {
         crate::HostDecision::Outcome(v) => v,
-        crate::HostDecision::RefusedFrame {
+        crate::HostDecision::Frame {
             decoded: Some(v), ..
         } => v,
         _ => return None,
@@ -630,7 +630,8 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
                 json!({"type":"mini-app-document-result-v1","id":id,"status":"source-uncertain","capture":record,
                 "message":"No complete export is retained. This operation cannot fetch again."})),
             DeliveryState::Completed(_) => Err("the fetch completed but its retained export is missing; restore the complete workspace custody".into()),
-            DeliveryState::Fresh => Err("no export is retained for this operation".into()),
+            // This fetch never records a destination refusal; a record that says so is not its.
+            DeliveryState::Fresh | DeliveryState::Refused { .. } => Err("no export is retained for this operation".into()),
         };
     }
     let v = opened(root, workspace, id)?;
@@ -652,6 +653,10 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
                     let out = accepted_outcome(&attempt)?.ok_or("confirmed attempt lost its retained outcome")?;
                     state["outcome"] = out;
                     state["status"] = json!("saved");
+                }
+                AttemptOutcome::Charged(value) => {
+                    state["outcome"] = value;
+                    state["status"] = json!("charged");
                 }
                 AttemptOutcome::Refused => state["status"] = json!("refused"),
                 AttemptOutcome::Pending if attempt.join("call.bin").exists() => {
@@ -978,7 +983,7 @@ mod tests {
             json!({"type":"unknown"})
         )))
         .is_none());
-        assert!(typed_refusal(Some(crate::HostDecision::RefusedFrame {
+        assert!(typed_refusal(Some(crate::HostDecision::Frame {
             command: "call".into(),
             byte: 0,
             encoded: vec![],

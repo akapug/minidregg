@@ -227,7 +227,9 @@ fn submit_operation(
         )
     })();
     if let Err(error) = result {
-        let decided = crate::take_host_decision().is_some();
+        // Only the Host's DECODED refusal is a refusal; a 255 frame that decodes as unavailable,
+        // uncertain or contention, or not at all, leaves the save undecided (the exact call is kept).
+        let decided = crate::take_host_decision().is_some_and(|d| d.is_refusal());
         let detail = if decided {
             text_plan
                 .as_ref()

@@ -807,11 +807,14 @@ impl ChildHandle for BoundedChild {
     }
 }
 
-// The mutators are intentionally unreachable from the public binary until
-// native verified BEGIN admission is wired. Keep the physical state machine
-// separately testable without exposing an operator-minted launch command.
-#[allow(dead_code)]
+// The physical state machine's mutators. They are reached only through the
+// resident's source-bound START/STOP and dispatch paths, never a CLI verb.
 impl Journal {
+    /// The generation directory this journal lives in (`apps/<app>/g<N>`).
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     /// Read-only recovery evidence for the exact claimed START whose spawn
     /// failed before producing a child. This does not clear a manager failure,
     /// mutate the journal, authorize a launch, or supply Mini's reserved gate.
@@ -946,10 +949,6 @@ impl Journal {
         stop_unit(unit)
     }
 
-    pub(crate) fn directory(&self) -> &Path {
-        &self.directory
-    }
-
     fn with_lock<T>(&self, f: impl FnOnce(&Self) -> io::Result<T>) -> io::Result<T> {
         let path = self.directory.join(".lock");
         let lock = OpenOptions::new()
@@ -1036,12 +1035,13 @@ impl Journal {
             if record.phase != Phase::Running || record.dispatch_in_flight.is_some() {
                 return Err(invalid("checkpoint requires settled physical dispatch"));
             }
-            for name in ["dispatch-active.json", "native-dispatch-active.json"] {
-                match fs::symlink_metadata(this.directory.join(name)) {
-                    Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
-                    Err(error) => return Err(error),
-                }
+            match fs::symlink_metadata(this.directory.join("dispatch-active.json")) {
+                Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error),
+            }
+            if !crate::dispatch_fence::undecided(&this.directory)?.is_empty() {
+                return Err(invalid("checkpoint dispatch outcome requires exact recovery"));
             }
             for entry in fs::read_dir(&this.directory)? {
                 let path = entry?.path();
@@ -1701,7 +1701,10 @@ impl Journal {
     }
 
     /// Tombstone first; only then call the unit manager. An uncertain manager
-    /// response retains Fenced and requires another exact-unit audit.
+    /// response retains Fenced and requires another exact-unit audit. The
+    /// production STOP takes `fence_and_stop_manager_checked`; this unchecked
+    /// form remains as the tests' model of the tombstone ordering.
+    #[cfg(test)]
     pub(crate) fn fence_and_stop(
         &self,
         stop: impl FnOnce(&str) -> io::Result<()>,
@@ -1742,30 +1745,6 @@ impl Journal {
             record.child_pid = None;
             this.write_unlocked(&record)
         })
-    }
-
-    /// Production stop path. The durable tombstone precedes the systemd stop;
-    /// a missing/mismatched unit or manager failure retains Fenced.
-    pub(crate) fn fence_and_stop_manager(&self) -> io::Result<()> {
-        self.fence_and_stop(
-            |unit| {
-                let record = self
-                    .read()?
-                    .ok_or_else(|| invalid("missing fenced record"))?;
-                // A prior stop may have succeeded just before the Stopped
-                // record fsync failed. Systemd then clears InvocationID. A
-                // complete exact post-stop audit permits this idempotent retry.
-                if UnitStopAudit::inspect(&record)
-                    .and_then(|audit| audit.prove(&record))
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-                UnitStopAudit::before_stop(&record)?;
-                self.stop_unit(unit)
-            },
-            UnitStopAudit::inspect,
-        )
     }
 
     /// Source-bound STOP uses the exact retained running incarnation and a
@@ -2361,15 +2340,16 @@ mod tests {
     }
 
     /// The human path after DeliveryRequested: a worker fence releases the
-    /// shared slot and the generation-wide native marker, the operation
+    /// shared slot and settles the call's own submit marker, the operation
     /// stays terminally Uncertain and is never dispatchable again, and the
     /// next participant proceeds.
     #[test]
     fn human_post_commit_failure_releases_slot_and_native_marker_with_fence() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let attempt = path.join("dispatch-op-1");
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();
@@ -2411,8 +2391,9 @@ mod tests {
     fn human_failure_without_matching_fence_keeps_every_marker() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let attempt = path.join("dispatch-op-1");
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();
@@ -3429,18 +3410,6 @@ mod tests {
             .unwrap()
             .prove(&record)
             .unwrap();
-        // Simulate a crash after systemd stop but before Stopped fsync. The
-        // production retry must recognize the exact cleared manager/cgroup
-        // state and finish the durable tombstone without a second stop.
-        let path = Path::new("/run/user").join(unsafe { libc::geteuid() }.to_string()).join(format!("mini-spk-stop-audit-{}", std::process::id()));
-        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-        let journal = Journal::open(&path).unwrap();
-        journal
-            .with_lock(|this| this.write_unlocked(&record))
-            .unwrap();
-        journal.fence_and_stop_manager().unwrap();
-        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
-        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

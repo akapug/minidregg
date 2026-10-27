@@ -3,7 +3,6 @@
 //! This is a physical codec, not dispatch admission. The private entrance must
 //! obtain a fresh Mini committed permit before calling the RPC driver or this
 //! serializer. An uncertain RPC result is never converted into a retry.
-#![allow(dead_code)] // Staged behind Mini's committed dispatch permit route.
 
 use minidregg_spk_rpc::{CookieExpiry, ETag, WebResponse, WebResult};
 use std::io;

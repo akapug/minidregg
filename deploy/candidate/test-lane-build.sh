@@ -4,7 +4,7 @@
 #   deploy/candidate/test-lane-build.sh [SCRATCH_DIR]      (default: a fresh mktemp -d)
 # Cases: (1) a lane whose roles were built at HEAD packages, consent pinned; (2) a compiled input that
 # changed after the Rust build is REFUSED naming the file; (3) a missing consent artifact is REFUSED;
-# (4) a tracked change left uncommitted is REFUSED.
+# (4) a tracked change left uncommitted is REFUSED. (1b) journey fixtures land in fixtures/, never in bin/.
 set -euo pipefail
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 S=${1:-$(mktemp -d)}
@@ -50,6 +50,8 @@ export PATH="$S/shim:$PATH" LANE_DIR="$S/lane"
 for n in minidregg-host minidregg-client-consent $(python3 "$HERE/package.py" --rust-roles | awk '{print $3}'); do
   echo "stub binary $n" >"$S/lane/artifacts/$n"
 done
+mkdir -p "$S/lane/fixtures"
+for n in $(python3 "$HERE/package.py" --fixture-roles | awk '{print $3}'); do echo "stub fixture $n" >"$S/lane/fixtures/$n"; done
 echo "stub manifest" >"$S/lane/native-out/manifest.txt"
 printf '%s\n' '-O0 -DSYNTHETIC_BUILD' >"$S/lane/native-out/compile-args.txt"
 git rev-parse HEAD | tee "$S/lane/logs/host-build.commit" >"$S/lane/logs/rust-build.commit"
@@ -66,6 +68,11 @@ if "$HERE/lane-build.sh" pack "$S/cand1" >"$S/1.out" 2>"$S/1.err"; then
       (.rustcVerbose | contains("commit-hash:")))' "$S/cand1/provenance.json" >/dev/null \
     && [ -f "$S/cand1/bin/clients/x86_64-unknown-linux-gnu/minidregg-client-consent" ] && ok "(1) built-at-HEAD lane packages with the consent pair" \
     || bad "(1) packaged, but the consent pair is not pinned: $(cat "$S/1.err")"
+  # journey fixtures ride beside the candidate: in fixtures/ with their own sums, never in bin/ or the manifest
+  [ -f "$S/cand1/fixtures/mini-hermes-test-provider" ] && (cd "$S/cand1/fixtures" && sha256sum -c --quiet SHA256SUMS) \
+    && [ ! -e "$S/cand1/bin/mini-hermes-test-provider" ] && ! grep -q 'hermes-test-provider' "$S/cand1/SHA256SUMS" "$S/cand1/manifest.json" \
+    && ok "(1b) the test provider is a fixture beside the candidate, not a shipped output" \
+    || bad "(1b) the test provider is not a fixture-only output"
 else bad "(1) pack failed: $(cat "$S/1.err")"; fi
 
 echo "pub fn g() {}" >>native/resource-client/src/lib.rs

@@ -44,7 +44,7 @@ PY
     test "$#" -ge 2
     MANIFEST=$(realpath "$2")
     # Copy only sources: the mutant has independent writable Cargo package state.
-    tar -C "$ROOT" --exclude=target --exclude=.git -cf - native deploy/pay deploy/shell/templates | tar -C "$TMP" -xf -
+    tar -C "$ROOT" --exclude=target --exclude=.git -cf - native deploy/pay | tar -C "$TMP" -xf -
     MUTANT=$TMP/native/resource-client/src/pay.rs
     python3 - "$MUTANT" <<'PY'
 from pathlib import Path

@@ -1,17 +1,25 @@
-//! `mini web`: the participant's own view of the node as plain hypertext.
+//! `mini web`: a workspace's view of the node as plain hypertext, in three faces.
 //!
-//! A loopback HTTP server beside the client. Every page that shows kernel
-//! state is one or more signed reads under the workspace's own key, through
-//! `workspace::signed_view` / `workspace::rendered_document` (the paths
-//! `workspace --action read` and `doc-show` take). A document renders through
-//! the Host's `inspect view-document`: the kernel's element-tree order, with
-//! transclusions inline as this reader's own source reads render them; links
-//! and backlinks are the Host's link-index views; history, a page at a past
-//! height and a diff are K-DOC-HISTORY's `at`-height reads. Document POST forms
-//! use the native client's pinned diff and durable attempt. It binds 127.0.0.1 only, accepts only
-//! `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard), refuses a
-//! foreign `Origin`, and every path sits under a per-launch secret printed at
-//! start, so another local user or a page in the browser cannot read it.
+//! Every page that shows kernel state is one or more signed reads under the
+//! workspace's own key, through `workspace::signed_view` /
+//! `workspace::rendered_document` (the paths `workspace --action read` and
+//! `doc-show` take). A document renders through the Host's `inspect
+//! view-document`: the kernel's element-tree order, with transclusions inline as
+//! this reader's own source reads render them; links and backlinks are the
+//! Host's link-index views; history, a page at a past height and a diff are
+//! K-DOC-HISTORY's `at`-height reads.
+//!
+//! - **Loopback server** (`--listen 127.0.0.1:PORT`): the developer's and the
+//!   journeys' direct face over one workspace: reads plus the document editor and
+//!   creation POST forms, which use the native client's pinned diff and durable
+//!   attempt and sign under the workspace key. It binds 127.0.0.1 only, accepts
+//!   only `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard),
+//!   refuses a foreign `Origin`, and every path sits under a per-launch secret.
+//! - **Body** (`--body`, `web/body.rs`): the same renders as stage fragments plus
+//!   every verb action, for the web gateway (docs/WEB-FRONTEND-2026-10-27.md),
+//!   over the root-only listener `mini-web-spawn` hands it; `--anonymous` is the
+//!   public reader. The public web is this face through the gateway; there is no
+//!   static snapshot and no separate read-only server.
 
 mod editor;
 #[path = "web_admission.rs"]
@@ -21,10 +29,15 @@ mod inspect;
 mod resident;
 #[path = "web/world.rs"]
 mod world;
-mod surface;
 mod studio;
 #[path = "web/search.rs"]
 mod search;
+#[path = "web/body.rs"]
+mod body;
+#[path = "web/verbs.rs"]
+mod verbs;
+#[path = "web/apps.rs"]
+mod apps;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -50,11 +63,14 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}\
 .stale{color:#8a5a00}.ann{font-size:13px;color:#333;margin:.2rem 0 .2rem 1rem}";
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
+    let root = absolute(&path(args.required("dir")?))?;
+    if args.optional("body").is_some() {
+        return body::run(args, root);
+    }
     let listen = args
         .required("listen")?
         .into_string()
         .map_err(|_| "--listen must be UTF-8".to_owned())?;
-    let root = absolute(&path(args.required("dir")?))?;
     let home = args.optional("home").map(|v| absolute(&path(v))).transpose()?;
     args.finish()?;
     let address = loopback_address(&listen)?;
@@ -68,19 +84,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     if !matches!(bound, SocketAddr::V4(v4) if *v4.ip() == Ipv4Addr::LOCALHOST) {
         return Err(format!("bound {bound}, which is not 127.0.0.1"));
     }
+    let front = Front::loopback(bound.port(), false);
     let site = Site {
         mutations: Mutex::new(()),
         home,
         subject: workspace::member(&workspace, "subject")?.to_owned(),
         root,
         workspace,
+        base: format!("/{token}"),
         token,
-        port: bound.port(),
+        front,
+        face: Face::Server,
+        shell: None,
     };
-    println!(
-        "mini web: workspace for subject {} at http://127.0.0.1:{}/{}/",
-        site.subject, site.port, site.token
-    );
+    println!("mini web: workspace for subject {} at http://127.0.0.1:{}/{}/", site.subject, bound.port(), site.token);
     println!("mini web: the path secret changes every launch; document forms use your current authority");
     std::io::stdout().flush().map_err(|error| error.to_string())?;
     let site = Arc::new(site);
@@ -120,6 +137,36 @@ fn launch_token() -> Result<String> {
     Ok(hex(&crate::fsio::random::<16>()?))
 }
 
+/// Who may address the loopback server (`Host` one of the origins' authorities,
+/// `Origin`, if any, one of the origins), and whether this face offers writes
+/// (`read_only` is the body's `--anonymous`: the public reader).
+pub(crate) struct Front {
+    pub origins: Vec<String>,
+    pub read_only: bool,
+}
+
+impl Front {
+    pub(crate) fn loopback(port: u16, read_only: bool) -> Self {
+        Front {
+            origins: vec![format!("http://127.0.0.1:{port}"), format!("http://localhost:{port}")],
+            read_only,
+        }
+    }
+
+    fn hosts(&self) -> impl Iterator<Item = &str> {
+        self.origins
+            .iter()
+            .map(|origin| origin.split_once("://").map_or(origin.as_str(), |(_, authority)| authority))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Face {
+    Server,
+    /// `--body`: fragments for the web gateway (`web/body.rs`); links under `/`.
+    Body,
+}
+
 struct Site {
     // Forms and draft-opening GETs may mutate owner-private custody. Complete
     // ingress first, then serialize those paths without blocking signed views.
@@ -129,7 +176,13 @@ struct Site {
     workspace: Value,
     subject: String,
     token: String,
-    port: u16,
+    front: Front,
+    /// What every emitted link is prefixed with: `/SECRET` for the loopback
+    /// server, nothing for the body (the gateway serves it at `/`).
+    base: String,
+    face: Face,
+    /// The shell's paths, when this site runs verbs as the member (`--body`).
+    shell: Option<body::Shell>,
 }
 
 #[derive(Debug)]
@@ -183,12 +236,16 @@ fn token_equal(left: &str, right: &str) -> bool {
             == 0
 }
 
-/// Method, Host, Origin, fetch-site and path-secret checks. Pure, so tested.
-pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
+/// Method, Host, Origin, fetch-site, path-secret and read-only checks. Pure, so tested.
+pub(crate) fn gate(request: &Request, front: &Front, token: &str) -> Gate {
     if !matches!(request.method.as_str(), "GET" | "HEAD" | "POST") {
         return Gate::Refuse(
             405,
-            format!("{}: this server answers GET, HEAD and document POST forms only", request.method),
+            format!(
+                "{}: this server answers GET, HEAD{} only",
+                request.method,
+                if front.read_only { "" } else { " and document POST forms" }
+            ),
         );
     }
     let hosts: Vec<&str> = request
@@ -197,21 +254,18 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
         .filter(|(name, _)| name == "host")
         .map(|(_, value)| value.as_str())
         .collect();
-    let allowed_hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
-    if hosts.len() != 1 || !allowed_hosts.iter().any(|allowed| allowed == hosts[0]) {
+    if hosts.len() != 1 || !front.hosts().any(|allowed| allowed == hosts[0]) {
         return Gate::Refuse(
             421,
             format!(
-                "Host header {:?} refused: only 127.0.0.1:{port} or localhost:{port} (DNS-rebinding guard)",
-                hosts
+                "Host header {:?} refused: only {} (DNS-rebinding guard)",
+                hosts,
+                front.hosts().collect::<Vec<_>>().join(" or ")
             ),
         );
     }
     for (name, value) in &request.headers {
-        if name == "origin"
-            && value != &format!("http://127.0.0.1:{port}")
-            && value != &format!("http://localhost:{port}")
-        {
+        if name == "origin" && !front.origins.iter().any(|origin| origin == value) {
             return Gate::Refuse(403, format!("Origin {value} refused: another origin may not read this view"));
         }
         if name == "sec-fetch-site" && value == "cross-site" {
@@ -238,8 +292,8 @@ pub(crate) fn gate(request: &Request, port: u16, token: &str) -> Gate {
     }) {
         return Gate::Refuse(404, "not found".into());
     }
+    let parts: Vec<_> = segments.iter().map(String::as_str).collect();
     if request.method == "POST" {
-        let parts: Vec<_> = segments.iter().map(String::as_str).collect();
         if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "preview"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
@@ -313,7 +367,16 @@ fn short(id: &str) -> String {
     }
 }
 
-pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
+/// The links every page's header carries.
+pub(crate) fn nav(base: &str, search: bool) -> String {
+    if search {
+        format!("<a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a>")
+    } else {
+        format!("<a href=\"{base}/\">published documents</a>")
+    }
+}
+
+pub(crate) fn wrap(page: &Page, nav: &str, subject: &str) -> String {
     let context = match &page.stamp {
         Stamp::Read(read) | Stamp::EditBase(read) => format!(
             "{}read as subject <span class=id>{}</span> at height <span class=id data-height=\"{}\">{}</span> \
@@ -348,7 +411,7 @@ pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
         "<!doctype html>\n<html lang=en><head><meta charset=utf-8>\
          <meta name=viewport content=\"width=device-width\"><meta name=referrer content=same-origin>\
          <title>{title} | mini</title><style>{CSS}</style></head><body>\n\
-         <header><nav><a href=\"{base}/\">workspace</a> | <a href=\"{base}/search\">search</a></nav><h1>{title}</h1><div class=ctx>{context}</div></header>\n\
+         <header><nav>{nav}</nav><h1>{title}</h1><div class=ctx>{context}</div></header>\n\
          <main>\n{body}</main></body></html>\n",
         title = escape(&page.title),
         body = page.body,
@@ -478,8 +541,10 @@ pub(crate) fn index_sections(
 
 /// `/doc/NAME/history`: K-DOC-HISTORY's rows through the one renderer
 /// (`render::history`), each height linked to its page and its diff.
-pub(crate) fn render_history(base: &str, name: &str, history: &Value) -> String {
-    let links = |height: &str| match height.parse::<u64>().ok().and_then(|h| h.checked_sub(1)) {
+/// `linked(height)` says whether that row's `show` and `diff` pages exist (a
+/// server: every row; a static snapshot: the rows it rendered).
+pub(crate) fn render_history(base: &str, name: &str, history: &Value, linked: &dyn Fn(&str) -> bool) -> String {
+    let links = |height: &str| match height.parse::<u64>().ok().and_then(|h| h.checked_sub(1)).filter(|_| linked(height)) {
         Some(below) => format!(
             " <a href=\"{base}/at/{h}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{h}\">diff</a>",
             h = escape(height),
@@ -552,7 +617,18 @@ pub(crate) fn render_fields(entries: &[Value], board: bool) -> String {
 
 impl Site {
     fn base(&self) -> String {
-        format!("/{}", self.token)
+        self.base.clone()
+    }
+
+    fn nav(&self) -> String {
+        match self.face {
+            Face::Server => nav(&self.base, true),
+            Face::Body => String::new(),
+        }
+    }
+
+    fn allow(&self) -> &'static str {
+        if self.front.read_only { "GET, HEAD" } else { "GET, HEAD, POST" }
     }
 
     fn serve(&self, mut stream: TcpStream, deadline: Instant) -> Result<()> {
@@ -568,30 +644,30 @@ impl Site {
             }
             head.extend_from_slice(&buffer[..read]);
             if head.len() > MAX_REQUEST {
-                return respond(&mut stream, false, &simple(431, "Too large", "request head too large"), "", "");
+                return respond(&mut stream, false, &simple(431, "Too large", "request head too large"), "", "", "");
             }
         }
         let request = match parse_request(&head) {
             Ok(request) => request,
             Err(error) => {
-                return respond(&mut stream, false, &simple(400, "Bad request", &error), "", "");
+                return respond(&mut stream, false, &simple(400, "Bad request", &error), "", "", "");
             }
         };
         let head_only = request.method == "HEAD";
-        let page = match gate(&request, self.port, &self.token) {
+        let page = match gate(&request, &self.front, &self.token) {
             Gate::Refuse(status, text) => simple(status, "Refused", &text),
             Gate::Route(segments) if request.method == "POST" => {
-                let length = match editor::body_length(&request) {
+                let length = match editor::body_length(&request, &self.front) {
                     Ok(length) => length,
-                    Err(error) => return respond(&mut stream,false,&simple(400,"Cannot save",&error),&self.base(),&self.subject),
+                    Err(error) => return respond(&mut stream,false,&simple(400,"Cannot save",&error),&self.nav(),&self.subject,self.allow()),
                 };
                 let end = head.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
                 let mut body = head[end..].to_vec();
-                if body.len() > length { return respond(&mut stream,false,&simple(400,"Cannot save","unexpected bytes after the form"),&self.base(),&self.subject); }
+                if body.len() > length { return respond(&mut stream,false,&simple(400,"Cannot save","unexpected bytes after the form"),&self.nav(),&self.subject,self.allow()); }
                 while body.len() < length {
                     let remaining = (length-body.len()).min(buffer.len());
                     let read = admission::read_ingress(&mut stream, &mut buffer[..remaining], deadline).map_err(|e|e.to_string())?;
-                    if read == 0 { return respond(&mut stream,false,&simple(400,"Cannot save","incomplete document form"),&self.base(),&self.subject); }
+                    if read == 0 { return respond(&mut stream,false,&simple(400,"Cannot save","incomplete document form"),&self.nav(),&self.subject,self.allow()); }
                     body.extend_from_slice(&buffer[..read]);
                 }
                 let _mutation = self.mutations.lock().map_err(|_| "browser custody lock poisoned")?;
@@ -619,7 +695,7 @@ impl Site {
                 self.route(&segments)
             },
         };
-        respond(&mut stream, head_only, &page, &self.base(), &self.subject)
+        respond(&mut stream, head_only, &page, &self.nav(), &self.subject, self.allow())
     }
 
     fn route(&self, segments: &[String]) -> Page {
@@ -744,7 +820,9 @@ impl Site {
                  read under your key; what you see is what your grants cover.</p>\n<table data-refs=\"{}\">\
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
-            ) + &format!("<p><a href=\"{base}/studio\">Source studio</a> | <a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self),
+            ) + &if self.front.read_only { String::new() } else {
+                format!("<p><a href=\"{base}/studio\">Source studio</a> | <a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
+            },
         }
     }
 
@@ -778,10 +856,10 @@ impl Site {
                 title,
                 stamp: Stamp::Read(context),
                 body: format!(
-                    "<p class=note>{0} is not a document; its fields are below (<a href=\"{base}/board/{0}\">as a \
-                     board</a>).</p>\n{1}",
+                    "<p class=note>{0} is not a document; its fields are below{2}.</p>\n{1}",
                     escape(name),
-                    render_fields(&entries, false)
+                    render_fields(&entries, false),
+                    format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name))
                 ),
             };
         }
@@ -824,10 +902,10 @@ impl Site {
                 s = escape(read.document["state"].as_str().unwrap_or("?")),
             ));
         } else {
-            body.push_str(&format!(
-                "<p class=note><a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | <a href=\"{base}/doc/{n}/history\">history</a> | <a href=\"{base}/doc/{n}/inspect\">source and comments</a></p>\n",
-                n = escape(name)
-            ));
+            let n = escape(name);
+            let edit = if self.front.read_only { String::new() } else { format!("<a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | ") };
+            let inspect = format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>");
+            body.push_str(&format!("<p class=note>{edit}<a href=\"{base}/doc/{n}/history\">history</a>{inspect}</p>\n"));
         }
         // The document is the one renderer's HTML, byte for byte what
         // `doc show --format html` prints for this read.
@@ -851,7 +929,7 @@ impl Site {
                 status: 200,
                 title,
                 stamp: Stamp::None,
-                body: render_history(&self.base(), name, &history),
+                body: render_history(&self.base(), name, &history, &|_| true),
             },
             Err(error) => failure_page(&title, &error),
         }
@@ -926,8 +1004,11 @@ impl Site {
             .into_iter()
             .filter(|other| self.born_in(other).as_deref() == Some(target.as_str()))
             .collect();
+        let actions = if self.front.read_only { String::new() } else {
+            format!("<p><a href=\"{base}/room/{n}/new-document\">Create a document in this room</a> | <a href=\"{base}/room/{n}/resident\">Resident requests and output</a></p>", n = escape(name))
+        };
         let mut body = format!(
-            "<p><a href=\"{base}/room/{n}/new-document\">Create a document in this room</a> | <a href=\"{base}/room/{n}/resident\">Resident requests and output</a></p><p>The room cell itself: {} entries, <a href=\"{base}/doc/{n}\">open it</a>.</p>\n\
+            "{actions}<p>The room cell itself: {} entries, <a href=\"{base}/doc/{n}\">open it</a>.</p>\n\
              <section><h2>In this room</h2>\n<ul data-children=\"{}\">\n",
             entries.len(),
             children.len(),
@@ -994,8 +1075,8 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, subject: &str) -> Result<()> {
-    let body = wrap(page, base, subject);
+fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, nav: &str, subject: &str, allow: &str) -> Result<()> {
+    let body = wrap(page, nav, subject);
     let mut response = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
          Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
@@ -1005,7 +1086,7 @@ fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, sub
         page.status,
         reason(page.status),
         body.len(),
-        if page.status == 405 { "Allow: GET, HEAD, POST\r\n" } else { "" },
+        if page.status == 405 { format!("Allow: {allow}\r\n") } else { String::new() },
     )
     .into_bytes();
     if !head_only {
@@ -1017,6 +1098,10 @@ fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, sub
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn loopback() -> Front {
+        Front::loopback(8080, false)
+    }
 
     #[test]
     fn board_rendering_visits_sparse_state_fields_without_address_scan() {
@@ -1164,7 +1249,7 @@ mod tests {
                 {"type":"changed","element":"1001","before":{"kind":"atom","payload":hex(b"a")},
                     "after":{"kind":"atom","payload":hex(b"b")}},
                 {"type":"moved","element":"1002","before":null,"after":"1001"}]}]});
-        let html = render_history("/t", "paper", &history);
+        let html = render_history("/t", "paper", &history, &|_| true);
         assert!(html.contains("data-history=\"2\""));
         assert!(html.contains("data-row=\"99\" data-subject=\"7\" data-content=\"false\""));
         assert!(html.contains("data-no-content"));
@@ -1205,7 +1290,7 @@ moved 1002: after the start -> after 1001
         let undecoded = failure_page("paper", "mini: host refused query; encoded refusal: 00ff");
         assert_eq!(undecoded.status, 403);
         assert!(undecoded.body.contains("frame was not decoded"));
-        assert!(wrap(&page, "/t", "9").contains("the Host refused this page's signed read"));
+        assert!(wrap(&page, &nav("/t", true), "9").contains("the Host refused this page's signed read"));
         let page = failure_page("paper", "cannot open socket: no such file");
         assert_eq!(page.status, 502);
     }
@@ -1233,35 +1318,35 @@ moved 1002: after the start -> after 1001
     fn gate_refuses_writes_foreign_hosts_origins_and_wrong_secret() {
         let host = [("Host", "127.0.0.1:8080")];
         assert_eq!(
-            gate(&request("GET", "/s3cret/doc/paper", &host), 8080, "s3cret"),
+            gate(&request("GET", "/s3cret/doc/paper", &host), &loopback(), "s3cret"),
             Gate::Route(vec!["doc".into(), "paper".into()])
         );
-        assert_eq!(gate(&request("HEAD", "/s3cret/", &[("Host", "localhost:8080")]), 8080, "s3cret"), Gate::Route(vec![]));
+        assert_eq!(gate(&request("HEAD", "/s3cret/", &[("Host", "localhost:8080")]), &loopback(), "s3cret"), Gate::Route(vec![]));
         for method in ["POST", "PUT", "DELETE", "PATCH", "OPTIONS"] {
-            assert!(matches!(gate(&request(method, "/s3cret/", &host), 8080, "s3cret"), Gate::Refuse(405, _)));
+            assert!(matches!(gate(&request(method, "/s3cret/", &host), &loopback(), "s3cret"), Gate::Refuse(405, _)));
         }
         for foreign in ["evil.example:8080", "127.0.0.1:9999", "127.0.0.1", "attacker.127.0.0.1.nip.io:8080"] {
-            assert!(matches!(gate(&request("GET", "/s3cret/", &[("Host", foreign)]), 8080, "s3cret"), Gate::Refuse(421, _)));
+            assert!(matches!(gate(&request("GET", "/s3cret/", &[("Host", foreign)]), &loopback(), "s3cret"), Gate::Refuse(421, _)));
         }
-        assert!(matches!(gate(&request("GET", "/s3cret/", &[]), 8080, "s3cret"), Gate::Refuse(421, _)));
+        assert!(matches!(gate(&request("GET", "/s3cret/", &[]), &loopback(), "s3cret"), Gate::Refuse(421, _)));
         assert!(matches!(
-            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Host", "evil:8080")]), 8080, "s3cret"),
+            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Host", "evil:8080")]), &loopback(), "s3cret"),
             Gate::Refuse(421, _)
         ));
         assert!(matches!(
-            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Origin", "http://evil.example")]), 8080, "s3cret"),
+            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Origin", "http://evil.example")]), &loopback(), "s3cret"),
             Gate::Refuse(403, _)
         ));
         assert!(matches!(
-            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Origin", "http://127.0.0.1:8080")]), 8080, "s3cret"),
+            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Origin", "http://127.0.0.1:8080")]), &loopback(), "s3cret"),
             Gate::Route(_)
         ));
         assert!(matches!(
-            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Sec-Fetch-Site", "cross-site")]), 8080, "s3cret"),
+            gate(&request("GET", "/s3cret/", &[("Host", "127.0.0.1:8080"), ("Sec-Fetch-Site", "cross-site")]), &loopback(), "s3cret"),
             Gate::Refuse(403, _)
         ));
         for target in ["/", "/wrong/", "/s3cre/", "/s3cret0/", "/s3cret/doc/..%2f", "doc"] {
-            assert!(matches!(gate(&request("GET", target, &host), 8080, "s3cret"), Gate::Refuse(404, _)), "{target}");
+            assert!(matches!(gate(&request("GET", target, &host), &loopback(), "s3cret"), Gate::Refuse(404, _)), "{target}");
         }
     }
 
@@ -1277,9 +1362,9 @@ moved 1002: after the start -> after 1001
     #[test]
     fn creation_posts_are_bounded_to_exact_session_routes() {
         for target in ["/secret/new-document/0123456789abcdef0123456789abcdef", "/secret/new-document/0123456789abcdef0123456789abcdef/lookup", "/secret/new-document/0123456789abcdef0123456789abcdef/finish"] {
-            assert!(matches!(gate(&request("POST",target,&[("host","127.0.0.1:8080")]),8080,"secret"),Gate::Route(_)));
+            assert!(matches!(gate(&request("POST",target,&[("host","127.0.0.1:8080")]), &loopback(), "secret"),Gate::Route(_)));
         }
-        assert!(matches!(gate(&request("POST","/secret/room/lab/new-document",&[("host","127.0.0.1:8080")]),8080,"secret"),Gate::Refuse(405,_)));
+        assert!(matches!(gate(&request("POST","/secret/room/lab/new-document",&[("host","127.0.0.1:8080")]), &loopback(), "secret"),Gate::Refuse(405,_)));
     }
 
     #[test]

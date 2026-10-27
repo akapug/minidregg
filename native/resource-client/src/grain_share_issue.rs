@@ -129,7 +129,7 @@ fn reinspect(directory: &Path, state: &Retained, stem: &str) -> Result<Option<Va
     }
     let frame = custody::bounded(&frame_path, transport::HOST_MAX_FRAME)?;
     let operation = if stem == "submit" { 54 } else { 55 };
-    if frame.first() == Some(&255) && !binary.exists() {
+    if frame.first().is_some_and(|b| crate::is_outcome_frame(*b)) && !binary.exists() {
         return Ok(None);
     }
     if frame.first() != Some(&operation) || frame.len() < 2 {

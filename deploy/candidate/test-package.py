@@ -20,6 +20,8 @@ usage: python3 deploy/candidate/test-package.py
 """
 import hashlib
 import json
+import tarfile
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -141,6 +143,28 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
                   git(repo, "rev-parse", "HEAD^{tree}").decode().strip() and
                   v["build"]["cargoLockSha256"]["Cargo.lock"] == sha(repo / "Cargo.lock")
                   for rel, v in manifest["outputs"].items()))
+        # build.sh --source-archive packages in an extracted tree: no repository holds the commit there.
+        def package_from(archive_path, cwd, out):
+            return subprocess.run([sys.executable, str(PACKAGE), "--roles", str(tmp / "cand.roles.json"),
+                                   "--source-archive", str(archive_path), "--out", str(tmp / out),
+                                   "--toolchains", str(toolchains)], cwd=cwd, capture_output=True, text=True)
+        outside = tmp / "no-repo"
+        outside.mkdir()
+        bare = package_from(archive, outside, "no-repo-cand")
+        check("packages outside any repository, tree taken from the archive",
+              bare.returncode == 0 and json.loads((tmp / "no-repo-cand/provenance.json").read_text())["source"]["tree"]
+              == git(repo, "rev-parse", "HEAD^{tree}").decode().strip(), bare.stderr)
+        # Teeth: an archive whose files are not the commit's (same commit id in its header) is refused
+        # where a repository holding the commit can say so.
+        tampered = tmp / "tampered.tar"
+        tampered.write_bytes(archive.read_bytes())
+        with tarfile.open(tampered, "a") as tar:
+            extra = tarfile.TarInfo("planted.txt")
+            extra.size = 7
+            tar.addfile(extra, io.BytesIO(b"planted"))
+        refused = package_from(tampered, repo, "tampered-cand")
+        check("an archive whose files differ from the commit is refused",
+              refused.returncode != 0 and "is not `git archive" in refused.stderr, refused.stderr)
         # Missing builder evidence must refuse, not invent provenance from the current machine.
         no_evidence = run("--roles", str(tmp / "cand.roles.json"), "--source-archive", str(archive),
                           "--out", str(tmp / "no-evidence"))

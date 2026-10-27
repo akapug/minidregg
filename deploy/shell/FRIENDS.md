@@ -1,40 +1,28 @@
 # the mini shellserver: a guide for friends (from ember)
 
-**what this guide is true of.** it describes the code in main (the minidregg repository,
-commit 5216e02f), and says in each section whether the public node has it. the public node
-(`mini@2.28.141.27`) runs candidate **5688775a** (a source commit of 2026-09-30, re-genesised
-2026-10-01); that was read from the node on 2026-10-03. `help guide` on the node prints the
-copy of this file that shipped with that candidate (`ship.sh` installs each candidate's own
-`deploy/shell/FRIENDS.md`), so what the node prints is an older text than this one. when a
-newer candidate is shipped, the table below is the part to redo.
+**what this guide is true of.** it describes the code in main (the minidregg repository).
+a node runs one shipped candidate, and `help guide` on the node prints the copy of this file
+that shipped with that candidate (`ship.sh` installs each candidate's own
+`deploy/shell/FRIENDS.md`). the table below is the part a ship fills in: it says what the
+shipped candidate has, and it is empty until a candidate built from this text ships.
 
-## what the public node has, and what only main has
+## what the node has
 
-on the node today, the shell answers these verbs and no others (the `VERBS` table of
-`native/resource-client/src/shell.rs` at 5688775a): `whoami keygen init enroll refs read
-describe import create propose invoke delegate law submit lookup retry publish revoke doc
-board inbox export history help exit`. inside them, `doc` has only `new` (a `draft` or a
-`note`), `show`, `append`, `edit`, `link` and `backlinks`; `law` takes one JSON predicate;
-`create` takes no field list; `keygen` makes one key and no next key.
+the demo box (`demo.dregg.online`) has not shipped a candidate from this text yet (the demo
+prefix, `docs/DEMO-PREFIX-2026-10-26.md`, Phase 2). when it does, this table is filled from
+that candidate's own `help` and its journey rows, and nothing in it is claimed before:
 
-| in this guide | on the public node | where it stands |
+| surface | on the shipped candidate | evidence |
 |---|---|---|
-| keys, `init`, `create`, `invoke`, `delegate`, `publish`, `export`/`import`, `retry`, `revoke`, JSON laws, `lock`, `history` | yes (with the limits above) | the journey J0-J8 passed through this shell (`docs/evidence/2026-09-30-shell-journey`) |
-| next key: `key-status`, `rotate-key`, `adopt-next-key` | no | main only |
-| `renounce`, `inspect`, `why`, `can`, one-line laws, `law check`, `law show` | no | main only |
-| documents beyond `new/show/append/edit/link/backlinks`: `insert`, `move`, `mark`, `annotate` in the shell, ranges, transclusion, `history`, `diff`, `pull`/`push`, `search`, `--at`, `--html`, `--raw` | no | main only |
-| `mini web` (a command of the client binary, not a shell verb) | no | main only |
-| proxy mode (`mini --remote`, `mini join`, `mini socket-proxy`) | no: the 5688775a source has none of them | main only; see its section for what it still needs |
-| rooms, templates, `room leave` | no | integrated on development worlds only (README, Honest state) |
-| chat (`chat`, `say`, `tail`, `react`, `topic`, `pin`) | no | compiled; no recorded run joins it to a native Host |
-| a paid week in a room (`pay`, `credit`, `tariff`, `topup`, `room status`) | no | J17 passed on a development world |
-| private rooms | no | on main; no run on a real Host is recorded in `docs/evidence`; devnet quality, privacy not audited |
-| jobs, sealed markets | no | on main |
-| the librarian (`summon`, `ask`, `dismiss`, `hermes`) | no: no such verbs, and `mini-hermes` was inactive | scripted-provider run on a private Store only |
-| the Discord entrance | no: `mini-discord` was inactive and no Discord application exists | tested against a simulated Discord |
-| paying to enrol (`mini join --solana`) | no: the pay watcher and roster sync were inactive, and the node's single-socket entry has no operator socket | fixtures only; see "joining by yourself" |
+| the shell (keys, resources, laws, documents, boards) | (filled at ship) | the candidate's journey rows |
+| signing up at `/join` (free or paid) | (filled at ship) | `journey.d/jdoor.sh --box` |
+| Discord (`/mini`, linked with `/mini line:link CODE`) | (filled at ship) | the entrance's endpoint tests; a real application |
+| rooms, chat, a week in a room, private rooms | (filled at ship) | |
+| the librarian (Hermes) | (filled at ship) | |
+| proxy mode (`mini --remote`) | (filled at ship) | signing needs a locally replayed Store (below) |
 
-on 2026-10-03 the node's roster held ember and three test keys, and no friend was enrolled.
+the old public node (`dregg-workhorse`, candidate 5688775a of 2026-09-30) is torn down once
+the demo box is up; nothing here describes it.
 
 ## beta, read this first
 
@@ -47,20 +35,21 @@ IDs (`deploy/shell/OPERATOR.md`, "Re-genesis"). nothing here has an uptime promi
 home, and the box's operator (root) can always read it. who else can depends on how the box is
 set up, and ember tells you which:
 
-- **one shared account** (the public node today): the Store, the Host, the operator's tools and
-  every hosted friend's session run as the box's `mini` account, so the shell's verb grammar is
-  the only fence between friends (`deploy/shell/README.md`).
-- **separate accounts** (dregg-infra `tenancy=split`, built on main 2026-10-04, on no box yet):
+- **one shared account** (single tenancy; no box offered to strangers runs it): the Store, the
+  Host, the operator's tools and every hosted friend's session run as the box's `mini` account,
+  so the shell's verb grammar is the only fence between friends (`deploy/shell/README.md`).
+- **separate accounts** (dregg-infra `tenancy=split`; the demo box's shape, and the door refuses
+  to run without it):
   your session runs as your own account `mini-s-NAME`, and only that account and root can read
   your session home; the Store and the Host run as `mini-core`, which cannot read it either. a
   provider key you `key set` is sealed by the box's key broker (`mini-keys`), which no session
   account, not the Store and not the librarian can read: it checks your grant and makes the
   provider call itself. a Discord line runs as your account too.
 
-enrollment also needs your key in ember's session for a moment, because `enroll plan` signs
-with both keys in one process; ember copies it there and deletes the copy right after the
-enrollment (`OPERATOR.md`, steps 4-5). keep nothing precious behind a hosted key. proxy mode
-(below) keeps your key on your own machine; main has it, the node does not.
+enrollment never copies your key: the sponsor plans from your public key, and your own account
+signs the possession proof in your session home (`deploy/door/README.md`, "Custody contract").
+**everything on the demo box is world-readable** to every member: keep nothing private or
+precious behind a hosted key. proxy mode (below) keeps your key on your own machine.
 
 **your next key (main only).** `keygen mini.key` also makes `mini.key.next`: your *next* key.
 your record commits to it (only its digest is stored), and it is the only thing that can
@@ -86,20 +75,23 @@ the last one you hold; a `law-denied` refusal can name no clause).
 ## getting in
 
 1. make an ssh key just for this: `ssh-keygen -t ed25519 -f ~/.ssh/mini`
-2. send me `~/.ssh/mini.pub` (the `.pub` one, only that) and the name you want for your
-   session: it must start with a lowercase letter, then lowercase letters, digits and `-`,
-   32 characters at most, and it is permanent.
-3. when i say you're on the list: `ssh -t -i ~/.ssh/mini mini@2.28.141.27`. you land at
-   `mini> `. (on a box with separate accounts, the login is your own: `mini-s-NAME@HOST`, NAME
-   being your session name; everything after the login is the same. typing `mini@` there tells
-   you the right login and runs nothing.) Tab completes verbs and names, Up/Down walks history, `help` lists every verb,
-   and `help VERB` shows what it runs.
+2. at **<https://demo.dregg.online/join>**, choose a session name (it starts with a lowercase
+   letter, then lowercase letters, digits and `-`, 25 characters at most, and it is permanent)
+   and paste `~/.ssh/mini.pub` (the `.pub` one, only that). choose free or pay, and tick "link
+   Discord" if you want it. keep the status page it gives you: its address is the only key to
+   your request.
+3. when the page says your account is ready: `ssh -t -i ~/.ssh/mini mini-s-NAME@demo.dregg.online`.
+   you land at `mini> `, already enrolled and initialized. Tab completes verbs and names, Up/Down
+   walks history, `help` lists every verb, and `help VERB` shows what it runs.
 
 ```
-ssh -t -i ~/.ssh/mini mini@2.28.141.27                 # interactive
-ssh -i ~/.ssh/mini mini@2.28.141.27 'read notes'       # one verb; exit code is the verb's
-ssh -T -i ~/.ssh/mini mini@2.28.141.27 < steps.mini    # a script, one verb per line, stops at the first failure
+ssh -t -i ~/.ssh/mini mini-s-NAME@demo.dregg.online                 # interactive
+ssh -i ~/.ssh/mini mini-s-NAME@demo.dregg.online 'read notes'       # one verb; exit code is the verb's
+ssh -T -i ~/.ssh/mini mini-s-NAME@demo.dregg.online < steps.mini    # a script, one verb per line, stops at the first failure
 ```
+
+an operator friend is added by ember instead (`OPERATOR.md`); after the login everything is the
+same.
 
 ### keeping your key on your own machine (`mini --remote`): main only
 
@@ -107,8 +99,7 @@ the hosted shell above is a convenience, and a weak one for your key (see key cu
 **proxy mode** is the other mode: you run the same `mini` locally and the box only relays its
 frames (it keeps what you store, not your key). the box side is a `mode=proxy` line in the
 operator's roster (`deploy/shell/README.md`); it needs `mini socket-proxy`, which the node's
-candidate does not contain, so **today there is no proxy mode on the public node.** what main
-implements:
+candidate may not contain (see the table above). what main implements:
 
 1. get `mini` from a candidate (Linux x86-64: `bin/mini`; macOS arm64:
    `bin/clients/aarch64-apple-darwin/mini`) and check its SHA-256 against `SHA256SUMS`.
@@ -146,12 +137,8 @@ hosted shell on main does not need the variables: with a Host path and no
 ## your first 10 minutes
 
 ```
-mini> keygen mini.key            # your signing key, in your session home
-   … on main this also prints two hex lines (your next public key and its co-signature):
-     send me both, then tell me "done" …
-   … i enroll you and give you a factory grant and a small funded account.
-     i send you your subject number (a long decimal) …
-mini> init mini.key SUBJECT      # your workspace; before i've provisioned you it says so and makes nothing
+   … the door already ran `keygen mini.key` and `init mini.key SUBJECT` for you (an operator
+     friend runs them by hand: keygen, then init once ember sends the subject) …
 mini> whoami                     # "initialized": true, "subject": "<yours>"
 mini> create notes declared {"type":"all","predicates":[]} 2
                                  # a resource of your own, under a permit-all law, whose field 2 you may write
@@ -175,9 +162,9 @@ mini> publish give-sam
 ```
 hand the reference over (it's JSON addressed to sam; `export` works once you have run `publish`):
 ```
-you$ ssh -i ~/.ssh/mini mini@2.28.141.27 'export give-sam' > give-sam.json   # send them this file
-sam$ ssh -i ~/.ssh/mini mini@2.28.141.27 "import notes $(cat give-sam.json)"
-sam$ ssh -i ~/.ssh/mini mini@2.28.141.27 'read notes'
+you$ ssh -i ~/.ssh/mini mini-s-NAME@demo.dregg.online 'export give-sam' > give-sam.json   # send them this file
+sam$ ssh -i ~/.ssh/mini mini-s-sam@demo.dregg.online "import notes $(cat give-sam.json)"
+sam$ ssh -i ~/.ssh/mini mini-s-sam@demo.dregg.online 'read notes'
 ```
 retrying is safe. after the service restarts, the same attempt returns the same receipt:
 ```
@@ -422,7 +409,7 @@ room key is wrapped to an X25519 + ML-KEM-768 pair; the signatures that vouch fo
 not). if you are the founder and rotate your signing key, run `room transition` first (it hands the
 room to your next key; members need no re-pin) -- `rotate-key` refuses until you do. a private room is
 never mirrored to Discord. again: devnet quality; privacy not audited. details:
-`deploy/shell/templates/room/private/README.md` and `docs/PRIVATE-ROOMS-DESIGN.txt`.
+`native/resource-client/templates/room/private/README.md` and `docs/PRIVATE-ROOMS-DESIGN.txt`.
 
 what can you do here? ask before you try (main only):
 ```
@@ -507,63 +494,33 @@ turn free) plus the network fee; when its account can't pay, the Host refuses th
 Hermes says "out of budget" in its stream. it can't write anything it holds no grant on: ask
 it to edit your document and the Host refuses it.
 
-## joining by yourself: pay to enrol (not deployed)
+## joining by yourself: paying instead of the free route
 
-this is how you would enrol without asking ember, by paying. **it does not run anywhere you
-can use yet**: the pay watcher and the roster sync were inactive on the node when it was
-read, the node's entry has no operator socket (self-enrollment needs one, so it needs a
-re-genesis onto the ingress topology), and publishing the pin your client reads is the last
-step of the operator's runbook, still ahead.
-what is decided, from `deploy/pay/enrol-terms.json` and `deploy/pay/README.md`:
+the door's **pay** route (`/join`, "pay") gives you the same hosted account as the free route, paid
+for by you instead of the box's sponsor. it runs on the box only once the operator has set up the
+payment watcher (`deploy/pay/README.md`), and the join page offers it only then.
 
-- the price is **50 DREGG per node week**, paid to the Solana address
-  `5N2uUG4TEwvM4acjWRpZ981CJa4p5e9RcuAYQvuUZLp6` (a fresh devnet-quality key), in the token
-  with mint `XkeTXo1125vz5H9svJpGiw4JvLbN8VmMu9cmMvspump` (Token-2022, 6 decimals; 1 atomic
-  unit is 1 credit). the tariff's unit is the week, so the week is exactly 50000000 atomic units
-  (50.000000 DREGG); enrolling costs the one-time birth fee plus that, and the Host's own
-  quote, which `mini join` prints, is the amount to send.
-- you run `mini join --solana` on your machine. it makes (or takes) your Mini key there, signs
-  two possessions, and prints the Host's quote (the price as birth fee + membership + spendable
-  credit, and that the quote does not reserve the price), then the address, the mint, the amount
-  in DREGG and in atomic units, the memo (400 bytes), a Solana Pay link and an `spl-token transfer`
-  line; **it submits nothing**, you pay from your own wallet. send from a wallet you control, never
-  an exchange: exchanges drop memos, and a transfer without the memo can fail enrollment; some
-  wallets also drop the memo from a Solana Pay link, so check the memo is in the transaction
-  before you sign, or use the `spl-token` line. your wallet, your ssh key and your Mini key are
-  linked publicly and permanently on Solana. `mini join --wait` then polls the public enrollment
-  view for your key and, once you are enrolled, prints your subject, your workspace, your account,
-  your lease (the box hour it runs until) and the ssh line for your proxy key; `mini join --renew`
-  prints the memo again with one week's amount. the v2
-  memo (`--memo-version v2`) also commits to your next key; v1 does not.
-
-```
-mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
-mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
-mini join --wait --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir JOIN-DIR [--signature TX-BASE58]
-```
-- `ENROL.json` is the pin ember publishes with the friend bundle; the client refuses a pin whose
-  address differs from the box's book row at the enrollment index, and refuses the unset
-  placeholder `EMBER_ENROL_ADDRESS`. `deploy/pay/render-enrol` writes it from
-  `enrol-terms.json`.
-- **the ssh key must be a plain `ssh-ed25519` key.** a FIDO / security-key ssh key
-  (`ed25519-sk`, public line `sk-ssh-ed25519@openssh.com ...`, made with `ssh-keygen -t ed25519-sk`
-  or kept on a YubiKey) is refused by name, `fidoKeyRefused`, and so are RSA and ECDSA keys
-  (`notEd25519`). the refusal comes from `mini join --solana` on your machine, before it prints
-  an address or an amount, so nothing is paid. the reason is the signature: a security key signs
-  a different structure (flags and a counter) than the enrollment memo's possession proof
-  carries, so a payment naming one could not enrol you and would only be journalled for ember
-  to settle by hand. make a separate key for this (`ssh-keygen -t ed25519 -f ~/.mini/mini-ssh`)
-  and pass it as `--ssh-key`; your security key keeps working for everything else.
-- once the Host has seen your payment, the roster sync (every 60 seconds) gives you a
-  *proxy* line (self-enrollment is proxy only), so you then need proxy mode, with the signing
-  limits above. the line lapses when your lease ends: your subject, credit, grants and
-  resources stay, you just cannot log in; paying the same memo again renews it
-  (`dregg-infra` `edge/mini/README.md`, "Roster").
-- a payment can also be *journalled* instead of enrolling you: no memo, a malformed memo, an
-  amount below the price, or an ssh key already taken. nothing is minted then, and it is
-  kept for ember to settle by hand.
-- the operator's order of work is `dregg-infra` `edge/mini/SHIP-RUNBOOK.md`, section 10.
-  publishing the pin is ember's own act, after a 1 DREGG dry run from his wallet.
+- the price is **50 DREGG per node week** plus the box's one-time birth fee; the tariff's unit is
+  the week, so a week is exactly 50000000 atomic units (6 decimals). the amount the page shows is
+  the Host's own quote: send exactly that.
+- the receiving address is this deployment's own fresh key, signed into the box's book; the page
+  shows it. whether it is Solana mainnet or devnet is the operator's switch, and the page says
+  which.
+- your Mini key is made on the box (a hosted account, as for the free route); your ssh key is your
+  login. to tie them together without the box ever holding your ssh secret, the page shows one
+  `ssh-keygen -Y sign -n dregg-enrol@v2` command: run it on your machine and paste the signature
+  back. the page then shows the address, the amount, the memo and the chain hour the quote expires
+  at. a late memo is not lost, but it no longer enrols you by itself; ask the page for a fresh one.
+- pay from a wallet you control, never an exchange (exchanges drop memos), with the memo as one SPL
+  Memo instruction, then paste the transaction signature into the page. your wallet, your ssh key
+  and your Mini key are linked publicly and permanently on Solana.
+- **the ssh key must be a plain `ssh-ed25519` key.** FIDO / security keys (`sk-ssh-ed25519@…`), RSA
+  and ECDSA are refused at the form, before anything is paid.
+- a payment can be *journalled* instead of enrolling you: a missing or malformed memo, an amount
+  below the price, or an ssh key already taken. nothing is minted then; the page says so, and ember
+  settles it by hand.
+- the CLI route still exists for your own machine (`mini join --memo-version v2 --solana`, proxy
+  mode); it gives a proxy-mode account, which cannot sign until proxy mode can (above).
 
 ## how things end
 

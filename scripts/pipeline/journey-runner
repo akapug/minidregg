@@ -42,12 +42,15 @@ scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [
 # Product driver input plumbing lives here. Paths belong to this artifact set;
 # ancillary inputs have explicit names and no developer-machine defaults.
 product_inputs() {
+  # One world template per variant per tip (newparticipant-acceptance.sh NEWPARTICIPANT_TEMPLATE_DIR): the
+  # first row of a variant builds its world and leaves it; the others restore it. Removed with the tip's run.
+  export NEWPARTICIPANT_TEMPLATE_DIR=$J/world-templates; mkdir -p -m 700 "$NEWPARTICIPANT_TEMPLATE_DIR"
   export HOST=$set/bin/minidregg-host MINI=$set/bin/mini STORE=$set/bin/minidregg-link-sqlite-store
   export VERIFIER=$set/bin/minidregg-credential-signature-verifier SHELL_BIN=$set/bin/mini
   export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher
   export CANDIDATE=$set/provenance.json
   export M7_REFERENCE=${MINI_M7_REFERENCE:-$(m7_reference_for "$set")}
-  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/bin/mini-hermes-test-provider}
+  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/fixtures/mini-hermes-test-provider}  # a journey fixture, not a candidate output (package.py --fixture-roles)
   export LAUNCH_GATE=${MINI_LAUNCH_GATE_BIN:-$set/bin/launch-gate}
   export MINI_FN_LAUNCHER=${MINI_FN_LAUNCHER:-} MINI_FN_CORE=${MINI_FN_CORE:-}
 }
@@ -110,6 +113,7 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
   SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
     systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
       --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
+      --setenv=NEWPARTICIPANT_TEMPLATE_DIR \
       -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
   rc=$?
   # Failed scopes can kill the row shell before it emits any verdict. Keep the
@@ -205,6 +209,7 @@ run_tip() {
       "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
     { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | tabalign; } >"$J/table.txt"
   bash "$here/journey-red-lines" "$JOURNEY_ROOT" "$tip" "${labels% }" >"$J/red.txt"
+  rm -rf "$J/world-templates"                 # the tip's world templates: test keys and Stores, not evidence
   echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
   pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
   # lean envs: drop those already run and no longer labelled, but keep the newest run one (the

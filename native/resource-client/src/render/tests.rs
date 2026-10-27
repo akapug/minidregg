@@ -218,6 +218,49 @@ fn shared_name_bindings_render_as_internal_targets_not_external_urls() {
     assert_eq!(rendered.raw(), b"one\ntwo'\nthree\nfour\n");
 }
 
+/// A co-editor writes `mini-name` links the strict decoder refuses (Lean admits
+/// any link with that scheme). The document still renders for every reader in
+/// every format; each malformed link shows as invalid with the decoder's reason;
+/// a well-formed binding beside them still binds.
+#[test]
+fn render_malformed_shared_name_link_renders_invalid_not_fatal() {
+    let scheme = crate::hex(b"mini-name");
+    let bad = |id: &str, authority: &[u8], path: &[u8], extra: Value| {
+        let mut entry = json!({"type":"link","id":id,"source":null,"relation":"0","tombstonedAt":null,
+            "target":{"type":"external","scheme":scheme,"authority":crate::hex(authority),"path":crate::hex(path)}});
+        for (key, value) in extra.as_object().unwrap() { entry[key] = value.clone(); }
+        entry
+    };
+    let entries = vec![
+        bad("91", b"x", b"bogus", json!({})),
+        bad("92", b"board", b"object/042", json!({})),
+        bad("93", b"board", b"planet/1", json!({})),
+        bad("94", b"<script>\x1b]52;c;eA==\x07", b"object/1", json!({})),
+        bad("95", b"board", b"object/1", json!({"relation":"3"})),
+        { let mut e = bad("96", b"board", b"object/1", json!({})); e.as_object_mut().unwrap().remove("tombstonedAt"); e },
+        json!({"type":"link","id":"9","source":null,"relation":"0","tombstonedAt":null,
+            "target":crate::workspace::shared_names::target("board","object","42").unwrap()}),
+    ];
+    let rendered = render_with(&fixture("k12m"), &entries, &BTreeMap::new());
+    assert_eq!(rendered.raw(), b"one\ntwo'\nthree\nfour\n");
+    let text = rendered.text();
+    assert!(text.contains("board → object:42"), "{text}");
+    for id in ["91", "92", "93", "94", "95", "96"] {
+        assert!(text.contains(&format!("✗ invalid shared-name link {id}: ")), "{id}: {text}");
+    }
+    assert!(text.chars().all(|c| c == '\n' || !c.is_control()));
+    let html = rendered.html("lab/index");
+    assert!(html.contains("<dt>board</dt><dd>object:42</dd>"));
+    assert_eq!(html.matches("data-invalid-name=").count(), 6);
+    assert!(!html.contains("<script>"));
+    let json = rendered.json("7");
+    assert_eq!(json["sharedNames"].as_array().unwrap().len(), 1);
+    assert_eq!(json["invalidSharedNames"].as_array().unwrap().len(), 6);
+    // Resolution stays strict: an index carrying a malformed binding resolves nothing.
+    let index = json!({"cell":{"entries":entries}});
+    assert!(crate::workspace::shared_names::bindings(&index).is_err());
+}
+
 // These are explicit legacy-reference carriers, not fabricated range openings.
 #[test]
 fn legacy_reference_renders_current_authorized_bytes_without_inventing_height() {

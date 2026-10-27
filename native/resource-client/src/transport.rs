@@ -70,6 +70,31 @@ pub(crate) fn host_budget(request: &[u8]) -> Duration {
 /// The named refusal for a request whose body exceeds its own operation's
 /// bound, judged before the Host sees a byte of it. `None` is not an
 /// approval: `request_within_bound` and `allowed_operation` still judge it.
+/// The loud reason a public caller gets for an fn ACK (op 13/15). The Host's
+/// `runFnAckSession`/`runFnReplyAckSession` authorize nothing beyond "this Mini
+/// transaction is accepted", so a member could pre-ACK and push the operator's
+/// consumer into Held via `covered-by-durable-frontier`. Until Lean names the
+/// receiver and capability that may ACK a public fn delivery, only the
+/// owner-private socket routes these ops.
+pub(crate) const FN_ACK_OPERATOR_ONLY: &str =
+    "fn ACK (op 13/15) is operator-only: Lean has not stated who may ACK a public fn delivery";
+
+fn fn_ack_transaction(digits: &[u8]) -> bool {
+    !digits.is_empty()
+        && digits.len() <= 80
+        && digits.iter().all(u8::is_ascii_digit)
+        && (digits.len() == 1 || digits[0] != b'0')
+}
+
+/// A named refusal for an op the public route withholds on purpose, so a
+/// caller sees why rather than the generic "unavailable".
+pub(crate) fn public_route_refusal(request: &[u8]) -> Option<&'static str> {
+    match request {
+        [13 | 15, ..] => Some(FN_ACK_OPERATOR_ONLY),
+        _ => None,
+    }
+}
+
 pub(crate) fn operation_body_refusal(request: &[u8]) -> Option<&'static str> {
     match request {
         [operation, _, ..] if NO_BODY_OPS.contains(operation) => {
@@ -232,6 +257,9 @@ pub(crate) fn public_envelope(
     if let Some(reason) = operation_body_refusal(request) {
         return Err(reason);
     }
+    if let Some(reason) = public_route_refusal(request) {
+        return Err(reason);
+    }
     if !allowed_operation(request, catalog_enabled) {
         return Err("operation unavailable on selected socket");
     }
@@ -344,12 +372,6 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // Renumbered from 117-123 at the final merge (pay holds 117-120).
         [131..=137, ..] => true,
         [12 | 14] => true,
-        [13 | 15, digits @ ..] => {
-            !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
-        }
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
@@ -554,6 +576,9 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
+        // fn ACK 13/15 is operator-only (see `FN_ACK_OPERATOR_ONLY`): the Host's
+        // `runFnAckSession` checks only that the txn is accepted, not who asks.
+        [13 | 15, digits @ ..] => fn_ack_transaction(digits),
         // Event17/19 testimony and receipt-only lookups remain on the owner
         // operator socket. The public listener cannot advance a fn frontier.
         [60..=63, payload @ ..] => !payload.is_empty() && payload.len() <= 16_384,
@@ -762,29 +787,9 @@ pub(crate) fn pin_service_mode(path: &Path, operator: bool, legacy_config_exists
     )
 }
 
+/// `mini_sdk::private::clear_stale_socket`.
 pub(crate) fn clear_stale_socket(path: &Path) -> Result<(), String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("cannot inspect socket {}: {error}", path.display())),
-    };
-    if !metadata.file_type().is_socket() || !mini_sdk::private::owned(&metadata) {
-        return Err("socket path is not an owned Unix socket".to_owned());
-    }
-    match UnixStream::connect(path) {
-        Ok(_) => Err("another service still listens on socket".to_owned()),
-        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-            let current = fs::symlink_metadata(path)
-                .map_err(|error| format!("cannot recheck stale socket: {error}"))?;
-            if !current.file_type().is_socket()
-                || (current.dev(), current.ino()) != (metadata.dev(), metadata.ino())
-            {
-                return Err("socket path changed during stale recovery".to_owned());
-            }
-            fs::remove_file(path).map_err(|error| format!("cannot remove stale socket: {error}"))
-        }
-        Err(error) => Err(format!("cannot prove socket stale: {error}")),
-    }
+    Ok(mini_sdk::private::clear_stale_socket(path)?)
 }
 
 pub(crate) fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
@@ -880,6 +885,13 @@ impl<W: Write + AsRawFd> Write for DeadlinePipeWrite<'_, W> {
     }
 }
 
+/// Before any byte reaches a Host: every custody name this process committed is durable
+/// (`mini_sdk::durable::flush_directory_syncs`; a no-op unless the process defers directory syncs).
+/// A request whose preceding custody cannot be made durable is never sent.
+pub(crate) fn durability_barrier() -> Result<(), String> {
+    mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
+}
+
 /// A failed write or read leaves the request's execution status unknown. Callers
 /// retain the original signed call and use historical lookup before resubmission.
 pub fn invoke(
@@ -954,6 +966,7 @@ pub(crate) fn invoke_pinned_deadline(
     frame.extend_from_slice(&expected);
     frame.push(operation);
     frame.extend_from_slice(payload);
+    durability_barrier()?;
     let started = Instant::now();
     let mut stream = connect_unix_deadline(socket, deadline)
         .map_err(|e| format!("cannot connect within deadline: {e}"))?;
@@ -965,6 +978,14 @@ pub(crate) fn invoke_pinned_deadline(
         &frame,
     )
     .map_err(|e| format!("uncertain host request write: {e}"))?;
+    // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): the exact call
+    // was written; the reply is deliberately not read. The Host decides as it would; the attempt
+    // stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
+    if mini_sdk::operator::lose_reply_armed(operation) {
+        std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        drop(stream);
+        return Err(LOST_REPLY.to_owned());
+    }
     let reply = read_frame(&mut DeadlinePipe {
         reader: &mut stream,
         deadline,
@@ -1102,7 +1123,7 @@ fn connect_unix_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStrea
 // request; only exact bytes distinguish it from an uncertain outcome.
 fn response_operation_matches(operation: u8, reply: &[u8]) -> bool {
     match reply.split_first() {
-        Some((&tag, _)) if tag == operation || tag == 255 => true,
+        Some((&tag, _)) if tag == operation || crate::is_outcome_frame(tag) => true,
         Some((&34, _)) if operation == 164 => true,
         Some((&164, payload)) if operation == 34 => {
             payload == b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1"
@@ -1138,7 +1159,21 @@ fn invoke_inner(
     }
     frame.push(operation);
     frame.extend_from_slice(payload);
+    durability_barrier()?;
     let started = std::time::Instant::now();
+    if mini_sdk::operator::lose_reply_armed(operation) {
+        // The lost-reply switch (`submit ID --lose-reply-once`, DEMO-EXPERIENCE A11): write the
+        // exact frame, then deliberately never read the answer. The Host decides as it would; the
+        // attempt stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
+        std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        if let Endpoint::Unix(path) = endpoint(socket)? {
+            durability_barrier()?;
+            let mut stream = UnixStream::connect(path).map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
+            write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
+            drop(stream);
+        }
+        return Err(LOST_REPLY.to_owned());
+    }
     let reply = match endpoint(socket)? {
         Endpoint::Unix(path) => exchange_unix(path, &frame)?,
         Endpoint::Remote(destination) => crate::proxy::exchange(destination, &frame)?,
@@ -1165,7 +1200,12 @@ fn invoke_inner(
 
 /// One framed request on a fresh unix-socket connection and its framed reply.
 /// A failure after the write leaves the request's status uncertain.
+/// What the client says when it chose not to read the reply (the uncertain-response class, so
+/// the attempt is retained and resolved by lookup or retry, never re-sent).
+const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
+
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
+    durability_barrier()?;
     let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
@@ -1928,6 +1968,9 @@ fn serve_connection(
         // lifecycle clients and the separately filtered public ingress relay.
         allowed_operator_operation(&request) || allowed_operation(&request, rules.catalog_enabled)
     } else {
+        if let Some(reason) = public_route_refusal(&request) {
+            return refuse(&mut stream, reason);
+        }
         allowed_operation(&request, rules.catalog_enabled)
     }) {
         return refuse(&mut stream, "operation unavailable on selected socket");
@@ -1956,64 +1999,9 @@ fn serve_connection(
     }
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd"
-))]
+/// The peer's uid from the kernel (`mini_sdk::private::peer_uid`).
 pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
-    unsafe extern "C" {
-        fn getpeereid(socket: i32, uid: *mut u32, gid: *mut u32) -> i32;
-    }
-    let mut uid = 0;
-    let mut gid = 0;
-    if unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
-        return Err(format!(
-            "operator peer credential: {}",
-            io::Error::last_os_error()
-        ));
-    }
-    Ok(uid)
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
-    #[repr(C)]
-    struct Ucred {
-        pid: i32,
-        uid: u32,
-        gid: u32,
-    }
-    unsafe extern "C" {
-        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut Ucred, length: *mut u32) -> i32;
-    }
-    let mut credential = Ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut length = std::mem::size_of::<Ucred>() as u32;
-    if unsafe { getsockopt(stream.as_raw_fd(), 1, 17, &mut credential, &mut length) } != 0
-        || length as usize != std::mem::size_of::<Ucred>()
-    {
-        return Err(format!(
-            "operator peer credential: {}",
-            io::Error::last_os_error()
-        ));
-    }
-    Ok(credential.uid)
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd"
-)))]
-pub(crate) fn peer_uid(_stream: &UnixStream) -> Result<u32, String> {
-    Err("operator peer credentials are unavailable on this platform".into())
+    Ok(mini_sdk::private::peer_uid(stream)?)
 }
 
 #[cfg(test)]
@@ -2063,6 +2051,42 @@ mod tests {
         let reply = read_frame(&mut client).unwrap().unwrap();
         worker.join().unwrap();
         reply
+    }
+
+    fn public_socket_reply(request: &[u8]) -> Vec<u8> {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let (jobs, _queue) = fair_queue::<HostJob>(1);
+        let worker = thread::spawn(move || {
+            let rules = EnvelopeRules {
+                operator: None,
+                config_bytes: b"config",
+                host_sha256: &[7; 32],
+                catalog_enabled: true,
+                read_deadline: Duration::from_millis(500),
+            };
+            serve_connection(server, &rules, &jobs);
+        });
+        let envelope = [&[2u8, 6, 0, 0, 0][..], b"config", &[7; 32], request].concat();
+        write_frame(&mut client, &envelope).unwrap();
+        let reply = read_frame(&mut client).unwrap().unwrap();
+        worker.join().unwrap();
+        reply
+    }
+
+    /// A public caller asking for an fn ACK gets the named reason on the
+    /// public socket and through every byte proxy, never a queued Host call.
+    #[test]
+    fn transport_fn_ack_public_route_refuses_loudly() {
+        for ack in [13u8, 15] {
+            let reply = public_socket_reply(&[ack, b'4']);
+            assert_eq!(reply, [&[254u8][..], FN_ACK_OPERATOR_ONLY.as_bytes()].concat());
+            let envelope = [&[2u8, 6, 0, 0, 0][..], b"config", &[7; 32], &[ack, b'4']].concat();
+            assert_eq!(public_envelope(&envelope, b"config", true), Err(FN_ACK_OPERATOR_ONLY));
+            assert_eq!(public_envelope(&envelope, b"config", false), Err(FN_ACK_OPERATOR_ONLY));
+        }
+        // A malformed ACK is refused for the route too, before its shape.
+        assert_eq!(public_socket_reply(&[13]),
+            [&[254u8][..], FN_ACK_OPERATOR_ONLY.as_bytes()].concat());
     }
 
     #[test]
@@ -3049,15 +3073,19 @@ done"#;
     fn public_fn_operations_have_no_path_payload() {
         assert!(allowed_operation(&[12], false));
         assert!(!allowed_operation(&[12, b'/'], false));
-        assert!(allowed_operation(&[13, b'0'], false));
-        assert!(allowed_operation(&[13, b'1', b'2', b'3'], false));
-        assert!(!allowed_operation(&[13], false));
-        assert!(!allowed_operation(&[13, b'0', b'1'], false));
-        assert!(!allowed_operation(&[13, b'1', b'/'], false));
         assert!(allowed_operation(&[14], false));
         assert!(!allowed_operation(&[14, b'/'], false));
-        assert!(allowed_operation(&[15, b'2'], false));
-        assert!(!allowed_operation(&[15, b'0', b'2'], false));
+        // fn ACK is operator-only; the operator arm keeps the decimal shape.
+        for ack in [13u8, 15] {
+            assert!(!allowed_operation(&[ack, b'2'], false));
+            assert!(!allowed_operation(&[ack, b'2'], true));
+            assert!(allowed_operator_operation(&[ack, b'0']));
+            assert!(allowed_operator_operation(&[ack, b'1', b'2', b'3']));
+            assert!(!allowed_operator_operation(&[ack]));
+            assert!(!allowed_operator_operation(&[ack, b'0', b'1']));
+            assert!(!allowed_operator_operation(&[ack, b'1', b'/']));
+            assert!(!allowed_operator_operation(&[[ack].as_slice(), &[b'9'; 81]].concat()));
+        }
         assert!(!allowed_operation(&[16, b'R'], false));
         assert!(!allowed_operation(&[16], true));
         assert!(allowed_operation(&[16, b'R'], true));

@@ -465,7 +465,9 @@ def specialized (extraExpected : ExtraExpected) (settings : Settings) (config : 
   else match full with
     | some verified => extraExpected settings config verified operation request
     | none => throw (IO.userError "entry consent adapter requires the full re-admission")
-  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExact expected candidate)
+  -- The re-derived plan, or its height pin where the operation has one (op 86 today).
+  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExactOrPinned expected
+    (NativeSpecializedConsent.pinnedExpectedBytes operation request expected) candidate)
   pure candidate
 
 def possession (config : NativeHost.Config) (payload : List UInt8) : IO (List UInt8) := do
@@ -578,7 +580,12 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
     match held with
     | none => writeSessionFrame output 233 []
     | some session =>
-        match ← ConsentAnchor.recheckStore config.transport session.2.anchor with
+        -- HOT-PATH 2f: O(1) against the tag this provider verified at its height; the
+        -- chain-from-genesis re-check only for an image that never saw its head tag.
+        let rechecked ← match session.1.headTag with
+          | some tag => ConsentAnchor.recheckHeld config.transport session.1.image.accepted.length tag
+          | none => ConsentAnchor.recheckStore config.transport session.2.anchor
+        match rechecked with
         | .ok () => writeSessionFrame output 233 []
         | .error detail =>
             writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList

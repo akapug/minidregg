@@ -1,2 +1,0 @@
-# scripts/gates/waste-model-decisions.txt -- why a waste-model ceiling rose or a necessary figure moved.
-# One line per change: DATE<TAB>ROW-KEY<TAB>NEW-VALUE<TAB>why (named; a load excuse is not a why).

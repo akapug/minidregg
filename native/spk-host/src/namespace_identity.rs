@@ -187,12 +187,19 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
     }
     Ok(())
 }
+/// Name the step and the path an OS error came from: a bare ENOENT from the
+/// namespace bootstrap says nothing about which helper or file is missing.
+fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error {
+    let (step, path) = (step.to_owned(), path.to_owned());
+    move |error| io::Error::new(error.kind(), format!("namespace bootstrap {step} ({path}): {error}"))
+}
 fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
     eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
     let status = Command::new(program)
         .args([pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()])
         .env_clear()
-        .status()?;
+        .status()
+        .map_err(at("mapping helper", program))?;
     if !status.success() {
         return Err(refused("namespace identity mapping refused"));
     }
@@ -205,6 +212,15 @@ fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     }
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
+/// `Threads:` of /proc/self/status: the size of this thread group.
+fn thread_count() -> io::Result<u32> {
+    let status = fs::read_to_string("/proc/self/status").map_err(at("thread census", "/proc/self/status"))?;
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Threads:"))
+        .and_then(|rest| rest.trim().parse().ok())
+        .ok_or_else(|| refused("thread census refused: /proc/self/status names no Threads"))
+}
 fn exact_map(text: &str, op: u32, app: u32) -> bool {
     let rows: Vec<Vec<u32>> = text.lines().map(|r| r.split_whitespace().filter_map(|n| n.parse().ok()).collect()).collect();
     rows.len() == 2 && rows.contains(&vec![op, op, 1]) && rows.contains(&vec![app, app, 1])
@@ -214,11 +230,22 @@ fn exact_map(text: &str, op: u32, app: u32) -> bool {
 /// waits. newuidmap/newgidmap then map exactly {operator, app} into it (the operator's
 /// /etc/subuid grant covers the app identity), this process holds the namespace by fd,
 /// releases bwrap (whose child runs /usr/bin/true and exits), and joins by setns. The
-/// joining process is single-threaded and keeps every capability of the namespace,
-/// none of the host, until the bootstrap drops them.
+/// joining process must be single-threaded: the kernel refuses setns(CLONE_NEWUSER)
+/// from a thread group of more than one (kernel/user_namespace.c `userns_install`,
+/// EINVAL), so this is checked by name before any host program is touched. The
+/// production entry (`spk-host resident-bootstrap`, a fresh exec) spawns no thread
+/// before it; a test harness thread is the known way to break it. The joined process
+/// keeps every capability of the namespace, none of the host, until the bootstrap
+/// drops them.
 pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32, app_uid: u32, app_gid: u32) -> io::Result<()> {
     if unsafe { libc::geteuid() } == 0 || unsafe { libc::geteuid() } != operator_uid || unsafe { libc::getegid() } != operator_gid {
         return Err(refused("resident requires its unprivileged operator uid"));
+    }
+    let threads = thread_count()?;
+    if threads != 1 {
+        return Err(io::Error::other(format!(
+            "namespace entry requires a single-threaded process: this thread group has {threads} threads, and the kernel refuses setns(CLONE_NEWUSER) from more than one (EINVAL); enter before any thread starts"
+        )));
     }
     pinned_bwrap(bwrap, bwrap_sha256)?;
     let (info_r, info_w) = pipe()?;
@@ -241,7 +268,8 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
             Ok(())
         });
     }
-    let mut holder = command.spawn()?;
+    let bwrap_text = bwrap.display().to_string();
+    let mut holder = command.spawn().map_err(at("bwrap spawn", &bwrap_text))?;
     drop(info_w);
     drop(block_r);
     let result = (|| -> io::Result<()> {
@@ -254,11 +282,13 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
             .and_then(|p| u32::try_from(p).ok())
             .filter(|p| *p > 1)
             .ok_or_else(|| refused("namespace bwrap child absent"))?;
-        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+        let status_path = format!("/proc/{pid}/status");
+        let status = fs::read_to_string(&status_path).map_err(at("bwrap child status", &status_path))?;
         if !status.lines().any(|l| l.split_whitespace().collect::<Vec<_>>() == ["PPid:", &holder.id().to_string()]) {
             return Err(refused("namespace holder is not the bwrap child"));
         }
-        let ns = File::open(format!("/proc/{pid}/ns/user"))?;
+        let ns_path = format!("/proc/{pid}/ns/user");
+        let ns = File::open(&ns_path).map_err(at("bwrap child namespace", &ns_path))?;
         if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
@@ -288,4 +318,43 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
         let _ = holder.wait();
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The libtest harness runs every test on a spawned thread, so this process
+    /// has at least two. `enter` must refuse by name here, before it looks for
+    /// bwrap or the mapping helpers: the kernel's own answer is a bare EINVAL.
+    #[test]
+    fn enter_refuses_a_multithreaded_process_by_name_before_any_host_program() {
+        let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+        if uid == 0 {
+            return; // the identity check fires first as root; the rule under test needs the operator
+        }
+        assert!(thread_count().unwrap() >= 2, "libtest runs tests on their own thread");
+        let error = enter(Path::new("/nonexistent/bwrap"), "", uid, gid, uid + 1, gid + 1).unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("single-threaded process"), "{text}");
+        // Not the exact count: under a parallel `cargo test`, sibling test threads
+        // come and go between two censuses. nextest runs one test per process.
+        assert!(text.contains("threads, and the kernel refuses setns(CLONE_NEWUSER)"), "{text}");
+        assert!(!text.contains("nonexistent"), "bwrap was consulted before the thread rule: {text}");
+    }
+
+    /// A forked child carries only the forking thread: the shape of the production
+    /// entry, and of the sandbox-floor audit's child.
+    #[test]
+    fn a_forked_child_is_single_threaded() {
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            let ok = thread_count().map(|n| n == 1).unwrap_or(false);
+            unsafe { libc::_exit(if ok { 0 } else { 1 }) }
+        }
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status:#x}");
+    }
 }

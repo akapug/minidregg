@@ -10,16 +10,13 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const O_NOFOLLOW: i32 = 0o400000;
-const LOCK_EX: i32 = 2;
-const LOCK_UN: i32 = 8;
-unsafe extern "C" {
-    fn flock(fd: i32, operation: i32) -> i32;
-    fn geteuid() -> u32;
-}
+// Every OS constant and call comes from `libc` for the target being built: the hand-typed
+// O_NOFOLLOW (0o400000) was the x86-64 value, which is O_LARGEFILE on aarch64 (review 2026-10-26,
+// deploy 4.4). Built only through native/launch-gate (the candidate role launchGate).
+use libc::{geteuid, LOCK_EX, LOCK_UN, O_NOFOLLOW};
 
 fn lock(file: &File, operation: i32) -> Result<(), String> {
-    if unsafe { flock(file.as_raw_fd(), operation) } == 0 {
+    if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
         Ok(())
     } else {
         Err(format!("flock: {}", std::io::Error::last_os_error()))
@@ -222,10 +219,10 @@ impl Controller {
     fn open(&self) -> Result<File, String> {
         self.verify()?;
         let fd = unsafe {
-            syscall(
-                434,
-                self.pid as std::os::raw::c_long,
-                0 as std::os::raw::c_long,
+            libc::syscall(
+                libc::SYS_pidfd_open,
+                self.pid as libc::c_long,
+                0 as libc::c_long,
             )
         };
         if fd < 0 {
@@ -249,25 +246,13 @@ fn process_start(pid: u32) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or("invalid process stat".into())
 }
-#[repr(C)]
-struct PollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
-}
-unsafe extern "C" {
-    fn syscall(number: std::os::raw::c_long, ...) -> std::os::raw::c_long;
-    fn poll(fds: *mut PollFd, count: usize, timeout: i32) -> i32;
-    fn prctl(option: i32, ...) -> i32;
-    fn getppid() -> i32;
-}
 fn ready(file: &File, timeout: i32) -> Result<bool, String> {
-    let mut p = PollFd {
+    let mut p = libc::pollfd {
         fd: file.as_raw_fd(),
-        events: 1,
+        events: libc::POLLIN,
         revents: 0,
     };
-    let n = unsafe { poll(&mut p, 1, timeout) };
+    let n = unsafe { libc::poll(&mut p, 1, timeout) };
     if n < 0 {
         let e = std::io::Error::last_os_error();
         if e.kind() == std::io::ErrorKind::Interrupted {
@@ -283,14 +268,14 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
         command.pre_exec(move || {
             // A monitor crash also kills bwrap, whose --die-with-parent and PID
             // namespace kill all sandbox descendants, including setsid children.
-            if prctl(
-                1,
-                9 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGKILL as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
             ) != 0
-                || getppid() != monitor
+                || libc::getppid() != monitor
             {
                 return Err(std::io::Error::other("worker monitor disappeared"));
             }
