@@ -10,6 +10,7 @@ Run these verbs through the same authorized `install-user-world` entrypoint:
 
 ```text
 controller-create STORE HELPER
+controller-resume-create STORE HELPER
 controller-stage STORE HELPER BUNDLE BIN_DIR UPSTREAM_PRIVATE_SOCKET PUBLIC_SOCKET
 controller-start STORE HELPER
 controller-stop STORE HELPER
@@ -18,6 +19,8 @@ controller-tool STORE HELPER REQUEST_ID TOOL ARGUMENTS_JSON
 controller-tool-result STORE HELPER REQUEST_ID
 controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
+controller-service-logs STORE HELPER
+controller-consent-storage STORE HELPER
 controller-export STORE HELPER
 controller-reserve-export STORE HELPER DISPATCH_ATTEMPT_ID
 controller-remove STORE HELPER
@@ -29,7 +32,12 @@ account, group, unit names and home inode. Account names are fixed to
 `mini-c-STORE`. The installer selects one unused UID/GID from the operator's
 existing `/etc/subuid` and `/etc/subgid` intersection; it grants no new range.
 It creates the private group with that exact GID before creating the named
-account with both explicit IDs. Existing accounts/groups, app ranges,
+account with both explicit IDs. Account creation uses `useradd --system` without
+`--add-subids-for-system`, so it grants no subordinate ranges. Before creation,
+the installer checks the bounded `useradd -D` output requires
+`CREATE_MAIL_SPOOL=no` and no implicit supplementary groups. It does not change
+host defaults or pass defaults-file settings as unsupported `-K` login.defs
+keys. Existing accounts/groups, app ranges,
 controller reservations, other principals' overlapping delegations and a
 different calling operator refuse. Numeric subid-owner aliases are supported.
 A controller name or numeric UID with its own stale subordinate grants also
@@ -43,6 +51,18 @@ allocation enforce these reservations and retained removal receipts under the
 same global installation lock. Malformed or unsafe registry data fails closed.
 The installer bounds registry counts, delegation input, candidate enumeration
 and NSS snapshots rather than silently truncating a range.
+
+`controller-resume-create` handles the specific interruption after the permanent
+reservation and private group were created, but before the account exists. It
+requires the exact root-owned `pending.json` and lifecycle lock as the entire
+controller directory; matching world/deployment/operator reservation; the
+reserved group name/GID with no members or aliases; no passwd entry, UID/GID
+use, live identity process or controller unit; and still-exclusive subordinate
+delegation. It then creates the account with the **same recorded identity** and
+finishes normal setup. It never allocates again, deletes partial state, adopts
+an existing account or accepts partially populated home/configuration files.
+The original pending record and permanent reservation remain. Recovery after a
+later creation step is outside this narrow verb and fails closed.
 
 The provisioning operator is explicitly trusted: it generates the controller's
 keys, supplies its code/configuration and already owns the delegated ID range.
@@ -129,9 +149,25 @@ in its per-attempt pins; the transport checks the exact config/provider binding
 and controller peer, with no local or thin fallback. A controller config update
 keeps the fixed host-config path; it does not change the service settings.
 
-Only the operator-private anchor directory is writable through the consent
-service's systemd filesystem view; the Store stays read-only. The verifier may
-use its private temporary directory. Stop/start and controller configuration
+The consent service keeps `ProtectSystem=strict`, with two write exceptions:
+its own operator-private consent anchor directory and the exact private parent
+of the configured `storageRoot`. The existing SQLite helper opens the database
+read/write, takes a write-capable lock, and may atomically replace the sibling
+`storageRoot.head-anchor`; the parent must therefore permit creation and rename.
+This grants the trusted operator-side provider write access to that **entire
+private parent**, including other entries there, not just SQLite or the anchor.
+It grants the controller no filesystem access. The provider/configuration remain
+exactly pinned, and native Lean consent remains the authority for requests.
+
+Setup requires a canonical path with no symlink ancestors, a real operator-owned
+0700 Store and parent, and private regular single-link database/anchor/lock
+files. It pins ancestor/Store directory identities and persistent database/lock
+inodes. Each use revalidates owners, modes and those identities. The source
+helper legitimately replaces a well-formed private `MINIANC2` anchor, so its
+inode may change; its private parent and current file custody/format are checked
+and the native helper still checks its continuity. The writable path comes only
+from the exact pinned host configuration, with control characters, aliases and
+systemd specifiers refused. The verifier may use its private temporary directory. Stop/start and controller configuration
 updates preserve the `binding`, `frontier` and `lock` files. Missing/corrupt
 retained state is a native refusal, not permission to replay from an empty
 frontier. Removal first copies these exact bounded files, including an
@@ -139,7 +175,17 @@ incomplete initialization, to a root-private
 `/var/lib/mini-spk-controller-history/STORE-consent` archive and records their
 hashes. A changed archive refuses removal.
 
-Stage returns the consent service/socket/provider/config/identity pins. Start
+Existing version-2 stages need the explicit `controller-consent-storage` verb
+while all recorded units are inactive, both manager PIDs are zero and no
+controller process remains. It derives the Store path from the unchanged pinned
+configuration and changes only the consent unit's `ReadWritePaths` plus the
+stage's filesystem pins. Exact old/new unit and stage bytes and an immutable
+intent are retained under root custody. Interruptions after any archive,
+intent, unit, stage or manager-reload step can resume only those same byte
+states; unrelated edits or changed Store identities refuse. No restart, source
+request or config rewrite occurs. New stages include these checks directly.
+
+Stage returns the consent service/socket/provider/config/identity and storage pins. Start
 adds its observed systemd invocation, MainPID, process start ticks, exact
 executable inode and socket owner/mode. This is labeled **process and socket
 readiness only**; independent source admission is established by the actual
@@ -168,6 +214,17 @@ fixed runtime and native control socket. A call has a 20-minute deadline and
 16 MiB combined output bound; failure after sending still requires exact
 request recovery, never an automatic resend. No general command runner exists.
 
+`controller-service-logs` returns private bounded system journals for only the
+fixed service units in the checked root receipt/stage. It validates the actual
+manager unit, owner and fragment, selects its observed invocation when present,
+and otherwise labels the result as recent history for that fixed unit. Each
+service is limited to 256 records, 1 MiB of output and 20 seconds. Exact bytes are
+returned as base64 with hashes, never interpreted as commands or admission.
+Callers cannot supply a unit, invocation, path or journal expression. The
+read-only verb uses the shared lifecycle lock and is useful after a failed
+startup when the controller's private state journal cannot explain systemd
+stderr. Save its output as private evidence, not public chat/log prose.
+
 `controller-journal` returns only the native controller journal. `controller-export`
 returns bounded state evidence (at most 512 regular files / 32 MiB, with hashes
 and base64 bytes), excluding the separate custody directory and its keys.
@@ -187,8 +244,8 @@ subtrees, replaced ACL objects or changed ACLs. It removes only this account and
 its recorded units, then retains a cleanup receipt under
 `/var/lib/mini-spk-controller-history`. Ordinary world removal refuses while a
 controller allocation remains. Interrupted setup retains its pending records;
-an incomplete ACL mutation or account allocation without a completed identity
-receipt needs operator repair, not an ownership guess or destructive retry.
+an incomplete ACL mutation or account allocation outside the exact supported
+pending-create shape needs operator repair, not an ownership guess or destructive retry.
 
 The unprivileged tests are:
 
@@ -205,7 +262,7 @@ copies, legacy layout compatibility, and retained partial anchor state. Actual a
 journey remain separate receiving tests.
 
 The entrypoint executes only its SHA-256-pinned Python companion bytes, read once
-through a bounded no-follow descriptor. Deploy both files together. The existing
+through a bounded (96 KiB) no-follow descriptor. Deploy both files together. The existing
 operator-writable source entrypoint remains explicitly trusted root setup; this
 pin prevents ambient sibling substitution and read/execute races, rather than
 pretending to isolate root from an operator authorized to replace that entrypoint.

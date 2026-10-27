@@ -134,34 +134,77 @@ lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already
 ACP resident, the rehearsal #2 candidate → infra ships #2 (door on 8796, mini-keys split shape,
 Hermes controller via `grain create`, frame grain units without `RestrictSUIDSGID`, gateway Discord).
 
-**Lanes.** Done on branches: L2 custody-as-records 554667d9 (39 → 13 fsyncs, wire bytes identical,
-the 253/255 classifier by generated constants, 8,236 lines gone); L3 5aaf1a32 (the setns red explained
-to the kernel line: libtest threads, production unaffected; the **sandbox floor audit PASSED on Debian
-13** for the first time, evidence in `docs/evidence/2026-10-27-sandbox-floor-dregg-build/`; the audit
-root is `/var/lib/spk-floor-audit` because `/run` is noexec and `/var/tmp` world-writable); L4 a9e0dd70 (units that
-open, `grain create`, the outcome record, provider classes; J14 blocked only by L7's summon fix and
-L1's `checkPlan`); L5 bce88a74 (door: unprivileged `/join`, root processor the only writer of
-accounts/keys/roster, hosted keygen, pay-to-enrol onto a hosted account, Discord link codes; gateway
-mode); L6 43ede087 (WAL store, grant caps against the body, op-144 pinned); L7 717148c9 (render
-repairs; the summon fix: one document-creation path, loud refusal); L8 6e9ea3bb; L9 d74947d2
-(workspace gate, journey split, 9,348 lines gone); L11 ed73009c/bef88d32 (the breakdown; the fsync
-fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theorems, O(1) consent,
-codec resident, image hashed once); coordination 179a21c2 (`docs/COORDINATION-2026-10-27.md`,
-−116,631 lines of gate bookkeeping; the per-module Lean RSS table; a nightly on `dregg-build` at 00:00 UTC;
-the Lake artifact cache verified: an unchanged worktree rebuilds in 14 s). Working: **L1** (above); **L12 web front end**
-(`lane/web-frontend` 3bb0a248: the gateway + root helper + body, xterm.js vendored; browser-only join;
-the public front page with the operations room, receipts and laws; `/tour` with its rows; truthful outcome
-classes; the lost-reply switch `submit --lose-reply-once`; `delegate --until`; and **A0 complete**: every
-verb of the four tables is grammar data (69 verbs, 201 leaves), the shell parses through it, help and
-completion read it, the body renders every form from it, shell.rs about −1,400 net; **parity** measured: 203 leaves
-dry-run through the real handlers, 0 usage and 0 world refusals; the web journey 23/24 on the build box
-with its own provisioned member (the one red needs the round-2 Host's 253 byte); the tour's lose-reply,
-exact-retry and `can --any` paste-back rows PASS; `/receipts/ID` anchored honestly pending A10); **L13 app market**
-(dfc696de: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify from the real
-store, `japps --box` 22/22; the apps worker with every reply decided or carrying its exact retry; the
-request law `Kernel/AppsRequest.lean`; units and ports staged on the box; v1 = one guest subject per
-grain, v2 after L1b; blocked only on the round-2 broker world for its lifecycle rows; the member
-application birth (op 30) is a Host question on L1's queue); the M7 reference build on `dregg-build`; L11's 10k soak on the box.
+**Main advances every cut** (ember, 2026-10-27 morning): integration was merged into main at
+6b824270 (cut 4) and main has moved continuously since; another session's edits in the shared
+worktree are committed as found on sight. Landed on main today besides the lanes: the README rewritten
+whole; the L10 docs lane (~35 contradicted documents rewritten against the code, 7 stale files deleted);
+the dead-path census repaired across ~100 documents (96 → 6); Studio composted (ruling D7) and the
+TypeScript SDK made honest; four tests that could not fail now go red on a planted fault; the GitWeb
+ingest chain and six uncalled acceptance scripts deleted with the grep that proves no caller; the Store
+and pay-watcher units hardened; the measured lane rules in `docs/COORDINATION-2026-10-27.md` and
+`mk-lane.sh`'s brief template; a read-only permission allowlist; three reviews (`docs/review/
+2026-10-27-genesis-coupling/`, `2026-10-27-process/`, `2026-10-27-platform-cell-statements/`) and the
+harvested backlog (`docs/BACKLOG-2026-10-27.md`: 34 landed, 72 open, 14 superseded, 9 in flight).
+
+**Cuts** (the integrator reads `lane/*` itself every 60–90 min; one report per cut): cut 6 = 23861533
+(tour 38 PASS / 0 FAIL / 1 UNCONFIGURED, the headless-Chromium row now configured on the build box;
+composed rooms/churn/documents/restart PASS, apps/connector/residents blocked only on the scratch world's
+genesis, now fixed in dregg-infra; the enrol acceptance PASS with five members back to back under a
+ticker). Cut 7 (the pay-law genesis v7) building; cut 8 takes the enrolment pin, the platform statements
+and the driver fixes.
+
+**Lanes, present tips.** L1 lane/lean-critical 38bfc427 (S1 pay law + control unconditional at every
+genesis, frame v7; the platform cell and meter refill as audited statements with their proofs of
+ordering, validity and the reference receiver; the enrolment pin that survives ticks; the receiver's
+hand-off file; a successor builds the receiver: cell kind → install receiver → Host arms 240–243 →
+genesis seed v8 → births priced from the cell → `Intent.credit` + refill ops). L2 successor
+lane/custody-drivers 843e0a90 (every driver red of rounds 2–3 fixed; the seal re-inspection fix; the
+world template; `--keep-going`, `--only STEP`, `box-wait`; a read-only attempt-state verb next). L3
+successor lane/fence (the Debian 13 floor audit PASS; now the SPK resident reading marker 253). L4
+lane/hermes 0b8cc8bb (the real upstream Hermes agent through bwrap → bridge → gateway → broker → provider
+→ v4 settle on the build box, 105 rows PASS; the v4 `leg` frame; reconcile after the record; the demo-box
+install sequence and worker root; the ask pass's completion boundary and the librarian fixture are its
+last reds). L12 web lane lane/web-frontend 43533e6d (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
+the tour's doors 11 and 12; progressive `can`; "Pay with your wallet" on the paid route; the door's
+funding figure). L13 lane/app-market f68de59f+ (Hacker Slides and Simple Todos through create, install,
+share, start, enrol and page load on a live world; `HackSessionContext` served; the member's own install
+pays from the member's account (ruling); `composed-inputs.sh`; `mini apps bootstrap`; the genesis
+pass-through for the grain platform). Oracle lane lane/oracle-grain (the design, the data volume, the
+`joracle` row; the 15 GB dataset syncing to the build box). Hot-path successor (the codec resident
+re-applied; J12X's malformed codec frames; thin consent's JP2).
+
+**Published numbers** (the demo box's own soak, candidate a0db11f8-era binaries, consent in full
+mode; read back 2026-10-27; seconds, p50 / p99 / max; performance is published, never a gate):
+
+| level | propose | submit | cold reopen |
+|---|---|---|---|
+| ~100 records | 0.55–0.63 / ≤0.80 / 0.80 | 0.71–0.81 / ≤0.85 / 0.85 | 1.1–3.9 |
+| records 102–1,105 | 1.34 / 2.07 / 2.18 | 0.83 / 0.96 / 1.12 | 1.5 |
+| ~1,100 records | 2.10–2.21 / ≤2.30 / 2.30 | 0.86–0.93 / ≤1.20 / 1.20 | 16–17.6 |
+| records 1,191–1,770 | 2.63 / 3.40 / 3.54 | 0.90 / 1.08 / 1.82 | 18.0 |
+
+The soak stopped at 1,770 records when the box rebooted for a security kernel (as ruled). Propose
+grows ~1.2 ms per record (the consent re-check the box still runs in full mode; the O(1) provider
+switches on when thin consent's JP2 is green); submit is flat near 0.9 s; the cold reopen's growth
+(the full open re-hashes the whole chain before the light open) is a hot-path item with the
+before/after at 1.7k records owed.
+
+**First Linux runs that never happened before** (dregg-build, cut 6's candidate, 2026-10-27): `objective-cgen`
+PASS; `objective-c` 1,218 of 1,219 packet differentials with one Lean timeout under a loaded box
+(StressCount; a nightly matter); the demo journey 19/40 in a 5,000 s run budget (its K12 docuverse
+steps take ~15 min each; the nightly gets the full 10,800 s and measures rather than truncates);
+`m6grain` on Debian 13 rerunning after the test-SPK cache path was provided. None of these gates a
+rehearsal: the gate is the tour plus the composed scenario.
+
+**Consent mode, decided** (2026-10-27 afternoon): the box stays on full consent; with the O(1) recheck
+(`ConsentAnchor.recheckHeld`, in every candidate since round 2) the propose cost is flat, so thin consent buys
+nothing the demo needs and lacks a birth arm (JP2 refuses a thin birth by name until a thin-birth design
+exists: Phase 3). The soak's propose slope was the pre-recheck binaries.
+
+**The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
+replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
+clock alone would have emptied it in about 7 days. Rehearsal #3's genesis raises it to 10^10 per lane;
+the refill is the platform receiver's last piece.
 
 **Ember's codex session** is landing the veri7vn oracle appliance in the main worktree (uncommitted
 `deploy/oracle/`, `native/oracle-appliance`, `native/spk-package-stream`): the split recipe keeps the
@@ -292,7 +335,14 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+(ember, same morning). **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
+through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
+resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the
+GLM provider-route capability for 30 days on `pay subscribers 4000`; L4 builds the Anthropic-messages
+adapter and the row; infra seals the key; the web lane the Subscribe form). Whether the coding plan's
+terms permit serving third parties' agents is ember's call, flagged; the join page carries the sentence
+ember supplies. The 1Password state bundle is re-saved in a few days when the state stabilises.
 Main advances after every integration round; other sessions' work in the shared worktree is committed
 as found and fixed forward.
 

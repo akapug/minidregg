@@ -9,6 +9,8 @@ import re
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -137,7 +139,7 @@ class ControllerWorldTests(unittest.TestCase):
     def test_v2_consent_units_keep_exact_pins_and_operator_boundary(self):
         r = self.consent_record(); r['uid'] = r['gid'] = 100032
         r['operatorUid'] = r['operatorGid'] = 1000
-        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32}
+        pins = {'providerSha256': '12'*32, 'configSha256': '34'*32, 'storage':{'writableParent':'/private/store-parent'}}
         base = Path('/var/lib/mini-spk-worlds/abababababababab/controller')
         units = c.unit_bytes(r, base, Path('/operator/private.sock'), pins)
         runtime, _, _, listener, service = [units[n].decode() for n in r['units']]
@@ -145,7 +147,7 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertIn('SocketUser=100032', listener)
         self.assertIn('SocketMode=0600', listener)
         self.assertIn('--anchors ' + str(base / 'consent/anchors'), service)
-        self.assertIn('ReadWritePaths=' + str(base / 'consent/anchors') + '\n', service)
+        self.assertIn('ReadWritePaths=' + str(base / 'consent/anchors') + ' /private/store-parent\n', service)
         self.assertNotIn('ReadWritePaths=/operator', service)
         self.assertIn('--consent-sha256 ' + pins['providerSha256'], service)
         self.assertIn('--config-sha256 ' + pins['configSha256'], service)
@@ -379,12 +381,89 @@ class ControllerWorldTests(unittest.TestCase):
              patch.object(c,'HISTORY',self.root/'history'),patch.object(c,'allocate_identity',return_value=100032), \
              patch.object(c.pwd,'getpwall',return_value=[]),patch.object(c.grp,'getgrall',return_value=[]), \
              patch.object(c,'mkdir',side_effect=directory),patch.object(c,'write_new',side_effect=write), \
-             patch.object(c,'ancestry'),patch.object(c,'run',side_effect=command):
+             patch.object(c,'ancestry'),patch.object(c,'account_defaults'),patch.object(c,'run',side_effect=command):
             with self.assertRaisesRegex(ValueError,'injected'):c.create('ab'*8,registry['helper'])
         self.assertEqual(events,['reserved','groupadd','useradd'])
         self.assertTrue((reservations/('ab'*8+'.json')).exists())
         self.assertTrue((base/'pending.json').exists())
         self.assertFalse((base/'namespace.json').exists())
+
+    def test_useradd_uses_system_account_contract_without_invalid_defaults_keys(self):
+        with patch.object(c,'run',return_value=SimpleNamespace(stdout=b'CREATE_MAIL_SPOOL=no\nGROUPS=\n')):
+            c.account_defaults()
+        for raw in (b'CREATE_MAIL_SPOOL=yes\n', b'CREATE_MAIL_SPOOL=no\nGROUPS=operators\n',
+                    b'CREATE_MAIL_SPOOL=no\nCREATE_MAIL_SPOOL=yes\n', b'GROUPS=\n'):
+            with self.subTest(raw=raw), patch.object(c,'run',return_value=SimpleNamespace(stdout=raw)):
+                with self.assertRaises(ValueError): c.account_defaults()
+        with patch.object(c,'run') as execute, patch.object(c,'delegation_owners',return_value=(set(),set())):
+            c.create_account(self.root, 'mini-c-'+'ab'*8, 100032)
+        args = execute.call_args.args[0]
+        self.assertEqual(args, ['/usr/sbin/useradd','--system','--uid','100032','--gid','100032',
+                               '--no-user-group','--no-create-home','--no-log-init',
+                               '--home-dir',str(self.root/'home'),'--shell','/usr/sbin/nologin','mini-c-'+'ab'*8])
+        with patch.object(c,'run'), patch.object(c,'delegation_owners',return_value=({'mini-c-'+'ab'*8},set())):
+            with self.assertRaises(ValueError): c.create_account(self.root, 'mini-c-'+'ab'*8, 100032)
+
+    def test_pending_resume_binds_exact_group_intent_and_exclusive_delegation(self):
+        registry, reservation = self.registry_value(), self.reservation_value()
+        name, identity = reservation['account'], reservation['controllerUid']
+        base = self.root/'pending-controller'; base.mkdir(mode=0o755)
+        pending = {'store':registry['store'],'name':name,'operatorUid':registry['operatorUid']}
+        (base/'pending.json').write_bytes(c.encoded(pending))
+        (base/'lifecycle.lock').write_bytes(b'controller lifecycle lock\n')
+        reservation_path = c.RESERVATIONS/(registry['store']+'.json')
+        group = SimpleNamespace(gr_name=name,gr_gid=identity,gr_mem=[])
+        def read(path,*args,**kwargs):
+            return c.encoded(reservation) if path == reservation_path else path.read_bytes()
+        with c.contextlib.ExitStack() as stack:
+            for owner, attr, kwargs in [
+                (c,'ancestry',{}),(c,'metadata',{}),(c,'read_file',{'side_effect':read}),
+                (c,'occupied_ids',{'return_value':{identity}}),
+                (c,'delegated',{'return_value':([(100000,165536)],[])}),
+                (c,'delegation_owners',{'return_value':(set(),set())}),
+                (c.pwd,'getpwall',{'return_value':[]}), (c.pwd,'getpwnam',{'side_effect':KeyError(name)}),
+                (c.pwd,'getpwuid',{'side_effect':KeyError(identity)}),
+                (c.grp,'getgrall',{'return_value':[group]}), (c.grp,'getgrnam',{'return_value':group}),
+                (c.grp,'getgrgid',{'return_value':group}), (c,'no_processes',{}),
+                (c,'manager_properties',{'return_value':{'LoadState':'not-found'}}),
+                (c,'HISTORY',{'new':self.root/'history'}),(c,'UNITS',{'new':self.root/'units'})]:
+                stack.enter_context(patch.object(owner,attr,**kwargs))
+            self.assertEqual(c.pending_create_identity(registry,base), reservation)
+            foreign = SimpleNamespace(gr_name='foreign',gr_gid=identity,gr_mem=[])
+            for groups in ([foreign],[group,foreign],[SimpleNamespace(gr_name=name,gr_gid=identity,gr_mem=['foreign'])]):
+                with patch.object(c.grp,'getgrall',return_value=groups), self.assertRaises(ValueError):
+                    c.pending_create_identity(registry,base)
+            for own, foreign_ranges in (([],[]), ([(100000,165536)],[(identity,identity+1)])):
+                with patch.object(c,'delegated',return_value=(own,foreign_ranges)), self.assertRaises(ValueError):
+                    c.pending_create_identity(registry,base)
+            with patch.object(c.pwd,'getpwuid',return_value=SimpleNamespace(pw_uid=identity)), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            with patch.object(c,'no_processes',side_effect=ValueError('live identity')), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            with patch.object(c,'manager_properties',return_value={'LoadState':'loaded'}), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            reservation['hostId'] = '00'*32
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+            reservation['hostId'] = registry['hostId']
+            (base/'pending.json').write_bytes(c.encoded({**pending,'operatorUid':2000}))
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+            (base/'pending.json').write_bytes(c.encoded(pending))
+            (base/'home').mkdir()
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+
+    def test_resume_reuses_reserved_identity_without_allocation_or_group_creation(self):
+        registry, reservation = self.registry_value(), self.reservation_value()
+        events = []
+        with patch.object(c,'store_context',return_value=(registry,self.root)), \
+             patch.object(c,'pending_create_identity',return_value=reservation), patch.object(c,'account_defaults'), \
+             patch.object(c,'allocate_identity') as allocate, patch.object(c,'run') as direct_command, \
+             patch.object(c,'create_account',side_effect=lambda *args:events.append(args)), \
+             patch.object(c,'finish_create',return_value={'controllerUid':reservation['controllerUid']}) as finish:
+            result = c.resume_create(registry['store'],registry['helper'])
+        allocate.assert_not_called(); direct_command.assert_not_called()
+        self.assertEqual(events,[(self.root,reservation['account'],reservation['controllerUid'])])
+        finish.assert_called_once_with(registry,self.root,reservation)
+        self.assertTrue(result['resumedPendingCreation'])
 
     def test_exact_reserve_export_has_eight_files_and_no_custody(self):
         r=self.record();prefix='agent-lifetime-reserve-0000000000000042'
@@ -400,6 +479,159 @@ class ControllerWorldTests(unittest.TestCase):
                 with self.assertRaises(ValueError):c.reserve_export(r['store'],'/unused',bad)
         self.assertEqual(set(result['files']),{prefix+'/'+n for n in names})
         for n in names:self.assertEqual(result['files'][prefix+'/'+n]['sha256'],hashlib.sha256(n.encode()).hexdigest())
+
+    def test_service_logs_use_only_recorded_services_and_observed_invocations(self):
+        r = self.consent_record(); r['uid'] = 100032; r['operatorUid'] = 1000
+        stage = {'units':{n:'recorded' for n in r['units']}}
+        def observed(unit):
+            return {'LoadState':'loaded','FragmentPath':str(c.UNITS/unit),'Transient':'no',
+                    'User':str(r['uid'] if unit == r['units'][0] else r['operatorUid']),
+                    'InvocationID':'ab'*16 if unit == r['units'][0] else ''}
+        with patch.object(c,'load',return_value=({},self.root,r)), patch.object(c,'checked_units',return_value=stage), \
+                patch.object(c,'manager_properties',side_effect=observed), patch.object(c,'bounded_service_journal',return_value=b'private journal\n') as journal:
+            result=c.service_logs(r['store'],'/unused')
+        self.assertEqual([row['unit'] for row in result['services']], [n for n in r['units'] if n.endswith('.service')])
+        self.assertEqual(journal.call_args_list[0].args,(r['units'][0],'ab'*16))
+        self.assertEqual(result['services'][0]['selection'],'observed-invocation')
+        self.assertEqual(result['services'][1]['selection'],'fixed-unit-recent-history')
+        self.assertTrue(result['privateEvidence'])
+        with patch.object(c,'load',return_value=({},self.root,r)), patch.object(c,'checked_units',return_value=stage), \
+                patch.object(c,'manager_properties',return_value={**observed(r['units'][0]),'User':'0'}), \
+                patch.object(c,'bounded_service_journal') as journal:
+            with self.assertRaises(ValueError):c.service_logs(r['store'],'/unused')
+            journal.assert_not_called()
+
+    def test_service_journal_output_bound_and_owned_child_reap(self):
+        spawn=subprocess.Popen; children=[]; calls=[]
+        def child(args,**kwargs):
+            calls.append(args)
+            process=spawn([sys.executable,'-c','import sys; sys.stdout.buffer.write(b"x" * 1048577)'],**kwargs)
+            children.append(process);return process
+        with patch.object(c.subprocess,'Popen',side_effect=child):
+            with self.assertRaisesRegex(ValueError,'1 MiB'):c.bounded_service_journal('fixed.service','ab'*16)
+        self.assertTrue(all(process.poll() is not None for process in children))
+        self.assertEqual(calls[0],['/usr/bin/journalctl','--quiet','--no-pager','--lines=256',
+                                  '--output=short-iso-precise','--unit=fixed.service','_SYSTEMD_INVOCATION_ID='+'ab'*16])
+        with patch.object(c.subprocess,'Popen') as start:
+            with self.assertRaises(ValueError):c.bounded_service_journal('fixed.service','bad invocation')
+            start.assert_not_called()
+
+    def storage_fixture(self, parent):
+        parent.mkdir(mode=0o700)
+        root=parent/'store';root.mkdir(mode=0o700)
+        for path,data in ((root/'forward-link.sqlite3',b'database fixture'),
+                          (parent/'store.head-anchor',b'MINIANC2'+b'a'*112),
+                          (parent/'store.head-anchor.lock',b'')):
+            path.write_bytes(data);path.chmod(0o600)
+        return c.encoded({'storageRoot':str(root)})
+
+    def test_storage_pins_reject_replacements_but_allow_atomic_anchor_advance(self):
+        settings=self.storage_fixture(self.root/'store-parent')
+        expected=c.consent_storage(settings,self.uid)
+        root=Path(expected['root']);anchor=Path(expected['replaceableAnchor'])
+        new=anchor.with_name('next');new.write_bytes(b'MINIANC2'+b'b'*112);new.chmod(0o600);new.replace(anchor)
+        self.assertEqual(c.consent_storage(settings,self.uid),expected)
+        for path in (root/'forward-link.sqlite3',Path(str(root)+'.head-anchor.lock')):
+            data=path.read_bytes();new=path.with_name(path.name+'.next');new.write_bytes(data);new.chmod(0o600);new.replace(path)
+            self.assertNotEqual(c.consent_storage(settings,self.uid),expected)
+            expected=c.consent_storage(settings,self.uid)
+        original=root.parent; moved=original.with_name('renamed-parent');original.rename(moved)
+        original.symlink_to(moved,target_is_directory=True)
+        with self.assertRaises(ValueError):c.consent_storage(settings,self.uid)
+        original.unlink();moved.rename(original)
+        anchor.chmod(0o644)
+        with self.assertRaises(ValueError):c.consent_storage(settings,self.uid)
+        for path in ('/tmp/x\nReadWritePaths=/', '/tmp/%h/store', '/tmp/../store'):
+            with self.assertRaises(ValueError):c.consent_storage(c.encoded({'storageRoot':path}),self.uid)
+
+    @c.contextlib.contextmanager
+    def storage_upgrade_fixture(self, suffix=''):
+        base=self.root/('upgrade-controller'+suffix);base.mkdir(mode=0o700)
+        home=base/'home';home.mkdir(mode=0o700)
+        for p in (base/'bin',base/'configs',base/'consent',base/'consent/anchors'):
+            p.mkdir(mode=0o700)
+        units=self.root/('units'+suffix);units.mkdir(mode=0o700)
+        settings=self.storage_fixture(self.root/('upgrade-store-parent'+suffix))
+        r=self.consent_record();r['home']=str(home)
+        binaries={n:('fixture:'+n).encode() for n in c.binary_names(r)}
+        pins={'providerSha256':c.sha(binaries[c.CONSENT_BIN]),'configSha256':c.sha(settings)}
+        storage=c.consent_storage(settings,self.uid)
+        files=c.unit_bytes(r,base,Path('/operator/private.sock'),{**pins,'storage':storage})
+        unit=r['units'][4]
+        files[unit]=files[unit].replace((' '+storage['writableParent']+'\n').encode(),b'\n')
+        for n,data in files.items():
+            p=units/n;p.write_bytes(data);p.chmod(0o644)
+        for n,data in binaries.items():
+            p=base/'bin'/n;p.write_bytes(data);p.chmod(0o755)
+        for p in (base/'consent/config.json',home/'host-config.json'):
+            p.write_bytes(settings);p.chmod(0o600)
+        stage={'units':{n:c.sha(data) for n,data in files.items()},
+               'binaries':{n:c.sha(data) for n,data in binaries.items()},'consent':pins}
+        stage_raw=c.encoded(stage);(base/'stage.json').write_bytes(stage_raw);(base/'stage.json').chmod(0o600)
+        original_read,original_write=c.read_file,c.write_new
+        def read(path,owner,*args,**kwargs):return original_read(path,self.uid if owner==0 else owner,*args,**kwargs)
+        def write(path,data,uid=0,gid=0,mode=0o600):return original_write(path,data,self.uid if uid==0 else uid,self.gid if gid==0 else gid,mode)
+        def manager(unit):return {'LoadState':'loaded','Transient':'no','FragmentPath':str(units/unit),
+                                  'ActiveState':'inactive','MainPID':'0','ControlPID':'0','User':str(self.uid)}
+        with patch.object(c,'load',return_value=({},base,r)),patch.object(c,'UNITS',units), \
+             patch.object(c,'no_processes'),patch.object(c,'manager_properties',side_effect=manager), \
+             patch.object(c,'read_file',side_effect=read),patch.object(c,'write_new',side_effect=write),patch.object(c,'run'):
+            yield base,r,units,stage_raw,files[unit]
+
+    def test_storage_upgrade_retries_only_exact_old_new_publication_states(self):
+        with self.storage_upgrade_fixture() as (base,r,units,old_stage,old_unit):
+            original=c.replace_root_record; calls=[]
+            def fail_after_unit(path,data,mode):
+                original(path,data,mode);calls.append(path)
+                if len(calls)==1:raise OSError('injected unit publication interruption')
+            with patch.object(c,'replace_root_record',side_effect=fail_after_unit):
+                with self.assertRaises(OSError):c.consent_storage_upgrade(r['store'],'/unused')
+            self.assertEqual((base/'stage.json').read_bytes(),old_stage)
+            self.assertNotEqual((units/r['units'][4]).read_bytes(),old_unit)
+            result=c.consent_storage_upgrade(r['store'],'/unused')
+            new_stage=(base/'stage.json').read_bytes();new_unit=(units/r['units'][4]).read_bytes()
+            self.assertEqual(result['stageSha256'],c.sha(new_stage))
+            # The inverse partial state and interrupted manager reload are also
+            # exact retained transitions, not license to accept arbitrary bytes.
+            (units/r['units'][4]).write_bytes(old_unit)
+            with patch.object(c,'run',side_effect=OSError('injected reload failure')):
+                with self.assertRaises(OSError):c.consent_storage_upgrade(r['store'],'/unused')
+            self.assertEqual((units/r['units'][4]).read_bytes(),new_unit)
+            self.assertEqual((base/'stage.json').read_bytes(),new_stage)
+            c.consent_storage_upgrade(r['store'],'/unused')
+            self.assertEqual((base/'stage.json').read_bytes(),new_stage)
+            changed=units/r['units'][4];changed.write_bytes(new_unit+b'Environment=FORGED=1\n')
+            with self.assertRaises(ValueError):c.consent_storage_upgrade(r['store'],'/unused')
+
+    def test_storage_upgrade_config_drift_and_live_units_refuse_before_publication(self):
+        with self.storage_upgrade_fixture() as (base,r,units,old_stage,old_unit):
+            config=base/'consent/config.json';config.write_bytes(b'{"storageRoot":"/other"}')
+            with self.assertRaisesRegex(ValueError,'configuration bytes differ'):
+                c.consent_storage_upgrade(r['store'],'/unused')
+            self.assertEqual((units/r['units'][4]).read_bytes(),old_unit)
+            with patch.object(c,'manager_properties',return_value={'LoadState':'loaded','Transient':'no',
+                    'FragmentPath':str(units/r['units'][0]),'ActiveState':'active','MainPID':'123'}):
+                with self.assertRaisesRegex(ValueError,'must be stopped'):c.consent_storage_upgrade(r['store'],'/unused')
+
+    def test_storage_upgrade_retries_after_each_archive_intent_and_temporary_write(self):
+        for fault in range(1,8):
+            with self.subTest(fault=fault), self.storage_upgrade_fixture(str(fault)) as (base,r,units,old_stage,old_unit):
+                original=c.write_new;writes=[]
+                def interrupt(path,data,*args,**kwargs):
+                    original(path,data,*args,**kwargs);writes.append(path)
+                    if len(writes)==fault:raise OSError('injected durable write interruption')
+                with patch.object(c,'write_new',side_effect=interrupt):
+                    with self.assertRaises(OSError):c.consent_storage_upgrade(r['store'],'/unused')
+                result=c.consent_storage_upgrade(r['store'],'/unused')
+                self.assertEqual(c.sha((base/'stage.json').read_bytes()),result['stageSha256'])
+                self.assertTrue((base/'configs'/('consent-storage-'+c.sha(old_stage)+'.stage')).exists())
+                self.assertTrue((base/'configs'/('consent-storage-'+c.sha(old_unit)+'.service')).exists())
+                # The real receiving check refuses persistent object substitution
+                # after staging even when replacement bytes/mode are identical.
+                store=Path(result['consent']['storage']['root'])
+                database=store/'forward-link.sqlite3';replacement=store/'replacement'
+                replacement.write_bytes(database.read_bytes());replacement.chmod(0o600);replacement.replace(database)
+                with self.assertRaisesRegex(ValueError,'persistent inode pins differ'):c.checked_units(base,r)
 
 
 if __name__ == '__main__':
