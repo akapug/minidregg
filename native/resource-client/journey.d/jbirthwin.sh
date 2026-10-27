@@ -18,6 +18,7 @@
 # Every count and every operator-log reason is recorded in the rows file.
 # Exit 0 = every row as expected. Last stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 N=${KBW_BIRTHS:-20}
@@ -40,8 +41,8 @@ create() { # WS NAME LOG
     --predicate "$D/req/permit-all.json" >"$3.out" 2>"$3.err"
 }
 installed() { [ -f "$1/attempts/create-$2/outcome.json" ] \
-  && jq -e '.type == "confirmed" and (.confirmation == "installed" or .confirmation == "replayed")' \
-       "$1/attempts/create-$2/outcome.json" >/dev/null 2>&1; }
+  && attempt_answer "$1/attempts/create-$2/outcome.json" \
+     | jq -e '.type == "confirmed" and (.confirmation == "installed" or .confirmation == "replayed")' >/dev/null 2>&1; }
 
 # The concurrent writer's resource: the sponsor births `kbw-pad` and delegates
 # observe+mutate on it to the newcomer (the J3/J4 path).

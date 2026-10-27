@@ -89,14 +89,15 @@ ls "$SPONSOR_WS/attempts/p7-vote/" >"$D/attempt-files.txt"
 ok instance-after alice 'instance show p7-one'
 cp "$OUT" "$D/instance-after.json"
 if [ "$RC" = 0 ]; then :; fi
-RETRY_JSON=$(ls "$SPONSOR_WS"/attempts/p7-vote/retry-*.json 2>/dev/null | tail -1 || true)
-[ -z "$RETRY_JSON" ] || cp "$RETRY_JSON" "$D/retry-decision.json"
+# the newest retry's decoded answer, through `mini attempt-state` (numeric order, repaired from the record)
+"$MINI" attempt-state --attempt "$SPONSOR_WS/attempts/p7-vote" --json 2>/dev/null \
+  | jq -e '.retries | last | .outcome' >"$D/retry-decision.json" 2>/dev/null || rm -f "$D/retry-decision.json"
 voted=$(jq -r --arg s "$SPONSOR_SUBJECT" '[.value.entries[] | select(.field=="3" and .key==$s) | .value] | join(",")' "$D/instance-after.json")
 rev=$(jq -r '.value.descriptor.revision' "$D/instance-after.json")
 fields=$(jq -r '[.value.descriptor.fields[].id] | join(",")' "$D/instance-after.json")
 before_other=$(jq -S '[.value.entries[] | select(.field!="3")]' "$D/instance-before.json")
 after_other=$(jq -S '[.value.entries[] | select(.field!="3")]' "$D/instance-after.json")
-if [ -n "$RETRY_JSON" ] && jq -e '.type=="refused" or .type=="contention"' "$RETRY_JSON" >/dev/null && [ -z "$voted" ]; then
+if [ -s "$D/retry-decision.json" ] && jq -e '.type=="refused" or .type=="contention"' "$D/retry-decision.json" >/dev/null && [ -z "$voted" ]; then
   verdict=REFUSED
 elif [ "$voted" = 1 ] && [ "$rev" = 1 ] && [ "$fields" = "1,2,3" ] && [ "$before_other" = "$after_other" ]; then
   verdict=SAME-EFFECT

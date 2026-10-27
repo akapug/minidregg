@@ -20,6 +20,7 @@
 # Store (the write past it is refused again); the operator audit re-admits
 # every record from genesis, certify records and the tail law included.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in MINI HOST STORE VERIFIER JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jtail: $name is required" >&2; exit 2; fi
@@ -85,9 +86,9 @@ attempt_write() {  # attempt_write ID -> rc 0 iff admitted; creates the next fre
   [ "$(rc "$1-propose")" = 0 ] || return 1
   run "$1-submit" "$MINI" workspace --action submit --dir "$WS" \
     --intent "$WS/proposals/tail-$1/intent.json" --attempt "$WS/attempts/tail-$1"
-  [ "$(rc "$1-submit")" = 0 ] && jq -e '.type == "confirmed"' "$WS/attempts/tail-$1/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$1-submit")" = 0 ] && attempt_answer "$WS/attempts/tail-$1/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
-reason_of() { jq -r '.reason // empty' "$WS/attempts/tail-$1/outcome.json" 2>/dev/null; }
+reason_of() { attempt_answer "$WS/attempts/tail-$1/outcome.json" | jq -r '.reason // empty' 2>/dev/null; }
 explain_of() { grep -m1 '^refused:' "$D/$1-submit.err" 2>/dev/null | cut -c1-160; }
 fill() {  # fill PREFIX COUNT -> number admitted
   local i ok=0
