@@ -40,7 +40,7 @@ const SSH_BLOB_PREFIX: [u8; 19] = [
 /// A door account name: `^[a-z][a-z0-9-]{1,24}$` (split tenancy logs in as `mini-s-NAME`,
 /// 32 characters at most), never reserved, never ending in `-`.
 /// The member's research-consent fact (ember's policy ruling, 2026-10-27): the reference
-/// `research-consent` in the member's own workspace, a declared cell under the open law, whose
+/// `research-consent` in the member's own workspace, a declared cell under the open law holding
 /// field 1 is 1 for CC0 (contributed for research) and 0 for none. The lines that write it at
 /// enrolment, as the member, through the same tenant path as every other enrolment step.
 pub const RESEARCH_CONSENT_REF: &str = "research-consent";
@@ -49,10 +49,32 @@ pub const RESEARCH_CONSENT_ATTEMPT: &str = "research-consent-0";
 
 pub fn research_consent_lines(cc0: bool) -> [String; 3] {
     [
-        format!("create {RESEARCH_CONSENT_REF} declared open"),
+        format!("create {RESEARCH_CONSENT_REF} declared open {RESEARCH_CONSENT_FIELD}"),
         format!("invoke {RESEARCH_CONSENT_ATTEMPT} {RESEARCH_CONSENT_REF} create {RESEARCH_CONSENT_FIELD} {}", u8::from(cc0)),
         format!("submit {RESEARCH_CONSENT_ATTEMPT}"),
     ]
+}
+
+/// The member's invite fact: present only for a member admitted with an operator-issued invite
+/// code. The reference `invite`, a declared open cell, whose field 1 is the code's
+/// SERIAL in the operator's codes file (never the code: the world is world-readable). Serials are
+/// 1 or more, and `invoke ... create` writes one scalar, so field 1 IS the serial. An uncoded
+/// member has no `invite` reference at all (absence = admitted on an open seat; a field-1 = 0 fact
+/// would only add a write whose absence says the same).
+pub const INVITE_REF: &str = "invite";
+pub const INVITE_ATTEMPT: &str = "invite-0";
+
+pub fn invite_lines(serial: u32) -> [String; 3] {
+    [
+        format!("create {INVITE_REF} declared open"),
+        format!("invoke {INVITE_ATTEMPT} {INVITE_REF} create 1 {serial}"),
+        format!("submit {INVITE_ATTEMPT}"),
+    ]
+}
+
+/// An invite code as the operator issues it and the form carries it: 8 to 64 of A-Z a-z 0-9 -.
+pub fn is_invite_code(code: &str) -> bool {
+    (8..=64).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// The sentence the join page, /subscribe and /export carry (ember's ruling, verbatim; one file,
@@ -180,7 +202,9 @@ impl Route {
 pub enum Request {
     /// `research`: the stranger ticked "contribute my data for research (CC0; kept private until
     /// reviewed)"; the processor writes it as the member's research-consent fact at enrolment.
-    Join { id: String, at: u64, name: String, ssh_key: String, discord: bool, route: Route, research: bool },
+    Join { id: String, at: u64, name: String, ssh_key: String, discord: bool, route: Route, research: bool,
+        /// An operator-issued one-use invite code (free route only), for seats past freeCap - inviteReserve.
+        invite: Option<String> },
     /// The stranger's detached ssh signature over the paid-enrolment statement.
     Sign { id: String, at: u64, signature: String },
     /// The stranger's Solana transaction signature after paying.
@@ -212,8 +236,14 @@ impl Request {
 
     pub fn to_json(&self) -> Value {
         match self {
-            Request::Join { id, at, name, ssh_key, discord, route, research } => json!({"type":REQUEST_TYPE,"kind":"join",
-                "id":id,"at":at,"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research}),
+            Request::Join { id, at, name, ssh_key, discord, route, research, invite } => {
+                let mut v = json!({"type":REQUEST_TYPE,"kind":"join",
+                    "id":id,"at":at,"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research});
+                if let Some(code) = invite {
+                    v["invite"] = json!(code);
+                }
+                v
+            }
             Request::Sign { id, at, signature } => json!({"type":REQUEST_TYPE,"kind":"sign","id":id,"at":at,"signature":signature}),
             Request::Paid { id, at, transaction } => json!({"type":REQUEST_TYPE,"kind":"paid","id":id,"at":at,"transaction":transaction}),
         }
@@ -227,9 +257,16 @@ impl Request {
             "join" => {
                 // `research` is required of every request the form writes now; a request queued
                 // before it existed reads as not ticked.
-                let o = match exact(&value, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route", "research"]) {
+                // `invite` is optional and present only when a code was given.
+                let mut stripped = value.clone();
+                let invite = match stripped.as_object_mut().and_then(|m| m.remove("invite")) {
+                    None => None,
+                    Some(Value::String(c)) if is_invite_code(&c) => Some(c),
+                    Some(_) => return Err("invite is not an invite code".into()),
+                };
+                let o = match exact(&stripped, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route", "research"]) {
                     Ok(o) => o,
-                    Err(_) => exact(&value, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route"])?,
+                    Err(_) => exact(&stripped, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route"])?,
                 };
                 let name = text(o, "name")?;
                 if !is_door_name(name) {
@@ -248,6 +285,9 @@ impl Request {
                     "paid" => Route::Paid,
                     other => return Err(format!("route {other:?} is neither free nor paid")),
                 };
+                if invite.is_some() && route != Route::Free {
+                    return Err("an invite code is for the free route only".into());
+                }
                 Request::Join {
                     id: text(o, "id")?.into(),
                     at: natural(o, "at")?,
@@ -256,6 +296,7 @@ impl Request {
                     discord: o.get("discord").and_then(Value::as_bool).ok_or("discord is not a boolean")?,
                     route,
                     research: match o.get("research") { None => false, Some(v) => v.as_bool().ok_or("research is not a boolean")? },
+                    invite,
                 }
             }
             "sign" => {
@@ -500,7 +541,7 @@ mod tests {
     #[test]
     fn requests_round_trip_and_anything_else_refuses() {
         let id = new_request_id().unwrap();
-        let join = Request::Join { id: id.clone(), at: 7, name: "alice".into(), ssh_key: KEY.into(), discord: true, route: Route::Paid, research: true };
+        let join = Request::Join { id: id.clone(), at: 7, name: "alice".into(), ssh_key: KEY.into(), discord: true, route: Route::Paid, research: true, invite: None };
         let bytes = serde_json::to_vec(&join.to_json()).unwrap();
         assert_eq!(Request::parse(&bytes).unwrap(), join);
         assert_eq!(join.file_name(), format!("join-{id}.json"));

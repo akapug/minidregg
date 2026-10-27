@@ -392,7 +392,14 @@ def awaitJson (domain : Digest) (await : Await) : Json :=
     ("source", match await.source with
       | .reply slot decider => .mkObj [("kind", "reply"), ("slot", decimal slot.value),
           ("slotCell", decimal (AnswerSlot.cell domain slot).value), ("decider", decimal decider.value)]
-      | .height due => .mkObj [("kind", "height"), ("due", decimal due)]),
+      | .height due => .mkObj [("kind", "height"), ("due", decimal due)]
+      | .performed verdict => .mkObj [("kind", "performed"), ("verdict", match verdict with
+          | .settled => "settled"
+          | .refused _ => "refused"), ("reason", match verdict with
+          | .settled => Json.null
+          | .refused .unfunded => "unfunded"
+          | .refused .reserved => "reserved"
+          | .refused .closed => "closed")]),
     ("deadline", decimal await.deadline), ("yieldedAt", decimal await.yieldedAt)]
 
 open Minidregg.Kernel.ObjectiveActivity in

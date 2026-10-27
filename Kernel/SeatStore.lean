@@ -627,8 +627,8 @@ structure Request where
 is its signer, nonce and exact turn bytes, so a retry finds its record. -/
 def transactionOf (request : Request) : TransactionId :=
   match request.turn with
-  | .publish stored => tagged "DREGG/SEAT/TX/PUBLISH/v2" (digestStream.encode (publishedPin stored))
-  | turn => tagged "DREGG/SEAT/TX/v2"
+  | .publish stored => tagged "DREGG/SEAT/TX/PUBLISH/v3" (digestStream.encode (publishedPin stored))
+  | turn => tagged "DREGG/SEAT/TX/v3"
       (subjectStream.encode request.subject ++ StreamCodec.nat.encode request.nonce ++ turnStream.encode turn)
 
 /-- The id of the `index`-th member of the Plan an invoking turn performs, if

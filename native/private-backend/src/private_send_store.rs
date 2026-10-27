@@ -163,7 +163,8 @@ impl Machine for DeliveryMachine {
                     ps.push(p)
                 }
                 c.finish()?;
-                self.state.dealer_with_coefficients(&m, &ps)?
+                self.state.commit_dealer(&m, &ps)?;
+                vec![]
             }
             1 => {
                 let receiver = c.u16()?;
@@ -175,6 +176,10 @@ impl Machine for DeliveryMachine {
                 let m = decode_message(&c.bytes()?)?;
                 c.finish()?;
                 self.state.receive(sender, m)?
+            }
+            3 => {
+                c.finish()?;
+                self.state.emit_dealer()?
             }
             _ => return Err(bad("private delivery event")),
         };
@@ -195,7 +200,7 @@ impl Store {
         length: usize,
     ) -> Result<Self> {
         let state = PrivateSend::new(me, dealer, n, f, g, length)?;
-        let mut identity = b"DREGG.PRIVATE.DELIVERY.PARTY.V1".to_vec();
+        let mut identity = b"DREGG.PRIVATE.DELIVERY.PARTY.V2".to_vec();
         g.put(&mut identity);
         identity.extend(me.to_le_bytes());
         identity.extend(dealer.to_le_bytes());
@@ -209,17 +214,37 @@ impl Store {
     pub fn state(&self) -> &PrivateSend {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, event: &[u8]) -> Result<Vec<Send>> {
         let b = self.journal.append(event)?;
         parse_outbox(&b, self.state().n)
     }
+    /// The deal is two journalled steps: commit the plaintext and random
+    /// coefficients (nothing published), then emit. A tear of the emit record
+    /// re-derives the identical ciphertext and key shares; an exact retry
+    /// replays the retained outbox.
     pub fn dealer(&mut self, m: &[u8]) -> Result<Vec<Send>> {
-        let mut b = vec![0];
-        bytes(m, &mut b);
-        let mut coeff = vec![0u8; 2 * (self.state().f + 1) * 16];
-        File::open("/dev/urandom")?.read_exact(&mut coeff)?;
-        b.extend(coeff);
-        self.apply(&b)
+        match self.state().committed_deal() {
+            Some((old, _)) => {
+                if old != m {
+                    return Err(bad("private delivery changed dealer retry"));
+                }
+                if self.state().dealer_emitted() {
+                    return self.replay_outboxes();
+                }
+            }
+            None => {
+                let mut b = vec![0];
+                bytes(m, &mut b);
+                let mut coeff = vec![0u8; 2 * (self.state().f + 1) * 16];
+                File::open("/dev/urandom")?.read_exact(&mut coeff)?;
+                b.extend(coeff);
+                self.apply(&b)?;
+            }
+        }
+        self.apply(&[3])
     }
     pub fn request_delivery(&mut self, r: u16) -> Result<Vec<Send>> {
         let mut b = vec![1];
@@ -279,6 +304,57 @@ mod tests {
         let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
         assert_eq!(s.replay_outboxes().unwrap(), original);
         assert!(s.dealer(&[62; 64]).is_err());
+    }
+    fn cut_last_byte(p: &std::path::Path) {
+        let len = fs::metadata(p).unwrap().len();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_len(len - 1)
+            .unwrap();
+    }
+    #[test]
+    fn torn_emit_rederives_the_same_deal_never_a_redraw() {
+        let p = path();
+        let out = {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+            s.dealer(&[61; 64]).unwrap()
+        };
+        cut_last_byte(&p);
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(s.dealer(&[62; 64]).is_err());
+        assert_eq!(s.dealer(&[61; 64]).unwrap(), out);
+        assert_eq!(s.dealer(&[61; 64]).unwrap(), out);
+        drop(s);
+        let s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert_eq!(s.replay_outboxes().unwrap(), out);
+    }
+    #[test]
+    fn torn_commit_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = path();
+        let after_open = {
+            let s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+            let n = fs::metadata(&p).unwrap().len();
+            drop(s);
+            n
+        };
+        Store::open(&p, 0, 0, 4, 1, &g(), 64)
+            .unwrap()
+            .dealer(&[61; 64])
+            .unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s.dealer(&[62; 64]).unwrap().is_empty());
     }
     #[test]
     fn transfer_wire_roundtrip_and_trailing_rejection() {

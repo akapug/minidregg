@@ -1033,6 +1033,48 @@ mod tests {
             err.set_description_html("<p>denied</p>");
             Ok(())
         }
+        async fn propfind(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::PropfindParams,
+            mut results: web_session_capnp::web_session::PropfindResults,
+        ) -> capnp::Result<()> {
+            let p = params.get()?;
+            let depth = match p.get_depth()? {
+                web_session_capnp::web_session::PropfindDepth::Zero => "0",
+                web_session_capnp::web_session::PropfindDepth::One => "1",
+                web_session_capnp::web_session::PropfindDepth::Infinity => "infinity",
+            };
+            let echoed = format!("{}|{}|{}", p.get_path()?.to_str()?, depth, p.get_xml_content()?.to_str()?);
+            let mut content = results.get().init_content();
+            content.set_status_code(web_session_capnp::web_session::response::SuccessCode::MultiStatus);
+            content.set_mime_type("application/xml");
+            content.init_body().set_bytes(echoed.as_bytes());
+            Ok(())
+        }
+        async fn move_(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::MoveParams,
+            mut results: web_session_capnp::web_session::MoveResults,
+        ) -> capnp::Result<()> {
+            let p = params.get()?;
+            let echoed = format!("{}->{}|{}", p.get_path()?.to_str()?, p.get_destination()?.to_str()?, p.get_no_overwrite());
+            let mut content = results.get().init_content();
+            content.set_status_code(web_session_capnp::web_session::response::SuccessCode::Created);
+            content.set_mime_type("text/plain");
+            content.init_body().set_bytes(echoed.as_bytes());
+            Ok(())
+        }
+        async fn options(
+            self: capnp::capability::Rc<Self>,
+            _: web_session_capnp::web_session::OptionsParams,
+            mut results: web_session_capnp::web_session::OptionsResults,
+        ) -> capnp::Result<()> {
+            let mut o = results.get();
+            o.set_dav_class1(true);
+            o.set_dav_class2(true);
+            o.reborrow().init_dav_extensions(1).set(0, "calendar-access");
+            Ok(())
+        }
     }
 
     struct FakeHandle;
@@ -1325,18 +1367,56 @@ mod tests {
                         ..Default::default()
                     },
                     body: Some(Body { mime_type: "application/json".into(), encoding: String::new(), bytes: br#"{"task":"write"}"#.to_vec() }),
+                    dav: Default::default(),
                 };
                 let reply = dispatch_web(&session, &post, 1024, Duration::from_secs(5)).await.unwrap();
                 assert_eq!(reply.headers, [Header { name: "x-sandstorm-app-test".into(), value: "kept".into() }]);
                 assert!(matches!(reply.result, WebResult::Content { status: 201, body, .. } if body == br#"{"ok":true}"#));
                 assert_eq!(observed.borrow().posts, [("todos?from=app%20view&n=2".into(), br#"{"task":"write"}"#.to_vec(), "session=abc".into(), "x-sandstorm-app-test=yes".into())]);
-                let delete = WebRequest { method: Method::Delete, path_and_query: "todos/1".into(), context: RequestContext::default(), body: None };
+                let delete = WebRequest { method: Method::Delete, path_and_query: "todos/1".into(), context: RequestContext::default(), body: None, dav: Default::default() };
                 let reply = dispatch_web(&session, &delete, 1024, Duration::from_secs(5)).await.unwrap();
                 assert!(matches!(reply.result, WebResult::ClientError { status: 403, html, .. } if html == "<p>denied</p>"));
-                let get = |path: &str| WebRequest { method: Method::Get, path_and_query: path.into(), context: RequestContext::default(), body: None };
+                let get = |path: &str| WebRequest { method: Method::Get, path_and_query: path.into(), context: RequestContext::default(), body: None, dav: Default::default() };
                 let reply = dispatch_web(&session, &get("stream"), 64, Duration::from_secs(5)).await.unwrap();
                 assert!(matches!(reply.result, WebResult::Content { body, .. } if body == b"streamed body"));
                 assert!(dispatch_web(&session, &get("overflow"), 4, Duration::from_secs(5)).await.is_err());
+                use crate::web::{DavArgs, Depth};
+                let propfind = WebRequest {
+                    method: Method::Propfind,
+                    path_and_query: "dav/notes".into(),
+                    context: RequestContext::default(),
+                    body: Some(Body { mime_type: "application/xml".into(), encoding: String::new(), bytes: b"<propfind/>".to_vec() }),
+                    dav: DavArgs { depth: Some(Depth::One), ..Default::default() },
+                };
+                let reply = dispatch_web(&session, &propfind, 1024, Duration::from_secs(5)).await.unwrap();
+                assert!(matches!(reply.result, WebResult::Content { status: 207, body, .. } if body == b"dav/notes|1|<propfind/>"));
+                let mv = WebRequest {
+                    method: Method::Move,
+                    path_and_query: "dav/a".into(),
+                    context: RequestContext::default(),
+                    body: None,
+                    dav: DavArgs { destination: Some("dav/b".into()), no_overwrite: true, ..Default::default() },
+                };
+                let reply = dispatch_web(&session, &mv, 1024, Duration::from_secs(5)).await.unwrap();
+                assert!(matches!(reply.result, WebResult::Content { status: 201, body, .. } if body == b"dav/a->dav/b|true"));
+                let options = WebRequest { method: Method::Options, path_and_query: "dav".into(), context: RequestContext::default(), body: None, dav: Default::default() };
+                let reply = dispatch_web(&session, &options, 1024, Duration::from_secs(5)).await.unwrap();
+                assert_eq!(reply.headers, [Header { name: "dav".into(), value: "1, 2, calendar-access".into() }]);
+                // Refused before the call: a MOVE without a destination, a destination on a GET,
+                // a COPY with a body, a PROPFIND whose xmlContent is not text.
+                let mut no_destination = mv.clone();
+                no_destination.dav.destination = None;
+                assert!(dispatch_web(&session, &no_destination, 1024, Duration::from_secs(5)).await.is_err());
+                let mut get_with_destination = get("todos");
+                get_with_destination.dav.destination = Some("x".into());
+                assert!(dispatch_web(&session, &get_with_destination, 1024, Duration::from_secs(5)).await.is_err());
+                let mut copy_with_body = mv.clone();
+                copy_with_body.method = Method::Copy;
+                copy_with_body.body = Some(Body { mime_type: String::new(), encoding: String::new(), bytes: b"x".to_vec() });
+                assert!(dispatch_web(&session, &copy_with_body, 1024, Duration::from_secs(5)).await.is_err());
+                let mut binary_xml = propfind.clone();
+                binary_xml.body.as_mut().unwrap().bytes = vec![0xff, 0xfe];
+                assert!(dispatch_web(&session, &binary_xml, 1024, Duration::from_secs(5)).await.is_err());
                 let mut forbidden = post.clone();
                 forbidden.context.additional_headers[0].name = "authorization".into();
                 assert!(dispatch_web(&session, &forbidden, 1024, Duration::from_secs(5)).await.is_err());

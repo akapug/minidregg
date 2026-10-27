@@ -442,7 +442,18 @@ pub const CONSENT_STORE_RECHECK: u8 = 233;
 pub const CONSENT_FRAMES: &[u8] = &[CONSENT_INTENT, CONSENT_OBSERVATION, CONSENT_PLAN, CONSENT_OPERATOR_PLAN, CONSENT_POSSESSION, CONSENT_OBJECTIVE, CONSENT_ANCHOR_OFFER, CONSENT_ANCHOR_ADMITTED, CONSENT_THIN_INTENT, CONSENT_THIN_OBSERVATION, CONSENT_THIN_PLAN, CONSENT_STORE_RECHECK];
 
 // Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.
-pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops"];
+pub const ORDINARY_HEADER_NAMES: &[&str] = &["cookie", "accept", "accept-encoding", "content-type", "user-agent", "if-match", "if-none-match", "x-requested-with", "x-csrftoken", "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime", "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset", "oc-lazyops", "content-encoding"];
 pub fn ordinary_header_name(name: &str) -> bool {
     ORDINARY_HEADER_NAMES.contains(&name)
+}
+
+// Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.
+pub const DAV_METHODS: &[&str] = &["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT", "OPTIONS"];
+pub fn dav_method(name: &str) -> bool {
+    DAV_METHODS.contains(&name)
+}
+// Kernel/ApplicationDispatchAdmission.lean davHeaderName: signed, admitted on a DAV method only.
+pub const DAV_HEADER_NAMES: &[&str] = &["depth", "destination", "overwrite", "lock-token"];
+pub fn dav_header_name(name: &str) -> bool {
+    DAV_HEADER_NAMES.contains(&name)
 }

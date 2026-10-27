@@ -38,6 +38,8 @@ def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .objectiveActivity => none
   -- A seat cell is read through the seat view, never observed as a resource.
   | .seat => none
+  -- The platform cell is read through its lookup, never observed as a resource.
+  | .platform => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

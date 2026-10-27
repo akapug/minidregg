@@ -211,7 +211,7 @@ def audit (transport : Transport) (rootBytes : List UInt8 → Digest) : IO (Exce
     indexAt := (trailerCarried entry.tag).map (·.indexRoot) |>.getD indexAt
     if let some bytes := (checkpointHeights.find? (·.1 = height)).map (·.2) then
       let expected := checkpointFrame.encode (sealAt key height current.chain (current.frontier.getD [])
-        indexAt (State.ofSnapshot current.image current.snapshot) current.worldRoot)
+        indexAt (State.ofSnapshot current.image current.snapshot) current.system current.worldRoot)
       if bytes ≠ expected then
         return refused s!"checkpoint at height {height} differs from the genesis replay"
   match stored.entries.getLast?.bind (trailerCarried ·.tag) with
