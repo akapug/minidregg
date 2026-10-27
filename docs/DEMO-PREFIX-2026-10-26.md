@@ -26,42 +26,38 @@ landmine fixed (explicit per-box roster, `BOX` file); `*.demo.dregg.online` wild
 puts a DNS token on the box as a written CONFINEMENT §2 exception and makes Caddy security updates our
 own rebuild; every installed grain gets one fixed origin `<grain>.demo.dregg.online`.
 
-## 1. The bar and the public-opening contract
+## 1. The bar, the gate, and the public-opening contract
 
 The bar: a stranger with the URL exercises every surface, for as long as the demo stands (to 11 Nov
-2026), without the operator babysitting, and finds a coherent product, not a set of prototypes. There
-is no "week-1" scope and no degraded first edition (ember, 2026-10-27: "we've let week-1 become a
-hobgoblin of our minds and we must kill it and raise our ambitions"); half-built prototypes are compost
-for the one design, never exposed as a hodgepodge.
+2026), without the operator babysitting, and finds a coherent product, not a set of prototypes
+(`docs/DEMO-EXPERIENCE-2026-10-27.md` is what that product is). There is no "week-1" scope and no
+degraded first edition; half-built prototypes are compost for the one design.
 
-Rehearsal ships (operator-only, re-genesis allowed) happen on the day planned with every red
-named: that is how DelveTalk shipped seventeen editions in a week and how DEPLOY-3 died when
-it was batched behind a composed gate (HISTORY §8). **Public opening** needs one contract, all
-four parts, measured on the demo box itself:
+**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships on the day
+with its reds named; the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
+`jtour`: the web journey's rows driven against the box's own Host (the twelve steps of the experience
+document, parity over every verb leaf, the lost reply and its exact retry, the paste-the-yes), and
+(b) the composed scenario over N forced-ssh members (rooms, churn, documents, apps, connector,
+residents, restart). The 148-row standing run is the nightly's on `dregg-build`; it names its reds
+in the morning report and never names a candidate's. Performance is measured and published, never a
+gate.
 
-1. **Advertised surfaces work**: the demo journey's rows for every surface that is on pass
-   on the candidate that ships (ssh shell J0–J8+J12, the browser front end (terminal, documents, boards, rooms, apps, receipts),
-   the app market (any Sandstorm SPK installed by a member and opened on its own origin), EtherCalc
-   two-browser co-edit + restart, Hermes room resident with a real pool/homelab call, one
-   mainnet pay-to-enrol, Discord slash entrance, fn consumer worker, fleet row, oracle grain).
-2. **Tenancy holds**: split tenancy on the box (`jsplit-tenancy.sh` green), no member can read
-   another's key, the operator socket is unreachable from a tenant, Lean-emitted default
-   policies replace permit-all before the door opens.
-3. **Uncertain effects recover safely**: no undecided outcome is shown as a refusal; no
-   money or write path reruns without a record; provider failures (non-200, timeout,
-   malformed, crash-after-send) leave a decided purse; a failed first CREATE on a grain is
-   recoverable; restart, certifier failure and backup drills pass.
-4. **Performance is measured and published, never a gate** (ember, 2026-10-27: "growth / perf
-   isn't a good reason to avoid deploying this demo right now, we'll do more focused performance
-   engineering later"). The growth judge's numbers (write MAX, p99, reopen at 1000 records; the
-   journey's criterion is MAX ≤ 5 s, `native/resource-client/journey.sh:858-866`) and a 10k-record
-   soak are measured on the demo box and written on the join page and in the plan; they do not
-   block a rehearsal or the opening. L11 continues as engineering, off the critical path.
+**Public opening** needs one contract, measured on the demo box itself:
 
-The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; for the
-candidate that opens, its composed phases and its non-performance journey rows must be green
-(growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
-tested rule). The date is re-estimated from each rehearsal's evidence, never promised.
+1. **The tour runs for a stranger**: every spine step of the experience document admitted/refused/
+   undecided as the step says, from a browser with nothing installed; the composed scenario's phases
+   pass; one real Hermes resident through the pool route; one app installed from the real store and
+   opened on its own origin; one mainnet pay-to-enrol.
+2. **Tenancy holds**: split tenancy on the box, no member can read another's key, the operator socket
+   is unreachable from a tenant, Lean-emitted default laws replace permit-all.
+3. **Uncertain effects recover safely**: no undecided outcome is shown as a refusal; no money or
+   write path reruns without a record; provider failures of all four classes leave a decided purse;
+   restart, certifier failure and backup drills pass.
+4. **Performance is measured and published**, on the join page and here, never a gate.
+
+**The opening target is 2026-10-29**, re-estimated from rehearsal #3's evidence (round 4's candidate,
+a re-genesis carrying the grain platform), and announced when the contract holds. Mainnet
+pay-to-enrol from the first open day (ember, 2026-10-27).
 
 ## 2. Where we stand (2026-10-27, mid-morning UTC; rewritten whole)
 
@@ -256,7 +252,8 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 3. Lean interface changes land first and rebuild early; no statement packets for code being
    removed; only a lane's top-level theorem must be non-vacuous.
 4. Rehearsals ship on the day with reds named; the opening waits for the §1 contract and
-   nothing else; the gate is never relaxed and never grown ahead of the surfaces.
+   nothing else; the gate is the tour plus the composed scenario and never grows ahead of the
+   surfaces; standing rows are nightly and never a candidate's reds.
 5. One root per project; resume the agent that holds the context; no censuses or ledgers
    unless they unblock the ship; every lane brief carries the system framing, the report
    sections, `path:line` pointers, the worktree and branch, and the verification it must run.
@@ -286,10 +283,12 @@ oracle ships through the same grain gate, with its format blocker owned by the o
 a $50 hard cap set at OpenRouter (the broker's pool ceiling is $40, $0.10 worst-case per call;
 BYOK on); the Dragon's Egg bot (application 1507638321877090374) is in guild 1507637841235017768;
 the demo's **shutdown date is 2026-11-11**, written on the join page and in the teardown plan;
-backup retention defaults to 7 days after shutdown. Still open, with the engineering default that
-applies meanwhile: **mainnet vs devnet for pay-to-enrol** (default: devnet, two providers,
-until ember says mainnet; the sponsor's total cap and per-stranger funding amount are the door's
-configured values, published on the join page).
+backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
+morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
+configured values, published on the join page). The oracle lands as a grain if it can be got away with
+(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+Main advances after every integration round; other sessions' work in the shared worktree is committed
+as found and fixed forward.
 
 ## 6. What this file is not
 
