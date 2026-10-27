@@ -107,11 +107,6 @@ impl Broker {
         Ok(Broker::new(socket, uid as u32))
     }
 
-    /// The box default ([`CLIENT_CONFIG`], root-owned).
-    pub fn default_box() -> Result<Self, Refused> {
-        Self::load(Path::new(CLIENT_CONFIG), 0)
-    }
-
     /// Connect before `end` and check the answering account.
     pub fn connect(&self, end: Instant) -> Result<UnixStream, Refused> {
         let stream = connect(&self.socket, end).map_err(|e| local("broker-unavailable", e))?;
