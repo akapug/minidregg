@@ -24,7 +24,6 @@ import Compiler.BendCommittedUnroll
 import Compiler.BendProofBytes
 import Compiler.BendProofCshake
 import Compiler.BendProofCshakeBounded
-import Compiler.BendProofCshakeBoundedChecks
 import Compiler.BendProofCshakeChecks
 import Compiler.BendProofKeccak
 import Compiler.BendProofKeccakChecks
