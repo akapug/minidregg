@@ -719,6 +719,7 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
   | .streamEntry, _ | .system, _ => none
   | .objectiveActivity, _ => none
   | .seat, _ => none
+  | .platform, _ => none
 
 /-- A read under `fields` keeps an address exactly when its field is named;
 an address with no field is kept only by a scope naming every field. -/
