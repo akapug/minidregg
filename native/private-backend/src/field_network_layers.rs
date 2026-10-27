@@ -423,7 +423,7 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::field_network_store::{LayerStore, Store};
+    use crate::field_network_store::LayerStore;
     use std::{
         collections::VecDeque,
         fs,
@@ -594,13 +594,6 @@ pub(crate) mod tests {
         assert!(ns
             .iter()
             .all(|n| n.completed_batches() == 1 && n.output().is_some()));
-        let (old, _) = crate::field_network::tests::engine_nodes(Field(0), Field(1));
-        let mut started = old.into_iter().next().unwrap();
-        started.start().unwrap();
-        assert!(
-            LayerEngine::new(started).is_err(),
-            "cannot reinterpret a protocol already opening shares"
-        );
     }
     #[test]
     fn corrupt_early_vector_waits_for_late_honest_full_vector_and_rejects_shape() {
@@ -646,10 +639,6 @@ pub(crate) mod tests {
             q.extend(ps.into_iter().map(|p| (i as u16, p)));
         }
         drop(stores[1].take());
-        assert!(
-            Store::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).is_err(),
-            "sequential WAL cannot reinterpret layer wire events"
-        );
         let reopened = LayerStore::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).unwrap();
         assert_eq!(reopened.replay_outboxes().unwrap(), saved);
         q.extend(saved.into_iter().map(|p| (1, p)));

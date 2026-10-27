@@ -836,9 +836,6 @@ impl Dzk {
             })
         }
     }
-    pub(crate) fn dealer_inputs(&self) -> Option<&[Vec<Field>]> {
-        self.dealer_inputs.as_deref()
-    }
     pub fn verify_private(&self, holder: u16, values: &[Field]) -> Result<Verification> {
         if self.delivered().is_none() {
             return Err(Error::new(
