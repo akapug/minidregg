@@ -91,7 +91,14 @@ impl Sandbox {
 /// assignment (`sandboxTools`), from the prompt the controller was handed.
 fn room_grant(prompt: &str) -> Option<u64> {
     let assignment: Value = serde_json::from_str(prompt.strip_prefix(room_resident::ASSIGNMENT_PREFIX)?).ok()?;
-    assignment.get("sandboxTools")?.as_u64().filter(|bits| *bits <= 7)
+    assignment.get("sandboxTools")?.as_u64().filter(|bits| *bits <= 15)
+}
+
+/// The room's `hermes/tools` bit 8: the oracle (Oracle tools through the operator's lifetime
+/// route), granted per room like the sandbox toolsets.
+pub(crate) const ORACLE_BIT: u64 = 8;
+pub(crate) fn oracle_granted(prompt: Option<&str>) -> bool {
+    prompt.and_then(room_grant).is_some_and(|bits| bits & ORACLE_BIT != 0)
 }
 
 /// The exact upstream names the granted toolsets add to the catalogue.
@@ -137,7 +144,10 @@ mod tests {
         sandbox.tools = vec!["file".into()];
         assert_eq!(sandbox.grant(Some(&prompt(json!(7)))), vec!["file"]);
         assert!(sandbox.grant(Some(&prompt(json!(2)))).is_empty(), "the ceiling withholds the terminal");
-        assert!(sandbox.grant(Some(&prompt(json!(8)))).is_empty(), "an out-of-range grant is none");
+        assert!(sandbox.grant(Some(&prompt(json!(8)))).is_empty(), "the oracle bit grants no sandbox toolset");
+        assert!(sandbox.grant(Some(&prompt(json!(16)))).is_empty(), "an out-of-range grant is none");
+        assert!(oracle_granted(Some(&prompt(json!(8)))) && oracle_granted(Some(&prompt(json!(15)))));
+        assert!(!oracle_granted(Some(&prompt(json!(7)))) && !oracle_granted(Some(&prompt(json!(16)))) && !oracle_granted(None));
         assert!(sandbox.grant(Some("Assignment: {}")).is_empty());
         assert!(sandbox.grant(None).is_empty(), "a non-resident prompt gets none");
     }

@@ -3519,6 +3519,8 @@ struct Runtime {
     prompt_provider_refusals: Vec<String>,
     /// The sandbox toolsets granted to the running prompt's worker.
     prompt_sandbox: Vec<&'static str>,
+    /// Whether the running resident prompt's room grants the oracle.
+    prompt_oracle: bool,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -6644,6 +6646,7 @@ impl Runtime {
             prompt_member: None,
             prompt_provider_refusals: Vec::new(),
             prompt_sandbox: Vec::new(),
+            prompt_oracle: false,
             prompt_decision: None,
             foreground_operation: None,
             output: None,
@@ -8271,6 +8274,21 @@ impl Runtime {
     }
     /// A product tool constructs ordinary HTTP only. Dispatch below still
     /// checks the current route, signed authority, native permit and settlement.
+    /// A restricted room resident reaches applications only through the Oracle tools, and only
+    /// in a room that grants the oracle; refused by name before any dispatch.
+    fn restricted_application_call(&self, name: &str) -> Result<()> {
+        if !self.room_tools_restricted() { return Ok(()); }
+        if !oracle_tools::is_tool(name) {
+            return Err("this resident accepts only room tools".into());
+        }
+        if self.resident_oracle_applications().is_empty() {
+            return Err("refused: oracle-not-configured: no Oracle lifetime route serves this resident".into());
+        }
+        if !self.prompt_oracle {
+            return Err("refused: oracle-not-granted: this room's founder has not granted the oracle (hermes/tools bit 8)".into());
+        }
+        Ok(())
+    }
     fn application_tool_arguments(&self, name: &str, arguments: &Value) -> Result<Value> {
         if oracle_tools::is_tool(name) {
             let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
@@ -14218,6 +14236,23 @@ impl Runtime {
     }
     /// Prepare bounded tool-discovery names from exact retained Mini births.
     /// The catalog never substitutes for admission on a later tool call.
+    /// The Oracle applications a restricted room resident is offered: the operator's
+    /// `applicationServices` behind a pinned lifetime API (docs/oracle-agent-tools.md).
+    fn resident_oracle_applications(&self) -> Vec<String> {
+        self.config.tool_task.as_ref()
+            .filter(|tool| tool.lifetime_api_host_sha256.is_some())
+            .map(|tool| oracle_tools::applications(&tool.application_services))
+            .unwrap_or_default()
+    }
+    /// The upstream catalogue names a restricted resident's session must report beyond the
+    /// room catalogue: the granted sandbox toolsets and the offered Oracle tools.
+    fn resident_extra_tool_names(&self) -> Vec<String> {
+        let mut names = sandbox_tools::names(&self.prompt_sandbox);
+        if !self.resident_oracle_applications().is_empty() {
+            names.extend(["mcp__mini_grain__mini_oracle_discover".to_owned(), "mcp__mini_grain__mini_oracle_call".to_owned()]);
+        }
+        names
+    }
     fn room_tools_restricted(&self) -> bool {
         self.config.tool_task.as_ref().and_then(|tool| tool.room.as_ref())
             .is_some_and(|room| room.restrict_tools)
@@ -14225,7 +14260,11 @@ impl Runtime {
 
     fn tool_catalog(&self) -> Result<mcp::ToolCatalog> {
         if self.room_tools_restricted() {
-            return Ok(mcp::ToolCatalog { room_tools: true, ..Default::default() });
+            // The room catalogue, plus the operator's Oracle tools when a lifetime route serves
+            // them: offered to every prompt, called only where the room grants the oracle.
+            let oracle = self.resident_oracle_applications();
+            return Ok(mcp::ToolCatalog { room_tools: true, api_applications: oracle.clone(),
+                oracle_applications: oracle, ..Default::default() });
         }
         let Some(tool) = self.config.tool_task.as_ref() else {
             return Ok(mcp::ToolCatalog::default());
@@ -14696,6 +14735,9 @@ impl Runtime {
             (Some(sandbox), Some(_), Some(_)) => sandbox.grant(invocation.prompt()),
             _ => Vec::new(),
         };
+        // The oracle is granted per room (hermes/tools bit 8), read like the sandbox grant.
+        self.prompt_oracle = invocation.resident_identity().is_some()
+            && sandbox_tools::oracle_granted(invocation.prompt());
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
@@ -14872,7 +14914,7 @@ impl Runtime {
             acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker, None)?;
-            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response, &sandbox_tools::names(&self.prompt_sandbox))?; }
+            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response, &self.resident_extra_tool_names())?; }
             if let Some(previous) = &existing_session {
                 if !response.is_object() {
                     return Err("Hermes did not reload the retained session".into());
@@ -15224,6 +15266,8 @@ impl Runtime {
                         if application_api_call.is_some() {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
+                        } else if let Err(refusal) = self.restricted_application_call(&request.name) {
+                            let _ = request.reply.send(json!({"isError":true,"text":refusal}));
                         } else {
                             match self.application_tool_arguments(&request.name, &request.arguments)
                                 .and_then(|arguments| self.begin_application_api(

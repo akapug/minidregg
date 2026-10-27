@@ -480,6 +480,17 @@ the resident tools `mini_pending_awaits` / `mini_answer_await`. A member announc
 `await OBJECT TRANSACTION` in the room; that is the allowance. The kernel decides who may answer
 (notDecider) and refuses a second answer. Row: J14_AWAIT=1.
 
+**The Oracle through Hermes:**
+- Room field `hermes/tools` bit 8 grants the oracle.
+- A restricted resident is offered `mini_oracle_discover` and `mini_oracle_call` (never the raw
+  `mini_application_api`) when the operator's toolTask binds an Oracle lifetime route
+  (docs/oracle-agent-tools.md).
+- Every call goes through Mini's application dispatch and purse settlement. In a room without the
+  bit, the call is refused `oracle-not-granted` before any dispatch.
+- The answer comes back as Hermes's paid reply. Row: J14_ORACLE=1, with J14_ORACLE_TOOLTASK naming
+  the route fragment issued for this world's Hermes task. Issuing that fragment inside J14's world
+  (codex's `issue-grant` / `prepare-route` against the J14 controller) is the open seam.
+
 **Running J14 on dregg-build.** `/build/lanes/hermes-tier-run/tools-run.sh RUN_DIR` builds the
 lane binaries into `/build/lanes/hermes-tier-target` (CARGO_BUILD_JOBS=4), rebuilds the runtime
 root with `build-runtime-root` from `/build/lanes/hermes-live-run/hermes-agent` (6d8a8beb) against

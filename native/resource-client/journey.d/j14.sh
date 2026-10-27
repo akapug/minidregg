@@ -109,6 +109,19 @@ J14_TOOLS=${J14_TOOLS:-}
 # resumes with the answer at a later height. Hermes's answer to the second (the
 # slot named in the ask) is refused by the kernel: notDecider.
 J14_AWAIT=${J14_AWAIT:-}
+# J14_ORACLE=1: asking the Oracle through Hermes. J14_ORACLE_TOOLTASK names a
+# JSON fragment for Hermes's controller toolTask (allowedApplicationLifetimeRoutes,
+# lifetimeApiHostSha256, applicationServices) from the Oracle lifetime route
+# provisioned for this world's Hermes task (scripts/oracle-agent-lifetime-journey.sh
+# issue-grant / prepare-route). Bob asks `oracle: QUESTION` in lab: refused
+# oracle-not-granted while the room does not grant it, then answered from the
+# Oracle grain once alice sets hermes/tools bit 8; the answer is Hermes's paid reply.
+J14_ORACLE=${J14_ORACLE:-}
+if [ -n "$J14_ORACLE" ]; then
+  [ -n "${J14_ORACLE_TOOLTASK:-}" ] && [ -f "$J14_ORACLE_TOOLTASK" ] || {
+    echo "J14_ORACLE needs J14_ORACLE_TOOLTASK: the Oracle lifetime route fragment for Hermes's toolTask" >&2; exit 5; }
+  [ -n "${J14_HERMES_ROOT:-}" ] || { echo "J14_ORACLE needs J14_HERMES_ROOT (upstream Hermes)" >&2; exit 5; }
+fi
 [ -z "$J14_TOOLS" ] || [ -n "${J14_HERMES_ROOT:-}" ] || { echo "J14_TOOLS needs J14_HERMES_ROOT (upstream Hermes)" >&2; exit 5; }
 POOL_ROW=pool; [ "$J14_ROUTE" = zai ] && POOL_ROW=zai-glm
 WEEK=40 PERIOD=${J14_PERIOD:-260}
@@ -510,6 +523,13 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
   "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
 cp "$OUT" "$SD/grain-created.json"
+if [ -n "$J14_ORACLE" ] && [ "$RC" = 0 ]; then
+  # The operator binds the Oracle lifetime route into Hermes's toolTask before its controller starts.
+  jq --slurpfile f "$J14_ORACLE_TOOLTASK" '.toolTask += $f[0]' "$G/controller.json" >"$G/controller.json.new" \
+    && chmod 600 "$G/controller.json.new" && mv "$G/controller.json.new" "$G/controller.json"
+  check hermes "the Oracle route is bound in Hermes's toolTask" true \
+    "$(jq '(.toolTask.applicationServices // []) | any(.protocol == "oracle-operations-v1")' "$G/controller.json")"
+fi
 [ "$RC" = 0 ] || finish
 # Room tools act in the tool task's workspace with a home inside stateDir.
 HERMES_WS=$G/state/resource-workspace
@@ -764,6 +784,29 @@ if [ -n "$J14_AWAIT" ]; then
   check await "program 2 is untouched: still awaiting alice, total 0" "awaiting $A {total=0}" "$(jq -r '"\(.phase) \(.decider) \(.stateText)"' "$OUT")"
 fi
 
+if [ -n "$J14_ORACLE" ]; then
+  # -------------------------------------------- the Oracle through Hermes
+  ORLOG=${PLOG%.log}.oracle.jsonl
+  QUESTION="how many Earth days are three Mars years?"
+  ok oracle bob "ask lab oracle: $QUESTION"
+  hermes oracle "is refused the Oracle: the room has not granted it"
+  checkp oracle "the Oracle call was refused by name: oracle-not-granted" \
+    sh -c "jq -r 'select(.id == \"or-call\") | .content' '$ORLOG' | tail -1 | grep -q oracle-not-granted"
+  tail_json >"$SD/tail-oracle-0.jsonl"
+  checkp oracle "bob is told, in lab, that the room has not granted the oracle" \
+    jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and .kind == "say" and (.text | test("oracle-not-granted")))' "$SD/tail-oracle-0.jsonl"
+  ok oracle alice "tariff lab set hermes/tools $(( ${J14_TOOLS:+7} + 8 ))"
+  OT0=$(paid_turns)
+  ok oracle bob "ask lab oracle: $QUESTION"
+  hermes oracle "asks the Oracle grain and answers bob"
+  checkp oracle "the Oracle answered through Mini's dispatch (no refusal)" \
+    sh -c "jq -r 'select(.id == \"or-call\") | .content' '$ORLOG' | tail -1 | grep -qv 'refused\|isError\|error'"
+  tail_json >"$SD/tail-oracle-1.jsonl"
+  checkp oracle "Hermes's reply to bob carries the Oracle's answer, as a say in lab" \
+    jq -s -e --arg h "$HS" --arg b "$B" '[.[] | select(.author == $h and .to == $b and .kind == "say" and (.text | startswith("oracle:")))] | length >= 1' "$SD/tail-oracle-1.jsonl"
+  checkp oracle "the reply was a paid turn (the till took at least one more hermes/turn)" sh -c "[ $(paid_turns) -gt $OT0 ]"
+fi
+
 # ------------------------------------------------ topup
 BAL=$(credit_of hermes "$ACCT")
 require_nat topup "Hermes's balance before topup" "$BAL"
@@ -835,6 +878,7 @@ checkp redteam "no operator material in any brief a model was shown ($(wc -l <"$
 RT_CATALOGUE='"mini_room_ls","mini_room_status","mini_stream_tail","mini_say","mini_doc_context","mini_doc_show","mini_doc_link","mini_doc_review","mini_doc_append","mini_pending_awaits","mini_answer_await","mini_room_attempts"'
 # Under J14_TOOLS the sandbox prompt was also offered exactly its granted toolsets.
 [ -z "$J14_TOOLS" ] || RT_CATALOGUE=$RT_CATALOGUE',"read_file","write_file","patch","search_files","terminal","process_manage","execute_code"'
+[ -z "$J14_ORACLE" ] || RT_CATALOGUE=$RT_CATALOGUE',"mini_oracle_discover","mini_oracle_call"'
 checkp redteam "every offer to the model was the room catalogue${J14_TOOLS:+ (and the granted sandbox tools)}" \
   sh -c "jq -e -s '[.[].tools[] | ltrimstr(\"mcp__mini_grain__\")] | unique - [$RT_CATALOGUE] | length == 0' '$SHOWN' >/dev/null"
 
