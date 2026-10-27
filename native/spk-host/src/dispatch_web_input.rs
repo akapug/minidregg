@@ -7,8 +7,8 @@ use crate::dispatch_inspection::{
 };
 use crate::rpc_adapter::{SessionBinding, SessionKind};
 use minidregg_spk_rpc::{
-    Body, Cookie, ETag, ETagPrecondition, Header, Method, RequestContext, SessionParameters,
-    WebRequest, WebSocketOpen,
+    Body, Cookie, DavArgs, Depth, ETag, ETagPrecondition, Header, Method, RequestContext,
+    SessionParameters, WebRequest, WebSocketOpen,
 };
 use std::io;
 
@@ -170,7 +170,7 @@ pub(crate) fn physical_open_input(
     preferred_handle: &str,
     base_path: &str,
 ) -> io::Result<PhysicalOpenInput> {
-    let (binding, call, context, body, protocols) =
+    let (binding, call, context, body, protocols, _) =
         project(matched, http, display_name, preferred_handle, base_path)?;
     match (call, body) {
         (Call::Open, None) => Ok(PhysicalOpenInput {
@@ -203,7 +203,7 @@ pub(crate) fn physical_web_input(
     preferred_handle: &str,
     base_path: &str,
 ) -> io::Result<PhysicalWebInput> {
-    let (binding, call, context, body, _) =
+    let (binding, call, context, body, _, dav) =
         project(matched, http, display_name, preferred_handle, base_path)?;
     let Call::Exchange(method) = call else {
         return Err(invalid("a streamed open is not a WebSession exchange"));
@@ -215,6 +215,7 @@ pub(crate) fn physical_web_input(
             path_and_query: matched.app_path_and_query.clone(),
             context,
             body,
+            dav,
         },
     })
 }
@@ -227,6 +228,15 @@ fn call_for(method: &str) -> io::Result<Call> {
         "PUT" => Call::Exchange(Method::Put),
         "PATCH" => Call::Exchange(Method::Patch),
         "DELETE" => Call::Exchange(Method::Delete),
+        "PROPFIND" => Call::Exchange(Method::Propfind),
+        "PROPPATCH" => Call::Exchange(Method::Proppatch),
+        "MKCOL" => Call::Exchange(Method::Mkcol),
+        "COPY" => Call::Exchange(Method::Copy),
+        "MOVE" => Call::Exchange(Method::Move),
+        "LOCK" => Call::Exchange(Method::Lock),
+        "UNLOCK" => Call::Exchange(Method::Unlock),
+        "REPORT" => Call::Exchange(Method::Report),
+        "OPTIONS" => Call::Exchange(Method::Options),
         STREAMED_OPEN_METHOD => Call::Open,
         _ => return Err(invalid("Mini method unavailable to WebSession")),
     })
@@ -255,6 +265,7 @@ struct HttpParts {
     context: RequestContext,
     body: Option<Body>,
     protocols: Option<Vec<String>>,
+    dav: DavArgs,
     kind: SessionKind,
     base_path: String,
     user_agent: Option<String>,
@@ -267,12 +278,13 @@ fn project(
     display_name: &str,
     preferred_handle: &str,
     base_path: &str,
-) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
+) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>, DavArgs)> {
     let call = call_for(matched.method.as_str())?;
     let HttpParts {
         context,
         body,
         protocols,
+        dav,
         kind,
         base_path,
         user_agent,
@@ -315,6 +327,7 @@ fn project(
         context,
         body,
         protocols.unwrap_or_default(),
+        dav,
     ))
 }
 
@@ -335,7 +348,11 @@ fn project_http(
     }
     let mut context = RequestContext::default();
     let mut content_type = None;
+    let mut content_encoding = None;
     let mut user_agent = None;
+    let mut dav = DavArgs::default();
+    let dav_call = matches!(call, Call::Exchange(m) if crate::host_operations::dav_method(dav_name(*m)));
+    let mut dav_seen = std::collections::HashSet::new();
     for (name, value) in http.ordered_headers {
         match name.as_str() {
             "accept" => context.accept.extend(quality_list(value)?),
@@ -348,6 +365,23 @@ fn project_http(
                 if content_type.replace(value.as_str()).is_some() {
                     return Err(invalid("duplicate content-type"));
                 }
+            }
+            "content-encoding" => {
+                if value.len() > 128 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                    return Err(invalid("content-encoding is not one coding token"));
+                }
+                if content_encoding.replace(value.as_str()).is_some() {
+                    return Err(invalid("duplicate content-encoding"));
+                }
+            }
+            dav_header if crate::host_operations::dav_header_name(dav_header) => {
+                if !dav_call {
+                    return Err(invalid("DAV parameter header on a non-DAV call"));
+                }
+                if !dav_seen.insert(dav_header) {
+                    return Err(invalid("duplicate DAV parameter header"));
+                }
+                dav_parameter(&mut dav, dav_header, value, http.route, base_path)?;
             }
             "user-agent" => {
                 if value.len() > 4096 {
@@ -393,22 +427,39 @@ fn project_http(
     {
         return Err(invalid("WebSession context category exceeds bound"));
     }
-    let body = if matches!(
-        call,
-        Call::Exchange(Method::Post | Method::Put | Method::Patch)
-    ) {
-        let mime_type = content_type.unwrap_or("");
-        Some(Body {
-            mime_type: mime_type.to_owned(),
-            encoding: String::new(),
+    let body = match call {
+        Call::Exchange(Method::Post | Method::Put | Method::Patch | Method::Proppatch) => Some(Body {
+            mime_type: content_type.unwrap_or("").to_owned(),
+            encoding: content_encoding.unwrap_or("").to_owned(),
             bytes: http.body.to_vec(),
-        })
-    } else {
-        if content_type.is_some() || !http.body.is_empty() {
-            return Err(invalid("body/header on bodyless WebSession method"));
+        }),
+        // A DAV call's content is optional: present exactly when the request carried a body.
+        Call::Exchange(Method::Propfind | Method::Lock | Method::Mkcol | Method::Report)
+            if !http.body.is_empty() =>
+        {
+            Some(Body {
+                mime_type: content_type.unwrap_or("").to_owned(),
+                encoding: content_encoding.unwrap_or("").to_owned(),
+                bytes: http.body.to_vec(),
+            })
         }
-        None
+        Call::Exchange(Method::Propfind | Method::Lock | Method::Mkcol | Method::Report) => None,
+        _ => {
+            if content_type.is_some() || content_encoding.is_some() || !http.body.is_empty() {
+                return Err(invalid("body/header on bodyless WebSession method"));
+            }
+            None
+        }
     };
+    match call {
+        Call::Exchange(Method::Copy | Method::Move) if dav.destination.is_none() => {
+            return Err(invalid("COPY/MOVE without a destination"))
+        }
+        Call::Exchange(Method::Unlock) if dav.lock_token.is_none() => {
+            return Err(invalid("UNLOCK without a lock token"))
+        }
+        _ => {}
+    }
     let (kind, base_path) = match http.route {
         Route::Browser => {
             let host = base_path
@@ -427,10 +478,82 @@ fn project_http(
         context,
         body,
         protocols,
+        dav,
         kind,
         base_path,
         user_agent: user_agent.map(str::to_owned),
     })
+}
+
+/// The method token Lean's `davMethod` names for a WebSession DAV call.
+fn dav_name(method: Method) -> &'static str {
+    match method {
+        Method::Propfind => "PROPFIND",
+        Method::Proppatch => "PROPPATCH",
+        Method::Mkcol => "MKCOL",
+        Method::Copy => "COPY",
+        Method::Move => "MOVE",
+        Method::Lock => "LOCK",
+        Method::Unlock => "UNLOCK",
+        Method::Report => "REPORT",
+        Method::Options => "OPTIONS",
+        _ => "",
+    }
+}
+
+/// One signed DAV parameter header into its typed WebSession parameter, as Sandstorm's own
+/// front end maps them: `depth` 0/1/infinity, `overwrite: F` is `noOverwrite`, `lock-token`
+/// verbatim, and `destination` (an absolute URL on this grain's origin, or an absolute path)
+/// into the relative Sandstorm path.
+fn dav_parameter(
+    dav: &mut DavArgs,
+    name: &str,
+    value: &str,
+    route: Route<'_>,
+    base_path: &str,
+) -> io::Result<()> {
+    match name {
+        "depth" => {
+            dav.depth = Some(match value.to_ascii_lowercase().as_str() {
+                "0" => Depth::Zero,
+                "1" => Depth::One,
+                "infinity" => Depth::Infinity,
+                _ => return Err(invalid("DAV depth is not 0, 1 or infinity")),
+            })
+        }
+        "overwrite" => {
+            dav.no_overwrite = match value {
+                "F" | "f" => true,
+                "T" | "t" => false,
+                _ => return Err(invalid("DAV overwrite is not T or F")),
+            }
+        }
+        "lock-token" => dav.lock_token = Some(value.to_owned()),
+        "destination" => {
+            let path = if let Some(rest) = value.strip_prefix("https://") {
+                let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+                if let Route::Browser = route {
+                    if format!("https://{authority}") != base_path {
+                        return Err(invalid("DAV destination is on another origin"));
+                    }
+                }
+                path
+            } else {
+                value.strip_prefix('/').ok_or_else(|| invalid("DAV destination is neither an https URL nor an absolute path"))?
+            };
+            if let Route::Api { signed_path } = route {
+                if signed_path != "/" {
+                    return Err(invalid("DAV destination under an apiPath is unsupported"));
+                }
+            }
+            if path.len() > 8192 || path.contains(['#', '\r', '\n', '\0']) {
+                return Err(invalid("DAV destination outside protocol bound"));
+            }
+            dav.destination = Some(path.to_owned());
+        }
+        _ => return Err(invalid("unknown DAV parameter header")),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -584,6 +707,44 @@ mod tests {
             ..http
         };
         assert!(physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").is_err());
+    }
+
+    #[test]
+    fn dav_headers_project_into_typed_parameters_and_refuse_off_dav() {
+        let base = "https://friend.example.test";
+        let project = |method: &'static str, path: &'static str, headers: &[(String, String)], body: &'static [u8]| {
+            let mut source = matched();
+            source.method = method.into();
+            source.app_path_and_query = path.into();
+            let http = HttpProjection { method, path_and_query: path, ordered_headers: headers, body, route: Route::Browser };
+            physical_web_input(&source, &http, "Friend", "friend", base)
+        };
+        let h = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect::<Vec<_>>();
+        let propfind = project("PROPFIND", "dav/notes", &h(&[("depth", "0"), ("content-type", "application/xml")]), b"<propfind/>").unwrap();
+        assert_eq!(propfind.request.method, Method::Propfind);
+        assert_eq!(propfind.request.dav.depth, Some(Depth::Zero));
+        assert_eq!(propfind.request.body.unwrap().bytes, b"<propfind/>");
+        let mv = project("MOVE", "dav/a", &h(&[("destination", "https://friend.example.test/dav/b%20c"), ("overwrite", "F")]), b"").unwrap();
+        assert_eq!(mv.request.dav.destination.as_deref(), Some("dav/b%20c"));
+        assert!(mv.request.dav.no_overwrite);
+        assert!(mv.request.body.is_none());
+        let by_path = project("COPY", "dav/a", &h(&[("destination", "/dav/c"), ("depth", "0")]), b"").unwrap();
+        assert_eq!(by_path.request.dav.destination.as_deref(), Some("dav/c"));
+        assert_eq!(by_path.request.dav.depth, Some(Depth::Zero));
+        let unlock = project("UNLOCK", "dav/a", &h(&[("lock-token", "<opaquelocktoken:1>")]), b"").unwrap();
+        assert_eq!(unlock.request.dav.lock_token.as_deref(), Some("<opaquelocktoken:1>"));
+        let mkcol = project("MKCOL", "dav/new", &[], b"").unwrap();
+        assert!(mkcol.request.body.is_none());
+        let encoded = project("POST", "repo.git/git-upload-pack", &h(&[("content-type", "application/x-git-upload-pack-request"), ("content-encoding", "gzip")]), b"\x1f\x8b").unwrap();
+        assert_eq!(encoded.request.body.unwrap().encoding, "gzip");
+        // Refusals by name, before any call.
+        assert!(project("MOVE", "dav/a", &h(&[("destination", "https://elsewhere.example/dav/b")]), b"").is_err());
+        assert!(project("MOVE", "dav/a", &[], b"").is_err());
+        assert!(project("UNLOCK", "dav/a", &[], b"").is_err());
+        assert!(project("GET", "dav/a", &h(&[("depth", "1")]), b"").is_err());
+        assert!(project("PROPFIND", "dav/a", &h(&[("depth", "2")]), b"").is_err());
+        assert!(project("COPY", "dav/a", &h(&[("destination", "/dav/b"), ("overwrite", "maybe")]), b"").is_err());
+        assert!(project("PROPFIND", "dav/a", &h(&[("depth", "1"), ("depth", "0")]), b"").is_err());
     }
 
     #[test]

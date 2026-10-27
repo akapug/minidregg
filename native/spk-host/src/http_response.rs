@@ -319,6 +319,14 @@ pub(crate) fn serialize_for_origin(
         // Security context and HTTP framing belong to the host, never the app.
         match extra.name.as_str() {
             "x-oc-mtime" => {},
+            // An OPTIONS answer's DAV compliance classes, rendered by spk-rpc from the app's
+            // typed `Options` (never an app-supplied header string).
+            "dav" => {
+                if extra.value.is_empty() || !extra.value.split(", ").all(|class| !class.is_empty()
+                    && class.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.:/<>".contains(&b))) {
+                    return Err(invalid("WebSession DAV classes refused"));
+                }
+            },
             "x-sandstorm-app-http-status" => {
                 // This preserves the app's original status when the pinned
                 // Sandstorm union has no matching variant. It is metadata;
