@@ -877,13 +877,18 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     }
     let mut out = child.stdout.take()?;
     let mut err = child.stderr.take()?;
+    // Both pipes are drained on their own threads: a read on this thread would block until the
+    // shell exits, and the deadline below could never fire while a long `can` runs.
     let reader = std::thread::spawn(move || {
         let mut s = Vec::new();
         let _ = out.read_to_end(&mut s);
         s
     });
-    let mut stderr = Vec::new();
-    let _ = err.read_to_end(&mut stderr);
+    let err_reader = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        let _ = err.read_to_end(&mut s);
+        s
+    });
     // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
     // member can read (what was decided so far, and a named notice), never as the gateway's 504.
     let deadline = Instant::now() + Duration::from_secs(100);
@@ -899,6 +904,7 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         }
     };
     let stdout = reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
     let cap = |v: Vec<u8>| {
         let mut s = String::from_utf8_lossy(&v).into_owned();
         if s.len() > 64 * 1024 {
