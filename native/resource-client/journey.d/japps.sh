@@ -193,8 +193,9 @@ if [ "$mode" = --box ]; then
           >"$W/world.out" 2>"$W/world.err"; then ok=1; fi
     row "two market apps on a scratch world: install, share, start, enroll, GET, stop one (grain-journey.sh)" "$ok" "$(tail -1 "$W/world.err" | cut -c1-160)"
     if [ "$ok" = 1 ]; then
-      app_a=$(ls "$run"/evidence/a-app-author/source.json >/dev/null 2>&1 && echo 7101 || echo "")
-      exp=$("$BIN/spk-host" grain export "$(jq -er .profilePath "$run/evidence/profile-result.json")" "${app_a:-7101}" "$W/export-a" 2>&1); rc=$?
+      # The stopped app's id is the one grain-journey.sh's birth of app a bound (its retained source).
+      app_a=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/a-app-source.json" 2>/dev/null)
+      exp=$("$BIN/spk-host" grain export "$(jq -er .profilePath "$run/evidence/profile-result.json")" "${app_a:?no app a birth source in $run/evidence}" "$W/export-a" 2>&1); rc=$?
       row "export of the stopped app writes var.ext4, manifest.json and manifest.sig" "$([ "$rc" = 0 ] && [ -f "$W/export-a/manifest.sig" ] && echo 1 || echo 0)" "$(tail -1 <<<"$exp" | cut -c1-120)"
     fi
     [ -n "${WORLD_RUN:-}" ] || sh "$REPO/scripts/spk-platform/grain-journey.sh" stop-services "$run" >/dev/null 2>&1 || true
