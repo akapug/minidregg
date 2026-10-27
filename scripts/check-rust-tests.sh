@@ -534,6 +534,13 @@ exact private-dealer-wal     private-backend --lib -- \
   sh2t_id_store::tests::torn_commit_record_published_nothing_so_a_fresh_deal_is_safe \
   dzk_store::tests::store_retains_proof_randomness_and_outboxes_and_refuses_changed_identity \
   dzk_store::tests::canonical_wire_and_durable_recipient_transfer_replay
+# The anchor runs on transition_journal: a torn tail recovers, interior damage refuses, the
+# record is linear in the request
+exact private-anchor-wal     private-backend --lib -- \
+  custody::tests::full_controller_sized_batch_is_single_durable_record_and_preserves_old_rows \
+  custody::tests::torn_anchor_tail_recovers_at_every_cut_and_the_anchor_keeps_serving \
+  custody::tests::lost_reply_and_relabel \
+  custody::tests::singleton_authority
 # W16 MPC: the King composite store recovers a kill -9 mid-King with one dealer event per
 # instance and no new anchor allocation; the curious-holder transcript check and its falsifier
 exact private-king-store private-backend --lib -- \
