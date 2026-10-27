@@ -85,7 +85,11 @@ fn run() -> Result<(), String> {
     let mut last_sweep = std::time::Instant::now();
     loop {
         match listener.accept() {
-            Ok((stream, _)) => helper.serve(stream),
+            // BSD sockets inherit the listener's O_NONBLOCK; the request is read blocking, bounded by its timeouts.
+            Ok((stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                helper.serve(stream)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 let mut pfd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
                 unsafe { libc::poll(&mut pfd, 1, 1000) };

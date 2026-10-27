@@ -85,7 +85,7 @@ form.row > * { flex: 1 1 10rem; } form.row > button { flex: 0 0 auto; }
 .pane { min-width: 0; background: var(--paper); }
 .pane-title { font-size: 1.15rem; }
 .pane-body { max-width: 62rem; }
-body.js .stage { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr)); gap: 1rem; align-content: start; }
+body.js .stage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); gap: 1rem; align-content: start; }
 body.js .pane { border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-height: 12rem; max-height: calc(100vh - 8rem); overflow: hidden; }
 body.js .pane.max { grid-column: 1 / -1; max-height: none; }
 body.js .pane-head { display: flex; align-items: center; gap: .4rem; padding: .35rem .6rem; border-bottom: 1px solid var(--rule); background: var(--paper-2); }

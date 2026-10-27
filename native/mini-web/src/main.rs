@@ -170,12 +170,14 @@ impl Gateway {
         }
     }
 
-    /// The security headers every answer carries.
+    /// The security headers every answer carries. Scripts come only from this origin (the
+    /// vendored xterm.js and app.js); styles may be inline because xterm.js lays its terminal out
+    /// with inline styles (`mini web`'s own CSP made the same allowance).
     fn finish(&self, response: Response) -> Response {
         let frame = if self.frame_src.is_empty() { "'none'".to_owned() } else { self.frame_src.clone() };
         let cache = response.header("Cache-Control").is_some();
         let response = response
-            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"))
+            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"))
             .with("X-Content-Type-Options", "nosniff")
             .with("X-Frame-Options", "DENY")
             .with("Referrer-Policy", "same-origin");

@@ -34,7 +34,7 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
     let identity = match who {
         Some(who) => format!(
             "<span class=\"me\" title=\"session {}\">{}</span>\
-             <form method=\"post\" action=\"/logout\" class=\"inline\"><button class=\"quiet\">Log out</button></form>",
+             <form method=\"post\" action=\"/logout\" class=\"inline\" data-full><button class=\"quiet\">Log out</button></form>",
             h(&who.prefix()),
             h(&who.name)
         ),
@@ -102,7 +102,7 @@ pub fn refusal(headline: &str, detail: &str) -> String {
 pub fn login_confirm(code: &str) -> String {
     format!(
         "<p>This link opens a browser session for the account the door made for you. It works once.</p>\
-         <form method=\"post\" action=\"/login\"><input type=\"hidden\" name=\"code\" value=\"{}\"><button>Open my session</button></form>\
+         <form method=\"post\" action=\"/login\" data-full><input type=\"hidden\" name=\"code\" value=\"{}\"><button>Open my session</button></form>\
          <p class=\"note\">Your session is a cookie that names your hosted account; it is never a key. Your signing key stays on the box, in your account's home. Log out from any page; see every session under Keys &amp; sessions.</p>",
         h(code)
     )
