@@ -38,12 +38,22 @@ application-session source generation in `agent-session-overlay.sh` remains;
 this change removes enrollment and provisioner-policy injection, not every
 legacy fixture rewrite in the repository.
 
-## Central validation still required
+## Scoped checks and remaining qualification
 
-No tests, builds or shell validation were run for this batch. Earlier predicate
-and composition receipts describe preceding implementations. The updated
-focused checks and the complete fresh Oracle v7 journey are recorded in
-[ROWS-OWED](../ROWS-OWED.md#oracle-appliance).
+After Mini lifted the lane-validation ban, the five focused checks listed in
+[ROWS-OWED](../ROWS-OWED.md#oracle-appliance) passed on dregg-ref: 5 tests,
+5.422 seconds, exit 0. Source was `ce27ff402` (cleanup `45f5d04ab` merged with
+main `cacefcba8`); retained output is
+`/build/lanes/oracle-enrollment-ce27ff402/focused.log`. No Lean build or live
+Store was involved. Earlier predicate receipts remain scoped to their earlier
+implementations.
+
+A separate real-journey preflight regression passed there in 0.171 seconds
+(exit 0, one test with matching-Host, old-Host and failed-receipt cases; retained
+`preflight.log`). The journey now rejects an old STOP benchmark before creating
+a Store or copying shared data. A matching receipt proceeds to the next
+independent preflight check. Its full cold/served controls still belong to the
+final report; the new early check does not qualify the benchmark itself.
 
 The composition checks inspect the actual operator/genesis JSON at mocked
 bootstrap, with both member and agent configurations, changed source formatting,

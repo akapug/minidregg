@@ -133,8 +133,10 @@ both stopped runs and their exact evidence. The
 [provisioning simplification](evidence/oracle-provisioning-configuration-2026-10-27.md)
 replaces source-text configuration and enrollment rewrites with explicit inputs
 and fixed provisioner phases. The workroom uses the shared genesis template;
-its composition checks and fresh hosted qualification are listed in
-[ROWS-OWED](ROWS-OWED.md#oracle-appliance) for central validation.
+its five focused composition/allocation/birth checks now pass on dregg-ref.
+The fresh hosted qualification remains in
+[ROWS-OWED](ROWS-OWED.md#oracle-appliance), including a new-Host STOP receipt
+and an actual browser driver.
 
 The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or
