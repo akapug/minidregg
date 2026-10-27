@@ -166,18 +166,11 @@ pub fn qualify_bridge_spk_with_profile(
         .as_deref()
         .ok_or_else(|| invalid("bridge-only SPK lacks signed config"))?;
     let bridge = decode_bridge_config(member).map_err(invalid)?;
-    // Each refusal names the bridge-config field, so a survey of real
-    // packages can say which Sandstorm facility a package needs.
-    if bridge.save_identity_caps {
-        return Err(invalid(
-            "signed bridge requires unsupported physical profile: saveIdentityCaps",
-        ));
-    }
-    if bridge.expect_app_hooks {
-        return Err(invalid(
-            "signed bridge requires unsupported physical profile: expectAppHooks",
-        ));
-    }
+    // saveIdentityCaps (identity_custody; SandstormApi save/restore/drop) and
+    // expectAppHooks (the bridge answers getViewInfo through the app's hooks;
+    // app-object restore stays unknownToken) are served. The refusal that
+    // remains names the bridge-config field, so a survey of real packages can
+    // say which Sandstorm facility a package needs.
     if let Some(path) = bridge.api_path.as_deref() {
         if let Err(error) = minidregg_signed_api_path::checked_prefix(path) {
             return Err(invalid(format!(

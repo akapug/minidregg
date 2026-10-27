@@ -699,11 +699,11 @@ mod tests {
         assert_eq!((big.state.as_str(), big.reason.as_deref()), ("refused", Some("sizeOverProfile")));
         fs::write(
             verdicts.join("aee0806c9547d1f53c1ccef38ac195ba.json"),
-            br#"{"verdict":"refused","reason":"unsupportedBridge: saveIdentityCaps","signedAppId":"h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60"}"#,
+            br#"{"verdict":"refused","reason":"unsupportedBridge: apiPath \"../x\"","signedAppId":"h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60"}"#,
         )
         .unwrap();
         let pad = verdict(&verdicts, &meta, "aee0806c9547d1f53c1ccef38ac195ba");
-        assert_eq!(verdict_line(&pad), "refused: unsupportedBridge: saveIdentityCaps");
+        assert_eq!(verdict_line(&pad), "refused: unsupportedBridge: apiPath \"../x\"");
         fs::write(verdicts.join("5830d70137cdae158118884da8790870.json"), br#"{"verdict":"verified","running":2}"#).unwrap();
         assert_eq!(verdict_line(&verdict(&verdicts, &meta, "5830d70137cdae158118884da8790870")), "verified, running 2");
     }

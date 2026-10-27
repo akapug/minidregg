@@ -12,9 +12,9 @@
 #                                      (cargo build -p minidregg-spk-package-stream --example inspect).
 #                                      MINI_MARKET_CACHE=DIR reuses already-downloaded <packageId>.spk files.
 #   japps.sh --box BIN-DIR             on a Linux box with the candidate's bin/ (dregg-build or the demo):
-#                                      everything --dry does, plus `spk-host qualify` on the four exhibits:
-#                                      Hacker Slides and Simple Todos accepted; Etherpad refused
-#                                      saveIdentityCaps and Tiny Tiny RSS refused expectAppHooks, by name.
+#                                      everything --dry does, plus `spk-host qualify` on four exhibits, all
+#                                      accepted: Hacker Slides, Simple Todos, Etherpad (saveIdentityCaps:
+#                                      the identity custody serves it) and Tiny Tiny RSS (expectAppHooks).
 #                                      With a grain world (GRAINS_ROOT, BROKER_SOCKET, SPK_HOST profile as
 #                                      scripts/spk-platform/grain-journey.sh wants them) it installs, starts,
 #                                      reaches, stops and exports both apps on a scratch Store through that
@@ -30,7 +30,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 FIXTURE=$HERE/tests/fixtures/sandstorm-index-2026-10-27.json
 FETCH=$REPO/deploy/market/mini-market-fetch
-# The two installs, and the two named refusals (bridge configs decoded 2026-10-27).
+# The two installs, and the two bridge-facility exhibits (bridge configs decoded 2026-10-27:
+# Etherpad saveIdentityCaps=true, TT-RSS expectAppHooks=true; both served since the identity custody).
 SLIDES_APP=7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh SLIDES_PKG=f0277a5dce2e1c6af0cce188241411a4
 TODOS_APP=0dp7n6ehj8r5ttfc0fj0au6gxkuy1nhw2kx70wussfa1mqj8tf80 TODOS_PKG=5830d70137cdae158118884da8790870
 ETHERPAD_PKG=aee0806c9547d1f53c1ccef38ac195ba TTRSS_PKG=ac6dfded255f6ea86172fb62064772fc
@@ -80,9 +81,9 @@ bad=$(bash "$FETCH" --state "$W/state" --mini "$MINI" fetch "not-a-package-id" 2
 row "fetcher refuses a malformed packageId" "$([ "$rc" != 0 ] && echo 1 || echo 0)" "$(tail -1 <<<"$bad")"
 # The verdict table, as the worker would write it: the catalogue shows it beside the index's claims.
 mkdir -p "$W/verdicts"
-printf '{"verdict":"refused","reason":"unsupportedBridge: saveIdentityCaps","signedAppId":"h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60"}\n' >"$W/verdicts/$ETHERPAD_PKG.json"
+printf '{"verdict":"verified","signedAppId":"h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60","facilities":["saveIdentityCaps"]}\n' >"$W/verdicts/$ETHERPAD_PKG.json"
 pad=$("$MINI" apps show --index "$FIXTURE" --verdicts "$W/verdicts" --meta "$W/state/meta" --app "$ETHERPAD_PKG" 2>&1)
-row "the catalogue shows the ingest's refusal beside Etherpad" "$(grep -q 'refused: unsupportedBridge: saveIdentityCaps' <<<"$pad" && echo 1 || echo 0)" "$(grep verdict <<<"$pad" | head -1 | tr -s ' ')"
+row "the catalogue shows the ingest's verdict beside Etherpad" "$(grep -q 'verdict    verified' <<<"$pad" && echo 1 || echo 0)" "$(grep verdict <<<"$pad" | head -1 | tr -s ' ')"
 slides=$("$MINI" apps show --index "$FIXTURE" --verdicts "$W/verdicts" --meta "$W/state/meta" --app "$SLIDES_APP" 2>&1)
 row "a fetched package's size and class come from the fetcher's meta" "$(grep -q 'class      S' <<<"$slides" && grep -q '16778192 bytes' <<<"$slides" && echo 1 || echo 0)" "$(grep -E 'size|class' <<<"$slides" | tr -s ' ' | tr '\n' ';')"
 
@@ -112,12 +113,13 @@ if [ "$mode" = --box ]; then
     # Directly under HOME (0700): a shared ~/.cache is often group-writable and refused too.
     Q=${JAPPS_QUALIFY_ROOT:-$HOME}/.mini-japps-qualify.$$
     mkdir -m 0700 "$Q"
-    for pair in "$SLIDES_PKG:accept" "$TODOS_PKG:accept" "$ETHERPAD_PKG:saveIdentityCaps" "$TTRSS_PKG:expectAppHooks"; do
+    for pair in "$SLIDES_PKG:accept" "$TODOS_PKG:accept" "$ETHERPAD_PKG:accept" "$TTRSS_PKG:accept"; do
       pkg=${pair%%:*} want=${pair##*:}
       seed "$pkg"; bash "$FETCH" --state "$W/state" --mini "$MINI" fetch "$pkg" >/dev/null 2>&1
       cp "$W/state/quarantine/$pkg.spk" "$Q/$pkg.spk" && chmod 0600 "$Q/$pkg.spk"
       if q=$("$BIN/spk-host" qualify --import-profile standard-v1 "$Q/$pkg.spk" 2>"$W/q-$pkg.err"); then got=accept; else got=$(grep -oE 'saveIdentityCaps|expectAppHooks|apiPath' "$W/q-$pkg.err" | head -1); fi
-      row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err" | cut -c1-120)}"
+      facilities=$(grep -oE '"saveIdentityCaps":(true|false),"expectAppHooks":(true|false)' <<<"$q" | head -1)
+      row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err" | cut -c1-120)} ${facilities}"
     done
     rm -rf "$Q"
   else

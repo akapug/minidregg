@@ -11,8 +11,9 @@ mod web;
 pub use bridge_config::{decode_bridge_config, BridgeConfig};
 pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};
 pub use protocol::{
-    InlineResponse, LocalizedText, PermissionDefinition, RoleDefinition, SessionParameters,
-    SupervisorConnection, ViewInfo,
+    CustodyRefusal, IdentityCustody, InlineResponse, LocalizedText, MemoryIdentityCustody,
+    PermissionDefinition, RoleDefinition, SavedIdentity, SessionParameters, SupervisorConnection,
+    ViewInfo,
 };
 pub use web::{
     dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, ETag,

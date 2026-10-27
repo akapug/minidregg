@@ -14,11 +14,12 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | Catalogue: `mini apps search/show`, the recorded index fixture, the verdict table | **built**, tests pass on the Mac (`cargo nextest -p minidregg-resource-client -E 'test(apps_)'`) |
 | Market fetcher `mini-market-fetch` + `mini-market.{service,timer}` (uid `mini-market`, the one egress path) | **built** (bash + curl, the shape `fetch-test-spk.sh` already has); not yet run on a box |
 | The grain front `mini apps-front` (Host-dispatching entrance behind Caddy, replaces `spk-browser-proxy`) | **built** with loopback tests; not yet run against a live route socket |
-| `japps.sh --dry` (Mac) and `--box` (`dregg-build`, 2026-10-27) | **green**: `--dry` 18/18 (catalogue, the two real packages verified, a tampered copy and an unknown appId refused by name, the front over real sockets); `--box` 22/22 with the four `spk-host qualify` exhibits proven on Linux (Hacker Slides and Simple Todos accepted; Etherpad `saveIdentityCaps` and TT-RSS `expectAppHooks` refused by name); the scratch-world lifecycle rows are UNCONFIGURED on the build box until a broker world (`two-world-journey.sh`'s setup) exists there |
+| `japps.sh --dry` (Mac) and `--box` (`dregg-build`, 2026-10-27) | **green**: `--dry` 18/18 (catalogue, the two real packages verified, a tampered copy and an unknown appId refused by name, the front over real sockets); `--box` 22/22 with the four `spk-host qualify` exhibits proven on Linux (Hacker Slides, Simple Todos, Etherpad and TT-RSS all accepted once §3a landed); the scratch-world lifecycle rows are UNCONFIGURED on the build box until a broker world (`two-world-journey.sh`'s setup) exists there |
 | Member verbs `mini apps install/list/open/stop/start/share/export/delete` over the worker socket | verbs **built** against the socket protocol of §4; the worker itself is the next increment |
 | `mini apps-worker` (the operator-side custodian that drives `spk-host grain`) | **designed** (§4); the `--box` journey drives the same steps through `grain-journey.sh` meanwhile |
 | The request law `law.apps` rendered from Lean (`scripts/AppsLawTemplate.lean`) | **designed** (§3); until it lands, the member's package choice is carried by the worker socket and the signed state is the birth + delegation |
 | Per-grain origin via the wildcard certificate and `*.demo.dregg.online` | infra lane applies DNS (live) and Caddy; the routing rule is §5 and `deploy/market/INSTALL.md` |
+| `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
 
 ## 1. The pieces, who runs what
@@ -49,7 +50,7 @@ it is showing.
   publisher's key hash), publisher, package size when known, and **Mini's verdict** from
   `/var/lib/mini-apps/verdicts/<packageId>.json`, written by the worker's real ingest: `verified`
   (signature and appId checked, bridge profile supported, within the standard profile),
-  `refused: <reason>` (e.g. `expectAppHooks`, `sizeOverProfile`), `running N` (grains on this box),
+  `refused: <reason>` (an unchecked `apiPath`, `sizeOverProfile`), `running N` (grains on this box),
   or `unverified` (never fetched here; install verifies). Nothing in the index can produce
   `verified`.
 - `mini apps show <appId|packageId>` shows one entry whole, with the package URL the fetcher would
@@ -92,9 +93,9 @@ The verb then hands the worker, over the authenticated socket, the three pointer
 receipt, the delegation file) and the choice. **Refusals by name** before any effect:
 `unknownApp` (not in the index), `sizeOverProfile` (the fetcher's recorded size or the index's
 declared size above 256 MiB raw / 768 MiB decoded), `unverifiedSignature` (the ingest's verdict),
-`appIdMismatch` (signed appId differs from the catalogue's), `unsupportedBridge` (`expectAppHooks`,
-`saveIdentityCaps`, an unchecked `apiPath`), `funding` (the kernel's), `classRefused`,
-`originBudget` is gone with the wildcard. A lost reply is answered by the **exact retry** of the
+`appIdMismatch` (signed appId differs from the catalogue's), `unsupportedBridge` (an unchecked
+`apiPath`; `saveIdentityCaps` and `expectAppHooks` are served, §3a), `funding` (the kernel's),
+`classRefused`. A lost reply is answered by the **exact retry** of the
 same request id (`mini apps install --retry ID`); the worker's idempotency is per request id and
 per the lifecycle's own one-shot markers (SPK-LIFECYCLE); a second install is never issued.
 
@@ -102,6 +103,36 @@ per the lifecycle's own one-shot markers (SPK-LIFECYCLE); a second install is ne
 raw SHA-256 and signed appId, the class, the grain id `a<app>`, the origin
 `https://a<app>.demo.dregg.online`, the INSTALL and START receipts' accepted counts, and the
 bootstrap hand-off (`mini apps open`).
+
+### 3a. The two bridge facilities "any app" needs: saved identities, app hooks
+
+Sandstorm apps people know (Etherpad, Tiny Tiny RSS, Wekan) declare one or both of
+`BridgeConfig.saveIdentityCaps` and `expectAppHooks`; until 2026-10-27 the custodian refused each by
+name. Both are served now, modelled as what they are:
+
+- **`saveIdentityCaps`**: the first time a participant opens the grain, the bridge calls
+  `SandstormApi.save(identity)` and keeps the token in the grain's `/var`; later `restore(token)`
+  gives the identity back (`getSavedIdentity`), `drop(token)` lets it go. In Mini this is **a
+  grain-held capability the member granted by opening the grain**: `spk-rpc`'s supervisor serves
+  `save` only for an identity object this connection minted (the object describes itself through
+  `AppPersistent.save` with a tag bound to the connection's secret and that identity: a forged
+  object or any other capability is refused by name, `identityTagRefused` /
+  `unsupportedPersistentCap`), and `spk-host`'s `identity_custody` keeps the record outside the
+  sandbox in `apps/<app>/identities/<token>.json` (0600, the operator's), across generations. The
+  record is listed in the member's receipts (`mini apps list/status` show "identities held by this
+  grain") and **revocable** from outside (`FileIdentityCustody::revoke`, the worker's
+  `share --revoke`): a revoked or dropped token answers `identityRevoked` for every later generation,
+  an unknown one `unknownToken`. The identity carries the display name and handle the custodian
+  presented, no permission bits.
+- **`expectAppHooks`**: the app connects back to the bridge and offers `AppHooks`; the bridge then
+  answers `getViewInfo` through the app and would delegate app-object `restore`. The custodian's
+  bound is explicit: `getViewInfo` through the hooks under the adapter's existing view-info
+  deadline; `SandstormApi.save` of an app object is refused (`unsupportedPersistentCap`), so no
+  app-object token is ever minted and `restore` of one is `unknownToken`; every other `SandstormApi`
+  method (powerbox, sharing, scheduling, activity) stays unimplemented by name.
+
+`spk-host qualify` reports both flags under `bridgeFacilities` with the sentence of what is served.
+What still refuses by name: an `apiPath` outside the checked prefix.
 
 ## 4. The worker: one custodian, the existing lifecycle
 
@@ -187,19 +218,16 @@ loopback port against a fake route socket: cookie, bearer and bootstrap dispatch
 grain, 403 without a credential, a 101 pumped both ways.
 
 `--box` (`dregg-build`, Debian 13, as the `lanes` user): everything `--dry` does, plus `spk-host
-qualify` on the four exhibits, and, when a grain world is at hand (`GRAINS_ROOT`, `BROKER_SOCKET`
-as `grain-journey.sh` wants them), a scratch world through `scripts/spk-platform/grain-journey.sh`
+qualify` on four exhibits, and, when a grain world is at hand (`GRAINS_ROOT`, `BROKER_SOCKET` as
+`grain-journey.sh` wants them), a scratch world through `scripts/spk-platform/grain-journey.sh`
 with `SPK_A`/`SPK_B` the two market packages (birth, install, share, start, enroll, GET 200 over the
-edge phase, stop one, export it). The two apps: **Hacker Slides 0.4.0**
+edge phase, stop one, export it). The two installs: **Hacker Slides 0.4.0**
 (`7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh`, package `f0277a5d…`, 16.8 MB) and
 **Simple Todos** (`0dp7n6ehj8r5ttfc0fj0au6gxkuy1nhw2kx70wussfa1mqj8tf80`, package `5830d701…`,
-23.6 MB, the retained sample the SPK work began with). Both signed bridge configs decode with
-`saveIdentityCaps=false`, `expectAppHooks=false`, no `apiPath`. The first picks, Etherpad and Tiny
-Tiny RSS, are the row's **named refusals** instead: Etherpad's signed bridge config has
-`saveIdentityCaps=true` and TT-RSS's `expectAppHooks=true` (it ships `ttrss-apphooks`), and the
-qualifier refuses each by name (`unsupportedBridge: saveIdentityCaps` / `expectAppHooks`). The
-catalogue shows those verdicts beside the apps; growing the custodian's vocabulary to those two
-bridge facilities is the next widening of "any app" (batch item).
+23.6 MB). The two bridge-facility exhibits: **Etherpad** (`saveIdentityCaps=true`) and **Tiny Tiny
+RSS** (`expectAppHooks=true`, it ships `ttrss-apphooks`); both were refused by name before
+2026-10-27 and are accepted now that the facilities are served (§3a), which the row checks from
+`qualify`'s `bridgeFacilities` field.
 
 ## 7. Compost
 

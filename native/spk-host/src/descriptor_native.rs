@@ -103,14 +103,13 @@ pub(crate) fn author_signed_package<T: SourceTool>(
         .as_deref()
         .ok_or_else(|| invalid("signed bridge config absent"))?;
     let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
-    if bridge.save_identity_caps
-        || bridge.expect_app_hooks
-        || bridge
-            .api_path
-            .as_deref()
-            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+    // saveIdentityCaps and expectAppHooks are served; an unchecked apiPath is not.
+    if bridge
+        .api_path
+        .as_deref()
+        .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
     {
-        return Err(invalid("signed bridge outside resident Mini mapping"));
+        return Err(invalid("signed bridge outside resident Mini mapping: apiPath"));
     }
     let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
     let schema_input = write_new(

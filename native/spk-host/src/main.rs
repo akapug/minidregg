@@ -186,6 +186,11 @@ fn main() {
                     "signedBridgeConfigHex":member.iter().map(|byte| format!("{byte:02x}"))
                         .collect::<String>(),
                     "bridgeApiPath":bridge.api_path.clone().unwrap_or_default(),
+                    "bridgeFacilities":{
+                        "saveIdentityCaps":bridge.save_identity_caps,
+                        "expectAppHooks":bridge.expect_app_hooks,
+                        "served":"identity capabilities are saved, restored and dropped through the app's identity custody (revocable, listed in receipts); app hooks answer the bridge's getViewInfo; app-object restore answers unknownToken"
+                    },
                     "signedSchema":signed_schema_source(&bridge, package.manifest.app_version),
                 });
                 println!("{json}");
