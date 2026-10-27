@@ -60,6 +60,9 @@ impl Drop for Signals {
 struct Bounds {
     controller_uid: Option<u32>,
     public_controller_uid: Option<u32>,
+    /// A room resident's own activated operator route: only this uid connects,
+    /// and only `transport::RESIDENT_OPERATIONS` pass.
+    resident_uid: Option<u32>,
     connections: usize,
     read: Duration,
     connect: Duration,
@@ -69,6 +72,7 @@ struct Bounds {
 const BOUNDS: Bounds = Bounds {
     controller_uid: None,
     public_controller_uid: None,
+    resident_uid: None,
     connections: 64,
     read: Duration::from_secs(10),
     connect: Duration::from_secs(10),
@@ -322,6 +326,9 @@ fn connection(
     if bounds.controller_uid.is_some_and(|uid| transport::peer_uid(&public).ok() != Some(uid)) {
         return refusal(&mut public, stop, bounds, "controller peer UID mismatch");
     }
+    if bounds.resident_uid.is_some_and(|uid| transport::peer_uid(&public).ok() != Some(uid)) {
+        return refusal(&mut public, stop, bounds, "resident peer UID mismatch");
+    }
     if bounds.public_controller_uid.is_some_and(|uid|
         !matches!(transport::peer_uid(&public), Ok(peer) if peer == uid || peer == mini_sdk::private::euid())) {
         return refusal(&mut public, stop, bounds, "public controller peer UID mismatch");
@@ -342,11 +349,13 @@ fn connection(
             )
         }
     };
-    let envelope = if bounds.controller_uid.is_some() {
-        transport::agent_operator_envelope(&frame, config)
-    } else { transport::public_envelope(&frame, config, catalog) };
+    let envelope = if bounds.resident_uid.is_some() {
+        transport::resident_operator_envelope(&frame, config, catalog)
+    } else if bounds.controller_uid.is_some() {
+        transport::agent_operator_envelope(&frame, config).map_err(String::from)
+    } else { transport::public_envelope(&frame, config, catalog).map_err(String::from) };
     if let Err(reason) = envelope {
-        return refusal(&mut public, stop, bounds, reason);
+        return refusal(&mut public, stop, bounds, &reason);
     }
     // Recheck retained config/mode on every request: a restarted backend must
     // not silently introduce a new deployment under a still-running relay.
@@ -743,6 +752,50 @@ pub(crate) fn serve_agent_activated(socket: &Path, upstream: &Path, config: &Pat
         Bounds { controller_uid: Some(controller_uid), ..BOUNDS }, true)
 }
 
+/// A room resident's operator route (deploy/hermes/README.md "One uid per
+/// resident"). Systemd supplies two listeners bound in the resident's own
+/// 0700 directory with `SocketUser` the resident: fd3 at `socket` (Host
+/// frames, `transport::RESIDENT_OPERATIONS` only) and fd4 at
+/// `socket.control` (the status action only, never drain). This process runs
+/// as the Store operator; the resident pins the listeners' creator (systemd,
+/// uid 0) with `--operator-peer-uid` / `MINI_OPERATOR_PEER_UID`.
+#[cfg(target_os = "linux")]
+pub(crate) fn serve_resident_activated(socket: &Path, upstream: &Path, config: &Path, resident_uid: u32) -> Result<(), String> {
+    if resident_uid == 0 || resident_uid == mini_sdk::private::euid() {
+        return Err("resident proxy requires a distinct non-root resident UID".into());
+    }
+    if std::env::var("LISTEN_PID").ok().as_deref() != Some(std::process::id().to_string().as_str())
+        || std::env::var("LISTEN_FDS").ok().as_deref() != Some("2") {
+        return Err("resident proxy requires exactly two systemd-activated listeners (socket, control) for this process".into());
+    }
+    // SAFETY: ownership of activation fds 3 and 4 transfers to this process exactly once.
+    let (listener, control) = unsafe { (UnixListener::from_raw_fd(3), UnixListener::from_raw_fd(4)) };
+    validate_activated_listener(&listener, socket)?;
+    validate_activated_listener(&control, &socket.with_extension("control"))?;
+    private_directory(upstream)?;
+    let config_bytes = transport::read_config(config)?;
+    check_upstream(upstream, &config_bytes)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let probe = connect(upstream, &stop, Instant::now() + BOUNDS.connect)
+        .map_err(|error| format!("resident proxy upstream unavailable: {error}"))?;
+    if transport::peer_uid(&probe)? != mini_sdk::private::euid() {
+        return Err("resident proxy upstream peer UID mismatch".into());
+    }
+    drop(probe);
+    let _signals = Signals::install()?;
+    let status = {
+        let (stop, upstream) = (stop.clone(), upstream.with_extension("control"));
+        std::thread::Builder::new().name("mini-resident-status".into())
+            .spawn(move || crate::operator_drain::serve_status_proxy(control, &upstream, resident_uid, &stop))
+            .map_err(|e| format!("cannot start resident status proxy: {e}"))?
+    };
+    let result = run(listener, upstream.to_path_buf(), config_bytes, stop.clone(),
+        Bounds { resident_uid: Some(resident_uid), ..BOUNDS }, true);
+    stop.store(true, Ordering::Release);
+    let _ = status.join();
+    result
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn validate_activated_listener(listener: &UnixListener, socket: &Path) -> Result<(), String> {
     if !socket.is_absolute() || listener.local_addr().map_err(|e| e.to_string())?.as_pathname() != Some(socket) {
@@ -872,6 +925,7 @@ mod tests {
         Bounds {
             controller_uid: None,
             public_controller_uid: None,
+            resident_uid: None,
             connections: 3,
             read: Duration::from_millis(150),
             connect: Duration::from_millis(150),
@@ -1022,6 +1076,45 @@ mod tests {
             assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);
             assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
         }
+    }
+    #[test]
+    fn resident_operator_proxy_forwards_its_operations_and_refuses_the_rest_by_name() {
+        let (fixture, backend) = Fixture::new(Bounds { resident_uid: Some(mini_sdk::private::euid()), ..bounds() });
+        for operation in [0u8, 2, 3, 5, 17, 98, 151] {
+            let frame = envelope(CONFIG, &[operation, 1]);
+            let mut client = fixture.client();
+            transport::write_frame(&mut client, &frame).unwrap();
+            let mut private = accept(&backend);
+            assert_eq!(transport::read_frame(&mut private).unwrap(), Some(frame));
+            transport::write_frame(&mut private, &[operation, 9]).unwrap();
+            assert_eq!(transport::read_frame(&mut client).unwrap(), Some(vec![operation, 9]));
+        }
+        // Operator-only operations (lifecycle, dispatch, fn namespace custody
+        // signing, fn ACK, agent reserve) and public ones off the resident's
+        // route are refused by name before any upstream connection.
+        for operation in [13u8, 22, 26, 34, 43, 58, 76, 121, 183, 206] {
+            let mut client = fixture.client();
+            transport::write_frame(&mut client, &envelope(CONFIG, &[operation, 1])).unwrap();
+            let reply = transport::read_frame(&mut client).unwrap().unwrap();
+            assert_eq!(reply[0], 254);
+            assert!(String::from_utf8_lossy(&reply[1..]).contains(&format!("operation {operation} is not on the resident operator route")));
+            assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        }
+        // A resident operation still passes the public relay's own checks: a
+        // provider usage quote with a malformed body is refused, never forwarded.
+        let mut client = fixture.client();
+        transport::write_frame(&mut client, &envelope(CONFIG, &[19, 1])).unwrap();
+        let reply = transport::read_frame(&mut client).unwrap().unwrap();
+        assert_eq!(reply[0], 254);
+        assert!(String::from_utf8_lossy(&reply[1..]).starts_with("operation 19: "));
+        assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    }
+    #[test]
+    fn resident_operator_proxy_refuses_other_uid_before_reading_a_frame() {
+        let (fixture, backend) = Fixture::new(Bounds { resident_uid: Some(mini_sdk::private::euid().wrapping_add(1)), ..bounds() });
+        let mut client = fixture.client();
+        assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);
+        assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
     }
     #[test]
     fn agent_operator_proxy_refuses_other_uid_before_reading_a_frame() {
