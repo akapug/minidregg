@@ -11,10 +11,20 @@
 #   mini-market-fetch [...] fetch PACKAGE-ID                     one package into the quarantine
 #   mini-market-fetch [...] pin PACKAGE-ID SHA256                one package whose whole SHA-256 is pinned (the M6 gate's sntfy)
 #   mini-market-fetch [...] verify PACKAGE-ID                    re-hash a quarantined package and rewrite its meta
+#   mini-market-fetch [...] adopt PACKAGE-ID SHA256 FILE          one package from a box-local file (an operator-pinned
+#                                                                 entry without a packageUrl, e.g. the oracle runtime
+#                                                                 shipped on its data volume): copied, hashed, quarantined
 #   mini-market-fetch [...] wanted                               fetch every PACKAGE-ID flagged in STATE/wanted/
 #
+# Operator-pinned entries: STATE/local.json (0644, written by the operator, never by this script) is
+# an index in the market's shape whose entries carry `sha256` (the whole raw SHA-256) and optionally
+# `packageUrl` (https) and `class`; `refresh` merges it into index.json through `mini apps index-check
+# --local`, and a fetch of a pinned packageId takes the pinned URL and refuses any other bytes
+# (`pinMismatch`). A pinned entry without a URL is never downloaded: `adopt` is its only way in.
+#
 # State (STATE, default /var/lib/mini-market, owned by mini-market, group mini-apps):
-#   index.json           the catalogue `mini apps` reads (0644; re-rendered by index-check)
+#   index.json           the catalogue `mini apps` reads (0644; re-rendered by index-check, pins merged)
+#   local.json           the operator's pinned entries (optional; read, never written here)
 #   quarantine/ID.spk    downloaded packages (0640 mini-market:mini-apps; the worker reads, nothing else)
 #   meta/ID.json         {packageId, sha256, bytes, fetchedAt, url} (0644)
 #   wanted/ID            flags the worker drops (dir 0730 mini-market:mini-apps); removed once fetched or refused
@@ -65,9 +75,9 @@ refuse() { # ID REASON
   echo "mini-market-fetch: $id refused: $reason" >&2
   return 1
 }
-write_meta() { # ID SHA BYTES
-  printf '{"packageId":"%s","sha256":"%s","bytes":%s,"fetchedAt":"%s","url":"%s%s"}\n' \
-    "$1" "$2" "$3" "$(now)" "$PACKAGE_URL" "$1" >"$STATE/meta/.$1.json.new"
+write_meta() { # ID SHA BYTES [URL]
+  printf '{"packageId":"%s","sha256":"%s","bytes":%s,"fetchedAt":"%s","url":"%s"}\n' \
+    "$1" "$2" "$3" "$(now)" "${4:-$PACKAGE_URL$1}" >"$STATE/meta/.$1.json.new"
   chmod 0644 "$STATE/meta/.$1.json.new"
   mv -f "$STATE/meta/.$1.json.new" "$STATE/meta/$1.json"
 }
@@ -76,19 +86,35 @@ refresh() {
   local raw=$STATE/.index.raw.json code
   rm -f "$raw"
   code=$(dl "$INDEX_URL" "$raw" "$INDEX_LIMIT") || { echo "mini-market-fetch: index download failed (http ${code:-none}); the previous index stands" >&2; rm -f "$raw"; return 1; }
-  # index-check parses the download as data and publishes only the known fields, by rename.
-  "$MINI" apps index-check --in "$raw" --out "$STATE/index.json" || { rm -f "$raw"; echo 'mini-market-fetch: the downloaded index did not validate; the previous index stands' >&2; return 1; }
+  # index-check parses the download as data and publishes only the known fields, by rename;
+  # the operator's pinned entries (local.json) are merged by the same parser, refused on collision.
+  local -a local_args=()
+  [[ ! -f $STATE/local.json ]] || local_args=(--local "$STATE/local.json")
+  "$MINI" apps index-check --in "$raw" --out "$STATE/index.json" "${local_args[@]}" || { rm -f "$raw"; echo 'mini-market-fetch: the downloaded index did not validate; the previous index stands' >&2; return 1; }
   chmod 0644 "$STATE/index.json"
   rm -f "$raw"
 }
 
+# The operator's pin for ID from the merged index: "SHA256<TAB>URL" (either may be empty), or nothing.
+pinned() { # ID
+  [[ -f $STATE/index.json ]] || return 0
+  jq -r --arg id "$1" '.apps[] | select(.packageId == $id and .sha256 != null) | [.sha256, (.packageUrl // "")] | @tsv' "$STATE/index.json" 2>/dev/null | head -1
+}
+
 fetch_one() { # ID [PINNED-SHA]
-  local id=$1 pin=${2:-} part out code sha bytes
+  local id=$1 pin=${2:-} part out code sha bytes url pinned_sha pinned_url
   package_id "$id" || { echo "mini-market-fetch: $id is not a packageId (32 lowercase hex)" >&2; return 2; }
   out=$STATE/quarantine/$id.spk part=$STATE/quarantine/.$id.part
+  IFS=$'\t' read -r pinned_sha pinned_url <<<"$(pinned "$id")"
+  if [[ -n $pinned_sha ]]; then
+    [[ -z $pin || $pin == "$pinned_sha" ]] || { refuse "$id" "pinConflict:$pin"; return; }
+    pin=$pinned_sha
+  fi
   if [[ -f $out ]]; then verify_one "$id" "$pin"; return; fi
+  if [[ -n $pinned_sha && -z $pinned_url ]]; then refuse "$id" "localAdoptionRequired"; return; fi
+  url=${pinned_url:-$PACKAGE_URL$id}
   rm -f "$part"
-  code=$(dl "$PACKAGE_URL$id" "$part" "$RAW_LIMIT") || {
+  code=$(dl "$url" "$part" "$RAW_LIMIT") || {
     rm -f "$part"
     case ${code:-} in 404) refuse "$id" unknownPackage ;; *) refuse "$id" "http-${code:-none}" ;; esac
     return
@@ -100,9 +126,29 @@ fetch_one() { # ID [PINNED-SHA]
   [[ -z $pin || $sha == "$pin" ]] || { rm -f "$part"; refuse "$id" "pinMismatch:$sha"; return; }
   chmod 0640 "$part"
   mv -n "$part" "$out"
-  write_meta "$id" "$sha" "$bytes"
+  write_meta "$id" "$sha" "$bytes" "$url"
   rm -f "$STATE/wanted/$id" "$STATE/refused/$id.json"
   echo "fetched $id sha256=$sha bytes=$bytes -> $out"
+}
+
+adopt_one() { # ID SHA256 FILE: a box-local package, copied through the same checks as a download
+  local id=$1 pin=$2 file=$3 part out sha bytes
+  package_id "$id" || { echo "mini-market-fetch: $id is not a packageId (32 lowercase hex)" >&2; return 2; }
+  [[ $pin == "$id"* ]] || { echo "mini-market-fetch: pinned sha256 does not start with $id" >&2; return 2; }
+  [[ $file == /* && -f $file && ! -L $file ]] || { echo "mini-market-fetch: adopt takes an absolute regular file" >&2; return 2; }
+  out=$STATE/quarantine/$id.spk part=$STATE/quarantine/.$id.part
+  if [[ -f $out ]]; then verify_one "$id" "$pin"; return; fi
+  bytes=$(stat -c %s "$file" 2>/dev/null || stat -f %z "$file")
+  [[ $bytes -le $RAW_LIMIT ]] || { refuse "$id" sizeOverProfile; return; }
+  rm -f "$part"
+  cp "$file" "$part"
+  sha=$(sha256 "$part")
+  [[ $sha == "$pin" ]] || { rm -f "$part"; refuse "$id" "pinMismatch:$sha"; return; }
+  chmod 0640 "$part"
+  mv -n "$part" "$out"
+  write_meta "$id" "$sha" "$bytes" "file://$file"
+  rm -f "$STATE/wanted/$id" "$STATE/refused/$id.json"
+  echo "adopted $id sha256=$sha bytes=$bytes <- $file"
 }
 
 verify_one() { # ID [PINNED-SHA]
@@ -135,6 +181,7 @@ case $verb in
   fetch) [[ $# == 1 ]] || { echo 'usage: fetch PACKAGE-ID' >&2; exit 2; }; fetch_one "$1" ;;
   pin) [[ $# == 2 && $2 =~ ^[0-9a-f]{64}$ ]] || { echo 'usage: pin PACKAGE-ID SHA256' >&2; exit 2; }; fetch_one "$1" "$2" ;;
   verify) [[ $# == 1 ]] || { echo 'usage: verify PACKAGE-ID' >&2; exit 2; }; verify_one "$1" ;;
+  adopt) [[ $# == 3 && $2 =~ ^[0-9a-f]{64}$ ]] || { echo 'usage: adopt PACKAGE-ID SHA256 FILE' >&2; exit 2; }; adopt_one "$1" "$2" "$3" ;;
   wanted) wanted ;;
-  *) sed -n '2,22p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,32p' "$0" >&2; exit 2 ;;
 esac

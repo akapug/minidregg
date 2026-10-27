@@ -38,6 +38,8 @@ done
 for binary in mini spk-host mini-spk-broker mini-spk-volume-helper; do
   install -m 755 "$own/$binary" "$run/bin/$binary"
 done
+# The public-data publisher (the oracle's shared dataset) when the lane built it; optional otherwise.
+[[ ! -x $own/spk-data-publish ]] || install -m 755 "$own/spk-data-publish" "$run/bin/spk-data-publish"
 install -m 755 "$repo/deploy/spk-host/spk-ingest" "$run/bin/spk-ingest"
 sha256sum "$run/bin/"* >"$run/binary-sha256.txt"
 runid=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
@@ -50,8 +52,21 @@ config=$run/w/store/base/workroom/deployment/pinned-config.json
 "$run/bin/minidregg-host" "$config" profile >"$run/w/native-profile.json"
 store=$(jq -er '.storeTag | select(test("^[0-9a-f]{16}$"))' "$run/w/native-profile.json")
 root=/var/lib/mini-spk-worlds/$store
-start=$(awk -F: -v user="$op_name" '$1==user && $3>=32 {print $2;exit}' /etc/subuid)
-[[ $start =~ ^[0-9]+$ ]] || { echo "no /etc/subuid range for $op_name" >&2; exit 1; }
+# A free 16-ID slice of the operator's subordinate allocation: a lane box carries several standing
+# worlds, and the installer refuses a slice another world's registry already names.
+read -r start count < <(awk -F: -v user="$op_name" '$1==user && $3>=16 {print $2,$3;exit}' /etc/subuid)
+[[ $start =~ ^[0-9]+$ && $count =~ ^[0-9]+$ ]] || { echo "no /etc/subuid range for $op_name" >&2; exit 1; }
+end=$((start + count))
+while ((start + 16 <= end)); do
+  occupied=0
+  for registry in /etc/mini-spk-volumes/*.json; do
+    [[ -f $registry ]] || continue
+    if jq -e --argjson first "$start" --argjson last "$((start + 16))" '.appUids | any(. >= $first and . < $last)' "$registry" >/dev/null 2>&1; then occupied=1; break; fi
+  done
+  [[ $occupied == 1 ]] || break
+  start=$((start + 16))
+done
+((start + 16 <= end)) || { echo "no unused 16-ID subordinate slice for $op_name" >&2; exit 1; }
 bwrap=$(sh "$repo/deploy/grain-host/resolve-bwrap") || exit 1
 deployment=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 host=$(sha256sum /etc/machine-id | cut -d ' ' -f1)
@@ -59,9 +74,13 @@ printf 'ROOT SETUP BEGIN store=%s\n' "$store" | tee -a "$run/root-setup.log"
 sudo -n -- "$installer" install "$run/bin/mini-spk-volume-helper" "$helper" "$store" "$deployment" "$host" "$op_uid" "$start" 16 >>"$run/root-setup.log" 2>&1
 printf 'ROOT SETUP store=%s helper=%s\n' "$store" "$helper" | tee -a "$run/root-setup.log"
 registry=/etc/mini-spk-volumes/$store.json
+# MINI_IMPORT_PROFILE is the operator's physical intake budget for materialising a package
+# (standard-v1: 120 s; operator-appliance-v1: 1800 s, the oracle runtime's 15,155 members).
+import_profile=${MINI_IMPORT_PROFILE:-standard-v1}
+case $import_profile in standard-v1|operator-appliance-v1) ;; *) echo "unknown MINI_IMPORT_PROFILE $import_profile" >&2; exit 2;; esac
 jq -n --slurpfile registry "$registry" --arg binary "$run/bin/spk-host" --arg sha "$(sha256sum "$run/bin/spk-host" | cut -d ' ' -f1)" --arg ingest "$run/bin/spk-ingest" --arg op "$op_name" \
-  --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" '
-  $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[]}' >"$root/broker/config.json"
+  --arg bwrap "$bwrap" --arg bwrapSha "$(sha256sum "$bwrap" | cut -d ' ' -f1)" --arg importProfile "$import_profile" '
+  $registry[0] as $r | {protocol:"mini-spk-broker-config-v3",store:$r.store,grainsRoot:$r.grainsRoot,spkRoot:($r.grainsRoot+"/spk"),brokerSocket:($r.grainsRoot+"/runtime-"+$r.store+"/broker.sock"),operatorUser:$op,unitPrefix:"mini",spkHost:$binary,spkHostSha256:$sha,bwrap:$bwrap,bwrapSha256:$bwrapSha,ingestHelper:$ingest,volumeHelper:$r.helper,appUids:$r.appUids,residentHomeReadOnlyPaths:[],importProfile:$importProfile}' >"$root/broker/config.json"
 chmod 600 "$root/broker/config.json"
 sed "s|%h/.local/libexec/mini-spk-broker|$run/bin/mini-spk-broker|" "$repo/deploy/spk-host/mini-spk-broker@.service" >"$units/mini-spk-broker@$store.service"
 systemctl --user daemon-reload

@@ -15,6 +15,14 @@
 #   - the origin check: one authenticated GET through the grain's route socket with the route's
 #     browser cookie and the grain's Host, as the edge would send it.
 # Every step is one real verb; nothing is faked. Stop the worker by its PID file only.
+#
+# Knobs (environment), so a sibling row (joracle.sh) runs the same path with another package:
+#   APPS_E2E_INDEX     the catalogue to install from (default: the recorded fixture; joracle: fixture + the pin)
+#   APPS_E2E_CLASS     the member's class choice (default S; the oracle needs L)
+#   APPS_E2E_ATTEMPTS  install retries, 15 s apart (default 20; the operator-appliance import budget needs 130)
+#   APPS_E2E_GET_PATH  the authenticated GET's path (default /; the oracle bridge serves /health)
+#   APPS_E2E_POST      "PATH|CONTENT-TYPE|BODY-FILE": one authenticated POST after the GET, body kept in OUT/<grain>.post.body
+#   APPS_E2E_STOP=1    `mini apps stop` the grain at the end and check it is decided stopped
 set -uo pipefail
 umask 077
 [[ $# -ge 3 ]] || { echo "usage: $0 WORLD.env OUT_DIR APP-ID [APP-ID...]" >&2; exit 2; }
@@ -23,7 +31,8 @@ env_file=$1 out=$2; shift 2
 . "$env_file"
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-FIXTURE=$repo/native/resource-client/tests/fixtures/sandstorm-index-2026-10-27.json
+FIXTURE=${APPS_E2E_INDEX:-$repo/native/resource-client/tests/fixtures/sandstorm-index-2026-10-27.json}
+CLASS=${APPS_E2E_CLASS:-S} ATTEMPTS=${APPS_E2E_ATTEMPTS:-20} GET_PATH=${APPS_E2E_GET_PATH:-/}
 [[ ! -e $out ]] || { echo "fresh OUT_DIR required" >&2; exit 2; }
 mkdir -m 700 "$out"
 rows=0 fails=0
@@ -98,10 +107,10 @@ trap stop_worker EXIT
 export MINI_MARKET_INDEX=$FIXTURE MINI_MARKET_META=$out/meta MINI_APPS_VERDICTS=$out/verdicts MINI_APPS_WORKER_SOCKET=$out/worker.sock MINI_APPS_CONFIG=$out/apps.json
 install_app() { # APP-ID
   local app=$1 attempt=1 outcome rid
-  outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class S --json 2>"$out/install-$app.err")
+  outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class "$CLASS" --json 2>"$out/install-$app.err")
   rid=$(grep -oE 'request [0-9a-f]{32}' <<<"$outcome" | head -1 | cut -d' ' -f2)
   [ -n "$rid" ] || rid=$(ls "$WS9/apps/requests/" 2>/dev/null | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
-  while [ $attempt -le 20 ] && ! grep -q '"decided": true' <<<"$outcome"; do
+  while [ $attempt -le "$ATTEMPTS" ] && ! grep -q '"decided": true' <<<"$outcome"; do
     attempt=$((attempt + 1)); sleep 15
     outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --retry "$rid" --json 2>>"$out/install-$app.err")
   done
@@ -116,14 +125,27 @@ for app in "$@"; do
     # the origin check: one authenticated GET through the route socket with the route's cookie and the grain's Host
     rdir=$(jq -r --arg m member '.routes[$m].directory' "$out/state/grains/$grain.json")
     code=$(curl -sS --max-time 900 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -H "Origin: https://$grain.demo.test" \
-      -H "Cookie: __Host-mini_spk_session=$(cat "$rdir/browser.token")" -o "$out/$grain.body" -w '%{http_code}' "http://$grain.demo.test/" 2>"$out/$grain.curl.err" || echo 000)
-    anon=$(curl -sS --max-time 120 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -o /dev/null -w '%{http_code}' "http://$grain.demo.test/" 2>/dev/null || echo 000)
-    row "origin check $grain: authenticated GET 200 through the route, anonymous refused" "$([ "$code" = 200 ] && [ "$anon" != 200 ] && echo 1 || echo 0)" "authed=$code anon=$anon $(head -c 60 "$out/$grain.body" | tr '\n' ' ')"
+      -H "Cookie: __Host-mini_spk_session=$(cat "$rdir/browser.token")" -o "$out/$grain.body" -w '%{http_code}' "http://$grain.demo.test$GET_PATH" 2>"$out/$grain.curl.err" || echo 000)
+    anon=$(curl -sS --max-time 120 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -o /dev/null -w '%{http_code}' "http://$grain.demo.test$GET_PATH" 2>/dev/null || echo 000)
+    row "origin check $grain: authenticated GET $GET_PATH 200 through the route, anonymous refused" "$([ "$code" = 200 ] && [ "$anon" != 200 ] && echo 1 || echo 0)" "authed=$code anon=$anon $(head -c 60 "$out/$grain.body" | tr '\n' ' ')"
+    if [ -n "${APPS_E2E_POST:-}" ]; then
+      IFS='|' read -r ppath ptype pbody <<<"$APPS_E2E_POST"
+      pcode=$(curl -sS --max-time 900 --unix-socket "$rdir/http.sock" -H "Host: $grain.demo.test" -H "Origin: https://$grain.demo.test" \
+        -H "Cookie: __Host-mini_spk_session=$(cat "$rdir/browser.token")" -H "Content-Type: $ptype" -H "Accept: application/json" --data-binary "@$pbody" \
+        -o "$out/$grain.post.body" -w '%{http_code}' "http://$grain.demo.test$ppath" 2>"$out/$grain.post.err" || echo 000)
+      row "POST $ppath through the route answers 200" "$([ "$pcode" = 200 ] && echo 1 || echo 0)" "code=$pcode $(head -c 100 "$out/$grain.post.body" | tr '\n' ' ')"
+    fi
     open=$(mini apps open --dir "$WS9" --grain "$grain" --json 2>&1); row "apps open $grain hands the member the one-time bootstrap token" "$(grep -q bootstrapToken <<<"$open" && echo 1 || echo 0)" "$(grep -oE '"origin": "[^"]*"' <<<"$open")"
   else
     row "install $name as the member" 0 "$(tail -1 "$out/install-$app.err" | cut -c1-160) $(grep -oE '"(refused|state|detail)": "[^"]*"' "$out/install-$app.json" | tr '\n' ' ' | cut -c1-200)"
   fi
 done
 listed=$(mini apps list --dir "$WS9" --json 2>&1); row "apps list shows the member's grains" "$(grep -q '"grains"' <<<"$listed" && echo 1 || echo 0)" "$(grep -oE '"grain": "a[0-9]+"' <<<"$listed" | tr '\n' ' ')"
+if [ "${APPS_E2E_STOP:-0}" = 1 ]; then
+  for g in $(grep -oE '"grain": "a[0-9]+"' <<<"$listed" | grep -oE 'a[0-9]+' | sort -u); do
+    stopped=$(mini apps stop --dir "$WS9" --grain "$g" --json 2>&1); printf '%s\n' "$stopped" >"$out/stop-$g.json"
+    row "apps stop $g is decided stopped (a source-authorized STOP through the custodian)" "$(grep -q '"decided": true' <<<"$stopped" && grep -q '"state": "stopped"' <<<"$stopped" && echo 1 || echo 0)" "$(grep -oE '"(state|refused|detail)": "[^"]*"' <<<"$stopped" | tr '\n' ' ' | cut -c1-160)"
+  done
+fi
 cp "$out/state/grains/"*.json "$out/" 2>/dev/null
 verdict
