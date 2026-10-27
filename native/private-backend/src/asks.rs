@@ -10,7 +10,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{Read, Result},
+    io::Result,
 };
 const WORDS: usize = 2; // Independent 128-bit coordinates; 256-bit hidden entropy.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -209,24 +209,6 @@ impl Asks {
             .or(self.private_share.as_ref())
             .filter(|s| self.h(self.me + 1, s) == commits[self.me as usize])
             .cloned()
-    }
-    /// Real entropy from OS for dealer fixture. The party must persist the selected
-    /// polynomial and this outbound list before transmitting; regenerating after
-    /// uncertainty is an equivocation. Caller owns the durable transcript adapter.
-    pub fn dealer_start(&self) -> Result<Vec<Send>> {
-        if self.me != self.dealer {
-            return Err(bad("not dealer"));
-        }
-        let mut coefficients = vec![vec![Field(0); self.f + 1]; WORDS];
-        let mut rng = std::fs::File::open("/dev/urandom")?;
-        for p in &mut coefficients {
-            for c in p {
-                let mut b = [0; 16];
-                rng.read_exact(&mut b)?;
-                *c = Field(u128::from_le_bytes(b));
-            }
-        }
-        self.dealer_with_coefficients(&coefficients)
     }
     pub fn dealer_with_coefficients(&self, coefficients: &[Vec<Field>]) -> Result<Vec<Send>> {
         if self.me != self.dealer
