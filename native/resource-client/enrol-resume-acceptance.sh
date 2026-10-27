@@ -67,7 +67,8 @@ tick() {
   step "$1" ok "$MINI" clock --action tick --workspace "$ROOT/clock"
   date +%s >"$ROOT/last-tick"
 }
-tick_height() { jq -er '.acceptedCount' "$LOG/$1.stdout"; }
+# A confirmed tick's commit: the clock's accepted count, the second it asserted, the world root after it.
+tick_commit() { jq -er 'select(.type == "confirmed") | "\(.acceptedCount) \(.asserted.now) \(.worldRoot)"' "$LOG/$1.stdout"; }
 NS=$(jq -r .namespaceRoot "$ROOT/sponsor/workspace.json")
 A="$ROOT/attempts/newcomer"
 plan() { step "$1" "$2" "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
@@ -185,10 +186,11 @@ step pinned-plan ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/spon
 tick tick-4
 step pinned-seal ok "$MINI" enroll --action seal --dir "$B"
 tick tick-5
-# the plan crossed two commits: two distinct heights, both past the height the plan was pinned at
-h4=$(tick_height tick-4); h5=$(tick_height tick-5); pinned_at=$(jq -er .pinnedAtHeight "$B/pin.json")
-[ "$h4" != "$h5" ] && [ "$h4" -gt "$pinned_at" ] && [ "$h5" -gt "$h4" ] \
-  || { echo "step 7: the ticks did not cross two heights past the pin (pinned $pinned_at, ticks $h4, $h5)" >&2; exit 1; }
+# the plan crossed two commits: both ticks confirmed, the clock's count and asserted second strictly
+# rising, and two different world roots (each tick moved the log the plan was pinned under)
+set -- $(tick_commit tick-4) $(tick_commit tick-5)
+[ "$#" -eq 6 ] && [ "$4" -gt "$1" ] && [ "$5" -gt "$2" ] && [ "$3" != "$6" ] \
+  || { echo "step 7: the two ticks are not two distinct commits: $*" >&2; exit 1; }
 step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
 [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
 [ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
