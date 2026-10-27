@@ -594,3 +594,26 @@ reader's prefix guarantee moves back from chain-hash collision resistance to KMA
 **The condition:** the root log read from the tags is new served state. `Opened.view`/`View` must carry it,
 and `View.Honest` must pin it (each entry's receipt root equals the replay's root at that height), or `exact`
 and `keystone` leave it unstated.
+
+## 2026-10-27, fourteenth pass: partial `ofOpened` and `reopens` (hot-path-v4 aa025c8d)
+
+**`reopens` is the right form.** It is stated under `exact`'s hypotheses, not over `Wrote`, and that is
+the stronger and more reusable choice. A `Wrote` reopen already carries `ofOpened opened = .ok loaded`
+as a premise, and every `Wrote` checkpoint is honest by the keystone, so a per-`Wrote` restatement would
+only be a corollary. `inhabited` now includes a successful build.
+
+`reopens` is true only if the build refuses nothing the replay accepts. Both of its checks meet that bar:
+- *Nullifiers:* a suffix record carrying a prefix nullifier fails `preflight`'s `nullifiersFreshCheck`
+  (`.alreadyConsumed`).
+- *Transaction ids:* `DurableCommitProtocol.execute` (`:427`) answers a recorded transaction id with
+  `.replayed`/`.transactionConflict`, never `.accepted`.
+
+So the proof rests on `replay` demanding `.accepted` for every record; cite that lemma. Admissibility for
+`pre ++ suf` from admissibility for `pre` should follow from `mem_cellIds_append`.
+
+**Missing teeth: the build's soundness.** `viewOpened` and the keystone constrain builds only on Stores
+this Host wrote. Nothing states what a successful build guarantees on a MAC-valid Store whose suffix
+reuses a prefix nullifier. Either instantiate `Loaded4 := Loaded`, so the real resume proof makes it hold
+by type (say so in the spec), or add `buildSound : ofOpened opened = .ok loaded → (impl.view
+loaded).snapshot = (protocol resume of the image)`, with a teeth pole: a suffix record carrying a prefix
+nullifier makes `ofOpened` refuse.
