@@ -248,12 +248,18 @@ struct VerifiedImage {
 
 /// Holds the verified descriptor open for as long as the caller may execute
 /// it; the `/proc/self/fd` path is valid only while this value lives.
+#[derive(Debug)]
 pub(crate) struct VerifiedExecutable(std::sync::Arc<File>);
 
 impl VerifiedExecutable {
     pub(crate) fn path(&self) -> PathBuf {
         use std::os::fd::AsRawFd;
         PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()))
+    }
+}
+impl std::os::fd::AsRawFd for VerifiedExecutable {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0.as_raw_fd()
     }
 }
 
@@ -268,7 +274,7 @@ fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
 }
 
 /// Returns the retained descriptor of exactly the verified inode.
-fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
+pub(crate) fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
     verified_image_hashing(path, expected_sha256).map(|(image, _)| image)
 }
 
@@ -666,8 +672,9 @@ impl Drop for ContinuityAttemptDir {
 
 impl PrivateOperator {
     /// The pinned Host's Store key: `storeTag` in its `profile` output, Mini's
-    /// tag of this deployment's genesis seed identity
-    /// (`ApplicationLifecycleResidentProfile.storeTag`). Resident unit names,
+    /// tag of the Store identity, the genesis seed at the Store's root
+    /// (`NativeHost.Config.storeIdentity`, `ApplicationLifecycleResidentProfile.storeTag`).
+    /// Resident unit names,
     /// volumes, slices and the Store's state root all carry it; the physical
     /// host reads it from Mini and never derives its own.
     pub(crate) fn store_tag(&self, parent: &Path) -> io::Result<String> {

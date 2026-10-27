@@ -173,7 +173,6 @@ impl VolumeWitness {
         })
     }
 
-    #[allow(dead_code)] // RUST-TRIAGE §4 R15: reached only from the unwired `start_attested`.
     pub(crate) fn compare_open_mount(&self, persistent_var_fd: RawFd) -> io::Result<()> {
         let path_meta = fs::symlink_metadata(&self.mount)?;
         if !path_meta.is_dir()
@@ -320,6 +319,41 @@ mod tests {
 
     fn site() -> VolumeSite {
         VolumeSite::new(Path::new("/var/lib/mini/grains"), "0123456789abcdef").unwrap()
+    }
+
+    /// The attested-start boundary (`PreparedResident::start_attested`): the
+    /// directory held open for fd5 must be the attested mount, by device and
+    /// inode, with the app's ownership and mode. Each tamper is refused by name.
+    #[test]
+    fn compare_open_mount_refuses_a_replaced_or_loosened_mount_by_name() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let root = std::env::temp_dir().join(format!(
+            "spk-attested-mount-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let mount = root.join("var");
+        fs::DirBuilder::new().mode(0o700).create(&mount).unwrap();
+        let mut witness = VolumeWitness::parse(example(), &site()).unwrap();
+        witness.app_uid = unsafe { libc::geteuid() };
+        witness.mount = mount.clone();
+        let held = fs::File::open(&mount).unwrap();
+        witness.compare_open_mount(held.as_raw_fd()).unwrap();
+        // Loosened: the mount is no longer the app's private directory.
+        fs::set_permissions(&mount, fs::Permissions::from_mode(0o755)).unwrap();
+        let loosened = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
+        assert_eq!(loosened.to_string(), "attested /var mount path identity drift");
+        fs::set_permissions(&mount, fs::Permissions::from_mode(0o700)).unwrap();
+        witness.compare_open_mount(held.as_raw_fd()).unwrap();
+        // Replaced: a fresh directory under the attested path, while fd5 still
+        // holds the one that was verified (another inode).
+        fs::rename(&mount, root.join("var.moved")).unwrap();
+        fs::DirBuilder::new().mode(0o700).create(&mount).unwrap();
+        let replaced = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
+        assert_eq!(replaced.to_string(), "preopened /var differs from attested mount");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

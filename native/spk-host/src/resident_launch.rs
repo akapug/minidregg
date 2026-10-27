@@ -424,7 +424,6 @@ impl PreparedResident {
     /// Compare the root-owned custody handoff with the exact directory held
     /// open for fd5. This is a physical observation; the caller must also
     /// compare the witness bytes and volume ID to the source-owned v3 claim.
-    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
     pub(crate) fn compare_attested_volume(&self, witness: &VolumeWitness) -> io::Result<()> {
         witness.compare_open_mount(self._persistent_var.as_raw_fd())?;
         witness.recheck_handoff()
@@ -433,7 +432,7 @@ impl PreparedResident {
     /// Repeat the fixed handoff/FD5 check at the last physical boundary before
     /// consuming the journal's one-shot spawn. This does not mint Mini launch
     /// authority or promise cancellation of a later operator mount change.
-    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
+    /// `resident_service::run` starts every resident through this.
     pub(crate) fn start_attested(
         self,
         journal: &Journal,

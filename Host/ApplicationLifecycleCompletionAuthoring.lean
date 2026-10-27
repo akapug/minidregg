@@ -28,7 +28,7 @@ structure PhysicalObservation where
 
 /-- Pin the raw op26 frame and derive the only installed-manifest bytes that
 may appear in the custodian's report. `store` is the authoring Host's
-`Config.expectedSeed` (every plan here checks the unit is this Store's). -/
+`Config.storeIdentity` (every plan here checks the unit is this Store's). -/
 def reportPlan (store : Digest) (beginBytes claimBytes : List UInt8)
     (observed : PhysicalObservation) : Except String ApplicationLifecycleCompletionReport.Report := do
   let some begin := ApplicationLifecycleBeginV2Ingress.codec.decode beginBytes

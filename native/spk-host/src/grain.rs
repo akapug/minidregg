@@ -233,8 +233,8 @@ struct Host {
     profile: HostProfile,
     identity: HostIdentity,
     management_key_id: String,
-    /// The Store key: Mini's `storeTag` of the deployment's genesis seed
-    /// identity, read from the pinned Host's profile at every load. Resident
+    /// The Store key: Mini's `storeTag` of the Store identity (the genesis seed
+    /// at the Store's root), read from the pinned Host's profile at every load. Resident
     /// unit, volume, mount, witness and slice names and the state root carry it.
     store: String,
     // Serializes profile selection with grain lifecycle operations.
