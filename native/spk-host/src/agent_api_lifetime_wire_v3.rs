@@ -5,6 +5,7 @@ use crate::agent_api_lifetime_v3::LifetimeBinding;
 use crate::agent_api_lifetime_v3::ReceiptPin;
 use serde::{Deserialize, Serialize};
 use std::io;
+use crate::canonical::{decimal, lower_hex as hex};
 
 pub(crate) const PROTOCOL: &str = "mini-spk-agent-api-v3";
 pub(crate) const MAX_FRAME: usize = 262_144;
@@ -13,20 +14,6 @@ const MAX_BODY: usize = 65_536;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn sha256(value: &str) -> bool {

@@ -145,10 +145,7 @@ struct PolicyFile {
 }
 
 fn canonical_nat(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    crate::canonical::decimal(value)
 }
 
 pub(crate) fn valid_export_path(path: &str) -> bool {
@@ -190,24 +187,8 @@ pub(crate) fn valid_expected_host(host: &str) -> bool {
 }
 
 fn hex_digest(value: &str) -> io::Result<[u8; 32]> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(refuse("custodian token hash is not lowercase SHA-256"));
-    }
-    let mut digest = [0_u8; 32];
-    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        let high = (pair[0] as char)
-            .to_digit(16)
-            .ok_or_else(|| refuse("token hash hex"))?;
-        let low = (pair[1] as char)
-            .to_digit(16)
-            .ok_or_else(|| refuse("token hash hex"))?;
-        digest[index] = ((high << 4) | low) as u8;
-    }
-    Ok(digest)
+    crate::canonical::unhex_array(value)
+        .ok_or_else(|| refuse("custodian token hash is not lowercase SHA-256"))
 }
 
 impl CustodianPolicy {
@@ -1526,7 +1507,6 @@ mod tests {
     use super::*;
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
-
 
     #[test]
     fn admission_bounds_principals_and_apps_independently() {

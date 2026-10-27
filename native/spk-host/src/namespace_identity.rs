@@ -103,7 +103,7 @@ fn remember(path: &Path, roots: &mut Provenance) -> io::Result<()> {
     Ok(())
 }
 fn finalized_name(name: &str) -> bool {
-    name.strip_prefix("sha256-").is_some_and(|hash| hash.len()==64 && hash.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)))
+    name.strip_prefix("sha256-").is_some_and(|hash| crate::canonical::hex64(&hash))
 }
 fn public_tree(path: &Path, roots: &mut Provenance, depth: usize) -> io::Result<()> {
     if depth>MAX_CUSTODY_DEPTH { return Err(refused("bootstrap public-data tree depth exceeded")); }

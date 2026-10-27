@@ -12,6 +12,7 @@ use std::fs::DirBuilder;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
+use crate::canonical::{decimal, hex};
 
 /// The only pure source-authoring formats the physical SPK descriptor path
 /// may request. This does not expose Mini submit, lookup or admission.
@@ -52,27 +53,11 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(out, "{byte:02x}").expect("writing to String");
-    }
-    out
-}
-
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
     value
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("source SPK descriptor field absent"))
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) struct SourceDescriptor {

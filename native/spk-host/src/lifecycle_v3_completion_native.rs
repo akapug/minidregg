@@ -302,31 +302,7 @@ fn checked_assembled(
 }
 
 fn retained_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("v3 completion retained artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("v3 completion retained artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("v3 completion retained artifact length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "v3 completion retained artifact identity refused")
 }
 
 /// Reopens one protected op71 result after process restart. The caller must

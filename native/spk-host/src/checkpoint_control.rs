@@ -16,10 +16,7 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 fn digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::hex64(&value)
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -47,25 +44,7 @@ pub(crate) struct Intent {
 }
 
 fn retained(path: &Path) -> io::Result<Vec<u8>> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.mode() & 0o777 != 0o600
-        || meta.len() > 8192
-    {
-        return Err(invalid("checkpoint custody differs"));
-    }
-    let mut bytes = Vec::new();
-    file.take(8193).read_to_end(&mut bytes)?;
-    if bytes.len() > 8192 {
-        return Err(invalid("checkpoint record grew"));
-    }
-    Ok(bytes)
+    crate::private_file::read_maybe_empty(path, 8192, "checkpoint custody differs")
 }
 fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
     match retained(path) {

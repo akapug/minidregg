@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 const HOST_MAX_FRAME: usize = 12_102_760;
 use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD, RESPONSE_PRIVATE_DISPATCH_NO_RECORD};
+use crate::canonical::hex;
 const ROUTE_BOUND_DISPATCH_OPCODE: u8 = crate::host_operations::APPLICATION_ROUTE_BOUND_DISPATCH;
 const NO_RECORD_REFUSAL: &[u8] = b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1";
 const MAX_CONFIG: usize = 65_536;
@@ -32,15 +33,6 @@ const MAX_HELPER_STDERR: u64 = 64 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
 }
 
 fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
@@ -1530,11 +1522,7 @@ pub(crate) mod qualification {
             crate::dispatch_inspection::Route::Api { signed_path } => Some(signed_path),
         };
         if trigger.protocol != "mini-spk-dispatch-race-trigger-v1"
-            || trigger.nonce_hex.len() != 64
-            || !trigger
-                .nonce_hex
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::hex64(&trigger.nonce_hex)
             || trigger.app != custody.app
             || trigger.session != custody.session
             || trigger.subject != custody.subject
