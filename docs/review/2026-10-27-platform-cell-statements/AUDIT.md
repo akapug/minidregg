@@ -718,3 +718,34 @@ second bug L1 found: in bc88a5ab an install was refused because `.monotone` fail
 step. The one remaining premise (management steps project no `clock/*`) fails safe. Breaking it narrows
 management and never widens it. That direction needs no theorem, only a note on the clause.
 `pole_controller_advance_refused` is the requested teeth.
+
+## 2026-10-27, sixteenth pass: plan against submit, L1c (lane/lean-audit-c 23bae6bbc, not built)
+
+**Verdict: the statement owed in pass 4 (c) is now stated, on the deployed path. Two things are needed
+before calling it done.**
+
+`Pending.judgeBranch` is `admitBranch`'s own tail. It names binding, unsupported, range and cast refusals
+before `law.admit`, so `policyRejected` now means the law's verdict and nothing else. `planVerdict` makes
+the same three compiler checks plus `eval`, on `config.step = branchStep` (by `rfl`). The three keystones
+have the right shape and scope (one `Pending`, one snapshot and height):
+- `PlanRefusalSound` (a plan refusal makes `BranchAccepted` empty);
+- `PlanPassNotLawRefused`;
+- `LawRefusalDisclosed`, the converse asked for in pass 4.
+
+`factoryVerdict_congr` is the honest claim across time. `birthRefusal` now refuses where it used to pass
+silently. `planVerdict` leaves out binding, which is correct: binding depends on the evidence, and
+`PlanPassNotLawRefused` allows it as a separate cause.
+
+1. **No poles for the three keystones.** `PlanRefusalSound` is vacuous if no `Pending` has
+   `factoryVerdict = some false`. Both pass-throughs are vacuous if `BranchAccepted … .factory` is never
+   inhabited. Reuse the concrete descriptor of `:816` ("Both poles on one concrete descriptor"): a
+   satisfiable `Pending` with verdict `some true` and an accepted factory branch, and a teeth `Pending`
+   whose law evaluates false, with verdict `some false` and admission `.error .policyRejected`.
+2. **Disclosure of preparation errors.** `birthRefusal` now returns `s!"birth preparation: {repr reason}"`
+   and `"birth admission: {repr reason}"` on the observation channel. The law's refusal goes through
+   `publicRefusal (grantFields …)`, but these strings are unfiltered. Check that no `ResourceBirthController`
+   or `ResourceBirthPolicyController` `Reject` carries state the requester's grant does not name
+   (balances, other cells' roots, revision numbers). Otherwise map them to names without payloads.
+
+The known gap stays open and should be listed in the lane's state file:
+`GrainResourceBirthAdmission.Pending.admitBranch` still lets `law.admit`'s `none` cover binding.
