@@ -513,7 +513,7 @@ impl Store {
         opened: &DecryptedEnvelope,
         receipts: &[&DraftReceipt],
     ) -> Result<SealedBatchReceipt> {
-        if outcome.progress_claim().signing_bytes != opened.inner().signing_bytes() {
+        if outcome.signing_bytes() != opened.inner().signing_bytes() {
             return Err(bad("outbox original received protocol binding"));
         }
         let mut cursor = Cursor::new(outcome.outbox())?;
@@ -631,9 +631,9 @@ impl ActualProgress {
         opened: &DecryptedEnvelope,
         sealed: &SealedBatchReceipt,
     ) -> Result<Self> {
-        let raw = outcome.progress_claim();
-        if raw.signing_bytes != opened.inner().signing_bytes()
-            || sealed.received_semantic != raw.signing_bytes
+        let raw = outcome.signing_bytes();
+        if raw != opened.inner().signing_bytes()
+            || sealed.received_semantic != raw
             || sealed.original_outbox != outcome.outbox()
         {
             return Err(bad("sealed progress actual protocol binding"));
@@ -1312,8 +1312,6 @@ mod tests {
             assert!(!contains(wire, &opened.inner().signing_bytes()));
             assert!(!contains(wire, opened.hiding_nonce()));
         }
-        assert_ne!(progress, outcome.progress_claim().encode().unwrap());
-        assert!(ProgressDigestClaim::decode(&outcome.progress_claim().encode().unwrap()).is_err());
         // A separately retained/sealed wrong body, wrong destination or reversed
         // order may not certify the actual protocol outbox.
         let mut reversed = refs.clone();
