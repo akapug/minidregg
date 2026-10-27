@@ -75,9 +75,10 @@ check_params() {
 # The grain platform's operator policy (deploy/market/INSTALL.md §0), pinned at genesis so the world
 # can host SPK grains at all: `grainPlatform {lifecycleManagement {managementSubject, managementKeyId},
 # grainBirthTariff {base, perBirth}, completionCustodianKey}`. Optional as a whole; when present every
-# field must be, and the refusal names the one that is not. The management subject is the sponsor
-# (the one key pair `run.sh init` generates); the completion custodian key is a 32-byte public key,
-# `null` in the operator's file until `run.sh init` generates the pair and fills it.
+# field must be, and the refusal names the one that is not. `lifecycleManagement` is a Host setting
+# (`run.sh platform` changes it on a stopped Store; the sponsor's key is the natural first choice,
+# since `run.sh init` generates it); the completion custodian key is a 32-byte public key, `null` in
+# the operator's file until `run.sh init` generates the pair and fills it.
 check_grain_platform() {
   jq -e 'has("grainPlatform") | not' "$1" >/dev/null && return 0
   for field in lifecycleManagement grainBirthTariff completionCustodianKey; do
@@ -91,9 +92,6 @@ check_grain_platform() {
     and (.grainBirthTariff | type == "object" and (keys | sort) == ["base", "perBirth"]
          and ([.base, .perBirth] | all(int)) and .base > 0)' "$1" >/dev/null ||
     { echo 'genesis: grainPlatformInvalid: lifecycleManagement {managementSubject, managementKeyId} and grainBirthTariff {base > 0, perBirth} must be JSON integers' >&2; exit 2; }
-  jq -e '.grainPlatform.lifecycleManagement.managementSubject == .sponsor.subject
-         and .grainPlatform.lifecycleManagement.managementKeyId == .sponsor.keyId' "$1" >/dev/null ||
-    { echo 'genesis: managementNotSponsor: the lifecycle management subject must be the sponsor (.sponsor.subject/.sponsor.keyId), whose key pair run.sh init generates; another management subject needs its own genesis enrollment and key' >&2; exit 2; }
   jq -e '.grainPlatform.completionCustodianKey | . == null or (type == "string" and test("^[0-9a-f]{64}$"))' "$1" >/dev/null ||
     { echo 'genesis: completionCustodianKeyInvalid: null (to be generated at init) or 64 lowercase hex digits' >&2; exit 2; }
 }
