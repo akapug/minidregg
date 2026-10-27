@@ -12,7 +12,6 @@ mod room_task;
 mod room_resident;
 mod resident_context;
 mod quiescence;
-mod quiescence_transport;
 mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
@@ -7826,13 +7825,7 @@ impl Runtime {
         self.query_as(&a)
     }
     fn query_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_as_via(authority, None)
-    }
-    // Only the query-only topology receiver can construct this transport token.
-    // The shared bounded read path preserves this exact admitted socket on retries.
-    fn query_as_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        self.query_observation_via(authority, transport)
+        self.query_observation_as(authority)
     }
     fn query_policy(&mut self) -> Result<Value> {
         self.query_policy_observation()
@@ -18103,15 +18096,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
-                if let Some(path) = request.command.strip_prefix("quiescence transport ") {
-                    let result = rt.inspect_quiescence_transport(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
                 if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
                     let result = if request.command == "quiescence status" {
                         rt.quiescence_status()
@@ -18339,12 +18323,6 @@ fn main() -> ExitCode {
         return match session_failure::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "quiescence-transport" {
-        return match quiescence_transport::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime quiescence-transport: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "quiescence" {
