@@ -158,8 +158,89 @@ pub(crate) fn prepare_root_handles(config: &Path, root: &Path, store: &str, grai
     let witness=root.join("attest").join(format!("{store}-{grain}.witness"));
     for path in witness.ancestors() { remember(path,&mut roots)?; }
     remember_spk_namespace(root,&mut roots)?;
+    let controller=root.join("controller");
+    match fs::symlink_metadata(&controller) {
+        Err(e) if e.kind()==io::ErrorKind::NotFound => {},
+        result => { result?; remember(&controller,&mut roots)?; }
+    }
     ROOTS.set(roots).map_err(|_|refused("namespace root provenance initialized twice"))
 }
+/// Root setup may register one already-delegated controller. This protects the
+/// operator from the controller, not controller keys from their trusted operator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ControllerIdentity { uid: u32, gid: u32 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+struct ControllerReceipt {
+    protocol: String, store: String, deployment_id: String, host_id: String,
+    operator_uid: u32, operator_gid: u32, controller_uid: u32, controller_gid: u32,
+    account: String,
+}
+static CONTROLLER: OnceLock<Option<ControllerIdentity>> = OnceLock::new();
+fn receipt_identity(r: &ControllerReceipt, registry: &crate::volume_helper::Registry) -> io::Result<ControllerIdentity> {
+    let valid = |id: u32| id>=65536 && id<u32::MAX;
+    if r.protocol!="mini-spk-controller-namespace-v1" || r.store!=registry.store
+        || r.deployment_id!=registry.deployment_id || r.host_id!=registry.host_id
+        || r.operator_uid!=registry.operator_uid || r.operator_gid!=registry.operator_gid
+        || r.account!=format!("mini-c-{}",registry.store)
+        || !valid(r.controller_uid) || !valid(r.controller_gid)
+        || r.controller_uid==registry.operator_uid || r.controller_gid==registry.operator_gid
+        || registry.app_uids.contains(&r.controller_uid) || registry.app_uids.contains(&r.controller_gid)
+    { return Err(refused("registered controller namespace identity differs from world")); }
+    Ok(ControllerIdentity {uid:r.controller_uid,gid:r.controller_gid})
+}
+fn account_matches(name: &str, home: &Path, identity: ControllerIdentity) -> io::Result<()> {
+    use std::ffi::{CString,CStr};
+    let name=CString::new(name).map_err(|_|refused("controller account name"))?;
+    let mut bytes=vec![0 as libc::c_char;16384];
+    let mut entry:libc::passwd=unsafe{std::mem::zeroed()};
+    let mut result=std::ptr::null_mut();
+    let code=unsafe{libc::getpwnam_r(name.as_ptr(),&mut entry,bytes.as_mut_ptr(),bytes.len(),&mut result)};
+    if code!=0 || result.is_null() || entry.pw_dir.is_null() || entry.pw_shell.is_null()
+        || entry.pw_uid!=identity.uid || entry.pw_gid!=identity.gid
+        || unsafe{CStr::from_ptr(entry.pw_dir)}.to_bytes()!=home.as_os_str().as_encoded_bytes()
+        || unsafe{CStr::from_ptr(entry.pw_shell)}.to_bytes()!=b"/usr/sbin/nologin"
+    { return Err(refused("registered controller passwd identity differs")); }
+    let mut group:libc::group=unsafe{std::mem::zeroed()};
+    let mut result=std::ptr::null_mut();
+    let code=unsafe{libc::getgrnam_r(name.as_ptr(),&mut group,bytes.as_mut_ptr(),bytes.len(),&mut result)};
+    if code!=0 || result.is_null() || group.gr_gid!=identity.gid
+        || (!group.gr_mem.is_null() && !unsafe{*group.gr_mem}.is_null())
+    { return Err(refused("registered controller private group differs")); }
+    Ok(())
+}
+pub(crate) fn load_registered_controller(registry: &crate::volume_helper::Registry) -> io::Result<Option<ControllerIdentity>> {
+    let directory=registry.grains_root.join("controller");
+    match fs::symlink_metadata(&directory) {
+        Err(e) if e.kind()==io::ErrorKind::NotFound => return Ok(None),
+        result => { result?; }
+    }
+    let path=directory.join("namespace.json");
+    minidregg_compatible_upgrade_custody::root_ancestors(&path)?;
+    let mut file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_NONBLOCK).open(&path)?;
+    let before=file.metadata()?;
+    if !before.is_file() || before.uid()!=0 || before.nlink()!=1 || before.mode()&0o7777!=0o644
+        || before.len()==0 || before.len()>4096 {
+        return Err(refused("registered controller namespace receipt custody refused"));
+    }
+    let mut bytes=Vec::new();
+    Read::by_ref(&mut file).take(4097).read_to_end(&mut bytes)?;
+    let after=file.metadata()?;
+    let named=fs::symlink_metadata(&path)?;
+    if bytes.len() as u64!=before.len() || stable(&before)!=stable(&after)
+        || stable(&before)!=stable(&named) || (before.dev(),before.ino(),before.uid(),before.gid())!=(named.dev(),named.ino(),named.uid(),named.gid()) {
+        return Err(refused("registered controller receipt changed while read"));
+    }
+    let receipt:ControllerReceipt=serde_json::from_slice(&bytes)?;
+    let identity=receipt_identity(&receipt,registry)?;
+    account_matches(&receipt.account,&directory.join("home"),identity)?;
+    Ok(Some(identity))
+}
+pub(crate) fn require_registered_controller(uid:u32) -> io::Result<()> {
+    if CONTROLLER.get().and_then(|v|*v).is_some_and(|c|c.uid==uid) { Ok(()) }
+    else { Err(refused("agent controller UID is not the root-registered mapped identity")) }
+}
+
 /// The physical bubblewrap binaries a host may provide (deploy/grain-host/resolve-bwrap):
 /// the AppArmor-profiled copy a host restricting unprivileged user namespaces ships, and
 /// the distro binary. The namespace and the app sandbox are made by the same binary.
@@ -193,10 +274,12 @@ fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error {
     let (step, path) = (step.to_owned(), path.to_owned());
     move |error| io::Error::new(error.kind(), format!("namespace bootstrap {step} ({path}): {error}"))
 }
-fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
+fn map(program: &str, pid: u32, operator: u32, app: u32, controller: Option<u32>) -> io::Result<()> {
     eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
+    let mut args=vec![pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()];
+    if let Some(id)=controller { args.extend([id.to_string(),id.to_string(),"1".into()]); }
     let status = Command::new(program)
-        .args([pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()])
+        .args(args)
         .env_clear()
         .status()
         .map_err(at("mapping helper", program))?;
@@ -221,9 +304,12 @@ fn thread_count() -> io::Result<u32> {
         .and_then(|rest| rest.trim().parse().ok())
         .ok_or_else(|| refused("thread census refused: /proc/self/status names no Threads"))
 }
-fn exact_map(text: &str, op: u32, app: u32) -> bool {
-    let rows: Vec<Vec<u32>> = text.lines().map(|r| r.split_whitespace().filter_map(|n| n.parse().ok()).collect()).collect();
-    rows.len() == 2 && rows.contains(&vec![op, op, 1]) && rows.contains(&vec![app, app, 1])
+fn exact_map(text: &str, op: u32, app: u32, controller:Option<u32>) -> bool {
+    let rows:Result<Vec<Vec<u32>>,_>=text.lines().map(|r|r.split_whitespace().map(str::parse::<u32>).collect()).collect();
+    let Ok(mut rows)=rows else{return false};
+    let mut expected=vec![vec![op,op,1],vec![app,app,1]];
+    if let Some(id)=controller {expected.push(vec![id,id,1]);}
+    rows.sort();expected.sort();rows==expected
 }
 /// `bwrap --unshare-user --userns-block-fd 4 --info-fd 3` creates the namespace and,
 /// given the block fd, writes no uid/gid map itself: it reports its namespaced child and
@@ -238,6 +324,13 @@ fn exact_map(text: &str, op: u32, app: u32) -> bool {
 /// keeps every capability of the namespace, none of the host, until the bootstrap
 /// drops them.
 pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32, app_uid: u32, app_gid: u32) -> io::Result<()> {
+    enter_registered(bwrap,bwrap_sha256,operator_uid,operator_gid,app_uid,app_gid,None)
+}
+pub(crate) fn enter_registered(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operator_gid: u32,
+    app_uid: u32, app_gid: u32, controller:Option<&ControllerIdentity>) -> io::Result<()> {
+    if controller.is_some_and(|c| c.uid==operator_uid || c.uid==app_uid || c.gid==operator_gid || c.gid==app_gid) {
+        return Err(refused("registered controller overlaps operator or app"));
+    }
     if unsafe { libc::geteuid() } == 0 || unsafe { libc::geteuid() } != operator_uid || unsafe { libc::getegid() } != operator_gid {
         return Err(refused("resident requires its unprivileged operator uid"));
     }
@@ -292,8 +385,8 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
         if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
-        map("/usr/bin/newuidmap", pid, operator_uid, app_uid)?;
-        map("/usr/bin/newgidmap", pid, operator_gid, app_gid)?;
+        map("/usr/bin/newuidmap", pid, operator_uid, app_uid,controller.map(|c|c.uid))?;
+        map("/usr/bin/newgidmap", pid, operator_gid, app_gid,controller.map(|c|c.gid))?;
         File::from(block_w).write_all(&[1])?;
         if !holder.wait()?.success() {
             return Err(refused("namespace bwrap failed"));
@@ -308,9 +401,10 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
         }
         let uid = fs::read_to_string("/proc/self/uid_map")?;
         let gid = fs::read_to_string("/proc/self/gid_map")?;
-        if !exact_map(&uid, operator_uid, app_uid) || !exact_map(&gid, operator_gid, app_gid) {
+        if !exact_map(&uid, operator_uid, app_uid,controller.map(|c|c.uid)) || !exact_map(&gid, operator_gid, app_gid,controller.map(|c|c.gid)) {
             return Err(refused("namespace identity maps differ from broker selection"));
         }
+        CONTROLLER.set(controller.copied()).map_err(|_|refused("controller mapping initialized twice"))?;
         Ok(())
     })();
     if result.is_err() {
