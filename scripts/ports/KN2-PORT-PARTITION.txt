@@ -166,7 +166,7 @@ LANES AND FILES
 == PORT-D: 19 files, 78 leftover sites
   Assurance/HyperdocumentDurableInstallation.lean  (1 sites: G2)
   Assurance/HyperdocumentLinkFramedRecovery.lean  (3 sites: G2,G3,G7)
-  Assurance/NativeAcceptedFixture.lean  (1 sites: G4)
+  Fixtures/NativeAcceptedFixture.lean  (1 sites: G4)
   Host/ApplicationAgentLifetimeGrantAuthoring.lean  (1 sites: G1)
   Host/ApplicationLifecycleClaimOperator.lean  (1 sites: G1)
   Host/ApplicationLifecycleLaunchBeginAuthoring.lean  (1 sites: G1)

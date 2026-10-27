@@ -302,7 +302,7 @@ Root registered JPO in the actual journey runner with J0 dependency, optional pr
 
 Epoch prepareOnly:true now retains the real signed install call and pending custody without submitting or activating keys; explicit admitted:false status prevents confusion with a receipt. The witness-replacement fixture preserves signed declaration bytes to test native roster binding independently of signature validity. Scoped Rust check and two custody/restart tests pass. The actual two-object native journey has not yet run.
 
-Candidate docs/PRIVATE-OBJECTS.md now explains source-grounded CLI usage, the real scoped journey command, exact result recovery, audience phases and supported evolution, plus measured component costs and outstanding boundaries. Integration into actual main, reproducible native evidence and ordinary commits/pushes remain root obligations.
+Candidate PRIVATE-OBJECTS.md [not in tree] now explains source-grounded CLI usage, the real scoped journey command, exact result recovery, audience phases and supported evolution, plus measured component costs and outstanding boundaries. Integration into actual main, reproducible native evidence and ordinary commits/pushes remain root obligations.
 
 
 ## Native wave and adversarial fixture convergence
@@ -383,7 +383,7 @@ The native namespace mismatch is traced to Lake package=minidregg setup versus d
 
 ## Release repair review and native fixture alignment
 
-Independent review cleared the source-owned direct/inherited release obligations after a reserved-binder correction. The new module is Kernel/ObjectMessageReleaseParticipants.lean; ObjectMessageReleaseReceiver retains its certificate and guards in fresh admission. A precise actual-branch refusal diagnostic is being added so the native freeze case cannot accidentally credit an earlier ancestor-revocation or device-catalog failure. The journey now stages genuine signed ingress, includes protected invocation → plain receiver → computed reply, and distinguishes new release rejection from original admitted release recovery. Native runtime qualification remains pending.
+Independent review cleared the source-owned direct/inherited release obligations after a reserved-binder correction. The new module is Kernel.ObjectMessageReleaseParticipants [not in tree]; ObjectMessageReleaseReceiver retains its certificate and guards in fresh admission. A precise actual-branch refusal diagnostic is being added so the native freeze case cannot accidentally credit an earlier ancestor-revocation or device-catalog failure. The journey now stages genuine signed ingress, includes protected invocation → plain receiver → computed reply, and distinguishes new release rejection from original admitted release recovery. Native runtime qualification remains pending.
 
 The additional guards/charges alter candidate event40 replay semantics. No candidate event40/41 native histories have been produced, and no candidate implementation has been deployed. First coherent Host success is only a build/smoke baseline. Final acceptance uses a fresh world after the repaired release build; this does not qualify historical-profile migration.
 

@@ -10,6 +10,7 @@ use mini_sdk::local::{Codec, CodecError};
 
 const CAP: usize = mini_sdk::local::CAP;
 static SESSION: Mutex<Option<Consent>> = Mutex::new(None);
+static DELEGATED_SESSION: OnceLock<Option<crate::consent_proxy::Selection>> = OnceLock::new();
 
 /// Pure codec operations always use a separately selected local native image.
 /// A remote Host digest is not an executable or a local semantic authority.
@@ -54,11 +55,18 @@ fn with_consent<T>(host: &Path, config: &Path, frame: impl FnOnce(&mut Consent) 
         .unwrap_or_else(||config.to_path_buf());
     if !executable.is_absolute()||!settings.is_absolute() {return Err("local consent executable/settings must be absolute".into());}
     let settings_bytes=crate::fsio::read_bounded_or_empty(&settings, CAP)?;
+    let delegated=match PINS.get(){Some(p)=>p.delegated.clone(),None=>crate::consent_proxy::Selection::from_env()?};
+    if let Some(selected)=DELEGATED_SESSION.get(){
+        if selected!=&delegated{return Err("consent transport selection changed within signing session".into());}
+    } else {DELEGATED_SESSION.set(delegated.clone()).map_err(|_|"consent transport selection raced")?;}
     let mut slot=SESSION.lock().map_err(|_|"local consent session lock poisoned")?;
     if let Some(consent)=slot.as_ref() {
         if consent.0.executable()!=executable||consent.0.settings()!=settings_bytes {
             return Err("local consent executable or settings changed within signing session".into());
         }
+    } else if let Some(selection)=delegated {
+        let (input,output)=crate::consent_proxy::connect(&selection,&settings_bytes)?;
+        *slot=Some(Consent(mini_sdk::local::Session::over(input,output,executable,settings_bytes)));
     } else if resident_enabled() {
         let mini=std::env::current_exe().map_err(|e|format!("resident consent provider: {e}"))?;
         let mut launch=Command::new(mini);
@@ -146,7 +154,7 @@ fn thin_plan(host:&Path,config:&Path,intent:&Path,plan:&Path,key:&[u8])->Result<
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct Pins { semantic:PathBuf, consent:PathBuf, config:PathBuf }
+struct Pins { semantic:PathBuf, consent:PathBuf, config:PathBuf, delegated:Option<crate::consent_proxy::Selection> }
 static PINS: OnceLock<Pins> = OnceLock::new();
 /// Private local workspace/attempt custody record; never filled from an
 /// operator response or a remotely inspected JSON object.
@@ -155,15 +163,24 @@ pub(crate) fn pin_record(value:&Value)->Result<()> {
         let path=PathBuf::from(value.get(name).and_then(Value::as_str).ok_or("local consent pin is missing a path")?);
         if !path.is_absolute(){return Err("local consent pin path must be absolute".into());}Ok(path)
     };
-    let pins=Pins{semantic:path("semanticHost")?,consent:path("consentHost")?,config:path("config")?};
+    let pins=Pins{semantic:path("semanticHost")?,consent:path("consentHost")?,config:path("config")?,delegated:crate::consent_proxy::Selection::from_record(value)?};
+    if let Some(selected)=crate::consent_proxy::Selection::from_env()? {
+        if pins.delegated.as_ref()!=Some(&selected){return Err("retained consent transport pins differ from explicit selection".into());}
+    }
     match PINS.get(){Some(old) if old!=&pins=>Err("local consent pins differ within one process".into()),Some(_)=>Ok(()),None=>PINS.set(pins).map_err(|_|"cannot pin local consent custody".into())}
 }
 pub(crate) fn configured_record()->Result<Option<Value>> {
-    if let Some(pins)=PINS.get(){return Ok(Some(json!({"semanticHost":pins.semantic,"consentHost":pins.consent,"config":pins.config})));}
+    if let Some(pins)=PINS.get(){
+        let mut value=json!({"semanticHost":pins.semantic,"consentHost":pins.consent,"config":pins.config});
+        if let Some(p)=&pins.delegated{value["delegatedConsent"]=p.record();}
+        return Ok(Some(value));
+    }
     let paths=["MINI_LOCAL_HOST","MINI_CONSENT_HOST","MINI_CONSENT_CONFIG"].map(std::env::var_os);
-    if paths.iter().all(Option::is_none){return Ok(None);}
+    let delegated=crate::consent_proxy::Selection::from_env()?;
+    if paths.iter().all(Option::is_none)&&delegated.is_none(){return Ok(None);}
     let [Some(semantic),Some(consent),Some(config)]=paths else {return Err("durable local consent selection requires MINI_LOCAL_HOST, MINI_CONSENT_HOST and MINI_CONSENT_CONFIG together".into());};
-    let value=json!({"semanticHost":PathBuf::from(semantic),"consentHost":PathBuf::from(consent),"config":PathBuf::from(config)});
+    let mut value=json!({"semanticHost":PathBuf::from(semantic),"consentHost":PathBuf::from(consent),"config":PathBuf::from(config)});
+    if let Some(p)=delegated{value["delegatedConsent"]=p.record();}
     pin_record(&value)?;Ok(Some(value))
 }
 

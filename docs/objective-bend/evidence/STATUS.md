@@ -8,7 +8,7 @@ Destination: first-class source-authored partial prototypes, governed effects an
 
 Checked: source-seven-passing-manifest.json and return-four-passing-manifest.json list exact scoped Lean PASS sources and dependency pins. Current Compiler/BendWorldPlan.lean adds the subsequent UNCHECKED kindRead exclusion; the previously checked source remains in the captain first-seven archive.
 
-Uncompiled: Compiler/BendPlanLowering.lean (requires pending reverse canonical source byte codec), Compiler/BendKeyRecord.lean, Kernel/BendComputeCapacity.lean, Host/BendPackage.lean, Host/BendReceiving.lean, next-cohort/Kernel/NativeHostReplay.lean. All are active construction, not receiving qualification.
+Uncompiled: Compiler.BendPlanLowering [deleted 212c79af] (requires pending reverse canonical source byte codec), Compiler.BendKeyRecord [deleted 212c79af], Kernel.BendComputeCapacity [deleted 2f516fae], Host.BendPackage [deleted 212c79af], Host.BendReceiving [deleted 212c79af], next-cohort/Kernel/NativeHostReplay.lean. All are active construction, not receiving qualification.
 
 The next-cohort replay file is a complete isolated replacement candidate for Kernel/NativeHostReplay.lean, not a second compiled module. Its base/new hashes are recorded adjacent. Captain must reconcile against current common before shared integration. New release event must not be appended through current hosted candidate until original-prefix replay and Host routes qualify together.
 

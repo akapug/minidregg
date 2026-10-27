@@ -54,7 +54,12 @@ first user.
 - Named-file commits (never `git add -A`); never `git stash`; prose commit
   messages with code spans via `git commit -F <uniquely named file>`.
 - Filtered tests only, run once per coherent batch; never an unfiltered suite.
-- Stop a process by the PID in its PID file, and only that. No `pkill -f`,
-  `pkill -x`, `killall`, `kill -u`. No PID file: say so instead.
+- Every process you start gets a PID file; stop a process by the PID in its PID file,
+  and only that. No `pkill -f`, `pkill -x`, `killall`, `kill -u`. No PID file: say so instead.
+- Per-lane `CARGO_TARGET_DIR` and scratch subdirectory; no foreground waits (`box-wait`
+  in one background call); no "was it red before me" baselines; REPL-first Lean; no
+  whole-file `Read` over 2,000 lines (COORDINATION §3 states each).
+- The gate is the tour (`jtour` plus the composed scenario); standing rows are the
+  nightly's and never a candidate's reds (COORDINATION §6).
 - Disk pressure is a pause-and-tell condition, never a delete.
 - Unsigned commits are fine and expected while working autonomously.

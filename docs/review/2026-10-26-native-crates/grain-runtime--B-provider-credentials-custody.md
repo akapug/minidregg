@@ -580,7 +580,7 @@ More than 4 concurrent connections are closed without a refusal frame (dispatch_
 | legacy_custody_audit.rs | admin `reconcile tool legacy b44|zero` (main.rs:17800-17801), predicate main.rs:16255 | none | none |
 | config_migration.rs | open/save (main.rs:6846-6917), serve loop (17595), `config-migrate` (17938-17941), `controller-write-scopes` (17933), resident modules | **none** (grep over crate drivers, resource-client journeys, deploy, scripts) | none |
 | mcp.rs | `start_broker` (main.rs:14598-14604), `mcp-stdio` subcommand (main.rs:18136-18137) | acceptance.sh, hermes-journey.sh | 2026-09-30-hermes-participant |
-| gitweb_worker.rs | mcp.rs:541-545 | scripts/gitweb-shared-journey/README.md (prose) | 2026-09-27-hermes-gitweb-tool (source gate) |
+| gitweb_worker.rs | mcp.rs:541-545 | README.md [deleted 68b2214d] (prose) | 2026-09-27-hermes-gitweb-tool (source gate) |
 | hermes_catalogue_probe.rs | `#[ignore]` test | - | - |
 | hermes_outcome.rs | main.rs:14878-14909, 15016-15019 | hermes-journey.sh | 2026-09-30-hermes-participant |
 | hermes_session_verify.rs | `Invocation` throughout main.rs; admin main.rs:17772 | none found for `verify-session` | - |

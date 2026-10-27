@@ -33,6 +33,82 @@ def mount_rows(directory):
     return result
 
 
+def consent_evidence(run, require):
+    directory = run / 'agent-lifetime'
+    world = read(run / 'world-identity.json')
+    created = read(directory / 'controller-create.json')
+    staged = read(directory / 'controller-stage-receipt.json')
+    base = world['root'] + '/controller'
+    expected = {
+        'providerSha256': sha(run / 'bin/minidregg-client-consent'),
+        'transportSha256': sha(run / 'bin/mini'),
+        'configSha256': sha(run / 'world/store/base/workroom/deployment/pinned-config.json'),
+        'socket': base + '/home/consent/peer.sock',
+        'socketUnit': f"mini-spk-controller-consent-{world['store']}.socket",
+        'serviceUnit': f"mini-spk-controller-consent-{world['store']}.service",
+        'serviceUid': created['operatorUid'], 'controllerUid': created['controllerUid'],
+        'activationPeerUid': 0, 'provider': base + '/bin/minidregg-client-consent',
+        'config': base + '/consent/config.json', 'anchors': base + '/consent/anchors',
+    }
+    require('controller_consent_v2_distinct_identity',
+            created.get('protocol') == staged.get('protocol') == 'mini-spk-controller-v2'
+            and created.get('store') == staged.get('store') == world['store']
+            and type(created['operatorUid']) is int and created['operatorUid'] > 0
+            and type(created['controllerUid']) is int and created['controllerUid'] > 0
+            and created['operatorUid'] != created['controllerUid']
+            and created.get('consentSocket') == expected['socket']
+            and created.get('consentPeerUid') == 0)
+    require('controller_consent_exact_stage_pins', staged.get('consent') == expected)
+    require('controller_consent_exact_config_bytes',
+            sha(directory / 'controller-stage/host-config.json') == expected['configSha256'])
+    starts = {}
+    for label, filename in (('bootstrap', 'controller-bootstrap-start.json'),
+                            ('initial', 'controller-start-initial.json'),
+                            ('restart', 'controller-start-restart.json')):
+        receipt = read(directory / filename)
+        value = receipt.get('consent', {})
+        require(f'consent_{label}_exact_pins',
+                receipt.get('action') == 'start' and receipt.get('store') == world['store']
+                and all(value.get(key) == item for key, item in expected.items())
+                and expected['serviceUnit'] in receipt.get('units', [])
+                and expected['socketUnit'] in receipt.get('units', []))
+        require(f'consent_{label}_observed_readiness_only',
+                value.get('readiness') == 'process-and-socket-only'
+                and value.get('independentAdmissionObserved') is False
+                and type(value.get('mainPid')) is int and value['mainPid'] > 0
+                and type(value.get('processStartTicks')) is int and value['processStartTicks'] > 0
+                and re.fullmatch('[0-9a-f]{32}', value.get('invocationId', '')) is not None
+                and value.get('socketUid') == created['controllerUid'] and value.get('socketMode') == '0600'
+                and all(isinstance(value.get(key), list) and len(value[key]) == 2
+                        and all(type(n) is int and n >= 0 for n in value[key]) and value[key][1] > 0
+                        for key in ('socketIdentity', 'processExecutableIdentity')))
+        starts[label] = value
+    require('consent_restarts_have_distinct_invocations',
+            len({value['invocationId'] for value in starts.values()}) == 3)
+    require('consent_restarts_keep_transport_inode',
+            all(value['processExecutableIdentity'] == starts['bootstrap']['processExecutableIdentity']
+                for value in starts.values()))
+    observations = {}
+    for stage, start in (('probe', 'initial'), ('probe-after-restart', 'restart')):
+        value = read(directory / f'consent-memory-after-{stage}.json')
+        properties = value.get('properties', {})
+        require(f'consent_{stage}_resources_match_active_invocation',
+                value.get('schema') == 'mini-oracle-consent-resources-v1'
+                and value.get('unit') == expected['serviceUnit'] and value.get('observation_exit') == 0
+                and properties.get('ActiveState') == 'active'
+                and properties.get('MainPID') == str(starts[start]['mainPid'])
+                and properties.get('InvocationID') == starts[start]['invocationId'])
+        def bytes_or_unavailable(key):
+            raw = properties.get(key, '')
+            return int(raw) if raw.isascii() and raw.isdecimal() and int(raw) < 2**64 - 1 else None
+        observations[stage] = {'observation': value,
+                               'memory_peak_bytes': bytes_or_unavailable('MemoryPeak'),
+                               'memory_limit_bytes': bytes_or_unavailable('MemoryMax')}
+    return {'stage': expected, 'starts': starts, 'resources': observations,
+            'scope': 'Startup receipts show process/socket readiness only. Actual agent operations below '
+                     'exercise independent consent. Memory observations cover this run, not arbitrary Store sizes.'}
+
+
 def main():
     run, inventory_sha = Path(sys.argv[1]), sys.argv[2]
     ev = run / 'world/evidence'
@@ -44,7 +120,7 @@ def main():
             raise AssertionError(name)
 
     replies = {}
-    for label in ('a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10', 'a11', 'a12', 'a13', 'a14', 'b1', 'b2'):
+    for label in ('a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'a10', 'a11', 'a12', 'a13', 'a14', 'b1', 'b2', 'b3'):
         path = ev / f'post-{label}-body.body'
         value = read(path)
         replies[label] = {'sha256': sha(path), 'bytes': path.stat().st_size,
@@ -67,6 +143,7 @@ def main():
     require('restart_exact_reply', replies['a1']['sha256'] == replies['a7']['sha256'])
     require('restart_exact_followup', replies['a3']['sha256'] == replies['a8']['sha256'])
     require('second_grain_unchanged_by_restart', replies['b1']['sha256'] == replies['b2']['sha256'])
+    require('second_grain_exact_replay_after_reconciliation', replies['b1']['sha256'] == replies['b3']['sha256'])
     mars = re.search(r'([0-9]+(?:\.[0-9]+)?)\s+Earth years', replies['a9']['response'])
     require('supplied_mars_periods_preserved', replies['a9']['status'] == 'answered' and mars is not None
             and math.isclose(float(mars.group(1)), 3 * 687 / 365.25, rel_tol=1e-9))
@@ -97,8 +174,49 @@ def main():
     require('published_exact_inventory', publication.get('inventory_sha256') == inventory_sha)
     operator_import = read(run / 'import-profile.json')
     selected_profile = operator_import['selected_profile']
+    disk_plan = read(run / 'disk-plan.json')
+    require('capacity_plan_keeps_native_guards', disk_plan.get('fits') is True
+            and disk_plan.get('reservation') is False
+            and disk_plan.get('order') == 'install-both-before-publication'
+            and disk_plan['available_bytes'] >= disk_plan['materialize_guard_bytes']
+            and disk_plan['projected_available_after_publication'] >= disk_plan['verify_guard_bytes'])
+    disk = {name: read(run / f'disk-{name}.json')
+            for name in ('before-install', 'after-install', 'after-publication', 'after-stops')}
+    require('observed_post_publication_verification_space',
+            disk['after-publication']['available_bytes'] >= disk_plan['verify_guard_bytes'])
 
-    configs, mounts, native_receipts = {}, {}, {}
+    op155 = {letter: read(run / f'op155-{letter}/report.json') for letter in ('a', 'b')}
+    operator_identities = [read(run / f'op155-operator-{boundary}.json')
+                           for boundary in ('before', 'after-a', 'before-b', 'after-b')]
+    require('stop_inspection_same_operator_process', all(
+        identity == operator_identities[0] for identity in operator_identities))
+    require('fresh_stop_resident_controls_at_both_boundaries', all(
+        item.get('schema') == 'mini-stop-inspection-probe-v1' and item.get('passed') is True
+        and item.get('mode') == 'resident-only' and item.get('served_checks_passed') is True
+        and item.get('cold_comparison') == 'not-performed'
+        for item in op155.values()))
+    copied_benchmark = read(run / 'copied-store-stop-benchmark.json')
+    require('separate_copied_store_cold_comparison_same_host',
+            copied_benchmark.get('schema') == 'mini-stop-inspection-continuation-v1'
+            and copied_benchmark.get('passed') is True
+            and copied_benchmark.get('host_sha256') == op155['a']['host_sha256']
+            and copied_benchmark.get('config_sha256') != op155['a']['config_sha256']
+            and re.fullmatch(r'[0-9a-f]{64}', copied_benchmark.get('cold_sha256', '')) is not None
+            and copied_benchmark.get('canonical_wrong_claim_checked') is True
+            and copied_benchmark.get('source_and_copied_store_and_anchor') == 'hashes unchanged'
+            and copied_benchmark.get('controls') == {
+                'trailing-claim': 'source', 'malformed-pair': 'transport-routing',
+                'mismatched-committed': 'source', 'public-denied': 'transport-routing'})
+    require('stop_inspection_refreshed_for_new_claim',
+            op155['a']['plan_sha256'] != op155['b']['plan_sha256']
+            and op155['a']['committed_sha256'] != op155['b']['committed_sha256']
+            and op155['a']['host_sha256'] == op155['b']['host_sha256']
+            and op155['a']['config_sha256'] == op155['b']['config_sha256'])
+    require('stop_inspection_rejects_old_canonical_claim',
+            op155['b'].get('canonical_wrong_claim_checked') is True
+            and op155['b'].get('mismatched_committed_sha256') == op155['a']['committed_sha256'])
+
+    configs, mounts, native_receipts, stop_receipts = {}, {}, {}, {}
     for app in ('9101', '9201'):
         directory = run / 'receiving' / app
         configs[app] = [read(p) for p in sorted(directory.glob('g*/resident.json'))]
@@ -126,11 +244,20 @@ def main():
         require(f'grain_{app}_mount_exact_inventory', all(
             m['root'].endswith(f'/sha256-{inventory_sha}/data') for m in data_mounts))
         native_receipts[app] = [{'file': str(p.relative_to(run)), 'sha256': sha(p)}
-                               for p in sorted(directory.glob('g*/*completed*.json'))]
-        require(f'grain_{app}_native_start_completion', bool(native_receipts[app]))
+                               for p in sorted(directory.glob('g*/start-completed*.json'))]
+        require(f'grain_{app}_two_native_start_completions',
+                len({Path(row['file']).parts[2] for row in native_receipts[app]}) >= 2)
+        stop_receipts[app] = [{'file': str(p.relative_to(run)), 'sha256': sha(p), 'receipt': read(p)}
+                              for p in sorted(directory.glob('g*/stop-completion/**/receipt-anchor.json'))]
+        require(f'grain_{app}_two_native_stop_completions', len({Path(row['file']).parts[2] for row in stop_receipts[app]}) >= 2
+                and all(row['receipt'].get('eventId') and row['receipt'].get('worldRoot')
+                        for row in stop_receipts[app]))
     require('restart_keeps_runtime_and_var', len(configs['9101']) >= 2
             and len({c['expectedRawSha256'] for c in configs['9101']}) == 1
             and len({c['persistentVar'] for c in configs['9101']}) == 1)
+    require('reconciled_restart_keeps_runtime_and_var', len(configs['9201']) >= 2
+            and len({c['expectedRawSha256'] for c in configs['9201']}) == 1
+            and len({c['persistentVar'] for c in configs['9201']}) == 1)
     require('both_grains_same_signed_runtime', len({c['expectedRawSha256']
             for cs in configs.values() for c in cs}) == 1)
     require('separate_var_paths', configs['9101'][0]['persistentVar'] != configs['9201'][0]['persistentVar'])
@@ -141,6 +268,29 @@ def main():
              for app, rows in mounts.items()}
     require('separate_physical_var_mounts', bool(vars_['9101']) and bool(vars_['9201'])
             and vars_['9101'].isdisjoint(vars_['9201']))
+    reconciliation_dir = run / 'reconcile-b'
+    prior = read(reconciliation_dir / 'record-before.json')
+    inactive = read(reconciliation_dir / 'record-inactive.json')
+    stopped = read(reconciliation_dir / 'record-stopped.json')
+    manager = dict(line.split('=', 1) for line in
+                   (reconciliation_dir / 'manager-inactive.txt').read_text().splitlines())
+    require('manager_stop_keeps_running_journal_exact', prior == inactive and inactive['phase'] == 'running')
+    require('reconciliation_exact_inactive_unit', manager.get('Id') == prior['identity']['unit']
+            and manager.get('LoadState') == 'loaded' and manager.get('ActiveState') == 'inactive'
+            and manager.get('MainPID') == '0' and manager.get('InvocationID') == ''
+            and manager.get('ControlGroup') == '' and manager.get('Job') in ('', '0'))
+    require('native_stop_reconciles_same_incarnation', stopped['phase'] == 'stopped'
+            and stopped['identity'] == prior['identity']
+            and stopped['invocation_id'] == prior['invocation_id']
+            and stopped['control_group'] == prior['control_group'] and stopped['child_pid'] is None)
+    reconciled_status = read(reconciliation_dir / 'after-native-stop.json')
+    require('reconciled_generation_source_stopped', any(
+        row['generation'] == str(prior['identity']['generation']) and row['state'] == 'stopped'
+        for row in reconciled_status['runs']))
+    for letter in ('a', 'b'):
+        final_status = read(ev / f'status-{letter}.stdout')
+        require(f'final_{letter}_source_stopped', all(
+            row['state'] in ('stopped', 'never-begun') for row in final_status['runs']))
     refusals = {}
     for label in ('missing-data', 'wrong-data'):
         before, after = read(run / f'{label}-before.json'), read(run / f'{label}-after.json')
@@ -189,16 +339,103 @@ def main():
         record.get('profile') == selected_profile and record['started']
         and record['finished'] and not record['failed']
         for record in import_units.values()))
+    # This stage is mandatory for the U3 claim. Receiving HTTP responses above
+    # cannot substitute for a controller's agent-origin lifetime grant, native
+    # dispatch receipt and distinct-purse settlement.
+    consent = consent_evidence(run, require)
+    agent_stages = {}
+    for stage in ('probe', 'probe-after-restart'):
+        agent_dir = run / 'agent-lifetime' / stage
+        agent_probe = read(agent_dir / 'result.json')
+        agent_cases = read(agent_dir / 'cases.json')
+        require(f'agent_{stage}_lifetime_probe_completed',
+                agent_probe.get('protocol') == 'mini-oracle-lifetime-tool-probe-v1'
+                and agent_probe.get('application') == 'oracle-app'
+                and agent_probe.get('cases') == len(agent_cases)
+                and agent_probe.get('result') == 'all-cases-have-definite-lifetime-delivery-and-settlement')
+        require(f'agent_{stage}_discovery_and_invoke_exercised',
+                any(case['tool'] == 'mini_oracle_discover' and case['status'] == 200
+                    for case in agent_cases)
+                and any(case['tool'] == 'mini_oracle_call' and case['status'] == 200
+                        for case in agent_cases))
+        agent_outcomes = []
+        for case in agent_cases:
+            name = case['name']
+            require(f'agent_{stage}_case_{name}_safe_name', bool(re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name)))
+            reply = read(agent_dir / f'{name}.http.json')
+            attempt = read(agent_dir / f'{name}.lifetime-attempt.json')
+            require(f'agent_{stage}_case_{name}_definite_lifetime_settlement',
+                    reply.get('protocol') == 'mini-spk-agent-api-v3'
+                    and reply.get('type') == 'http-v3' and reply.get('status') == case['status']
+                    and attempt.get('phase') == 'definite' and attempt.get('reported') is True
+                    and attempt.get('routeName') == 'oracle-app'
+                    and str(attempt.get('operationId')) == reply.get('operationId')
+                    and attempt.get('bindingSha256') == reply.get('bindingSha256')
+                    and attempt.get('operationFingerprint') == reply.get('operationFingerprint')
+                    and attempt.get('lifetimeCommittedReceipt') == reply.get('committedReceipt')
+                    and reply.get('committedReceipt') is not None
+                    and attempt.get('lifetimeSettledResponseSha256') == reply.get('responseSha256')
+                    and re.fullmatch(r'[0-9a-f]{64}', reply.get('responseSha256', '')) is not None
+                    and attempt.get('lifetimeSettlement', {}).get('forwardOperationId') == attempt.get('operationId')
+                    and attempt.get('lifetimeSettlement', {}).get('settlement', {}).get('operation') == 'dispatch settle')
+            require(f'agent_{stage}_case_{name}_retained_tool_result_exact',
+                    sha(agent_dir / f'{name}.result.json') == sha(agent_dir / f'{name}.retained-result.json'))
+            agent_outcomes.append({'name': name, 'tool': case['tool'], 'status': reply['status'],
+                                   'operation_id': reply['operationId'],
+                                   'response_sha256': reply['responseSha256'],
+                                   'attempt_sha256': sha(agent_dir / f'{name}.lifetime-attempt.json')})
+        agent_stages[stage] = {'probe': agent_probe, 'outcomes': agent_outcomes}
+    first_agent = run / 'agent-lifetime/probe'
+    restarted_agent = run / 'agent-lifetime/probe-after-restart'
+    require('agent_restart_uses_same_appliance_requests',
+            sha(first_agent / 'cases.json') == sha(restarted_agent / 'cases.json'))
+    for case in read(first_agent / 'cases.json'):
+        if case['tool'] != 'mini_oracle_call':
+            continue
+        name = case['name']
+        initial = read(first_agent / f'{name}.http.json')
+        restarted = read(restarted_agent / f'{name}.http.json')
+        require(f'agent_{name}_exact_appliance_reply_after_restart',
+                initial['bodyText'] == restarted['bodyText'] and initial['status'] == restarted['status'])
+        require(f'agent_{name}_new_native_dispatch_after_restart',
+                initial['operationId'] != restarted['operationId']
+                and (first_agent / f'{name}.request-id').read_text() !=
+                    (restarted_agent / f'{name}.request-id').read_text())
+    authority = read(run / 'agent-lifetime/authority/report.json')
+    require('actual_lifetime_positive_and_wrong_indices_qualified',
+            authority.get('protocol') == 'mini-oracle-agent-authority-probe-v1'
+            and authority.get('passed') is True
+            and authority.get('positiveReserveReceipt', {}).get('eventId')
+            and authority.get('wrong-event22-index', {}).get('passed') is True
+            and authority.get('wrong-event27-index', {}).get('passed') is True
+            and authority.get('revocationTested') is False
+            and authority.get('unsubmittedStalePlanTested') is False
+            and authority.get('hostSha256') == op155['a']['host_sha256']
+            and authority.get('configSha256') == op155['a']['config_sha256']
+            and authority.get('applicationAttemptSha256') == sha(
+                first_agent / 'discover-core-query.lifetime-attempt.json'))
     report = {'schema': 'mini-oracle-shared-data-acceptance-v1', 'passed': True,
-              'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch and sandbox. '
+              'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch, agent lifetime tools, '
+                       'source STOP/restart/reconciliation and sandbox. '
                        'No public deployment, specialist panel score, or formal answer-proof claim.',
               'inventory_sha256': inventory_sha,
               'runtime_spk_sha256': configs['9101'][0]['expectedRawSha256'],
               'appliance_receipt_sha256': sha(run / 'receiving/9101/APPLIANCE.json'),
               'checks': checks, 'queries': replies, 'mounts': mounts,
               'operator_import': operator_import,
+              'disk_plan': disk_plan, 'disk_observations': disk,
               'import_units': import_units,
-              'native_completion_receipts': native_receipts, 'refusals': refusals}
+              'native_completion_receipts': native_receipts,
+              'native_stop_receipts': stop_receipts,
+              'stop_inspection': op155, 'operator_identity': operator_identities[0],
+              'separate_copied_store_cold_benchmark': {'receipt': copied_benchmark,
+                  'sha256': sha(run / 'copied-store-stop-benchmark.json'),
+                  'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
+              'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
+              'controller_consent': consent,
+              'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
+                                                 'source_stopped': stopped},
+              'refusals': refusals}
     (run / 'report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
     print(json.dumps({'passed': True, 'checks': len(checks), 'report': str(run / 'report.json')}))
 
