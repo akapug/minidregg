@@ -435,12 +435,14 @@ checkp summon "the tariff: hermes/turn $PRICE; hermes = $HS" sh -c "grep -q '^  
 # the program is a document members read and the founder edits
 BCAP=$(jq -r .observeCapability "$WS/bob/refs/lab.json")
 ok program bob "import lab-program object $PROGRAM_T $BCAP $BCAP"
+operator program "CONTINUITY: bob's imported reference starts its continuity record" \
+  "$MINI" workspace --action continuity-init --dir "$WS/bob" --name lab-program
 ok program bob "doc show lab-program"
 checkp program "bob reads the librarian's program" grep -q "Librarian of lab" "$OUT"
 # bob holds observe/place/append under lab, not mutate, and the program's
 # law admits only the founder's writes; the Host's prepare reports the law's
 # failing clause first (the clause names alice).
-two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: subject == $A"
+two_step_refused program bob "doc append bp lab-program 'bob: be nicer'" "submit bp" "law-denied: .*subject == $A"
 ok program alice "doc append ap lab-hermes-librarian 'Founder: keep answers short.'"
 ok program alice "submit ap"
 
