@@ -21,9 +21,13 @@ un-verify (Generic Simplex gate), un-bend (bend verb + lost reply), un-world (Ta
 - un-pb-twins 134535c2: §5.3 deletions (reconstruction, two_bit_addition, source_endpoint outcome side, PROGRESS v1, dealer_start, binding v1, sequential Engine + store, circuit_batch items, reserve_material, custody Pool/Cut + CLI arms + crash-probes.py); AnchorFixture replaced by the real serve(listener, stop) (blocking accept, wake connect); P6 receipt verifier rebuilt on the anchor with its test (extends case shown); LayerEngine non-Boolean test. Faerie (a1d3a428143ff3b8e, ~294k) retired.
 
 ## Owed / unowned
+- ember's ruling (memory "no hand-written kernel effects"): kernel effects must come from a revived Effects/ derivation engine. un-effects' transfer/commit are hand-written in Kernel/ObjectiveActivity.lean: deferrable for the demo, owed after (EFFECTS.md has the Phase-3 design: EffectSpec widened with refusal, authority demand and frame; the dispatch keystone; the hand arm deleted in the same commit).
 - private-backend helper-copy merges (Cursor, Lagrange, Horner, PRG, urandom, outbox codecs): unowned.
 - private-backend P6 (lost reply on reserve/burn): open; the verifier exists.
 - Tier 2 (after the opening): R1 the in-process MPC as a door. The sibling product deputy (a5a600787670d2be5) now owns the MPC demo door, invite codes, Host request rate, web3.js serializer, grain class slices: not ours.
+
+## Web item (done)
+- un-web-front 0da04999: the public front page renders the operator's published document. mini-web-spawn reads /etc/mini/front-doc and passes --front-doc to the public body only; it falls back to the index. Infra writes `welcome` there (demo-vm 3b8e729, run-sheet step 9c); its check line: an anonymous GET / renders welcome. Sha sent to the integrator.
 
 ## Decided
 fn out; private-backend stays; Effects/ registry is Phase 3 (EFFECTS.md); dues and six more ride the effect Plan; DreggNet lease cluster parked; Contracts Cuts/Snapshot/Refinements/Futures kept; Pred BoundedQuantifiedView/CoordinationDial kept; twin conflict on un-pb-twins resolved to un-pb-wal 68d9f28e's design (82f3710b).
