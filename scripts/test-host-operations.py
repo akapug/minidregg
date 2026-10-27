@@ -184,6 +184,18 @@ class GateTests(unittest.TestCase):
         with (self.root / ops.GENERATED).open("a") as file: file.write("// stale\n")
         self.rejects("generated request constants drift")
 
+    def test_consent_plan_must_be_an_active_operation(self):
+        def unknown(data):
+            data["consent_plans"].append("NO_SUCH_PLAN")
+        self.registry(unknown)
+        self.rejects("consent plan is not an active operation: NO_SUCH_PLAN")
+
+    def test_consent_plan_is_listed_once(self):
+        def duplicate(data):
+            data["consent_plans"].append(data["consent_plans"][0])
+        self.registry(duplicate)
+        self.rejects("duplicate consent plan")
+
     def test_echoed_response_and_payload_literals_are_not_allocations(self):
         # This test asserts the gate's scope, not correctness of the deliberately
         # changed response; runtime receiving checks still own response codecs.

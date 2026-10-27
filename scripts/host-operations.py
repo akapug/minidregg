@@ -32,7 +32,7 @@ def unique_object(pairs):
 def load(root):
     data = json.loads((root / REGISTRY).read_text(), object_pairs_hook=unique_object)
     require(data.get("format") == "mini-host-request-operations-v1", "unknown operation registry format")
-    require(set(data) == {"format", "operations", "response_markers", "client_constants"}, "unknown registry fields")
+    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "client_constants"}, "unknown registry fields")
     ids, symbols = {}, set()
     for entry in data["operations"]:
         require(set(entry) == {"code", "symbol", "status", "routes", "owner", "purpose", "receiver"}, f"invalid operation fields: {entry}")
@@ -48,12 +48,23 @@ def load(root):
         require((entry["status"] == "reserved") == (entry["receiver"] is None), f"receiver/status mismatch: {symbol}")
         ids[code] = entry
         symbols.add(symbol)
-    responses = set()
+    responses, markers = set(), set()
     for entry in data["response_markers"]:
-        require(set(entry) == {"code", "purpose", "request_reserved"} and type(entry["code"]) is int and type(entry["request_reserved"]) is bool, "invalid response marker")
+        require(set(entry) == {"code", "symbol", "purpose", "request_reserved"} and type(entry["code"]) is int and type(entry["request_reserved"]) is bool, "invalid response marker")
         require(0 <= entry["code"] <= 255 and entry["code"] not in responses, "duplicate/invalid response marker")
+        require(isinstance(entry["symbol"], str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", entry["symbol"]), f"invalid response marker symbol: {entry['symbol']}")
+        require(entry["symbol"] not in markers, f"duplicate response marker symbol: {entry['symbol']}")
+        markers.add(entry["symbol"])
         require(not entry["request_reserved"] or entry["code"] not in ids, f"request collides with reserved response marker: {entry['code']}")
         responses.add(entry["code"])
+    # The operator plans a client checks against its local consent provider (frame 224) before any
+    # signing consumer sees the operator's reply. Each must be an active allocation, listed once.
+    plans = data["consent_plans"]
+    require(isinstance(plans, list) and all(isinstance(p, str) for p in plans), "consent_plans must be a list of operation symbols")
+    require(len(set(plans)) == len(plans), "duplicate consent plan")
+    by_symbol = {e["symbol"]: e for e in ids.values()}
+    for plan in plans:
+        require(plan in by_symbol and by_symbol[plan]["status"] == "active", f"consent plan is not an active operation: {plan}")
     bindings = set()
     for binding in data["client_constants"]:
         require(set(binding) == {"path", "constant", "operation"}, "invalid client constant binding")
@@ -267,6 +278,11 @@ def generated(data):
     for entry in sorted(data["operations"], key=lambda e: e["code"]):
         lines += [f"// {entry['status']}; {','.join(entry['routes']) or 'Host stdio only'}; owner: {entry['owner']}",
                   f"pub const {entry['symbol']}: u8 = {entry['code']};"]
+    lines += ["", "// Response markers: the first byte of a reply frame, a namespace apart from requests."]
+    for entry in data["response_markers"]:
+        lines += [f"// {entry['purpose']}", f"pub const RESPONSE_{entry['symbol']}: u8 = {entry['code']};"]
+    lines += ["", "// Operator plans checked against the local consent provider (frame 224) before signing."]
+    lines += ["pub const CONSENT_PLANS: &[u8] = &[" + ", ".join(p for p in data["consent_plans"]) + "];"]
     return "\n".join(lines) + "\n"
 
 def check(root, check_generated=True):

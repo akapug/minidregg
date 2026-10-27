@@ -2162,19 +2162,55 @@
   "response_markers": [
     {
       "code": 254,
+      "symbol": "NEVER_FORWARDED",
       "purpose": "Transport refusal: request never forwarded",
       "request_reserved": true
     },
     {
       "code": 255,
+      "symbol": "HOST_REFUSAL",
       "purpose": "Host refusal/outcome envelope",
       "request_reserved": true
     },
     {
       "code": 164,
+      "symbol": "PRIVATE_DISPATCH_NO_RECORD",
       "purpose": "Private ordinary dispatch definitive no-record refusal; distinct from request164",
       "request_reserved": false
     }
+  ],
+  "consent_plans": [
+    "APPLICATION_SHARE_ISSUE_PLAN",
+    "APPLICATION_DISPATCH_PLAN",
+    "APPLICATION_LIFECYCLE_COMPLETION_PLAN",
+    "AGENT_PAID_DISPATCH_PLAN",
+    "APPLICATION_LIFECYCLE_BEGIN_PLAN",
+    "APPLICATION_LIFECYCLE_CLAIM_PLAN",
+    "AGENT_RESERVE_PLAN",
+    "APPLICATION_LAUNCH_BEGIN_PLAN",
+    "APPLICATION_LAUNCH_CLAIM_PLAN",
+    "APPLICATION_LAUNCH_COMPLETION_PLAN",
+    "AGENT_LIFETIME_GRANT_PLAN",
+    "AGENT_LIFETIME_DISPATCH_PLAN",
+    "AGENT_LIFETIME_RESERVE_PLAN",
+    "APPLICATION_SESSION_ENROLLMENT_PLAN",
+    "PARTICIPANT_KEY_ENROLLMENT_PLAN",
+    "PARTICIPANT_PROVISIONING_PLAN",
+    "FLEET_TURN_PLAN",
+    "PAY_COMMAND_PLAN",
+    "PAY_OBSERVATION_PLAN",
+    "PAY_REFILL_PLAN",
+    "PAY_SELF_ENROLLMENT_PLAN",
+    "REALM_WELL_PLAN",
+    "CLOCK_TICK_PLAN",
+    "KEY_ROTATION_PLAN",
+    "JOB_MONEY_PLAN",
+    "CERTIFY_PLAN",
+    "PAY_CLAIM_PLAN",
+    "RESERVE_RESOURCE_BIRTH_PLAN",
+    "APPLICATION_FAILED_START_RECOVERY_PREPARE",
+    "ACTIVITY_PLAN",
+    "SEAT_PLAN"
   ],
   "client_constants": [
     {
