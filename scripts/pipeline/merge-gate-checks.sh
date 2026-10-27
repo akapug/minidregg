@@ -80,6 +80,9 @@ builders() {
   # plant (the follower skipping a failed guard) red at its recorded seed and step. Needs the world-sim
   # exe (exe-roots, just above, builds it). The nightly knob is in the script header.
   run world-sim       bash scripts/gates/check-world-sim .lake/build/bin/world-sim
+  # native/private-backend codec agreement: the two Lean fixture exes (exe-roots built them) emit the canonical
+  # frames and Plan; the Rust crate must decode and re-encode them, and refuse a flipped byte.
+  run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates

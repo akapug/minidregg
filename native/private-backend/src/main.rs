@@ -39,6 +39,30 @@ fn run() -> std::io::Result<()> {
    if parse_request(&frames[1])?!=(id,g,Purpose::HolderPad)||Journal::decode(&frames[2])?!=journal||mini_private_backend::allocation_receipt::AllocationReceipt::decode(&frames[3])?!=expected{return Err(bad("native/Rust decoded values differ"));}
    println!("PRIVATE-BACKEND NATIVE/RUST WIRE PASS (four canonical frames, arbitrary Nat digests)");Ok(())
   }
+  Some("check-plan-fixture") if a.len()==3=>{
+   // The single JSON line Host/PrivateCircuitPlanFixture.lean prints: {"valid":..,"bytes":[..],"schedule":[[t,g],..],"rowCount":n}.
+   let input=std::fs::read_to_string(&a[2])?;
+   if input.len()>MAX{return Err(bad("fixture capacity"));}
+   let field=|key:&str|->std::io::Result<&str>{
+    let at=input.find(&format!("\"{key}\":")).ok_or_else(||bad("fixture field"))?+key.len()+3;
+    let rest=&input[at..];
+    let end=if rest.starts_with('['){let mut depth=0;rest.char_indices().find_map(|(i,c)|{match c{'['=>depth+=1,']'=>{depth-=1;if depth==0{return Some(i+1);}}_=>{}}None})}else{rest.find(|c|c==','||c=='}')};
+    Ok(&rest[..end.ok_or_else(||bad("fixture field end"))?])
+   };
+   let numbers=|text:&str|->std::io::Result<Vec<u64>>{
+    text.split(|c:char|!c.is_ascii_digit()).filter(|x|!x.is_empty()).map(|x|x.parse::<u64>().map_err(|_|bad("fixture number"))).collect()
+   };
+   if field("valid")?!="true"{return Err(bad("native plan is not valid"));}
+   let bytes=numbers(field("bytes")?)?.into_iter().map(|x|u8::try_from(x).map_err(|_|bad("fixture byte"))).collect::<std::io::Result<Vec<u8>>>()?;
+   let plan=mini_private_backend::circuit_batch::Plan::decode(&bytes)?;
+   if plan.encode()!=bytes{return Err(bad("native/Rust Plan bytes differ"));}
+   let flat=numbers(field("schedule")?)?;
+   let native:Vec<(u64,u64)>=flat.chunks(2).map(|c|(c[0],c[1])).collect();
+   let rust:Vec<(u64,u64)>=plan.assignments().iter().map(|(t,g,_)|(*t,*g as u64)).collect();
+   if native!=rust{return Err(bad("native/Rust Plan schedule differs"));}
+   if numbers(field("rowCount")?)?!=vec![plan.rows.len() as u64]{return Err(bad("native/Rust Plan row count differs"));}
+   println!("PRIVATE-BACKEND NATIVE/RUST PLAN PASS (canonical Plan bytes and schedule)");Ok(())
+  }
   Some("worker") if a.len()==3=>{
    let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
    let mut input=vec![];std::io::stdin().take(MAX as u64+1).read_to_end(&mut input)?;
