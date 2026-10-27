@@ -22,7 +22,7 @@ type Result<T> = std::result::Result<T, String>;
 fn answer_name(name: &str) -> bool {
     name == "outcome.json"
         || name.strip_prefix("retry-").and_then(|s| s.strip_suffix(".json"))
-            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+            .is_some_and(mini_sdk::decimal::is_digits)
 }
 
 pub(crate) fn state(dir: &Path) -> Result<Value> {

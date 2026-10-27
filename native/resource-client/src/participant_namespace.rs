@@ -121,11 +121,7 @@ fn parse_ids(value: &Value, roles: &[Role]) -> Result<BTreeMap<String, String>> 
             .get(&role.label)
             .and_then(Value::as_str)
             .ok_or("namespace record lacks role ID")?;
-        if id
-            .parse::<u64>()
-            .ok()
-            .is_none_or(|number| number < (1u64 << 63))
-            || id.starts_with('0')
+        if mini_sdk::decimal::parse::<u64>(id).is_none_or(|number| number < (1u64 << 63))
         {
             return Err("namespace record has invalid candidate ID".into());
         }
@@ -158,11 +154,7 @@ fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
             .ok_or("namespace record lacks ids")?;
         for value in prior_ids.values() {
             let id = value.as_str().ok_or("namespace record has non-string ID")?;
-            if id
-                .parse::<u64>()
-                .ok()
-                .is_none_or(|number| number < (1u64 << 63))
-                || id.starts_with('0')
+            if mini_sdk::decimal::parse::<u64>(id).is_none_or(|number| number < (1u64 << 63))
             {
                 return Err("namespace record has invalid candidate ID".into());
             }

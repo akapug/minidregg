@@ -431,7 +431,7 @@ fn settlement_needs_recovery(ws: &Ws, dir: &Path) -> Result<bool> {
                 .ok_or("job: invalid retained submission name")?;
             // crate::fsio::random_nonce() emits a canonical decimal u128, not a hex identifier.
             // Roundtrip the spelling so aliases cannot pair different sends.
-            if id.parse::<u128>().ok().is_none_or(|value| value.to_string() != id) {
+            if mini_sdk::decimal::parse::<u128>(id).is_none() {
                 return Err("job: invalid retained submission name".into());
             }
             let bytes = crate::shell::session_fs::read(&ws.root, &entry.path(), 1 << 20)?;

@@ -684,12 +684,7 @@ fn quote_natural(args: &mut Args, name: &str) -> Result<String> {
         .required(name)?
         .into_string()
         .map_err(|_| format!("{name} must be decimal"))?;
-    let n = raw
-        .parse::<u64>()
-        .map_err(|_| format!("{name} must be an unsigned 64-bit integer"))?;
-    if n.to_string() != raw {
-        return Err(format!("{name} must be canonical decimal"));
-    }
+    mini_sdk::decimal::parse::<u64>(&raw).ok_or_else(|| format!("{name} must be a canonical unsigned 64-bit decimal"))?;
     Ok(raw)
 }
 

@@ -80,10 +80,7 @@ pub(crate) const FN_ACK_OPERATOR_ONLY: &str =
     "fn ACK (op 13/15) is operator-only: Lean has not stated who may ACK a public fn delivery";
 
 fn fn_ack_transaction(digits: &[u8]) -> bool {
-    !digits.is_empty()
-        && digits.len() <= 80
-        && digits.iter().all(u8::is_ascii_digit)
-        && (digits.len() == 1 || digits[0] != b'0')
+    mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
 }
 
 /// A named refusal for an op the public route withholds on purpose, so a
@@ -310,9 +307,7 @@ fn provider_continuity_request(payload: &[u8]) -> bool {
     } else if let Some(body) = payload.strip_prefix(crate::provider_continuity::V3) {
         exact_pair(body).is_some_and(|(receipts, point)| {
             v2_body(receipts) && exact_pair(point).is_some_and(|(count, root)| {
-                let natural = |digits: &[u8]| !digits.is_empty() && digits.len() <= 80
-                    && digits.iter().all(u8::is_ascii_digit)
-                    && (digits.len() == 1 || digits[0] != b'0');
+                let natural = |digits: &[u8]| mini_sdk::decimal::is_canonical_ascii_max(digits, 80);
                 natural(count) && count != b"0" && natural(root)
             })
         })
@@ -370,11 +365,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
-            catalog_enabled
-                && !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
+            catalog_enabled && mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
         }
         [19, payload @ ..] if payload.len() >= 10 => {
             let metadata_length = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
@@ -480,12 +471,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
-        [102, digits @ ..] => {
-            !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
-        }
+        [102, digits @ ..] => mini_sdk::decimal::is_canonical_ascii_max(digits, 80),
         // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
         [126 | 128, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)

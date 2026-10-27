@@ -797,7 +797,7 @@ pub fn check(kind: Kind, value: &str, name: &str) -> Result<(), String> {
     let ok = match kind {
         Kind::Id => !value.is_empty() && value.len() <= 64 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
         Kind::Ref => validate_ref_name(value).is_ok(),
-        Kind::Subject | Kind::Number => !value.is_empty() && value.len() <= 40 && value.bytes().all(|b| b.is_ascii_digit()),
+        Kind::Subject | Kind::Number => value.len() <= 40 && mini_sdk::decimal::is_digits(value),
         Kind::TextOrFile => !value.is_empty() && (!value.starts_with('@') || is_session_file(&value[1..])),
         Kind::File => value.strip_prefix('@').is_some_and(is_session_file),
         Kind::KeyFile => is_session_file(value),

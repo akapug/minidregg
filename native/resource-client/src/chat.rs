@@ -2449,7 +2449,7 @@ mod tests {
     }
 
     fn hex(text: &str) -> String {
-        text.bytes().map(|b| format!("{b:02x}")).collect()
+        mini_sdk::hex::encode(text.as_bytes())
     }
 
     #[test]
