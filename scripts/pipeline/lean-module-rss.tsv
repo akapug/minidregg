@@ -621,7 +621,6 @@ Assurance.NoteSpendProofControllerAdmission	5.3	3747884	0
 Assurance.HyperdocumentTransclusionReferenceDeployment	3.1	3747676	0
 Compiler.WorldKindLawDependencies	2.2	3747348	0
 Assurance.HyperdocumentAgentOperation	5.5	3745736	0
-Assurance.PrivateEscrowSettlementJoin	2.6	3745620	0
 Compiler.ResourceTargetAdmission	2.3	3745252	0
 Assurance.ReactiveOutboxDelivery	3.4	3743876	0
 Compiler.NockProgramCodec	3.2	3743148	0
@@ -640,7 +639,6 @@ Assurance.HyperdocumentLinkPageDurableWeld	2.9	3736276	0
 Assurance.SameCoinGameProduct	2.5	3734740	0
 Kernel.WorldRoot	3.4	3734592	0
 Theory.TypedAuthorization	5.0	3734480	0
-Kernel.PrivateEscrowSettlement	3.2	3733792	0
 Compiler.HyperdocumentCell	3.6	3733464	0
 Kernel.ObjectiveActivityWire	3.1	3732964	0
 Assurance.NoteSpendConcreteCellAdapter	2.8	3732696	0
