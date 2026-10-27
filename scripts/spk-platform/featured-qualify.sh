@@ -30,7 +30,8 @@ o HledgerWeb 23321185cf7dd1ae7a74e5b7deb6caba S / web
 p Datasette 547714ee1f01bae653fe9276d6d30ce9 M / web"
 # A batch brings its own table (same columns) and its write functions:
 # QUALIFY_TABLE=scripts/spk-platform/market-batches/bN.tsv, and every
-# scripts/spk-platform/market-writes/*.sh is sourced after the functions below.
+# scripts/spk-platform/market-writes/*.sh (and QUALIFY_WRITES/*.sh, a batch's own directory) is
+# sourced after the functions below.
 # QUALIFY_STOP=1 stops each grain after its write (a shared box keeps memory for the next app).
 [[ -z ${QUALIFY_TABLE:-} ]] || apps=$(grep -v '^#' "$QUALIFY_TABLE")
 want=" ${*:-$(awk '{printf "%s ", $1}' <<<"$apps")} "
@@ -102,7 +103,7 @@ write_Datasette() {
   # Datasette 0.63 has no write API; its write is the upload of a database through the page.
   [[ $got == 200 ]] && echo "0 read-only: GET /-/versions.json $got; Datasette 0.63 has no HTTP write (upload is the page's form)"
 }
-for f in "$here"/market-writes/*.sh; do [[ -f $f ]] && . "$f"; done
+for f in "$here"/market-writes/*.sh ${QUALIFY_WRITES:+"$QUALIFY_WRITES"/*.sh}; do [[ -f $f ]] && . "$f"; done
 
 while read -r letter name pkg class page kind; do
   [[ $want == *" $letter "* ]] || continue
