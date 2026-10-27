@@ -2280,6 +2280,59 @@ def AcceptedBirth.sourceReadGuards {height : Height}
 #assert_axioms BranchAccepted.law_admits_step AcceptedBirth.births_named
 #assert_axioms AcceptedBirth.indexed
 
+/-! ### The plan-time factory verdict (`NativeHost.birthRefusal`) against admission
+
+Keystones stated before their proofs (ATLAS law 2); the proofs are owed with the receiver
+work. The plan reads the factory branch on the Pending it prepares; a submission prepares
+its own Pending on its own image, so a law installed between plan and submit is judged by
+the submission's Pending, and these statements relate a plan's verdict to the admission of
+the SAME Pending (the image the plan saw, unchanged). -/
+
+variable {descriptor : Descriptor Registry}
+
+/-- The factory branch's verdict as a plan reads it: the law the branch configuration
+resolves, evaluated on the branch's own step. -/
+def Pending.factoryVerdict
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) : Option Bool :=
+  (pending.branchConfig .factory).resolve?.map fun law =>
+    Minidregg.Pred.eval law.predicate (pending.branchStep .factory).oldState
+      (pending.branchStep .factory).newState
+
+/-- **Keystone, refusal pole (proof owed).** A plan-time refusal is final on that image: no
+factory branch of the same Pending is accepted. -/
+def PlanRefusalSound : Prop :=
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height),
+    pending.factoryVerdict = some false → IsEmpty (BranchAccepted pending .factory)
+
+/-- **Keystone, admission pole (proof owed).** A plan-time pass on an unchanged image is not
+refused by the factory law at admission: any refusal of that branch names another cause
+(signature, capability, epoch, a missing source), never `policyRejected`. -/
+def PlanPassNotLawRefused : Prop :=
+  ∀ {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) (credential : BranchCredential)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot),
+    pending.factoryVerdict = some true →
+      pending.admitBranch .factory credential receipt ≠ .error .policyRejected
+
+/-- Teeth of the image premise: the verdict is a function of the branch's resolved law and
+step alone, so a plan and a submission can disagree only if the factory branch they judge
+changed (a law installed in between, or a moved step). -/
+theorem factoryVerdict_congr
+    {prepared₁ prepared₂ : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (p₁ : Pending prepared₁ height) (p₂ : Pending prepared₂ height)
+    (sameLaw : (p₁.branchConfig .factory).resolve?.map (·.predicate) =
+      (p₂.branchConfig .factory).resolve?.map (·.predicate))
+    (sameStep : p₁.branchStep .factory = p₂.branchStep .factory) :
+    p₁.factoryVerdict = p₂.factoryVerdict := by
+  unfold Pending.factoryVerdict
+  rw [← sameStep]
+  cases h₁ : (p₁.branchConfig .factory).resolve? <;>
+    cases h₂ : (p₂.branchConfig .factory).resolve? <;> simp_all
+
+#assert_axioms factoryVerdict_congr
+
 end Concrete
 
 end Minidregg.Kernel.ResourceBirthPolicyController
