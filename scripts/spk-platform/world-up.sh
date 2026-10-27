@@ -24,11 +24,11 @@ while :; do
   [[ $ancestor == / ]] && break
   ancestor=$(dirname "$ancestor")
 done
-# A standing world hosts many apps: every app birth reserves on the workroom's tool task and every
-# share issues a metered ticket, so the provisioner's single-journey defaults (tool budget 50) run
-# out after three apps. A standing world takes the platform provisioner's task budgets instead (w7 with the
-# balances raised as well failed its store phase; the balances stay the provisioner's).
-export WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET:-1000000} WORKROOM_PARENT_BUDGET=${WORKROOM_PARENT_BUDGET:-1000000}
+# A standing world hosts many apps: every app birth reserves 5 on the workroom's tool task and
+# every share issues a metered ticket of 3, so the provisioner's single-journey tool budget (50)
+# runs out after about six apps. A standing world takes 100, the tool balance's own bound (w7 and
+# w8, with 1000000, failed their store phase without a named reason).
+export WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET:-100}
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 installer=$repo/deploy/spk-host/install-user-world
