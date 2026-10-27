@@ -355,7 +355,7 @@ impl Runtime {
         }
         let guard = ResidentGuard::acquire(&self.config, Some(&r.resident_state))?;
         let pending =
-            resident_reconcile::bound_failed_pending(guard.bytes()?, &r.expected_resident_sha256)?;
+            resident_reconcile::bound_failed_pending(guard.bytes()?, &r.expected_resident_sha256, &self.config.state_dir)?;
         if pending["promptSha256"] != f.resident_prompt_sha256 {
             return Err("failed envelope names another resident prompt".into());
         }

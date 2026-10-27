@@ -71,9 +71,6 @@ pub(crate) struct Retry {
 }
 
 impl Record {
-    pub(crate) fn is_failed_after_admission(&self) -> bool {
-        matches!(self.outcome, Outcome::Refused { stage: RefusalStage::TurnFailure, .. })
-    }
     pub(crate) fn validate(&self) -> Result<()> {
         let digest = |v: &Option<String>| v.as_ref().is_none_or(|s| resident_origin::valid_digest(s));
         let ok = self.kind == KIND
@@ -214,7 +211,7 @@ mod tests {
         write(&dir, &undecided).unwrap();
         let back = read_bound(&dir, 42, &"a".repeat(64), &"b".repeat(64)).unwrap();
         assert_eq!(back, undecided);
-        assert!(!back.is_failed_after_admission());
+        assert!(matches!(back.outcome, Outcome::Undecided { .. }));
         let text = fs::read_to_string(path(&dir, 42)).unwrap();
         assert!(text.contains("\"state\": \"undecided\"") && text.contains("reconcile parent audited"));
         // The first decision stands: a later refused record for the same prompt is refused.
@@ -246,7 +243,7 @@ mod tests {
         bad.outcome = Outcome::Admitted { stop_reason: "end_turn".into(), settled_charge: "01".into(),
             provider_response_sha256: None, provider_metered_charge: None };
         assert!(bad.validate().is_err());
-        let refused = record(Outcome::Refused { stage: RefusalStage::TurnFailure, reason: "format_error".into() });
-        assert!(refused.is_failed_after_admission());
+        record(Outcome::Refused { stage: RefusalStage::TurnFailure, reason: "format_error".into() }).validate().unwrap();
+        assert!(record(Outcome::Refused { stage: RefusalStage::Setup, reason: String::new() }).validate().is_err());
     }
 }
