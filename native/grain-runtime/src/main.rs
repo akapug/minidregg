@@ -39,6 +39,7 @@ mod dispatch_custody;
 mod dispatch_runtime_tests;
 mod gitweb_worker;
 mod grain_source;
+mod grain_create;
 mod homelab;
 mod pending_prepare;
 mod legacy_custody_audit;
@@ -17923,6 +17924,12 @@ fn main() -> ExitCode {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;
     }
+    if args.len() >= 2 && args[1] == "create" {
+        return match grain_create::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime create: {error}"); ExitCode::FAILURE }
+        };
+    }
     if args.len() >= 2 && args[1] == "controller-launch" {
         return match systemd_manager::launch_client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
@@ -18219,7 +18226,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
