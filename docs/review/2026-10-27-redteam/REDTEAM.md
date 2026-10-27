@@ -91,7 +91,7 @@ the founder set aside.**
   on dregg-build (J14 `redteam` row, 2026-10-27, upstream Hermes Agent 6d8a8beb in the gated worker
   on the pool route, the deterministic model that obeys every planted call): **the injection spent 8
   paid turns** of alice's budget (Hermes's account fell by exactly 8 turns; the row's own bound of 4
-  did not hold, because Hermes Agent retries the calls its catalogue drops). That is the bound: the
+  did not hold; why the real agent took 8 turns, not the stand-in's 4, was not examined). That is the bound: the
   summon budget and the price per turn, which the founder chose. A non-member cannot address the
   resident. A `topup` is the founder's act.
 - **The shared pool.** On `main` (26416293) the pool row's caps are `perCall`, `perDay` *per runner*, and
