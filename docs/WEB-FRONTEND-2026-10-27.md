@@ -157,3 +157,37 @@ draws its `--json` replies; `MINI_WEB_FRAME_SRC` names the grain origins for the
 the door; the patch in `deploy/web-frontend/door.patch` adds the login record and the one status
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).
+
+## 6. A0: the structured command grammar, verb by verb (the series after this batch)
+
+The council's finding stands: `Verb` is three strings and the forms are read from usage prose, so
+"derived from the verb table" is an interim. The honest artifact (ATLAS law 13) is ONE grammar per
+verb, as data, that the shell's parsing, `help`, Tab completion and the web body all consume. The
+series, each step a commit that keeps the usage-string form for every verb whose grammar is not
+yet data and labels the page accordingly:
+
+1. **The type** (`shell::Grammar`): a verb is a list of leaves; a leaf is its literal path
+   (`doc append`), its positional arguments (name, kind: `Id | Ref(kind) | Subject | Text | Json |
+   File | Number | Height | Choice(..) | Word`, optional), its flags (name, value kind, dangerous:
+   needs confirmation, as `--i-know`, `--freeze-roster`, `--i-lock-myself-out`), its effect
+   (`Read | Local | Transition { proposes: bool }`) and its outcome schema (what the ending prints:
+   a JSON view, a receipt, a text). `usage` and `operation` are RENDERED from the grammar (one
+   printer), so `help` cannot drift from the parser; `subcommands()` reads the leaves, not prose.
+2. **The parser arm consumes the grammar**: `plan()` for a converted verb walks the leaf's
+   arguments (arity, validators per kind) and hands the plan builder typed values; the per-verb
+   `match` arm shrinks to the builder. The web body renders the form from the same leaf (kinds →
+   fields, dangerous flags → an explicit confirmation checkbox, effect → the outcome class, the
+   outcome schema → the bespoke renderer or the one partial).
+3. **Order**: `doc` (the forty leaves: the tour's step 3), `room`/`chat`/`say`/`tail`, `delegate`/
+   `revoke`/`renounce`/`law`/`can`/`why`/`inspect`, the money verbs (`pay`/`credit`/`tariff`/
+   `topup`/`market`/`bid`/`reveal`/`bids`/`job`/`jobs`), the lifecycle (`propose`/`submit`/`lookup`/
+   `retry`/`publish`/`history`), `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story`, keys, the rest.
+4. **The gate**: `face-coverage` becomes `parity` when every leaf has (a) a route and a no-JS
+   form from its grammar and (b) an outcome test: a journey row per spine flow (steps 3–7 of the
+   tour) asserting the decoded outcome class and the receipt, plus a per-leaf dry-run where the
+   verb has one (`can`, op 130) and a usage-ending test where it does not. The red-proof stays.
+5. **Deletions as each verb lands**: its usage/operation strings (rendered now), its hand-written
+   arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
+   `subcommands()` once the last verb converts.
+
+Not started in this batch; nothing on the page claims it is.
