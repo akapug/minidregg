@@ -631,6 +631,44 @@ mod tests {
         write_new(&attempt, "completion-v2.bin", ingress).unwrap();
         assert!(load_retained(&attempt, &begin, &claim, report).is_ok());
         assert!(load_retained(&attempt, &begin, &claim, b"other report").is_err());
+        let assembled = load_retained(&attempt, &begin, &claim, report).unwrap();
+        // recover_receipt_only checks the retained op38 submit marker before
+        // it touches the operator, so an unreachable operator isolates the
+        // marker check: refusal names the marker, acceptance fails later.
+        let operator = PrivateOperator {
+            host: parent.join("absent-host"),
+            config: parent.join("absent-config"),
+            socket: parent.join("absent-socket"),
+            host_sha256: "00".repeat(32),
+            config_sha256: "00".repeat(32),
+        };
+        let marker = |protocol: &str, ingress: &[u8], committed: &[u8]| {
+            serde_json::to_vec(&json!({
+                "protocol": protocol,
+                "ingressSha256": hex(&Sha256::digest(ingress)),
+                "claimSha256": hex(&Sha256::digest(committed)),
+            }))
+            .unwrap()
+        };
+        let recover = || {
+            recover_receipt_only(&operator, &assembled, &begin, &claim, report)
+                .err()
+                .expect("an unreachable operator cannot recover a receipt")
+                .to_string()
+        };
+        let missing = recover_receipt_only(&operator, &assembled, &begin, &claim, report);
+        assert!(missing.is_err());
+        let submit = "mini-spk-launch-completion-submit-requested-v1";
+        for (label, bytes) in [
+            ("wrong protocol", marker("other-protocol-v1", ingress, &claim.committed)),
+            ("wrong ingress", marker(submit, b"other ingress", &claim.committed)),
+            ("wrong claim", marker(submit, ingress, b"other committed")),
+        ] {
+            fs::write(attempt.join("op38-requested.json"), bytes).unwrap();
+            assert!(recover().contains("submit marker differs"), "{label}");
+        }
+        fs::write(attempt.join("op38-requested.json"), marker(submit, ingress, &claim.committed)).unwrap();
+        assert!(!recover().contains("submit marker differs"));
         fs::remove_dir_all(parent).unwrap();
     }
 }
