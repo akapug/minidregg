@@ -83,6 +83,9 @@ builders() {
   # native/private-backend codec agreement: the two Lean fixture exes (exe-roots built them) emit the canonical
   # frames and Plan; the Rust crate must decode and re-encode them, and refuse a flipped byte.
   run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
+  # Generic Simplex (Kernel/GenericSimplex*): the harness, log-reopen and load programs exe-roots builds,
+  # run, each with its plant red (fixed timer, split tip, flipped journal bit). Seconds; header names them.
+  run generic-simplex bash scripts/gates/check-generic-simplex .lake/build/bin
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
