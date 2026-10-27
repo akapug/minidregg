@@ -29,10 +29,17 @@ Branch `lane/custody-drivers` (main merged at `859ad3ce`). Mac worktree
 Verified on dregg-build: at `6aa5dde3` spk-host filtered 276/276; at `d2041a21` check green,
 build green, resource-client filtered 241/241, mini-sdk 33/33, and again at `cce04212` (241/241, 33/33; script: `/build/lanes/custody-drivers-logs/run-wire-5.sh`).
 
+- resource-client's own decimal and hex copies take mini_sdk's rule (`94b6ac5f`, 36 copies: 20 hex,
+  16 decimal; mini_sdk gains `decimal::parse`, `is_canonical_ascii_max`, `hex::decode_fixed`). pay.rs's
+  unsigned reader had accepted `+5`. Linux at `94b6ac5f`: check and build green, mini-sdk 34/34,
+  resource-client filtered 401/403; the two reds are cohort_tcp's wall-clock slot tests ("missed
+  public link slot"), a different pair failing on a serial rerun (20/22), untouched by this change
+  (its one edit there is a test-local hex closure): the traffic-privacy stack's, not this lane's.
+
 Not done here, by decision: grain-runtime's ~13 bounded readers (another crate's lane; the
 `private_file` shape is the template); the three BPF assemblers (RT 30, `setid_bound.rs` deletion,
-the sandbox lane's); resource-client's own decimal/hex copies (fewer, and `mini_sdk` already has
-`hex`; next pass).
+the sandbox lane's); `crate::decode_hex` stays any-case (`hex::decode_any_case`): it reads typed
+input as well as Host values, and splitting its ~100 callers is its own pass.
 
 ## Enrol / world template: waiting on a candidate
 
