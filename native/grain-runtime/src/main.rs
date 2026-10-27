@@ -14723,7 +14723,8 @@ impl Runtime {
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
-            .args(sandbox_tools::worker_argument(&self.prompt_sandbox))
+            .args(sandbox_tools::worker_arguments(&self.prompt_sandbox,
+                self.config.sandbox.as_ref().map_or(0, |s| s.tool_call_seconds)))
             .current_dir(&self.config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

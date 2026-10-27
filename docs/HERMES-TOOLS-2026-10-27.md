@@ -173,13 +173,14 @@ needs nothing more.
 
   These are upstream Hermes Agent 6d8a8beb's `toolsets.py` names. A different
   pin means re-checking the names; the check refuses and does not guess.
-- **The worker's side:** `/agent/hermes-acp --mini-sandbox-tools
-  file,terminal,code_execution` exports `HERMES_MINI_SANDBOX_TOOLSETS`. The
-  catalogue patch adds exactly those built-in toolsets to the MCP-only set and
-  reports every loaded name, with `valid` true only when every name is Mini's
-  or in the granted set. The generated `config.yaml` pins `terminal.backend:
-  local`, `terminal.cwd: /scratch`, the per-call timeouts and
-  `code_execution.timeout`.
+- **The worker's side:** `/agent/hermes-acp --mini-sandbox-tools=file,terminal,code_execution
+  --mini-tool-seconds=N` exports `HERMES_MINI_SANDBOX_TOOLSETS` plus
+  `TERMINAL_ENV=local`, `TERMINAL_CWD=/scratch` and `TERMINAL_TIMEOUT=N`, and
+  refuses to start without the `/scratch` mount. The catalogue patch adds
+  exactly those built-in toolsets to the MCP-only set and reports every loaded
+  name, with `valid` true only when every name is Mini's or in the granted set.
+  `execute_code` keeps upstream's own 300 s per-call default. The unit's
+  `RuntimeMaxSec` is the hard bound on both.
 
 No grant shape here touches admission: the room field write is an existing
 founder write, and the intersection and catalogue are controller policy, like

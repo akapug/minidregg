@@ -96,9 +96,24 @@ cat >"$out/hermes-acp" <<'ENTRY'
 #!/bin/sh
 # Upstream Hermes ACP inside the Mini worker: workspace-private home, no lazy
 # installs, the Mini tool catalogue reported on every session response.
+# `--mini-sandbox-tools=file,terminal,code_execution` (the controller's grant
+# for this prompt; docs/HERMES-TOOLS-2026-10-27.md) adds exactly those
+# built-in toolsets, running in /scratch, local backend, bounded per call.
 export HOME=/workspace HERMES_HOME=/workspace/.hermes PYTHONPATH=/agent/source PYTHONDONTWRITEBYTECODE=1 \
   XDG_CACHE_HOME=/workspace/.cache XDG_CONFIG_HOME=/workspace/.config XDG_DATA_HOME=/workspace/.local/share \
   HERMES_DISABLE_LAZY_INSTALLS=1 HERMES_MINI_TOOL_CATALOGUE=1
+case ${1:-} in
+  --mini-sandbox-tools=*)
+    tools=${1#--mini-sandbox-tools=}; shift
+    case $tools in *[!a-z_,]*|'') echo 'hermes-acp: --mini-sandbox-tools takes file,terminal,code_execution' >&2; exit 64 ;; esac
+    [ -d /scratch ] || { echo 'hermes-acp: sandbox tools need the /scratch mount' >&2; exit 64; }
+    seconds=120
+    case ${1:-} in
+      --mini-tool-seconds=*) seconds=${1#--mini-tool-seconds=}; shift
+        case $seconds in *[!0-9]*|'') echo 'hermes-acp: --mini-tool-seconds takes seconds' >&2; exit 64 ;; esac ;;
+    esac
+    export HERMES_MINI_SANDBOX_TOOLSETS=$tools TERMINAL_ENV=local TERMINAL_CWD=/scratch TERMINAL_TIMEOUT=$seconds TMPDIR=/tmp ;;
+esac
 exec /agent/venv/bin/python -m acp_adapter.entry "$@"
 ENTRY
 chmod 0755 "$out/hermes-acp"

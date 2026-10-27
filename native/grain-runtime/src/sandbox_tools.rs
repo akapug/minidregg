@@ -100,9 +100,11 @@ pub(crate) fn names(granted: &[&str]) -> Vec<String> {
         .flat_map(|(_, _, names)| names.iter().map(|n| (*n).to_owned())).collect()
 }
 
-/// The `hermes-acp` argument that asks the worker for the granted toolsets.
-pub(crate) fn worker_argument(granted: &[&str]) -> Option<String> {
-    (!granted.is_empty()).then(|| format!("--mini-sandbox-tools={}", granted.join(",")))
+/// The `hermes-acp` arguments that ask the worker for the granted toolsets
+/// and Hermes's own per-call timeout; none when nothing is granted.
+pub(crate) fn worker_arguments(granted: &[&str], tool_call_seconds: u64) -> Vec<String> {
+    if granted.is_empty() { return Vec::new(); }
+    vec![format!("--mini-sandbox-tools={}", granted.join(",")), format!("--mini-tool-seconds={tool_call_seconds}")]
 }
 
 /// The CPU the launch gate recorded for a worker unit (`STATE/UNIT.cpu`),
@@ -145,8 +147,9 @@ mod tests {
         assert_eq!(names(&["terminal"]), vec!["terminal", "process_manage"]);
         assert_eq!(names(&["file", "code_execution"]).len(), 5);
         assert!(names(&[]).is_empty());
-        assert_eq!(worker_argument(&["file", "terminal"]).as_deref(), Some("--mini-sandbox-tools=file,terminal"));
-        assert_eq!(worker_argument(&[]), None);
+        assert_eq!(worker_arguments(&["file", "terminal"], 120),
+            vec!["--mini-sandbox-tools=file,terminal", "--mini-tool-seconds=120"]);
+        assert!(worker_arguments(&[], 120).is_empty());
     }
 
     #[test]
