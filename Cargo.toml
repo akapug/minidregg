@@ -7,7 +7,6 @@ resolver = "2"
 members = [
   "native/resource-client",
   "native/hyperdocument-link-sqlite-store",
-  "native/hyperdocument-link-store",
   "native/credential-signature-verifier",
   "native/grain-runtime",
   "native/inference-scheduler",

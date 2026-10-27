@@ -844,10 +844,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minidregg-hyperdocument-link-store"
-version = "0.1.0"
-
-[[package]]
 name = "minidregg-inference-scheduler"
 version = "0.1.0"
 dependencies = [

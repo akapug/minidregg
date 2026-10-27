@@ -8,8 +8,10 @@ use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+// The 14-byte recovery record Lean authors (Assurance.HyperdocumentLinkLocalFileStore.recoveryFixture;
+// regenerate with `lake env lean --run scripts/EmitHyperdocumentLinkRecoveryFixture.lean OUTPUT`).
 const LEAN_FIXTURE: &[u8] =
-    include_bytes!("../../hyperdocument-link-store/fixtures/hyperdocument-link-recovery-v1.bin");
+    include_bytes!("hyperdocument-link-recovery-v1.bin");
 
 struct TempDir(PathBuf);
 
