@@ -16,9 +16,8 @@ use crate::{Error, Result};
 pub struct Consent(Process);
 
 /// The opcodes whose operator replies the transport checks against consent before any
-/// signing consumer sees them (`client_consent.rs::plan_operation`, 29 opcodes).
-pub const OPERATOR_PLAN_OPS: &[u8] = &[32, 36, 44, 48, 50, 52, 58, 66, 68, 70, 74, 78, 80, 82, 86, 92, 96, 103, 108,
-    113, 117, 123, 126, 140, 160, 170, 183, 201, 206];
+/// signing consumer sees them: the registry's `consent_plans`.
+pub const OPERATOR_PLAN_OPS: &[u8] = crate::host_operations::CONSENT_PLANS;
 
 fn headers(bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
     let v: Value = serde_json::from_slice(bytes).map_err(|e| format!("consent headers: {e}"))?;
@@ -96,6 +95,6 @@ mod tests {
         let (exe, settings) = fake::script("noop", "exec 3<&0; cat <&3 >/dev/null");
         let mut c = Consent::start(&exe, &settings).unwrap();
         assert!(c.operator_plan(1, b"", b"").is_err());
-        assert_eq!(OPERATOR_PLAN_OPS.len(), 29);
+        assert_eq!(OPERATOR_PLAN_OPS.len(), 31);
     }
 }

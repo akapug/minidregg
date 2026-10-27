@@ -63,7 +63,16 @@ refusal 255). Request 164 may legitimately receive response 34, and request 34
 may receive the definitive no-record response 164. Ordinary responses echoing
 their request byte are also not duplicate allocations. This gate does not claim
 to verify response codecs, payload guards or Mini authorization; those remain
-source admission and runtime receiving-test responsibilities.
+source admission and runtime receiving-test responsibilities. Each marker has a
+`symbol`, generated as `RESPONSE_<symbol>` beside the request constants.
+
+`consent_plans` lists the operator plans a client checks against its local
+consent provider (frame 224) before any signing consumer sees the operator's
+reply. Each entry must name an active operation, once. It is generated as
+`CONSENT_PLANS` and is the only copy: `mini_sdk::host_operations` carries the
+generated file, and the client's transport and the SDK consent client both read
+it. The provider's own reconstruction (`Kernel/NativeSpecializedConsent.lean`)
+is the check; this list only says which replies must pass it.
 
 The joined source inventory retains Host-only operations 24/25 for selected-source
 publication. Observer-signed enrollment 117–120 is operator-only; public quote

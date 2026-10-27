@@ -5,8 +5,7 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::path::Path;
-#[path = "../../host-operations.rs"]
-mod host_operations;
+use mini_sdk::host_operations;
 const PLAN_OP: u8 = host_operations::APPLICATION_DISPATCH_AUTHENTICATED_PLAN;
 const READY_OP: u8 = host_operations::APPLICATION_DISPATCH_READY;
 
