@@ -443,3 +443,23 @@ returns `Ran q b` for caller-chosen `b` other than the shim; no derived or expli
 stated at `receiverVerifier`. And it must carry an IO-level teeth pole: an ingress whose signature the
 shim answered `false` yields no voucher for it, which is `not_verified_of_not_answered` instantiated at
 `Ran`. Today every satisfiable and inhabitation pole is at `Id`; the pilot must give one at `IO`.
+
+## 2026-10-27, ninth pass: lane/hot-path-v4 571f9981
+
+**Verdict: proofs may start.**
+
+`Impl.ff` (:210) is now a definition: `ffState` (whose type has no prefix), then the chain gate (prefix count
+equals `stateBase.1`, the recomputed chain equals `stateBase.2`, and `suffixGate` pins that pair to the MAC'd
+body), then decoding. A replaying `ff` cannot be written. `Opened.view` (:224) pairs the executed part
+(`stateHead`, `stateWorld`) with `rebuildDerived` and `State.snapshot head records`, so the prefix journal,
+history and consumed set come from decoding, and the pass-7 contradiction is gone. `exact` (:346) pins the
+executed head's snapshot over `pre ++ suf` to the replay's, and the World to the fold's. It is satisfiable:
+a v3 `resume` at `height = length` is exactly `State.snapshot st records`, and a head state exists because
+`storeCheckpoint` seals at any height. The laws are bundled: an `ffState` that always errors fails `exact`,
+`inhabited` and `headSealZero`. `viewOpened` ties `ofOpened` to the open's view.
+
+One note for the prover. The first lemma `exact` needs is that replaying the suffix from
+`State.snapshot base pre` equals `State.snapshot head (pre ++ suf)` for the head state the executing part
+builds (roots by `rootTable`, consumed, journal, history). If that equation fails at some corner (a
+retired cell, absent bytes), suspect the `State.snapshot` shape before the prover. The `representsCheck` of
+earlier passes is replaced by `representsFromDerived`; no change is needed.
