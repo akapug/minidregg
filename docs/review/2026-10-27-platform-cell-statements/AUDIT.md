@@ -760,3 +760,31 @@ The known gap stays open and should be listed in the lane's state file:
   still wants the witnesses at declaration level, though, gated beside the axiom pin. The concrete
   `Pending` in Lean stays owed, and the keystones are not "done" until it exists. List it in the state
   file next to the Grain gap.
+
+## 2026-10-27, seventeenth pass: births priced from the platform cell (lean-audit-c d68a9afe4, statement only)
+
+**Accepted: the ordinary birth is the first scope.** Two conditions apply.
+
+`ReceiverReadsCurrent` is about the deployed object:
+- `receiveLoaded`'s accepted birth;
+- `platformAt` read on the very durable image it commits against;
+- tariff and `{ownerBudget, lifetime}` equal to the record's;
+- the platform cell in the read guards, so a concurrent install makes the birth stale;
+- `platformUnavailable` by name when the cell is absent.
+
+It instantiates `BirthsReadCurrent`/`BirthQuoteCurrent` through `deployedView`, and its teeth (a reader
+of `opened.pins` after a tariff-changing install) are the right refutation. Carrying the template beside
+the profile is forced by the profile hashing `profile.template` into the semantics. Changing
+`AcceptedBirth.indexed`'s text for it is justified.
+
+1. **State the scope in the claim.** The label must say "ordinary births". The owed families
+   (grain-birth tariff, application grain, share issue, agent lifetime, provisioning, pay enrol, and
+   completion's custodian key) are listed with file:line in the state file, not implied by the keystone's
+   name.
+2. **No silent twin at the re-genesis.** `profile.template` stays in the semantics, so every owed site
+   that still reads `profile.template.ownerBudget/lifetime` or `config.tariff` would serve the
+   *genesis* value after an install, without error. That is the twin that law 13 says to delete. Before
+   the one digest change ships, each owed site must either read the cell or be shown to read only
+   `issuer`/`birthSlack`. Gate this with a census row that refuses any reader of those fields outside the
+   cell path. Otherwise the re-genesis that is meant to be the last one leaves stale pricing in families
+   nobody re-checked.
