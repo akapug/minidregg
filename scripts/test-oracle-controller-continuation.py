@@ -203,6 +203,23 @@ class ContinuationGuards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exact installed-controller'):
             CONTINUATION.validate_run_acl(1001, 0o710, 1000, 100064, acl)
 
+    def test_prepared_resume_refuses_any_repair_receipt(self):
+        root = self.root / 'prepared'; root.mkdir()
+        for name in ('prepared.json', 'prior', 'bin', 'recovery-input-sha256.txt', 'consent-storage.json'):
+            (root / name).touch()
+        with self.assertRaisesRegex(ValueError, 'newer repair or attempt'):
+            CONTINUATION.resume_prepared_archive(root, {}, Path('/unused'), True)
+        self.assertFalse((root / 'source-resume-1.json').exists())
+
+    def test_prepared_resume_refuses_changed_store(self):
+        root = self.root / 'prepared'; root.mkdir()
+        for name in ('prior', 'bin', 'recovery-input-sha256.txt'):
+            (root / name).touch()
+        (root / 'prepared.json').write_text(json.dumps({'store_before': {'store': 'old'}}))
+        with self.assertRaisesRegex(ValueError, 'boundary changed: store_before'):
+            CONTINUATION.resume_prepared_archive(root, {'store_before': {'store': 'new'}}, Path('/unused'), True)
+        self.assertFalse((root / 'source-resume-1.json').exists())
+
 
 class SessionRefusalGuards(unittest.TestCase):
     def setUp(self):

@@ -5,6 +5,21 @@
 # Mini's Host and broker remain the authority and physical-custody receivers.
 # Every root effect uses the existing fixed deployment installer/helper.
 
+# One source list for both fresh and continued execution. Immutable snapshot
+# manifests cover the remaining inherited tree; these are the direct runtime
+# helpers and fixture inputs selected by this harness.
+world_source_manifest() {
+  sha256sum "$repo/scripts/oracle-shared-data-journey.sh" \
+    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
+    "$repo/deploy/oracle/acceptance/agent.py" "$repo/deploy/oracle/acceptance/agent-cases.json" \
+    "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
+    "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
+    "$repo/scripts/spk-platform/grain-journey.sh" "$repo/scripts/spk-platform/grain-store.sh" \
+    "$repo/scripts/spk-platform/prepare-lifetime-route.sh" "$repo/scripts/spk-platform/agent-genesis-overlay.sh" \
+    "$repo/deploy/spk-host/install-user-world" "$repo/deploy/spk-host/controller-world.py"
+}
+
 # Capacity accounting only. The native materializer and verifier independently
 # apply their unchanged statvfs guards; this does not reserve or grant space.
 world_disk_plan() {
@@ -401,6 +416,7 @@ world_continue_controller() {
 # the original tool was definitively refused before any session operation.
 world_continue_session() {
   local run=$1 repo=$2 fresh app target bundle
+  local resume_args=()
   op_uid=$(id -u)
   export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
   export BIN=$run/bin
@@ -417,17 +433,26 @@ world_continue_session() {
   state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
   fresh=$(mktemp -d "$run/session-refusal-preflight.XXXXXXXX")
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$fresh/controller-export.json"
+  # Check the complete runtime helper list before publishing a backup boundary.
+  # This manifest is reused after preparation; missing inputs cannot leave a
+  # prepared continuation that has not yet checked its own source dependencies.
+  world_source_manifest >"$fresh/source-input-sha256.txt"
+  sha256sum "$own/grain-runtime" >>"$fresh/source-input-sha256.txt"
+  [[ ${session_resume_prepared:-0} != 1 ]] || resume_args+=("$fresh/source-input-sha256.txt")
   continuation=$(python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --session-refusal \
-    "$run" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json")
+    "$run" "$spk" "$inventory" "$benchmark" "$repo" "$fresh/controller-export.json" "${resume_args[@]}")
   [[ $continuation == "$run/continuations/session-refusal-1" ]] || fail 'session continuation evidence path differs'
-  mkdir -m 700 "$continuation/bin"
   controller_runtime=$continuation/bin/grain-runtime
-  install -m 500 "$own/grain-runtime" "$controller_runtime"
-  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
-    "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent.py" \
-    "$installer" "$repo/deploy/spk-host/controller-world.py" "$controller_runtime" \
-    >"$continuation/recovery-input-sha256.txt"
+  recovery_manifest=$continuation/recovery-input-sha256.txt
+  if [[ ${session_resume_prepared:-0} == 1 ]]; then
+    recovery_manifest=$continuation/source-resume-1-input-sha256.txt
+    [[ $(sha256sum "$controller_runtime" | cut -d ' ' -f1) == $(sha256sum "$own/grain-runtime" | cut -d ' ' -f1) ]] || fail 'prepared runtime changed'
+  else
+    mkdir -m 700 "$continuation/bin"
+    install -m 500 "$own/grain-runtime" "$controller_runtime"
+  fi
+  (set -o noclobber; cat "$fresh/source-input-sha256.txt" >"$recovery_manifest")
+  sha256sum "$controller_runtime" >>"$recovery_manifest"
   preserve_existing_exit=0
   configured=1 controller_created=1 controller_staged=1
   timeout 120 sudo -n -- "$installer" controller-consent-storage "$store" "$helper" >"$continuation/consent-storage.json"

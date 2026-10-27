@@ -265,6 +265,23 @@ def session_continuation(run, require):
             sha(directory / 'prior/native-profile.json') == value['native_profile_sha256']
             and sha(directory / 'prior/host-config.json') == value['host_config_sha256']
             and sha(run / 'world/store/base/workroom/deployment/pinned-config.json') == value['host_config_sha256'])
+    resumed = None
+    if (directory / 'source-resume-1.json').exists():
+        resumed = read(directory / 'source-resume-1.json')
+        require('session_prepared_only_resume_exact',
+                resumed.get('schema') == 'mini-oracle-prepared-session-resume-v1'
+                and resumed.get('run') == str(run) and resumed.get('store') == value['store']
+                and resumed.get('prepared_sha256') == sha(directory / 'prepared.json')
+                and resumed.get('partial_manifest_sha256') == sha(directory / 'recovery-input-sha256.txt')
+                and resumed.get('failed_launch_sha256') == sha(Path(resumed['failed_launch_receipt']))
+                and resumed.get('existing_backup_reused') is True and resumed.get('repeated_phases') == []
+                and resumed.get('runtime_sha256') == sha(directory / 'bin/grain-runtime')
+                and resumed.get('execution_manifest') == str(directory / 'source-resume-1-input-sha256.txt'))
+        for name, digest in resumed['source_files'].items():
+            require('session_resumed_source_' + name, Path(name).is_absolute() and sha(Path(name)) == digest)
+        for line in (directory / 'source-resume-1-input-sha256.txt').read_text().splitlines():
+            digest, name = line.split(None, 1)
+            require('session_execution_source_' + name, Path(name).is_absolute() and sha(Path(name)) == digest)
     prior = read(directory / 'prior/agent-lifetime/session-birth.result.json')
     current = read(run / 'agent-lifetime/session-birth.result.json')
     require('session_new_tool_does_not_recast_original_failure',
@@ -281,7 +298,7 @@ def session_continuation(run, require):
             and upgrade.get('runtimeSha256') == sha(directory / 'bin/grain-runtime')
             and upgrade['runtimeSha256'] != upgrade['previousRuntimeSha256'])
     return {'prepared': value, 'prepared_sha256': sha(directory / 'prepared.json'),
-            'original_failed_tool': prior, 'runtime_upgrade': upgrade,
+            'original_failed_tool': prior, 'runtime_upgrade': upgrade, 'prepared_only_resume': resumed,
             'continuation_exit_path': str(directory / 'exit.json'),
             'scope': 'Same retained Store; original null-operation refusal preserved without ACK or resend. '
                      'Explicit source policy and native binding enrollments precede the new session attempt.'}
