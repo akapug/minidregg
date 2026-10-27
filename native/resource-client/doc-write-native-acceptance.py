@@ -40,7 +40,8 @@ try:
     (root/'draft-law.json').write_text(json.dumps(law))
     sh('doc-new',mini,'workspace','--action','doc-new','--dir',sponsor,'--name','paper','--predicate',root/'draft-law.json')
     out={}
-    for label,text in (('a1','first paragraph'),('a2','second paragraph, appended by the same member')):
+    texts=['first paragraph','second paragraph, appended by the same member']
+    for label,text in zip(('a1','a2'),texts):
         req={'type':'minidregg-workspace-proposal-v1','action':'invoke',
              'targets':[{'name':'paper','payload':{'type':'document','actions':[{'type':'append','text':text}]}}]}
         (root/f'{label}.json').write_text(json.dumps(req))
@@ -51,7 +52,9 @@ try:
         out[label]=o
     sh('read',mini,'workspace','--action','read','--dir',sponsor,'--name','paper')
     view=json.loads((T/'read.out').read_text())
-    if not all(t in json.dumps(view) for t in ('first paragraph','second paragraph')):raise SystemExit('readback: the appended text is not in the document')
+    payloads={e.get('payload') for e in view['cell']['entries'] if e.get('type')=='atom'}
+    for t in texts:
+        if t.encode().hex() not in payloads:raise SystemExit(f'readback: {t!r} is not an atom of the document')
     (root/'results').mkdir()
     (root/'results'/'doc-write.json').write_text(json.dumps(out,indent=1)+'\n')
     (root/'state.json').write_text(json.dumps({'type':'minidregg-doc-write-native-acceptance-v1','root':str(root),'bin':str(bin_),
