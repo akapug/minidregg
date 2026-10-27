@@ -16,12 +16,26 @@
 #     untrusted-tool-result wrapper, until the model stops;
 #   - streams the model's text back as ACP agent_message_chunk updates and a
 #     tool_call update per tool, then answers the prompt with end_turn.
-# The user message is the resident's assignment JSON (the text after
-# "Assignment: "); the deterministic librarian upstream decides only from it
-# and from the tool results. Holds no provider key: the gateway and broker do.
-import http.client, json, os, subprocess, sys, urllib.parse
+# The user message is the controller's prompt, verbatim (it ends
+# "Assignment: {json}"); the deterministic librarian upstream decides only from
+# that assignment and from the tool results. Holds no provider key: the gateway and broker do.
+import http.client, json, os, sqlite3, subprocess, sys, urllib.parse
 
 PREFIX = "mcp__mini_grain__"
+
+STATE_DB = "/workspace/.hermes/state.db"
+
+def remember(session, prompt_text, stop):
+    """Hermes keeps its sessions in HERMES_HOME/state.db; the controller
+    fingerprints that file to bind a completed turn. Private to the worker."""
+    if not os.path.exists(STATE_DB):
+        os.close(os.open(STATE_DB, os.O_CREAT | os.O_WRONLY, 0o600))
+    db = sqlite3.connect(STATE_DB)
+    db.execute("pragma journal_mode=delete")
+    db.execute("create table if not exists turns (session text, prompt text, stop text)")
+    db.execute("insert into turns values (?, ?, ?)", (session, prompt_text, stop))
+    db.commit(); db.close()
+    os.chmod(STATE_DB, 0o600)
 
 def send(message):
     sys.stdout.write(json.dumps(message) + "\n"); sys.stdout.flush()
@@ -108,8 +122,10 @@ def stream(base, key, body):
 
 def prompt(session, mcp, text):
     base, key, model, iterations = profile()
-    brief = text.rsplit("Assignment: ", 1)[-1]
-    messages = [{"role": "user", "content": brief}]
+    # The user turn is the controller's prompt exactly as received, as Hermes
+    # sends it: the controller binds the delivered reply to a provider request
+    # carrying that exact text (prefix and assignment).
+    messages = [{"role": "user", "content": text}]
     for _ in range(iterations):
         reply, calls, finish = stream(base, key, {"model": model, "messages": messages, "max_tokens": 64,
                                                   "stream": True, "stream_options": {"include_usage": True},
@@ -161,6 +177,7 @@ for raw in sys.stdin:
             note(f"prompt failed: {error}")
             send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": str(error)[:500]}})
             continue
+        remember(session, text, stop)
         send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": stop}})
     else:
         send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "method not found"}})

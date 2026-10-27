@@ -61,6 +61,7 @@ use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use crate::canonical::{hex as hex_bytes, hex64};
 
 const MAX_CONFIG: u64 = 16 * 1024;
 // Retained routes must remain loadable after the live registry grows. Keep
@@ -73,31 +74,8 @@ fn invalid(reason: &'static str) -> io::Error {
 }
 
 fn private_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("private file parent absent"))?;
-    private_dir(parent)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !path.is_absolute()
-        || !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > max
-    {
-        return Err(invalid("operator private file identity or size refused"));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != meta.len() || bytes.len() as u64 > max {
-        return Err(invalid("operator private file changed while reading"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("private file parent absent"))?)?;
+    crate::private_file::read(path, max, "operator private file identity or size refused")
 }
 
 #[derive(Deserialize)]
@@ -476,13 +454,6 @@ impl StartAction {
             Self::Continue { .. } => Err(invalid("START created index noncanonical")),
         }
     }
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn agent_socket_parent_overlap(earlier: &[FixedAgentConfig], socket: &Path) -> bool {
@@ -1793,7 +1764,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     write_new(&config.journal_dir, admitted_name, &admitted_bytes)?;
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
-    let mut resident = prepared.start(&journal, &claim.physical_begin)?;
+    // The last physical boundary before the one-shot spawn: fd5 is the exact
+    // directory the root witness attests, and the witness itself is unchanged
+    // since preflight (RUST-TRIAGE R15).
+    let mut resident = prepared.start_attested(&journal, &claim.physical_begin, &volume)?;
     // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
     // request is refused before it is sent, after the claim is committed.
     let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
@@ -1963,6 +1937,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     agent_fds.push(checkpoint.as_raw_fd());
     let route_control_index = agent_fds.len();
     agent_fds.push(route_control.as_raw_fd());
+    // The grain's publishing socket (apps/<app>/www.sock): anonymous GET/HEAD of
+    // the app's /var/www, read through the app-identity worker's descriptor.
+    let www = crate::www_publish::WwwListener::bind(&crate::www_publish::socket_for_journal(&config.journal_dir)?)?;
+    let www_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.listener));
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
@@ -2006,6 +1985,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         };
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
+        }
+        if index == www_index {
+            if let Err(error) = www.accept_one(|| resident.open_www()) {
+                eprintln!("spk-host: publishing connection refused: {error}");
+            }
+            return Ok(None);
         }
         if index == checkpoint_index {
             checkpoint.poll_once(&journal, || {
@@ -2177,15 +2162,6 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         }
         Ok(None)
     })
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        write!(out, "{byte:02x}").expect("writing to String");
-    }
-    out
 }
 
 fn deliver_request(

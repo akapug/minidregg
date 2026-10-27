@@ -404,35 +404,7 @@ pub(crate) fn fence_exact(
 }
 
 fn read_private_artifact(path: &Path, max: usize) -> io::Result<Vec<u8>> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
-    let before = file.metadata()?;
-    if !before.is_file()
-        || before.uid() != unsafe { libc::geteuid() }
-        || before.nlink() != 1
-        || before.permissions().mode() & 0o777 != 0o600
-        || before.len() == 0
-        || before.len() > max as u64
-    {
-        return Err(invalid("STOP recovery inspection file custody refused"));
-    }
-    let mut bytes = Vec::with_capacity(before.len() as usize);
-    file.by_ref().take(max as u64 + 1).read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != before.len()
-        || after.dev() != before.dev()
-        || after.ino() != before.ino()
-        || after.len() != before.len()
-        || after.mtime() != before.mtime()
-        || after.mtime_nsec() != before.mtime_nsec()
-        || after.ctime() != before.ctime()
-        || after.ctime_nsec() != before.ctime_nsec()
-    {
-        return Err(invalid("STOP recovery inspection changed during read"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max as u64, "STOP recovery inspection file custody refused")
 }
 
 fn retained_receipt(value: &Value) -> io::Result<ExactReceipt> {
@@ -474,7 +446,7 @@ pub(crate) fn resume_fenced_exact(
     let retained_committed =
         read_private_artifact(&attempt_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private_artifact(&attempt_dir.join("op26-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&original_frame, 26, COMMITTED_TAG)? != retained_committed {
+    if framed_payload(&original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)? != retained_committed {
         return Err(invalid("STOP recovery original op26 frame differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private_artifact(

@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 
 const HOST_MAX_FRAME: usize = 12_102_760;
 use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD, RESPONSE_PRIVATE_DISPATCH_NO_RECORD};
-const ROUTE_BOUND_DISPATCH_OPCODE: u8 = 164;
+use crate::canonical::hex;
+const ROUTE_BOUND_DISPATCH_OPCODE: u8 = crate::host_operations::APPLICATION_ROUTE_BOUND_DISPATCH;
 const NO_RECORD_REFUSAL: &[u8] = b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1";
 const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
@@ -32,15 +33,6 @@ const MAX_HELPER_STDERR: u64 = 64 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
 }
 
 fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
@@ -256,12 +248,18 @@ struct VerifiedImage {
 
 /// Holds the verified descriptor open for as long as the caller may execute
 /// it; the `/proc/self/fd` path is valid only while this value lives.
+#[derive(Debug)]
 pub(crate) struct VerifiedExecutable(std::sync::Arc<File>);
 
 impl VerifiedExecutable {
     pub(crate) fn path(&self) -> PathBuf {
         use std::os::fd::AsRawFd;
         PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()))
+    }
+}
+impl std::os::fd::AsRawFd for VerifiedExecutable {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0.as_raw_fd()
     }
 }
 
@@ -276,7 +274,7 @@ fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
 }
 
 /// Returns the retained descriptor of exactly the verified inode.
-fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
+pub(crate) fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
     verified_image_hashing(path, expected_sha256).map(|(image, _)| image)
 }
 
@@ -674,8 +672,9 @@ impl Drop for ContinuityAttemptDir {
 
 impl PrivateOperator {
     /// The pinned Host's Store key: `storeTag` in its `profile` output, Mini's
-    /// tag of this deployment's genesis seed identity
-    /// (`ApplicationLifecycleResidentProfile.storeTag`). Resident unit names,
+    /// tag of the Store identity, the genesis seed at the Store's root
+    /// (`NativeHost.Config.storeIdentity`, `ApplicationLifecycleResidentProfile.storeTag`).
+    /// Resident unit names,
     /// volumes, slices and the Store's state root all carry it; the physical
     /// host reads it from Mini and never derives its own.
     pub(crate) fn store_tag(&self, parent: &Path) -> io::Result<String> {
@@ -768,7 +767,7 @@ impl PrivateOperator {
             &attempt.0.join("continuity.bin"),
             deadline,
         )?;
-        let response = self.invoke_until(152, &request_bytes, deadline)?;
+        let response = self.invoke_until(crate::host_operations::APPLICATION_STREAM_RENEW, &request_bytes, deadline)?;
         let payload = response
             .get(5..)
             .ok_or_else(|| invalid("short continuity reply"))?;
@@ -963,13 +962,13 @@ fn author_signed_ingress(
         &request_bin,
         deadline,
     )?;
-    let plan_reply = operator.invoke_until(36, &request_bytes, deadline)?;
+    let plan_reply = operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_PLAN, &request_bytes, deadline)?;
     if plan_reply[4] != 36 {
         return Err(crate::dispatch_fence::refused_before_submit(
             operator,
             attempt_dir,
             operation_id,
-            36,
+            crate::host_operations::APPLICATION_DISPATCH_PLAN,
             &plan_reply,
         ));
     }
@@ -1001,13 +1000,13 @@ fn author_signed_ingress(
     pair.extend_from_slice(&(plan_bytes.len() as u32).to_le_bytes());
     pair.extend_from_slice(plan_bytes);
     pair.extend_from_slice(&signatures_bin);
-    let ingress_reply = operator.invoke_until(37, &pair, deadline)?;
+    let ingress_reply = operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_ASSEMBLE, &pair, deadline)?;
     if ingress_reply[4] != 37 {
         return Err(crate::dispatch_fence::refused_before_submit(
             operator,
             attempt_dir,
             operation_id,
-            37,
+            crate::host_operations::APPLICATION_DISPATCH_ASSEMBLE,
             &ingress_reply,
         ));
     }
@@ -1428,7 +1427,7 @@ impl PrivateOperator {
             &attempt.0.join("request.bin"),
             deadline,
         )?;
-        let response = self.invoke_until(154, &request_bytes, deadline)?;
+        let response = self.invoke_until(crate::host_operations::APPLICATION_ROUTE_INSPECT, &request_bytes, deadline)?;
         let payload = response
             .get(5..)
             .ok_or_else(|| invalid("short route admission reply"))?;
@@ -1530,11 +1529,7 @@ pub(crate) mod qualification {
             crate::dispatch_inspection::Route::Api { signed_path } => Some(signed_path),
         };
         if trigger.protocol != "mini-spk-dispatch-race-trigger-v1"
-            || trigger.nonce_hex.len() != 64
-            || !trigger
-                .nonce_hex
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::hex64(&trigger.nonce_hex)
             || trigger.app != custody.app
             || trigger.session != custody.session
             || trigger.subject != custody.subject
@@ -1887,7 +1882,7 @@ pub(crate) mod qualification {
                     "multiple" => vec![Ok(permit()), Ok(permit())],
                     _ => vec![Ok(permit()), Ok(receipt())],
                 };
-                let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+                let result = submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| {
                     select_winner(&replies, |_, p, _| {
                         let mut value = inspection(p);
                         if !p && mode == "receipt-drift" {
@@ -1907,7 +1902,7 @@ pub(crate) mod qualification {
                 // The undecided attempt is never resent; another call is not
                 // fenced by it (dispatch_fence bounds the undecided count).
                 assert!(
-                    submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| panic!(
+                    submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| panic!(
                         "uncertain race must never resubmit its own attempt"
                     ))
                     .is_err()
@@ -1920,7 +1915,7 @@ pub(crate) mod qualification {
             let root = super::super::tests::BoundFixture::new();
             let attempt = root.0.join("attempt");
             DirBuilder::new().mode(0o700).create(&attempt).unwrap();
-            let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+            let result = submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| {
                 await_go(
                     &attempt,
                     "nonce",
@@ -2137,7 +2132,7 @@ mod tests {
             (34, no_record_frame(), true),
             (
                 ROUTE_BOUND_DISPATCH_OPCODE,
-                frame(34, b"source committed permit"),
+                frame(crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"source committed permit"),
                 true,
             ),
             (
@@ -2148,7 +2143,7 @@ mod tests {
             (36, no_record_frame(), false),
             (
                 ROUTE_BOUND_DISPATCH_OPCODE,
-                frame(36, b"wrong operation"),
+                frame(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"wrong operation"),
                 false,
             ),
         ];
@@ -2286,7 +2281,7 @@ mod tests {
             .is_err());
             let b = root.attempt("b");
             let Submit::Frame(submitted) =
-                submit_once(&b, "2", b"b ingress", 34, b"b submission", |op, bytes| {
+                submit_once(&b, "2", b"b ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"b submission", |op, bytes| {
                     assert_eq!(op, 34);
                     assert_eq!(bytes, b"b submission");
                     Ok(b"private committed response".to_vec())
@@ -2352,7 +2347,7 @@ mod tests {
             // B is a different signed call: A's undecided marker is A's alone.
             let b = root.attempt("b");
             assert!(matches!(
-                submit_once(&b, "2", b"b ingress", 34, b"b submission", |_, _| Ok(
+                submit_once(&b, "2", b"b ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"b submission", |_, _| Ok(
                     historical.clone()
                 ))
                 .unwrap(),
@@ -2401,7 +2396,7 @@ mod tests {
             assert!(submitted.committed_payload().is_err());
             let b = root.attempt("b");
             assert!(matches!(
-                submit_once(&b, "2", b"ingress", 34, b"request", |_, _| Ok(valid.clone()))
+                submit_once(&b, "2", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"request", |_, _| Ok(valid.clone()))
                     .unwrap(),
                 Submit::NoRecord(_)
             ));
@@ -2510,7 +2505,7 @@ mod tests {
                 .unwrap();
         });
         assert_eq!(
-            operator.invoke(36, b"source request").unwrap(),
+            operator.invoke(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"source request").unwrap(),
             [5, 0, 0, 0, 36, b'p', b'l', b'a', b'n']
         );
         server.join().unwrap();
@@ -2531,7 +2526,7 @@ mod tests {
             )
             .is_err());
         fs::write(&config, b"{\"fixture\":false}").unwrap();
-        assert!(operator.invoke(36, b"source request").is_err());
+        assert!(operator.invoke(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"source request").is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

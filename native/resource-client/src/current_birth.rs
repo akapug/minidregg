@@ -61,7 +61,7 @@ impl Route {
 
 fn intent_from_frame(route: Route, frame: &[u8]) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "current {} birth authoring refused; retained encoded Host outcome",
             route.label()
         )),

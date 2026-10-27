@@ -39,6 +39,26 @@ const SSH_BLOB_PREFIX: [u8; 19] = [
 
 /// A door account name: `^[a-z][a-z0-9-]{1,24}$` (split tenancy logs in as `mini-s-NAME`,
 /// 32 characters at most), never reserved, never ending in `-`.
+/// The member's research-consent fact (ember's policy ruling, 2026-10-27): the reference
+/// `research-consent` in the member's own workspace, a declared cell under the open law, whose
+/// field 1 is 1 for CC0 (contributed for research) and 0 for none. The lines that write it at
+/// enrolment, as the member, through the same tenant path as every other enrolment step.
+pub const RESEARCH_CONSENT_REF: &str = "research-consent";
+pub const RESEARCH_CONSENT_FIELD: u32 = 1;
+pub const RESEARCH_CONSENT_ATTEMPT: &str = "research-consent-0";
+
+pub fn research_consent_lines(cc0: bool) -> [String; 3] {
+    [
+        format!("create {RESEARCH_CONSENT_REF} declared open"),
+        format!("invoke {RESEARCH_CONSENT_ATTEMPT} {RESEARCH_CONSENT_REF} create {RESEARCH_CONSENT_FIELD} {}", u8::from(cc0)),
+        format!("submit {RESEARCH_CONSENT_ATTEMPT}"),
+    ]
+}
+
+/// The sentence the join page, /subscribe and /export carry (ember's ruling, verbatim; one file,
+/// `deploy/policy/RETENTION.txt`, read by the door and the web body alike).
+pub const RETENTION_POLICY: &str = include_str!("../../../deploy/policy/RETENTION.txt").trim_ascii_end();
+
 pub fn is_door_name(s: &str) -> bool {
     let b = s.as_bytes();
     (2..=25).contains(&b.len())
@@ -158,7 +178,9 @@ impl Route {
 /// One spool file written by the form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    Join { id: String, at: u64, name: String, ssh_key: String, discord: bool, route: Route },
+    /// `research`: the stranger ticked "contribute my data for research (CC0; kept private until
+    /// reviewed)"; the processor writes it as the member's research-consent fact at enrolment.
+    Join { id: String, at: u64, name: String, ssh_key: String, discord: bool, route: Route, research: bool },
     /// The stranger's detached ssh signature over the paid-enrolment statement.
     Sign { id: String, at: u64, signature: String },
     /// The stranger's Solana transaction signature after paying.
@@ -190,8 +212,8 @@ impl Request {
 
     pub fn to_json(&self) -> Value {
         match self {
-            Request::Join { id, at, name, ssh_key, discord, route } => json!({"type":REQUEST_TYPE,"kind":"join",
-                "id":id,"at":at,"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word()}),
+            Request::Join { id, at, name, ssh_key, discord, route, research } => json!({"type":REQUEST_TYPE,"kind":"join",
+                "id":id,"at":at,"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research}),
             Request::Sign { id, at, signature } => json!({"type":REQUEST_TYPE,"kind":"sign","id":id,"at":at,"signature":signature}),
             Request::Paid { id, at, transaction } => json!({"type":REQUEST_TYPE,"kind":"paid","id":id,"at":at,"transaction":transaction}),
         }
@@ -203,7 +225,12 @@ impl Request {
         let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
         let request = match kind {
             "join" => {
-                let o = exact(&value, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route"])?;
+                // `research` is required of every request the form writes now; a request queued
+                // before it existed reads as not ticked.
+                let o = match exact(&value, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route", "research"]) {
+                    Ok(o) => o,
+                    Err(_) => exact(&value, &["type", "kind", "id", "at", "name", "sshKey", "discord", "route"])?,
+                };
                 let name = text(o, "name")?;
                 if !is_door_name(name) {
                     return Err(format!("{name:?} is not a door name"));
@@ -228,6 +255,7 @@ impl Request {
                     ssh_key,
                     discord: o.get("discord").and_then(Value::as_bool).ok_or("discord is not a boolean")?,
                     route,
+                    research: match o.get("research") { None => false, Some(v) => v.as_bool().ok_or("research is not a boolean")? },
                 }
             }
             "sign" => {
@@ -472,7 +500,7 @@ mod tests {
     #[test]
     fn requests_round_trip_and_anything_else_refuses() {
         let id = new_request_id().unwrap();
-        let join = Request::Join { id: id.clone(), at: 7, name: "alice".into(), ssh_key: KEY.into(), discord: true, route: Route::Paid };
+        let join = Request::Join { id: id.clone(), at: 7, name: "alice".into(), ssh_key: KEY.into(), discord: true, route: Route::Paid, research: true };
         let bytes = serde_json::to_vec(&join.to_json()).unwrap();
         assert_eq!(Request::parse(&bytes).unwrap(), join);
         assert_eq!(join.file_name(), format!("join-{id}.json"));

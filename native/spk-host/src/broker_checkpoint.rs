@@ -77,11 +77,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
             || !decimal(&b.generation)
             || request.protocol != "mini-spk-checkpoint-control-v1"
             || request.action != "pause"
-            || !(request.nonce_hex.len() == 64
-                && request
-                    .nonce_hex
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+            || !(crate::canonical::hex64(&request.nonce_hex))
         {
             return Err(invalid("checkpoint pause selector invalid"));
         }

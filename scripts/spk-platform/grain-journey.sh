@@ -424,15 +424,17 @@ delegate_observe() (
   confirmed "$D-attempt/outcome.json"
 )
 
-# share LABEL APP SESSION TICKET CAP NONCE KIND: session birth, event22 ticket
-# and event28 enrollment for participant 8, then `spk-host grain route`.
+# share LABEL APP SESSION TICKET CAP NONCE KIND [ROUTE]: session birth, event22
+# ticket and event28 enrollment for participant 8, then `spk-host grain route`.
+# LABEL is the app's letter, or letter+digit for a second browser session on the
+# same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
-  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7
+  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   birth_session "$label" "$nonce" "$app" "$session" "$kind" "$cap"
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
@@ -490,12 +492,13 @@ share() (
   fi
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
-  jq -n --arg name "owner-$kind" --arg session "$EV/$label-session-author/source.json" \
+  case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
+  jq -n --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
-    --arg seed "$WR/tool.key" \
+    --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
     {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
-     displayName:"Grain owner",preferredHandle:"owner",sessionSource:$session,
+     displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
     >"$EV/$label-route-request.json"
@@ -508,9 +511,9 @@ share() (
 enroll() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
@@ -611,7 +614,7 @@ http_post() (
 # Mini to author, sign and admit it (op36/37/34), then delivers it over fd3.
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
-  dir=$STATE/apps/$app/routes/owner-$kind
+  dir=$STATE/apps/$app/routes/${5:-owner-$kind}
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
@@ -827,11 +830,19 @@ run_phase() {
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
           "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
       fi ;;
-    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind" ;;
-    enroll) step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
-      $((base + 2000 + ${n:-1} * 1000)) ;;
+    # A trailing 2 (share-b2, enroll-b2, get-b2) is a second browser session on the
+    # same grain: session ${P}50, ticket ${P}30, capabilities 3${i}51.. (ticket
+    # 3${i}81..), route guest2-KIND, nonces from base + 6000.
+    share) if [ "$n" = 2 ]; then
+        step "$phase" share "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 6000)) "$kind" "guest2-$kind"
+      else step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind"; fi ;;
+    enroll) if [ "$n" = 2 ]; then
+        step "$phase" enroll "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 7000))
+      else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
+        $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
-    get) step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" ;;
+    get) if [ "$n" = 2 ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
+      else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
     poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
     floor) step "$phase" floor "$app" ;;

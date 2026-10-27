@@ -59,6 +59,7 @@ import Host.ResidentContextInspection
 import Host.ObjectiveActivityJson
 import Host.SeatJson
 import Lean.Data.Json
+import Kernel.NativeHostStoreIdentity
 
 namespace Minidregg.Host.Json
 
@@ -2029,25 +2030,50 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
 /-- info: 'Minidregg.Host.Json.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms grainPolicy_unnamed_worker_refused
 
+/-! ### Any holder of a delegated grant may make the birth witness (ruling Option A)
+
+The holder form is `AgentGrain.holderPolicy` (its theorems are there); the grain author
+selects it with `holderWitnessGeneration`. -/
+
+private def grainTaskPolicy (owner : Nat) : Option AgentGrain.GrainWitness → Minidregg.Pred.Pred
+  | none => grainPolicy owner none
+  | some (.workers subjects generation) => grainPolicy owner (some (subjects, generation))
+  | some (.holders generation) => AgentGrain.holderPolicy owner generation
+
+/-- Teeth of the ruling: the witness touch `AgentGrain.holderPolicy_member_witness_admitted`
+admits for a member (99) is refused under the named-worker form (worker 8): the refusal L13
+measured on the parent task. -/
+theorem grainPolicy_member_witness_refused :
+    Minidregg.Pred.eval (grainPolicy 7 (some ([8], 1))) (AgentGrain.witnessTouchState 99)
+      (AgentGrain.witnessTouchState 99) = false := by
+  decide +kernel
+
+#assert_axioms grainPolicy_member_witness_refused
+
 private def grainWorker (path : String)
-    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
-  match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration" with
-  | none, none, none => pure none
-  | some subject, none, some generation =>
-      pure (some ([← nat (path ++ ".workerSubject") subject],
-        ← int (path ++ ".workerGeneration") generation))
-  | none, some subjects, some generation =>
+    (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option AgentGrain.GrainWitness) := do
+  match obj.get? "workerSubject", obj.get? "workerSubjects", obj.get? "workerGeneration",
+      obj.get? "holderWitnessGeneration" with
+  | none, none, none, none => pure none
+  | some subject, none, some generation, none =>
+      pure (some (AgentGrain.GrainWitness.workers [← nat (path ++ ".workerSubject") subject]
+        (← int (path ++ ".workerGeneration") generation)))
+  | none, some subjects, some generation, none =>
       let values ← list (path ++ ".workerSubjects") nat subjects
       unless 1 ≤ values.length ∧ values.length ≤ 4 do
         failAt (path ++ ".workerSubjects") "expected 1 through 4 subjects"
       unless values.Nodup do
         failAt (path ++ ".workerSubjects") "subjects must be distinct"
-      pure (some (values, ← int (path ++ ".workerGeneration") generation))
-  | _, _, _ => failAt path "workerSubject or workerSubjects and workerGeneration must be supplied exclusively"
+      pure (some (AgentGrain.GrainWitness.workers values (← int (path ++ ".workerGeneration") generation)))
+  | none, none, none, some generation =>
+      pure (some (AgentGrain.GrainWitness.holders (← int (path ++ ".holderWitnessGeneration") generation)))
+  | _, _, _, _ =>
+      failAt path "workerSubject or workerSubjects with workerGeneration, or holderWitnessGeneration, exclusively"
 
 private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) : List String :=
   if (obj.get? "workerSubject").isSome then ["workerSubject", "workerGeneration"]
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
+  else if (obj.get? "holderWitnessGeneration").isSome then ["holderWitnessGeneration"]
   else []
 
 /-- The factory template an authoring request names. `birthSlack` is optional
@@ -2197,8 +2223,8 @@ private def birthParts (path : String)
   let schedule := if storage = "grain" then providerRoutes.lookup target else none
   let rulePredicate ← if storage = "grain" then
       pure <| match schedule with
-        | some routes => ProviderRoute.policy routes (grainPolicy owner.value worker)
-        | none => grainPolicy owner.value worker
+        | some routes => ProviderRoute.policy routes (grainTaskPolicy owner.value worker)
+        | none => grainTaskPolicy owner.value worker
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -2811,8 +2837,8 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json)
   unless current.semantics = semantics do
     failAt (path ++ ".semantics") "does not match current policy source"
   let nextPredicate := match providerRoutes.lookup task with
-    | some routes => ProviderRoute.policy routes (grainPolicy owner (some worker))
-    | none => grainPolicy owner (some worker)
+    | some routes => ProviderRoute.policy routes (grainTaskPolicy owner (some worker))
+    | none => grainTaskPolicy owner (some worker)
   let source : PolicyRecord :=
     { current with
       version := version + 1
@@ -2935,11 +2961,12 @@ private def agentLifetimePaidRequest (json : Lean.Json) : Result (List UInt8) :=
 private def completionDigest (path : String) (json : Lean.Json) : Result Digest :=
   return ⟨← nat path json⟩
 
-/-- The resident signed-SPK profile names units by Store (`Config.expectedSeed`):
-its authoring kinds run only against a deployed config. -/
+/-- The resident signed-SPK profile names units by Store identity
+(`Config.storeIdentity`: the genesis seed at the Store's root): its authoring kinds
+run only against a deployed config. -/
 private def residentStore (deployed : Option NativeHost.Config) : Result Digest :=
   match deployed with
-  | some config => pure config.expectedSeed
+  | some config => pure config.storeIdentity
   | none => throw "resident signed-SPK authoring needs the deployed config (its Store names the unit)"
 
 /-- Validate an already signed BEGIN-v2 frame for this physical host profile.
@@ -3748,8 +3775,8 @@ def author (kind : String) (json : Lean.Json)
         | some value => some <$> nat "$.task" value
         | none => pure none
       let policy := match task.bind (fun t => providerRoutes.lookup t) with
-        | some routes => ProviderRoute.policy routes (grainPolicy owner worker)
-        | none => grainPolicy owner worker
+        | some routes => ProviderRoute.policy routes (grainTaskPolicy owner worker)
+        | none => grainTaskPolicy owner worker
       pure (NativeHostGenesis.predicateStream.encode policy)
   | "grain-caveat" => do
       let obj ← exactObject "$" ["generation"] json

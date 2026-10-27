@@ -259,7 +259,7 @@ ok room alice "room invite i-bob lab $B @decl-lab-bob.json --verbs observe,place
 check room "the grant is K-ROOM's delegation under lab (not yet submitted)" \
   jq -e --arg lab "$LAB" '.purpose.draft.command.child.room == $lab' "$WS/alice/proposals/i-bob/intent.json"
 check room "the release records were bound first (turn 1), then the wrap disclosed (turn 2): both admitted" \
-  sh -c "jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-bind/outcome.json' && jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-wraps/outcome.json'"
+  sh -c "\"\$MINI\" attempt-state --attempt '$WS/alice/attempts/i-bob-keys-bind' --file outcome.json | jq -e '.type == \"confirmed\"' && \"\$MINI\" attempt-state --attempt '$WS/alice/attempts/i-bob-keys-wraps' --file outcome.json | jq -e '.type == \"confirmed\"'"
 check room "turn 1 carried no ciphertext (commitments only); the wrap atom of turn 2 is 1532 bytes: key id, hybrid wrap, grant, certificate, delivery" \
   sh -c "! grep -q 'DREGG' '$WS/alice/proposals/i-bob-keys-bind/intent.json' && jq -e '[.purpose.draft.command.targets[0].payload.actions[].payload | length / 2] == [1532]' '$WS/alice/proposals/i-bob-keys-wraps/intent.json'"
 exported room alice i-bob

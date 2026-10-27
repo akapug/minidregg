@@ -29,11 +29,14 @@ const conn = {
   sendRawTransaction: async (raw) => { sent = raw; return fakeSignature; },
 };
 const provider = { name: "Fake", publicKey: payer.publicKey, async connect() { return { publicKey: payer.publicKey }; }, async signTransaction(tx) { tx.partialSign(payer); return tx; } };
-const fetchImpl = async (url, options) => { posted = { url, options }; return { status: 200 }; };
+let sentBeforePost = null;
+const fetchImpl = async (url, options) => { posted = { url, options }; sentBeforePost = onSentSeen; return { status: 200, ok: true, text: async () => "" }; };
+let onSentSeen = null;
 
 const pay = makeDoorPay(web3, quote, { conn, fetch: fetchImpl });
 const said = [];
-const result = await pay.pay(provider, (t) => said.push(t));
+const result = await pay.pay(provider, (t) => said.push(t), (sig) => { onSentSeen = sig; });
+assert.equal(sentBeforePost, fakeSignature, "the payer holds the signature before the door is asked (fix 2)");
 
 const tx = web3.Transaction.from(sent);
 assert.equal(tx.instructions.length, 2, "one transfer and one memo");
@@ -54,11 +57,45 @@ assert.equal(result.signature, fakeSignature);
 assert.equal(posted.url, "/join/paid");
 assert.equal(posted.options.method, "POST");
 assert.equal(posted.options.body, "id=7f3a&transaction=" + fakeSignature, "the paste path's field, filled automatically");
-assert.ok(said.some((t) => t.startsWith("the wallet is signing")) && said.some((t) => t.startsWith("posting")));
+assert.ok(said.some((t) => t.startsWith("the wallet is signing")) && said.some((t) => t.startsWith("sent " + fakeSignature)));
 
 // A missing recipient account is refused before anything is signed; nothing is created.
 let signedWhenMissing = false;
 const refusing = makeDoorPay(web3, quote, { conn: { ...conn, getAccountInfo: async () => null }, fetch: fetchImpl });
 await assert.rejects(refusing.pay({ ...provider, async signTransaction(tx) { signedWhenMissing = true; return tx; } }), /does not exist/);
 assert.equal(signedWhenMissing, false);
+// Fix 6: a wallet that swaps the recipient's account is refused before anything is sent.
+{
+  let sentSwapped = false;
+  const thief = web3.Keypair.generate().publicKey;
+  const swapping = makeDoorPay(web3, quote, { conn: { ...conn, sendRawTransaction: async () => { sentSwapped = true; return fakeSignature; } }, fetch: fetchImpl });
+  const evil = { ...provider, async signTransaction(tx) {
+    const t = web3.Transaction.from(tx.serialize({ requireAllSignatures: false, verifySignatures: false }));
+    t.instructions[0].keys[2].pubkey = swapping.ata(thief);
+    t.partialSign(payer); return t; } };
+  await assert.rejects(swapping.pay(evil), /refused, nothing was sent: instruction 0 names other accounts/);
+  assert.equal(sentSwapped, false, "the swapped transaction never reaches the cluster");
+}
+
+// Fix 1: a door that refuses the POST (409, 429) is said as a refusal naming the signature, never "posted".
+{
+  let held = null;
+  const refusing409 = makeDoorPay(web3, quote, { conn, fetch: async () => ({ status: 409, ok: false, text: async () => "<h1>Not accepted</h1><p>this step is already queued</p><p><a href=/join>Back</a></p>" }) });
+  await assert.rejects(refusing409.pay(provider, () => {}, (s) => { held = s; }),
+    (e) => /did not accept it \(409: this step is already queued\)/.test(e.message) && e.message.includes(fakeSignature) && /Do not pay again/.test(e.message));
+  assert.equal(held, fakeSignature);
+}
+
+// Fix 3: a quote past its expiry hour is refused before the wallet is asked to sign.
+{
+  let asked = false;
+  const old = { ...quote, expiryHour: "1001", asOfHour: "1000", quotedAt: 1_000_000 };
+  const later = makeDoorPay(web3, old, { conn, fetch: fetchImpl, now: () => (1_000_000 + 2 * 3600 + 5) * 1000 });
+  assert.match(later.stale(), /expired at processing-chain hour 1001 \(it is now about hour 1002\)/);
+  await assert.rejects(later.pay({ ...provider, async signTransaction(tx) { asked = true; return tx; } }), /expired/);
+  assert.equal(asked, false);
+  const fresh = makeDoorPay(web3, old, { conn, fetch: fetchImpl, now: () => (1_000_000 + 1800) * 1000 });
+  assert.equal(fresh.stale(), null, "inside the hour the quote stands");
+}
+
 console.log("ok: transfer " + amount + " atomic (decimals 6) " + ata(payer.publicKey).toBase58().slice(0, 6) + "… -> " + ata(recipient).toBase58().slice(0, 6) + "…, memo " + JSON.stringify(quote.memo) + ", posted " + fakeSignature.slice(0, 8) + "…");

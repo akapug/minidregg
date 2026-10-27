@@ -90,23 +90,16 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 }
 
 fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, value.to_string().as_bytes()))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, value.to_string().as_bytes()))
 }
 
 fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("activity: invalid Host inspection of {kind}: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
 fn view(ws: &Ws, request: &Value) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 214, request.to_string().as_bytes())?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::ACTIVITY_VIEW, request.to_string().as_bytes())?)
         .map_err(|error| format!("activity: invalid view: {error}"))
 }
 
@@ -196,7 +189,7 @@ fn plan_command(ws: &Ws, command: &Value, out: &Path) -> Result<(Vec<u8>, Value)
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "objective-activity", command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;
-    let plan = invoke(ws, 210, &command_bytes)?;
+    let plan = invoke(ws, mini_sdk::host_operations::ACTIVITY_PLAN, &command_bytes)?;
     write_new(&out.join("plan.bin"), &plan)?;
     let inspected = inspect(ws, "objective-activity-plan", &plan)?;
     Ok((plan, inspected))
@@ -312,9 +305,9 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
     let (plan, inspected) = plan_command(ws, &command_for(ws, &turn, &authority, nonce.as_deref())?, out)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("activity: plan lacks a header")?;
-    let header = crate::decode_hex(canonical).map_err(|error| format!("activity: {error}"))?;
+    let header = mini_sdk::hex::decode(canonical).map_err(|error| format!("activity: {error}"))?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
-    let ingress = invoke(ws, 211, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::ACTIVITY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     write_new(&out.join("ingress.bin"), &ingress)?;
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
     // What the decided turn returns (an invocation's result), shown before signing; null otherwise.
@@ -330,7 +323,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
             "report": report, "verdict": verdict, "frontEnd": front_end})
     } else {
         mark_submitted(out)?;
-        let mut outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
+        let mut outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::ACTIVITY_SUBMIT, &ingress)?)?;
         write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
         outcome["transaction"] = transaction;
         outcome["report"] = report;

@@ -17,6 +17,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::canonical::hex;
 
 const PROTOCOL: &str = "mini-spk-saved-identity-v1";
 const MAX_RECORD: usize = 4096;
@@ -27,10 +28,6 @@ pub struct FileIdentityCustody {
 
 fn invalid(reason: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.into())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn token_name(token: &[u8]) -> Option<String> {

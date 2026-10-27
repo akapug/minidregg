@@ -53,6 +53,7 @@ pub(super) fn seal(audience:&Audience,action:&mut Value,nonce:&[u8;32],store:&mu
         if !is_kind(&before["kind"])||before["payload"]!=""||!before["tombstonedAt"].is_null(){return Err("only live authored text can be rewrapped".into());}
         action["wrapping"]=json!(fragments::rewrap(audience,&before["kind"]["fragment"],nonce,store,writer)?);
     }else{
+        // The action JSON is operator-authored; its payload hex may be typed.
         let plain=Zeroizing::new(crate::decode_hex(text(action,"payload")?)?);
         let version=next_version(action)?;
         let fragment=fragments::seal(audience,&binding(text(action,"atom")?,&version)?,nonce,&plain,store,writer)?;

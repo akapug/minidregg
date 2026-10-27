@@ -58,6 +58,14 @@ pub mod api_session_capnp {
     include!(concat!(env!("OUT_DIR"), "/api_session_capnp.rs"));
 }
 #[allow(clippy::all)]
+pub mod email_capnp {
+    include!(concat!(env!("OUT_DIR"), "/email_capnp.rs"));
+}
+
+pub mod hack_session_capnp {
+    include!(concat!(env!("OUT_DIR"), "/hack_session_capnp.rs"));
+}
+
 pub mod package_rust_capnp {
     include!(concat!(env!("OUT_DIR"), "/package_rust_capnp.rs"));
 }

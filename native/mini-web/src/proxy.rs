@@ -24,12 +24,28 @@ pub struct Fragment {
     pub location: Option<String>,
 }
 
+/// A body answer that is a file to save (`Content-Disposition: attachment`, the member's export):
+/// the gateway streams it from the body to the browser and never holds it whole.
+pub struct Download {
+    pub content_type: String,
+    pub disposition: String,
+    pub length: Option<u64>,
+    /// Bytes already read past the body's response head.
+    pub first: Vec<u8>,
+    pub stream: UnixStream,
+}
+
+pub enum Answer {
+    Page(Fragment),
+    Download(Download),
+}
+
 pub enum Target<'a> {
     Session(&'a str),
     Public,
 }
 
-pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Fragment, (u16, String)> {
+pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Answer, (u16, String)> {
     let ask = match target {
         Target::Session(sid) => Helper::Body { sid: Some(sid.to_owned()) },
         Target::Public => Helper::Body { sid: None },
@@ -59,11 +75,21 @@ pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Fragm
     stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(&body)).map_err(|e| (502, format!("writing to the body: {e}")))?;
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 16384];
+    let mut decided = false;
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => break,
             Ok(n) => {
                 bytes.extend_from_slice(&buffer[..n]);
+                if !decided {
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        decided = true;
+                        if let Some((content_type, disposition, length)) = download_head(&bytes[..end + 4]) {
+                            let first = bytes[end + 4..].to_vec();
+                            return Ok(Answer::Download(Download { content_type, disposition, length, first, stream }));
+                        }
+                    }
+                }
                 if bytes.len() > MAX_ANSWER {
                     return Err((502, "the body's answer exceeds the limit".into()));
                 }
@@ -75,12 +101,38 @@ pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Fragm
         }
     }
     let response: Response = parse_response(&bytes).map_err(|e| (502, e))?;
-    Ok(Fragment {
+    Ok(Answer::Page(Fragment {
         status: response.status,
         title: response.header("x-mini-title").unwrap_or("Mini").to_owned(),
         html: String::from_utf8_lossy(&response.body).into_owned(),
         location: response.header("location").map(str::to_owned),
-    })
+    }))
+}
+
+/// A 200 head naming an attachment, with a content type and a safe file name (no quote, no
+/// path, no control byte), is a download: (content type, disposition, length); anything else is a page.
+fn download_head(head: &[u8]) -> Option<(String, String, Option<u64>)> {
+    let text = std::str::from_utf8(head).ok()?;
+    let mut lines = text.split("\r\n");
+    if !lines.next()?.starts_with("HTTP/1.1 200 ") {
+        return None;
+    }
+    let (mut kind, mut disposition, mut length) = (None, None, None);
+    for line in lines {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        match k.trim().to_ascii_lowercase().as_str() {
+            "content-type" => kind = Some(v.trim().to_owned()),
+            "content-disposition" => disposition = Some(v.trim().to_owned()),
+            "content-length" => length = v.trim().parse().ok(),
+            _ => {}
+        }
+    }
+    let disposition = disposition?;
+    let name = disposition.strip_prefix("attachment; filename=\"")?.strip_suffix('"')?;
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)) {
+        return None;
+    }
+    Some((kind?, disposition, length))
 }
 
 fn target_of(request: &Request) -> String {
@@ -99,6 +151,16 @@ fn target_of(request: &Request) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_200_attachment_with_a_plain_file_name_is_a_download() {
+        let h = |s: &str| download_head(s.as_bytes());
+        assert_eq!(h("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Disposition: attachment; filename=\"mini-alice.tar\"\r\nContent-Length: 10\r\n\r\n"),
+            Some(("application/x-tar".into(), "attachment; filename=\"mini-alice.tar\"".into(), Some(10))));
+        assert_eq!(h("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"), None);
+        assert_eq!(h("HTTP/1.1 500 X\r\nContent-Type: application/x-tar\r\nContent-Disposition: attachment; filename=\"a.tar\"\r\n\r\n"), None);
+        assert_eq!(h("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Disposition: attachment; filename=\"../a.tar\"\r\n\r\n"), None);
+    }
 
     #[test]
     fn the_target_is_reencoded() {

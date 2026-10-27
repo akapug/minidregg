@@ -18,30 +18,14 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use crate::canonical::{decimal, lower_hex};
+pub(crate) use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
 const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v6";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn lower_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -744,7 +728,7 @@ pub(crate) fn authorize_once(
         "application-agent-paid-request",
         &paid_json,
     )?;
-    let paid_plan = reply(&operator.invoke(48, &paid_request)?, 48)?.to_vec();
+    let paid_plan = reply(&operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_PLAN, &paid_request)?, crate::host_operations::AGENT_PAID_DISPATCH_PLAN)?.to_vec();
     let paid_view = source_inspect(
         operator,
         attempt_dir,
@@ -788,8 +772,8 @@ pub(crate) fn authorize_once(
     let payer_bytes = signatures(operator, attempt_dir, "payer-signatures", &payer)?;
     let paid_signatures = pair(&app_bytes, &payer_bytes)?;
     let ingress = reply(
-        &operator.invoke(49, &pair(&paid_plan, &paid_signatures)?)?,
-        49,
+        &operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE, &pair(&paid_plan, &paid_signatures)?)?,
+        crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE,
     )?
     .to_vec();
     write_new(attempt_dir, "paid-ingress.bin", &ingress)?;
@@ -817,9 +801,9 @@ pub(crate) fn authorize_once(
         File::open(parent)?.sync_all()?;
         return Err(invalid("agent caller cancelled before op46"));
     }
-    let frame = operator.invoke(46, &ingress)?;
+    let frame = operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op46-frame.bin", &frame)?;
-    let permit = reply(&frame, 46)?;
+    let permit = reply(&frame, crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT)?;
     if !permit.starts_with(COMMITTED)
         || permit.len() <= COMMITTED.len()
         || permit.starts_with(OUTCOME)
@@ -873,8 +857,8 @@ mod tests {
     fn committed_agent_requires_exact_op46_and_distinct_tag() {
         let mut permit = COMMITTED.to_vec();
         permit.push(1);
-        assert_eq!(reply(&frame(46, &permit), 46).unwrap(), permit);
-        assert!(reply(&frame(47, &permit), 46).is_err());
+        assert_eq!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).unwrap(), permit);
+        assert!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_LOOKUP, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).is_err());
         assert!(!OUTCOME.starts_with(COMMITTED));
         assert!(pair(b"abc", b"def")
             .unwrap()

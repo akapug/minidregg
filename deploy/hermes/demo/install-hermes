@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# install-hermes STEP...  —  the room resident (Hermes) on the demo box.
+#
+# The exact sequence J14 runs (native/resource-client/journey.d/j14.sh), with
+# the box's paths and dregg-infra's controller registration
+# (controller-entry.py: mini-controller-register, mini-grain-controller@TASK,
+# mini-grain-resident@TASK). Run as root; every Mini command runs as the
+# service account through runuser. Steps, in order (each refuses to redo a
+# finished step):
+#
+#   preflight  the Store pins Hermes's purse tariff; the provider table has the
+#              pool row for the model; broker client; operator socket; launcher
+#   subjects   enroll hermes (room key and tool worker), hhost (parent owner),
+#              hprov (provider worker) and the founder; provision + init the
+#              founder and Hermes
+#   room       the founder's room, its index and the hermes/turn price
+#   runtime    the bwrap launcher and the Hermes runtime root
+#   create     grain-runtime create: Hermes's grain and controller.json
+#   handoff    register Hermes's task for the room; the registry the summon reads
+#   summon     the founder summons Hermes as librarian with a budget
+#   controller controller.json names the summoned account; register; start
+#              mini-grain-controller@TASK
+#   dispatch   the sealed hand-off into Hermes's registered inbox
+#   resident   resident.json names the delivered assignment inbox; with both
+#              units stopped, register the resident too; start
+#              mini-grain-controller@TASK and mini-grain-resident@TASK
+#              (continuous: one pass per intervalSeconds)
+#
+# Inputs (environment; defaults are the box layout of dregg-infra edge/mini):
+#   SVC (mini-core)  CAND (/var/lib/mini/candidate/current)  NODE (/var/lib/mini/store/node)
+#   HERMES_ROOT      a runtime root from deploy/hermes/build-runtime-root (required at `runtime`)
+#   ROOM (hermes-lab)  BUDGET (1000)  PRICE (10)  FOUNDER_FUNDING (5000)
+#   POOL_ROW         the provider-table row to pin (default: the pool row listing MODEL)
+#   INSTANCE (hermes) BASE (9870000) MODEL (meta-llama/llama-3.1-8b-instruct)
+#                    a second resident beside the first: its own subjects (INSTANCE-NAME),
+#                    its own state under /var/lib/mini/INSTANCE, tasks BASE+1..3 and
+#                    capabilities BASE+11..16, gateway port 18761+(BASE-9870000)/1000
+#   TIER             set (e.g. TIER=1 for the subscriber tier): the room is a concierge
+#                    workroom with a chat roster, `week` WEEK (4000) per PERIOD (43200
+#                    heights: 30 days at one tick a minute), open to any enrolled payer;
+#                    step `concierge` writes its controller config and timer
+#
+#   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
+#     INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+#       HERMES_ROOT=OUT install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+set -euo pipefail
+SVC=${SVC:-mini-core}
+# The archived candidate by its real path: the registration compares the
+# controller's mini/host paths with the root-pinned image.
+CAND=${CAND:-$(readlink -f /var/lib/mini/candidate/current)}
+NODE=${NODE:-/var/lib/mini/store/node}
+ROOM=${ROOM:-hermes-lab} BUDGET=${BUDGET:-1000} PRICE=${PRICE:-10} FOUNDER_FUNDING=${FOUNDER_FUNDING:-5000}
+INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000} MODEL=${MODEL:-meta-llama/llama-3.1-8b-instruct}
+case $INSTANCE in *[!a-z0-9]*|'') echo "install-hermes: INSTANCE must be lowercase letters and digits" >&2; exit 64 ;; esac
+case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; exit 64 ;; esac
+TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
+PARENT_T=$((BASE + 1)) TOOL_T=$((BASE + 2)) PURSE_T=$((BASE + 3))
+GATEWAY_PORT=$((18761 + (BASE - 9870000) / 1000))
+V=/var/lib/mini/$INSTANCE          # under the registration's allowed write roots
+G=$V/g                            # controller cwd; controller.json lives here
+S=$G/state                        # stateDir (room workspace/home/resident state are direct children)
+H=$V/homes                        # subject homes (keys), private to SVC
+WS=$V/workspaces                  # subject workspaces
+RECORD=$V/install                 # per-step records (outputs this script reads back)
+MINI=$CAND/bin/mini HOST=$CAND/bin/minidregg-host GRAIN=$CAND/bin/grain-runtime
+BRIDGE=$CAND/bin/grain-provider-bridge LAUNCH_GATE=$CAND/bin/launch-gate
+CONFIG=$NODE/deployment/pinned-config.json
+SOCKET=$NODE/operator/mini.sock
+SPONSOR_WS=$NODE/sponsor
+PARAMS=/etc/mini/genesis-params.json
+PTABLE=/etc/mini/providers.json KEYS_CLIENT=/etc/mini/keys-client.json
+here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO=$(CDPATH='' cd -- "$here/../../.." && pwd)
+
+die() { echo "install-hermes: $*" >&2; exit 1; }
+as_svc() { runuser -u "$SVC" -- "$@"; }
+sh_line() { # WHO LINE: one shell line in WHO's workspace and home, as SVC
+  local who=$1; shift
+  as_svc "$MINI" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" \
+    --workspace "$(ws_of "$who")" --home "$H/$who" --line "$1"
+}
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
+done_step() { [ -e "$RECORD/$1.done" ]; }
+mark() { as_svc touch "$RECORD/$1.done"; echo "install-hermes: $1 done"; }
+subject() { jq -r .subject "$RECORD/subject-$1.json"; }
+
+step_preflight() {
+  [ "$(id -u)" = 0 ] || die "run as root"
+  for x in "$MINI" "$HOST" "$GRAIN" "$BRIDGE" "$LAUNCH_GATE" "$CONFIG" "$PARAMS" "$PTABLE" "$KEYS_CLIENT"; do
+    [ -e "$x" ] || die "missing $x"; done
+  [ -S "$SOCKET" ] || die "no operator socket $SOCKET (mini serve-operator)"
+  as_svc "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG" >/dev/null \
+    || die "the operator socket does not answer operator-status"
+  jq -e --argjson p "$PURSE_T" --arg m "$MODEL" \
+    '.providerServices // [] | any(.providerResourceId == $p and .tariff.model == $m)' "$CONFIG" >/dev/null \
+    || die "the pinned config carries no providerServices tariff for purse $PURSE_T and $MODEL (deploy/hermes/demo/provider-services.json belongs in operator.json at genesis)"
+  [ "$(stat -c %u "$PTABLE")" = 0 ] || die "$PTABLE must be root-owned"
+  POOL_ROW=${POOL_ROW:-$(jq -r --arg m "$MODEL" '[.providers[] | select(.credential == "pool" and (.models | index($m)))][0].name // empty' "$PTABLE")}
+  [ -n "$POOL_ROW" ] || die "no pool row in $PTABLE lists $MODEL"
+  # The gateway pins a request without max_tokens to maxOutputTokens (1024);
+  # the broker refuses a call above the row's per-call cap.
+  jq -e --arg r "$POOL_ROW" '.providers[] | select(.name == $r) | (.caps.perCall | tonumber) >= 1024' "$PTABLE" >/dev/null \
+    || die "pool row $POOL_ROW caps.perCall is below the controller's maxOutputTokens 1024"
+  as_svc "$GRAIN" provider-table check "$PTABLE" >/dev/null || die "grain-runtime refuses $PTABLE"
+  [ "$("$GRAIN" --controller-manager-protocol)" = mini-controller-manager-v1 ] || die "grain-runtime lacks the controller-manager contract"
+  ! grep -rqs '^RestrictSUIDSGID=yes' /etc/systemd/system/mini-grain-controller@.service /etc/systemd/system/mini-grain-controller@.service.d \
+      /etc/systemd/system/mini-grain-resident@.service /etc/systemd/system/mini-grain-resident@.service.d \
+    || die "a Hermes unit sets RestrictSUIDSGID=yes (bwrap 0.12 dies with ENOSYS on openat2)"
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$V" "$H" "$WS" "$RECORD"
+  printf '%s\n' "$POOL_ROW" | as_svc tee "$RECORD/pool-row" >/dev/null
+  mark preflight
+}
+
+enroll() { # NAME: keygen in its home; the sponsor plans, seals and submits its enrollment
+  local f=$1
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/$f"
+  [ -e "$H/$f/keys/mini.key" ] || sh_line "$f" "keygen mini.key" >/dev/null
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/sponsor" "$H/sponsor/keys"
+  install -o "$SVC" -g "$SVC" -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$INSTANCE-$f.key"
+  sh_line sponsor "enroll plan $INSTANCE-$f $INSTANCE-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")" >/dev/null
+  sh_line sponsor "enroll seal $INSTANCE-$f" >/dev/null
+  sh_line sponsor "enroll submit $INSTANCE-$f" | as_svc tee "$RECORD/subject-$f.json" >/dev/null
+  rm -f "$H/sponsor/keys/$INSTANCE-$f.key"
+  [ -n "$(subject "$f")" ] && [ "$(subject "$f")" != null ] || die "enrollment of $f returned no subject"
+}
+provision() { # NAME FUNDING: an account owned by NAME, its birth context, its workspace
+  local f=$1 funding=$2 permit=$RECORD/permit-all.json
+  printf '%s\n' '{"type":"all","predicates":[]}' | as_svc tee "$permit" >/dev/null
+  as_svc "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$INSTANCE-$f" --holder "$(subject "$f")" \
+    --funding "$funding" --account-predicate "$permit" --factory-ref factory >/dev/null
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/$f/provision"
+  install -o "$SVC" -g "$SVC" -m 0600 "$SPONSOR_WS/provisions/$INSTANCE-$f/birth-context.json" "$H/$f/provision/birth-context.json"
+  sh_line "$f" "init mini.key $(subject "$f")" >/dev/null
+}
+step_subjects() {
+  local names="hermes hhost hprov founder"
+  [ -n "$TIER" ] && names="$names con"
+  for f in $names; do [ -s "$RECORD/subject-$f.json" ] || enroll "$f"; done
+  provision founder "$FOUNDER_FUNDING"
+  provision hermes 0
+  # The concierge's runner pays its own turn fees (J17 funds it 10).
+  [ -n "$TIER" ] && provision con "${CONCIERGE_FUNDING:-100}"
+  mark subjects
+}
+
+step_room() {
+  local A; A=$(subject founder)
+  if [ -n "$TIER" ]; then
+    # A concierge workroom (its till, the concierge's grants, `week` per
+    # `period`), open to any enrolled payer, given the chat roster Hermes reads.
+    sh_line founder "room new $ROOM --template workroom --concierge $(subject con) --period $PERIOD" >/dev/null
+    sh_line founder "chat adopt $ROOM" >/dev/null
+    sh_line founder "tariff $ROOM set week $WEEK" >/dev/null
+    sh_line founder "tariff $ROOM set open 1" >/dev/null
+  else
+    sh_line founder "chat new $ROOM" >/dev/null
+  fi
+  sh_line founder "doc new $ROOM-index 'any [ not (verb == write), subject == $A ]' --in $ROOM" >/dev/null
+  sh_line founder "doc append map $ROOM-index '$ROOM: what we are writing, linked from here'" >/dev/null
+  sh_line founder "submit map" >/dev/null
+  sh_line founder "tariff $ROOM set hermes/turn $PRICE" >/dev/null
+  mark room
+}
+
+step_concierge() {
+  [ -n "$TIER" ] || die "concierge is a TIER step"
+  local C; C=$(subject con)
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$H/con/programs" "$H/con/inbox" "$H/con/outbox"
+  # The founder's grants to the concierge, and the program its room wrote.
+  local f
+  for f in "$H/founder/outbox/$C"/*.json; do
+    [ -e "$f" ] && install -o "$SVC" -g "$SVC" -m 0600 "$f" "$H/con/inbox/"
+  done
+  install -o "$SVC" -g "$SVC" -m 0600 "$H/founder/concierge/$ROOM.json" "$H/con/programs/$ROOM.json"
+  jq -n --arg mini "$MINI" --arg ws "$WS/con" --arg p "$H/con/programs/$ROOM.json" --arg i "$H/con/inbox" \
+    --arg o "$H/con/outbox" --arg j "$H/con/journal-$ROOM.jsonl" \
+    '{type:"minidregg-concierge-controller-v1",mini:$mini,workspace:$ws,program:$p,inbox:$i,outbox:$o,journal:$j}' \
+    | as_svc tee "$V/concierge-$ROOM.json" >/dev/null
+  as_svc "$GRAIN" concierge step "$V/concierge-$ROOM.json" | as_svc tee "$RECORD/concierge-first-pass.json" >/dev/null
+  # One pass a minute; each pass decides only from the till's signed ledger.
+  cat >"/etc/systemd/system/mini-concierge-$ROOM.service" <<EOF
+[Unit]
+Description=Mini room concierge for $ROOM (one pass)
+[Service]
+Type=oneshot
+User=$SVC
+UMask=0077
+NoNewPrivileges=yes
+ExecStart=$GRAIN concierge step $V/concierge-$ROOM.json
+EOF
+  cat >"/etc/systemd/system/mini-concierge-$ROOM.timer" <<EOF
+[Unit]
+Description=Mini room concierge for $ROOM, once a minute
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "mini-concierge-$ROOM.timer"
+  mark concierge
+}
+
+step_runtime() {
+  [ -n "${HERMES_ROOT:-}" ] && [ -x "$HERMES_ROOT/hermes-acp" ] && [ -f "$HERMES_ROOT/pins.json" ] \
+    || die "HERMES_ROOT must name a root from deploy/hermes/build-runtime-root"
+  # The worker's grain-runtime must be the controller's: a root built for
+  # another candidate is rebound first (no rebuild).
+  [ "$(jq -r .grainRuntimeSha256 "$HERMES_ROOT/pins.json")" = "$(sha256sum "$GRAIN" | cut -d' ' -f1)" ] \
+    || die "HERMES_ROOT was built for another candidate: $REPO/deploy/hermes/build-runtime-root --rebind $HERMES_ROOT $CAND"
+  install -d -m 0755 "$V/runtime-root"; install -d -o "$SVC" -g "$SVC" -m 0700 "$V/launcher" "$V/worker-work" \
+    "$V/worker-work/.hermes" "$V/worker-work/.cache" "$V/worker-work/.config" "$V/worker-work/.local" "$V/worker-work/.local/share"
+  cp -a "$HERMES_ROOT"/. "$V/runtime-root/"
+  chown -R root:root "$V/runtime-root"; chmod -R go-w "$V/runtime-root"
+  local bwrap; bwrap=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
+  as_svc python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$bwrap" \
+    --physical-sha256 "$(sha256sum "$bwrap" | cut -d' ' -f1)" --output "$V/launcher/bwrap"
+  install -o "$SVC" -g "$SVC" -m 0700 "$LAUNCH_GATE" "$V/launcher/launch-gate"
+  chmod 700 "$V/launcher/bwrap"
+  mark runtime
+}
+
+step_create() {
+  local genesis=$NODE/genesis.json reserve
+  # The pool hold covers the fee and the metered charge at the token caps.
+  reserve=$(jq -r --argjson p "$PURSE_T" '.providerServices[] | select(.providerResourceId == $p) | .tariff.routes.pool
+    | ((.perOp|tonumber) + (((16000 * (.inputMicroPerMillion|tonumber)) + (1024 * (.outputMicroPerMillion|tonumber)) + 999999) / 1000000 | floor)) | tostring' "$CONFIG")
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$G"
+  jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$genesis" \
+    --arg ns "$NODE/namespace" --arg root "$G" --arg sk "$NODE/keys/sponsor.key" \
+    --arg hk "$H/hhost/keys/mini.key" --arg hs "$(subject hhost)" --arg tk "$H/hermes/keys/mini.key" --arg ts "$(subject hermes)" \
+    --arg pk "$H/hprov/keys/mini.key" --arg ps "$(subject hprov)" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
+    --arg l "$V/launcher/bwrap" --arg rt "$V/runtime-root" --arg ww "$V/worker-work" --arg table "$PTABLE" \
+    --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GATEWAY_PORT" --arg base "$BASE" --arg m "$MODEL" --arg row "$(cat "$RECORD/pool-row")" --arg reserve "$reserve" \
+    --arg ws "$S/resource-workspace" --arg home "$S/room-home" --arg room "$ROOM" \
+    --argjson gp "$(jq -c . "$PARAMS")" --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$NODE/operator.json")" '
+    {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
+     root:$root,nonce:(($base|tonumber) / 10 | floor | tostring),
+     sponsor:{key:$sk,subject:($gp.sponsor.subject|tostring),accountCapability:($gp.sponsor.spendCapabilityId|tostring),
+       grants:[{kind:"object",target:($gp.factoryId|tostring),capability:($gp.sponsor.factoryObserveCapabilityId|tostring)},
+               {kind:"account",target:($gp.sponsor.accountId|tostring),capability:($gp.sponsor.spendCapabilityId|tostring)}]},
+     template:$op,
+     owner:{key:$hk,subject:$hs,noPrerotation:false},workerKey:{key:$tk,subject:$ts,noPrerotation:false},
+     task:$pt,toolTask:$tt,
+     capabilities:{parentObserve:(($base|tonumber)+11|tostring),parentControl:(($base|tonumber)+12|tostring),
+       toolObserve:(($base|tonumber)+13|tostring),toolControl:(($base|tonumber)+14|tostring)},
+     budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
+     worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:900,reserve:"3",charge:"1"},
+     toolCharges:{reserve:"2",charge:"1"},
+     provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:(($base|tonumber)+15|tostring),controlCapability:(($base|tonumber)+16|tostring),
+       budget:"50000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,provider:$row,reserve:$reserve,
+         maxInputTokens:16000,maxOutputTokens:1024,maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:300,
+         localFixtureHostNetwork:false}},
+     room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:$room,account:"unsummoned"}}' \
+    | as_svc tee "$RECORD/grain-spec.json" >/dev/null
+  as_svc "$GRAIN" create "$RECORD/grain-spec.json" | as_svc tee "$RECORD/grain-created.json"
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$S/room-home" "$S/resident"
+  mark create
+}
+
+step_handoff() {
+  local lab; lab=$(jq -r .target "$WS/founder/refs/$ROOM.json")
+  install -d -o "$SVC" -g "$SVC" -m 0700 "$V/registrations" "$V/inbox" "$H/founder/hermes"
+  as_svc "$MINI" hermes-handoff --action registration --dir "$S/resource-workspace" --task "$PARENT_T" --room-cell "$lab" \
+    --inbox "$V/inbox" --socket "$SOCKET" | as_svc tee "$V/registrations/$PARENT_T.json" >/dev/null
+  as_svc "$MINI" hermes-handoff --action registry --registrations "$V/registrations" --socket "$SOCKET" \
+    | as_svc tee "$H/founder/hermes/registry.json" >/dev/null
+  mark handoff
+}
+
+step_summon() {
+  sh_line founder "summon $ROOM as librarian --budget $BUDGET" | as_svc tee "$RECORD/summon.out"
+  sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_svc tee "$RECORD/outbox" >/dev/null
+  [ -s "$(cat "$RECORD/outbox")/handoff.json" ] || die "summon left no sealed hand-off"
+  mark summon
+}
+
+step_controller() {
+  local acct; acct=$(jq -r .account.name "$(cat "$RECORD/outbox")/summon-$ROOM.json")
+  as_svc sh -c "jq --arg a '$acct' '.toolTask.room.account = \$a' '$G/controller.json' >'$G/controller.json.new' && chmod 600 '$G/controller.json.new' && mv '$G/controller.json.new' '$G/controller.json'"
+  mini-controller-register "$PARENT_T" "$G/controller.json"
+  systemctl start "mini-grain-controller@$PARENT_T.service"
+  for _ in $(seq 1 600); do [ -S "$S/control.sock" ] && break; sleep 0.1; done
+  [ -S "$S/control.sock" ] || die "the controller did not open its control socket (journalctl -u mini-grain-controller@$PARENT_T)"
+  mark controller
+}
+
+step_dispatch() {
+  as_svc "$MINI" hermes-handoff --action dispatch --registration "$V/registrations/$PARENT_T.json" \
+    --bundle "$(cat "$RECORD/outbox")/handoff.json" --socket "$SOCKET"
+  mark dispatch
+}
+
+step_resident() {
+  local current inbox
+  current=$(find "$V/inbox" -name current.json | head -1)
+  inbox=$(jq -r '.inbox // empty' "$current" 2>/dev/null)
+  [ -n "$inbox" ] && [ -d "$inbox" ] || die "no delivered assignment inbox under $V/inbox (run dispatch)"
+  jq -n --arg c "$G/controller.json" --arg i "$inbox" --arg s "$S/resident" \
+    '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:null,intervalSeconds:60}' \
+    | as_svc tee "$G/resident.json" >/dev/null
+  as_svc chmod 600 "$G/resident.json"
+  # Adding the resident to a registration requires both units stopped.
+  systemctl stop "mini-grain-controller@$PARENT_T.service"
+  mini-controller-register "$PARENT_T" "$G/controller.json" "$G/resident.json"
+  systemctl start "mini-grain-controller@$PARENT_T.service" "mini-grain-resident@$PARENT_T.service"
+  mark resident
+}
+
+[ $# -gt 0 ] || { sed -n '2,35p' "$0"; exit 64; }
+for step in "$@"; do
+  case $step in
+    preflight|subjects|room|concierge|runtime|create|handoff|summon|controller|dispatch|resident) ;;
+    *) die "unknown step $step" ;;
+  esac
+  [ "$step" = preflight ] || done_step preflight || die "run preflight first"
+  if done_step "$step"; then echo "install-hermes: $step already done"; continue; fi
+  [ "$step" = preflight ] || POOL_ROW=$(cat "$RECORD/pool-row")
+  "step_$step"
+done

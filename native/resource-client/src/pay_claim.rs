@@ -38,10 +38,10 @@ fn bootstrap_url(base: &str) -> Result<()> {
 
 fn claim_route(operation: u8) -> Result<(&'static str, &'static str)> {
     match operation {
-        183 => Ok(("/claim/plan", "canonicalPlan")),
-        184 => Ok(("/claim/assemble", "canonicalIngress")),
-        185 => Ok(("/claim/submit", "canonicalOutcome")),
-        186 => Ok(("/claim/lookup", "canonicalOutcome")),
+        mini_sdk::host_operations::PAY_CLAIM_PLAN => Ok(("/claim/plan", "canonicalPlan")),
+        mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE => Ok(("/claim/assemble", "canonicalIngress")),
+        mini_sdk::host_operations::PAY_CLAIM_SUBMIT => Ok(("/claim/submit", "canonicalOutcome")),
+        mini_sdk::host_operations::PAY_CLAIM_LOOKUP => Ok(("/claim/lookup", "canonicalOutcome")),
         _ => Err("claim HTTP transport has no generic operation route".into()),
     }
 }
@@ -70,7 +70,7 @@ fn decode_claim_wire(operation: u8, bytes: &[u8]) -> Result<Vec<u8>> {
         );
     }
     let mut frame = vec![operation];
-    frame.extend_from_slice(&decode_hex(raw)?);
+    frame.extend_from_slice(&mini_sdk::hex::decode(raw).map_err(|e| e.0)?);
     Ok(frame)
 }
 
@@ -218,7 +218,7 @@ impl Session {
         let bytes = match &self.endpoint {
             Endpoint::Socket(socket) => {
                 let reply =
-                    transport::invoke_pinned(socket, &self.config, &self.sha, 182, &payload)?;
+                    transport::invoke_pinned(socket, &self.config, &self.sha, mini_sdk::host_operations::PAY_CLAIM_QUOTE, &payload)?;
                 if reply.first() != Some(&182) {
                     return Err("source claim quote refused".into());
                 }
@@ -335,7 +335,7 @@ fn exact_hex(value: &Value, field: &str, size: usize) -> Result<Vec<u8>> {
             "source {field} must be {size} lowercase hexadecimal bytes"
         ));
     }
-    decode_hex(raw)
+    mini_sdk::hex::decode(raw).map_err(|e| e.0)
 }
 
 fn canonical_matches(value: &Value, field: &str, bytes: &[u8]) -> Result<()> {
@@ -354,7 +354,7 @@ fn frame_body(frame: &[u8], operation: u8, bound: usize) -> Result<&[u8]> {
         [actual, body @ ..] if *actual == operation && !body.is_empty() && body.len() <= bound => {
             Ok(body)
         }
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "Host refused claim op{operation}; no automatic rebase or retry"
         )),
         _ => Err(format!("invalid or oversized claim op{operation} response")),
@@ -577,7 +577,7 @@ fn recover<B: Backend>(
     if record.get("expectedReceipt") != Some(&expected.json()) {
         return Err("retained expected receipt differs from original source ingress".into());
     }
-    exchange_outcome(backend, dir, 186, &ingress, &expected)
+    exchange_outcome(backend, dir, mini_sdk::host_operations::PAY_CLAIM_LOOKUP, &ingress, &expected)
 }
 
 fn execute<B, S, I>(
@@ -622,8 +622,8 @@ where
         .get("command")
         .ok_or("source command view lacks command")?;
     let signing_key = command_action(command_view, action)?;
-    let frame = backend.call(183, command)?;
-    let plan = frame_body(&frame, 183, 3072)?;
+    let frame = backend.call(mini_sdk::host_operations::PAY_CLAIM_PLAN, command)?;
+    let plan = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_PLAN, 3072)?;
     create_private(&dir.join("plan.bin"), plan)?;
     let view = backend.inspect(
         "pay-claim-plan",
@@ -642,7 +642,7 @@ where
     if message_hex.is_empty() || message_hex.len() > 8192 {
         return Err("source claim signing message exceeds bound".into());
     }
-    let message = decode_hex(message_hex)?;
+    let message = mini_sdk::hex::decode(message_hex).map_err(|e| e.0)?;
     eprintln!(
         "Paid claim action (source command; exact origin and selected terms):\n{}",
         serde_json::to_string_pretty(command_view).map_err(|e| e.to_string())?
@@ -655,8 +655,8 @@ where
     let mut pair = (plan.len() as u32).to_le_bytes().to_vec();
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&signature);
-    let frame = backend.call(184, &pair)?;
-    let ingress = frame_body(&frame, 184, 4096)?;
+    let frame = backend.call(mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE, &pair)?;
+    let ingress = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE, 4096)?;
     create_private(&dir.join("ingress.bin"), ingress)?;
     let view_ingress = backend.inspect(
         "pay-claim-ingress",
@@ -676,7 +676,7 @@ where
     // immediately after it, even before the send, is lookup-only recovery.
     retain_json(&dir.join("operation.json"), &record)?;
     sync_retained_call(dir, &dir.join("ingress.bin"))?;
-    exchange_outcome(backend, dir, 185, ingress, &expected)
+    exchange_outcome(backend, dir, mini_sdk::host_operations::PAY_CLAIM_SUBMIT, ingress, &expected)
 }
 
 fn quote_natural(args: &mut Args, name: &str) -> Result<String> {
@@ -684,12 +684,7 @@ fn quote_natural(args: &mut Args, name: &str) -> Result<String> {
         .required(name)?
         .into_string()
         .map_err(|_| format!("{name} must be decimal"))?;
-    let n = raw
-        .parse::<u64>()
-        .map_err(|_| format!("{name} must be an unsigned 64-bit integer"))?;
-    if n.to_string() != raw {
-        return Err(format!("{name} must be canonical decimal"));
-    }
+    mini_sdk::decimal::parse::<u64>(&raw).ok_or_else(|| format!("{name} must be a canonical unsigned 64-bit decimal"))?;
     Ok(raw)
 }
 
@@ -844,7 +839,7 @@ fn run_quote(mut args: Args) -> Result<()> {
     {
         return Err("quote canonical command exceeds source bound or is malformed".into());
     }
-    let canonical = decode_hex(raw)?;
+    let canonical = mini_sdk::hex::decode(raw).map_err(|e| e.0)?;
     let input = record.join("command.bin");
     create_private(&input, &canonical)?;
     let inspected = session.inspect("pay-claim-command", &input, &record.join("command.json"))?;
@@ -1069,10 +1064,10 @@ mod tests {
         fn call(&mut self, operation: u8, _payload: &[u8]) -> Result<Vec<u8>> {
             self.calls.push(operation);
             let body = match operation {
-                183 if self.stale_plan => return Err("fixture source: roots changed".into()),
-                183 => b"PLAN".to_vec(),
-                184 => b"INGRESS".to_vec(),
-                185 | 186 => {
+                mini_sdk::host_operations::PAY_CLAIM_PLAN if self.stale_plan => return Err("fixture source: roots changed".into()),
+                mini_sdk::host_operations::PAY_CLAIM_PLAN => b"PLAN".to_vec(),
+                mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE => b"INGRESS".to_vec(),
+                mini_sdk::host_operations::PAY_CLAIM_SUBMIT | mini_sdk::host_operations::PAY_CLAIM_LOOKUP => {
                     // Every external submission/lookup has the completed durable record.
                     let record = workspace::bounded_json(&self.dir.join("operation.json"))?;
                     assert_eq!(record["type"], RECORD_TYPE);
@@ -1496,7 +1491,7 @@ mod tests {
         for op in [0, 117, 121, 182, 187, 255] {
             assert!(claim_route(op).is_err());
         }
-        assert!(decode_claim_wire(183, &vec![b' '; 16385]).is_err());
+        assert!(decode_claim_wire(mini_sdk::host_operations::PAY_CLAIM_PLAN, &vec![b' '; 16385]).is_err());
         for url in [
             "https://node.test/mini/v2",
             "http://127.0.0.1:8080/mini/v2",

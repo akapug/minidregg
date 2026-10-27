@@ -21,6 +21,7 @@ use std::process::Command;
 use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::canonical::{decimal as canonical_decimal, hex64};
 
 const VERSION: u32 = 1;
 const MAX_RECORD_BYTES: u64 = 16 * 1024;
@@ -32,10 +33,7 @@ fn invalid(message: impl Into<String>) -> io::Error {
 }
 
 fn canonical_native_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    crate::canonical::decimal(value)
 }
 
 fn deserialize_operation_id<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -56,13 +54,6 @@ where
         return Err(D::Error::custom("operation ID is not canonical decimal"));
     }
     Ok(text)
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Opaque physical identity derived from a future native verified BEGIN.
@@ -261,13 +252,6 @@ pub struct DispatchIdentity {
     pub dispatch_event: String,
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn canonical_digest_decimal(value: &str) -> bool {
     const MAX_256: &str =
         "115792089237316195423570985008687907853269984665640564039457584007913129639935";
@@ -455,11 +439,7 @@ impl UnitInstance {
     }
 
     fn validate(&self, unit: &str) -> io::Result<()> {
-        if self.invocation_id.len() != 32
-            || !self
-                .invocation_id
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        if !crate::canonical::lower_hex_of(&self.invocation_id, 16)
             || !self.control_group.starts_with('/')
             || !self.control_group.ends_with(&format!("/{unit}"))
             || self.control_group.contains("//")

@@ -34,6 +34,15 @@ pub fn pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// [`pair`] for a payload whose two components are both required (a plan and its signatures,
+/// a signed request and its body): an empty one is refused before anything is framed.
+pub fn pair_nonempty(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
+    if left.is_empty() || right.is_empty() {
+        return Err("pair has an empty component".into());
+    }
+    pair(left, right)
+}
+
 /// `u16(len(kind)) ‖ kind ‖ input`: the kind framing of codec frames 7 and 8.
 pub fn kind(kind: &str, input: &[u8]) -> Result<Vec<u8>> {
     let width: u16 = kind.len().try_into().map_err(|_| "local codec kind exceeds bound")?;
@@ -366,16 +375,16 @@ mod tests {
         let settings = dir.join("settings.json");
         let mut codec = Codec::new();
         for _ in 0..3 {
-            assert_eq!(codec.frame(&host, &settings, 7, b"intent").unwrap(), b"ok");
+            assert_eq!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         }
         assert_eq!(starts(&dir), 1);
         fs::rename(&settings, dir.join("moved.json")).unwrap();
-        assert_eq!(codec.frame(&host, &dir.join("moved.json"), 7, b"intent").unwrap(), b"ok");
+        assert_eq!(codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         assert_eq!(starts(&dir), 1, "the same bytes at another path keep the child");
         fs::write(dir.join("moved.json"), b"{ }").unwrap();
-        codec.frame(&host, &dir.join("moved.json"), 7, b"intent").unwrap();
+        codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap();
         assert_eq!(starts(&dir), 2);
-        assert!(matches!(codec.frame(&host, &dir.join("moved.json"), 12, b""), Err(CodecError::Failed(_))));
+        assert!(matches!(codec.frame(&host, &dir.join("moved.json"), crate::host_operations::FN_POLL, b""), Err(CodecError::Failed(_))));
 
         let other = stub_dir("codec-refusal");
         fs::write(other.join("settings.json"), b"{}").unwrap();
@@ -384,14 +393,14 @@ mod tests {
         fs::write(other.join("reply"), framed(b"\x07again")).unwrap();
         let refusing = codec_stub(&other);
         let mut codec = Codec::new();
-        match codec.frame(&refusing, &other.join("settings.json"), 7, b"intent") {
+        match codec.frame(&refusing, &other.join("settings.json"), crate::host_operations::AUTHOR, b"intent") {
             Err(CodecError::Refused { encoded, decoded: Some(v), .. }) => {
                 assert_eq!(encoded, vec![0xff, 0x00]);
                 assert_eq!(v["reason"], "malformed");
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(codec.frame(&refusing, &other.join("settings.json"), 7, b"intent").unwrap(), b"again");
+        assert_eq!(codec.frame(&refusing, &other.join("settings.json"), crate::host_operations::AUTHOR, b"intent").unwrap(), b"again");
         assert_eq!(starts(&other), 1);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&other);
@@ -410,10 +419,26 @@ mod tests {
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(dir.join("reply"), framed(&[255, 0xff, 0x00])).unwrap();
         let mut codec = Codec::new();
-        assert!(matches!(codec.frame(&host, &settings, 7, b"intent"), Err(CodecError::Refused { decoded: None, .. })));
+        assert!(matches!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent"), Err(CodecError::Refused { decoded: None, .. })));
         fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
-        assert_eq!(codec.frame(&host, &settings, 7, b"intent").unwrap(), b"ok");
+        assert_eq!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         assert_eq!(starts(&dir), 2);
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::*;
+
+    #[test]
+    fn pair_frames_left_length_and_refuses_what_the_host_would() {
+        assert_eq!(pair(b"ab", b"c").unwrap(), [2, 0, 0, 0, b'a', b'b', b'c']);
+        assert_eq!(pair(b"", b"").unwrap(), [0, 0, 0, 0]);
+        assert!(pair(&vec![0; CAP], b"").is_err(), "a frame at the bound is refused");
+        assert_eq!(pair_nonempty(b"plan", b"sig").unwrap(), pair(b"plan", b"sig").unwrap());
+        for (left, right) in [(&b""[..], &b"sig"[..]), (b"plan", b"")] {
+            assert!(pair_nonempty(left, right).unwrap_err().to_string().contains("empty component"));
+        }
     }
 }

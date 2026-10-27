@@ -42,6 +42,7 @@
 # next strike is refused by clause 10 (bal <= now) and admitted once the clock
 # passes the balance.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in MINI SPONSOR_WS NEWCOMER_WS JOURNEY_WORLD JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jclock: $name is required" >&2; exit 2; fi
@@ -85,7 +86,7 @@ reason() { jq -r '.detail // empty' "$D/$1.out" 2>/dev/null | xxd -r -p 2>/dev/n
 refusal() {
   local a=$SPONSOR_WS/attempts/clock-$1
   if [ -f "$a/outcome.json" ]; then
-    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+    printf '%s: %s' "$(attempt_answer "$a/outcome.json" | jq -r '.phase // empty' | xxd -r -p)" "$(attempt_answer "$a/outcome.json" | jq -r '.detail // empty' | xxd -r -p)"
   elif [ -f "$a/pre-submit-refusal.json" ]; then
     printf '%s: %s' "$(jq -r '.stage // empty' "$a/pre-submit-refusal.json")" "$(grep -m1 '^refused:' "$D/$1-submit.err" 2>/dev/null)"
   fi
@@ -115,7 +116,7 @@ attempt_write() {  # attempt_write ID VALUE -> rc 0 iff admitted and installed
   [ "$(rc "$1-propose")" = 0 ] || return 1
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
     --intent "$SPONSOR_WS/proposals/clock-$1/intent.json" --attempt "$SPONSOR_WS/attempts/clock-$1"
-  [ "$(rc "$1-submit")" = 0 ] && jq -e '.type == "confirmed"' "$SPONSOR_WS/attempts/clock-$1/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$1-submit")" = 0 ] && attempt_answer "$SPONSOR_WS/attempts/clock-$1/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 started=$(date +%s)
 
@@ -274,7 +275,7 @@ turn() {
   [ "$(rc "$id-propose")" = 0 ] || return 1
   run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
     --intent "$ws/proposals/clock-$id/intent.json" --attempt "$ws/attempts/clock-$id"
-  [ "$(rc "$id-submit")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/clock-$id/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$id-submit")" = 0 ] && attempt_answer "$ws/attempts/clock-$id/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 refused_line() { cat "$D/$1-submit.err" "$D/$1-propose.err" 2>/dev/null | grep -m1 '^refused:'; }
 writes() {  # writes NAME FIELD:EXPECTED:VALUE... : one invoke of guarded writes

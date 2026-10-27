@@ -363,9 +363,9 @@ fn project_http(
                 }
                 context.etag_precondition = etags(value, name == "if-match")?;
             }
-            "x-requested-with" | "x-csrftoken" | "x-csrf-token" | "oc-total-length"
-            | "oc-chunk-size" | "x-oc-mtime" | "oc-fileid" | "oc-chunked" | "oc-checksum"
-            | "oc-chunk-offset" | "oc-lazyops" => {
+            // The rest of Lean's ordinaryHeaderName (generated): carried as additional headers. The
+            // names with their own projection are matched above this arm.
+            other if crate::host_operations::ordinary_header_name(other) => {
                 context.additional_headers.push(Header {
                     name: name.clone(),
                     value: value.clone(),

@@ -191,6 +191,14 @@ impl AcpCapture {
     }
 }
 
+/// The ACP-streamed final and the settled provider final are the same text
+/// up to surrounding whitespace: upstream Hermes streams a "\n\n" separator
+/// chunk before the final segment that follows its tool calls. The delivered
+/// text is always the provider's; any other difference refuses.
+fn acp_final_matches(captured: &str, provider: &str) -> bool {
+    captured.trim() == provider.trim()
+}
+
 fn assignment(request: &Value, origin: &Value) -> Result<Value> {
     let messages = request["messages"]
         .as_array()
@@ -531,7 +539,7 @@ impl Runtime {
             &replay.response_sha256,
             Some(replay.response_bytes),
         )?)?;
-        if acp.is_some_and(|captured| captured != text) {
+        if acp.is_some_and(|captured| !acp_final_matches(captured, &text)) {
             return Err("source ACP final differs from settled provider final".into());
         }
         let record = FinalRecord {
@@ -856,19 +864,7 @@ impl Runtime {
             self.recover_room()?;
         }
         let status = self.inspect_quiescence_locked(&guard)?;
-        if !status.active.is_empty()
-            || !status.evidence_required.is_empty()
-            || !status.session_integrity_errors.is_empty()
-            || !status.exact_recovery.is_empty()
-            || status.retained.iter().any(|m| *m != "resident_delivery")
-            || status.observations.is_empty()
-            || !status
-                .observations
-                .iter()
-                .all(|o| quiescence::signed_unreserved_boundary(&o["state"]))
-        {
-            return Err("delivery requires fresh closed native/process/session boundary".into());
-        }
+        delivery_boundary(&status)?;
         if let Some(resolution) = self.retained_final_resolution(&record)? {
             guard.assert_unchanged()?;
             let saved_arguments=resolution["arguments"].clone();
@@ -1016,6 +1012,51 @@ pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
     Ok(())
 }
 
+/// The boundary a reply is delivered at: nothing native in flight, no session
+/// integrity error, every observed grain signed-unreserved, and nothing
+/// retained but this delivery and the request it answers. The started request
+/// (and any unstarted queued ones behind it) close only when this delivery is
+/// received (resident_requests::reconcile), so they cannot bar it.
+pub(crate) fn delivery_boundary(status: &quiescence::Status) -> Result<()> {
+    let mut open: Vec<String> = Vec::new();
+    open.extend(status.active.iter().map(|m| format!("active {m}")));
+    open.extend(status.evidence_required.iter().map(|m| format!("evidence {m}")));
+    open.extend(status.session_integrity_errors.iter().map(|m| format!("session {m}")));
+    if !status.exact_recovery.is_empty() {
+        open.push(format!("{} exact recoveries", status.exact_recovery.len()));
+    }
+    open.extend(
+        status
+            .retained
+            .iter()
+            .filter(|m| {
+                !matches!(
+                    **m,
+                    "resident_delivery" | "resident_started_request" | "resident_queued_requests"
+                )
+            })
+            .map(|m| format!("retained {m}")),
+    );
+    if status.observations.is_empty() {
+        open.push("no grain observation".into());
+    }
+    if !status
+        .observations
+        .iter()
+        .all(|o| quiescence::signed_unreserved_boundary(&o["state"]))
+    {
+        open.push("a grain is not at a signed unreserved boundary".into());
+    }
+    if open.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "delivery requires fresh closed native/process/session boundary; open: {}",
+            open.join(", ")
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1084,6 +1125,15 @@ mod tests {
         request["messages"].as_array_mut().unwrap().push(duplicate);
         assert!(assignment(&request, &origin).is_err());
     }
+    #[test]
+    fn acp_final_matches_provider_final_up_to_surrounding_whitespace_only() {
+        assert!(acp_final_matches("\n\nAttach done: 2 writes.", "Attach done: 2 writes."));
+        assert!(acp_final_matches("the answer", "the answer\n"));
+        assert!(!acp_final_matches("the  answer", "the answer"));
+        assert!(!acp_final_matches("the answer, edited", "the answer"));
+        assert!(!acp_final_matches("", "the answer"));
+    }
+
     #[test]
     fn acp_capture_ignores_display_and_refuses_session_changes() {
         let mut c = AcpCapture::default();
@@ -1367,4 +1417,38 @@ mod tests {
         assert_eq!(room_origin(&rt.journal, true, None), Some(record.origin));
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn delivery_boundary_admits_the_request_it_answers_and_names_what_blocks() {
+        let mut status = quiescence::Status {
+            disposition: quiescence::Disposition::RestartWithRetainedUncertainty,
+            can_restart_retaining_state: true,
+            closed_checkpoint: false,
+            full_resume_ready: false,
+            retained: vec!["resident_delivery", "resident_started_request", "resident_queued_requests"],
+            active: vec![],
+            evidence_required: vec![],
+            observations: vec![json!({"slot":"parent","task":"7",
+                "state":{"grain":{"status":"2","reserved":"0"},"nativeRead":{"height":"87","root":"r"}}})],
+            journal_sha256: "e".repeat(64),
+            next_operation_id: 80,
+            binding_sha256: "b".repeat(64),
+            config_sha256: None,
+            controller_pid: std::process::id(),
+            worker_unit: None,
+            exact_recovery: vec![],
+            resident_state: None,
+            resident_requests_sha256: None,
+            resume_evidence_required: vec![],
+            session_integrity_errors: vec![],
+            snapshot_only: true,
+        };
+        delivery_boundary(&status).unwrap();
+        status.retained.push("resident_return_pending");
+        let error = delivery_boundary(&status).unwrap_err();
+        assert!(error.contains("retained resident_return_pending"), "{error}");
+        status.retained.pop();
+        status.observations.clear();
+        assert!(delivery_boundary(&status).unwrap_err().contains("no grain observation"));
+    }
+
 }

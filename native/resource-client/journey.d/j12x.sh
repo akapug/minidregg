@@ -24,7 +24,7 @@ D=$JOURNEY_STEP_DIR/j12x
 mkdir -p -m 700 "$D"
 export D
 python3 - <<'PY'
-import json, os, re, signal, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, signal, socket, struct, subprocess, sys, time
 
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
@@ -52,10 +52,11 @@ def frame_of(sock):
     return exact(struct.unpack("<I", head)[0])
 
 config = open(CONFIG, "rb").read()
-def raw(request, version=1, body=None, timeout=120):
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin
+def raw(request, version=2, body=None, timeout=120):
     s = socket.socket(socket.AF_UNIX); s.settimeout(timeout); s.connect(SOCKET)
     if body is None:
-        body = bytes([version]) + struct.pack("<I", len(config)) + config + request
+        body = bytes([version]) + struct.pack("<I", len(config)) + config + (HOST_PIN if version == 2 else b"") + request
     s.sendall(struct.pack("<I", len(body)) + body)
     try: return frame_of(s)
     finally: s.close()
@@ -166,6 +167,8 @@ def blind_submission():
     return ok, f"{reply[0]} " + body[len(TAG):].decode("utf-8", "replace")[:120]
 # A submission's refusal stays undisclosed (MR): phase admission, "request refused".
 check("raw op 2 submit of garbage call bytes (blind submission refusal)", blind_submission)
+check("raw envelope version 1, unpinned (socket refusal by name: v1 is retired)",
+      lambda: socket_refused(raw(bytes([0]), version=1), "envelope v1 is retired"))
 check("raw envelope version 3 (socket refusal; Host never sees it)",
       lambda: socket_refused(raw(b"", body=bytes([3]) + struct.pack("<I", len(config)) + config + b"\x00"), "invalid socket envelope"))
 check("raw operation 200 on the public socket (socket refusal)",

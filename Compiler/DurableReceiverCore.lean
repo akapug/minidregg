@@ -1207,6 +1207,13 @@ nothing reinterprets. -/
 def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String ((loaded : Loaded rootBytes) ×'
       {chains : List Digest // chains = chainPrefixes loaded.logStart loaded.image.accepted})) := do
+  -- Operator measurement control (as `DurableServed.openHead`): MINI_OPEN_TIMING=1 prints each
+  -- stage's elapsed time to stderr. Every stage below the checkpoint's height is O(history) on
+  -- this path: the read, the decode, the chain, the tags, the six indexes and the World fold.
+  let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
+  let started ← IO.monoMsNow
+  let lap := fun (label : String) => do
+    if timing then IO.eprintln s!"full open {label}: {(← IO.monoMsNow) - started} ms"
   -- The Store's epoch, from its seed alone and before the head anchor or any
   -- other check: a Store of another epoch refuses by naming it.
   if let .ok (some seedBytes) := ← transport.peekSeed then
@@ -1219,6 +1226,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) =>
+      lap s!"read ({stored.entries.length} entries)"
       let some seedBytes := stored.seed | return .error "durable seed missing"
       if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
         return .error s!"durable store refused: {refusal}"
@@ -1229,6 +1237,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
             {records : List IntentRecord // List.Forall₂
               (fun bytes record => recordFrame.decode bytes = some record)
               (stored.entries.map (·.record)) records})
+      lap "decode"
       let logStart := transport.logStart seed
       -- The chain over the STORED bytes (no re-encode), equal to the
       -- specification chain over the decoded records (`chainPrefixesStored_eq`).
@@ -1236,6 +1245,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       have chainsEq : chains = chainPrefixes logStart records :=
         DurableLogTags.chainPrefixesStored_eq logStart _ _ decoded
       let headChain := chains.getLast?.getD logStart
+      lap "chain"
       -- The checkpoint's open evaluates its world root once, as a tree the head advances.
       let opened : OpenBase rootBytes ← match stored.checkpoint with
         | none => pure (⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩ : OpenBase rootBytes)
@@ -1251,6 +1261,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
                   return .error "checkpoint does not match the log chain"
                 pure (⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩ :
                   OpenBase rootBytes)
+      lap s!"checkpoint (height {opened.1})"
       let baseHeight := opened.1
       let base := opened.2.1
       let baseFrontier := opened.2.2.1
@@ -1259,6 +1270,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         return .error "durable log head does not match its entries"
       if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
         return .error message
+      lap "tags"
       -- The checkpoint's accumulator frontier and index root are the ones the
       -- (MAC-verified) tag of the entry at its height carries.
       if baseHeight > 0 then
@@ -1272,6 +1284,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
           ((stored.entries.drop baseHeight).zip (chains.drop (baseHeight + 1))) with
         | .error message => return .error message
         | .ok frontier => pure frontier
+      lap "frontier"
       let image : Image := ⟨seed, records⟩
       -- Every entry's verified tag carries the receipt root after it
       -- (`DurableLogTags.verifyTags_carried`).
@@ -1284,6 +1297,7 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
         match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some engine =>
+            lap "resume"
             have resumed := DurableEngine.resume_of_resumeEngine found
             let built : (cache : RootCache) ×'
                 RootsExact cache (entriesOf image (engine.view rootBytes) headChain) :=
@@ -1294,24 +1308,37 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
                       image.accepted.length headChain)
                     (entriesOf_checkpoint_step image base baseHeight (engine.view rootBytes) resumed
                       baseChain headChain)
+            lap "roots"
+            -- The indexes and the World, each named so its stage is timed; the structure below
+            -- is the same term (the `rfl`s and `_exact`s see through the `let`s).
+            let presence := PresenceIndex.ofRecords image.accepted
+            lap "presence index"
+            let links := LinkIndex.ofRecords image.accepted
+            lap "link index"
+            let cellIds := SessionIndex.CellIds.ofImage image
+            let txs := SessionIndex.TxIndex.ofRecords image.accepted
+            let nullifiers := SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted
+            let writesAt := SessionIndex.KeyIndex.ofRecords
+              (fun record => record.writes.map DataWrite.cellId) image.accepted
+            lap "session indexes"
+            let track := trackOf rootBytes image resumed
+            if let .lost _ := track then pure () else pure ()
+            lap "world fold"
             let loaded : Loaded rootBytes :=
               ⟨image, baseHeight, base, engine, engine.view rootBytes, rfl, within, resumed, logStart,
               headChain,
               (by show chains.getLast?.getD logStart = _; rw [chainsEq]
                   exact DurableLogTags.chainPrefixes_getLast? logStart records),
               built.1, built.2,
-              PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
-              SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
-              SessionIndex.TxIndex.ofRecords image.accepted,
-              SessionIndex.TxIndex.ofRecords_exact image.accepted,
-              SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
-              SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-              SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId)
-                image.accepted,
+              presence, rfl, links, rfl,
+              cellIds, SessionIndex.CellIds.ofImage_exact image,
+              txs, SessionIndex.TxIndex.ofRecords_exact image.accepted,
+              nullifiers, SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+              writesAt,
               SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
                 image.accepted,
               rootLog, Decidable.of_not_not sized, some frontier,
-              stored.entries.getLast?.map (·.tag), trackOf rootBytes image resumed⟩
+              stored.entries.getLast?.map (·.tag), track⟩
             if let .lost reason := loaded.track then
               return .error s!"durable log is not a turn log: {reason}"
             -- The head's stored root is the root this open just served: a

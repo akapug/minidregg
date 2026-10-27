@@ -268,6 +268,9 @@ pub static LOOKUP: Grammar = Grammar { verb: "lookup", leaves: &[
 pub static RETRY: Grammar = Grammar { verb: "retry", leaves: &[
     Leaf { path: &["retry"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini retry --attempt attempts/ID --mode submit (the exact retry of the retained call)" },
 ] };
+pub static ATTEMPT: Grammar = Grammar { verb: "attempt", leaves: &[
+    Leaf { path: &["attempt"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: mini attempt-state --attempt attempts/ID --json (the retained answers, the record's phase and the standing; no Host call)" },
+] };
 pub static PUBLISH: Grammar = Grammar { verb: "publish", leaves: &[
     Leaf { path: &["publish"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID (writes the recipient's reference)" },
 ] };
@@ -301,6 +304,7 @@ pub static IMPORT: Grammar = Grammar { verb: "import", leaves: &[
 ] };
 pub static EXPORT: Grammar = Grammar { verb: "export", leaves: &[
     Leaf { path: &["export"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: print proposals/ID/recipient-reference.json" },
+    Leaf { path: &["export", "world"], args: &[opt("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini export-world: your world as one tar at HOME/exports/NAME (default world.tar): every document as the Host renders it to you now and its signed view, every retained attempt with its standing, your room state, your public key and the custody statement, and a manifest with the world root; reads only" },
 ] };
 pub static INBOX: Grammar = Grammar { verb: "inbox", leaves: &[
     Leaf { path: &["inbox"], args: &[], flags: &[], effect: Effect::Local, about: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
@@ -476,7 +480,7 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
 ] };
 
 pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
-    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
+    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &ATTEMPT, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
@@ -794,7 +798,7 @@ pub fn check(kind: Kind, value: &str, name: &str) -> Result<(), String> {
     let ok = match kind {
         Kind::Id => !value.is_empty() && value.len() <= 64 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
         Kind::Ref => validate_ref_name(value).is_ok(),
-        Kind::Subject | Kind::Number => !value.is_empty() && value.len() <= 40 && value.bytes().all(|b| b.is_ascii_digit()),
+        Kind::Subject | Kind::Number => value.len() <= 40 && mini_sdk::decimal::is_digits(value),
         Kind::TextOrFile => !value.is_empty() && (!value.starts_with('@') || is_session_file(&value[1..])),
         Kind::File => value.strip_prefix('@').is_some_and(is_session_file),
         Kind::KeyFile => is_session_file(value),

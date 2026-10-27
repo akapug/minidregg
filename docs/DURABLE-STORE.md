@@ -256,6 +256,13 @@ submit a different operation.
   The demo box pushes to an Object Lock bucket and runs the restore check
   (`docs/DEMO-PREFIX-2026-10-26.md:77`, a recorded run, not a property of this
   crate).
+- **A Store restored or moved to another root is another Store to the grain
+  platform.** `storeTag` is the tag of the Store identity
+  (`Config.storeIdentity`, `Kernel/NativeHostStoreIdentity.lean`: the genesis
+  seed at `storageRoot`), so a copy opened from a different `storageRoot` names
+  fresh resident units, volumes and a fresh grain world and adopts none of the
+  original's residue, by construction, with no nonce to mint. A world template
+  restored under a new root therefore needs nothing beyond the path rewrite.
 - **Cold (the service stopped): copy the database file, its `-wal` and its
   `-shm` together** (or first run `PRAGMA wal_checkpoint(TRUNCATE)` as the
   Store's account, after which the database file alone is whole). A cold copy

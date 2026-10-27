@@ -44,7 +44,7 @@ private def interface (value : Interface) : Json := .mkObj
 
 /-- Strictly decode v2 only. This is a structural view of the full canonical
 frame, not proof that a caller obtained it from a fresh-tip op26 response.
-`store` is the inspecting Host's `Config.expectedSeed`. -/
+`store` is the inspecting Host's `Config.storeIdentity`. -/
 def inspect (store : Minidregg.Theory.TypedAuthorization.Digest) (bytes : List UInt8) : Except String Json := do
   let some value := ApplicationLifecycleClaimProjection.codecV2.decode bytes
     | throw "noncanonical descriptor-bound lifecycle claim frame"

@@ -14,6 +14,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use crate::canonical::hex64;
 
 #[path = "broker_endpoint.rs"]
 mod endpoint;
@@ -98,31 +99,19 @@ pub fn class(name: &str) -> io::Result<SizeClass> {
 }
 
 pub fn store_key(text: &str) -> bool {
-    text.len() == 16
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::lower_hex_of(&text, 8)
 }
 
+/// A positive canonical decimal that fits a signed 64-bit integer (18 digits).
 pub fn decimal(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= 18
-        && !(text.len() > 1 && text.starts_with('0'))
-        && text.bytes().all(|b| b.is_ascii_digit())
-        && text != "0"
-}
-
-fn hex64(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::decimal_within(text, 18) && text != "0"
 }
 
 /// Mini's lifecycle receivers pin the resident unit name (Kernel
 /// `ApplicationLifecycleResidentProfile.processIdentity`): the Store key (Mini's
-/// `storeTag` of the genesis seed identity), the app and the generation. Two
-/// Stores on one host never name the same unit.
+/// `storeTag` of the Store identity, the genesis seed at the Store's root), the
+/// app and the generation. Two Stores on one host never name the same unit, a
+/// world restored or forked to another root included.
 /// Canonical Store coordinate; an absent or malformed id cannot name a unit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreId(String);

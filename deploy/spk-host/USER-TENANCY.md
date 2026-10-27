@@ -15,7 +15,12 @@ STORE DEPLOYMENT_HEX HOST_HEX OPERATOR_UID SUBUID_START COUNT`. The store is the
 native Host's `profile.storeTag`, never a guessed config hash. This creates the
 protected volume root, operator state/runtime directories, a root-owned registry
 and a sudoers rule for exactly the helper binary. `visudo -cf` validates the rule
-before publication. Allocate disjoint subordinate uids for every world.
+before publication. `SUBUID_START` is a preference: several worlds and their controller
+accounts share one operator's delegated range, so under the global allocator lock the
+installer takes the first free `COUNT`-aligned range at or after it (then from the start of
+the delegation), skipping every registered world, controller reservation, removed-controller
+receipt and existing account; the registry and the `ROOT SETUP` line carry the range
+allocated. Only a delegation with no free range refuses (`app range exhausted`).
 
 Install the broker user template as `mini-spk-broker@.service` in the operator's
 user unit directory, stage binaries under `~/.local/libexec`, and write an

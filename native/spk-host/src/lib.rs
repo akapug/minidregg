@@ -47,6 +47,7 @@ mod dispatch_web_input;
 #[cfg(target_os = "linux")]
 pub mod hostd;
 pub mod identity_custody;
+pub mod www_publish;
 #[cfg(target_os = "linux")]
 pub mod http_entrance;
 #[cfg(target_os = "linux")]
@@ -133,6 +134,8 @@ mod route_admission;
 pub mod resident_route_control;
 
 #[cfg(target_os = "linux")]
+mod canonical;
+mod private_file;
 mod checkpoint_control;
 
 #[cfg(target_os = "linux")]

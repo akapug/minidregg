@@ -12,6 +12,8 @@ fn main() {
         "ip.capnp",
         "web-session.capnp",
         "api-session.capnp",
+        "email.capnp",
+        "hack-session.capnp",
     ];
     let mut command = capnpc::CompilerCommand::new();
     command.src_prefix("schema").import_path("schema");

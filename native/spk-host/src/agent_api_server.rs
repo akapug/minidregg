@@ -50,21 +50,14 @@ fn string<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
 
 fn decimal<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
     let text = string(value, field)?;
-    if text.is_empty()
-        || text.len() > 128
-        || text.starts_with('0') && text != "0"
-        || !text.bytes().all(|b| b.is_ascii_digit())
-    {
+    if !crate::canonical::decimal(text) {
         return Err(invalid("agent permit decimal noncanonical"));
     }
     Ok(text)
 }
 
 pub(crate) fn unhex32(value: &str) -> io::Result<[u8; 32]> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    if !crate::canonical::hex64(&value)
     {
         return Err(invalid("agent identity hex refused"));
     }
@@ -832,10 +825,7 @@ fn read_saved_binding(attempt_parent: &Path, operation_id: &str) -> io::Result<S
         return Err(invalid("historical inspection attempt anchor drift"));
     }
     let pin = string(&saved, "bindingSha256")?;
-    if pin.len() != 64
-        || !pin
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    if !crate::canonical::hex64(&pin)
     {
         return Err(invalid("historical inspection binding digest refused"));
     }
@@ -843,26 +833,7 @@ fn read_saved_binding(attempt_parent: &Path, operation_id: &str) -> io::Result<S
 }
 
 pub(crate) fn read_private_recovery(path: &Path, max: usize) -> io::Result<Vec<u8>> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max as u64
-    {
-        return Err(invalid("private definite reply identity or size"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(max as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("private definite reply changed during read"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max as u64, "private definite reply identity or size")
 }
 
 fn recover_definite(
@@ -1280,14 +1251,33 @@ mod tests {
 
     #[test]
     fn distinct_controller_uid_gets_exact_traverse_and_socket_acl() {
-        let directory = std::env::temp_dir().join(format!(
-            "mini-agent-acl-{}-{}",
+        // A distinct controller must traverse every ancestor, so this fixture cannot sit under
+        // TMPDIR, whose modes are the runner's (dregg-build's /build/t is 0700 and is refused,
+        // rightly). It sits directly under /tmp, the root-owned sticky directory the preflight
+        // admits as a shared ancestor, and also proves the refusal under a private ancestor.
+        let id = format!(
+            "{}-{}",
             std::process::id(),
             NEXT_LISTENER.fetch_add(1, Ordering::SeqCst)
-        ));
+        );
+        let controller_uid = unsafe { libc::geteuid() } + 10_000;
+        let private = Path::new("/tmp").join(format!("mini-agent-acl-private-{id}"));
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let hidden = private.join("agent");
+        fs::create_dir(&hidden).unwrap();
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o700)).unwrap();
+        let refused = AgentApiListener::preflight_parent(&hidden.join("agent.sock"), controller_uid)
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("controller cannot traverse agent socket ancestor"),
+            "{refused}"
+        );
+        fs::remove_dir(&hidden).unwrap();
+        fs::remove_dir(&private).unwrap();
+        let directory = Path::new("/tmp").join(format!("mini-agent-acl-{id}"));
         fs::create_dir(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let controller_uid = unsafe { libc::geteuid() } + 10_000;
         let socket = directory.join("agent.sock");
         AgentApiListener::preflight_parent(&socket, controller_uid).unwrap();
         let listener = AgentApiListener::bind(&socket, controller_uid).unwrap();

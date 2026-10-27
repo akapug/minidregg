@@ -391,7 +391,7 @@ fn recorded_commitment(value: &Value) -> Result<crate::key_rotation::Commitment>
     match value.get("prerotation") {
         Some(Value::Bool(false)) => Ok(crate::key_rotation::Commitment::Without),
         Some(Value::Bool(true)) => {
-            let next: [u8; 32] = crate::decode_hex(member(value, "nextPublicKey")?)?
+            let next: [u8; 32] = mini_sdk::hex::decode(member(value, "nextPublicKey")?).map_err(|e| e.0)?
                 .try_into()
                 .map_err(|_| "workspace nextPublicKey is not 32 bytes")?;
             Ok(crate::key_rotation::Commitment::Mine(next))
@@ -1158,11 +1158,17 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
                 println!("    {context}");
             }
         } else {
+            // A target this workspace names is printed by name and, in
+            // parentheses, by its resource ID, so a reader (a room resident's
+            // mini_doc_show) can match links against cells.
+            let target = member(row, "target")?;
+            let label = cell_label(root, target);
+            let label = if label == target { label } else { format!("{label} (target {target})") };
             println!(
                 "link {} -> {} {} relation {} revision {} since {}",
                 member(row, "link")?,
                 member(row, "kind")?,
-                cell_label(root, member(row, "target")?),
+                label,
                 member(row, "relation")?,
                 member(row, "revision")?,
                 member(row, "height")?
@@ -1765,7 +1771,7 @@ fn project_transclusion_source(item: &mut Value, source: &str,
             if matching.len()!=1 { return None; }
             let atom=matching[0];
             if atom["kind"]==json!({"type":"text"}) {
-                return Some(match crate::decode_hex(atom["payload"].as_str()?).ok()
+                return Some(match mini_sdk::hex::decode(atom["payload"].as_str()?).ok()
                     .and_then(|bytes|String::from_utf8(bytes).ok()) {
                     Some(text)=>text, None=>"[source fragment: binary text]".into(),
                 });
@@ -2750,6 +2756,8 @@ fn stream_append(payload: &Value) -> Result<Value> {
                 .into(),
         );
     }
+    // The append payload JSON is operator-authored (topicHex/payloadHex exist
+    // so a person can express non-UTF-8 bytes): either case reads.
     let topic = if has("topic") {
         member(payload, "topic")?.as_bytes().to_vec()
     } else {
@@ -3104,7 +3112,7 @@ fn propose_summary_once(
                         field_decimal(sequence, "stream nextSeq")?;
                         // Seal the normalized bytes so binary append proposals retain
                         // the same room privacy as text proposals.
-                        let plain = zeroize::Zeroizing::new(crate::decode_hex(member(&lowered, "payload")?)?);
+                        let plain = zeroize::Zeroizing::new(mini_sdk::hex::decode(member(&lowered, "payload")?).map_err(|e| e.0)?);
                         lowered["payload"] = json!(hex(&roomkey::seal_for_room(
                             key, room, target, sequence, &plain
                         )?));
@@ -5284,7 +5292,7 @@ fn resource_link_of(target: &Value) -> Option<(String, String)> {
         return None;
     }
     let text = |key: &str| {
-        crate::decode_hex(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+        mini_sdk::hex::decode(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
     };
     if text("scheme")? != RESOURCE_LINK_SCHEME || !text("authority")?.is_empty() {
         return None;
@@ -5438,6 +5446,7 @@ fn document_actions(
         }
         if member(action, "type")? == "push" {
             let seen = seen_for(root, workspace, name, view, fresh, "a push is a diff against your last read")?;
+            // Operator-authored action JSON, like the append payload above.
             let file = crate::decode_hex(member(action, "bytes")?)?;
             lowered.extend(push_actions(&seen, &file)?.actions);
             // A push may change which line ends the document: no run is extended by a later append.
@@ -5658,7 +5667,7 @@ fn pulled_lines(seen: &Value) -> Result<Vec<PulledLine<'_>>> {
                 let bytes = match private::opened_text(opened)? {
                     Some(bytes) => bytes,
                     None if atom.get("kind") == Some(&json!({"type":"text"})) =>
-                        crate::decode_hex(member(atom, "payload")?)?,
+                        mini_sdk::hex::decode(member(atom, "payload")?).map_err(|e| e.0)?,
                     None => return Err(format!("line {line} is not a text atom; a file cannot carry it")),
                 };
                 if bytes.contains(&b'\n') {
@@ -5964,7 +5973,7 @@ fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &
                 let opened = atom_of(&displayed, id).unwrap_or_else(|| atom.clone());
                 let bytes = match private::opened_text(&opened) {
                     Ok(Some(bytes)) => bytes,
-                    Ok(None) => crate::decode_hex(atom["payload"].as_str().unwrap_or("")).unwrap_or_default(),
+                    Ok(None) => mini_sdk::hex::decode(atom["payload"].as_str().unwrap_or("")).unwrap_or_default(),
                     Err(_) => { changed.push(format!("line {line} changed (private text unavailable)")); continue; }
                 };
                 let mut text = String::from_utf8_lossy(&bytes).into_owned();

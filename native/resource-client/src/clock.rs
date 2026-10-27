@@ -104,20 +104,13 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 
 /// Host op 7: source-owned authoring of a JSON value into canonical bytes.
 fn author(ws: &Workspace, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
 }
 
 /// Host op 8: source-owned inspection of canonical bytes as JSON.
 fn inspect(ws: &Workspace, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("clock: invalid Host inspection of {kind}: {error}"))
-}
-
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
 }
 
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
@@ -144,7 +137,7 @@ fn bool_arg(args: &mut Args, name: &str) -> Result<bool> {
 }
 
 fn view(ws: &Workspace) -> Result<Value> {
-    let bytes = invoke(ws, 129, &[])?;
+    let bytes = invoke(ws, mini_sdk::host_operations::CLOCK_VIEW, &[])?;
     inspect(ws, "clock-view", &bytes)
 }
 
@@ -202,7 +195,7 @@ fn attempts(ws: &Workspace) -> Result<PathBuf> {
 fn submit(ws: &Workspace, attempt: &Path) -> Result<Value> {
     let ingress = fs::read(attempt.join("ingress.bin"))
         .map_err(|error| format!("cannot read {}: {error}", attempt.display()))?;
-    let outcome = invoke(ws, 128, &ingress)?;
+    let outcome = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_SUBMIT, &ingress)?;
     inspect(ws, "outcome", &outcome)
 }
 
@@ -280,16 +273,16 @@ fn tick(
             "now": now, "slot": slot,
         }),
     )?;
-    let plan = invoke(ws, 126, &command)?;
+    let plan = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_PLAN, &command)?;
     let header = inspect(ws, "clock-plan", &plan)?;
     let canonical = header
         .get("header")
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("clock plan lacks a canonical header")?;
-    let header_bytes = decode_hex(canonical).map_err(|_| "clock plan header is not hex")?;
+    let header_bytes = mini_sdk::hex::decode(canonical).map_err(|_| "clock plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
-    let ingress = invoke(ws, 127, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     // Retained before submission: a lost reply is resolved by the next run.
     let attempt = attempts(ws)?.join(format!("t-{}", crate::fsio::random_nonce()?));
     make_private_dir(&attempt)?;
@@ -297,7 +290,7 @@ fn tick(
     create_private(&attempt.join("tick.json"), asserted.to_string().as_bytes())?;
     create_private(&attempt.join("ingress.bin"), &ingress)?;
     if abandon {
-        let _ = invoke(ws, 128, &ingress)?;
+        let _ = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_SUBMIT, &ingress)?;
         return Ok(json!({"type": "abandoned", "attempt": attempt, "asserted": asserted}));
     }
     let mut value = resolve(ws, &attempt)?;

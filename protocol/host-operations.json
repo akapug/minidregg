@@ -2381,7 +2381,7 @@
       "status": "reserved",
       "routes": [],
       "owner": "platform",
-      "purpose": "platform install submit: controller-signed, version-monotone platform record (L1)",
+      "purpose": "platform install submit: controller-signed, version-monotone platform record (L1); effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2400,8 +2400,8 @@
       "symbol": "METER_REFILL_PLAN",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill plan (GENESIS-COUPLING M2; statements in Kernel/PlatformCell.lean; proof phase)",
+      "owner": "durable-meter",
+      "purpose": "plan a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2410,8 +2410,8 @@
       "symbol": "METER_REFILL_ASSEMBLE",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill assemble (M2)",
+      "owner": "durable-meter",
+      "purpose": "assemble a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2420,8 +2420,8 @@
       "symbol": "METER_REFILL_SUBMIT",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill submit: controller-signed posting that raises the lifetime meter lane by lane (M2)",
+      "owner": "durable-meter",
+      "purpose": "submit a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     },
@@ -2430,8 +2430,8 @@
       "symbol": "METER_REFILL_LOOKUP",
       "status": "reserved",
       "routes": [],
-      "owner": "platform",
-      "purpose": "meter refill receipt-only lookup (M2)",
+      "owner": "durable-meter",
+      "purpose": "lookup a seed-meter refill: the commit protocol's seed meter (Snapshot.available), not a cell: a refill is a nullifier-only, charge-exempt intent, so it is its own family rather than realmWell (a law-judged cell on the credit asset's issuer well); statements in Kernel/PlatformCell.lean M2; effect becomes append at activation",
       "receiver": null,
       "effect": "none"
     }
@@ -2610,5 +2610,87 @@
       "constant": "STOP_INSPECT_OPERATION",
       "operation": "APPLICATION_STOP_INSPECT"
     }
+  ],
+  "consent_frames": [
+    {
+      "code": 220,
+      "symbol": "CONSENT_INTENT",
+      "purpose": "the intent's headers a key may sign (Host/ClientConsentCore.lean consent 220)"
+    },
+    {
+      "code": 221,
+      "symbol": "CONSENT_OBSERVATION",
+      "purpose": "the operator challenge's headers an intent permits (221; a stale source is refused by name)"
+    },
+    {
+      "code": 222,
+      "symbol": "CONSENT_PLAN",
+      "purpose": "the operator plan's headers an intent permits (222)"
+    },
+    {
+      "code": 224,
+      "symbol": "CONSENT_OPERATOR_PLAN",
+      "purpose": "an operator (specialized) plan re-derived and compared exactly or pinned (224; registry consent_plans)"
+    },
+    {
+      "code": 226,
+      "symbol": "CONSENT_POSSESSION",
+      "purpose": "enrollment possession over the complete retained command (226)"
+    },
+    {
+      "code": 227,
+      "symbol": "CONSENT_OBJECTIVE",
+      "purpose": "the Objective's expected typed plan headers (227)"
+    },
+    {
+      "code": 228,
+      "symbol": "CONSENT_ANCHOR_OFFER",
+      "purpose": "offer the provider a retained admission anchor before admission (228)"
+    },
+    {
+      "code": 229,
+      "symbol": "CONSENT_ANCHOR_ADMITTED",
+      "purpose": "the anchor of what the provider admitted, retained by the client (229)"
+    },
+    {
+      "code": 230,
+      "symbol": "CONSENT_THIN_INTENT",
+      "purpose": "thin consent (no Store read): the intent (230)"
+    },
+    {
+      "code": 231,
+      "symbol": "CONSENT_THIN_OBSERVATION",
+      "purpose": "thin consent: the observation (231)"
+    },
+    {
+      "code": 232,
+      "symbol": "CONSENT_THIN_PLAN",
+      "purpose": "thin consent: the plan against the provider's command and the target views (232)"
+    },
+    {
+      "code": 233,
+      "symbol": "CONSENT_STORE_RECHECK",
+      "purpose": "re-check the Store before a connection's first frame (233, ConsentAnchor.recheckStore)"
+    }
+  ],
+  "ordinary_headers": [
+    "cookie",
+    "accept",
+    "accept-encoding",
+    "content-type",
+    "user-agent",
+    "if-match",
+    "if-none-match",
+    "x-requested-with",
+    "x-csrftoken",
+    "x-csrf-token",
+    "oc-total-length",
+    "oc-chunk-size",
+    "x-oc-mtime",
+    "oc-fileid",
+    "oc-chunked",
+    "oc-checksum",
+    "oc-chunk-offset",
+    "oc-lazyops"
   ]
 }

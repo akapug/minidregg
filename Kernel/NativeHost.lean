@@ -38,9 +38,19 @@ checkpoint is materialized and only the records after it are replayed through
 the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
 signed ingress is re-admitted here; `audit` does that. -/
 def openExisting (config : Config) : IO (Except String (Opened config)) := do
+  -- Operator measurement control (as `DurableReceiverIO.loadChained`): MINI_OPEN_TIMING=1 prints
+  -- the load's and the validation's elapsed time to stderr.
+  let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
+  let started ← IO.monoMsNow
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
-  | .ok durable => return validateLoaded config durable
+  | .ok durable =>
+      if timing then IO.eprintln s!"full open load: {(← IO.monoMsNow) - started} ms"
+      match validateLoaded config durable with
+      | .error detail => return .error detail
+      | .ok opened =>
+          if timing then IO.eprintln s!"full open validate: {(← IO.monoMsNow) - started} ms"
+          return .ok opened
 
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
@@ -818,6 +828,50 @@ def invokeRefusal (config : Config) (opened : Opened config)
           legs.firstLawRefusal fieldsOf
   | _ => none
 
+/-- An ordinary birth's factory law, judged on the signed observation's channel at plan time,
+as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
+judged by its own preparation; an ordinary birth's factory law was otherwise met only at the
+blind submission, whose refusal is `undisclosed`, so a member refused by the factory law
+learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's: the law the
+branch configuration resolves, on that branch's step (`Pending.branchStep .factory`), the
+very pair `Pending.admitBranch` admits on; disclosure is through the slots the requester's
+grant on the factory names. -/
+def birthRefusal (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
+  | .birth bytes _ => do
+      if (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome then none else
+      let descriptor ← CanonicalCellRegistry.sourceEncoding.codec.decode bytes
+      let height := logicalHeight config opened.durable
+      let prepared ← (ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+        config.profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor
+        height).toOption
+      let pending ← (ResourceBirthPolicyController.Concrete.preparePending
+        (profile := config.profile) prepared.prepared height).toOption
+      let law ← (pending.branchConfig .factory).resolve?
+      let step := pending.branchStep .factory
+      if Minidregg.Pred.eval law.predicate step.oldState step.newState then none
+      else some (ComposedLawDiagnostics.publicRefusal
+        (grantFields config opened grants config.deployment.factoryId) law)
+  | _ => none
+
+/-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
+theorem birthRefusal_only_birth (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) (draft : Draft)
+    (notBirth : ∀ bytes capabilities, draft ≠ .birth bytes capabilities) :
+    birthRefusal config opened grants draft = none := by
+  cases draft <;> first | rfl | exact absurd rfl (notBirth _ _)
+
+/-- A grain-backed birth is never judged here (its own preparation judges it). -/
+theorem birthRefusal_grain_none (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) (bytes : List UInt8)
+    (capabilities : List CapabilityId)
+    (grain : (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome) :
+    birthRefusal config opened grants (.birth bytes capabilities) = none := by
+  simp [birthRefusal, grain]
+
+#assert_axioms birthRefusal_only_birth
+#assert_axioms birthRefusal_grain_none
+
 /-- An installation's plan on the light route: the served state's authority (a basis
 declaring nothing) fixes the marker, a basis declaring its nullifier answers it. -/
 def prepareInstallLight (config : Config) (light : NativeHostLight.Light config) (subject : SubjectId)
@@ -850,7 +904,8 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
       | .prepare draft =>
           if let some steps := draftOverSyncBudget config draft then
             return .error ⟨.operationRejected, overSyncBudgetDetail config.nockFSync steps, none⟩
-          match invokeRefusal config opened signed.challenge.intent.grants draft with
+          match (invokeRefusal config opened signed.challenge.intent.grants draft).orElse
+              fun _ => birthRefusal config opened signed.challenge.intent.grants draft with
           | some refusal => return .error refusal
           | none =>
               match draft with

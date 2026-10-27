@@ -162,11 +162,11 @@ pub(crate) fn submit_stale_target(decision: Option<&HostDecision>) -> Option<Str
         || outcome["phase"] != crate::hex(b"stale-target") {
         return None;
     }
-    let detail = crate::decode_hex(outcome["detail"].as_str()?).ok()?;
+    let detail = mini_sdk::hex::decode(outcome["detail"].as_str()?).ok()?;
     let target = std::str::from_utf8(&detail).ok()?
         .strip_prefix("target ")?
         .strip_suffix(" moved since the plan was signed")?;
-    (!target.is_empty() && target.len() <= 40 && target.bytes().all(|b| b.is_ascii_digit()))
+    (target.len() <= 40 && mini_sdk::decimal::is_digits(target))
         .then(|| target.to_owned())
 }
 
@@ -420,7 +420,7 @@ mod tests {
     }
 
     fn hex(text: &str) -> String {
-        text.bytes().map(|b| format!("{b:02x}")).collect()
+        mini_sdk::hex::encode(text.as_bytes())
     }
 
     fn refused(reason: &str) -> HostDecision {

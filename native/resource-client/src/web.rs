@@ -37,6 +37,8 @@ mod body;
 mod verbs;
 #[path = "web/apps.rs"]
 mod apps;
+#[path = "web/subscribe.rs"]
+mod subscribe;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -330,6 +332,8 @@ pub(crate) struct ReadContext {
     pub height: String,
     pub authority_root: String,
     pub cell_root: String,
+    /// The world root the Host reported with this read (an export's manifest names the same).
+    pub world_root: String,
 }
 
 impl ReadContext {
@@ -339,6 +343,7 @@ impl ReadContext {
             height: text(&challenge["height"]),
             authority_root: text(&challenge["authorityRoot"]),
             cell_root: text(&view["cell"]["root"]),
+            world_root: text(&challenge["worldRoot"]),
         }
     }
 }
@@ -822,6 +827,7 @@ impl Site {
             height: challenge["height"].as_str().unwrap_or("?").to_owned(),
             authority_root: challenge["authorityRoot"].as_str().unwrap_or("?").to_owned(),
             cell_root: read.document["cellRoot"].as_str().unwrap_or("?").to_owned(),
+            world_root: challenge["worldRoot"].as_str().unwrap_or("?").to_owned(),
         };
         let entries = read.entries.clone();
         let base = self.base();

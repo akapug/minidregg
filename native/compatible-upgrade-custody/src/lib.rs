@@ -349,4 +349,51 @@ mod tests {
         a.public_socket = Some("/node/../public/mini.sock".into());
         assert!(validate_topology(&a).is_err());
     }
+
+    /// Needs `fixture-os`: only then may the unprivileged test principal stand
+    /// in for root; the wrong-pin refusals do not depend on who owns the file.
+    #[cfg(feature = "fixture-os")]
+    mod pin {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+        fn scratch(name: &str, mode: u32) -> PathBuf {
+            let dir = std::env::temp_dir()
+                .canonicalize()
+                .unwrap()
+                .join(format!("cuc-{}-{name}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+            let file = dir.join("image");
+            fs::write(&file, b"exact image bytes").unwrap();
+            fs::set_permissions(&file, fs::Permissions::from_mode(mode)).unwrap();
+            file
+        }
+        #[test]
+        fn root_pin_accepts_exact_digest_and_refuses_wrong_pin_or_custody() {
+            let exact = sha(b"exact image bytes");
+            let file = scratch("pin", 0o644);
+            assert!(root_pin(&file, &exact).is_ok());
+            assert!(root_pin(&file, &sha(b"other bytes")).is_err());
+            assert!(root_pin(&file, &exact.to_uppercase()).is_err());
+            assert!(root_pin(&file, &exact[..63]).is_err());
+            let loose = scratch("loose", 0o666);
+            assert!(root_pin(&loose, &exact).is_err());
+            let group = scratch("group", 0o664);
+            assert!(root_pin(&group, &exact).is_err());
+        }
+        #[test]
+        fn root_pin_refuses_symlink_and_root_bytes_refuses_empty_and_oversize() {
+            let exact = sha(b"exact image bytes");
+            let file = scratch("link", 0o644);
+            let link = file.with_file_name("link");
+            std::os::unix::fs::symlink(&file, &link).unwrap();
+            assert!(root_pin(&link, &exact).is_err());
+            assert!(root_bytes(&link, 1024).is_err());
+            assert_eq!(root_bytes(&file, 1024).unwrap(), b"exact image bytes");
+            assert!(root_bytes(&file, 4).is_err());
+            fs::write(&file, b"").unwrap();
+            assert!(root_bytes(&file, 1024).is_err());
+        }
+    }
 }

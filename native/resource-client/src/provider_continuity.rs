@@ -401,7 +401,7 @@ pub(crate) fn guard(
     let payload = descriptor_payload(&descriptor, &evidence)?;
     create_private(&evidence.join("request.bin"), &payload)?;
     sync_directory_ancestors(&evidence)?;
-    let frame = session_invoke(host, socket, config, 17, &payload)?;
+    let frame = session_invoke(host, socket, config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     create_private(&evidence.join("reply.frame"), &frame)?;
     if frame.first() != Some(&17) {
         return Err("Host refused continuity; exact frame retained".into());
@@ -815,7 +815,7 @@ pub(crate) fn resolve_attempt(
     }
     let payload = resolution_payload(&payload, &old_prefix)?;
     create_private(&fresh_dir.join("request.bin"), &payload)?;
-    let frame = session_invoke(host, socket, &copied_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &copied_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     create_private(&fresh_dir.join("reply.frame"), &frame)?;
     if frame.first() != Some(&17) {
         return Err("fresh continuity refused; keep Pending".into());

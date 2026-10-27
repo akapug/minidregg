@@ -199,7 +199,7 @@ pub(crate) fn replace(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), Stri
         return Err(std::io::Error::last_os_error().to_string());
     }
     let nonce = crate::fsio::random::<16>()?;
-    let nonce = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let nonce = mini_sdk::hex::encode(&nonce);
     let temporary = CString::new(format!(".mini-replace-{}-{nonce}", std::process::id())).unwrap();
     let fd = unsafe { libc::openat(directory.as_raw_fd(), temporary.as_ptr(),
         libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600) };

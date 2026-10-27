@@ -287,6 +287,7 @@ fn checked_identity(verifier: &Path, verifier_sha256: &str, config: &Path) -> Re
 }
 fn pinned_verifier(verifier: &Path, verifier_sha256: &str, config: &Path,
     config_bytes: &[u8]) -> Result<crate::transport::PinnedLocalInvocation> {
+    // The verifier pin arrives in settings a person writes, not from the Host.
     let expected: [u8; 32] = crate::decode_hex(verifier_sha256).map_err(fail)?
         .try_into().map_err(|_| fail("local verifier pin must be exactly 32 bytes"))?;
     crate::transport::PinnedLocalInvocation::new(verifier, config, &expected, config_bytes)
@@ -607,7 +608,7 @@ impl HostProof<'_> {
         let socket = SOCKET
             .get()
             .ok_or_else(|| fail("continuity requires a pinned Host socket"))?;
-        let frame = crate::session_invoke(&host, socket, &config, 151, &bytes)?;
+        let frame = crate::session_invoke(&host, socket, &config, mini_sdk::host_operations::RECEIPT_CONTINUITY, &bytes)?;
         if frame.first() != Some(&151) || frame.len() as u64 > MAX_JSON {
             return Err(fail("Host refused continuity or exceeded hop bound"));
         }

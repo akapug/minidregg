@@ -14,6 +14,7 @@ use std::fs::DirBuilder;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
+pub(crate) use crate::canonical::{decimal, hex, lower_hex as lowercase_hex};
 
 const MAX_FRAME: usize = 12_102_760;
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-PLAN/v1";
@@ -23,43 +24,8 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
-}
-
-pub(crate) fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(crate) fn lowercase_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 pub(crate) fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !lowercase_hex(value) {
-        return Err(invalid("v3 BEGIN noncanonical hexadecimal"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).map_err(|_| invalid("v3 BEGIN hex pair"))?;
-            u8::from_str_radix(pair, 16).map_err(|_| invalid("v3 BEGIN hex pair"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| invalid("v3 BEGIN noncanonical hexadecimal"))
 }
 
 pub(crate) fn text<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {
@@ -444,9 +410,9 @@ pub(crate) fn submit_once(
     // already been allocated; recovery must inspect the original attempt and
     // never call submit_once again.
     hold_begin_attempt(parent, &active)?;
-    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 66, PLAN_TAG)?;
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspection = operator.tool(
         "inspect",
@@ -473,9 +439,9 @@ pub(crate) fn submit_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
-    let reply = operator.invoke(67, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 67, BEGIN_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, BEGIN_INGRESS_FILE, &ingress)?;
     let marker = json!({
         "protocol":"mini-spk-launch-begin-submit-requested-v1",
@@ -489,9 +455,9 @@ pub(crate) fn submit_once(
         "op22-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(22, &ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, b"DREGG/NATIVE-HOST/OUTCOME/v6")?;
+    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, b"DREGG/NATIVE-HOST/OUTCOME/v6")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",
@@ -656,11 +622,11 @@ mod tests {
         reply.push(66);
         reply.extend_from_slice(PLAN_TAG);
         reply.push(1);
-        assert!(framed_payload(&reply, 66, PLAN_TAG).is_ok());
-        assert!(framed_payload(&reply, 67, PLAN_TAG).is_err());
-        assert!(framed_payload(&reply, 66, BEGIN_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_ok());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, PLAN_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, BEGIN_TAG).is_err());
         reply.push(0);
-        assert!(framed_payload(&reply, 66, PLAN_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_err());
     }
 
     #[test]
