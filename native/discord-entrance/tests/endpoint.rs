@@ -168,6 +168,12 @@ fn command(id: &str, user: &str, name: &str, line: Option<&str>) -> Value {
             "member": { "user": { "id": user } }, "data": data })
 }
 
+fn feedback_command(id: &str, user: &str, text: &str) -> Value {
+    json!({ "type": 2, "id": id, "application_id": APP, "token": format!("tok-{id}"),
+            "member": { "user": { "id": user } },
+            "data": { "name": "feedback", "options": [{ "name": "text", "type": 3, "value": text }] } })
+}
+
 fn content(resp: &str) -> String {
     let v: Value = serde_json::from_str(resp).unwrap();
     assert_eq!(v["type"], 4, "{resp}");
@@ -249,6 +255,22 @@ fn a_rostered_line_runs_in_its_session_deferred_and_logged() {
     assert_eq!(recs[2]["exit"], 3);
     let mode = std::fs::metadata(home.join("discord.log")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+/// `/feedback text:` runs the member's own `feedback --via discord "TEXT"` line in the member's
+/// session (the same turn the shell and the web make), the text quoted whole so none of its words
+/// can be read as a flag of the verb; an empty text runs nothing.
+#[test]
+fn feedback_is_the_members_own_report_line() {
+    let w = world("feedback");
+    let c = deferred_then_patch(&w, "1", post(&w, &feedback_command("1", FRIEND, "--clause fake the button is gone"), false));
+    let home = w.sessions.join("friend");
+    assert!(c.contains("line=[feedback --via discord \"--clause fake the button is gone\"]"), "{c}");
+    assert!(c.contains(&format!("home={}", home.display())), "{c}");
+    wait_for_worker_release(&w, "1");
+    let (status, body) = post(&w, &feedback_command("2", FRIEND, "   "), false);
+    assert_eq!(status, 200);
+    assert!(content(&body).contains("usage: /feedback text:"), "{body}");
 }
 
 #[test]

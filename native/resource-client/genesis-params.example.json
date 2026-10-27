@@ -18,6 +18,7 @@
   "issuerEpoch": 2,
   "factoryControllerCapability": 53,
   "payControlCapability": 4031,
+  "clockControlCapability": 4033,
   "sponsor": {
     "subject": 7,
     "keyId": 7007,

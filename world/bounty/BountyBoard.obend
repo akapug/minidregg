@@ -222,53 +222,115 @@ def escrowConserved(t: Transition, before: State) -> Bool:
     case moved(s): escrowHeld(s) == escrowHeld(before) && Order.not(isTerminal(s))
     case disbursed(m): escrowHeld(m.next) == 0n && m.payout.amount == escrowHeld(before) && isTerminal(m.next)
 
-# ---- (2) the lifecycle as an Activity ----------------------------------------
+# ---- (2) the lifecycle as an Activity on the kernel (Kernel/ObjectiveActivity) ----
+# One input value (`Opening`); the kernel's `resumed {outcome, view}` response; the kernel's own
+# Plans: `await {write, on, patience}` for the next event (the keeper, one decider, answers with a
+# typed `Event`) and `transfer {to, amount, write}` for the disbursement, which the kernel performs
+# FROM THE ACTIVITY'S PURSE (the escrow: the birth deposit) at the yield and answers `settled` or
+# `refused`. The declared state is a ledger counting the performed disbursements (at most one).
 
-record Waiting:
-  phase: String
-  deadline: Nat
+record Opening:
+  posted: Posted
+  keeper: Nat
+  fresh: Bool
+
+record Ledger:
+  moves: Nat
+
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+record Write:
+  moves: EditNat
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
+
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+
+record Pay:
+  to: Nat
+  amount: Nat
+  write: Write
 
 sum Plan:
-  await: Waiting
-  disburse: Payout
+  await: Await
+  transfer: Pay
 
-sum Response:
-  event: Event
+sum Outcome:
+  reply: Event
   settled: {}
   refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
 
-def waitingOf(s: State) -> Waiting:
-  match s:
-    case submitted(d): {phase: phaseOf(s), deadline: reviewEnds(d)}
-    case open(p): {phase: phaseOf(s), deadline: p.deadline}
-    case claimed(t): {phase: phaseOf(s), deadline: t.posted.deadline}
-    case paid(_): {phase: phaseOf(s), deadline: 0n}
-    case refunded(_): {phase: phaseOf(s), deadline: 0n}
+record View:
+  version: Nat
+  state: Ledger
 
-# The result is the terminal phase ("paid" or "refunded"). Every unfolding of
-# `serve` past a yield costs one admitted turn.
-def serve(s: State) -> Activity<Plan, Response, String>:
-  match perform(Plan.await(waitingOf(s))):
-    case event(e): step(s, react(s, e))
-    case settled(_): serve(s)
-    case refused(_): serve(s)
+record Step:
+  outcome: Outcome
+  view: View
 
-def step(s: State, t: Transition) -> Activity<Plan, Response, String>:
+sum Response:
+  resumed: Step
+
+def keepLedger() -> Write:
+  {moves: EditNat.keep()}
+
+def firstWrite(o: Opening) -> Write:
+  if o.fresh then {moves: EditNat.set(0n)} else keepLedger()
+
+# The result is the terminal phase ("paid" or "refunded"). Every unfolding past a yield costs one
+# admitted turn; an unanswered await (unknown, timed out, broken) waits again.
+def serve(o: Opening, s: State, w: Write) -> Activity<Plan, Response, String>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): step(o, s, react(s, e))
+        case settled(_): serve(o, s, keepLedger())
+        case refused(_): serve(o, s, keepLedger())
+        case unknown(_): serve(o, s, keepLedger())
+        case timedOut(_): serve(o, s, keepLedger())
+        case broken(_): serve(o, s, keepLedger())
+        case upgraded(_): serve(o, s, keepLedger())
+
+def step(o: Opening, s: State, t: Transition) -> Activity<Plan, Response, String>:
   match t:
-    case refused(unchanged): serve(unchanged)
-    case moved(next): serve(next)
-    case disbursed(m): disburse(s, m)
+    case refused(unchanged): serve(o, unchanged, keepLedger())
+    case moved(next): serve(o, next, keepLedger())
+    case disbursed(m): disburse(o, s, m)
 
-# The disbursement is the last Plan: the kernel moves the escrow (whole) or
-# refuses, and a refused disbursement leaves the bounty where it was.
-def disburse(s: State, m: Move) -> Activity<Plan, Response, String>:
-  match perform(Plan.disburse(m.payout)):
-    case settled(_): phaseOf(m.next)
-    case refused(_): serve(s)
-    case event(_): serve(s)
+# The disbursement is the last Plan: a kernel transfer of the whole escrow from the purse, performed
+# (`settled`) or refused (nothing moves, the bounty stays where it was).
+def disburse(o: Opening, s: State, m: Move) -> Activity<Plan, Response, String>:
+  match perform(Plan.transfer({to: m.payout.to, amount: m.payout.amount, write: {moves: EditNat.add(1n)}})):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): phaseOf(m.next)
+        case refused(_): serve(o, s, keepLedger())
+        case reply(_): serve(o, s, keepLedger())
+        case unknown(_): serve(o, s, keepLedger())
+        case timedOut(_): serve(o, s, keepLedger())
+        case broken(_): serve(o, s, keepLedger())
+        case upgraded(_): serve(o, s, keepLedger())
 
-def bounty(p: Posted) -> Activity<Plan, Response, String>:
-  serve(State.open(p))
+def bounty(o: Opening) -> Activity<Plan, Response, String>:
+  serve(o, State.open(o.posted), firstWrite(o))
 
 # ---- the named scenario ------------------------------------------------------
 # Poster 1 escrows 50 for "translate the README", deadline height 100, review

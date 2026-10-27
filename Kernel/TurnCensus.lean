@@ -91,6 +91,8 @@ inductive Kind
   | activity
   /-- A seat-kernel cell (instance, invitation, seat, holdings, package). -/
   | seat
+  /-- The platform cell: the current platform record and its genesis controller. -/
+  | platform
   deriving DecidableEq, Repr
 
 /-- Every census cell has a RAM row namespace, an append-only log and a ROM
@@ -168,12 +170,13 @@ def cPay : CellId := 12
 def cSystem : CellId := 13
 def cActivity : CellId := 14
 def cSeat : CellId := 15
+def cPlatform : CellId := 16
 
 def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  ((((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
+  (((((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
     (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
     cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
     (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
@@ -182,7 +185,8 @@ def cells0 : Cells R :=
     cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
     cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))).update
     cActivity (some (cellOf .activity [(0, 1)]))).update
-    cSeat (some (cellOf .seat [(0, 1)]))
+    cSeat (some (cellOf .seat [(0, 1)]))).update
+    cPlatform (some (cellOf .platform [(0, 1)]))
 
 /-- The meter every lane starts with. -/
 def budget : Nat := 10000
@@ -232,6 +236,7 @@ inductive Ctor
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
   | jointReserve | bootstrapBundle | applicationFailedStartRecovery
   | applicationRetryBeginV4 | applicationRetryClaimV4 | applicationRetryCompletionV4
+  | platformInstall
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -246,11 +251,12 @@ def Ctor.all : List Ctor :=
     .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
     .certify, .renounce, .subjectKeyRotation, .activity, .seat, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
     .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery,
-    .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4]
+    .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4,
+    .platformInstall]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 51 := rfl
+theorem Ctor.all_length : Ctor.all.length = 52 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -347,6 +353,8 @@ def Ctor.turn : Ctor → CTurn
   -- seat (SEATS-NATIVE): an offer writes the seat cell at its loaded value and the
   -- Book postings (the seat account registered fresh); the marker and the invitation claim
   | .seat => mk [] [leg cSeat .seat [wr 0 1 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
+  -- platform install: the record written at its loaded value, the controller untouched
+  | .platformInstall => mk [] [leg cPlatform .platform [wr 0 1 2]] [159]
   -- holder renunciation appends the authority revocation and spends one marker
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [143]
   -- key rotation reads the current authority and appends its successor record
@@ -452,6 +460,8 @@ def Ctor.negation : Ctor → CTurn
       [155, 156]
   -- a seat turn whose seat cell moved under its signed outcome
   | .seat => mk [] [leg cSeat .seat [wr 0 9 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
+  -- a platform install over a record that moved (a stale base)
+  | .platformInstall => mk [] [leg cPlatform .platform [wr 0 9 2]] [159]
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [99]
   | .subjectKeyRotation => mk [] [leg cAuth .authority [rd 1 (some 0), lg 9 1]] [144]
   | .subjectKeyCommitmentAdoption => mk [] [leg cAuth .authority [wr 1 0 2]] [145]
@@ -523,6 +533,7 @@ def Ctor.refusal : Ctor → Reject
   | .certify => .guardFailed cSystem 0
   | .activity => .guardFailed cActivity 0
   | .seat => .guardFailed cSeat 0
+  | .platformInstall => .guardFailed cPlatform 0
   | .renounce => .nullifierSpent
   | .subjectKeyRotation => .guardFailed cAuth 0
   | .subjectKeyCommitmentAdoption => .guardFailed cAuth 0

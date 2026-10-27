@@ -659,31 +659,16 @@ def hasLink(l: ActivityLink) -> Bool:
     case noActivity(_): false
     case existing(_): true
 
-# ---- the lifecycle as an Activity ------------------------------------------------
-# A resident serves one request. It yields `await` naming the phase it is in;
-# a typed Event resumes it. The pure transition above decides. A refusal yields
-# nothing (no admitted turn, state unchanged); a proposal yields ONE `admit`
-# Plan -- the whole transition, expected state, successor and its (at most
-# three) effects, which the kernel admits atomically or refuses -- and the
-# kernel's `admitted`/`refused` resumes it. The Plan is derived from the same
-# Transition value the pure layer returns, so there is one mechanism.
-#
-# Plans and responses are first-order, non-recursive data: effects travel in
-# three fixed slots (`nothing` pads), never as a list.
-
-record Await:
-  phase: String
-
-record Admission:
-  expected: State
-  successor: State
-  first: Effect
-  second: Effect
-  third: Effect
-
-sum Plan:
-  await: Await
-  admit: Admission
+# ---- the lifecycle as an Activity on the kernel (Kernel/ObjectiveActivity) -------
+# A resident serves one request. It yields the kernel's `await {write, on, patience}` (the keeper,
+# one decider, relays each typed Event); the pure transition above decides. A refusal yields
+# nothing new (the activity awaits again, state unchanged); a proposal yields ONE `commit {write}`:
+# the admission is WRITTEN into the object's declared state (`Admitted`: the successor's phase and
+# the count of admissions) through the object's law, decided at the yield (`settled`; a law that
+# refuses the write refuses the whole turn, nothing is written and the activity stays at its yield).
+# The Plan is derived from the same Transition value the pure layer returns, so there is one
+# mechanism. The proposal's money effects are not carried by the commit: moving value is a
+# `transfer` Plan's, one recipient per yield (an action list is not a kernel Plan).
 
 record ReserveInput:
   request: Request
@@ -719,26 +704,74 @@ sum Event:
   reviewed: ReviewInput
   cancelRequested: CancelInput
 
-sum Response:
-  admitted: {}
+record Admitted:
+  phase: String
+  admissions: Nat
+
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+sum EditString:
+  keep: {}
+  set: String
+
+record Write:
+  phase: EditString
+  admissions: EditNat
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
+
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+
+record Commit:
+  write: Write
+
+sum Plan:
+  await: Await
+  commit: Commit
+
+sum Outcome:
+  reply: Event
+  settled: {}
   refused: {}
-  event: Event
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
 
-def effectAt(effects: Effects, n: Nat) -> Effect:
-  match effects:
-    case none(_): Effect.nothing()
-    case more(m): effectAtStep(m.head, m.tail, n)
+record View:
+  version: Nat
+  state: Admitted
 
-def effectAtStep(head: Effect, tail: Effects, n: Nat) -> Effect:
-  match n:
-    case 0n: head
-    case 1n+q: effectAt(tail, q)
+record Step:
+  outcome: Outcome
+  view: View
 
-def fitsAdmission(effects: Effects) -> Bool:
-  Order.lessOrEqual(effectCount(effects), 3n)
+sum Response:
+  resumed: Step
 
-def admissionOf(p: Proposal) -> Admission:
-  {expected: p.expected, successor: p.successor, first: effectAt(p.effects, 0n), second: effectAt(p.effects, 1n), third: effectAt(p.effects, 2n)}
+record Opening:
+  keeper: Nat
+  fresh: Bool
+
+def keepAdmitted() -> Write:
+  {phase: EditString.keep(), admissions: EditNat.keep()}
+
+def firstWrite(o: Opening) -> Write:
+  if o.fresh then {phase: EditString.set("vacant"), admissions: EditNat.set(0n)} else keepAdmitted()
 
 def isTerminal(s: State) -> Bool:
   match s:
@@ -761,40 +794,44 @@ def react(state: State, e: Event) -> Transition:
     case reviewed(i): accept(state, i.review, i.capacityHome, i.capacity, i.bookRoot)
     case cancelRequested(i): cancel(state, i.actor, i.now, i.capacityHome, i.capacity, i.bookRoot)
 
-# The result is the terminal phase ("finished" or "cancelled"). Every unfolding
-# of `serve` past a yield costs one admitted turn.
-def serve(state: State) -> Activity<Plan, Response, String>:
-  match perform(Plan.await({phase: phaseOf(state)})):
-    case admitted(_): serve(state)
-    case refused(_): serve(state)
-    case event(e): step(state, react(state, e))
+# The result is the terminal phase ("finished" or "cancelled"). Every unfolding past a yield costs
+# one admitted turn; an unanswered await (unknown, timed out, broken) waits again.
+def serve(o: Opening, state: State, w: Write) -> Activity<Plan, Response, String>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})):
+    case resumed(r):
+      match r.outcome:
+        case reply(e): step(o, state, react(state, e))
+        case settled(_): serve(o, state, keepAdmitted())
+        case refused(_): serve(o, state, keepAdmitted())
+        case unknown(_): serve(o, state, keepAdmitted())
+        case timedOut(_): serve(o, state, keepAdmitted())
+        case broken(_): serve(o, state, keepAdmitted())
+        case upgraded(_): serve(o, state, keepAdmitted())
 
-def step(state: State, t: Transition) -> Activity<Plan, Response, String>:
+def step(o: Opening, state: State, t: Transition) -> Activity<Plan, Response, String>:
   match t:
-    case refused(unchanged): serve(unchanged)
-    case proposed(p): commit(p)
+    case refused(unchanged): serve(o, unchanged, keepAdmitted())
+    case proposed(p): admit(o, p)
 
-# More than three effects cannot travel in one Plan; refuse rather than truncate.
-def commit(p: Proposal) -> Activity<Plan, Response, String>:
-  match fitsAdmission(p.effects):
-    case true: admit(p)
-    case false: serve(p.expected)
+def admit(o: Opening, p: Proposal) -> Activity<Plan, Response, String>:
+  match perform(Plan.commit({write: {phase: EditString.set(phaseOf(p.successor)), admissions: EditNat.add(1n)}})):
+    case resumed(r):
+      match r.outcome:
+        case settled(_): settleTo(o, p.successor)
+        case refused(_): serve(o, p.expected, keepAdmitted())
+        case reply(_): serve(o, p.expected, keepAdmitted())
+        case unknown(_): serve(o, p.expected, keepAdmitted())
+        case timedOut(_): serve(o, p.expected, keepAdmitted())
+        case broken(_): serve(o, p.expected, keepAdmitted())
+        case upgraded(_): serve(o, p.expected, keepAdmitted())
 
-def admit(p: Proposal) -> Activity<Plan, Response, String>:
-  match perform(Plan.admit(admissionOf(p))):
-    case admitted(_): settleTo(p.successor)
-    case refused(_): serve(p.expected)
-    case event(_): serve(p.expected)
-
-def settleTo(state: State) -> Activity<Plan, Response, String>:
+def settleTo(o: Opening, state: State) -> Activity<Plan, Response, String>:
   match isTerminal(state):
     case true: phaseOf(state)
-    case false: serve(state)
+    case false: serve(o, state, keepAdmitted())
 
-# Entries of the lifecycle activity. A definition without parameters would be a
-# shared lazy value, so an activity takes a (unit) parameter.
-def lifecycle(begin: {}) -> Activity<Plan, Response, String>:
-  serve(State.vacant())
+def lifecycle(o: Opening) -> Activity<Plan, Response, String>:
+  serve(o, State.vacant(), firstWrite(o))
 
 # ---- the named scenario (ServiceCommonsDemonstration.bend) ------------------------
 # "escrow 6 / capacity 5 -> 3, start, late-start refusal, completion-only

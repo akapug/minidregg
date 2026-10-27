@@ -53,5 +53,19 @@
         "max_length": 20
       }
     ]
+  },
+  {
+    "name": "feedback",
+    "description": "Tell the operator what went wrong or what you wish were different",
+    "type": 1,
+    "options": [
+      {
+        "name": "text",
+        "description": "Your report: one line, as plain as you like",
+        "type": 3,
+        "required": true,
+        "max_length": 1000
+      }
+    ]
   }
 ]

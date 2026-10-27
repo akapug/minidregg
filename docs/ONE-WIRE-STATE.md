@@ -69,14 +69,40 @@ Abuse limits (infra's review):
   wrapper's slot pair only bounds what one member's ssh account can queue; the Host is where every
   face (ssh, web, socket) meets.
 
-## Owed on cut 9 (28235a17)
+## For the integrator (COORDINATION §4: lanes run no builds, tests or rows)
 
-- The world template's before/after (waiting for the coordinator's cut 9 path). The run that matters is
-  `JOURNEY_WORLD_TEMPLATES=1` (the default). `=0` runs once, as the control for the published number,
-  via `/build/lanes/custody-drivers-logs/run-measure.sh` (re-add the frozen tree
-  `/build/lanes/custody-drivers-measure` at the tip first; point it at the cut 9 set). Last numbers
-  (a94bed71 binaries, without this lane's mini fixes): 1119 s off, 1089 s on, both cut short.
-- Optionally rerun `enrol-resume-acceptance.sh` there (`run-enrol-12.sh` pattern, `C=` the cut 9 set).
+Written and not run by this lane; the central build runs them:
+- `87768a8bb` platform install 240-243 on the operator socket: test
+  `transport::tests::platform_install_is_the_operators_alone_and_meter_refill_stays_closed`, plus
+  `python3 scripts/host-operations.py check` (the registry records routes ["operator"]).
+- `b085895e` the export cooldown: `world_export::tests::one_export_per_cooldown_named_by_time_and_a_failed_one_costs_nothing`.
+- `c59ab026` `python3 scripts/test-host-operations.py` (31 tests, about 72 s).
+
+The world template's before/after, on the newest candidate set `C=/build/candidates/<sha>`.
+Templates ON is the run that matters (it is the default); OFF runs once, as the control for the
+published number. Both use one frozen tree, so both runs judge the same scripts:
+
+```sh
+# on dregg-build as lanes, once per measurement
+cd /build/minidregg && git fetch -q origin
+T=/build/lanes/template-measure; TIP=<candidate sha>
+git worktree add --detach "$T" origin/main     # or the tree the candidate was cut from
+. /build/lanes/integration/pipeline/box.env; export XDG_RUNTIME_DIR=/run/user/$(id -u)
+for mode in 1 0; do
+  s=$(date +%s); uptime > /build/lanes/template-measure-$mode.load
+  JOURNEY_WORLD_TEMPLATES=$mode bash "$T/scripts/pipeline/journey-runner" --tip "$TIP" --source-tree "$T" \
+    --results-root /build/lanes/template-journeys-$mode > /build/lanes/template-measure-$mode.log 2>&1
+  R=/build/lanes/template-journeys-$mode/$TIP
+  echo "templates=$mode rc=$? wall=$(( $(date +%s) - s ))s WALL_S=$(cat $R/WALL_S) rows=$(wc -l < $R/results.tsv) fail=$(grep -c $'\tFAIL\t' $R/results.tsv) load=$(cat /build/lanes/template-measure-$mode.load)"
+done
+```
+
+The published number is WALL_S(templates=0) - WALL_S(templates=1), with both loads beside it.
+`journey-runner` exports NEWPARTICIPANT_TEMPLATE_DIR under the run (=1), or empty (=0, every world
+fresh). Last figures, on a94bed71 binaries without this lane's mini fixes: 1119 s off, 1089 s on,
+both cut short by J1's seal red (fixed since). Optional on the same candidate:
+`native/resource-client/enrol-resume-acceptance.sh HOST MINI STORE VERIFIER NEW_DIR` with the set's
+binaries (last PASS on cut 7, step 7 included).
 
 ## Verify commands
 - `python3 scripts/host-operations.py check` (3 s).

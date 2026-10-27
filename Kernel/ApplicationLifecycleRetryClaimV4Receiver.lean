@@ -33,14 +33,14 @@ structure Reservation (config : Config) where
 def Reservation.verified {config : Config} (reservation : Reservation config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate reservation.old
-        reservation.readback.derived reservation.readback.ready) :=
+        reservation.readback.derived reservation.readback.ready reservation.readback.tag) :=
   NativeHostReplay.extendExact reservation.reader reservation.old reservation.readback
 
 def Reservation.receipt {config : Config} (reservation : Reservation config) :
     NativeHostCodec.Receipt :=
   let old := reservation.old
   let candidate := NativeHostReplay.exactCandidate old
-    reservation.readback.derived reservation.readback.ready
+    reservation.readback.derived reservation.readback.ready reservation.readback.tag
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -61,7 +61,7 @@ theorem Reservation.successor_validated {config : Config} (reservation : Reserva
     reservation.readback.derived.intent = reservation.admitted.intent ∧
       NativeHost.validateLoaded config
           (NativeHostReplay.exactCandidate reservation.old
-            reservation.readback.derived reservation.readback.ready) =
+            reservation.readback.derived reservation.readback.ready reservation.readback.tag) =
         .ok reservation.readback.after :=
   ⟨reservation.derivedExact, reservation.readback.validated⟩
 

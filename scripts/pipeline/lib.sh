@@ -62,6 +62,12 @@ pipeline_verify_set() {
 # long build in one slot never blocks a waiter while another slot is free). A FAILING CMD is not
 # re-run: only flock's own conflict code (-E 253, so a CMD's own exit 75 is never read as busy)
 # moves on to the next slot.
+# pipeline_slots_exist: every file named in $PIPELINE_SLOTS exists (the box was provisioned with slots).
+pipeline_slots_exist() {
+  local s
+  for s in $PIPELINE_SLOTS; do [ -e "$s" ] || return 1; done
+  [ -n "$PIPELINE_SLOTS" ]
+}
 pipeline_slot() {
   local rc s told=0
   while :; do
@@ -87,6 +93,22 @@ pipeline_build_slot() {
   shift
   pipeline_cache_audit || pipeline_die "the shared Lake cache is unguarded (lake-cache-audit failed): not building on it"
   n=$(PIPELINE_PROG=stale-modules "$(dirname -- "${BASH_SOURCE[0]}")/stale-modules" "${mods[@]}" 2>/dev/null | head -1)
+  # A box provisioned without slot files (dregg-build, dregg-ref: no /srv/pipeline) has no slot to take,
+  # and flock on a missing /srv path fails at once. There a small rebuild runs directly (it is the
+  # per-file loop; swarm-build already caps its memory) and anything larger takes the box's one-closure
+  # lock when it has one (/usr/local/bin/closure-lock), so it never runs beside the box's closure.
+  if ! pipeline_slots_exist; then
+    if [ -n "$n" ] && [ "$n" -le "${PIPELINE_SMALL_MAX:-50}" ]; then
+      pipeline_log "small rebuild ($n stale modules), no slot files on $(hostname): direct, ${PIPELINE_SMALL_THREADS:-2} threads" >&2
+      env LEAN_NUM_THREADS="${PIPELINE_SMALL_THREADS:-2}" "$@"; return
+    fi
+    if command -v closure-lock >/dev/null 2>&1; then
+      pipeline_log "rebuild of ${n:-?} stale modules, no slot files on $(hostname): closure-lock" >&2
+      closure-lock "$@"; return
+    fi
+    pipeline_log "rebuild of ${n:-?} stale modules, no slot files and no closure-lock on $(hostname): direct" >&2
+    "$@"; return
+  fi
   if [ -n "${PIPELINE_SMALL_SLOTS:-}" ] && [ -n "$n" ] && [ "$n" -le "${PIPELINE_SMALL_MAX:-50}" ]; then
     pipeline_log "small rebuild ($n stale modules): small-check slot, ${PIPELINE_SMALL_THREADS:-2} threads" >&2
     while :; do

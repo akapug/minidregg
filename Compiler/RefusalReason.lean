@@ -99,6 +99,14 @@ inductive RefusalReason where
   the limit (`Kernel.Bounds.Refusal.render`). Like every admission branch it is
   told as `undisclosed` on a blind submission. -/
   | overBound
+  /-- The requesting subject has used its request rate for the current window
+  (`Kernel.SubjectRate`): told on the subject the request claims, before its
+  signature is checked and before any Store work, so it discloses only that the
+  claimed subject's window is full (its activity level, never a state fact about a
+  target). The detail names the milliseconds until the window reopens
+  (`retry-after-ms N`). A forged request never charges the window it claims
+  (`SubjectRate.charge_other`). -/
+  | rateLimited
   deriving DecidableEq, Repr, Inhabited
 
 namespace RefusalReason
@@ -121,6 +129,7 @@ def name : RefusalReason → String
   | .tailBound => "tail-bound"
   | .audienceTransition => "audience-transition"
   | .overBound => "over-bound"
+  | .rateLimited => "rate-limited"
 
 /-- Fixed friend-facing text. It depends on the reason only. -/
 def describe : RefusalReason → String
@@ -140,11 +149,12 @@ def describe : RefusalReason → String
   | .tailBound => "the node is past its tail bound; no write is admitted until the next checkpoint"
   | .audienceTransition => "a holder of the object's current audience epoch no longer stands; the owner rotates the epoch before new protected bytes"
   | .overBound => "a value in the request is past a static bound; the detail names the bound, the value and the limit"
+  | .rateLimited => "this subject has used its request rate for now; the detail names the milliseconds until it may retry"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
     .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed,
-    .lawInputRange, .tailBound, .audienceTransition, .overBound]
+    .lawInputRange, .tailBound, .audienceTransition, .overBound, .rateLimited]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -173,6 +183,7 @@ def stream : StreamCodec RefusalReason where
     | .tailBound => [13]
     | .audienceTransition => [14]
     | .overBound => [15]
+    | .rateLimited => [16]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -190,11 +201,12 @@ def stream : StreamCodec RefusalReason where
     | 13 :: suffix => some (.tailBound, suffix)
     | 14 :: suffix => some (.audienceTransition, suffix)
     | 15 :: suffix => some (.overBound, suffix)
+    | 16 :: suffix => some (.rateLimited, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (16 :: suffix) = none := rfl
+    stream.decodePrefix (17 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the

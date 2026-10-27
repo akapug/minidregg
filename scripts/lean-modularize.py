@@ -32,19 +32,45 @@ from lean_imports import header_layout, file_imports
 EVAL = re.compile(r"native_decide|^\s*#eval\b|^\s*#guard\s(?!_msgs)|^\s*#guard_expr\b|decide\s*\+\s*native|^\s*#reduce\b", re.M)
 
 
+# Core definitions that kernel reduction (`decide`, `decide +kernel`) in this tree unfolds and that
+# Lean's own modules do not expose; a module reaching them sees an opaque constant and `decide` gets
+# stuck (measured: `toString`/`s!` of Nat and List, `Array.map`, `Array.zip`). `import all` of the core
+# module restores the bodies for that one file. The toolchain never changes under a build, so the
+# private-olean dependency costs no rebuild. Grow this list when a converted file's `decide` sticks.
+CORE_REDUCE = ["Init.Data.Repr", "Init.Data.ToString.Basic", "Init.Data.ToString.Extra", "Init.Data.Array.Basic",
+               "Init.Data.ByteArray.Basic", "Init.Data.String.Decode", "Init.Data.String.Defs"]
+DECIDE = re.compile(r"\bdecide\b")
+CORE_NOTE = "-- `decide` reduces these core definitions, which core does not expose (module system).\n"
+SECTION = "@[expose] public section\n"
+CORE_BLOCK = re.compile(r"\n-- `decide` reduces these core definitions[^\n]*\n(?:import all [^\n]*\n)+")
+
+
 def convert(text):
+    """The module form of text, or None when text is already in it."""
     first, imports, end, keywords = header_layout(text)
-    if "module" in keywords:
-        return None
     if "prelude" in keywords:
         raise SystemExit("prelude files are not converted")
+    have_all = {m for (s, e, mods, m) in imports if text[s:e].split()[-2:-1] == ["all"]}
+    want_all = [m for m in CORE_REDUCE if m not in have_all] if DECIDE.search(text[end:]) else []
+    if "module" in keywords:
+        if not want_all:
+            return None
+        # one core block per file: drop the old one, write the union once
+        core = [m for m in CORE_REDUCE if m in have_all or m in want_all]
+        text = CORE_BLOCK.sub("\n", text)
+        i = text.find("\n" + SECTION)
+        if i < 0:
+            raise SystemExit("a module without `@[expose] public section` after its header: convert it by hand")
+        return text[:i + 1] + CORE_NOTE + "".join(f"import all {m}\n" for m in core) + text[i + 1:]
     mods = [m for (_, _, _, m) in imports]
     evals = bool(EVAL.search(text[end:]))
     head = "module\n\n"
     head += "".join(f"public import {m}\n" for m in mods)
     if evals:
         head += "".join(f"meta import {m}\n" for m in mods)
-    head += "\n@[expose] public section\n"
+    if want_all:
+        head += "\n" + CORE_NOTE + "".join(f"import all {m}\n" for m in want_all)
+    head += "\n" + SECTION
     return text[:first] + head + "\n" + text[end:].lstrip("\n")
 
 

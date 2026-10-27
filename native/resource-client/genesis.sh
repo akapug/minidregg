@@ -56,8 +56,9 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability, .tailBound, .issuanceCap, .payControlCapability] | all(int))
-    and .tailBound > 0
+          .factoryControllerCapability, .tailBound, .issuanceCap, .payControlCapability,
+          .clockControlCapability] | all(int))
+    and .tailBound > 0 and .lifetime > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
           .initialBalance] | all(int))
@@ -205,6 +206,10 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    factoryControllerSubject: ($p.sponsor.subject|s),
    factoryControllerCapability: ($p.factoryControllerCapability|s),
    payControlCapability: ($p.payControlCapability|s),
+   clockControlCapability: ($p.clockControlCapability|s),
+   platform: {ownerBudget: ($p.ownerBudget|s), lifetime: ($p.lifetime|s),
+     grainBirthTariff: (if $p.grainPlatform then ($p.grainPlatform.grainBirthTariff | map_values(s)) else null end),
+     completionCustodianKey: (if $p.grainPlatform then $p.grainPlatform.completionCustodianKey else null end)},
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
    issuanceCap: ($p.issuanceCap|s),
