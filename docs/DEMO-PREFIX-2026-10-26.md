@@ -117,8 +117,15 @@ refusal byte (J5 and its cascade; fixed at 9f144c2b, the rest with the L2 succes
 class and the unbounded loops (fixed at 2c15e48c: with those drivers seats, bounty, send, domain,
 objectrecord, upgrade and JPAY4 all PASS), chargedfailure (L2 successor), jserve timing and births/perf
 under load, m6grain/JPAY6's `sudo -n true` probe. The web journey against this Host: 24/24.
-**Rehearsal ship #2 is dispatched with this candidate** (every staged install: door, mini-keys split
-shape, Hermes controller, Discord gateway mode, the web front end, the app market's units and grants).
+**Rehearsal ship #2 is SERVING** (2026-10-27 ~10:54 UTC, `--rehearsal --regenesis`, every login
+closed, the 36 reds in the notice): `mini-health` OK (0.79 s), the door on 8796 (`/join` held closed),
+mini-keys in the split shape with the sealed pool key and its caps, **Discord over the gateway, READY
+as Dragon's Egg**, the web gateway and root helper up with Caddy's `import mini_app`, the app front on
+8799 and the index fetcher reaching the store (98 apps), consent full; drills green (advance, Store and
+relay restart, certifier not-due, backup 121 MB pushed + restore check OK). Not yet live, each with its
+owner: the `public` member (its `enroll plan` goes stale while the clock writes: client lane), so the
+front page answers 502 as the public reader; the apps world's metered tasks (L13's bootstrap verb);
+the Hermes controller (L4 resumed to stand it up and run HERMES-LIVE).
 **Round 3** started at integration 6236826f (custody-drivers, m7, web-frontend d14ca3c8 with
 app-market inside, the stranger-driver fix). **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
 box `dregg-ref` reproduces all 26 outputs byte for byte (the first reproducible-build verdict across two
