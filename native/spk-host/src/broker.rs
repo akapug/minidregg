@@ -411,6 +411,33 @@ fn file_sha256(file: &mut File) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+/// HOT-PATH 2g: the digest of a pinned executable, computed ONCE per file identity per process.
+/// The 159 MB spk-host image was hashed on every broker config load, adoption pin and runtime
+/// status (five times across one STOP). The key is the file's full identity (device, inode, size,
+/// mtime, ctime): a replaced, rewritten or touched image is a new key and is hashed again; the
+/// cached value is the DIGEST, never the verdict, so a different pin against the same bytes is still
+/// compared. `PINNED_HASHES` counts the hashes taken (the test's witness).
+static PINNED_DIGESTS: std::sync::Mutex<Option<std::collections::HashMap<(u64, u64, u64, i64, i64, i64, i64), String>>> =
+    std::sync::Mutex::new(None);
+static PINNED_HASHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn pinned_digest(path: &Path, meta: &fs::Metadata) -> io::Result<String> {
+    let key = (meta.dev(), meta.ino(), meta.size(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec());
+    if let Some(known) = PINNED_DIGESTS.lock().ok().and_then(|cache| cache.as_ref().and_then(|c| c.get(&key).cloned())) {
+        return Ok(known);
+    }
+    let digest = file_sha256(&mut File::open(path)?)?;
+    PINNED_HASHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // The identity must still be the one hashed: a file replaced mid-read is not remembered.
+    let after = fs::symlink_metadata(path)?;
+    if (after.dev(), after.ino(), after.size(), after.mtime(), after.mtime_nsec(), after.ctime(), after.ctime_nsec()) == key {
+        if let Ok(mut cache) = PINNED_DIGESTS.lock() {
+            cache.get_or_insert_with(Default::default).insert(key, digest.clone());
+        }
+    }
+    Ok(digest)
+}
+
 fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if !path.is_absolute() || !meta.is_file() || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()}) || meta.mode() & 0o022 != 0 {
@@ -420,7 +447,7 @@ fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
         )));
     }
     if let Some(sha) = sha {
-        if !hex64(sha) || file_sha256(&mut File::open(path)?)? != sha {
+        if !hex64(sha) || pinned_digest(path, &meta)? != sha {
             return Err(invalid(format!(
                 "{} SHA-256 differs from its pin",
                 path.display()
@@ -1271,6 +1298,31 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// HOT-PATH 2g: one hash per image identity; a rewritten image is a new identity and is hashed
+    /// (and refused against the old pin); a wrong pin against cached bytes is refused.
+    #[test]
+    fn pinned_executable_is_hashed_once_per_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("spk-pinned-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let image = dir.join("spk-host");
+        std::fs::write(&image, b"candidate image bytes v1").unwrap();
+        std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let pin = format!("{:x}", super::Sha256::digest(b"candidate image bytes v1"));
+        let before = super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed);
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        assert_eq!(super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed) - before, 1, "three checks, one hash");
+        let wrong = format!("{:x}", super::Sha256::digest(b"another pin"));
+        assert!(super::pinned_root_executable(&image, Some(&wrong)).is_err(), "the verdict is never cached");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&image, b"candidate image bytes v2 (longer)").unwrap();
+        assert!(super::pinned_root_executable(&image, Some(&pin)).is_err(), "a rewritten image is hashed again and refused");
+        assert_eq!(super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed) - before, 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
 
     #[test]

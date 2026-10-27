@@ -176,7 +176,7 @@ echo "mk-lane: OK $DEST at $TIP"
 
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
-  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
+  ( bash scripts/build-mini-kernels.sh && LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
   # Known-red modules: ONE rule, scripts/pipeline/known-red-verdict (also advance-base-burst.sh).
   bash "$BASE/scripts/pipeline/known-red-verdict" "$log" "$BASE" "$vrc" || refuse "verify: $log (known-red-verdict above)"
   # Locale-independent pattern; positive control against the base green log.
