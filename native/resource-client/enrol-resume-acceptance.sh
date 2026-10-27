@@ -17,7 +17,13 @@
 #      `plan` re-plans in place and seal + submit admit (or the Host admits at once: either way,
 #      exactly one admission);
 #   5. the admitted subject and keyId are the first plan's; the namespace holds one request record
-#      and one binding for the name.
+#      and one binding for the name;
+#   6. a pinned plan (`pin-enrollment-plan-height`) survives two ticks without the resume path;
+#   7. five members enrol back to back (plan, tick, seal, submit each, as the composed world does under
+#      its ticker): each seal signs the pinned plan it planned, five admissions, five subjects.
+# On a Host that pins (pin.json `pinnedAtHeight`), steps 2 and 4 assert the pinned behaviour instead: a
+# tick does not kill a pinned plan, so `plan` resumes it and `seal` signs it as it stands. Steps 6 and 7
+# need the pin; on a Host without it the script stops there by name.
 # Every step leaves cmd/stdout/stderr/exit under ROOT/log (provisioning-acceptance.sh's shape).
 set -eu
 umask 077
@@ -56,27 +62,40 @@ same_identity() { [ "$(jq -er .subject "$LOG/$1.stdout")" = "$SUBJECT" ] && [ "$
 plan plan-1 ok "$A"
 SUBJECT=$(jq -er .subject "$LOG/plan-1.stdout"); KEYID=$(jq -er .keyId "$LOG/plan-1.stdout")
 P1=$(plan_sha)
+PINNED=$(jq -r '.pinnedAtHeight // empty' "$A/pin.json")
 # 1. resumption: nothing moved, nothing planned again
 plan plan-resume ok "$A"
 same_identity plan-resume; [ "$(plan_sha)" = "$P1" ]; [ ! -e "$A/replanned" ]
 said plan-resume 'a validated plan is retained'
-# 2. after a tick the retained plan is stale: re-planned under the same request
+# 2. after a tick: an unpinned plan is stale and re-planned under the same request; a pinned one is
+#    the Host's plan pinned at the same height again, so it is resumed
 tick tick-1
 plan plan-after-tick ok "$A"
-same_identity plan-after-tick; [ "$(plan_sha)" != "$P1" ]; [ -s "$A/replanned/01/plan.bin" ]
-said plan-after-tick 'the retained plan is stale against the moved source'
-[ "$(ls "$NS" | grep -c '^released-')" = 1 ]
+same_identity plan-after-tick
+if [ -n "$PINNED" ]; then
+  [ "$(plan_sha)" = "$P1" ]; [ ! -e "$A/replanned" ]
+  said plan-after-tick 'a validated plan is retained'
+else
+  [ "$(plan_sha)" != "$P1" ]; [ -s "$A/replanned/01/plan.bin" ]
+  said plan-after-tick 'the retained plan is stale against the moved source'
+  [ "$(ls "$NS" | grep -c '^released-')" = 1 ]
+fi
 # 3. another --dir for the same name is refused, naming the retained plan
 plan plan-elsewhere fail "$ROOT/attempts/newcomer-again"
 said plan-elsewhere "already planned at $A"
 [ ! -e "$ROOT/attempts/newcomer-again/pin.json" ]
-# 4. a tick before seal: the consent provider refuses the stale plan and points at plan
+# 4. a tick before seal: an unpinned plan is refused by the consent provider, which points at plan; a
+#    pinned one is signed as it stands (the consent provider re-derives it at the observation's height)
 tick tick-2
-step seal-stale fail "$MINI" enroll --action seal --dir "$A"
-said seal-stale 'plans the same request again'
-plan plan-2 ok "$A"
-same_identity plan-2; [ -s "$A/replanned/02/plan.bin" ]
-step seal-2 ok "$MINI" enroll --action seal --dir "$A"
+if [ -n "$PINNED" ]; then
+  step seal-2 ok "$MINI" enroll --action seal --dir "$A"
+else
+  step seal-stale fail "$MINI" enroll --action seal --dir "$A"
+  said seal-stale 'plans the same request again'
+  plan plan-2 ok "$A"
+  same_identity plan-2; [ -s "$A/replanned/02/plan.bin" ]
+  step seal-2 ok "$MINI" enroll --action seal --dir "$A"
+fi
 tick tick-3
 set +e; "$MINI" enroll --action submit --dir "$A" >"$LOG/submit-1.stdout" 2>"$LOG/submit-1.stderr"; code=$?; set -e
 printf '%s\n' "$code" >"$LOG/submit-1.exit"; printf 'submit-1\t%s\n' "$code" >>"$ROOT/steps.tsv"
@@ -86,7 +105,7 @@ if [ "$code" -ne 0 ]; then
   step seal-refused fail "$MINI" enroll --action seal --dir "$A"
   said seal-refused 'plan again'
   plan plan-3 ok "$A"
-  same_identity plan-3; [ -s "$A/replanned/03/submit-refused.json" ]
+  same_identity plan-3; [ -s "$(ls -d "$A"/replanned/* | tail -1)/submit-refused.json" ]
   step seal-3 ok "$MINI" enroll --action seal --dir "$A"
   step submit-3 ok "$MINI" enroll --action submit --dir "$A"
   PATH_TAKEN=submit-refused-no-record-then-replanned
@@ -121,4 +140,20 @@ tick tick-5
 step pinned-submit ok "$MINI" enroll --action submit --dir "$B"
 [ "$(jq -er .authority "$B/enrollment.json")" = admitted-key-only ]
 [ "$(jq -er .subject "$B/enrollment.json")" = "$(jq -er .subject "$LOG/pinned-plan.stdout")" ]
-echo "enrol-resume: PASS ($PATH_TAKEN; pinned plan admitted across two ticks) subject=$SUBJECT keyId=$KEYID"
+# 7. Five members back to back under a ticker (the composed world's `enroll member-1..5`): each plan is
+#    pinned at its own observation's height, the clock ticks before its seal, and seal signs the pinned
+#    plan (it inspects the plan the custody signs, never the unpinned answer beside it).
+for i in 1 2 3 4 5; do
+  "$MINI" keygen --secret "$ROOT/member-$i.key" --public "$ROOT/member-$i.pub" >"$ROOT/member-$i-keygen.json"
+  M="$ROOT/attempts/member-$i"
+  step "member-$i-plan" ok "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
+    --name "member-$i" --new-key "$ROOT/member-$i.key" --dir "$M"
+  [ -s "$M/plan-pinned.bin" ]
+  tick "member-$i-tick"
+  step "member-$i-seal" ok "$MINI" enroll --action seal --dir "$M"
+  step "member-$i-submit" ok "$MINI" enroll --action submit --dir "$M"
+  [ "$(jq -er .authority "$M/enrollment.json")" = admitted-key-only ]
+done
+members=$(for i in 1 2 3 4 5; do jq -er .subject "$ROOT/attempts/member-$i/enrollment.json"; done | sort -u | wc -l | tr -d ' ')
+[ "$members" = 5 ] || { echo "five members admitted $members distinct subjects" >&2; exit 1; }
+echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; pinned plan admitted across two ticks; five members back to back) subject=$SUBJECT keyId=$KEYID"

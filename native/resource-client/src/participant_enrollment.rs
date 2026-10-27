@@ -486,6 +486,12 @@ fn public_key_file(path: &Path) -> Result<VerifyingKey> {
     VerifyingKey::from_bytes(&bytes).map_err(|_| "enrollment public key is not a valid Ed25519 point".into())
 }
 
+/// The plan the custody signs: the pinned form when the Host pinned it (`pin-enrollment-plan-height`),
+/// else the Host's plan as answered. Every reader of the signed plan goes through this one name.
+fn plan_file(pinned_at: Option<&str>) -> &'static str {
+    if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }
+}
+
 fn load_pin(directory: &Path) -> Result<Pin> {
     crate::fsio::ensure_private_dir_durable(directory)?;
     let pin = json_private(&directory.join("pin.json"))?;
@@ -522,8 +528,7 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         Some(Value::String(height)) => Some(height.clone()),
         _ => None,
     };
-    let plan = private_bytes(
-        &directory.join(if pinned_at.is_some() { "plan-pinned.bin" } else { "plan.bin" }), LIMIT)?;
+    let plan = private_bytes(&directory.join(plan_file(pinned_at.as_deref())), LIMIT)?;
     pinned(&pin, "commandSha256", &digest(&command))?;
     pinned(&pin, "planSha256", &digest(&plan))?;
     let name = field(&pin, "name")?;
@@ -1718,7 +1723,7 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
         &pin.public_socket,
         &pin.config,
         PLAN_KIND,
-        &directory.join("plan.bin"),
+        &directory.join(plan_file(pin.pinned_at.as_deref())),
         &directory.join("seal-plan.json"),
     )?;
     if fresh != plan_view {
