@@ -82,10 +82,20 @@ row_kernel() { journey_set_row kernel G; }
 # The native Objective acceptance (Accepted receipt + every refusal) on its own two scratch worlds.
 # world: template: the fixture's per-candidate world restored, the row's own heights on top (both scratch worlds: the policy and knobs are constant, so one variant each)
 row_objective() {
-  local d=$SRC/native/resource-client/objective-native-acceptance.py
+  local d=$SRC/native/resource-client/objective-native-acceptance.py lean=$SRC
   [ -f "$d" ] || return 99
-  [ "$LEANENV" = 1 ] || { echo "no lean env for this tip (its mutations run lake env lean)" >&2; return 98; }
-  (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
+  if [ "$LEANENV" != 1 ]; then
+    # --source-tree unbinds leanenv even when the box holds the tip's own oleans
+    # ($ARTIFACT_ROOT/.leanenv/TIP, the very tree the standing pipeline runs rows from):
+    # take them by the tip's name before declaring the row unconfigured.
+    lean=${ARTIFACT_ROOT:-/srv/artifacts}/.leanenv/${SET##*/}
+    if [ ! -f "$lean/.pipeline-leanenv-complete" ] || [ ! -f "$lean/native/resource-client/objective-native-acceptance.py" ]; then
+      echo "missing input: the tip's lean env ($lean with .pipeline-leanenv-complete; the mutations run lake env lean)" >&2
+      return 98
+    fi
+    d=$lean/native/resource-client/objective-native-acceptance.py
+  fi
+  (cd "$lean" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
   local rc=$?
   cp "$RUN/o/results/summary.json" "$OUT/" 2>/dev/null
   tail -1 "$OUT/objective.out" >&2
@@ -484,6 +494,10 @@ row_m4() {
   product_input SHELL_BIN executable || return $?
   product_tools ssh ssh-keygen ss || return $?
   command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ] || { echo "missing input: sshd" >&2; return 98; }
+  [ -x "$SRC/deploy/shell/mini-shell-ssh" ] && [ -x "$SRC/deploy/shell/render-shell-key" ] ||
+    { echo "missing input: $SRC/deploy/shell/mini-shell-ssh and render-shell-key (shell-journey.sh: 'deploy/shell scripts missing')" >&2; return 98; }
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ':22422$' &&
+    { echo "missing input: a free 127.0.0.1:22422 for the journey's private sshd (shell-journey.sh: 'port 22422 is in use')" >&2; return 98; }
   product_exec m4 bash "$d" "$HOST" "$MINI" "$SHELL_BIN" "$STORE" "$VERIFIER" "$RUN/s"; rc=$?
   product_keep "$RUN/s/log"
   if [ "$rc" != 0 ]; then
@@ -498,13 +512,19 @@ row_m4() {
 }
 # world: template: the fixture's per-candidate world restored, the row's own heights on top (subjects 8/9 fixture-made)
 row_hermes() {
-  local d=$SRC/native/grain-runtime/hermes-journey.sh rc
+  local d=$SRC/native/grain-runtime/hermes-journey.sh rc task=${HERMES_JOURNEY_TASK:-8751} state
   [ -f "$d" ] || return 99
   product_native || return $?
   product_input GRAIN executable || return $?
   product_systemd || return $?
   product_tools rustc || return $?
   product_userns || return $?
+  [ "$(uname -s)" = Linux ] || { echo "missing input: Linux user systemd (hermes-journey.sh: 'Linux user systemd is required')" >&2; return 98; }
+  [ -n "${LAUNCH_GATE:-}" ] && [ -x "$LAUNCH_GATE" ] ||
+    { echo "missing input: LAUNCH_GATE, the candidate's bin/launch-gate (hermes-journey.sh: 'LAUNCH_GATE names the launch gate (a candidate bin/launch-gate, or cargo build -p launch-gate)')" >&2; return 98; }
+  state=$(systemctl --user show -p LoadState --value "mini-grain-controller@$task.service" 2>/dev/null || :)
+  [ "$state" = not-found ] ||
+    { echo "missing input: unit mini-grain-controller@$task.service unloaded (hermes-journey.sh: 'unit mini-grain-controller@$task is already loaded ($state)'; stop and reset-failed it)" >&2; return 98; }
   product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
   product_keep "$RUN/h/evidence"
   [ "$rc" = 0 ] || return "$rc"
