@@ -21,7 +21,10 @@ hcloud project `dreggnet-demo`, same account; `demo.dregg.online` and `calc.demo
 security kernels rebooted as soon as available; operator ssh on 22; clock tick per minute;
 Caddy terminates TLS with hybrid X25519MLKEM768 + X25519 fallback; EtherCalc on its own
 origin; Studio out until a producer exists; `m6.sh` wraps `two-world-journey.sh`; the roster
-landmine fixed (explicit per-box roster, `BOX` file).
+landmine fixed (explicit per-box roster, `BOX` file); `*.demo.dregg.online` wildcard DNS as code and a
+**wildcard certificate** via Caddy's Gandi DNS-01 module (ember, 2026-10-27: "wildcard approved"), which
+puts a DNS token on the box as a written CONFINEMENT §2 exception and makes Caddy security updates our
+own rebuild; every installed grain gets one fixed origin `<grain>.demo.dregg.online`.
 
 ## 1. The bar and the public-opening contract
 
