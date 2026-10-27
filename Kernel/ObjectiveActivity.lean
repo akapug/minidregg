@@ -140,11 +140,30 @@ abbrev Role := ObjectiveActivityCell.Role
 
 /-! ## The record -/
 
+/-- Why the kernel refused an effect it was asked to perform at a yield. -/
+inductive EffectRefusal where
+  /-- The purse cannot pay the transfer and still reserve the await's fee pair and its record's
+  storage deposit after it. -/
+  | unfunded
+  /-- The recipient is the activity's own purse, the collector or the issuer well. -/
+  | reserved
+  /-- The recipient is not an open account of the Book. -/
+  | closed
+  deriving DecidableEq, Repr
+
+/-- How the kernel decided an effect at the yield that asked for it. -/
+inductive Verdict where
+  | settled
+  | refused (reason : EffectRefusal)
+  deriving DecidableEq, Repr
+
 inductive Source where
   /-- An answer slot (by name) and its one decider. -/
   | reply (slot : Digest) (decider : SubjectId)
   /-- A height at or after which the await is due. -/
   | height (due : Nat)
+  /-- An effect the kernel performed (or refused) at the yield: the await is decided already. -/
+  | performed (verdict : Verdict)
   deriving DecidableEq, Repr
 
 structure Await where
@@ -215,6 +234,7 @@ and the heights below `256 ^ 8`, and every admitted record fits
 def Source.Fits : Source → Prop
   | .reply slot _ => slot.value < 256 ^ 32
   | .height due => due < 256 ^ 8
+  | .performed _ => True
 
 def Await.Fits (await : Await) : Prop :=
   await.id.value < 256 ^ 32 ∧ await.source.Fits ∧ await.deadline < 256 ^ 8 ∧ await.yieldedAt < 256 ^ 8
@@ -231,26 +251,50 @@ def Record.DigestsFit (record : Record) : Prop :=
 
 def Record.Fits (record : Record) : Prop := record.DigestsFit ∧ record.phase.Fits
 
-abbrev SourceWire := (Digest256 × SubjectId) ⊕ Height64
+/-- A verdict's wire: two octets, whatever the verdict, so a record's length (hence its storage
+deposit) does not depend on how its effect was decided. -/
+abbrev VerdictWire := (Unit ⊕ Unit) ⊕ (Unit ⊕ Unit)
+abbrev SourceWire := (Digest256 × SubjectId) ⊕ (Height64 ⊕ VerdictWire)
 abbrev AwaitWire := Digest256 × (SourceWire × (Height64 × Height64))
 abbrev PhaseWire := AwaitWire ⊕ (Bytes ⊕ String)
 abbrev RecordWire := Digest256 × (Digest256 × (Digest256 × (Bytes × (Nat × (Bytes × (Digest256 ×
   (Escrow × (Nat × PhaseWire))))))))
 
-instance (source : Source) : Decidable source.Fits := by cases source <;> unfold Source.Fits <;> infer_instance
+instance (source : Source) : Decidable source.Fits := by
+  cases source <;> unfold Source.Fits <;> infer_instance
 instance (await : Await) : Decidable await.Fits := by unfold Await.Fits; infer_instance
 instance (phase : Phase) : Decidable phase.Fits := by cases phase <;> unfold Phase.Fits <;> infer_instance
 instance (record : Record) : Decidable record.Fits := by
   unfold Record.Fits Record.DigestsFit; infer_instance
 
 /-- The wire of a source that fits: the bound is an argument, so nothing is reduced. -/
+def Verdict.toWire : Verdict → VerdictWire
+  | .settled => .inl (.inl ())
+  | .refused .unfunded => .inl (.inr ())
+  | .refused .reserved => .inr (.inl ())
+  | .refused .closed => .inr (.inr ())
+
+def Verdict.ofWire : VerdictWire → Verdict
+  | .inl (.inl ()) => .settled
+  | .inl (.inr ()) => .refused .unfunded
+  | .inr (.inl ()) => .refused .reserved
+  | .inr (.inr ()) => .refused .closed
+
+theorem Verdict.ofWire_toWire (verdict : Verdict) : Verdict.ofWire verdict.toWire = verdict := by
+  rcases verdict with _ | (_ | _ | _) <;> rfl
+
+theorem Verdict.toWire_ofWire (wire : VerdictWire) : (Verdict.ofWire wire).toWire = wire := by
+  rcases wire with (⟨⟩ | ⟨⟩) | (⟨⟩ | ⟨⟩) <;> rfl
+
 def Source.toWire : (source : Source) → source.Fits → SourceWire
   | .reply slot decider, fits => .inl (toDigest256 slot fits, decider)
-  | .height due, fits => .inr (toHeight64 due fits)
+  | .height due, fits => .inr (.inl (toHeight64 due fits))
+  | .performed verdict, _ => .inr (.inr verdict.toWire)
 
 def Source.ofWire : SourceWire → Source
   | .inl (slot, decider) => .reply (ofDigest256 slot) decider
-  | .inr due => .height due.val
+  | .inr (.inl due) => .height due.val
+  | .inr (.inr verdict) => .performed (Verdict.ofWire verdict)
 
 def Await.toWire (await : Await) (fits : await.Fits) : AwaitWire :=
   (toDigest256 await.id fits.1, await.source.toWire fits.2.1, toHeight64 await.deadline fits.2.2.1,
@@ -278,8 +322,12 @@ def Record.ofWire (w : RecordWire) : Record :=
   ⟨ofDigest256 w.1, ofDigest256 w.2.1, ofDigest256 w.2.2.1, w.2.2.2.1, w.2.2.2.2.1, w.2.2.2.2.2.1,
     ofDigest256 w.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.1, w.2.2.2.2.2.2.2.2.1, Phase.ofWire w.2.2.2.2.2.2.2.2.2⟩
 
+def verdictWire : StreamCodec VerdictWire :=
+  StreamCodec.sum (StreamCodec.sum unitStream unitStream) (StreamCodec.sum unitStream unitStream)
+
 def sourceWire : StreamCodec SourceWire :=
-  StreamCodec.sum (StreamCodec.product digest256Stream subjectStream) height64Stream
+  StreamCodec.sum (StreamCodec.product digest256Stream subjectStream)
+    (StreamCodec.sum height64Stream verdictWire)
 
 def awaitWire : StreamCodec AwaitWire :=
   StreamCodec.product digest256Stream (StreamCodec.product sourceWire
@@ -304,14 +352,15 @@ def recordWire : StreamCodec RecordWire :=
     (StreamCodec.product digest256Stream
     (StreamCodec.product escrowStream (StreamCodec.product StreamCodec.nat phaseWire))))))))
 
-/-- v8: the escrowed envelopes carry `domainWork` (A3 domain pricing);
+/-- v9: an await's source may be `performed` (an effect the yield asked for, decided at the yield:
+`Verdict`, a two-octet wire); v8: the escrowed envelopes carry `domainWork` (A3 domain pricing);
 v7: the escrowed envelopes carry the front end's work (`replayBytes`, `coreBytes`, GPT-6 row E);
 v6: the record is FIXED-WIDTH where it is charged (digests 32 octets, heights 8:
 `digest256Stream`, `height64Stream`), so `|encodeRecord|`, hence the storage deposit,
 does not depend on the digests or heights (`encodeRecord_length_mask`); v5: the escrow holds declared envelopes (`Capacity`), not tick counts; v4: the record carries `tried` (the envelope its exhausted attempts at the
 current await reached); v3: no recorded reads (resume with view reads the state
 in the resuming turn); v2: the escrow names the payer's Book account. -/
-def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8".toUTF8.toList
+def recordFrame : Bytes := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v9".toUTF8.toList
 
 /-- The record's bytes: the frame, then the fixed-width wire. A record that does not fit has NO
 encoding (`[]`, which `decodeRecord` refuses): nothing is reduced into a different record. `[]` is
@@ -339,6 +388,7 @@ theorem Source.ofWire_toWire (source : Source) (fits : source.Fits) :
       simp only [Source.toWire, Source.ofWire]
       rw [ofDigest256_toDigest256 slot fits]
   | height due => rfl
+  | performed verdict => simp only [Source.toWire, Source.ofWire, Verdict.ofWire_toWire]
 
 theorem Await.ofWire_toWire (await : Await) (fits : await.Fits) :
     Await.ofWire (await.toWire fits) = await := by
@@ -365,7 +415,10 @@ theorem Record.ofWire_toWire (record : Record) (fits : record.Fits) :
 theorem Source.ofWire_fits (wire : SourceWire) : (Source.ofWire wire).Fits := by
   cases wire with
   | inl pair => exact ofDigest256_lt pair.1
-  | inr due => exact due.isLt
+  | inr rest =>
+    cases rest with
+    | inl due => exact due.isLt
+    | inr _ => trivial
 
 theorem Await.ofWire_fits (wire : AwaitWire) : (Await.ofWire wire).Fits :=
   ⟨ofDigest256_lt _, Source.ofWire_fits _, wire.2.2.1.isLt, wire.2.2.2.isLt⟩
@@ -382,7 +435,11 @@ theorem Record.ofWire_fits (wire : RecordWire) : (Record.ofWire wire).Fits :=
 theorem Record.toWire_ofWire (wire : RecordWire) :
     (Record.ofWire wire).toWire (Record.ofWire_fits wire) = wire := by
   obtain ⟨_, _, _, _, _, _, _, _, _, phase⟩ := wire
-  rcases phase with ⟨_, (⟨_, _⟩ | _), _, _⟩ | (_ | _) <;> rfl
+  rcases phase with ⟨_, (⟨_, _⟩ | (_ | verdict)), _, _⟩ | (_ | _)
+  all_goals (try rfl)
+  simp only [Record.ofWire, Phase.ofWire, Await.ofWire, Source.ofWire, Record.toWire, Phase.toWire,
+    Await.toWire, Source.toWire, Verdict.toWire_ofWire]
+  rfl
 
 /-- **A fitting record round-trips.** -/
 theorem record_roundTrip (record : Record) (fits : record.Fits) :
@@ -424,6 +481,7 @@ theorem decodeRecord_some {bytes : Bytes} {record : Record} (decoded : decodeRec
 def Source.mask : Source → Source
   | .reply _ decider => .reply ⟨0⟩ decider
   | .height _ => .height 0
+  | .performed _ => .performed .settled
 
 def Await.mask (await : Await) : Await := ⟨⟨0⟩, await.source.mask, 0, 0⟩
 
@@ -464,8 +522,9 @@ theorem encodeRecord_length_mask (record : Record) (fits : record.Fits) :
     cases p with
     | awaiting await =>
         obtain ⟨id, source, deadline, yieldedAt⟩ := await
-        cases source <;>
+        rcases source with _ | _ | (_ | (_ | _ | _)) <;>
           simp [Phase.mask, Await.mask, Source.mask, Phase.toWire, Await.toWire, Source.toWire,
+            Verdict.toWire, verdictWire, unitStream,
             phaseWire, awaitWire, sourceWire, StreamCodec.sum, StreamCodec.product,
             digest256Stream, height64Stream, fixedStream_encode_length]
     | done _ => rfl
@@ -1095,11 +1154,13 @@ inductive AwaitOutcome where
   | timedOut
   | broken
   | upgraded
+  /-- The effect the yield asked for was performed (`Source.performed .settled`). -/
+  | settled
   deriving Repr
 
 def AwaitOutcome.label : AwaitOutcome → String
   | .reply _ => "reply" | .refused => "refused" | .unknown => "unknown" | .timedOut => "timedOut"
-  | .broken => "broken" | .upgraded => "upgraded"
+  | .broken => "broken" | .upgraded => "upgraded" | .settled => "settled"
 
 /-- The outcome datum, the `outcome` field of the response. -/
 def AwaitOutcome.data : AwaitOutcome → Data
@@ -1109,6 +1170,12 @@ def AwaitOutcome.data : AwaitOutcome → Data
   | .timedOut => .variant "timedOut" (.record [])
   | .broken => .variant "broken" (.record [])
   | .upgraded => .variant "upgraded" (.record [])
+  | .settled => .variant "settled" (.record [])
+
+/-- The outcome an effect's await is delivered with: `settled` when performed, `refused` when not. -/
+def Verdict.outcome : Verdict → AwaitOutcome
+  | .settled => .settled
+  | .refused _ => .refused
 
 /-- The view datum: the object's declared state and its write version. -/
 def viewData (view : ObjectState) : Data :=
@@ -1493,6 +1560,31 @@ def outcomeProtocol {config : Config} {pin : Digest} {input : Data} (program : P
     if (typeData program.assumptions config.typeFuel outcome.data outcomeType).isNone then
       throw (.outcomeProtocol outcome.label)
 
+/-- **The effect protocol**: the outcome type types `settled` and `refused`, the two outcomes an
+effect's await is decided with. Not part of `outcomeProtocol` (`settled` is not a kernel outcome:
+an await-only program need not type it); a yield that asks for an effect without it is refused
+as a Plan (`commitYield`). -/
+def effectProtocol {config : Config} {pin : Digest} {input : Data} (program : Program config pin input) : Bool :=
+  match responseParts program.assumptions program.responseType with
+  | none => false
+  | some (outcomeType, _) =>
+    [AwaitOutcome.settled, AwaitOutcome.refused].all fun outcome =>
+      (typeData program.assumptions config.typeFuel outcome.data outcomeType).isSome
+
+/-- The effect protocol of the program a pin and an input load at a snapshot (false when it does
+not load): what a turn's `Funds` carry, a function of the stored package and the input only. -/
+def programEffects {rootBytes : Bytes → Digest} (config : Config) (snapshot : DataSnapshot rootBytes)
+    (pin : Digest) (input : Data) : Bool :=
+  match loadProgram config (packageBytes config snapshot pin) pin input with
+  | .ok program => effectProtocol program
+  | .error _ => false
+
+theorem programEffects_eq {rootBytes : Bytes → Digest} {config : Config} {snapshot : DataSnapshot rootBytes}
+    {pin : Digest} {input : Data} {program : Program config pin input}
+    (loaded : loadProgram config (packageBytes config snapshot pin) pin input = .ok program) :
+    programEffects config snapshot pin input = effectProtocol program := by
+  unfold programEffects; rw [loaded]
+
 /-- At a birth that yields: the response type types the view of the state the
 birth leaves, so the next delivery's view is typed. -/
 def viewProtocol {config : Config} {pin : Digest} {input : Data} (program : Program config pin input)
@@ -1503,12 +1595,22 @@ def viewProtocol {config : Config} {pin : Digest} {input : Data} (program : Prog
 
 /-! ## Plans the kernel performs -/
 
+/-- An effect a Plan asks the kernel to perform at its yield. `transfer`: move `amount` of the credit
+asset from the activity's purse to the account `to`; `commit`: only the Plan's write. -/
+inductive Effect where
+  | transfer (recipient : AccountId) (amount : Nat)
+  | commit
+  deriving DecidableEq, Repr
+
 inductive PlanSource where
   | reply (decider : SubjectId)
   | height (due : Nat)
+  /-- An effect, performed (or refused) by the kernel at the yield itself. -/
+  | performed (effect : Effect)
   deriving DecidableEq, Repr
 
-/-- A yielded Plan: `await {write, on, patience}`. `write` names, per field of
+/-- A yielded Plan: `await {write, on, patience}`, or an effect, `transfer {to, amount, write}` or
+`commit {write}`, whose await the kernel decides at the yield (patience 1). `write` names, per field of
 the object's declared state, an edit (`keep`, `set v` or `add n`) that the kernel
 applies to the state the activity was resumed with (`stateWrite`); `on` names
 what the activity waits for; the deadline is the yield height plus `patience`. -/
@@ -1535,7 +1637,16 @@ def decodePlan : Data → Except Refusal PlanAwait
       | .variant "message" _ => throw .messageAwaitNeedsInbox
       | _ => throw (.plan "await.on must be reply, height or message")
     pure ⟨write, source, patience⟩
-  | _ => throw (.plan "the kernel performs only `await` Plans")
+  | .variant "transfer" (.record fields) => do
+    let some write := fieldOf fields "write" | throw (.plan "transfer.write missing")
+    let some (.natural recipient) := fieldOf fields "to" | throw (.plan "transfer.to missing")
+    let some (.natural amount) := fieldOf fields "amount" | throw (.plan "transfer.amount missing")
+    if amount = 0 then throw (.plan "transfer.amount must be positive")
+    pure ⟨write, .performed (.transfer recipient amount), 1⟩
+  | .variant "commit" (.record fields) => do
+    let some write := fieldOf fields "write" | throw (.plan "commit.write missing")
+    pure ⟨write, .performed .commit, 1⟩
+  | _ => throw (.plan "the kernel performs only `await`, `transfer` and `commit` Plans")
 
 /-- What one segment of an activity ends in. A yield stores the state the Plan
 extraction left (`ObjectiveBendDemandData.yieldedPlan`: the yielded control and
@@ -2045,17 +2156,63 @@ def purse (book : Book) (asset : AssetId) (held : AccountId) : Nat := (book.bala
 
 /-! ### Yields -/
 
+/-- **The storage deposit** a record reserves while it is retained: the
+deployment's rate per byte of the record's encoding. Only an awaiting record is
+retained; an ended one is retired and reserves nothing. A function of the record
+the yield commits, so it is re-priced at every yield. -/
+def storageDeposit (config : Config) (record : Record) : Nat :=
+  match record.phase with
+  | .awaiting _ => config.storageRate * (encodeRecord record).length
+  | .done _ | .faulted _ => 0
+
 /-- What a yield commits besides the record: the declared-state write (if the
-Plan writes), the answer slot it opens, and the await. -/
+Plan writes), the answer slot it opens, the await, and the transfer its effect
+posts in the turn's batch (`effect`: recipient and amount; `none` for an await, a
+`commit`, or a refused transfer). -/
 structure YieldCommit where
   await : Await
   written : Option StateWritten
   posts : List Post
+  effect : Option (AccountId × Nat)
+
+/-- What a yield's effect is judged against, given by the turn that runs the segment. -/
+structure Funds where
+  /-- The program types `settled` and `refused` (`effectProtocol`). -/
+  effects : Bool
+  /-- The activity's purse. -/
+  purse : AccountId
+  /-- The Book once the turn's own postings before the effect are made, given the write the
+  yield makes (a delivery's drain fee depends on it). -/
+  book : Option StateWritten → Book
+  /-- The record the yield is stored in (its escrow's fee pair; the checkpoint's record shape). -/
+  base : Record
+
+/-- **The verdict on a transfer**: refused `reserved` to the purse, the collector or the issuer
+well; refused `closed` to an account the Book does not hold open; performed exactly when the purse
+pays `amount` and still holds `reserve` (the await's fee pair and its record's storage deposit)
+after it; else refused `unfunded`. -/
+def transferVerdict (config : Config) (funds : Funds) (reserve : Nat) (written : Option StateWritten)
+    (recipient : AccountId) (amount : Nat) : Verdict :=
+  if recipient = funds.purse ∨ recipient = config.collector ∨ recipient = config.asset then .refused .reserved
+  else if recipient ∉ (funds.book written).accounts then .refused .closed
+  else if amount + reserve ≤ purse (funds.book written) config.asset funds.purse then .settled
+  else .refused .unfunded
+
+/-- The posting a yield's effect makes in the turn's batch: the transfer out of the purse. -/
+def effectOps (config : Config) (held : AccountId) : Option YieldCommit → List Operation
+  | some committed => match committed.effect with
+    | some (recipient, amount) => [.transfer held recipient config.asset amount]
+    | none => []
+  | none => []
+
+/-- A batch with the yield's effect postings after its own operations. -/
+def withEffect (batch : Batch) (effect : List Operation) : Batch :=
+  ⟨batch.registrations, batch.operations ++ effect, batch.deregistrations⟩
 
 def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (transaction : TransactionId) (cell : CellId) (object : CellId) (generation : Nat)
-    (checkpoint : Digest) (current : Option ObjectState) (viewed : Bool) (plan : PlanAwait) :
-    Except Refusal YieldCommit :=
+    (checkpoint : Digest) (current : Option ObjectState) (viewed : Bool) (plan : PlanAwait)
+    (funds : Funds) (reserve : Await → Nat) : Except Refusal YieldCommit :=
   if plan.patience = 0 ∨ config.maxPatience < plan.patience then
     .error (.patience plan.patience config.maxPatience) else
   if 256 ^ 8 ≤ height + plan.patience then .error (.heightWide height plan.patience) else
@@ -2071,11 +2228,28 @@ def commitYield {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     .ok ⟨⟨awaitId cell generation checkpoint, .reply (AnswerSlot.name transaction cell generation) decider,
         height + plan.patience, height⟩, written,
       (written.map StateWritten.post).toList ++ [slotPost config snapshot
-        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, [], true⟩]⟩
+        ⟨AnswerSlot.name transaction cell generation, cell, .subject decider, height + plan.patience, .opened, [], true⟩],
+      none⟩
   | .height due =>
     if height + plan.patience < due then .error (.plan "a height await is due after its deadline") else
     .ok ⟨⟨awaitId cell generation checkpoint, .height due, height + plan.patience, height⟩, written,
-      (written.map StateWritten.post).toList⟩
+      (written.map StateWritten.post).toList, none⟩
+  | .performed effect =>
+    if !funds.effects then .error (.plan "effect outcomes") else
+    match effect with
+    | .commit =>
+      .ok ⟨⟨awaitId cell generation checkpoint, .performed .settled, height + plan.patience, height⟩, written,
+        (written.map StateWritten.post).toList, none⟩
+    | .transfer recipient amount =>
+      match transferVerdict config funds
+          (reserve ⟨awaitId cell generation checkpoint, .performed .settled, height + plan.patience, height⟩)
+          written recipient amount with
+      | .settled =>
+        .ok ⟨⟨awaitId cell generation checkpoint, .performed .settled, height + plan.patience, height⟩, written,
+          (written.map StateWritten.post).toList, some (recipient, amount)⟩
+      | .refused reason =>
+        .ok ⟨⟨awaitId cell generation checkpoint, .performed (.refused reason), height + plan.patience, height⟩,
+          none, [], none⟩
 
 /-- The record that ends a segment. -/
 def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldCommit → Record
@@ -2102,13 +2276,21 @@ def nextRecord (base : Record) (generation : Nat) : Segment → Option YieldComm
   | .yielded _ _, none =>
     { base with generation := generation, phase := .faulted "internal: yield without commit" }
 
+/-- What the purse must still hold after a yield's effect: the await's fee pair and the storage
+deposit of the record that retains the await. -/
+def yieldReserve (config : Config) (funds : Funds) (generation : Nat) (state : State) (plan : PlanAwait)
+    (await : Await) : Nat :=
+  funds.base.escrow.pair +
+    storageDeposit config (nextRecord funds.base generation (.yielded state plan) (some ⟨await, none, [], none⟩))
+
 /-- The yield commit of a segment, when it yielded. -/
 def segmentCommit {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (transaction : TransactionId) (cell object : CellId) (generation : Nat)
-    (current : Option ObjectState) (viewed : Bool) : Segment → Except Refusal (Option YieldCommit)
+    (current : Option ObjectState) (viewed : Bool) (funds : Funds) : Segment → Except Refusal (Option YieldCommit)
   | .yielded state plan => do
     let committed ← commitYield config snapshot height transaction cell object generation
-      (checkpointDigest (checkpointBytes state)) current viewed plan
+      (checkpointDigest (checkpointBytes state)) current viewed plan funds
+      (yieldReserve config funds generation state plan)
     pure (some committed)
   | _ => pure none
 
@@ -2117,11 +2299,11 @@ as `faulted` (the await ends, the unused escrow returns); birth keeps refusing
 them, since nothing is escrowed before a birth commits. -/
 def resumedSegment {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
     (height : Nat) (transaction : TransactionId) (cell object : CellId) (generation envelope : Nat)
-    (view : ObjectState) (start : State) : Except Refusal (Segment × Option YieldCommit) :=
+    (view : ObjectState) (start : State) (funds : Funds) : Except Refusal (Segment × Option YieldCommit) :=
   match runSegment config envelope start with
   | .error refusal => faultOr config envelope refusal
   | .ok segment =>
-    match segmentCommit config snapshot height transaction cell object generation (some view) true segment with
+    match segmentCommit config snapshot height transaction cell object generation (some view) true funds segment with
     | .error refusal => faultOr config envelope refusal
     | .ok yielded => .ok (segment, yielded)
 
@@ -2148,10 +2330,10 @@ theorem faultOr_ok {config : Config} {envelope : Nat} {α : Type} {refusal : Ref
 
 /-- **A resumed program never wedges its await.** Whatever a delivery is
 refused for, it is not a fault of the resumed program: those commit. -/
-theorem resumedSegment_never_refuses_program_fault {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_never_refuses_program_fault {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start : State} {refusal : Refusal}
-    (refused : resumedSegment config snapshot height transaction cell object generation envelope view start =
+    (refused : resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .error refusal) :
     programFault config envelope refusal = none := by
   unfold resumedSegment at refused
@@ -2165,14 +2347,14 @@ theorem resumedSegment_never_refuses_program_fault {rootBytes : Bytes → Digest
 
 /-- A resumed segment that committed a yield is the bounded run's own segment
 and its own yield commit. -/
-theorem resumedSegment_committed {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_committed {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
     {committed : YieldCommit}
-    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .ok (segment, some committed)) :
     runSegment config envelope start = .ok segment ∧
-      segmentCommit config snapshot height transaction cell object generation (some view) true segment =
+      segmentCommit config snapshot height transaction cell object generation (some view) true funds segment =
         .ok (some committed) := by
   unfold resumedSegment at ran
   split at ran
@@ -2188,14 +2370,14 @@ theorem resumedSegment_committed {rootBytes : Bytes → Digest} {config : Config
 
 /-- A resumed segment that yielded is the bounded run's own yield and its own
 yield commit. -/
-theorem resumedSegment_yielded {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_yielded {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start state : State} {plan : PlanAwait}
     {committed : Option YieldCommit}
-    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .ok (.yielded state plan, committed)) :
     runSegment config envelope start = .ok (.yielded state plan) ∧
-      segmentCommit config snapshot height transaction cell object generation (some view) true
+      segmentCommit config snapshot height transaction cell object generation (some view) true funds
         (.yielded state plan) = .ok committed := by
   unfold resumedSegment at ran
   split at ran
@@ -2211,13 +2393,13 @@ theorem resumedSegment_yielded {rootBytes : Bytes → Digest} {config : Config}
 
 /-- A resumed segment's yield commit is the commit of the segment it carries:
 the segment's own commit when it yielded, none when it faulted. -/
-theorem resumedSegment_commit {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_commit {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
     {yielded : Option YieldCommit}
-    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .ok (segment, yielded)) :
-    segmentCommit config snapshot height transaction cell object generation (some view) true segment =
+    segmentCommit config snapshot height transaction cell object generation (some view) true funds segment =
       .ok yielded := by
   unfold resumedSegment at ran
   split at ran
@@ -2231,11 +2413,11 @@ theorem resumedSegment_commit {rootBytes : Bytes → Digest} {config : Config}
       exact commits
 
 /-- An exhaustion below the turn cap is refused, never committed as a fault. -/
-theorem resumedSegment_exhausted_below_cap {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_exhausted_below_cap {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start : State}
     (ran : runSegment config envelope start = .error .exhausted) (below : envelope < config.maxTicks) :
-    resumedSegment config snapshot height transaction cell object generation envelope view start =
+    resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .error .exhausted := by
   unfold resumedSegment
   rw [ran]
@@ -2255,15 +2437,6 @@ theorem law_denial_is_not_a_fault (config : Config) (envelope : Nat) (reason : W
 theorem exhaustion_below_cap_is_not_a_fault (config : Config) (envelope : Nat)
     (below : envelope < config.maxTicks) : programFault config envelope .exhausted = none := by
   simp [programFault, Nat.not_le.mpr below]
-
-/-- **The storage deposit** a record reserves while it is retained: the
-deployment's rate per byte of the record's encoding. Only an awaiting record is
-retained; an ended one is retired and reserves nothing. A function of the record
-the yield commits, so it is re-priced at every yield. -/
-def storageDeposit (config : Config) (record : Record) : Nat :=
-  match record.phase with
-  | .awaiting _ => config.storageRate * (encodeRecord record).length
-  | .done _ | .faulted _ => 0
 
 /-- The assets a purse holds a nonzero balance of, in ascending order. -/
 def purseAssets (book : Book) (held : AccountId) : List AssetId :=
@@ -2507,8 +2680,7 @@ def birthTransaction (request : BirthRequest) : TransactionId :=
 /-- The birth's postings: register the purse, pay the birth's declared envelope
 to the collector, move the deposit into the purse; then the purse settles
 (`settlePurse`). -/
-def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
-    (escrow : Escrow) (deposit : Nat) (segment : Segment) : Except Refusal Batch :=
+def birthBefore (config : Config) (book : Book) (held : AccountId) (request : BirthRequest) : Batch :=
   let registered := Batch.apply ⟨[held], [], []⟩ book
   let own : List Operation :=
     [.fee request.account config.collector config.asset (config.tariff.workOf request.envelope)] ++
@@ -2517,9 +2689,16 @@ def birthBatch (config : Config) (book : Book) (held : AccountId) (request : Bir
   let closing : List Operation := match request.predecessor with
     | none => []
     | some predecessor => sweep (applyOperations registered own) predecessor.purse held
-  settlePurse config registered held escrow deposit
-    ⟨[], own ++ closing, (request.predecessor.map Predecessor.purse).toList⟩ segment
+  ⟨[], own ++ closing, (request.predecessor.map Predecessor.purse).toList⟩
+
+/-- The birth's postings: `birthBefore`, then the first yield's effect (`effect`), then the purse
+settles. -/
+def birthBatch (config : Config) (book : Book) (held : AccountId) (request : BirthRequest)
+    (escrow : Escrow) (deposit : Nat) (effect : List Operation) (segment : Segment) : Except Refusal Batch :=
+  settlePurse config (Batch.apply ⟨[held], [], []⟩ book) held escrow deposit
+    (withEffect (birthBefore config book held request) effect) segment
   |>.map fun settled => ⟨held :: settled.registrations, settled.operations, settled.deregistrations⟩
+
 
 /-- The account the activity's purse is returned to at its end: the payer's, or
 for a rebirth the predecessor's (the request's account is the old purse, closed
@@ -2528,6 +2707,21 @@ def BirthRequest.escrowAccount (request : BirthRequest) : AccountId :=
   match request.predecessor with
   | some predecessor => predecessor.refund
   | none => request.account
+
+/-- The record a birth's first segment is stored in. -/
+def birthBase (config : Config) (request : BirthRequest) : Record :=
+  ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
+    0, [], checkpointDigest [],
+    escrowOf config.tariff request.subject request.escrowAccount request.resume request.timeout,
+    0, .faulted "unborn"⟩
+
+/-- What a birth's first yield judges its effect against: the purse once the birth's own
+postings are made (the deposit in, a predecessor's purse swept in). -/
+def birthFunds {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
+    (request : BirthRequest) (book : Book) (cell : CellId) : Funds :=
+  ⟨programEffects config snapshot request.pin request.input, heldAccount cell,
+    fun _ => (birthBefore config book (heldAccount cell) request).apply (Batch.apply ⟨[heldAccount cell], [], []⟩ book),
+    birthBase config request⟩
 
 /-- The turn code a birth's write is judged under: 1, or 9 for a rebirth. -/
 def BirthRequest.factsTurn (request : BirthRequest) : Nat :=
@@ -2557,6 +2751,8 @@ structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot
   cellExact : cell = recordCell config.domain request.object (activityId request.object (birthTransaction request))
   /-- The record cell held no activity cell at all. -/
   fresh : payloadOf (snapshot.canonicalBytes cell) = none
+  book : BookCell
+  bookExact : loadBook config snapshot = .ok book
   /-- The object's declared state as the birth found it (the first segment is
   not shown it: its write may not `set` present state). -/
   current : Option ObjectState
@@ -2564,8 +2760,10 @@ structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot
   segment : Segment
   segmentExact : runSegment config request.envelope.sourceTicks (initial program.applied.erase) = .ok segment
   yielded : Option YieldCommit
+  /-- The first yield's commit; its effect is judged against the purse once the birth's own
+  postings are made (`birthFunds`). -/
   yieldedExact : segmentCommit config snapshot height (birthTransaction request) cell request.object 0
-    current false segment = .ok yielded
+    current false (birthFunds config snapshot request (logicalBook book.logical) cell) segment = .ok yielded
   record : Record
   recordExact : record = nextRecord
     ⟨request.object, activityId request.object (birthTransaction request), request.pin, dataBytes request.input,
@@ -2579,8 +2777,6 @@ structure BirthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot
   admits : object.admitsNew = true
   /-- ... of the package it runs for them (its pin; while draining, the next pin). -/
   pinned : object.activePin = request.pin
-  book : BookCell
-  bookExact : loadBook config snapshot = .ok book
   /-- The object's law admitted the first segment's write (if it wrote). -/
   judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
     (yielded.bind YieldCommit.written) = .ok ()
@@ -2668,7 +2864,7 @@ def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
             | .error reason => throw reason
             | .ok segment =>
               match yieldedExact : segmentCommit config snapshot height transaction cell request.object 0
-                  current false segment with
+                  current false (birthFunds config snapshot request (logicalBook book.logical) cell) segment with
               | .error reason => throw reason
               | .ok yielded =>
                 match judged : judgeWritten object (factsOf request.subject height request.object request.factsTurn (some request.pin))
@@ -2688,8 +2884,8 @@ def birthPrefix {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
                   let base : Record := ⟨request.object, activity, request.pin, dataBytes request.input, 0, [],
                     checkpointDigest [], escrow, 0, .faulted "unborn"⟩
                   let record := nextRecord base 0 segment yielded
-                  pure ⟨paid, program, programExact, cell, rfl, fresh, current, currentExact, segment, segmentExact, yielded,
-                    yieldedExact, record, rfl, object, objectExact, admits, pinned, book, bookExact,
+                  pure ⟨paid, program, programExact, cell, rfl, fresh, book, bookExact, current, currentExact, segment,
+                    segmentExact, yielded, yieldedExact, record, rfl, object, objectExact, admits, pinned,
                     judged, drained, narrow, extractCovered, covered⟩
       else throw (.pinMismatch object.activePin request.pin)
       else throw .draining
@@ -2706,7 +2902,7 @@ def birth {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot 
   else
     let held := heldAccount pre.cell
     let batch ← birthBatch config (logicalBook pre.book.logical) held request escrow
-      (storageDeposit config pre.record) pre.segment
+      (storageDeposit config pre.record) (effectOps config held pre.yielded) pre.segment
     let posted ← postings pre.book batch
     let posts := recordPost config snapshot pre.cell pre.record ::
       ((pre.yielded.map YieldCommit.posts).getD [] ++ [posted.write config snapshot] ++
@@ -2890,6 +3086,8 @@ def settle {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot
     if await.deadline < height then .ok ⟨.timedOut, .timedOut, [], [], []⟩
     else if due ≤ height then .ok ⟨.resumed, .reply (.record [("at", .natural height)]), [], [], []⟩
     else .error (.notYetDue due height)
+  -- decided at its yield: no decider, no due height, no deadline
+  | .performed verdict => .ok ⟨.resumed, verdict.outcome, [], [], []⟩
 
 /-- No state, no checkpoint and no outcome is ever taken from a request: the
 submitter names the record and may add envelope it pays for from `account`. -/
@@ -2908,6 +3106,21 @@ def deliveryCharges (config : Config) (record : Record) (cell : CellId) (path : 
     (if request.extra = zeroCapacity then []
      else [.fee request.account config.collector config.asset (config.tariff.workOf request.extra)]) ++
     (if migration = 0 then [] else [.fee (heldAccount cell) config.collector config.asset migration]), []⟩
+
+/-- The purse's own charges in a delivery: the used fee and the drain fee (the submitter's added
+envelope is paid from the submitter's account, never from the purse). -/
+def purseCharges (config : Config) (record : Record) (cell : CellId) (path : Path) (migration : Nat) :
+    List Operation :=
+  [.fee (heldAccount cell) config.collector config.asset (record.escrow.used path)] ++
+    (if migration = 0 then [] else [.fee (heldAccount cell) config.collector config.asset migration])
+
+/-- What a delivery's yield judges its effect against: the purse once the purse's own charges are
+made (the used fee, the drain fee the yield's write costs). -/
+def deliveryFunds {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (input : Data)
+    (book : Book) (object : ObjectRecord) (record : Record) (cell : CellId) (path : Path) : Funds :=
+  ⟨programEffects config snapshot record.pin input, heldAccount cell,
+    fun written => applyOperations book (purseCharges config record cell path (drainFee config object written)),
+    record⟩
 
 /-! ### The resume point
 
@@ -3061,13 +3274,6 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   heapCovered : (segmentLimits config resumed).heap ≤ envelope.heap
   /-- Single-extraction reservation contract over the shared budget-preserving extractor; no refunds. -/
   extractCovered : config.planBudget.ticks ≤ envelope.extractTicks
-  segment : Segment
-  yielded : Option YieldCommit
-  /-- The resumed run and its yield commit; a program fault ends it `faulted`. -/
-  endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record record.object
-    (record.generation + 1) envelope.sourceTicks view resumed = .ok (segment, yielded)
-  next : Record
-  nextExact : next = nextRecord record (record.generation + 1) segment yielded
   /-- The object's record, read in this turn. -/
   object : ObjectRecord
   objectExact : readObject config snapshot record.object = .ok (some object)
@@ -3075,11 +3281,23 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   runsPin : object.runs record.pin = true
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
+  segment : Segment
+  yielded : Option YieldCommit
+  /-- The resumed run and its yield commit; a program fault ends it `faulted`. A yield's effect is
+  judged against the purse once the delivery's own charges are made (`deliveryFunds`). -/
+  endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record record.object
+    (record.generation + 1) envelope.sourceTicks view resumed
+    (deliveryFunds config snapshot input (logicalBook book.logical) object record request.record settlement.path) =
+      .ok (segment, yielded)
+  next : Record
+  nextExact : next = nextRecord record (record.generation + 1) segment yielded
   batch : Batch
+  /-- The delivery's charges, then the yield's effect (a transfer out of the purse), then the purse settles. -/
   batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
     (storageDeposit config next)
-    (deliveryCharges config record request.record settlement.path request
-      (drainFee config object (yielded.bind YieldCommit.written))) segment =
+    (withEffect (deliveryCharges config record request.record settlement.path request
+      (drainFee config object (yielded.bind YieldCommit.written)))
+        (effectOps config (heldAccount request.record) yielded)) segment =
       .ok batch
   posted : Postings book
   postedBatch : posted.batch = batch
@@ -3127,8 +3345,12 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   if heapCovered : tail.needed config ≤ envelope.heap then
   if extractCovered : config.planBudget.ticks ≤ envelope.extractTicks then
   if 0 < record.tried ∧ envelope.sourceTicks ≤ record.tried then .error (.alreadyExhausted record.tried envelope.sourceTicks) else
+  match bookExact : loadBook config snapshot with
+  | .error reason => .error reason
+  | .ok book =>
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
-      record.object (record.generation + 1) envelope.sourceTicks view resumed with
+      record.object (record.generation + 1) envelope.sourceTicks view resumed
+      (deliveryFunds config snapshot head.input (logicalBook book.logical) object record request.record settlement.path) with
   | .error reason => .error reason
   | .ok (segment, yielded) =>
   match judged : judgeWritten object (factsOf record.escrow.payer height record.object 2 (some record.pin))
@@ -3139,13 +3361,11 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   | .error reason => .error reason
   | .ok () =>
   let next := nextRecord record (record.generation + 1) segment yielded
-  match bookExact : loadBook config snapshot with
-  | .error reason => .error reason
-  | .ok book =>
   match batchExact : settlePurse config (logicalBook book.logical) (heldAccount request.record) record.escrow
       (storageDeposit config next)
-      (deliveryCharges config record request.record settlement.path request
-        (drainFee config object (yielded.bind YieldCommit.written))) segment with
+      (withEffect (deliveryCharges config record request.record settlement.path request
+        (drainFee config object (yielded.bind YieldCommit.written)))
+          (effectOps config (heldAccount request.record) yielded)) segment with
   | .error reason => .error reason
   | .ok batch =>
   match postings book batch with
@@ -3162,8 +3382,8 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     head.inputExact, head.paid, program, head.programExact,
     settlement, tail.settled, view, tail.viewExact, tail.response, tail.state, tail.stateExact, resumed,
     tail.resumeExact, envelope, rfl,
-    covered, heapCovered, extractCovered, segment, yielded, endExact, next, rfl, object, objectExact, runsPin, book,
-    bookExact, batch, batchExact, posted,
+    covered, heapCovered, extractCovered, object, objectExact, runsPin, book, bookExact, segment, yielded, endExact,
+    next, rfl, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     judged, drained⟩
   else .error .bookRefused
@@ -3371,6 +3591,7 @@ def abandonSlot {rootBytes : Bytes → Digest} (config : Config) (snapshot : Sna
     Except Refusal (List Post × List StableNullifier) :=
   match await.source with
   | .height _ => .ok ([], [])
+  | .performed _ => .ok ([], [])
   | .reply name _ =>
     match readSlot config snapshot name with
     | none => .error (absentSlot config snapshot name)
@@ -3901,6 +4122,7 @@ theorem settle_posts_current {rootBytes : Bytes → Digest} {config : Config} {s
     · split at settled
       · cases settled; intro post member; simp at member
       · cases settled
+  · cases settled; intro post member; simp at member
 
 theorem stateWrite_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {object : CellId} {current : Option ObjectState} {viewed : Bool} {write : Data} {written : StateWritten}
@@ -3931,12 +4153,13 @@ theorem stateWrite_spec {rootBytes : Bytes → Digest} {config : Config} {snapsh
           cases ok
           exact ⟨edits, value, rfl, applied, rfl⟩
 
-theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_spec {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
-    stateWrite config snapshot object current viewed plan.write = .ok committed.written ∧
+    (∃ built, stateWrite config snapshot object current viewed plan.write = .ok built ∧
+      ∀ written, committed.written = some written → built = some written) ∧
       (∀ written, committed.written = some written → written.post ∈ committed.posts) ∧
       PostsCurrent snapshot committed.posts := by
   unfold commitYield at ok
@@ -3961,7 +4184,7 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snaps
           · cases ok
           · simp only [Except.ok.injEq] at ok
             subst ok
-            refine ⟨wrote, ?_, ?_⟩
+            refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, ?_⟩
             · intro one some; subst some; simp
             · intro post member
               simp only [List.mem_append, List.mem_singleton] at member
@@ -3972,8 +4195,24 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {config : Config} {snaps
           · cases ok
           · simp only [Except.ok.injEq] at ok
             subst ok
-            refine ⟨wrote, ?_, stateCurrent⟩
+            refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
             intro one some; subst some; simp
+        · split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok
+              subst ok
+              refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
+              intro one some; subst some; simp
+            · split at ok
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
+                intro one some; subst some; simp
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                refine ⟨⟨_, wrote, fun _ none_ => (by cases none_)⟩, fun _ none_ => (by cases none_), ?_⟩
+                intro post member; cases member
 
 
 theorem awaitId_lt (cell : CellId) (generation : Nat) (checkpoint : Digest) :
@@ -3981,10 +4220,10 @@ theorem awaitId_lt (cell : CellId) (generation : Nat) (checkpoint : Digest) :
 
 /-- **A committed yield's await fits the charged record**: its id and its reply slot are
 hash outputs, and its yield height and deadline were checked below `256 ^ 8`. -/
-theorem commitYield_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_fits {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     committed.await.Fits := by
   by_cases patient : plan.patience = 0 ∨ config.maxPatience < plan.patience
@@ -4015,15 +4254,29 @@ theorem commitYield_fits {rootBytes : Bytes → Digest} {config : Config} {snaps
         subst ok
         rename_i inTime
         exact ⟨awaitId_lt _ _ _, show due < 256 ^ 8 by omega, narrow, show height < 256 ^ 8 by omega⟩
+    · split at ok
+      · cases ok
+      · split at ok
+        · simp only [Except.ok.injEq] at ok
+          subst ok
+          exact ⟨awaitId_lt _ _ _, trivial, narrow, show height < 256 ^ 8 by omega⟩
+        · split at ok
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            exact ⟨awaitId_lt _ _ _, trivial, narrow, show height < 256 ^ 8 by omega⟩
+          · simp only [Except.ok.injEq] at ok
+            subst ok
+            exact ⟨awaitId_lt _ _ _, trivial, narrow, show height < 256 ^ 8 by omega⟩
 
-theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_spec {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok (some committed)) :
     ∃ state plan, segment = .yielded state plan ∧
       commitYield config snapshot height transaction cell object generation
-        (checkpointDigest (checkpointBytes state)) current viewed plan = .ok committed := by
+        (checkpointDigest (checkpointBytes state)) current viewed plan funds
+        (yieldReserve config funds generation state plan) = .ok committed := by
   cases segment with
   | yielded state plan =>
     simp only [segmentCommit, bind, Except.bind] at ok
@@ -4036,20 +4289,20 @@ theorem segmentCommit_spec {rootBytes : Bytes → Digest} {config : Config} {sna
   | finished result => simp [segmentCommit, pure, Except.pure] at ok
   | faulted reason => simp [segmentCommit, pure, Except.pure] at ok
 
-theorem segmentCommit_fits {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_fits {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok (some committed)) :
     committed.await.Fits := by
   obtain ⟨_, _, _, commit⟩ := segmentCommit_spec ok
   exact commitYield_fits commit
 
-theorem resumedSegment_fits {rootBytes : Bytes → Digest} {config : Config}
+theorem resumedSegment_fits {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation envelope : Nat} {view : ObjectState} {start : State} {segment : Segment}
     {committed : YieldCommit}
-    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start =
+    (ran : resumedSegment config snapshot height transaction cell object generation envelope view start funds =
       .ok (segment, some committed)) :
     committed.await.Fits :=
   segmentCommit_fits (resumedSegment_committed ran).2
@@ -4208,8 +4461,8 @@ theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : C
   rw [yielded] at ended
   have commit := (resumedSegment_committed ended).2
   obtain ⟨state, plan, segmentIs, committedExact⟩ := segmentCommit_spec commit
-  obtain ⟨wrote, inPosts, _⟩ := commitYield_spec committedExact
-  rw [writes] at wrote
+  obtain ⟨⟨built, wrote, same⟩, inPosts, _⟩ := commitYield_spec committedExact
+  rw [same written writes] at wrote
   obtain ⟨edits, value, decoded, applied, exact⟩ := stateWrite_spec wrote
   have member : written.post ∈ delivery.posts := by
     rw [delivery.postsExact, yielded]
@@ -4366,7 +4619,9 @@ theorem delivery_fields_bind_checkpoint {rootBytes : Bytes → Digest} {config :
       decodeCheckpoint record.checkpoint = some state ∧
       resume (responseData delivery.settlement.decided delivery.view).term state = some delivery.resumed ∧
       resumedSegment config snapshot height (deliveryTransaction delivery.await.id) request.record record.object
-        (record.generation + 1) delivery.envelope.sourceTicks delivery.view delivery.resumed =
+        (record.generation + 1) delivery.envelope.sourceTicks delivery.view delivery.resumed
+        (deliveryFunds config snapshot delivery.input (logicalBook delivery.book.logical) delivery.object record
+          request.record delivery.settlement.path) =
           .ok (delivery.segment, delivery.yielded) := by
   refine ⟨delivery.record, delivery.state, delivery.recordExact, delivery.awaiting, ?_, delivery.stateExact,
     delivery.resumeExact, delivery.endExact⟩
@@ -4398,9 +4653,16 @@ theorem resume_deterministic {rootBytes : Bytes → Digest} {config : Config} {s
     exact (Option.some.inj a).symm
   have envelopes : one.envelope = two.envelope := by
     rw [one.envelopeExact, two.envelopeExact, records, settlements, sameEnvelope]
+  have inputs : one.input = two.input := by
+    have a := one.inputExact; rw [records, two.inputExact] at a; exact (Option.some.inj a).symm
+  have objects : one.object = two.object := by
+    have a := one.objectExact; rw [records, two.objectExact] at a; exact (Option.some.inj (Except.ok.inj a)).symm
+  have books : one.book = two.book := by
+    have a := one.bookExact; rw [two.bookExact] at a; exact (Except.ok.inj a).symm
   have ends : (one.segment, one.yielded) = (two.segment, two.yielded) := by
     have a := one.endExact
-    rw [awaits, sameRecord, records, envelopes, views, resumedEq, two.endExact] at a
+    rw [awaits, sameRecord, records, envelopes, views, resumedEq, inputs, objects, books, settlements,
+      two.endExact] at a
     exact (Except.ok.inj a).symm
   have segments : one.segment = two.segment := congrArg Prod.fst ends
   have yieldeds : one.yielded = two.yielded := congrArg Prod.snd ends
@@ -4448,7 +4710,7 @@ theorem refund_measurement_free {rootBytes : Bytes → Digest} {config : Config}
     rw [one.postedBatch]
     obtain ⟨rest, prefix_⟩ := settlePurse_prefix one.batchExact
     rw [prefix_]
-    simp [deliveryCharges]
+    simp [deliveryCharges, withEffect]
   exact ⟨posted, by rw [records, settlements], by rw [records, settlements]⟩
 
 /-- The submitter's charge for added envelope is the public price of what it
@@ -4527,14 +4789,15 @@ theorem settlePurse_yields (config : Config) (book : Book) (held : AccountId) (e
   · cases settled
 
 /-- **A resume re-prices the deposit**: a delivery that yields again leaves, in
-the purse after its own postings, the fee pair plus the storage deposit of the
-record it commits (`next`, at its new size). -/
+the purse after its own postings and its yield's effect (a performed transfer), the fee pair plus
+the storage deposit of the record it commits (`next`, at its new size). -/
 theorem Delivery.yield_reserves_deposit {rootBytes : Bytes → Digest} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {request : DeliverRequest}
     (delivery : Delivery config snapshot height request) (yields : delivery.segment.yields = true) :
     delivery.record.escrow.pair + storageDeposit config delivery.next ≤
-      purse ((deliveryCharges config delivery.record request.record delivery.settlement.path request
-        (drainFee config delivery.object (delivery.yielded.bind YieldCommit.written))).apply
+      purse ((withEffect (deliveryCharges config delivery.record request.record delivery.settlement.path request
+        (drainFee config delivery.object (delivery.yielded.bind YieldCommit.written)))
+        (effectOps config (heldAccount request.record) delivery.yielded)).apply
         (logicalBook delivery.book.logical)) config.asset (heldAccount request.record) :=
   (settlePurse_yields _ _ _ _ _ _ _ _ yields delivery.batchExact).2
 
@@ -5571,13 +5834,14 @@ nothing) remains. -/
 def PlanSource.maskedAwait : PlanSource → Await
   | .reply decider => ⟨⟨0⟩, .reply ⟨0⟩ decider, 0, 0⟩
   | .height _ => ⟨⟨0⟩, .height 0, 0, 0⟩
+  | .performed _ => ⟨⟨0⟩, .performed .settled, 0, 0⟩
 
 /-- A committed yield's await, masked, is a function of the plan's source alone: not of the
 height, the transaction, the record cell, the generation or the checkpoint. -/
-theorem commitYield_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_await_mask {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     committed.await.mask = plan.source.maskedAwait := by
   unfold commitYield at ok
@@ -5602,14 +5866,26 @@ theorem commitYield_await_mask {rootBytes : Bytes → Digest} {config : Config} 
             subst ok
             rw [hsource]
             rfl
+        · rename_i effect hsource
+          rw [hsource]
+          split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok
+              subst ok; rfl
+            · split at ok
+              · simp only [Except.ok.injEq] at ok
+                subst ok; rfl
+              · simp only [Except.ok.injEq] at ok
+                subst ok; rfl
 
-theorem segmentCommit_await_mask {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_await_mask {rootBytes : Bytes → Digest} {funds' : Funds} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height height' : Nat} {transaction transaction' : TransactionId} {cell cell' object object' : CellId}
     {generation : Nat} {current current' : Option ObjectState} {viewed viewed' : Bool} {segment : Segment}
     {yielded yielded' : Option YieldCommit}
-    (one : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (one : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok yielded)
-    (two : segmentCommit config snapshot height' transaction' cell' object' generation current' viewed' segment =
+    (two : segmentCommit config snapshot height' transaction' cell' object' generation current' viewed' funds' segment =
       .ok yielded') :
     yielded.map (fun committed => committed.await.mask) = yielded'.map (fun committed => committed.await.mask) := by
   cases segment with
@@ -5736,11 +6012,10 @@ theorem except_map_error {ε α β : Type} {f : α → β} {x : Except ε α} {e
   cases x <;> simp_all [Except.map]
 
 theorem birthBatch_error {config : Config} {book : Book} {held : AccountId} {request : BirthRequest}
-    {escrow : Escrow} {deposit : Nat} {segment : Segment} {refusal : Refusal}
-    (refused : birthBatch config book held request escrow deposit segment = .error refusal) :
+    {escrow : Escrow} {deposit : Nat} {effect : List Operation} {segment : Segment} {refusal : Refusal}
+    (refused : birthBatch config book held request escrow deposit effect segment = .error refusal) :
     ∃ available reserve, refusal = .awaitsFunding available reserve := by
   unfold birthBatch at refused
-  simp only [] at refused
   exact settlePurse_error (except_map_error refused)
 
 /-- **QUOTE -> SUBMIT, on the funding check.** A request whose prefix admits it, at the deposit the
@@ -5828,10 +6103,10 @@ theorem recordAt_recordImage (bytesAt : CellId → Bytes) (cell : CellId) (recor
 /-- What a yield commit posts: the declared-state write (a state image of the
 object) and, for a reply await, the slot it opens for this record cell, OPEN
 (`slot.phase = .opened`: a yield decides nothing). -/
-theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_posts {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     ∀ post ∈ committed.posts, (∃ state, post.bytes = stateImage object state) ∨
       (∃ slot : AnswerSlot.Slot, slot.activity = cell ∧ slot.phase = .opened ∧
@@ -5874,6 +6149,22 @@ theorem commitYield_posts {rootBytes : Bytes → Digest} {config : Config} {snap
             subst ok
             intro post member
             exact .inl (stateShape _ wrote post member)
+        · split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok
+              subst ok
+              intro post member
+              exact .inl (stateShape _ wrote post member)
+            · split at ok
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                intro post member
+                exact .inl (stateShape _ wrote post member)
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                intro post member
+                cases member
 
 /-- The record a yielding segment commits is awaiting. -/
 theorem nextRecord_yielded_awaiting (base : Record) (generation : Nat) (segment : Segment)
@@ -5975,10 +6266,10 @@ theorem recordFirst_cells_paid {rootBytes : Bytes → Digest} (config : Config) 
       rfl
 
 /-- A yield commit's posts are census posts of its object and record cell. -/
-theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_census {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok yielded) :
     ∀ post ∈ (yielded.map YieldCommit.posts).getD [], CensusPost object cell post := by
   intro post member
@@ -5990,10 +6281,10 @@ theorem segmentCommit_census {rootBytes : Bytes → Digest} {config : Config} {s
       (fun ⟨slot, activity, _, subject, isSlot⟩ => .inr (.inl ⟨slot, activity, subject, isSlot⟩))
 
 /-- A turn that opens a slot commits an awaiting record. -/
-theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_awaiting {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok yielded) (base : Record) (generation' : Nat)
     (opens : ∃ post ∈ (yielded.map YieldCommit.posts).getD [], (payloadOf post.bytes).isSome = true) :
     ∃ await, (nextRecord base generation' segment yielded).phase = .awaiting await := by
@@ -6065,6 +6356,10 @@ theorem settle_posts_retired {rootBytes : Bytes → Digest} {config : Config} {s
     · split at settled
       · cases settled; intro post member; simp at member
       · cases settled
+  | performed verdict =>
+    unfold settle at settled
+    rw [source] at settled
+    cases settled; intro post member; simp at member
 
 /-- **`retention_cells_have_payer`, delivery.** Every cell an admitted delivery
 leaves live names its payer: the record its escrow (it still awaits, or it is

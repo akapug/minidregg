@@ -25,7 +25,7 @@ Every resource-invocation law reads it: `slots` projects `clock/now`,
 `clock/day` (`now / 86400`) and `clock/slot` into the law's state
 (`DeclaredResourceController.now_slot_exact`).
 
-Wire: `DREGG/CLOCK/v3` (v2 predates the Book's floors section), with immutable `maxStepSeconds : Nat` at its own namespace.
+Wire: `DREGG/CLOCK/v4` (v3 predates the platform cell kind, v2 the Book's floors section), with immutable `maxStepSeconds : Nat` at its own namespace.
 The old clock cell shape refuses; re-genesis seeds `now` from explicit params.
 -/
 import Compiler.StoreCodec
@@ -153,7 +153,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .clock => clockStream
   | .maxStepSeconds => StreamCodec.nat
 
-def wireName : String := "DREGG/CLOCK/v3"
+def wireName : String := "DREGG/CLOCK/v4"
 
 def wire : Wire layout where
   name := wireName
@@ -166,7 +166,7 @@ def wire : Wire layout where
     | .clock => "unit"
     | .maxStepSeconds => "unit"
   valueCodecId
-    | .clock => "DREGG/CLOCK/NOW-SLOT/v2"
+    | .clock => "DREGG/CLOCK/NOW-SLOT/v3"
     | .maxStepSeconds => "positive-nat/max-step-seconds/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire

@@ -582,3 +582,15 @@ surfaces as `CredentialSignatureAdmission.Reject.expired`. But `PlatformCell.Adm
 `validUntil`, so the spec admits an expired install that the receiver refuses. Soundness holds (the
 receiver refuses more), but `receiverDecides` covers only the gate. Add `height ≤ i.validUntil` to
 `Admits`, with a teeth pole `expired_refused`, so the spec and the full receiver agree.
+
+## 2026-10-27, thirteenth pass: prefix entries with tags (hot-path-v4; judged on the described amendment)
+
+The pushed tip (`107f040d`) still passes record bytes, so this pass judges the amendment as described.
+**Verdict: nothing from passes 7 and 9 breaks, on one condition.** `ffState` still has no prefix in its
+type, so execution stays impossible. The added prefix `verifyTags` from the seed's chain is a further
+refusal, and an honest Store passes it because `exact`'s `OwnEntries` already verifies every entry's
+tag, so `exact` stays satisfiable. Reading receipt roots from the tags is decoding, not execution. The
+reader's prefix guarantee moves back from chain-hash collision resistance to KMAC; update the header.
+**The condition:** the root log read from the tags is new served state. `Opened.view`/`View` must carry it,
+and `View.Honest` must pin it (each entry's receipt root equals the replay's root at that height), or `exact`
+and `keystone` leave it unstated.

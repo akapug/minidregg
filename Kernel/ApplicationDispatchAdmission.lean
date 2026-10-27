@@ -117,7 +117,7 @@ def ordinaryHeaderName (name : List UInt8) : Bool :=
     "if-match", "if-none-match", "x-requested-with", "x-csrftoken",
     "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime",
     "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset",
-    "oc-lazyops"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
+    "oc-lazyops", "content-encoding"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
 
 def cleanTransportText (bytes : List UInt8) : Bool :=
   (String.fromUTF8? bytes.toByteArray).isSome &&
@@ -141,9 +141,36 @@ streamed-open method. -/
 def streamed (request : ApplicationDispatchCodec.Request) : Bool :=
   request.method == streamedOpenMethod
 
+/-- The WebDAV and CalDAV calls a WebSession serves beyond the plain exchanges
+(`web-session.capnp` `propfind` @7, `proppatch` @8, `mkcol` @9, `copy` @10, `move` @11,
+`lock` @12, `unlock` @13, `report` @15, `options` @16). `acl` @14 is absent: no
+admitted app uses it, and an absent method is refused before any record. Each is an
+ordinary exchange: one request, one response, one Mini write. -/
+def davMethod (method : List UInt8) : Bool :=
+  (["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT",
+    "OPTIONS"] : List String).any (fun allowed => method == allowed.toUTF8.toList)
+
+/-- The request headers a DAV call carries as its typed parameters: `depth` (propfind's
+`depth`, copy's and lock's `shallow`), `destination` (copy and move), `overwrite`
+(`noOverwrite`) and `lock-token` (unlock). They are signed like ordinary headers and admitted
+only on a DAV method: on every other request they are refused. -/
+def davHeaderName (name : List UInt8) : Bool :=
+  (["depth", "destination", "overwrite", "lock-token"] : List String).any
+    (fun allowed => name == allowed.toUTF8.toList)
+
+/-- DAV calls whose WebSession method has no content parameter. -/
+def davBodyless (method : List UInt8) : Bool :=
+  (["COPY", "MOVE", "UNLOCK", "OPTIONS"] : List String).any
+    (fun allowed => method == allowed.toUTF8.toList)
+
+/-- DAV calls whose content is `xmlContent :Text`: the body must be UTF-8 text without NUL. -/
+def davTextBody (method : List UInt8) : Bool :=
+  (["PROPFIND", "PROPPATCH", "LOCK"] : List String).any
+    (fun allowed => method == allowed.toUTF8.toList)
+
 def exchangeMethod (method : List UInt8) : Bool :=
   (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] : List String).any
-    (fun allowed => method == allowed.toUTF8.toList)
+    (fun allowed => method == allowed.toUTF8.toList) || davMethod method
 
 /-- The exact signed request is a bounded WebSession candidate. The received
 `generated` tag is never trusted: every incoming header must be ordinary,
@@ -158,8 +185,10 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
     if request.method == "GET".toUTF8.toList ||
         request.method == "HEAD".toUTF8.toList ||
         request.method == "DELETE".toUTF8.toList ||
-        streamed request then
+        streamed request || davBodyless request.method then
       request.body.isEmpty
+    else if davTextBody request.method then
+      (String.fromUTF8? request.body.toByteArray).isSome && !request.body.contains 0
     else true
   methodAllowed && bodyAllowed &&
     decide (request.path.length + request.query.length ≤ 8192) &&
@@ -172,7 +201,8 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
     request.headers.all (fun header =>
       !header.generated &&
       (ordinaryHeaderName header.name ||
-        (streamed request && header.name == webSocketProtocolHeader)) &&
+        (streamed request && header.name == webSocketProtocolHeader) ||
+        (davMethod request.method && davHeaderName header.name)) &&
       decide (header.name.length ≤ 128) &&
       decide (header.value.length ≤ 8192) &&
       cleanTransportText header.value)
@@ -202,6 +232,91 @@ theorem getMethod_exchange : exchangeMethod getMethod = true := by
   decide +kernel
 
 theorem getMethod_not_streamed : (getMethod == streamedOpenMethod) = false := by
+  decide +kernel
+
+theorem davMethod_streamedOpen : davMethod streamedOpenMethod = false := by
+  decide +kernel
+
+theorem davMethod_get : davMethod getMethod = false := by
+  decide +kernel
+
+/-! ### The DAV calls: admitted exactly as `requestSafeFor` says, with poles
+
+Statement: a DAV method is an ordinary exchange (`exchangeMethod`), its typed parameters
+travel as the four DAV headers and nowhere else, a parameter-only call carries no body, and
+an `xmlContent` call carries UTF-8 text. The theorems below are the general facts; the
+`#guard`-style examples after them are the satisfiable witnesses and the poles (each a
+concrete request, decided by the kernel). -/
+
+/-- Opening DAV changes nothing for a non-DAV request carrying no DAV header: the admission is
+the same Boolean with the DAV disjuncts erased. -/
+theorem dav_header_needs_dav_method (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (hdav : davMethod request.method = false)
+    (header : ApplicationDispatchCodec.Header) (mem : header ∈ request.headers)
+    (hname : ordinaryHeaderName header.name = false)
+    (hproto : streamed request = false ∨ header.name ≠ webSocketProtocolHeader) :
+    requestSafeFor open_ request = false := by
+  simp only [requestSafeFor, hdav, Bool.false_and, Bool.or_false]
+  rw [Bool.eq_false_iff]
+  intro safe
+  simp only [Bool.and_eq_true, List.all_eq_true] at safe
+  have h := (safe.2 header mem).1.1.1.2
+  rcases hproto with hs | hn
+  · simp [hname, hs] at h
+  · simp [hname, hn] at h
+
+/-- A DAV call without a content parameter (COPY, MOVE, UNLOCK, OPTIONS) carries no body. -/
+theorem dav_bodyless_body_empty (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (safe : requestSafeFor open_ request = true) (h : davBodyless request.method = true) :
+    request.body = [] := by
+  simp [requestSafeFor, h] at safe
+  tauto
+
+/-- The DAV parameter headers are never ordinary headers: off a DAV method each is refused. -/
+theorem davHeaderNames_not_ordinary :
+    (["depth", "destination", "overwrite", "lock-token"] : List String).all
+      (fun name => !ordinaryHeaderName name.toUTF8.toList &&
+        name.toUTF8.toList != webSocketProtocolHeader) = true := by
+  decide +kernel
+
+/-- Every DAV method is an exchange and none is a streamed open. -/
+theorem davMethods_exchange :
+    (["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT",
+      "OPTIONS"] : List String).all
+      (fun m => exchangeMethod m.toUTF8.toList && m.toUTF8.toList != streamedOpenMethod) = true := by
+  decide +kernel
+
+/-- A request fixture: a method, a path, headers and a body. -/
+def davFixture (method : String) (headers : List (String × String)) (body : String) :
+    ApplicationDispatchCodec.Request :=
+  { operationId := 1, method := method.toUTF8.toList, path := "dav/notes".toUTF8.toList,
+    query := [], body := body.toUTF8.toList,
+    headers := headers.map fun (n, v) =>
+      { name := n.toUTF8.toList, value := v.toUTF8.toList, generated := false } }
+
+/-- Satisfiable: a PROPFIND with `depth: 1` and an XML body is admitted, on a human route and
+on an agent route alike. -/
+theorem dav_propfind_admitted :
+    requestSafeFor false (davFixture "PROPFIND" [("depth", "1"), ("content-type", "application/xml")]
+      "<?xml version=\"1.0\"?><propfind xmlns=\"DAV:\"><allprop/></propfind>") = true := by
+  decide +kernel
+
+/-- Satisfiable: MKCOL, a MOVE with its destination and overwrite, a REPORT with a body. -/
+theorem dav_write_calls_admitted :
+    requestSafeFor false (davFixture "MKCOL" [] "") = true ∧
+    requestSafeFor false (davFixture "MOVE"
+      [("destination", "https://g.example/dav/old"), ("overwrite", "F")] "") = true ∧
+    requestSafeFor true (davFixture "REPORT" [("depth", "1")] "<calendar-query/>") = true := by
+  decide +kernel
+
+/-- Poles: a GET with a DAV header, a COPY with a body, an ACL, and a PROPFIND whose body is
+not UTF-8 are each refused. -/
+theorem dav_poles :
+    requestSafeFor true (davFixture "GET" [("depth", "1")] "") = false ∧
+    requestSafeFor true (davFixture "COPY" [("destination", "https://g.example/x")] "body") = false ∧
+    requestSafeFor true (davFixture "ACL" [] "<acl/>") = false ∧
+    requestSafeFor true
+      { davFixture "PROPFIND" [("depth", "0")] "" with body := [0xff, 0xfe] } = false := by
   decide +kernel
 
 /-- Pole: a route that may not open a stream refuses every streamed open. -/
@@ -249,7 +364,7 @@ theorem streamed_open_shape_is_get_shape (request : ApplicationDispatchCodec.Req
     simp [getMethod]
   rw [Bool.eq_iff_iff]
   simp only [requestSafe, requestSafeFor, hget, h, hm, getMethod_exchange, hGetBody,
-    streamedOpenMethod_not_exchange]
+    streamedOpenMethod_not_exchange, davMethod_streamedOpen, davMethod_get]
   simp only [Bool.or_true, Bool.true_or, Bool.and_true, Bool.true_and,
     Bool.false_and, Bool.or_false, ↓reduceIte]
   simp only [Bool.and_eq_true, List.all_eq_true]
@@ -263,6 +378,13 @@ theorem streamed_open_shape_is_get_shape (request : ApplicationDispatchCodec.Req
 #assert_axioms requestSafe_refuses_streamed
 #assert_axioms dispatchRequestSafe_agent_refuses_streamed
 #assert_axioms requestSafeFor_exchange
+#assert_axioms dav_header_needs_dav_method
+#assert_axioms dav_bodyless_body_empty
+#assert_axioms davHeaderNames_not_ordinary
+#assert_axioms davMethods_exchange
+#assert_axioms dav_propfind_admitted
+#assert_axioms dav_write_calls_admitted
+#assert_axioms dav_poles
 #assert_axioms streamed_open_body_empty
 #assert_axioms streamed_open_shape_is_get_shape
 
@@ -300,7 +422,7 @@ theorem observedPhysicalRoot_current {deployment : Deployment}
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v3".toUTF8.toList ++
+  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v4".toUTF8.toList ++
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream

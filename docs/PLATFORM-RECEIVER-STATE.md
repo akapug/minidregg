@@ -1,98 +1,114 @@
-# Platform receiver: state for the successor (2026-10-27)
+# Platform receiver: state for the successor (2026-10-27, second handoff)
 
-Branch `lane/lean-critical` at the commit that adds this file (worktree
-`/Users/ember/dev/minidregg-lanes/lean-critical`, the Mac's warm `.lake`). The statements
-were audited three times; the third pass (`docs/review/2026-10-27-platform-cell-statements/AUDIT.md`,
-lane/audit-platform 90af8593) cleared them for proof work.
+The Mac worktree `/Users/ember/dev/minidregg-lanes/lean-critical` is on `lane/lean-critical`,
+merged with origin/main (fae-4 aaf73ce1 included). Statements, poles and the third audit pass
+are in `Kernel/PlatformCell.lean` (the spec). The fourth audit pass is
+`docs/review/2026-10-27-platform-cell-statements/AUDIT.md` (lane/audit-platform 6bb1787c).
 
-## Landed
+## Rulings in force (coordinator, 2026-10-27)
+
+- The flag day (`STORE-CELLS/v17`, 43 bumped identities, every Store re-genesis) lands ONCE,
+  with the whole platform cell: kind, receiver, replay, Host arms, genesis seed (frame v8),
+  and births priced from the cell. Tell the coordinator when the seed is in; the integrator
+  takes the branch at that cut. Rehearsal #3 (cut 9) ships without it.
+- Op 240 goes in `consent_exempt`, with the reason recorded the way FN_NAMESPACE_PLAN's is:
+  it is the controller's operator-route plan.
+- O61 (clock control for the controller) joins the genesis seed commit. That means a
+  `clockControlCapability` mirroring `payControlCapability` on the clock cell, the theorem
+  `clock_control_cannot_tick` from `ClockLaw.clock_refuses_nonticker_tick` (:156), and poles
+  per GENESIS-COUPLING §C S2. The statement is in docs/LEAN-COHERENCE-STATE.md on lane/fae-4.
+- Delegation of the parent task is the owner's: holders get observation and the witness
+  no-op, never delegation. This is done in `AgentGrain.holderPolicy` on lane/lean-l13-laws;
+  bring it here when you merge that branch (see below).
+
+## Landed on lane/lean-critical
 
 | sha | what |
 |---|---|
-| 97205be6 | S1: the pay law and the controller's pay control at every genesis (`Kernel/NativeHostGenesis.lean`, frame `GENESIS-SOURCE/v7`) |
-| cc5ebd26, 89dc0e17, de53563d | `Kernel/PlatformCell.lean`: every statement, pole and teeth (L1 platform, M2 refill, protocol link) |
-| 92341df2 | enrollment pin survives ticks (`NativePlanHeight.pinHeaderAt`, consent `enrollmentPlanAtObservation`) |
-| 5f86883e | proved: `staysSorted`, `reachable_sorted`, `versionMonotone`, `recordsValid`, `decideInstall_decides`, `decides_authenticated` |
+| c385eed0 | registry!: `Kind.platform` (tag 21, schema 91020), `Kernel/PlatformCellLayout.lean` (record and genesis-fixed controller), every exhaustive site, the codec cascade (43 mechanical bumps; seed, clock and admitted-input-context raw versions to 4; `seedEpoch_v3_refusedFor`) |
+| 835617b4 | `Kernel/PlatformCellDomain.lean`, `Kernel/PlatformInstallReceiver.lean`: `admitsObserved` gate, `admitsObserved_decides`, `receiverDecides`, poles |
+| 40599807, 6fffa0de | L13 items (holder law; `birthRefusal`), also on lane/lean-l13-laws |
+| 3de3c348, c18c3012 | from lane/lean-l13-laws: the plan/admission keystone (stated) and the holder law without delegation |
+| merges of origin/main | built green after the last merge: kernels, Host.Main, ClientConsentSession, census; regen found no move; registry check green |
 
-`Kernel/PlatformCell.lean` is the spec. Its reference receiver is `decideInstall` (with
-`custodianCheck`), and it is proved to decide `Admits`. The registry reserves 240-243
-`PLATFORM_INSTALL_{PLAN,ASSEMBLE,SUBMIT,LOOKUP}` (owner `platform`) and 244-247
-`METER_REFILL_*` (owner `durable-meter`). `check` refuses an active `*_SUBMIT` whose effect is
-not `append`.
+The unbuilt draft of step 3 is on branch `lane/lean-critical-step3-wip` (8dfbed7a, pushed):
+- `PlatformCellDomain.SigningPlan` (frame `DREGG/PLATFORM/PLAN/v1`; tag registered);
+- `NativeHost.platform{Plan,Assemble,Submit,Lookup}Loaded`;
+- `NativeHostReplay.NativeAdmission.platformInstall` and its dispatch arm;
+- the Host/Main arms for 240-243 (241's payload is plan, signature, cosignature; an empty
+  cosignature means none).
+Cherry-pick it, then:
+1. Activate 240-243 in protocol/host-operations.json: receivers named, effect `append` on
+   242, 240 in `consent_exempt`.
+2. Run `python3 scripts/host-operations.py generate`.
+3. Run the codec regen.
+4. Build.
 
-## Not started (nothing mid-flight; the tree is clean at this commit)
+## The seed cut also takes lane/un-effects
 
-Order (coordinator, 2026-10-27): the cell kind and its layout, then the install receiver,
-then replay, then the Host arms, then the genesis seed, then births priced from the cell,
-then `Intent.credit` and the refill ops.
+The deputy's lane/un-effects changes persisted wire and stays off cuts until the seed is in;
+the integrator cuts it together with this branch, regenerating codec shapes ONCE over the
+merged tree. What it changes:
+- `DREGG/OBJECTIVE/ACTIVITY-RECORD/v8 -> /v9` (`Kernel/ObjectiveActivity.lean` `recordFrame`;
+  `PersistedCodecTags` `objective_activity_record_v8 -> _v9`).
+- Its pin is re-emitted.
+- `SourceWire` becomes `(Digest256 × SubjectId) ⊕ (Height64 ⊕ VerdictWire)`.
+- Host JSON only besides that; no registry ops, kinds or refusal constructors.
+When the seed is green, tell the coordinator so both branches go in one cut.
 
-### Next three steps
+## Fourth audit pass: statement changes owed before more proof work
 
-1. **The `platform` cell kind.** Write `Kernel/PlatformCellLayout.lean`, a cell module on the
-   shape of `Kernel/SeatCell.lean` / `Kernel/PayCell.lean`. It holds the `layout` (the
-   `Platform` fields plus `version`), `materializer`, `schemaId`/`wireVersion`, a
-   `registryTag` (next free tag after `.seat` = 20), `physicalId domain`, and `CellValid` =
-   `Platform.valid` of the decoded record. Then add `| platform` to
-   `CanonicalCellRegistry.Kind` and every exhaustive site in
-   `Compiler/CanonicalCellRegistry.lean`:
-   - `Kind.all` (:136), the `decide` list at :270, `Kind.lawClass` (:219; `.lawBearing`)
-   - `Kind.tag` (:276) / `kindAtTag` (:296), `schemaRef` (:338), `layout` (:~370),
-     `materializer` (:386), `wire?` (:425)
-   - the `none` arm at :439, `blinded`/`isBlinding` (:448/:455), the law match at :751,
-     `UserShape` (:852/:860)
-   - a `FamilyId.platformInstall` (:144; the list at :216)
+(a) **Receiver.**
+- The sponsor signs the request's `signingHeader`, not the plain command bytes. Make
+  `receiverContext.encode` the bytes the signature actually covers (the signing header with
+  the command inside it), and state `covers` over that.
+- `receiverDecides` runs on a `genesisStore` built from the spec. Restate it on the LOADED
+  cell, with an invariant over every writer of the cell that the controller stays genesis's.
+  The writers are genesis and install only; the kernelOnly kind `.platform` is written only by
+  `.platformInstall`, and `installPatch_record_only` covers the install.
+- Add one pole that decodes a real signed command through the real codec and signature path,
+  not assumed oracle answers.
 
-   Then run `lake build Compiler.CanonicalCellRegistry` and fix every downstream exhaustive
-   match the build names (per-file green hides a red umbrella). Also
-   `Compiler/PersistedCodecShapes` (`scripts/codec-shapes-regen.py`) and
-   `Compiler/PersistedCodecTagCensus` for the new identity strings.
-2. **The install receiver.** Write `Kernel/PlatformInstallReceiver.lean` on the
-   `Kernel/PayBookReceiver.lean` shape. It needs:
-   - `Command` (sponsor, control, the `Platform`, the expected platform root, an optional
-     custodian cosignature) with a framed `commandCodec`; `wireEncode` in PlatformCell is
-     the coverage model, and the real codec must satisfy `Context.covers`;
-   - the ingress pair (command bytes plus sponsor envelope);
-   - authority in capability mode with the operation slot `authority/operation/platform-install`;
-   - the pure decision = `decideInstall` over the decoded cell's history;
-   - the single write (the new record, version strictly increasing);
-   - theorems `genesis_change_accepted`, `same_version_refused`, `invalid_record_refused`
-     (decide on the genesis store, like PayBook :244-260), and `Decides` of its pure
-     decision against `PlatformCell.Admits`.
-3. **Replay and the Host arms.** Register the family in `Kernel/NativeHostReplay.lean` beside
-   PayBook. In `Kernel/NativeHost.lean`, add `platformInstallPlanLoaded` / assemble / submit /
-   lookup on PayBook's `payPlanLoaded` pattern, with `Host/Main.lean` arms for 240-243. Then in
-   the registry, set the four ops `active` with their receivers, `effect: append` on the
-   SUBMIT, and 240 in `consent_plans` with a `NativeSpecializedConsent.expectedPlanBytes` arm.
+(b) **Holder law.** Done on lane/lean-l13-laws: `holderPolicy` drops verb 3 for non-owners,
+with `holderPolicy_nonowner_delegate_refused`. Still to do: the infra delegation line (the
+frame's mini-reenroll) grants members `observe` and `mutate` on the parent, never `delegate`.
+This goes through the coordinator.
 
-After those: the genesis seed (`NativeHostGenesis`: the cell born with `genesisRecord host`;
-frame v8; re-genesis, carried by rehearsal #3 or #4). Then births: replace `source.tariff` /
-`config.grainBirthTariff` / `completionCustodianKey` / `template` reads with the decoded
-platform cell of the birth's pre-state, add the cell to the birth's read guards, and prove
-`BirthsReadCurrent` / `BirthQuoteCurrent` of that reader. Last, as ONE mechanical commit,
-`Intent.credit` (default 0) in `Kernel/DurableCommitProtocol.lean` (:55 Intent, :162
-install, :227 `install_exact_debit` restated with credit = `install_conserves_with_credit`),
-`ProtocolInstallMatches` proved of the real install, and the refill ops 244-247.
+(c) **Plan against submit.** On one snapshot and height, state both directions: a plan-time
+refusal implies `admitBranch .factory` errors, and `.policyRejected` implies a plan-time
+refusal. This needs `law.admit` shown equal to eval plus the range and cast checks
+(`inputsInRange`, `castInjOn`).
+- `birthRefusal` must include the range and cast checks (as `invokeRefusal` does with
+  `firstRangeRefusal`/`firstCastRefusal`).
+- It must surface a `preparePending` failure instead of passing silently.
+- `ResourceBirthPolicyController.Concrete` already states `Pending.factoryVerdict`,
+  `PlanRefusalSound` and `PlanPassNotLawRefused` (unproved), plus `factoryVerdict_congr`
+  (proved), on lane/lean-l13-laws. Extend those.
 
-## Verify (exact commands, from the worktree)
+## Then, in order
+
+1. **Genesis seed (frame v8), with O61.** Seed the cell in `NativeHostGenesis.baseCells` with
+   `PlatformCellLayout.genesisStore config.factoryController.subject (genesisRecord ...)`.
+   The genesis config lacks `grainBirthTariff` and `completionCustodianKey` (they are runtime
+   parameters today): add them to the genesis config, or seed from the pinned
+   `NativeHost.Config`.
+2. **Births priced from the cell.** Read `recordOf` of the loaded platform cell in place of
+   `config.tariff`, `grainBirthTariff`, `completionCustodianKey` and `template` budget and
+   lifetime; add the cell to the birth's read guards; prove `BirthsReadCurrent` and
+   `BirthQuoteCurrent` of that reader.
+3. **One mechanical commit:** `Intent.credit` in `DurableCommitProtocol` (:55, :162, :227),
+   `ProtocolInstallMatches` proved, and ops 244-247.
+
+## Verify (from the worktree)
 
 ```
 sh scripts/build-mini-kernels.sh
-LEAN_NUM_THREADS=6 lake build Kernel.PlatformCell Kernel.NativeHostGenesis \
-  Compiler.PersistedCodecTagCensus Kernel.NativePlanHeight Kernel.NativeSpecializedConsent \
-  Host.ClientConsentSession Host.Main
-python3 -I scripts/host-operations.py generate && python3 -I scripts/host-operations.py check
-timeout 600 python3 -I scripts/test-host-operations.py
+lake build Kernel.NativeHostReplay Compiler.PersistedCodecTags   # retry on "Too many open files"
+python3 scripts/codec-shapes-regen.py                            # to a fixed point; rc 2 = hand bump
+lake build Host.Main Host.ClientConsentSession Compiler.PersistedCodecTagCensus
+python3 -I scripts/host-operations.py check
 ```
 
-All green at this commit. Commit with `git -c commit.gpgsign=false commit -F <scratch file>`,
-named files only, never `git stash`, push `HEAD:refs/heads/lane/lean-critical`.
-
-## Open for the parent
-
-- The demo's `edge/demo/genesis-params.json` (dregg-infra) needs `payControlCapability`.
-- The meter: turnBytes ~1,000 per record against 10^7, so the per-minute clock alone uses it up
-  in about 6.9 days. Raise `meterAllowance` to at least 10^10 per lane in the v7 re-genesis until
-  M2 lands.
-- Known boundaries recorded in PlatformCell's header: the controller may name its own first
-  custodian; `Deployment.host`/`.genesis` carry no consistency premise; the install encoding has
-  no domain tag (replay across worlds rests on `expectedSemantics`).
+The Mac's system file table fills when several agents build at once ("Too many open files in
+system"). Retry; do not lower anything. Commit named files with
+`git -c commit.gpgsign=false commit -F <file>`, never `git stash`.
