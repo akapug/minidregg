@@ -25,58 +25,19 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use crate::canonical::hex as hex_bytes;
 
 const MAX_RETAINED_DESCRIPTOR: u64 = 12_102_759;
 
 fn retained_descriptor_file(path: &Path) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("descriptor parent absent"))?;
-    private_dir(parent)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.nlink() != 1
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > MAX_RETAINED_DESCRIPTOR
-    {
-        return Err(invalid("retained signed descriptor file custody refused"));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.by_ref()
-        .take(MAX_RETAINED_DESCRIPTOR + 1)
-        .read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != meta.len()
-        || after.dev() != meta.dev()
-        || after.ino() != meta.ino()
-        || after.len() != meta.len()
-        || after.mtime() != meta.mtime()
-        || after.mtime_nsec() != meta.mtime_nsec()
-    {
-        return Err(invalid("retained signed descriptor changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("descriptor parent absent"))?)?;
+    crate::private_file::read(path, MAX_RETAINED_DESCRIPTOR, "retained signed descriptor file custody refused")
 }
 
 fn source_text<'a>(view: &'a Value, name: &str) -> io::Result<&'a str> {
     view.get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("retained signed descriptor source field absent"))
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("hex String");
-    }
-    result
 }
 
 fn invalid(reason: &'static str) -> io::Error {

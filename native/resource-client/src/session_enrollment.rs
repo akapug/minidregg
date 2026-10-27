@@ -24,7 +24,7 @@ const LOOKUP_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_
 
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "enrollment Host refused op{operation}; frame retained"
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),

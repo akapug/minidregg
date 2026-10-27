@@ -89,13 +89,6 @@ fn inspect(ws: &Workspace, kind: &str, bytes: &[u8]) -> Result<Value> {
         .map_err(|error| format!("checkpoint: invalid Host inspection of {kind}: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
     match args.optional(name) {
         None => Ok(None),
@@ -146,7 +139,7 @@ fn certify(ws: &Workspace, control: &str, min_tail: Option<String>) -> Result<Va
         .ok_or("certify plan lacks a canonical header")?;
     let header_bytes = decode_hex(canonical).map_err(|_| "certify plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
-    let ingress = invoke(ws, mini_sdk::host_operations::CERTIFY_ASSEMBLE, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::CERTIFY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     let outcome = invoke(ws, mini_sdk::host_operations::CERTIFY_SUBMIT, &ingress)?;
     let mut value = inspect(ws, "outcome", &outcome)?;
     value["certified"] = json!({"height": field(&current, "head")?, "digest": field(&current, "chain")?});

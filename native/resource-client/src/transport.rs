@@ -80,10 +80,7 @@ pub(crate) const FN_ACK_OPERATOR_ONLY: &str =
     "fn ACK (op 13/15) is operator-only: Lean has not stated who may ACK a public fn delivery";
 
 fn fn_ack_transaction(digits: &[u8]) -> bool {
-    !digits.is_empty()
-        && digits.len() <= 80
-        && digits.iter().all(u8::is_ascii_digit)
-        && (digits.len() == 1 || digits[0] != b'0')
+    mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
 }
 
 /// A named refusal for an op the public route withholds on purpose, so a
@@ -198,7 +195,7 @@ pub(crate) fn pinned_address(address: &Path) -> Result<String, String> {
 fn split_envelope<'a>(
     envelope: &'a [u8],
     config: &[u8],
-) -> Result<(Option<&'a [u8]>, &'a [u8]), &'static str> {
+) -> Result<(&'a [u8], &'a [u8]), &'static str> {
     // Version 1 (no Host image pin) is retired: every client sends v2, and an unpinned request is
     // refused by name before anything is forwarded.
     if envelope.first() == Some(&1) {
@@ -217,13 +214,8 @@ fn split_envelope<'a>(
     let sha_end = config_end
         .checked_add(32)
         .ok_or("invalid socket envelope")?;
-    let (pin, request_start) = (
-        Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
-        sha_end,
-    );
-    let request = envelope
-        .get(request_start..)
-        .ok_or("invalid socket envelope")?;
+    let pin = envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?;
+    let request = envelope.get(sha_end..).ok_or("invalid socket envelope")?;
     if request.is_empty() {
         return Err("invalid socket envelope");
     }
@@ -236,7 +228,7 @@ fn request_from_envelope<'a>(
     host_sha256: &[u8; 32],
 ) -> Result<&'a [u8], &'static str> {
     let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_some_and(|pin| pin != host_sha256.as_slice()) {
+    if pin != host_sha256.as_slice() {
         return Err("host image pin mismatch");
     }
     Ok(request)
@@ -270,9 +262,8 @@ pub(crate) fn public_envelope(
 /// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
 /// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
 pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
-    let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
-    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+    let (_, request) = split_envelope(envelope, config)?;
+    if !matches!(request.first().copied(), Some(mini_sdk::host_operations::AGENT_PAID_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_RESERVE_PLAN | mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE | mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_PLAN | mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_ASSEMBLE))
         || !request_within_bound(request) || !allowed_operator_operation(request) {
         return Err("operation unavailable on agent operator proxy");
     }
@@ -316,9 +307,7 @@ fn provider_continuity_request(payload: &[u8]) -> bool {
     } else if let Some(body) = payload.strip_prefix(crate::provider_continuity::V3) {
         exact_pair(body).is_some_and(|(receipts, point)| {
             v2_body(receipts) && exact_pair(point).is_some_and(|(count, root)| {
-                let natural = |digits: &[u8]| !digits.is_empty() && digits.len() <= 80
-                    && digits.iter().all(u8::is_ascii_digit)
-                    && (digits.len() == 1 || digits[0] != b'0');
+                let natural = |digits: &[u8]| mini_sdk::decimal::is_canonical_ascii_max(digits, 80);
                 natural(count) && count != b"0" && natural(root)
             })
         })
@@ -376,11 +365,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [16, carrier @ ..] => catalog_enabled && !carrier.is_empty() && carrier.len() <= 1_516_384,
         [17, payload @ ..] => provider_continuity_request(payload),
         [18, digits @ ..] => {
-            catalog_enabled
-                && !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
+            catalog_enabled && mini_sdk::decimal::is_canonical_ascii_max(digits, 80)
         }
         [19, payload @ ..] if payload.len() >= 10 => {
             let metadata_length = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
@@ -486,12 +471,7 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
-        [102, digits @ ..] => {
-            !digits.is_empty()
-                && digits.len() <= 80
-                && digits.iter().all(u8::is_ascii_digit)
-                && (digits.len() == 1 || digits[0] != b'0')
-        }
+        [102, digits @ ..] => mini_sdk::decimal::is_canonical_ascii_max(digits, 80),
         // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
         [126 | 128, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
@@ -2044,8 +2024,14 @@ mod tests {
             }
         });
         // One frame that no envelope rule accepts: an admitted peer is refused
-        // for the frame, a foreign peer before any byte is read.
-        write_frame(&mut client, b"x").unwrap();
+        // for the frame, a foreign peer before any byte is read. The foreign
+        // refusal may close the socket before this write lands (EPIPE); the
+        // refusal it wrote first is still there to read.
+        match write_frame(&mut client, b"x") {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("{error}"),
+        }
         let reply = read_frame(&mut client).unwrap().unwrap();
         worker.join().unwrap();
         reply
@@ -3833,8 +3819,9 @@ done"#;
             supervise(&listener, Some(&OperatorPeers::with(&[])), b"config", &[0;32], false, &mut start)
         });
         let envelope = |request: &[u8]| {
-            let mut bytes = vec![1,6,0,0,0];
+            let mut bytes = vec![2,6,0,0,0];
             bytes.extend_from_slice(b"config");
+            bytes.extend_from_slice(&[0; 32]);
             bytes.extend_from_slice(request);
             bytes
         };
@@ -4035,9 +4022,13 @@ mod bootstrap_deadline_tests {
         let scratch = Scratch::new();
         let socket = scratch.0.join("socket");
         let listener = UnixListener::bind(&socket).unwrap();
+        // The server accepts and never reads, so a frame far above the socket buffer cannot be
+        // written. The deadline leaves the connect time on a loaded box (a 60 ms deadline expired
+        // in connect on dregg-build), and the write must still end at the deadline, not when the
+        // server goes away.
         let server = std::thread::spawn(move || {
             let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(350));
+            std::thread::sleep(Duration::from_millis(3000));
         });
         let start = Instant::now();
         let error = invoke_pinned_deadline(
@@ -4046,14 +4037,14 @@ mod bootstrap_deadline_tests {
             &"11".repeat(32),
             mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE,
             &vec![b'x'; HOST_MAX_FRAME - 1],
-            start + Duration::from_millis(60),
+            start + Duration::from_millis(400),
         )
         .unwrap_err();
         assert!(
             error.contains("write") && error.contains("deadline"),
             "{error}"
         );
-        assert!(start.elapsed() < Duration::from_millis(250));
+        assert!(start.elapsed() < Duration::from_millis(2000));
         server.join().unwrap();
     }
 }

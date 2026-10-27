@@ -26,6 +26,14 @@ pub fn decode(text: &str) -> Result<Vec<u8>> {
     bytes.chunks(2).map(|p| Ok(digit(p[0])? << 4 | digit(p[1])?)).collect()
 }
 
+/// Exactly `N` bytes of canonical lowercase hex.
+pub fn decode_fixed<const N: usize>(text: &str) -> Result<[u8; N]> {
+    if text.len() != N * 2 {
+        return Err(Error(format!("hex must be {} digits", N * 2)));
+    }
+    Ok(decode(text)?.try_into().expect("the length was checked"))
+}
+
 /// Hex of either case (what a person or another tool may type); the value is the same bytes.
 /// Prefer [`decode`] wherever the spelling is part of the contract.
 pub fn decode_any_case(text: &str) -> Result<Vec<u8>> {
@@ -68,6 +76,8 @@ mod tests {
         assert_eq!(super::decode("00abff").unwrap(), vec![0, 171, 255]);
         assert!(super::decode("AB").is_err());
         assert!(super::decode("abc").is_err());
+        assert_eq!(super::decode_fixed::<2>("00ab").unwrap(), [0, 171]);
+        assert!(super::decode_fixed::<2>("00AB").is_err() && super::decode_fixed::<2>("00").is_err());
         assert_eq!(super::decode_any_case("00AbFf").unwrap(), vec![0, 171, 255]);
         assert!(super::decode_any_case("0x").is_err() && super::decode_any_case("+1").is_err() && super::decode_any_case("é1").is_err());
         assert!(super::is_canonical("00abff") && !super::is_canonical("") && !super::is_canonical("AB") && !super::is_canonical("abc"));

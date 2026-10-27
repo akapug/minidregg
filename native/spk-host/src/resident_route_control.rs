@@ -15,6 +15,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use crate::canonical::decimal;
 
 pub(crate) const MAX_ROUTES: usize = 64;
 const MAX_COMMAND: usize = 16 * 1024;
@@ -24,17 +25,8 @@ pub const SOCKET_NAME: &str = "route-control.sock";
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
 fn digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::hex64(&value)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -199,30 +191,8 @@ pub(crate) fn private_bytes(path: &Path) -> io::Result<Vec<u8>> {
     if !clean_absolute(path) {
         return Err(invalid("private route path refused"));
     }
-    private_dir(
-        path.parent()
-            .ok_or_else(|| invalid("private route parent absent"))?,
-    )?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > MAX_COMMAND as u64
-    {
-        return Err(invalid("private route file identity refused"));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_COMMAND as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != meta.len() {
-        return Err(invalid("private route file size drift"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("private route parent absent"))?)?;
+    crate::private_file::read(path, MAX_COMMAND as u64, "private route file identity refused")
 }
 
 /// Read once and retain both identities. No later path read may replace either.

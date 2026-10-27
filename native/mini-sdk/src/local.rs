@@ -34,6 +34,15 @@ pub fn pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// [`pair`] for a payload whose two components are both required (a plan and its signatures,
+/// a signed request and its body): an empty one is refused before anything is framed.
+pub fn pair_nonempty(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
+    if left.is_empty() || right.is_empty() {
+        return Err("pair has an empty component".into());
+    }
+    pair(left, right)
+}
+
 /// `u16(len(kind)) ‖ kind ‖ input`: the kind framing of codec frames 7 and 8.
 pub fn kind(kind: &str, input: &[u8]) -> Result<Vec<u8>> {
     let width: u16 = kind.len().try_into().map_err(|_| "local codec kind exceeds bound")?;
@@ -415,5 +424,21 @@ mod tests {
         assert_eq!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         assert_eq!(starts(&dir), 2);
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::*;
+
+    #[test]
+    fn pair_frames_left_length_and_refuses_what_the_host_would() {
+        assert_eq!(pair(b"ab", b"c").unwrap(), [2, 0, 0, 0, b'a', b'b', b'c']);
+        assert_eq!(pair(b"", b"").unwrap(), [0, 0, 0, 0]);
+        assert!(pair(&vec![0; CAP], b"").is_err(), "a frame at the bound is refused");
+        assert_eq!(pair_nonempty(b"plan", b"sig").unwrap(), pair(b"plan", b"sig").unwrap());
+        for (left, right) in [(&b""[..], &b"sig"[..]), (b"plan", b"")] {
+            assert!(pair_nonempty(left, right).unwrap_err().to_string().contains("empty component"));
+        }
     }
 }

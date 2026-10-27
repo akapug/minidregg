@@ -285,7 +285,7 @@ fn fixed<const N: usize>(value: &Value, key: &str) -> Result<[u8; N]> {
 fn request_fixed<const N: usize>(value: &Value, key: &str) -> Result<[u8; N]> {
     let text = string(value, key)?;
     need(
-        text.len() == N * 2 && text.bytes().all(|b| b.is_ascii_hexdigit()),
+        mini_sdk::hex::is_canonical_len(text, N),
         "status request hexadecimal width",
     )?;
     decode_hex(text)?

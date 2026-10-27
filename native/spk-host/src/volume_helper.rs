@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use sha2::{Digest, Sha256};
 use minidregg_compatible_upgrade_custody as custody;
+use crate::canonical::hex64 as hex;
 const REGISTRY: &str = "/etc/mini-spk-volumes";
 fn refuse(message: &str) -> io::Error { io::Error::new(io::ErrorKind::PermissionDenied, message) }
-fn hex(value: &str) -> bool { value.len()==64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all="camelCase", deny_unknown_fields)]
 pub(crate) struct Registry {

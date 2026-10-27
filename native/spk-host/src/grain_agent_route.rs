@@ -94,11 +94,7 @@ fn custody(bytes: &[u8], app: &str) -> io::Result<LifetimeCustodyV3> {
 }
 fn decode(r: &Retained) -> io::Result<Vec<u8>> {
     if r.custody_hex.len() as u64 > 2 * MAX_CUSTODY
-        || r.custody_hex.len() % 2 != 0
-        || !r
-            .custody_hex
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !crate::canonical::lower_hex(&r.custody_hex)
     {
         return Err(invalid("retained lifetime custody encoding refused"));
     }

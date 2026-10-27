@@ -133,6 +133,8 @@ mod route_admission;
 pub mod resident_route_control;
 
 #[cfg(target_os = "linux")]
+mod canonical;
+mod private_file;
 mod checkpoint_control;
 
 #[cfg(target_os = "linux")]

@@ -26,6 +26,7 @@ use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use crate::canonical::hex64;
 
 const MAX_CONFIG: u64 = 65_536;
 const MAX_FRAME: u64 = 12_102_760;
@@ -91,43 +92,8 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
 }
 
 fn read_private(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
-    private_dir(
-        path.parent()
-            .ok_or_else(|| invalid("STOP file parent absent"))?,
-    )?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let before = file.metadata()?;
-    if !path.is_absolute()
-        || !before.is_file()
-        || named.dev() != before.dev()
-        || named.ino() != before.ino()
-        || before.uid() != unsafe { libc::geteuid() }
-        || before.nlink() != 1
-        || before.permissions().mode() & 0o777 != 0o600
-        || before.len() == 0
-        || before.len() > maximum
-    {
-        return Err(invalid("STOP retained file identity refused"));
-    }
-    let mut bytes = Vec::with_capacity(before.len() as usize);
-    file.by_ref().take(maximum + 1).read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != before.len()
-        || after.dev() != before.dev()
-        || after.ino() != before.ino()
-        || after.len() != before.len()
-        || after.mtime() != before.mtime()
-        || after.mtime_nsec() != before.mtime_nsec()
-        || after.ctime() != before.ctime()
-        || after.ctime_nsec() != before.ctime_nsec()
-    {
-        return Err(invalid("STOP retained file changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("STOP file parent absent"))?)?;
+    crate::private_file::read(path, maximum, "STOP retained file identity refused")
 }
 
 fn ensure_artifact(directory: &Path, name: &str, expected: &[u8], bound: u64) -> io::Result<()> {
@@ -188,13 +154,6 @@ struct ResidentPins {
     begin_operation_ledger: PathBuf,
     claim_nonce_ledger: PathBuf,
     descriptor_attempt_dir: PathBuf,
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn load_config(path: &Path) -> io::Result<(StopConfig, ResidentPins)> {

@@ -14,10 +14,7 @@ fn invalid() -> io::Error {
     )
 }
 fn decimal(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 4096
-        && s.bytes().all(|b| b.is_ascii_digit())
-        && (s.len() == 1 || !s.starts_with('0'))
+    crate::canonical::decimal_within(s, 4096)
 }
 pub(crate) fn digest(s: &str) -> io::Result<[u8; 32]> {
     if !decimal(s) {

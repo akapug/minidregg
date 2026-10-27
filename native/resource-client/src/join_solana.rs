@@ -301,7 +301,7 @@ fn natural(value: &Value, name: &str) -> Result<u128> {
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
-        [255, body @ ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, body @ ..] => Err(format!(
             "Host refused op{operation}: {}",
             String::from_utf8_lossy(body)
         )),

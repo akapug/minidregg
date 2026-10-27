@@ -48,20 +48,6 @@ pub(crate) fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("fleet record lacks {key}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
-    let length: u32 = first
-        .len()
-        .try_into()
-        .map_err(|_| "fleet pair exceeds u32")?;
-    let mut bytes = length.to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    if first.is_empty() || second.is_empty() || bytes.len() >= transport::HOST_MAX_FRAME {
-        return Err("fleet pair exceeds Host bound or has an empty component".into());
-    }
-    Ok(bytes)
-}
-
 /// The Host's refusal frame is retained byte-exact; its text is shown only as
 /// a diagnostic, never parsed into a decision.
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
@@ -573,7 +559,7 @@ fn attempt(
     };
     retain(&directory.join("signed-observation.bin"), &signed)?;
     retain_json(&directory.join("account-view.json"), &view)?;
-    let plan = match invoke(agent, &directory, "plan", mini_sdk::host_operations::FLEET_TURN_PLAN, &pair(&signed, &draft_bytes)?) {
+    let plan = match invoke(agent, &directory, "plan", mini_sdk::host_operations::FLEET_TURN_PLAN, &mini_sdk::local::pair_nonempty(&signed, &draft_bytes)?) {
         Ok(plan) => plan,
         Err(error) => match plan_refusal(agent, &directory)? {
             Some(refusal) if refusal.get("reason").and_then(Value::as_str) == Some("stale-root") => {
@@ -600,7 +586,7 @@ fn attempt(
     let signing = read_secret(&workspace::member_path(&agent.workspace, "key")?)?;
     let signature = signing.sign(&header).to_bytes();
     retain(&directory.join("signature.bin"), &signature)?;
-    let ingress = invoke(agent, &directory, "ingress", mini_sdk::host_operations::FLEET_TURN_ASSEMBLE, &pair(&plan, &signature)?)?;
+    let ingress = invoke(agent, &directory, "ingress", mini_sdk::host_operations::FLEET_TURN_ASSEMBLE, &mini_sdk::local::pair_nonempty(&plan, &signature)?)?;
     let ingress_view = inspect(agent, "fleet-turn-ingress", &directory.join("ingress.bin"), &directory.join("ingress.json"))?;
     if field(&ingress_view, "canonical")? != hex(&ingress)
         || field(&ingress_view, "commandBytes")? != field(&plan_view, "commandBytes")?
@@ -893,7 +879,7 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
     let (_, signed) = observe(agent, reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(&topic),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_TOPIC_POLL, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_TOPIC_POLL, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
     let mut value: Value =
         serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_TOPIC_POLL)?).map_err(|error| error.to_string())?;
     if field(&value, "payer")? != field(reference, "target")? || field(&value, "topic")? != hex(&topic)
@@ -1026,7 +1012,7 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
     let (_, signed) = observe(&agent, &reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
     let mut value: Value =
         serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())?;
     if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {

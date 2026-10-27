@@ -14,15 +14,12 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-COMMITTED-PERMIT/v3";
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn later_count(later: &str, earlier: &str) -> bool {

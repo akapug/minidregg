@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
+use crate::canonical::{decimal as canonical_decimal, lower_hex as canonical_hex};
 
 pub(crate) const MAX_FRAME: usize = 262_144;
 pub(crate) const MAX_REPLY_FRAME: usize = 1_048_576;
@@ -18,20 +19,6 @@ const TRANSFER_DEADLINE: Duration = Duration::from_secs(30);
 
 fn refuse(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn canonical_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn control_free(value: &str) -> bool {
@@ -102,10 +89,7 @@ impl Request {
             } => {
                 if !canonical_decimal(operation_id)
                     || binding_sha256.as_ref().is_some_and(|sha| {
-                        sha.len() != 64
-                            || !sha
-                                .bytes()
-                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                        !crate::canonical::hex64(&sha)
                     })
                 {
                     return Err(refuse("agent API inspection operation ID refused"));

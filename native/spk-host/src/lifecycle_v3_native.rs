@@ -14,6 +14,7 @@ use std::fs::DirBuilder;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
+pub(crate) use crate::canonical::{decimal, hex, lower_hex as lowercase_hex};
 
 const MAX_FRAME: usize = 12_102_760;
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-PLAN/v1";
@@ -23,43 +24,8 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
-}
-
-pub(crate) fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub(crate) fn lowercase_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 pub(crate) fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !lowercase_hex(value) {
-        return Err(invalid("v3 BEGIN noncanonical hexadecimal"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).map_err(|_| invalid("v3 BEGIN hex pair"))?;
-            u8::from_str_radix(pair, 16).map_err(|_| invalid("v3 BEGIN hex pair"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| invalid("v3 BEGIN noncanonical hexadecimal"))
 }
 
 pub(crate) fn text<'a>(value: &'a Value, field: &str) -> io::Result<&'a str> {

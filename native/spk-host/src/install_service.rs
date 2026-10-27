@@ -16,28 +16,13 @@ use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use crate::canonical::{hex, hex64};
 
 const MAX_CONFIG: u64 = 16 * 1024;
 const MAX_CLAIM: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut text = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(text, "{byte:02x}").expect("writing to String");
-    }
-    text
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn hidden_by_private_tmp(path: &Path) -> bool {

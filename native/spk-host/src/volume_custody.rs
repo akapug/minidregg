@@ -1,13 +1,13 @@
 //! Root-observed persistent /var identity for the resident START profile.
 //! These bytes are physical evidence, never Mini launch authority by themselves.
 
-
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::RawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
+use crate::canonical::{decimal_u64 as decimal, hex64 as hex32};
 
 const TAG: &str = "DREGG/SPK-VAR-CUSTODY/v1";
 const MAX_WITNESS: u64 = 4096;
@@ -16,23 +16,6 @@ const FUTURE_TOLERANCE: Duration = Duration::from_secs(5);
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(text: &str) -> Option<u64> {
-    if text.is_empty()
-        || (text.len() > 1 && text.starts_with('0'))
-        || !text.bytes().all(|b| b.is_ascii_digit())
-    {
-        return None;
-    }
-    text.parse().ok()
-}
-
-fn hex32(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn uuid(text: &str) -> bool {
@@ -76,10 +59,7 @@ pub(crate) struct VolumeSite {
 impl VolumeSite {
     pub(crate) fn new(grains_root: &Path, store: &str) -> io::Result<Self> {
         if !grains_root.is_absolute()
-            || store.len() != 16
-            || !store
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::lower_hex_of(&store, 8)
         {
             return Err(invalid("volume site refused"));
         }

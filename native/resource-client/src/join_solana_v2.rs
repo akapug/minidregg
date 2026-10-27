@@ -18,13 +18,7 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("missing string {name}"))
 }
 fn number(text: &str, name: &str) -> Result<u64> {
-    let n = text
-        .parse::<u64>()
-        .map_err(|_| format!("{name} must be u64 decimal"))?;
-    if n.to_string() != text {
-        return Err(format!("{name} must be canonical decimal"));
-    }
-    Ok(n)
+    mini_sdk::decimal::parse(text).ok_or_else(|| format!("{name} must be a canonical u64 decimal"))
 }
 fn scalar(value: &Value, name: &str) -> Result<u64> {
     number(field(value, name)?, name)
@@ -1174,7 +1168,10 @@ mod tests {
         let base = format!("http://{}/mini/v2", listener.local_addr().unwrap());
         let thread = std::thread::spawn(move || {
             listener.set_nonblocking(true).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(8);
+            // The test ends the mock with `/stop`; this bound only reaps a mock whose test died first.
+            // It must outlast the test under a loaded box (an 8 s bound refused the test's own late
+            // requests on dregg-build: curl exit 7, then the wrong status), so it is far above any run.
+            let deadline = Instant::now() + Duration::from_secs(300);
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {

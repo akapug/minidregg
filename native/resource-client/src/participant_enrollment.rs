@@ -70,19 +70,7 @@ fn identity_name(value: &str) -> Result<()> {
 
 pub(crate) use crate::fsio::read_secret_in_private_dir as key;
 
-pub(crate) fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
-    let length: u32 = first
-        .len()
-        .try_into()
-        .map_err(|_| "enrollment pair exceeds u32")?;
-    let mut bytes = length.to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    if first.is_empty() || second.is_empty() || bytes.len() >= transport::HOST_MAX_FRAME {
-        return Err("enrollment pair exceeds Host bound or has an empty component".into());
-    }
-    Ok(bytes)
-}
+pub(crate) use mini_sdk::local::pair_nonempty as pair;
 
 pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {

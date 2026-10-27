@@ -927,10 +927,7 @@ pub(crate) fn wrap_atom_id(epoch: u32, gen: u32, member: u64) -> String {
 }
 
 pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u32, u64)> {
-    let value: u128 = id.parse().map_err(|_| format!("wrap atom id {id} is not a decimal below 2^128"))?;
-    if value.to_string() != id {
-        return Err(format!("wrap atom id {id} is not canonical"));
-    }
+    let value: u128 = mini_sdk::decimal::parse(id).ok_or_else(|| format!("wrap atom id {id} is not a canonical decimal below 2^128"))?;
     let high = value >> 96;
     if high == 0 {
         return Err(format!("atom id {id} is in the record region, not a wrap"));
@@ -1044,10 +1041,7 @@ impl EncRecord {
 }
 
 fn subject_number(subject: &str) -> Result<u64> {
-    let value: u64 = subject.parse().map_err(|_| format!("subject {subject} is not a 64-bit decimal"))?;
-    if value.to_string() != subject {
-        return Err(format!("subject {subject} is not canonical"));
-    }
+    let value: u64 = mini_sdk::decimal::parse(subject).ok_or_else(|| format!("subject {subject} is not a canonical 64-bit decimal"))?;
     Ok(value)
 }
 
@@ -2381,8 +2375,7 @@ fn check_declared_custody(record: &EncRecord, i_know: bool) -> Result<()> {
 /// identity/key epoch, current room entitlement and release permission.
 pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &str,
     key_epoch: &str) -> Result<Value> {
-    let epoch: u32 = key_epoch.parse().map_err(|_| "recipient key epoch must fit32bits")?;
-    if epoch.to_string() != key_epoch { return Err("recipient key epoch must be canonical decimal".into()); }
+    let epoch: u32 = mini_sdk::decimal::parse(key_epoch).ok_or("recipient key epoch must be a canonical decimal that fits 32 bits")?;
     let subject = member(workspace, "subject")?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
     let encryption = enc_public(&*crate::fsio::read_seed(&member_path(workspace, "key")?)?)?;

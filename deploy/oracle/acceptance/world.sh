@@ -349,7 +349,7 @@ world_continue_controller() {
 }
 
 world_cleanup() {
-  local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false
+  local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false exit_path
   trap - EXIT INT TERM
   if [[ ${configured:-0} == 1 ]]; then
     if [[ ${controller_created:-0} == 1 ]]; then
@@ -399,10 +399,11 @@ world_cleanup() {
     fi
   fi
   if [[ -d $run && ${preserve_existing_exit:-0} != 1 ]]; then
-    jq -n --argjson execution "$result" --argjson cleanup "$cleanup_result" --argjson preserved "$preserve_namespace" '{execution_exit:$execution,cleanup_exit:$cleanup,namespace_preserved:$preserved}' >"$run/exit.json"
+    exit_path=$run/exit.json
     if [[ -n ${continuation:-} && -d $continuation ]]; then
-      cp "$run/exit.json" "$continuation/exit.json"
+      exit_path=$continuation/exit.json
     fi
+    jq -n --argjson execution "$result" --argjson cleanup "$cleanup_result" --argjson preserved "$preserve_namespace" '{execution_exit:$execution,cleanup_exit:$cleanup,namespace_preserved:$preserved}' >"$exit_path"
   fi
   [[ $result != 0 || $cleanup_result == 0 ]] || result=1
   exit "$result"

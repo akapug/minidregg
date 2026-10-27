@@ -213,7 +213,7 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
-        [255, body @ ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, body @ ..] => Err(format!(
             "Host refused op{operation} before a decision: {}",
             String::from_utf8_lossy(body)
         )),
@@ -235,11 +235,9 @@ fn number(value: &Value, field: &str) -> Result<u128> {
         Some(Value::Number(number)) => number.to_string(),
         _ => return Err(format!("{field} must be an unsigned integer")),
     };
-    if raw.is_empty() || (raw.len() > 1 && raw.starts_with('0')) {
-        return Err(format!("{field} must be a canonical unsigned integer"));
-    }
-    raw.parse::<u128>()
-        .map_err(|_| format!("{field} must be an unsigned integer below 2^128"))
+    // The Host's rule (`toString n == raw`): `+5` and `05` are refused, not read as 5.
+    mini_sdk::decimal::parse::<u128>(&raw)
+        .ok_or_else(|| format!("{field} must be a canonical unsigned integer below 2^128"))
 }
 
 fn hex_exact(value: &str, bytes: usize, field: &str) -> Result<Vec<u8>> {

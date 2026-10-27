@@ -28,22 +28,10 @@ pub(crate) struct Selection {
     pub(crate) config: [u8; 32],
 }
 pub(crate) fn digest(s: &str) -> Result<[u8; 32]> {
-    if s.len() != 64
-        || !s
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err("consent digest must be 64 lowercase hexadecimal characters".into());
-    }
-    let mut out = [0; 32];
-    for (i, b) in out.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
-    }
-    Ok(out)
+    mini_sdk::hex::decode_fixed(s)
+        .map_err(|_| "consent digest must be 64 lowercase hexadecimal characters".into())
 }
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|v| format!("{v:02x}")).collect()
-}
+use mini_sdk::hex::encode as hex;
 impl Selection {
     pub(crate) fn from_record(v: &Value) -> Result<Option<Self>> {
         let Some(v) = v.get("delegatedConsent") else {
@@ -248,7 +236,17 @@ pub(crate) fn connect(
 }
 
 fn allowed(frame: &[u8]) -> bool {
-    matches!(frame.first(), Some(220 | 221 | 222 | 224 | 226 | 227)) && frame.len() <= CAP
+    matches!(
+        frame.first().copied(),
+        Some(
+            mini_sdk::host_operations::CONSENT_INTENT
+                | mini_sdk::host_operations::CONSENT_OBSERVATION
+                | mini_sdk::host_operations::CONSENT_PLAN
+                | mini_sdk::host_operations::CONSENT_OPERATOR_PLAN
+                | mini_sdk::host_operations::CONSENT_POSSESSION
+                | mini_sdk::host_operations::CONSENT_OBJECTIVE
+        )
+    ) && frame.len() <= CAP
 }
 fn anchor_bytes(binding: &[u8], anchor: Option<&[u8]>) -> Vec<u8> {
     match anchor {

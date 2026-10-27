@@ -98,13 +98,6 @@ fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
         .map_err(|error| format!("activity: invalid Host inspection of {kind}: {error}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
 fn view(ws: &Ws, request: &Value) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::ACTIVITY_VIEW, request.to_string().as_bytes())?)
         .map_err(|error| format!("activity: invalid view: {error}"))
@@ -314,7 +307,7 @@ fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Opti
         .ok_or("activity: plan lacks a header")?;
     let header = crate::decode_hex(canonical).map_err(|error| format!("activity: {error}"))?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
-    let ingress = invoke(ws, mini_sdk::host_operations::ACTIVITY_ASSEMBLE, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::ACTIVITY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     write_new(&out.join("ingress.bin"), &ingress)?;
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
     // What the decided turn returns (an invocation's result), shown before signing; null otherwise.

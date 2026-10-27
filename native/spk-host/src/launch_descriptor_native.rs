@@ -23,18 +23,10 @@ use crate::dispatch_native::{private_dir, write_new};
 use crate::materialize::InstalledPackage;
 use crate::materialize::{qualify_bridge_spk_with_profile, ImportProfile};
 use serde::Deserialize;
+use crate::canonical::{decimal, hex};
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
 }
 
 const MAX_SOURCE_CONFIG: u64 = 65_536;
@@ -55,33 +47,8 @@ pub(crate) struct OfflineSourceHost {
 }
 
 fn read_private(path: &Path, bound: u64) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("source artifact parent absent"))?;
-    private_dir(parent)?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if !path.is_absolute()
-        || !opened.is_file()
-        || opened.len() == 0
-        || opened.len() > bound
-        || opened.uid() != unsafe { libc::geteuid() }
-        || opened.nlink() != 1
-        || opened.permissions().mode() & 0o777 != 0o600
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err(invalid("offline source artifact identity or bound refused"));
-    }
-    let mut bytes = Vec::new();
-    file.by_ref().take(bound + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != opened.len() {
-        return Err(invalid("offline source artifact changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("source artifact parent absent"))?)?;
+    crate::private_file::read(path, bound, "offline source artifact identity or bound refused")
 }
 
 impl OfflineSourceHost {
@@ -236,10 +203,7 @@ struct QualificationConfig {
 }
 
 fn lowercase_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    crate::canonical::hex64(&value)
 }
 
 /// Pure pre-Store qualification entry point. The signed SPK is parsed once;
@@ -358,13 +322,6 @@ fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("Mini launch descriptor inspection field absent"))
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn checked_command_echo(view: &Value, physical: &Value) -> io::Result<String> {

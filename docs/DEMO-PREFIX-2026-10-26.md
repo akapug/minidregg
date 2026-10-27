@@ -189,6 +189,13 @@ switches on when thin consent's JP2 is green); submit is flat near 0.9 s; the co
 (the full open re-hashes the whole chain before the light open) is a hot-path item with the
 before/after at 1.7k records owed.
 
+**First Linux runs that never happened before** (dregg-build, cut 6's candidate, 2026-10-27): `objective-cgen`
+PASS; `objective-c` 1,218 of 1,219 packet differentials with one Lean timeout under a loaded box
+(StressCount; a nightly matter); the demo journey 19/40 in a 5,000 s run budget (its K12 docuverse
+steps take ~15 min each; the nightly gets the full 10,800 s and measures rather than truncates);
+`m6grain` on Debian 13 rerunning after the test-SPK cache path was provided. None of these gates a
+rehearsal: the gate is the tour plus the composed scenario.
+
 **The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
 replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
 clock alone would have emptied it in about 7 days. Rehearsal #3's genesis raises it to 10^10 per lane;

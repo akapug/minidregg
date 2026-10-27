@@ -1787,7 +1787,7 @@ mod tests {
             &[0x44; hybrid_kem::KEM_CT_LEN],
             &recipient,
         );
-        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let hex = mini_sdk::hex::encode;
         assert_eq!(hex(&Sha256::digest(&transcript)), "8a4ca4c498ff6a08641fe91ba671836b8a2311a3281c47a5e2711c4fefa39f30");
         let kek = hybrid_kem::combine(LINK_SUITE, &[0x11; 32], &[0x22; 32], &transcript);
         assert_eq!(hex(&kek[..]), "cb54d24b78c8747aba524b9b4b73507f7e9ada833f2f71bbb35486a37b707847");

@@ -22,11 +22,7 @@ impl RouteAdmissionExpectation {
     pub(crate) fn validate(&self) -> io::Result<()> {
         self.binding.validate()?;
         if !matches!(self.session_kind.as_str(), "web" | "api")
-            || self.registration_nonce_hex.len() != 64
-            || !self
-                .registration_nonce_hex
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::hex64(&self.registration_nonce_hex)
         {
             return Err(invalid());
         }

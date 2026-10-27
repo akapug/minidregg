@@ -18,30 +18,14 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use crate::canonical::{decimal, lower_hex};
+pub(crate) use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
 const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v6";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn lower_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {

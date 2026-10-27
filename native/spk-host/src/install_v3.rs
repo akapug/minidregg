@@ -122,36 +122,9 @@ const V3_ARTIFACTS: &[&str] = &[
 
 fn retained_marker_bytes(path: &Path) -> io::Result<Vec<u8>> {
     crate::dispatch_native::private_dir(
-        path.parent()
-            .ok_or_else(|| invalid("v3 INSTALL marker parent absent"))?,
+        path.parent().ok_or_else(|| invalid("v3 INSTALL marker parent absent"))?,
     )?;
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > MAX_QUALIFICATION
-    {
-        return Err(invalid("v3 INSTALL marker identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("v3 INSTALL marker changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref()
-        .take(MAX_QUALIFICATION + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("v3 INSTALL marker length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, MAX_QUALIFICATION, "v3 INSTALL marker identity refused")
 }
 
 fn checked_retirement(config: &InstallConfig, active: &str, attempt: &str) -> io::Result<bool> {
@@ -481,11 +454,7 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
         || claim.physical_begin.transaction_id != claim.transaction_id
         || claim.physical_begin.event_id != claim.event_id
         || claim.physical_begin.package_sha256 != config.expected_raw_sha256
-        || begin.volume_id_hex.len() != 64
-        || !begin
-            .volume_id_hex
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !crate::canonical::hex64(&begin.volume_id_hex)
     {
         return Err(invalid("v3 INSTALL retained claim identity differs"));
     }

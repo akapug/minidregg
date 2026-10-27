@@ -29,8 +29,10 @@ HELP
 }
 [[ ${1:-} != --help ]] || { usage; exit 0; }
 mode=new
-if [[ ${1:-} == --resume ]]; then mode=resume; shift; fi
-if [[ ${1:-} == --continue-controller ]]; then mode=continue-controller; shift; fi
+case ${1:-} in
+  --resume) mode=resume; shift ;;
+  --continue-controller) mode=continue-controller; shift ;;
+esac
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
 benchmark=${ORACLE_STOP_BENCHMARK_JSON:?qualified copied-Store STOP benchmark receipt required}
