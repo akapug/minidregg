@@ -622,6 +622,39 @@ class ControllerWorldTests(unittest.TestCase):
             binary.write_bytes(b'other binary')
             with self.assertRaises(ValueError):c.register_public_listener(r['store'],'helper',str(binary))
 
+    def test_public_listener_upgrade_recovers_exact_record_and_binary_boundaries(self):
+        for fail_at in (1,2,3,4,5,6,7):
+            with self.subTest(fail_at=fail_at),self.public_listener_fixture('upgrade'+str(fail_at)) as (base,r,stage,public,binary,after):
+                prior=c.register_public_listener(r['store'],'helper',str(binary))
+                old=binary.read_bytes(); old_sha=c.sha(old)
+                binary.write_bytes(b'new opcode55 qualified mini'); new_sha=c.sha(binary.read_bytes())
+                publish=c.publish_exact; calls=[0]
+                def interrupted(*args,**kwargs):
+                    calls[0]+=1
+                    if calls[0]==fail_at:raise OSError('publication interrupted')
+                    return publish(*args,**kwargs)
+                with patch.object(c,'publish_exact',side_effect=interrupted):
+                    with self.assertRaises(OSError):c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha)
+                result=c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha)
+                self.assertEqual(result['publicListener']['binarySha256'],new_sha)
+                self.assertEqual((base/'public-listener'/(old_sha+'.binary')).read_bytes(),old)
+                self.assertEqual({k:v for k,v in result['publicListener'].items() if k!='binarySha256'},
+                                 {k:v for k,v in prior['publicListener'].items() if k!='binarySha256'})
+                self.assertEqual(c.upgrade_public_listener(r['store'],'helper',str(binary),old_sha,new_sha),result)
+                with self.assertRaises(ValueError):c.upgrade_public_listener(r['store'],'helper',str(binary),'0'*64,new_sha)
+
+    def test_recover_session_only_invokes_fixed_private_admin_command(self):
+        r=self.consent_record();base=self.root/'controller';r['home']=str(base/'home')
+        request='ab'*16
+        with patch.object(c,'load',return_value=({},base,r)),patch.object(c,'checked_units'),patch.object(c,'controller_child',return_value=0) as child:
+            self.assertEqual(c.recover_session(r['store'],'helper',request),0)
+            args=child.call_args
+            self.assertEqual(args.args[1],[str(base/'bin/grain-runtime'),'admin',str(base/'home/state/admin.sock'),'recover foreground session '+request])
+            self.assertEqual(args.kwargs,{'timeout':1800})
+            for bad in ('',request+'; quit','AB'*16,'../request'):
+                with self.assertRaises(ValueError):c.recover_session(r['store'],'helper',bad)
+            self.assertEqual(child.call_count,1)
+
     def test_public_listener_refuses_busy_lock_live_socket_and_changed_custody(self):
         with self.public_listener_fixture() as (base,r,stage,public,binary,after):
             with open(public.with_suffix('.lock'),'rb') as lock:

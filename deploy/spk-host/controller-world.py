@@ -1226,6 +1226,15 @@ def tool(store, helper, verb, request_id, extra):
     return controller_child(r, [runtime, verb, socket, request_id])
 
 
+def recover_session(store, helper, request_id):
+    """One fixed private admin operation; no attach, resend, or result ACK."""
+    _, base, r = load(store, helper)
+    checked_units(base, r)
+    require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
+    return controller_child(r, [str(base / 'bin/grain-runtime'), 'admin',
+        str(Path(r['home']) / 'state/admin.sock'), 'recover foreground session ' + request_id], timeout=1800)
+
+
 def export_state(store, helper):
     _, base, r = load(store, helper)
     checked_units(base, r)
@@ -1464,6 +1473,67 @@ def register_public_listener(store, helper, binary_arg):
     return controller_status(store, helper)
 
 
+def upgrade_public_listener(store, helper, binary_arg, old_sha, new_sha):
+    """Stopped exact binary succession, preserving the original registration."""
+    _, base, r = load(store, helper)
+    stage = checked_units(base, r)
+    stopped_controller_units(r)
+    require(all(re.fullmatch('[0-9a-f]{64}', digest) for digest in (old_sha, new_sha))
+            and old_sha != new_sha, 'listener upgrade requires distinct exact old/new digests')
+    data = read_file(canonical(binary_arg), r['operatorUid'], 256 * 1024 * 1024, True)
+    require(sha(data) == new_sha, 'listener candidate digest differs')
+    directory = base / 'public-listener'
+    binary, record_path = directory / 'mini', base / 'public-listener.json'
+    intent_path = directory / ('upgrade-' + new_sha + '.json')
+    with stopped_public_listener(stage, r) as public:
+        if not intent_path.exists() and not intent_path.is_symlink():
+            old_record = public_listener_record(base, stage, r, public)
+            require(old_record['binarySha256'] == old_sha, 'listener predecessor digest differs')
+            old_binary = read_file(binary, 0, 256 * 1024 * 1024, True, required_mode=0o555)
+            before = read_file(record_path, 0, 16384, required_mode=0o600)
+            after = encoded({**old_record, 'binarySha256': new_sha})
+            for raw, kind, bound in ((old_binary, 'binary', 256*1024*1024), (data, 'binary', 256*1024*1024),
+                                     (before, 'record', 16384), (after, 'record', 16384)):
+                publish_exact(directory / (sha(raw) + '.' + kind), raw, bound=bound)
+            publish_exact(intent_path, encoded({'protocol':'mini-spk-public-listener-upgrade-v1', 'store':store,
+                'oldBinarySha256':old_sha, 'newBinarySha256':new_sha,
+                'oldRecordSha256':sha(before), 'newRecordSha256':sha(after)}))
+        intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+        require(set(intent) == {'protocol','store','oldBinarySha256','newBinarySha256','oldRecordSha256','newRecordSha256'}
+                and intent['protocol'] == 'mini-spk-public-listener-upgrade-v1' and intent['store'] == store
+                and intent['oldBinarySha256'] == old_sha and intent['newBinarySha256'] == new_sha,
+                'listener upgrade intent differs')
+        retained = {}
+        for key, kind, bound in (('oldBinary','binary',256*1024*1024),('newBinary','binary',256*1024*1024),
+                                 ('oldRecord','record',16384),('newRecord','record',16384)):
+            digest = intent[key+'Sha256']
+            require(isinstance(digest,str) and re.fullmatch('[0-9a-f]{64}',digest), 'listener archive hash malformed')
+            retained[key] = read_file(directory/(digest+'.'+kind), 0, bound, required_mode=0o600)
+            require(sha(retained[key]) == digest, 'listener archived bytes changed')
+        old_record, new_record = map(strict_json, (retained['oldRecord'],retained['newRecord']))
+        require(new_record == {**old_record,'binarySha256':new_sha} and old_record['binarySha256'] == old_sha
+                and retained['newBinary'] == data, 'listener upgrade changes more than exact binary')
+        # All namespace/ACL/UID pins remain exact even on partial publication.
+        m = metadata(public.parent,r['operatorUid'],0o710)
+        require(old_record['store'] == store and old_record['socket'] == str(public)
+                and old_record['binary'] == str(binary) and old_record['controllerUid'] == r['uid']
+                and old_record['operatorUid'] == r['operatorUid']
+                and old_record['parentIdentity'] == [m.st_dev,m.st_ino]
+                and old_record['aclReceipts'] == public_acl_receipts(base,stage,r,public)
+                and old_record['pinSha256'] == sha(listener_pin(r))
+                and read_file(public.with_suffix('.controller'),r['operatorUid'],128,required_mode=0o600) == listener_pin(r),
+                'listener upgrade custody changed')
+        require(sha(read_file(binary,0,256*1024*1024,True,required_mode=0o555)) in (old_sha,new_sha)
+                and read_file(record_path,0,16384,required_mode=0o600) in (retained['oldRecord'],retained['newRecord']),
+                'listener is outside exact upgrade states')
+        temporary = directory / ('.mini-' + new_sha + '-next')
+        publish_exact(temporary,data,mode=0o555,bound=256*1024*1024)
+        os.replace(temporary,binary); sync_directory(directory)
+        replace_root_record(record_path,retained['newRecord'],0o600)
+        public_listener_record(base,stage,r,public)
+    return {**controller_status(store,helper),'publicListenerUpgrade':str(intent_path)}
+
+
 @contextlib.contextmanager
 def public_listener_teardown(base, stage, r):
     if not (base / 'public-listener.json').exists() and not (base / 'public-listener.json').is_symlink():
@@ -1553,7 +1623,7 @@ def main(args):
             m = os.fstat(held)
             require(stat.S_ISREG(m.st_mode) and m.st_uid == 0 and m.st_nlink == 1
                     and stat.S_IMODE(m.st_mode) == 0o600, 'controller lifecycle lock custody refused')
-            shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack',
+            shared = action in ('controller-tool', 'controller-tool-result', 'controller-tool-ack', 'controller-recover-session',
                                 'controller-journal', 'controller-export', 'controller-reserve-export',
                                 'controller-service-logs', 'controller-status')
             # Lock order is global allocator, then controller. Never wait on a
@@ -1569,11 +1639,16 @@ def main(args):
             # A long controller call must not monopolize the host installation lock.
             fcntl.flock(lock, fcntl.LOCK_UN)
             return tool(store, helper, action[11:], extra[0], extra[1:])
+        elif action == 'controller-recover-session' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return recover_session(store,helper,extra[0])
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
         elif action == 'controller-status' and not extra: result = controller_status(store, helper)
         elif action == 'controller-public-listener' and len(extra) == 1: result = register_public_listener(store, helper, extra[0])
+        elif action == 'controller-public-listener-upgrade' and len(extra) == 3:
+            result = upgrade_public_listener(store,helper,*extra)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
         elif action == 'controller-enroll' and len(extra) == 1:

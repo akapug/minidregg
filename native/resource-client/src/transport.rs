@@ -401,6 +401,10 @@ pub(crate) fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         }
         [20 | 21, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // Recipient receipt lookup: Host canonical-decodes the complete ingress and
+        // requires exact event22 certificate/record/original-receipt equality in
+        // its verified walk. No current authority or issue append is granted.
+        [55, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [30 | 31, payload @ ..] => {
             !payload.is_empty()
                 && payload.len() <= 256 * 1024
@@ -3123,6 +3127,21 @@ done"#;
     }
 
     #[test]
+    fn grain_share_receipt_lookup_is_bounded_public_but_issue_writes_stay_private() {
+        for catalog in [false,true] {
+            assert!(!allowed_operation(&[55],catalog));
+            assert!(allowed_operation(&[55,1],catalog));
+            let mut maximum=vec![1;HOST_MAX_FRAME];maximum[0]=55;
+            assert!(allowed_operation(&maximum,catalog));
+            maximum.push(1);
+            assert!(!allowed_operation(&maximum,catalog));
+            for operation in [54,56,57] {
+                assert!(!allowed_operation(&[operation,1],catalog));
+            }
+        }
+        assert!(allowed_operator_operation(&[55,1]));
+    }
+    #[test]
     fn carried_lookup_keeps_full_old_call_capacity_with_narrow_frame_exception() {
         let mut header =
             br#"{"algorithm":"minidregg-carried-call-lookup-v1","originIdentity":{}}"#.to_vec();
@@ -3542,7 +3561,7 @@ done"#;
             assert!(!allowed_operator_operation(&[operation, 1, 0, 0, 0, b'P']));
         }
 
-        for operation in [54, 55, 56] {
+        for operation in [54, 56] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operator_operation(&[operation]));
             assert!(!allowed_operation(&[operation, 1], true));
