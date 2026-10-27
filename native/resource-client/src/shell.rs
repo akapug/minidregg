@@ -94,7 +94,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "forget", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     // `room` is grammar data (shell_grammar::ROOM); the row holds its place, see `rendered_row`.
     Verb { name: "room", usage: "", operation: "" },
-    Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
+    Verb { name: "board", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "inbox", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -138,16 +138,22 @@ fn subcommands(verb: &str) -> Vec<String> {
     subcommands_after(verb,&format!("{verb} "))
 }
 
+/// The words that may follow `prefix` (`"doc "`, `"doc app-export "`): the next path word of every
+/// grammar leaf under it, and the literal choices of a leaf's first argument when the leaf's path
+/// is the prefix itself (`doc app-export publish|status|recover ID`). Read from the grammar, never
+/// scraped from prose.
 fn subcommands_after(verb: &str, prefix: &str) -> Vec<String> {
     let mut names = std::collections::BTreeSet::new();
-    if let Some(command) = command_catalog().find(|v| v.name == verb) {
-        for alternative in command.usage.split(prefix).skip(1) {
-            if let Some(word) = alternative.split_whitespace().next() {
-                for literal in word.split('|') {
-                    if !literal.is_empty() && literal.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
-                        names.insert(literal.to_owned());
-                    }
-                }
+    let words: Vec<&str> = prefix.split_whitespace().collect();
+    if let Some(grammar) = crate::shell_grammar::grammar(verb) {
+        for leaf in grammar.leaves {
+            if leaf.path.len() < words.len() || !leaf.path.iter().zip(&words).all(|(p, w)| p == w) {
+                continue;
+            }
+            if let Some(next) = leaf.path.get(words.len()) {
+                names.insert((*next).to_owned());
+            } else if let Some(crate::shell_grammar::Arg { kind: crate::shell_grammar::Kind::Choice(options), .. }) = leaf.args.first() {
+                names.extend(options.iter().map(|o| (*o).to_owned()));
             }
         }
     }
@@ -1100,77 +1106,40 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "board" => {
-            let Some(action) = w.get(1) else {
-                return Err(u.to_owned());
-            };
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::BOARD, &w)?;
             let task_field = |task: &str, offset: u64| -> std::result::Result<String, String> {
-                decimal(task, "task")?;
                 task.parse::<u64>()
                     .ok()
                     .and_then(|n| n.checked_mul(2)?.checked_add(2 + offset))
                     .map(|n| n.to_string())
                     .ok_or_else(|| "task number is too large".to_owned())
             };
-            match action.as_str() {
-                "new" => {
-                    arity(&w, 2, 2, u)?;
-                    ref_name(&w[2], "board name")?;
-                    let path = session.home.join("requests").join(format!("create-{}.json", ref_file(&w[2])));
+            match p.leaf.path {
+                ["board", "new"] => {
+                    let path = session.home.join("requests").join(format!("create-{}.json", ref_file(p.arg(0))));
                     Plan::Client {
                         command: "workspace".into(),
-                        flags: vec![
-                            flag("action", "create"),
-                            flag("dir", ws()),
-                            flag("name", w[2].clone()),
-                            flag("storage", "declared"),
-                            flag("predicate", path.clone()),
+                        flags: vec![flag("action", "create"), flag("dir", ws()), flag("name", p.arg(0)), flag("storage", "declared"), flag("predicate", path.clone()),
                             // The board law governs tasks 0 and 1: fields 2-5, no other.
-                            flag("fields", "2-5"),
-                        ],
+                            flag("fields", "2-5")],
                         writes: vec![request_file(path, &board_law())],
                     }
                 }
-                "add" => {
-                    arity(&w, 4, 4, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "board name")?;
-                    let field = task_field(&w[4], 0)?;
-                    scalar_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"create","key":{"type":"object","field":field},"value":"0"}),
-                    )
+                ["board", "add"] => {
+                    let field = task_field(p.arg(2), 0)?;
+                    scalar_proposal(session, p.arg(0), p.arg(1), json!({"type":"create","key":{"type":"object","field":field},"value":"0"}))
                 }
-                "move" => {
-                    arity(&w, 6, 6, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "board name")?;
-                    let field = task_field(&w[4], 0)?;
-                    let from = board_state(&w[5])?;
-                    let to = board_state(&w[6])?;
-                    scalar_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"write","key":{"type":"object","field":field},
-                            "value":to,"expected":from}),
-                    )
+                ["board", "move"] => {
+                    let field = task_field(p.arg(2), 0)?;
+                    let from = board_state(p.arg(3))?;
+                    let to = board_state(p.arg(4))?;
+                    scalar_proposal(session, p.arg(0), p.arg(1), json!({"type":"write","key":{"type":"object","field":field},"value":to,"expected":from}))
                 }
-                "take" => {
-                    arity(&w, 4, 4, u)?;
-                    workspace_name(&w[2], "proposal ID")?;
-                    ref_name(&w[3], "board name")?;
-                    let field = task_field(&w[4], 1)?;
+                _ => {
+                    let field = task_field(p.arg(2), 1)?;
                     let me = session_subject(session)?;
-                    scalar_proposal(
-                        session,
-                        &w[2],
-                        &w[3],
-                        json!({"type":"create","key":{"type":"object","field":field},"value":me}),
-                    )
+                    scalar_proposal(session, p.arg(0), p.arg(1), json!({"type":"create","key":{"type":"object","field":field},"value":me}))
                 }
-                _ => return Err(u.to_owned()),
             }
         }
         "exit" | "quit" => {

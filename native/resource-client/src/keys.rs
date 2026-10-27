@@ -43,8 +43,6 @@ use mini_keys::client::{Broker, CLIENT_CONFIG};
 /// is not the shell's own input and `key set PROVIDER -` may read it.
 pub(crate) static STDIN_FREE: OnceLock<bool> = OnceLock::new();
 
-pub(crate) const SHELL_USAGE: &str = "key set PROVIDER -|@FILE | key grant PROVIDER RUNNER --per-call TOKENS --per-day CALLS --until HEIGHT [--model MODEL] | key revoke PROVIDER [RUNNER] | key ls | key providers | key choose PROVIDER MODEL RUNNER TASK";
-
 fn text(value: OsString, label: &str) -> Result<String> {
     value
         .into_string()

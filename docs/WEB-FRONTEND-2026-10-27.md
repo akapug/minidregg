@@ -190,14 +190,14 @@ yet data and labels the page accordingly:
    arity checks, the body's bespoke form where the grammar renders the same, the usage scraper in
    `subcommands()` once the last verb converts.
 
-State (2026-10-27, lane tip): `shell_grammar.rs` holds the grammars of `doc` (40 leaves), `room`
-(28), `delegate`, `revoke`, `renounce`, `law` (5), `pay` (4), `credit`, `tariff` (2 shapes), `topup`,
-`market` (2), `bid`, `reveal`, `bids`, `job` (8), `jobs`: 16 verbs, 104 leaves. For each, the shell
-parses through `parse()`, `help`/`usage_of`/completion read the usage rendered by one printer, and
-the body renders the forms from the leaves (effect → outcome class and the "and submit" tick); the
-hand-written arity checks, flag scrapers and usage strings of those verbs are deleted (shell.rs:
-−845 lines across the three commits, +336 of builders; the grammar module is 552 lines of data and
-one parser). Still on usage strings: the lifecycle (`propose`/`submit`/`lookup`/`retry`/`publish`/
-`history`), `can`/`inspect`/`why`, `summon`/`ask`/`dismiss`/`hermes`, `apps`, `story` and the chat
-verbs, keys, `kind`/`program`/`instance`, `enroll`/`provision`, the rest; the `/verb/NAME` page says
-which it is.
+State (2026-10-27, lane tip): every verb of the four tables is grammar data in `shell_grammar.rs`
+(69 verbs, ~205 leaves: `doc`, `room`, the money verbs, the lifecycle, the reads and local verbs,
+the chat, Hermes and story verbs through `parse_line` on the raw line, `apps` on L13's final verb,
+keys, identity, births, `kind`/`program`/`instance`, `app`, `forget`, `board`). The shell parses
+through `parse`/`parse_line`, `help`, `usage_of` and Tab completion read the grammar (the usage
+scraper in `subcommands_after` is gone; `command_catalog` renders every row), and the body renders
+every form from the leaves (effect → outcome class, dangerous switches as explicit ticks, `Rest` as
+free text). The hand-written usage strings and arity checks are deleted (shell.rs −1,400 lines over
+the series; chat.rs −211, hermes.rs −83, story.rs −51, keys.rs −57). What stands between
+face-coverage and parity: an outcome test per leaf (the journey's spine flows assert their decoded
+outcomes; the per-leaf dry-run rows are the next increment), then the row is renamed.
