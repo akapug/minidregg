@@ -4,7 +4,7 @@ A story is a **table** a friend writes and then seals. After `story seal`, the
 table is the law on every player's cell: a player's `go`, `take` and `act` are
 one write each, and the Host judges it against the table. The client is
 `native/resource-client/src/story.rs`; the theorems are
-`Assurance/StoryLaw.lean`.
+`Kernel/StoryLaw.lean` (the law) and `Assurance/StoryLaw.lean` (the theorems).
 
 One directory per built-in story; `tale/` is the first. A friend's own table
 is a file in `HOME/requests/` (`story new NAME --from @FILE`).
@@ -55,7 +55,7 @@ the client adds the clause's number and name.
 `tale/law.player.json` and `tale/law.table.json` are **generated**:
 `scripts/gen-storylaw.py --mini PATH` runs the client's own parser and
 generator (`mini story-law --table tale/table`) and writes them, and writes
-the tale's table and law into `Assurance/StoryLaw.lean` §8, where
+the tale's table and law into `Kernel/StoryLaw.lean` (the law) and `Assurance/StoryLaw.lean` (the theorems).§8, where
 `tale_embedded_is_law` proves them equal to the Lean `law` of that table.
 `--check` fails if any of them is not what the client generates now.
 

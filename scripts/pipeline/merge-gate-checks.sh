@@ -121,7 +121,7 @@ readers() {
   run shell-paths     bash scripts/check-shell-paths.sh
   run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
   run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
-  # The story law files and Assurance/StoryLaw.lean §8 are the client's own generator output: build `mini` and
+  # The story law files and Kernel/StoryLaw.lean (generated region) are the client's own generator output: build `mini` and
   # require that `mini story-law` still produces exactly the embedded text (a stale embed is how a theorem
   # about `law taleTable` stops being about the law `story seal` installs; the rfl in the build only holds
   # the Lean side, this holds the Rust side).

@@ -39,6 +39,7 @@ open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Compiler
 open Minidregg.Assurance.StoryLaw
+open Minidregg.Kernel.StoryLaw
 set_option autoImplicit false
 set_option linter.unusedSimpArgs false
 
