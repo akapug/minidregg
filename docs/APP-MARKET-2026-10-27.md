@@ -22,34 +22,49 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
 
-## State at hand-off (2026-10-27 evening, lane tip after this commit)
+## State at hand-off (2026-10-27 night, lane tip after this commit)
 
-- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w6**
-  (`w6/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w6-job.sh` (PID
-  file `w6-job.pid`), which then runs `japps.sh --box` (→ `japps-w6.out`) and
-  `featured-qualify.sh` (→ `featured-w6/rows.tsv`). w3, w4 (partial, never registered) and w5 are
-  torn down. Stop a job only by its PID file. Each checkout on the box needs
-  `chmod go-w deploy/spk-host/*` (the lanes umask leaves `controller-world.py` 0664 and the
-  installer refuses it).
-- **Proven** (w5, 26 of 28 japps rows): catalogue, fetcher, the four qualify exhibits, the front,
-  Hacker Slides and Simple Todos through create, install, share, start, enrol, page load, stop and
-  export; **Etherpad** on the same world (also by hand on w3: install 739 s, share 1002 s, start
-  293 s, enrol 193 s, `/` → 303 → `/p/main` 200 with the pad editor, one saved identity held).
-- **Red on w5, fixed in code, rerunning on w6**: (a) the publishing socket answered 404 for
-  every path: the app runs under a 077 umask and Sandstorm publishes `/var/www` whatever its
-  modes, so the launch worker now opens each published file as the app (tag 6, `61f4a1ce`);
-  (b) the co-edit's second route was bound but never served: a route added after START needs
-  the running resident's route control (`register-X2`, `61f4a1ce`); on w5 that registration was
-  refused `Mini refused current route admission` with no reason; `f7b8fe5f` makes the refusal
-  name the Host's marker and text and keep `refusal.bin` in the attempt, so w6's `register-b2`
-  says why.
-- **Featured set** (§2a): the scout's 13 kept; `mini apps search` lists them first with their
-  agent hook (`f7b8fe5f`); `featured-qualify.sh` qualifies letters j..p (EtherCalc, HedgeDoc,
-  Davros, sntfy, DokuWiki, Hledger Web, Datasette) with one write each beneath the HTML. Not yet
-  in the harness: WBO (WebSocket write), SandCal, Gogs (REST with its CSRF form), Wekan (REST
-  login): each needs its write recipe probed against a live grain first. The coordinator's
-  order is Datasette, DokuWiki, HedgeDoc, Davros, SandCal, Gogs, EtherCalc, WBO, Hledger, sntfy,
-  Wekan.
+- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w8**
+  (`w8/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w8-job.sh` (PID
+  file `w8-job.pid`), which then runs `featured-qualify.sh` (rows in `featured-w8/rows.tsv`).
+  w3 to w7 are gone (w4 and w7 failed before root setup and never registered). Stop a job only
+  by its PID file. After each checkout on the box run `chmod go-w deploy/spk-host/*`: the lanes
+  umask leaves `controller-world.py` at 0664 and the installer refuses it.
+- **Proven on w6** (`japps --box`, 26 of 27 rows; `japps-w6.out`): the catalogue, the fetcher, the
+  four qualify exhibits and the front. Hacker Slides and Simple Todos go through create, install,
+  share, start, enrol, page load, stop and export. Etherpad goes through the same steps to
+  `/p/main` 200 (also by hand on w3). **The publishing socket serves Hacker Slides' `/var/www`**:
+  GET / is 200 with the deck, POST is 405 and a `..` escape is 404. Each file is opened by the
+  launch worker as the app (`61f4a1ce`).
+- **Red: the second-browser co-edit.** The second session is shared and enrolled, but its hot
+  route registration is refused by the Host. The reason is now named (`f7b8fe5f`): `authority
+  handoff requires an opening read from the Store`. It comes from
+  `Kernel/ApplicationStreamContinuity.lean` `withOpenedFreshTip`, line 216, and means the serving
+  Host's `durable.headTag` is `None`. A participant's signed read of the session just before the
+  registration does not satisfy it (tried on w6, not kept). The question goes to the Host lane:
+  when does a serving Host hold an opening read of the Store's head, and should route admission
+  take one itself? `ws-continuity-fixture.py` registers routes successfully under its own world
+  setup, so compare that setup with world-up's. Everything after the registration is ready
+  (`register-X2`, `ddp-coedit.py`).
+- **Featured set** (§2a): the scout's 13 are kept. `mini apps search` lists them first with their
+  agent hook (`f7b8fe5f`). `featured-qualify.sh` qualifies EtherCalc, HedgeDoc, Davros, sntfy,
+  DokuWiki, Hledger Web and Datasette (letters j..p) with one write each beneath the HTML. On w6
+  every birth was refused at prepare (`authorityBatch`): the workroom tool task had 4 left of its
+  single-journey budget of 50 after three apps. Each birth reserves 5 and each share ticket 3.
+  `world-up.sh` now raises the task budgets to 1,000,000 (`ef368ca4`). w7 also raised the
+  balances and failed its store phase with no named reason, so the balances stay at the
+  provisioner's defaults. **Datasette's row is read-only by design**: version 0.63 has no HTTP
+  write, since uploading a database is the page's own form, so the row records the read and
+  says so. **Four apps still need their write recipe** probed against a live grain before they
+  go into the harness:
+  - WBO: a stroke as a socket.io event over its WebSocket.
+  - SandCal: the new-event form, or an iCalendar import.
+  - Gogs: a repository created through `/repo/create` with its `_csrf`, or `/api/v1` with a
+    token the session mints.
+  - Wekan: REST after its Sandstorm header login.
+
+  The coordinator's order for the set: Datasette, DokuWiki, HedgeDoc, Davros, SandCal, Gogs,
+  EtherCalc, WBO, Hledger, sntfy, Wekan.
 - **DAV verbs and streamed bodies** (§2b), asked first by the coordinator, not started. The
   verbs are named in Lean: `Kernel/ApplicationDispatchAdmission.lean` `exchangeMethod` and the
   body rules of `requestSafeFor` (PROPFIND/PROPPATCH/REPORT/LOCK carry XML bodies; MKCOL, COPY,
@@ -64,6 +79,39 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
   `mini apps bootstrap` there, then `apps-e2e.sh RUN/WORLD.env OUT <appIds>` with
   `MEMBER_FUNDING=10000 APPS_MAX=50000`; read the debit from `OUT/balances.log` into INSTALL.md
   §4 (replacing the ~1,500 estimate) and the receipt's `budget:` line.
+- **A market of 2–3 dozen (ember, 2026-10-27): the batch table for parallel Sonnet faeries.**
+  Tier 1 is the featured 13 (§2a) plus Simple Todos. Tier 2 is below: apps the scout read as
+  the standard bundled `sandstorm-http-bridge` with no interface we do not serve, grouped three
+  or four to a faerie (42 apps in all). **The successor's own first item is the DAV verbs and
+  streamed bodies** (sites above), designed whole as one Lean+Rust change and landed with a cut:
+  it unlocks Davros' tree, SandCal and Radicale over CalDAV, git in Gogs, and the file-heavy
+  rows marked *stream* below.
+
+  | batch | apps (scout appId prefix) | watch for | the write beneath the HTML (probe first) |
+  |---|---|---|---|
+  | B1 notes | SandMD `9afdqy`, Permanote `svwrpw`, TextEditor `n4n49d`, Dillinger `fq057t` | nothing new | PUT/POST of a markdown document, GET it back |
+  | B2 lists and ledgers | Yet Another TODO `6ee9j5`, Prioritize `nut9xv`, ExpenseOwl `vfdve0`, OrgTodo `sfs5m1` | nothing new | REST POST of an item or expense, GET the JSON |
+  | B3 boards and drawing | diagrams.net `nfqhx8`, EtherDraw `1gda5n`, Scrumblr `w544a4` (bundled redis), Swagger Editor `1d3ump` | WebSocket frames; an inner redis | save a drawio XML or a sticky; read it back |
+  | B4 publishing | Hugo `ksyud8`, WordPress `aax9j6`, Hacker CMS `nqmcqs`, Hakyll CMS `z7za0n` | `HackSessionContext.getPublicId`, the `-www` origin (§5a) | write a page, build, GET it at `https://<grain>-www…` through the publishing socket |
+  | B5 files and media | FileDrop `nn7axg`, Kiwix `5uh349`, Groove Basin `wfg1r0` *stream*, Tube `70xjeu` *stream* | large bodies (fail closed until streaming lands) | upload a small file, GET it; media rows wait for streaming |
+  | B6 forms and tools | SandForms `ztxnre`, OwnTracks `cjv3p2`, Badgepack `kzyafw`, Hummingbird `4mfser` | nothing new | POST a form or a location fix, read the JSON |
+  | B7 doors | 2048 `u0yh8x`, Perplexity Sudoku `r8y55a`, 3D Blockstack `zxent0`, Simple Chat `yp9xt1` | Simple Chat is direct capnp (no http-bridge): a `WebSession` served by the app itself | page load; a state write where the app has one |
+  | B8 second-wave picks | IPython Notebook `rprqf3` (178 MB, class L), Mercurial `61gh7g`, MediaWiki `p04q48`, Firefly III `uws252` | class L memory; MediaWiki's bundled database | create a notebook or page over its REST, read it back |
+
+  **The faerie brief (one per batch).** Worktree:
+  `git -C /Users/ember/dev/minidregg worktree add -b lane/app-market-bN /Users/ember/dev/minidregg-lanes/app-market-bN origin/lane/app-market`.
+  On dregg-build as `lanes` (every build through `swarm-build`; PID files; never kill by pattern),
+  one standing world per faerie: `world-up.sh /build/candidates/<cut>/bin /build/lanes/app-market-bN/target/debug /build/lanes/app-market-bN-runs/w1`
+  (the installer now allocates disjoint app ranges, `f8243aba`; `chmod go-w deploy/spk-host/*`
+  after each checkout). Add the batch's apps to `featured-qualify.sh`'s table (letters j..p, one
+  `write_<Name>` function each: one request over the owner route with the session cookie and
+  Origin, then a read-back that proves the write persisted) and run it against the world. Per app:
+  create, install, share, start, enrol, page load, the write; a refusal is recorded by name
+  (`unsupportedBridge…`, a 500 whose app output names a capnp method we do not serve, a body the
+  bridge refuses) and the method, if any, is added to `spk-rpc` the way `HackSessionContext` was
+  (compile the schema, serve what the app calls, refuse the rest by name). Push per app with the
+  sha; the successor merges the batches and adds each green app's agent hook to `FEATURED` (or a
+  second tier list) in `apps.rs`.
 - **Allocator**: `install-user-world` moves a taken app range to the next free one in the
   delegation (`f8243aba`; controller-world.py pin `1a6e0c16`). The main worktree had an
   uncommitted edit to `controller-world.py`; whoever lands it re-pins.
