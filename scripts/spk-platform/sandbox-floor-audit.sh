@@ -71,11 +71,23 @@ BWRAP_SHA=$(sha256sum "$BWRAP" | cut -d' ' -f1)
   echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
 } > "$EVIDENCE/environment.txt"
 
+# The resident unit's own hardening, so bwrap is proven to START under it on
+# this host (a unit-level seccomp layer that returns ENOSYS for openat2, as
+# systemd 257's RestrictSUIDSGID=yes does, kills bwrap >= 0.11 at its first
+# mount). Mirror of the broker-rendered resident unit (broker.rs install-unit)
+# and its drop-in (broker_home.rs `hardening`); keep the three in step.
+RESIDENT_PROPS=(-p NoNewPrivileges=no -p UMask=0077 -p KillMode=control-group
+  -p LimitCORE=0 -p LimitNOFILE=8192 -p KeyringMode=private)
+for prop in "${RESIDENT_PROPS[@]}"; do
+  [[ $prop != RestrictSUIDSGID=* && $prop != SystemCallFilter=* ]] \
+    || { echo "resident hardening must not add a unit seccomp layer: $prop" >&2; exit 2; }
+done
+
 run() {
   local name=$1 test=$2
   set +e
   systemd-run --user --unit="$UNIT-$name" --wait --pipe --collect \
-    -p MemoryMax=256M -p TasksMax=64 -p RuntimeMaxSec=120 -p KillMode=control-group \
+    "${RESIDENT_PROPS[@]}" -p MemoryMax=256M -p TasksMax=64 -p RuntimeMaxSec=120 \
     --setenv=SPK_AUDIT_DIR="$DIR" --setenv=SPK_AUDIT_BWRAP="$BWRAP" \
     --setenv=SPK_AUDIT_BWRAP_SHA256="$BWRAP_SHA" \
     --setenv=SPK_AUDIT_UID="$APP_UID" --setenv=SPK_AUDIT_GID="$APP_GID" \
@@ -85,6 +97,10 @@ run() {
   set -e
   echo "$name unit=$UNIT-$name test=$test exit=$status" | tee -a "$EVIDENCE/results.txt"
   sudo -n cat "$DIR/app-output-$name.log" > "$EVIDENCE/app-output-$name.log" 2>/dev/null || true
+  # Name the openat2 class loudly rather than as a generic probe failure.
+  if grep -q "Function not implemented" "$EVIDENCE/$name.transcript" "$EVIDENCE/app-output-$name.log" 2>/dev/null; then
+    echo "$name: bwrap hit ENOSYS under the unit's hardening (openat2 filtered?)" | tee -a "$EVIDENCE/results.txt"
+  fi
   return $status
 }
 
