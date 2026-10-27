@@ -475,7 +475,9 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
   paths in the pinned config, sets `TMPDIR`, then `exec`s `mini serve`. Use it
   under systemd (`run.sh unit --state STATE` prints a unit: `Type=simple`,
   `Restart=on-failure`, `KillMode=control-group`, `UMask=0077`,
-  `NoNewPrivileges=yes`, `PrivateTmp=yes`) or any other supervisor.
+  `NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectSystem=strict` with
+  `ReadWritePaths=STATE` alone, `RestrictAddressFamilies=AF_UNIX`, `MemoryMax=8G`) or any
+  other supervisor.
 * `start`/`stop`/`status` are a minimal supervisor for hosts without one:
   `start` backgrounds `serve`, records `public/server.pid`, and waits (≤ 120 s)
   for the socket and a `mini: host process <pid>` line in `logs/serve.log`; `stop` only
