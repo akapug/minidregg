@@ -24,7 +24,7 @@ deploy/candidate/build.sh --out /srv/mini/candidate-<commit>          # binaries
 C=/srv/mini/candidate-<commit>
 cp $C/genesis-params.example.json /srv/mini/genesis-params.json      # edit: operator decisions
 $C/params.sh fill-genesis /srv/mini/genesis-params.json              # the genesis clock, chosen now
-$C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a
+$C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a [--pay-observer /srv/mini/pay-observer.json]
 $C/run.sh start --state /srv/mini/store-a                             # or: run.sh unit ... | systemd
 $C/run.sh sponsor --state /srv/mini/store-a
 $C/run.sh stop  --state /srv/mini/store-a
@@ -417,7 +417,8 @@ second and `maxStepSeconds` the most one clock tick may advance, both positive),
 storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`, and, for a world that hosts SPK
 grains (deploy/market/INSTALL.md §0), `grainPlatform {lifecycleManagement {managementSubject
 managementKeyId} grainBirthTariff {base perBirth} completionCustodianKey}`: the management subject
-is the sponsor (its key pair is the one `run.sh init` generates), the tariff the metered cost of a
+is a Host setting (`run.sh platform` changes it on a stopped Store; the sponsor, whose key pair
+`run.sh init` generates, is the natural first value), the tariff the metered cost of a
 grain birth (base > 0), and `completionCustodianKey` the completion custodian's 32-byte public key as
 64 lowercase hex, `null` in the operator's file until `run.sh init` generates `keys/completion.seed`
 and fills it (`params.sh require-platform` refuses a genesis without the block, naming the field).
