@@ -412,7 +412,7 @@ theorem toy_admits (host : NativeHost.Config) (genesis : Config) (key env : List
     (valid : h.current.valid = true) :
     Admits (toyContext (toyDeployment host genesis key verified)) h
       (installOf genesis { h.current with version := h.current.version + 1 } env) := by
-  refine ⟨rfl, ?_, ?_, by simp [installOf], ?_, ?_⟩
+  refine ⟨rfl, ?_, ?_, by simp [installOf], ?_, ?_, by simp [toyContext, installOf]⟩
   · simp only [toyContext, Deployment.verifies, Deployment.controller, toyDeployment, if_pos rfl]
     exact decide_eq_true recorded
   · simp [toyContext, toyDeployment, Deployment.controller]
@@ -504,7 +504,7 @@ theorem zero_lifetime_invalid (p : Platform) (zero : p.lifetime = 0) : p.valid =
 theorem custodian_drop_refused (ctx : Context) (h : History) (i : Install) (key : List UInt8)
     (named : h.current.completionCustodianKey = some key)
     (dropped : i.next.completionCustodianKey = none) : ¬ Admits ctx h i := by
-  rintro ⟨-, -, -, -, -, step⟩
+  rintro ⟨-, -, -, -, -, step, -⟩
   rw [named, dropped] at step
   exact step
 
@@ -514,7 +514,7 @@ theorem uncosigned_rotation_refused (ctx : Context) (h : History) (i : Install) 
     (named : h.current.completionCustodianKey = some a)
     (rotated : i.next.completionCustodianKey = some b) (differs : a ≠ b)
     (uncosigned : i.custodianCosign = none) : ¬ Admits ctx h i := by
-  rintro ⟨-, -, -, -, -, step⟩
+  rintro ⟨-, -, -, -, -, step, -⟩
   rw [named, rotated] at step
   rcases step with same | ⟨s, cosigned, -⟩
   · exact differs same
@@ -530,7 +530,7 @@ theorem cosigned_rotation_admitted (host : NativeHost.Config) (genesis : Config)
       [(key, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩, env),
        (old, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩, cosig)]))
       h ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩ := by
-  refine ⟨rfl, ?_, ?_, above, valid, ?_⟩
+  refine ⟨rfl, ?_, ?_, above, valid, ?_, by simp [toyContext]⟩
   · simp [toyContext, Deployment.verifies, Deployment.controller, toyDeployment]
   · simp [toyContext, toyDeployment, Deployment.controller]
   · simp only [toyContext, named, nextKey]

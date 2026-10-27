@@ -57,8 +57,11 @@ J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.
 not compile). The first candidate carrying both bc88a5ab (frame v8)
 and hermes 68394077 (any full build from main >= fb15f121b): send its sha and path to L4 (ac2a5ad7827eb4744) and
 the coordinator at once; L4 runs J14_TOOLS against it (3315a908 refuses the v8 genesis). Unit
-mini-grain-controller@9870001 is free (it was L4's orphan). L1c (lean-audit-c e50c3f155) seeds its dregg-ref tree from the integ8 copy; tell it
-when the copy lands.
+mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
+f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
+elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
+constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
+elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
 Next steps: when phase A3 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
 build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
