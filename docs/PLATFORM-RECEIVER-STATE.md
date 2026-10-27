@@ -104,7 +104,134 @@ routes any reds here.
     an unresolved factory law.
   - It judges through `Pending.factoryRefusal`, so range, cast and unsupported refusals are
     disclosed like a law refusal (`publicRefusal`, as `invokeRefusal` does).
+- Audit pass 16 (lane/audit-platform 90ec46ab), two items owed:
+  - **Poles: owed as Lean witnesses.** A concrete `Pending` with an accepted factory branch
+    needs a signed, loaded image, and the `WindowExample` descriptor is template-level only.
+    For now `scripts/kn2/neutral-birth.lean` checks both poles on the deployed path: the
+    control and the `birth/<id> = root` law have a plan that passes and they commit; the
+    `root + 1` law has a plan that refuses and is refused `Reject.policyRejected`.
+  - **Disclosure: checked.** The `preparePending` refusals carry no payload. Of the
+    `PreparationReject` refusals, only `room` does: the requester's own room id and the
+    room gate's refusal, which is already grant-filtered (`birthRefusedOutsideGrant`,
+    FIX-DISCLOSE). `NativeHost.prepareLoaded` already printed `birth preparation: {repr
+    reason}` on the same authorized plan channel, so nothing new is disclosed.
 - Not touched: `GrainResourceBirthAdmission.Pending.admitBranch` has the same conflation
   (`law.admit = none` → `policyRejected`). It is outside audit (c) and is a follow-up.
-- Next: merge lane/lean-critical 147d3861 (genesis seed), then births priced from the cell
-  (statement first), then `Intent.credit` with ops 244–247.
+- **Owed (pass 16 addendum): the keystone poles at declaration level.** The keystones are
+  not done until these exist:
+  - satisfiable: a concrete loaded, signed `Pending` with `factoryVerdict = some true` and
+    an inhabited `BranchAccepted … .factory`;
+  - teeth: a law that evaluates false, giving `some false` and admission
+    `.error .policyRejected`.
+  They wait for elaboration. Until then the executed witness is
+  `scripts/kn2/neutral-birth.lean`.
+- **Owed: the Grain `admitBranch` binding gap** (see above).
+
+### Births priced from the cell: design and statement (sent to the auditor, nothing coded)
+
+Main already carries the genesis seed (147d3861 / bc88a5ab: `platformCell` in `baseCells`,
+`platform_seeded`).
+
+**The surface is wider than the ordinary birth.** The cell's fields are read today from
+`NativeHost.Config` or the profile at these sites:
+- `FactoryPins.tariff` (`NativeHostContext.validateChecks`, `tariff := config.tariff`) is
+  read by `Checked.feeBound`.
+- `profile.template.{ownerBudget, lifetime}` is read by `RootGrantShape`/`checkTemplateAt`
+  (RBPC :384, :520, `Pending.templateBound`), by
+  `GrainResourceBirthAdmission.preparePending`, `ApplicationGrainBirth` (:90–132),
+  `ApplicationShareIssueSource` (:189–194), `ApplicationAgentLifetimeGrantSource`
+  (:250–255), `ParticipantFactoryProvisioning`, and `PayEnrolV2Receiver` (:77).
+- `config.grainBirthTariffValue` is read by `NativeHostGrainBirth` :48,
+  `ApplicationShareIssueGrainAdmission` :99, `ApplicationShareIssueGrainReceiver` :178,
+  and `NativeHost` :3214.
+- `config.completionCustodianKey` is read by the four `Application*Completion*Admission`
+  `keyPinned` fields. These are not births.
+
+**The template cannot be swapped inside the profile.** `Profile.compilerProfile` and so
+`Profile.semantics` hash `profile.template` (`CanonicalRuntimeProfileCore` :133). So the
+cell's owner budget and lifetime must enter as an explicit template beside the profile:
+`templateAt profile.template p := { profile.template with ownerBudget := p.ownerBudget,
+lifetime := p.lifetime }`. This changes the type of `Pending.templateBound`, and through it
+`AcceptedBirth.indexed` and the TokenCensus row text.
+
+**Design (ordinary birth first, in one commit; the rest follow by family).**
+1. New `Kernel/PlatformBirthTerms.lean` (L1c's file):
+   - `platformAt deployment durable := (PlatformCellDomain.load deployment
+     durable.snapshot).bind (recordOf ·.cell.logical)`;
+   - `pinsAt pins p := { pins with tariff := p.creation }`;
+   - `templateAt`;
+   - `deployedView deployment : PlatformCell.BirthView (Durable × Height)`.
+2. `ResourceBirthReceiver.receiveLoaded` loads the platform from the durable image it
+   commits against. A missing or undecodable cell refuses with a new `platformUnavailable`.
+   It admits with `pinsAt pins p` and `templateAt profile.template p`, and adds
+   `Loaded.readGuard` to the commit's read guards.
+3. `preparePending` takes the template explicitly (ordinary and reserve), and `Pending`
+   records it. The Host plan (`prepareLoaded`, `birthRefusal`) reads the same
+   `platformAt` on `opened.durable`.
+
+**Keystone statement (deployed, owed):** `ReceiverReadsCurrent deployment profile pins`.
+For every `durable height bytes` with `receiveLoaded … durable height bytes` admitting
+`accepted`, there is `p` with
+`platformAt deployment durable = some p`,
+`accepted.pins.tariff = p.creation`,
+`accepted.template = templateAt profile.template p`,
+and `(cellIdOf deployment, durable.snapshot.model.roots (cellIdOf deployment))` among the
+commit's read guards. And `platformAt deployment durable = none` → refused
+`platformUnavailable`. With `deployedView`, this instantiates `PlatformCell.BirthsReadCurrent`
+(terms = `termsAt p height`, guards ∋ the cell) and `BirthQuoteCurrent` (fee bound by
+`quotedFee p.creation`). Teeth: a reader of `opened.pins` (`config.tariff`) after an install
+that changed `creation` fails it (the shape of `genesisReader_stale`).
+
+**Auditor pass 17 (lane/audit-platform): the ordinary birth is accepted as the first
+scope, on two conditions.**
+1. The claim's label says "ordinary births". The owed families stay listed above with
+   file:line.
+2. **No silent twin at the re-genesis.** `profile.template` stays in the semantics, so an
+   owed site that still reads `profile.template.ownerBudget`/`lifetime` or `config.tariff`
+   would serve the genesis value after an install, without any error. Before the one
+   digest change ships, every owed site must read the cell, or be shown to read only
+   `issuer`/`birthSlack`. A census row gates this: it refuses readers of those fields
+   outside the cell path. The census row is part of the ordinary-birth commit.
+
+**Landed (ordinary births, creation tariff; pushed unbuilt):**
+- `Kernel/ResourceBirthReceiver.lean`:
+  - `pricedAt deployment pins durable` checks that the platform record loads from the
+    image the birth commits against and that `pins.tariff = record.creation`. Otherwise it
+    refuses with new `Reject.platformUnavailable` or `Reject.platformStale`.
+    `receiveLoaded` runs it before admission.
+  - `platformGuards` puts the platform cell's root into every ordinary birth's
+    `readGuards`. The replay recomputes the same `intent`, so it agrees.
+  - Theorems: `pricedAt_ok`, `pricedAt_stale` (teeth), `platformGuards_exact`,
+    `readGuards_platform`.
+- `scripts/check-platform-field-readers.py` with `scripts/platform-field-readers.json`:
+  - It refuses any new reader of `template.ownerBudget`/`lifetime`, `config.tariff`,
+    `grainBirthTariffValue` or `config.completionCustodianKey` outside the cell path.
+  - `--ship` refuses while any `owed` row remains (73 today). The seed is `genesis` and the
+    template encoding is `encoding`.
+  - It is wired into `scripts/pipeline/merge-gate-checks.sh`.
+- **Liveness until the next step:** `opened.pins` still carries `config.tariff`. That equals
+  the genesis record's creation tariff (`NativeHostGenesis.genesisRecord`), so births pass
+  until the first install that changes it, then refuse `platformStale`. Loud, never stale.
+
+**Next, in order (the ordinary-birth claim is incomplete until 1–3 land):**
+1. `opened.pins.tariff` from the cell: `NativeHostContext.validateChecks` reads the record
+   through `PlatformCellDomain.load` on the opened image, in both the full and the served
+   shape (`validateCore_map` in NativeHostServed must keep agreeing). Then `pricedAt`
+   passes after installs.
+2. The template's owner budget and lifetime from the record:
+   - `templateAt profile.template record` replaces `profile.template` in
+     `checkTemplate`/`preparePending`/`Pending.templateBound` (RBPC :520–533, :1328–1341);
+   - the `AcceptedBirth.indexed` text and the TokenCensus row change with it;
+   - the Host plan (`prepareLoaded`) and the client quote (`Host/Json.lean`) read the same
+     record.
+3. The deployed keystone `ReceiverReadsCurrent` for ordinary births, from `pricedAt_ok` and
+   `readGuards_platform` plus item 2, instantiating `PlatformCell.BirthsReadCurrent`
+   and `BirthQuoteCurrent`.
+4. The owed families, one per commit, each deleting its census rows.
+5. `Intent.credit` with ops 244–247.
+6. (Pass 17 addendum) Make `readGuards_platform` unconditional: discharge its `unwritten`
+   premise from `PlatformInstallReceiver.platform_written_only_by_install`. The `.platform`
+   kind is kernelOnly to `.platformInstall`, and the ordinary birth family is not that
+   family. This needs a bridge from the birth's `prepared.writes` cell ids to the family
+   write discipline, and the bridge is not stated yet.
+7. Audit (c)'s Lean poles (satisfiable and teeth on a concrete loaded, signed `Pending`).

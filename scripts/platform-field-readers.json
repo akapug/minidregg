@@ -1,0 +1,420 @@
+{
+ "Compiler/CanonicalRuntimeProfileCore.lean": {
+  "template.lifetime": {
+   "count": 1,
+   "status": "encoding"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "encoding"
+  }
+ },
+ "Host/ApplicationAgentLifetimeGrantAuthoring.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ApplicationCurrentBirthAuthoring.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ApplicationFailedStartRecoveryAuthoring.lean": {
+  "config.completionCustodianKey": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ApplicationLifecycleCompletionOperator.lean": {
+  "config.completionCustodianKey": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ApplicationLifecycleLaunchCompletionAuthoring.lean": {
+  "config.completionCustodianKey": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ApplicationLifecycleRetryCompletionV4Authoring.lean": {
+  "config.completionCustodianKey": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/BirthRuntimeProfile.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/ClientConsentSettingsScenario.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/Json.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Host/Main.lean": {
+  "config.tariff": {
+   "count": 7,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/NativeReserveBirthAuthoring.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/PayClaims.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/SourceAgreementJson.lean": {
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Host/SourceAgreementReader.lean": {
+  "config.tariff": {
+   "count": 6,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ActivitySeatEnd.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationAgentLifetimeGrantAdmission.lean": {
+  "config.tariff": {
+   "count": 4,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationAgentLifetimeGrantIntentTemplate.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationAgentLifetimeGrantSource.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationFailedStartRecoveryAdmission.lean": {
+  "config.completionCustodianKey": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationGrainBirth.lean": {
+  "config.tariff": {
+   "count": 4,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationGrainSessionBirth.lean": {
+  "config.tariff": {
+   "count": 4,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationLifecycleCompletionAdmission.lean": {
+  "config.completionCustodianKey": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationLifecycleCompletionV2Admission.lean": {
+  "config.completionCustodianKey": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationLifecycleRetryCompletionV4Admission.lean": {
+  "config.completionCustodianKey": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueAdmission.lean": {
+  "config.tariff": {
+   "count": 4,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueAuthoring.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueGrainAdmission.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueGrainAuthoring.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueGrainReceiver.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueReceiver.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ApplicationShareIssueSource.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  },
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHost.lean": {
+  "config.tariff": {
+   "count": 10,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHostBookInvariant.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHostContext.lean": {
+  "config.completionCustodianKey": {
+   "count": 2,
+   "status": "owed"
+  },
+  "config.tariff": {
+   "count": 13,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHostGenesis.lean": {
+  "config.tariff": {
+   "count": 15,
+   "status": "genesis"
+  },
+  "template.lifetime": {
+   "count": 2,
+   "status": "genesis"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "genesis"
+  }
+ },
+ "Kernel/NativeHostGrainBirth.lean": {
+  "grainBirthTariffValue": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHostPayClaims.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/NativeHostReplay.lean": {
+  "config.tariff": {
+   "count": 22,
+   "status": "owed"
+  },
+  "grainBirthTariffValue": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveActivity.lean": {
+  "config.tariff": {
+   "count": 17,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveActivityReceiverCore.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveActivityUpgrade.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveCall.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveDomain.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveRefinesWorld.lean": {
+  "config.tariff": {
+   "count": 14,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveResumeContract.lean": {
+  "config.tariff": {
+   "count": 16,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveSend.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ObjectiveUpgradeInvariant.lean": {
+  "config.tariff": {
+   "count": 2,
+   "status": "owed"
+  }
+ },
+ "Kernel/ParticipantFactoryProvisioning.lean": {
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/PayEnrolReceiver.lean": {
+  "template.lifetime": {
+   "count": 1,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/ResourceBirthPolicyController.lean": {
+  "template.lifetime": {
+   "count": 4,
+   "status": "owed"
+  },
+  "template.ownerBudget": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "Kernel/SeatStore.lean": {
+  "config.tariff": {
+   "count": 1,
+   "status": "owed"
+  }
+ },
+ "TokenCensus/Table.lean": {
+  "config.tariff": {
+   "count": 3,
+   "status": "owed"
+  }
+ }
+}
