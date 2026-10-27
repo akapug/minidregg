@@ -51,7 +51,7 @@ deny. The index host resolves to a CDN; the caveat is the same as for `openroute
 ```
 install -m 0755 deploy/market/mini-market-fetch /usr/local/lib/mini/market/mini-market-fetch
 install -m 0644 deploy/market/mini-market.{service,timer,path} deploy/market/mini-apps-front.service /etc/systemd/system/
-install -m 0644 deploy/market/mini-apps-worker@.service ~mini-core/.config/systemd/user/     # the operator's user manager, beside mini-spk-broker@
+install -m 0644 deploy/market/mini-apps-worker@.service /etc/systemd/user/     # the operator's user manager, exactly where mini-spk-broker@.service goes (mini-core's home is root's /var/lib/mini)
 echo 'd /run/mini-apps 0750 mini-core mini-sessions -' >/etc/tmpfiles.d/mini-apps.conf && systemd-tmpfiles --create
 install -d -m 0711 -o root /var/lib/mini-apps
 systemctl enable --now mini-market.timer mini-market.path mini-apps-front.service
@@ -103,9 +103,10 @@ share). Why not Caddy to the sockets: `/var/lib/mini` and the route files stay h
 }
 ```
 
-If the wildcard certificate is managed by Caddy's DNS module rather than installed as files, replace
-the `tls` line's two paths with the `dns gandi {env.GANDI_TOKEN}` block the infra lane uses; the
-rest is unchanged. The 8 MiB body cap is the custodian's own bound (`http_entrance.rs`); the front
+The box keeps its own Caddy-issued wildcard `tls` block (the Gandi DNS module the infra lane
+built in) and takes only the proxy body above (`request_body`, `reverse_proxy 127.0.0.1:8799` with
+its `header_up` and `transport` lines); the `tls` lines in the block are the file-based variant for
+a box that installs the certificate as files. The 8 MiB body cap is the custodian's own bound (`http_entrance.rs`); the front
 answers 413 above its 128-byte bootstrap-form bound.
 
 ## 6. What a stranger sees
