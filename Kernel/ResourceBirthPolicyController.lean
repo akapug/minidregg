@@ -1474,6 +1474,31 @@ def preparePending
       else .error .ambiguousRequests
     else .error .duplicateCell
 
+/-- The stale case is refused by name (law 10): past the factory checks, a record whose
+creation tariff the pins do not carry is refused `platformStale`, never another reason. -/
+theorem preparePending_stale
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (method : FactoryMethod) (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
+    (stale : pins.tariff ≠ record.creation)
+    (checked : PLift (Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared)
+      descriptor))
+    (passes : check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor =
+      .ok checked) :
+    preparePending prepared height method = .error .platformStale := by
+  unfold preparePending
+  simp only [bind, Except.bind, passes]
+  split
+  · rename_i missing
+    rw [recorded] at missing
+    cases missing
+  · rename_i found holds
+    rw [recorded] at holds
+    cases holds
+    simp [require, stale, bind, Except.bind]
+
+#assert_axioms pending_stale_empty preparePending_stale
+
 def Pending.tuple
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
     {height : Height} (pending : Pending prepared height) (primary : Legs descriptor) :

@@ -87,8 +87,9 @@ stay silently stale.
   - `preparePending` refuses a missing record (`platformUnavailable`) and a different
     tariff (new birth `Reject.platformStale`).
   - Teeth `pending_stale_empty`: with the record present and `pins.tariff ≠
-    record.creation`, `Pending` is empty. This is stronger than the planned
-    `preparePending_stale`; the refusal's name is a disclosure detail.
+    record.creation`, `Pending` is empty. Beside it, `preparePending_stale`: past the
+    factory checks, that case is refused `.error .platformStale`, so the named refusal
+    (law 10) cannot drift.
 - `Kernel/ResourceBirthReceiver.lean`:
   - `ReceiverReadsCurrent` and `receiverReadsCurrent`, `unpriced_empty`, and
     `stale_unadmitted` (`IsEmpty (AcceptedBirth …)` for stale pins).
