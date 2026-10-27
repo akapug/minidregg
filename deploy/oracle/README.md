@@ -10,11 +10,14 @@ per-member limit. The split recipe keeps 26 public data files outside the SPK an
 signs explicit links to the fixed `/opt/oracle-data` mount. It does not chunk or
 reconstruct stores. See the [shared-data contract and recipe](../../docs/oracle-shared-data-packaging.md).
 
-The [v3 runtime receipt](runtime-v3-receipt.json) records the actual signed Linux
+The [v4 runtime receipt](runtime-v4-receipt.json) records the actual signed Linux
 artifact and independent verification of all 15,155 members. Its 91.9 MB
 compressed size fits the existing 256 MiB limit; the 15 GB public stores remain
 in their separately pinned shared dataset. Mini acceptance and public deployment
-are separate outcomes.
+are separate outcomes. V4 adds JSON Accept negotiation and the fixed WordNet
+data path; the [v3 receipt](runtime-v3-receipt.json) remains historical evidence.
+The host must also include the native status-header serialization fix recorded
+in the v4 receipt.
 
 ## Exact inputs
 
@@ -130,6 +133,37 @@ launch. The runtime package's signed `minidregg-data.json` pins that exact publi
 inventory; Mini mounts its matching published contents at `/opt/oracle-data`.
 Missing or corrupt data is a launch refusal. The runtime cannot supply a host
 path or grant itself access to another dataset.
+
+## Operator import and recovery
+
+Keep `--profile standard-v1` for the post-pack verification above: the v4
+artifact passed those archive bounds. That check does not establish how long
+Mini needs to materialize its 15,155 members. For this runtime, select
+`"importProfile": "operator-appliance-v1"` in the operator-owned broker
+`config.json`. The intake deadline is then 1,800 seconds instead of the default
+120 seconds. This is a physical intake budget selected by the operator, not a
+package declaration or caller parameter; signature, package identity and Mini
+admission still apply. The runtime remains within the standard 256 MiB raw
+package cap.
+
+The acceptance harness selects that broker setting through
+`ORACLE_IMPORT_PROFILE=operator-appliance-v1` (its current default). Its first
+v3 attempt used the standard profile and timed out during materialization after
+creating a prepared INSTALL record. At that checkpoint, INSTALL was prepared
+but incomplete and no START had occurred. The package and post-pack receipt
+remain unchanged.
+
+Recovery uses `scripts/oracle-shared-data-journey.sh --resume` with the same six
+original arguments. It checks the retained package, inventory, binaries and
+prepared INSTALL bytes, then retries physical image preparation and completion
+for that existing record. Do not create a replacement install or edit its
+prepared claim. The original failure evidence is retained under the run's
+`initial-attempt/`, including `evidence/install-a.stderr`, `install-status.json`,
+`native-state.tar` and `input-sha256.txt`. The observed timeout is recorded here;
+this checkpoint does not establish a passing acceptance result. Later v3
+attempts reached START and enrollment but exposed the HTTP response-header
+refusal addressed by the host fix and v4 composed transport tests. V4 receiving
+acceptance remains a separate run.
 
 ## Inside the grain
 

@@ -12,11 +12,15 @@ October 27 final-v3 candidate, they total 15,046,949,326 bytes; 89,636,654 bytes
 code and other assets remain in the runtime before Python and the app bridge.
 The original appliance and its receipt are preserved.
 
-The [v3 package receipt](../deploy/oracle/runtime-v3-receipt.json) records the
-actual signed artifact: 91,931,220 compressed bytes and 501,299,144 decoded bytes,
+The [v4 package receipt](../deploy/oracle/runtime-v4-receipt.json) records the
+actual signed artifact: 91,944,584 compressed bytes and 501,347,632 decoded bytes,
 with all 15,155 members independently checked. It fits Mini's existing standard
 256/768 MiB limits. The receipt is packaging evidence; the separate acceptance
 journey establishes what runs through Mini's current admission and calling path.
+The immutable v3 package is preserved. V4 changes JSON Accept negotiation and
+the signed WordNet data path; Oracle source and the public dataset are unchanged.
+The host also needs the native response-header serialization fix pinned by the
+v4 composed transport tests.
 
 ## Signed attachment and path layout
 
@@ -58,6 +62,9 @@ Directories containing both code and data remain in the runtime. The adapter
 continues to use `/opt/oracle` as its source and `/opt/oracle/root` as its complete
 root view. Its startup check resolves every declared bulk store and checks its
 presence and size. No change to Oracle's database lookup code is required.
+For shared-data packages, both signed launch commands set
+`NLTK_DATA=/opt/oracle-data/root/nltk_data`, allowing WordNet's resolved physical
+path without disabling NLTK's path checks.
 `/var/oracle-workspace` remains private persistent state for each grain.
 
 ## Build inputs and signing
@@ -75,8 +82,8 @@ signature message, and compresses both messages using liblzma. The format is
 unchanged. The pinned legacy Bread writer encoded empty byte arrays as void
 lists; independent verification caught that defect in an unpublished v2 package.
 The generated encoder preserves empty regular and executable files correctly.
-Packages exceeding Mini's standard 256 MiB compressed or 768 MiB decoded bounds
-are refused; no larger import profile is selected automatically.
+The packer refuses packages exceeding Mini's standard 256 MiB compressed or
+768 MiB decoded bounds. It does not select Mini's operator import profile.
 
 Build this small physical tool in an independent source snapshot containing both
 `deploy/oracle/pack/` and `native/spk-package-stream/`, with its committed Cargo lock:
@@ -129,6 +136,16 @@ inventory, including data declaration and symlink targets. Its receipt includes
 the shared-data inventory digest and exact raw package SHA-256. Mini must import
 that exact package hash; a pathname alone is not its identity.
 
+The v3 and v4 post-pack checks passed with `standard-v1`. Actual installation also needs
+time to materialize 15,155 members: the first v3 Mini attempt exceeded the standard
+120-second intake deadline after preparing INSTALL. Use the operator-owned
+broker configuration key `importProfile` with value `operator-appliance-v1`
+for this runtime, giving intake 1,800 seconds. The acceptance harness sets this
+through `ORACLE_IMPORT_PROFILE` and retains the selected profile in its run
+evidence. This physical budget does not change the signed artifact, its
+post-pack receipt, or Mini's admission checks. See the
+[operator import and recovery instructions](../deploy/oracle/README.md#operator-import-and-recovery).
+
 ## Acceptance scope
 
 The signed runtime, published dataset and post-pack receipt are inputs to the
@@ -137,6 +154,14 @@ acceptance lane under `deploy/oracle/acceptance/`. Publishing data or signing an
 SPK does not create a grant. Callers use the live `mini_application_api` catalog
 with relative path `query`, the signed prefix `/`, and the existing `query`
 permission. They cannot select an HTTP host, workspace or data mount.
+
+At the initial timeout checkpoint, INSTALL was prepared but incomplete and no
+START had occurred. The acceptance lane retained that attempt's evidence and
+resumed the exact prepared record under the operator profile, with unchanged
+package and inventory identities. Later v3 attempts reached START and enrollment,
+then exposed the host's refusal to serialize the bridge's status header. The
+host repair and v4 bridge pass composed transport fixtures; a complete v4 Mini
+receiving journey remains separate evidence.
 
 The packaging tests exercise explicit public-data selection, preserved lookup
 paths, signed symlink and attachment bytes, source-mutation refusal, genuine SPK
