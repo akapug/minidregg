@@ -57,6 +57,13 @@ use serde_json::{json, Value};
 const LOG_FILE: &str = "discord-mirror.log";
 /// At most this many entries or messages cross per direction per poll.
 const BATCH: usize = 20;
+/// Pause between two posts of one poll, so a burst does not run into the webhook's rate limit.
+const POST_PACING: Duration = Duration::from_millis(1100);
+
+/// Backoff after the destination refused a send `attempts` times: 30 s doubling, capped at 1 h.
+pub fn backoff_s(attempts: u64) -> u64 {
+    30u64.saturating_mul(1u64 << attempts.saturating_sub(1).min(7)).min(3600)
+}
 
 fn fail(msg: impl std::fmt::Display) -> ! {
     eprintln!("mini-discord-mirror: {msg}");
@@ -226,6 +233,8 @@ struct Mirror {
     channel: String,
     broker: Broker,
     state: PathBuf,
+    /// Pause between two posts of one poll ([`POST_PACING`]; zero in tests).
+    pacing: Duration,
 }
 
 impl Mirror {
@@ -274,13 +283,30 @@ impl Mirror {
                 match delivery.state() {
                     DeliveryState::Completed(_)=>{}
                     DeliveryState::Unknown=>return Err(format!("publication {cell}:{seq} UNKNOWN; inspect Discord and resolve before continuing")),
-                    DeliveryState::Fresh=>{
+                    // Order is kept: a refused entry holds the entries after it until it posts.
+                    DeliveryState::Refused{not_before,..} if now_s()<not_before=>return Ok(posted),
+                    DeliveryState::Fresh|DeliveryState::Refused{..}=>{
+                        if posted>0 {std::thread::sleep(self.pacing)}
                         record.save(delivery.start(json!({"publication":format!("{cell}:{seq}")}),now_s())?)?;
+                        // No answer from the broker: the post may or may not exist (UNKNOWN).
                         let answer=self.broker.call(&json!({"op":"discord-post","body":followup(text)}),Duration::from_secs(40)).map_err(|r|format!("publication {cell}:{seq} UNKNOWN ({r}); no automatic repost"))?;
-                        let code=answer["status"].as_u64().unwrap_or(0) as u16;
-                        if !(200..300).contains(&code){return Err(format!("publication {cell}:{seq} UNKNOWN (HTTP {code}); no automatic repost"))}
-                        record.save(Delivery::open(delivery.binding,record.value.clone())?.complete(json!({"http":code}),now_s())?)?;
-                        posted+=1;
+                        let started=Delivery::open(delivery.binding,record.value.clone())?;
+                        match answer["status"].as_u64() {
+                            Some(code) if (200..300).contains(&code) => {
+                                record.save(started.complete(json!({"http":code}),now_s())?)?;
+                                posted+=1;
+                            }
+                            // Discord answered and created no message (429, 4xx, a 5xx with
+                            // wait=true): retry with backoff, never a permanent UNKNOWN.
+                            Some(code) if (100..600).contains(&code) => {
+                                let attempts=record.value.as_ref().and_then(|v|v["attempts"].as_u64()).unwrap_or(0)+1;
+                                let not_before=now_s()+backoff_s(attempts);
+                                record.save(started.refused(json!({"http":code}),now_s(),not_before)?)?;
+                                eprintln!("mini-discord-mirror: publication {cell}:{seq} refused (HTTP {code}); retry after {not_before}");
+                                return Ok(posted);
+                            }
+                            _ => return Err(format!("publication {cell}:{seq} UNKNOWN (no HTTP status); no automatic repost")),
+                        }
                     }
                 }
             }
@@ -397,6 +423,7 @@ fn main() {
         room,
         channel,
         broker,
+        pacing: POST_PACING,
     };
     // One process owns this bridge configuration and all its page files.
     let mut lease=Record::lock(&state_dir,&format!("{}-bridge",mirror.room)).unwrap_or_else(|e|fail(e)).unwrap_or_else(||fail("bridge already running"));
@@ -438,6 +465,15 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refusal_backoff_doubles_from_30_s_and_caps_at_an_hour() {
+        assert_eq!(backoff_s(1), 30);
+        assert_eq!(backoff_s(2), 60);
+        assert_eq!(backoff_s(5), 480);
+        assert_eq!(backoff_s(8), 3600);
+        assert_eq!(backoff_s(64), 3600);
+    }
 
     #[test]
     fn room_to_channel_skips_bridged_and_own_entries() {
@@ -583,7 +619,7 @@ mod tests {
         std::fs::write(&wrapper,"#!/bin/sh\ncase \"$SSH_ORIGINAL_COMMAND\" in\n tail*) cat \"$6/feed.json\" ;;\n *) printf '%s\\n' \"$SSH_ORIGINAL_COMMAND\" >> \"$6/says.log\" ;;\nesac\n").unwrap();
         std::fs::set_permissions(&wrapper,std::fs::Permissions::from_mode(0o700)).unwrap();
         let (broker,channel)=test_broker(&home,&api);
-        Mirror{deployment:Deployment{wrapper,mini:"/fixed/mini".into(),host:"/fixed/host".into(),config:"/fixed/config".into(),socket:"/fixed/socket".into(),timeout:Duration::from_secs(2),runner:None},session:Session{name:"mirror".into(),workspace:home.join("workspace"),home:home.clone()},room:"commons".into(),channel,broker,state:home.join("mirror/commons.json")}
+        Mirror{deployment:Deployment{wrapper,mini:"/fixed/mini".into(),host:"/fixed/host".into(),config:"/fixed/config".into(),socket:"/fixed/socket".into(),timeout:Duration::from_secs(2),runner:None},session:Session{name:"mirror".into(),workspace:home.join("workspace"),home:home.clone()},room:"commons".into(),channel,broker,state:home.join("mirror/commons.json"),pacing:Duration::ZERO}
     }
     fn page(m:&Mirror,start:u64,end:u64){
         let mut s=json!({"type":"mini-chat-room-v1","private":false,"selectedEntries":end-start,"discoveryCursors":{"42":end-1},"unreadable":[]}).to_string()+"\n";
@@ -603,6 +639,28 @@ mod tests {
         state.cursors.insert("42".into(),json!(44));page(&m,45,46);assert_eq!(m.up(&mut state).unwrap(),0);assert_eq!(count.load(Ordering::SeqCst),45);
         page(&m,46,47);assert!(m.up(&mut state).is_err());assert_eq!(count.load(Ordering::SeqCst),46);
         state=load_state(&m.state).unwrap();assert!(m.up(&mut state).unwrap_err().contains("UNKNOWN"));assert_eq!(count.load(Ordering::SeqCst),46);
+    }
+    #[test] fn a_refused_post_backs_off_and_retries_in_order_never_unknown(){
+        use minidregg_discord_entrance::http::{read_request,write_response};
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let addr=format!("http://{}",listener.local_addr().unwrap());
+        let count=Arc::new(AtomicUsize::new(0));let remote=count.clone();
+        // The third post is rate-limited once (429), everything else is accepted.
+        std::thread::spawn(move||{for stream in listener.incoming(){let mut stream=stream.unwrap();let _=read_request(&mut stream).unwrap();let n=remote.fetch_add(1,Ordering::SeqCst);
+            if n==2{let _=write_response(&mut stream,429,"Too Many Requests","application/json",br#"{"retry_after":1}"#);}else{let _=write_response(&mut stream,204,"No Content","application/json",b"");}}});
+        let m=test_mirror("refused",addr);let mut state=State::default();
+        page(&m,1,6);
+        assert_eq!(m.up(&mut state).unwrap(),2,"two posted, the third refused, the rest held behind it");
+        state=load_state(&m.state).unwrap();assert_eq!(state.cursors["42"],2);assert_eq!(count.load(Ordering::SeqCst),3);
+        let record=m.custody_root().join("up-42-3.json");
+        let mut v:Value=serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        assert_eq!(v["phase"],"refused");assert_eq!(v["evidence"]["http"],429);
+        // Inside the backoff nothing is sent and nothing is skipped.
+        assert_eq!(m.up(&mut state).unwrap(),0);assert_eq!(count.load(Ordering::SeqCst),3);
+        // After it, the refused entry posts first and the rest follow.
+        v["notBefore"]=json!(0);std::fs::write(&record,v.to_string()).unwrap();
+        assert_eq!(m.up(&mut state).unwrap(),3);state=load_state(&m.state).unwrap();
+        assert_eq!(state.cursors["42"],5);assert_eq!(count.load(Ordering::SeqCst),6);
     }
     #[test] fn channel_backfill_retains_all_115_across_restart_and_small_drains(){
         use minidregg_discord_entrance::http::{read_request,write_response};
