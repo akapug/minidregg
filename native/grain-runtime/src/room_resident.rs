@@ -181,6 +181,7 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
                     return Ok(true);
                 }
                 atomic_json(state, journal)?;
+                if close_refused_pending(config, journal, state)? { return Ok(true); }
                 return Err(format!("resident prompt ended {}; retained for review without replay", frame["outcome"]));
             }
             _ => {}
@@ -247,6 +248,37 @@ fn drain_preadmission_refusal(config:&Config,config_path:&Path,journal:&mut Resi
     Ok(true)
 }
 
+/// A prompt whose retained frame is not `completed` is decided only by the
+/// controller's typed outcome record (gr §4.3), never by the frame's label.
+/// `refused` closes it here: there is no completion receipt to wait for, the
+/// pending turn is cleared and counted, and `resident_requests::reconcile`
+/// then closes its request `failed-after-admission` from the same record.
+/// `undecided` (or no record yet) keeps it pending with the retry the record
+/// names; a failed frame over an `admitted` record is a conflict.
+fn close_refused_pending(config:&Config,journal:&mut ResidentState,state:&Path)->Result<bool> {
+    let (Some(pending),Some(frame))=(journal.pending.as_ref(),journal.last_completion.as_ref()) else{return Ok(false)};
+    if frame["type"]!="prompt-complete" || frame["outcome"]=="completed" {return Ok(false)}
+    if frame["residentPendingSha256"]!=json!(sha256_bytes(&serde_json::to_vec(pending).map_err(|e|e.to_string())?)?) {
+        return Err("retained failed completion does not bind the pending resident prompt".into());
+    }
+    let id=pending["residentPromptId"].as_str().ok_or("pending resident prompt has no unique identity")?;
+    let sha=pending["promptSha256"].as_str().ok_or("pending resident prompt has no digest")?;
+    validate_resident_origin(frame,id,sha)?;
+    let op=frame["residentOrigin"]["promptOperationId"].as_u64().ok_or("failed completion has no prompt operation")?;
+    let record=prompt_outcome::read_bound(&config.state_dir,op,id,sha)?;
+    match record.outcome {
+        prompt_outcome::Outcome::Refused{..}=>{}
+        prompt_outcome::Outcome::Undecided{retry,..}=>return Err(format!(
+            "resident prompt {op} is undecided; resolve it with admin {:?} (operation {:?}); it is never replayed",retry.admin,retry.operation)),
+        prompt_outcome::Outcome::Admitted{..}=>return Err(format!(
+            "resident prompt {op} ended {} over an admitted outcome record; retained for review",frame["outcome"])),
+    }
+    journal.completed=journal.completed.checked_add(1).ok_or("resident completed counter exhausted")?;
+    journal.pending=None;
+    atomic_json(state,journal)?;
+    Ok(true)
+}
+
 /// Publish owed request-status notices through the room-turn payment and the
 /// exact write record. Never an error for the driver: a notice that cannot be
 /// afforded is skipped, an undecided one is retried on a later pass, and no
@@ -306,6 +338,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     drain_preadmission_refusal(&config,&options.controller,&mut journal,&state)?;
     resident_completion::drain(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?; }
+    close_refused_pending(&config, &mut journal, &state)?;
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed".into()); }
     resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
@@ -394,6 +427,49 @@ mod tests {
         let (root, rt) = crate::tests::restart_resolution_fixture("resident-pending");
         let mut state = ResidentState { pending:Some(json!({"requestId":2})), ..ResidentState::default() };
         assert!(prompt(&rt.config, &rt.config_path, &json!({}), &mut state, &root.join("journal.json"),None).unwrap_err().contains("uncertain"));
+        fs::remove_dir_all(root).unwrap();
+    }
+    fn failed_pending(outcome: Option<prompt_outcome::Outcome>, tag: &str) -> (PathBuf, Result<bool>, ResidentState) {
+        let (root, rt) = crate::tests::restart_resolution_fixture(tag);
+        let (id, sha) = ("a".repeat(64), "b".repeat(64));
+        let pending = json!({"selectedRequest":null,"residentPromptId":id,"inputSha256":"c".repeat(64),
+            "promptSha256":sha,"attachmentId":7,"requestId":2});
+        let frame = json!({"v":1,"type":"prompt-complete","attachmentId":7,"requestId":2,"outcome":"failed",
+            "residentOrigin":{"residentPromptId":id,"promptSha256":sha,"promptOperationId":42,"sessionId":"s"},
+            "residentPendingSha256":sha256_bytes(&serde_json::to_vec(&pending).unwrap()).unwrap()});
+        if let Some(outcome) = outcome {
+            prompt_outcome::write(&rt.config.state_dir, &prompt_outcome::Record { kind: prompt_outcome::KIND.into(),
+                prompt_operation_id: 42, resident_prompt_id: Some(id.clone()), prompt_sha256: Some(sha.clone()),
+                session_id: Some("s".into()), outcome }).unwrap();
+        }
+        let mut journal = ResidentState { completed: 3, pending: Some(pending), last_completion: Some(frame), ..ResidentState::default() };
+        let result = close_refused_pending(&rt.config, &mut journal, &root.join("resident.json"));
+        (root, result, journal)
+    }
+    #[test]
+    fn a_failed_prompt_refused_by_its_typed_record_is_closed_and_counted() {
+        let refused = prompt_outcome::Outcome::Refused { stage: prompt_outcome::RefusalStage::TurnFailure,
+            reason: "provider-refused:member-day-ceiling".into() };
+        let (root, result, journal) = failed_pending(Some(refused), "resident-failed-refused");
+        assert!(result.unwrap());
+        assert!(journal.pending.is_none(), "a decided refusal leaves nothing pending for the next pass");
+        assert_eq!(journal.completed, 4);
+        assert_eq!(journal.last_completion.as_ref().unwrap()["outcome"], "failed", "the frame stays for reconcile");
+        let durable: ResidentState = serde_json::from_slice(&fs::read(root.join("resident.json")).unwrap()).unwrap();
+        assert!(durable.pending.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_failed_prompt_without_a_refused_record_stays_pending() {
+        let (root, result, journal) = failed_pending(None, "resident-failed-unrecorded");
+        assert!(result.unwrap_err().contains("undecided until the controller writes one"));
+        assert!(journal.pending.is_some()); assert_eq!(journal.completed, 3);
+        fs::remove_dir_all(root).unwrap();
+        let undecided = prompt_outcome::Outcome::Undecided { retry: prompt_outcome::Retry {
+            admin: vec!["recover".into()], operation: Some(9) }, detail: "settle undecided".into() };
+        let (root, result, journal) = failed_pending(Some(undecided), "resident-failed-undecided");
+        assert!(result.unwrap_err().contains("is undecided"));
+        assert!(journal.pending.is_some()); assert_eq!(journal.completed, 3);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
