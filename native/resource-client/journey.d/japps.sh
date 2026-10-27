@@ -107,12 +107,18 @@ else
 fi
 if [ "$mode" = --box ]; then
   if [ -x "$BIN/spk-host" ]; then
+    # qualify spools beside its input and refuses a world-writable ancestor (/tmp): the copies sit
+    # under the runner's own 0700 cache directory, as the operator's inbox does.
+    Q=${XDG_CACHE_HOME:-$HOME/.cache}/mini-japps-qualify.$$
+    mkdir -p -m 0700 "${XDG_CACHE_HOME:-$HOME/.cache}" && mkdir -m 0700 "$Q"
     for pair in "$SLIDES_PKG:accept" "$TODOS_PKG:accept" "$ETHERPAD_PKG:saveIdentityCaps" "$TTRSS_PKG:expectAppHooks"; do
       pkg=${pair%%:*} want=${pair##*:}
       seed "$pkg"; bash "$FETCH" --state "$W/state" --mini "$MINI" fetch "$pkg" >/dev/null 2>&1
-      if q=$("$BIN/spk-host" qualify --import-profile standard-v1 "$W/state/quarantine/$pkg.spk" 2>"$W/q-$pkg.err"); then got=accept; else got=$(grep -oE 'saveIdentityCaps|expectAppHooks|apiPath' "$W/q-$pkg.err" | head -1); fi
-      row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err")}"
+      cp "$W/state/quarantine/$pkg.spk" "$Q/$pkg.spk" && chmod 0600 "$Q/$pkg.spk"
+      if q=$("$BIN/spk-host" qualify --import-profile standard-v1 "$Q/$pkg.spk" 2>"$W/q-$pkg.err"); then got=accept; else got=$(grep -oE 'saveIdentityCaps|expectAppHooks|apiPath' "$W/q-$pkg.err" | head -1); fi
+      row "spk-host qualify $pkg -> $want" "$([ "$got" = "$want" ] && echo 1 || echo 0)" "${got:-$(tail -1 "$W/q-$pkg.err" | cut -c1-120)}"
     done
+    rm -rf "$Q"
   else
     row "spk-host present for qualify" 0 "no $BIN/spk-host"
   fi
