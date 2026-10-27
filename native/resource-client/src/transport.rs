@@ -198,7 +198,7 @@ pub(crate) fn pinned_address(address: &Path) -> Result<String, String> {
 fn split_envelope<'a>(
     envelope: &'a [u8],
     config: &[u8],
-) -> Result<(Option<&'a [u8]>, &'a [u8]), &'static str> {
+) -> Result<(&'a [u8], &'a [u8]), &'static str> {
     // Version 1 (no Host image pin) is retired: every client sends v2, and an unpinned request is
     // refused by name before anything is forwarded.
     if envelope.first() == Some(&1) {
@@ -217,13 +217,8 @@ fn split_envelope<'a>(
     let sha_end = config_end
         .checked_add(32)
         .ok_or("invalid socket envelope")?;
-    let (pin, request_start) = (
-        Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
-        sha_end,
-    );
-    let request = envelope
-        .get(request_start..)
-        .ok_or("invalid socket envelope")?;
+    let pin = envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?;
+    let request = envelope.get(sha_end..).ok_or("invalid socket envelope")?;
     if request.is_empty() {
         return Err("invalid socket envelope");
     }
@@ -236,7 +231,7 @@ fn request_from_envelope<'a>(
     host_sha256: &[u8; 32],
 ) -> Result<&'a [u8], &'static str> {
     let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_some_and(|pin| pin != host_sha256.as_slice()) {
+    if pin != host_sha256.as_slice() {
         return Err("host image pin mismatch");
     }
     Ok(request)
@@ -270,8 +265,7 @@ pub(crate) fn public_envelope(
 /// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
 /// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
 pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
-    let (pin, request) = split_envelope(envelope, config)?;
-    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
+    let (_, request) = split_envelope(envelope, config)?;
     if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
         || !request_within_bound(request) || !allowed_operator_operation(request) {
         return Err("operation unavailable on agent operator proxy");
@@ -3833,8 +3827,9 @@ done"#;
             supervise(&listener, Some(&OperatorPeers::with(&[])), b"config", &[0;32], false, &mut start)
         });
         let envelope = |request: &[u8]| {
-            let mut bytes = vec![1,6,0,0,0];
+            let mut bytes = vec![2,6,0,0,0];
             bytes.extend_from_slice(b"config");
+            bytes.extend_from_slice(&[0; 32]);
             bytes.extend_from_slice(request);
             bytes
         };

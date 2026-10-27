@@ -324,7 +324,9 @@ mod tests {
         p
     }
     fn body() -> Vec<u8> {
-        [vec![1, 2, 0, 0, 0], b"{}".to_vec(), vec![12]].concat()
+        // envelope v2: config "{}", a Host image pin (the public envelope check leaves the pin to
+        // the socket), operation 12
+        [vec![2, 2, 0, 0, 0], b"{}".to_vec(), vec![0; 32], vec![12]].concat()
     }
     fn ready(g: &AsyncDispatch, class: usize, id: [u8; 16], access: &[u8; 32]) -> Vec<u8> {
         let until = Instant::now() + Duration::from_secs(3);

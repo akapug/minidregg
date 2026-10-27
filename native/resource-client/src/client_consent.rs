@@ -33,11 +33,14 @@ pub(crate) fn take_stale_observation() -> bool {
     STALE_OBSERVATION.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
-fn resident_enabled()->bool { std::env::var("MINI_CONSENT_RESIDENT").as_deref()!=Ok("0") }
+// A resident is `mini` itself (`current_exe`); a unit-test binary is not `mini` and cannot start
+// one (`<test binary> consent-resident` is refused by the harness), so its tests keep the provider
+// and the codec in process. The resident path is the journeys' and the shell's, with the binary.
+fn resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CONSENT_RESIDENT").as_deref()!=Ok("0") }
 /// HOT-PATH 2a: the storeless codec Host is resident the same way (`mini codec-resident`), ONE per
 /// `pure_host` binding for every `mini` process of this user instead of one 159 MB Lean image per
 /// process. `MINI_CODEC_RESIDENT=0` keeps the per-process child.
-fn codec_resident_enabled()->bool { std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
+fn codec_resident_enabled()->bool { !cfg!(test) && std::env::var("MINI_CODEC_RESIDENT").as_deref()!=Ok("0") }
 /// A resident with no frame for `$variable` seconds (default `RESIDENT_IDLE_S`, 600) ends.
 fn resident_idle(variable:&str)->std::time::Duration {
     std::time::Duration::from_secs(std::env::var(variable).ok().and_then(|v|v.parse().ok()).unwrap_or(mini_sdk::consent::RESIDENT_IDLE_S))
