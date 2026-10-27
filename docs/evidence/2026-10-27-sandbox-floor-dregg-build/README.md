@@ -14,7 +14,7 @@ SPK_AUDIT_ROOT=/var/lib/spk-floor-audit swarm-build bash scripts/spk-platform/sa
 Verdict (`results.txt`): the floor test `operator_probe_holds_inside_production_resident_sandbox` exit 0
 (32 checks `held: true`, none false) and the pre-floor test `operator_probe_breaches_under_pre_floor_arguments`
 exit 0 (21 checks report the expected breaches). Hashes of the test ELF, the probe and the image's four
-files are in `environment.txt`; the two transient units' transcripts and the (empty) app output logs are
+files are in `environment.txt`; the two transient units' transcripts and the probe's app output logs are
 beside it.
 
 Two facts about the root, for the script and the box:
@@ -26,5 +26,9 @@ Two facts about the root, for the script and the box:
   `/var/lib/spk-floor-audit` (root:root 0755 on the ext4 root), and its sudoers rule for `lanes` is
   anchored there (dregg-infra `edge/tofu-build/sudoers-lanes-floor-audit`).
 - The script's line "bwrap hit ENOSYS under the unit's hardening (openat2 filtered?)" printed for BOTH
-  tests on this PASSING run while neither transcript contains `ENOSYS`; the detection fires on an empty
-  app-output log, so on this box it is a false positive to fix in the script, not a finding.
+  tests on this PASSING run. Its detector greps the transcript and app log for "Function not implemented",
+  and that string is exactly what the probe's own held checks report when seccomp refuses an unlisted
+  syscall (`unlisted-syscall-refused`, `io_setup-refused`, `vmsplice-refused`, `set_mempolicy-refused`:
+  errno 38, `held: true`). So the note is the floor holding, misread as bwrap failing: the detector needs
+  to look at bwrap's stderr (the unit's own lines), not the probe's JSON. A finding about the script, not
+  about the sandbox.
