@@ -646,7 +646,6 @@ Kernel.ObjectiveActivityWire	3.1	3732964	0
 Assurance.NoteSpendConcreteCellAdapter	2.8	3732696	0
 Assurance.HyperdocumentLinkClientLocalFileCutover	2.2	3731504	0
 Compiler.ObjectiveBendLawCodec	3.7	3729068	0
-Kernel.QuotaGcSettlement	3.2	3728836	0
 Compiler.ResourceBirthCodec	3.2	3728764	0
 Compiler.ObjectiveBendPublication	2.2	3728580	0
 Assurance.HyperdocumentReactiveCarrierWitness	2.9	3728572	0
@@ -723,7 +722,6 @@ Kernel.CanonicalPolicyRegistry	2.4	3696172	0
 Kernel.ContentResourceForestInstances	2.0	3695752	0
 Compiler.ObjectiveInvocationClaim	2.6	3695532	0
 Kernel.FieldClosure	2.5	3695048	0
-Assurance.QuotaGcSettlementWitness	2.3	3694472	0
 Compiler.StreamCell	2.8	3693128	0
 Theory	1.9	3692232	0
 Kernel.PayChainTip	2.3	3692216	0
