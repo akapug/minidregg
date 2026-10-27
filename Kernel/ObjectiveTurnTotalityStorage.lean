@@ -619,11 +619,11 @@ theorem count_posts (config : Config) (snapshot : Snapshot rootBytes)
   rw [mem_countPosts hp]
   simp
 
-theorem yield_images {config : Config} {snapshot : Snapshot rootBytes}
+theorem yield_images {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : DurableDataIntent.CellId}
     {generation : Nat} {current : Option ObjectState} {viewed : Bool}
     {segment : Segment} {committed : YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok (some committed)) : Images committed.posts := by
   obtain ⟨_, _, _, committedExact⟩ := segmentCommit_spec ok
   intro p hp
@@ -631,11 +631,11 @@ theorem yield_images {config : Config} {snapshot : Snapshot rootBytes}
   · rw [eq]; simp
   · rw [eq]; simp
 
-theorem optional_yield_images {config : Config} {snapshot : Snapshot rootBytes}
+theorem optional_yield_images {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : DurableDataIntent.CellId}
     {generation : Nat} {current : Option ObjectState} {viewed : Bool}
     {segment : Segment} {committed : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok committed) : Images ((committed.map YieldCommit.posts).getD []) := by
   cases committed with
   | none => simp
@@ -646,6 +646,8 @@ theorem abandon_images {config : Config} {snapshot : Snapshot rootBytes}
     (ok : abandonSlot config snapshot await = .ok (posts, claims)) : Images posts := by
   unfold abandonSlot at ok
   split at ok
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
   · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
     rw [← ok.1]; simp
   · rename_i name _ _
