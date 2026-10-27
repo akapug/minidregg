@@ -576,10 +576,10 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
         ("links Discord", "<code>/mini link CODE</code> in Discord with the code the door's status page shows; <code>/mini say</code> then lands as your turn and appears in the web room.".into(), String::new()),
         ("opens the terminal", "<code>mini shell</code> in the page, or over ssh with the key you gave: the same verbs, the same receipts.".into(),
             "<p><a href=\"/term\">Terminal</a></p>".into()),
-        ("plays", "A story room: collective fiction under a law the author sealed; the Lean theorem <code>sealed_story_scene_monotone</code> is the rule of the game.".into(),
-            forms(11, &[("story", "story new"), ("look", "look"), ("go", "go"), ("take", "take"), ("act", "act"), ("narrate", "narrate")])),
-        ("reads the operations room", "The box's own ships, drills, certifier ticks and backup receipts as signed turns of the box's member; the published performance numbers read from the same world.".into(),
-            operations(site)),
+        ("plays", "A story room from the built-in tale (<em>The Lamplighter's House</em>): <code>story new T --from tale</code>, <code>story seal T</code>, then invite yourself and join with the invitation the invite prints. <code>look</code> shows your scene; <code>go north</code> from the hallway is a legal move, admitted; <code>go north</code> again from the anteroom needs the key and is refused with that clause. The rule of the game is the Lean theorem <code>sealed_story_scene_monotone</code>, proved for the built-in tale's generator (the law of a table you write yourself is checked, not proved).".into(),
+            forms(11, &[("story", "story new"), ("story", "story seal"), ("story", "story invite"), ("story", "story join"), ("story", "story enter"), ("look", "look"), ("go", "go"), ("take", "take"), ("act", "act"), ("narrate", "narrate")])),
+        ("changes the rules", "A law on your own document that refuses even you: <code>law check</code> first says whether any write could ever pass it (nothing is installed); then install it; your next append is refused with the clause; revise the law (installs are not writes, so the law stays changeable: <code>--i-lock-myself-out</code> is a different door) and the append is admitted. Every outcome is a receipt.".into(),
+            forms(12, &[("law", "law check"), ("law", "law"), ("doc", "doc append"), ("law", "law show")])),
     ];
     let mut body = String::from("<p>Fifteen minutes, from a browser, nothing installed. Every form below is the real form: the words of one shell verb, run as you, answered by the Host; its outcome lands under the step.</p>\n<ol class=\"tour\">");
     for (i, (title, text, forms_html)) in steps.iter().enumerate() {
