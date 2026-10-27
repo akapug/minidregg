@@ -149,15 +149,15 @@ pub(crate) fn is_prepare_stale_target(decision: Option<&HostDecision>) -> bool {
 /// identical text against the new root. Whether every `staleTarget` refusal at
 /// admission is proven no-append is the open Lean question Q2/Q3
 /// (docs/review/2026-10-26-native-crates/resource-client.md §8, "Questions for
-/// the Lean side"; lane L1 owns the answer and the `NO_RECORD` frame). Until
-/// L1 lands it, this classifier trusts the decoded phase, as the existing
-/// `stale-root` path trusts its reason.
+/// the Lean side"; lane L1 owns the answer). A session frame re-plans only
+/// under `NO_RECORD` (253), the Host's proof that nothing was appended; the
+/// same decoded refusal under `HOST_OUTCOME` (255) is undecided and is looked
+/// up, never re-planned.
 pub(crate) fn submit_stale_target(decision: Option<&HostDecision>) -> Option<String> {
-    let outcome = match decision {
-        Some(HostDecision::RefusedFrame { command, decoded: Some(value), .. }) if command == "submit" => value,
-        Some(HostDecision::Outcome(value)) => value,
-        _ => return None,
-    };
+    let (command, outcome) = decided(decision)?;
+    if !(command.is_empty() || command == "submit") {
+        return None;
+    }
     if outcome["type"] != "refused" || outcome["reason"] != "operation-rejected"
         || outcome["phase"] != crate::hex(b"stale-target") {
         return None;
@@ -634,12 +634,12 @@ mod tests {
         let value = |phase: &[u8], detail: &[u8]| serde_json::json!({"type":"refused","reason":"operation-rejected",
             "phase":crate::hex(phase),"detail":crate::hex(detail)});
         let good = value(b"stale-target", b"target 42 moved since the plan was signed");
-        for byte in [253u8, 255] {
-            let frame = HostDecision::RefusedFrame { command: "submit".into(), byte, encoded: vec![], decoded: Some(good.clone()) };
-            assert_eq!(submit_stale_target(Some(&frame)).as_deref(), Some("42"));
-        }
+        let frame = |byte| HostDecision::Frame { command: "submit".into(), byte, encoded: vec![], decoded: Some(good.clone()) };
+        assert_eq!(submit_stale_target(Some(&frame(253))).as_deref(), Some("42"));
+        // The same decoded refusal under 255 is undecided: looked up, never re-planned.
+        assert_eq!(submit_stale_target(Some(&frame(255))), None);
         assert_eq!(submit_stale_target(Some(&HostDecision::Outcome(good.clone()))).as_deref(), Some("42"));
-        let prepare = HostDecision::RefusedFrame { command: "prepare".into(), byte: 255, encoded: vec![], decoded: Some(good.clone()) };
+        let prepare = HostDecision::Frame { command: "prepare".into(), byte: 255, encoded: vec![], decoded: Some(good.clone()) };
         assert_eq!(submit_stale_target(Some(&prepare)), None);
         for other in [value(b"invoke", b"target 42 moved since the plan was signed"),
             value(b"stale-target", b"target 4x2 moved since the plan was signed"),
@@ -648,7 +648,7 @@ mod tests {
         }
         let mut uncertain = good.clone(); uncertain["type"] = serde_json::json!("uncertain");
         assert_eq!(submit_stale_target(Some(&HostDecision::Outcome(uncertain))), None);
-        assert_eq!(submit_stale_target(Some(&HostDecision::RefusedFrame {
+        assert_eq!(submit_stale_target(Some(&HostDecision::Frame {
             command: "submit".into(), byte: 255, encoded: vec![1], decoded: None })), None);
     }
 

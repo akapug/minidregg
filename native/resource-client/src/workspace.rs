@@ -7264,7 +7264,7 @@ mod tests {
         // The fake Host: the document's root, its lines, every call's nonce.
         struct Host { root: u64, lines: Vec<String>, nonces: Vec<u64>, next_nonce: u64 }
         let host = Arc::new(Mutex::new(Host { root: 0, lines: vec![], nonces: vec![], next_nonce: 0 }));
-        let stale = |target: &str| HostDecision::RefusedFrame {
+        let stale = |target: &str| HostDecision::Frame {
             command: "submit".into(), byte: 253, encoded: vec![],
             decoded: Some(json!({"type":"refused","reason":"operation-rejected","phase":hex(b"stale-target"),
                 "detail":hex(format!("target {target} moved since the plan was signed").as_bytes())})),
@@ -7316,7 +7316,7 @@ mod tests {
         assert_eq!(super::append_recovery_class(Some(&stale("11")), &source, true), None);
         assert_eq!(super::append_recovery_class(Some(&stale("10")), &source, false), None);
         assert_eq!(super::append_recovery_class(Some(&HostDecision::Outcome(json!({"type":"uncertain"}))), &source, true), None);
-        assert_eq!(super::append_recovery_class(Some(&HostDecision::RefusedFrame {
+        assert_eq!(super::append_recovery_class(Some(&HostDecision::Frame {
             command: "submit".into(), byte: 255, encoded: vec![1], decoded: None }), &source, true), None);
         assert_eq!(super::append_recovery_class(None, &source, true), None);
         std::fs::remove_dir_all(&dir).unwrap();
