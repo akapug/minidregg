@@ -551,6 +551,60 @@ try:
                     and field_of(a3.get('state'), 'chapters') == 0
                     and World.await_of(a3).get('id') == World.await_of(c2).get('id'),
                     {'state': a3.get('state'), 'version': [c2.get('stateVersion'), a3.get('stateVersion')]})
+    if a.scenario == 'commons':
+        # Commons law natively (ResidentServiceCommons.obend :799-:831 `serve`/`step`/`admit`, comment :662-:672 of the
+        # activity layer: an accepted proposal is ONE `commit {write}` that WRITES the admission {phase, admissions+1}
+        # through the object's law, decided at the yield). The events are the typed `Event` values of the cohort's own
+        # row `CommonsLifecycleCancelPath` (world/commons/preview-cohort.json): reserveRequested then cancelRequested,
+        # taken verbatim from its responses (their payloads are the large Request/Offer/Sponsorship records :700).
+        rec = v['recordCell']
+        rows = json.load(open(repo / 'world' / 'commons' / 'preview-cohort.json'))
+        row = next(r for r in rows if r['name'] == 'CommonsLifecycleCancelPath')
+
+        def replies(r):
+            out = []
+            for resp in r['responses']:
+                outcome = next(f['value'] for f in resp['payload']['fields'] if f['name'] == 'outcome')
+                if outcome['label'] == 'reply':
+                    out.append(outcome['payload'])
+            return out
+        reserve, cancel = replies(row)
+        phase_of = lambda view: scalar_of(view.get('state'), 'phase', 'label')
+        with w.group('commons'):
+            w.check('cohort-events-are-reserve-then-cancel', reserve['label'] == 'reserveRequested'
+                    and cancel['label'] == 'cancelRequested', {'labels': [reserve['label'], cancel['label']]})
+            w.check('born-awaiting-the-keeper-vacant-0-admissions',
+                    source_of(v).get('kind') == 'reply' and phase_of(v) == 'vacant'
+                    and field_of(v.get('state'), 'admissions') == 0, {'source': source_of(v), 'state': v.get('state')})
+            _, v1 = drive('obj', 'reserve', tx, rec, v, reserve)
+            w.check('reserve-admission-commits-held-once',
+                    source_of(v1) == performed('settled') and phase_of(v1) == 'held'
+                    and field_of(v1.get('state'), 'admissions') == 1, {'source': source_of(v1), 'state': v1.get('state')})
+            v2 = deliver_only('obj', 'settled-reserve', tx, rec, v1)
+            _, v3 = drive('obj', 'cancel', tx, rec, v2, cancel)
+            w.check('cancel-admission-commits-cancelled-once',
+                    source_of(v3) == performed('settled') and phase_of(v3) == 'cancelled'
+                    and field_of(v3.get('state'), 'admissions') == 2, {'source': source_of(v3), 'state': v3.get('state')})
+            v4 = deliver_only('obj', 'settled-cancel', tx, rec, v3)
+            w.check('terminal-phase-ends-the-activity',
+                    v4.get('state') == v3.get('state') and v4['record'].get('phase', {}).get('kind') != 'awaiting',
+                    {'phase': v4['record'].get('phase'), 'state': v4.get('state')})
+        # Teeth: an object whose law is `admissions <= 0` refuses the reservation's admission write: the delivery is
+        # refused `objectWrite` as a whole turn, the object stays `vacant` and the activity stays at its yield
+        # (cohort row CommonsLifecycleRefusedAdmissionStaysAtYield).
+        with w.group('commons-teeth-law-refuses-admission'):
+            w.create('create-lawful', w.sponsor, 'lawful', aw.le('admissions', 0), 'installed', state_type=COMMONS_STATE)
+            tx3, b = birth_of('lawful', record(keeper=nat(second_acct), fresh=boolean(True)), a.deposit, 'birth-lawful')
+            rec3 = b['recordCell']
+            w.turn('resolve-reserve-lawful', w.second, {'kind': 'resolve', 'slot': source_of(b)['slot'],
+                                                         'answer': {'reply': reserve}}, 'installed')
+            w.turn('deliver-reserve-law-refused', w.sponsor, {'kind': 'deliver', 'record': rec3,
+                   'await': World.await_of(b)['id'], 'account': '0', 'accountCapability': '0'}, 'refused', 'objectWrite')
+            a3 = w.state('lawful', 'after-law-refusal', tx3)
+            w.check('law-refused-admission-writes-nothing',
+                    a3.get('state') == b.get('state') and a3.get('stateVersion') == b.get('stateVersion')
+                    and phase_of(a3) == 'vacant' and World.await_of(a3).get('id') == World.await_of(b).get('id'),
+                    {'state': a3.get('state'), 'version': [b.get('stateVersion'), a3.get('stateVersion')]})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()
