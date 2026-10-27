@@ -78,8 +78,6 @@ mod public_proxy;
 #[cfg(unix)]
 mod operator_drain;
 #[cfg(unix)]
-mod publisher;
-#[cfg(unix)]
 mod relay;
 #[cfg(unix)]
 mod channel;
@@ -801,9 +799,6 @@ usage:
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
-  mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini provider-continuity --host HOST --config CONFIG.json --socket SOCKET --guarded-attempt ATTEMPT --dir NEW-PROOF
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
   mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E] [--fault-drop SLOT:TICK] [--records-dir DIR]
@@ -2879,172 +2874,6 @@ fn consumer_ack(
 }
 
 #[cfg(unix)]
-fn origin_outbox_intent(value: &Value) -> Result<Option<Vec<u8>>> {
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-session-v1") {
-        return Err("unexpected origin outbox reply type; complete frame retained".into());
-    }
-    if value
-        .get("messageId")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-        || value.get("miniOrigin").is_none_or(|v| !v.is_object())
-    {
-        return Err("origin outbox reply lacks message identity or Mini origin".into());
-    }
-    let source = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks source identity")?;
-    let source_bytes = decode_hex(source)?;
-    if source_bytes.is_empty() || hex(&source_bytes) != source {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    let intent_hex = value
-        .get("intentHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks intentHex")?;
-    let intent = decode_hex(intent_hex)?;
-    if hex(&intent) != intent_hex {
-        return Err("origin outbox intentHex is not canonical lowercase".into());
-    }
-    match (
-        value.get("status").and_then(Value::as_str),
-        value.get("decision").and_then(Value::as_str),
-        intent.is_empty(),
-    ) {
-        (Some("prepared-decision"), Some("proposed-fresh"), false) => Ok(Some(intent)),
-        (Some("prepared-decision"), Some("repeated"), true) => Ok(None),
-        (Some("refused"), Some("refused"), true) => {
-            Err("origin outbox preparation refused; complete decision retained".into())
-        }
-        _ => Err("inconsistent origin outbox decision and intent; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_prepare(
-    host: &Path,
-    config: &Path,
-    carrier: &Path,
-    directory: &Path,
-) -> Result<()> {
-    const MAX_CARRIER: usize = 1_516_384;
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-prepare requires --socket")?;
-    let bytes = fsio::read_bounded(carrier, MAX_CARRIER)?;
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
-    create_private(&directory.join("carrier.bin"), &bytes)?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 16, &bytes)?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox preparation; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("decision.json"), &frame[1..])?;
-    let selected = origin_outbox_intent(&value);
-    print_json(&value)?;
-    match selected {
-        Ok(Some(intent)) => {
-            write_new(&directory.join("intent.bin"), &intent)?;
-            Ok(())
-        }
-        Ok(None) => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_export(
-    host: &Path,
-    config: &Path,
-    transaction: &str,
-    directory: &Path,
-) -> Result<()> {
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-export requires --socket")?;
-    if !mini_sdk::decimal::is_canonical_max(transaction, 80)
-    {
-        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".into());
-    }
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-export")?;
-    create_private(
-        &directory.join("transaction-id.txt"),
-        transaction.as_bytes(),
-    )?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 18, transaction.as_bytes())?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox export; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox export JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("export.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-export-v1") {
-        return Err("unexpected origin outbox export type; complete reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) == Some("refused") {
-        print_json(&value)?;
-        return Err("origin outbox export refused; complete typed reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) != Some("accepted")
-        || value.get("transactionId").and_then(Value::as_str) != Some(transaction)
-        || value
-            .get("messageId")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-    {
-        return Err("origin outbox export identity mismatch; complete reply retained".into());
-    }
-    for name in ["packageIdentity", "originCallIdentity"] {
-        let Some(text) = value.get(name).and_then(Value::as_str) else {
-            return Err(format!("origin outbox export lacks {name}"));
-        };
-        if !mini_sdk::decimal::is_canonical_max(text, 80)
-        {
-            return Err(format!("origin outbox export has noncanonical {name}"));
-        }
-    }
-    let source_hex = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks source identity")?;
-    let source = decode_hex(source_hex)?;
-    if source.is_empty() || hex(&source) != source_hex {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    for name in ["miniOrigin", "miniOutbox"] {
-        if value
-            .get(name)
-            .and_then(|receipt| receipt.get("type"))
-            .and_then(Value::as_str)
-            != Some("verified-mini-native-prefix-v1")
-        {
-            return Err(format!("origin outbox export lacks typed {name} receipt"));
-        }
-    }
-    let carrier_hex = value
-        .get("carrierHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks carrierHex")?;
-    if carrier_hex.is_empty() || carrier_hex.len() > 2 * 1_516_384 {
-        return Err("origin outbox export carrier exceeds selected profile".into());
-    }
-    let carrier = decode_hex(carrier_hex)?;
-    if carrier.is_empty() || hex(&carrier) != carrier_hex {
-        return Err("origin outbox carrier is not canonical lowercase hex".into());
-    }
-    write_new(&directory.join("carrier.bin"), &carrier)?;
-    print_json(&value)
-}
-
-#[cfg(unix)]
 fn continuity_reply(value: &Value) -> Result<bool> {
     if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-continuity-v1") {
         return Err("unexpected provider continuity reply type; complete frame retained".into());
@@ -3397,65 +3226,6 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("persistent host sessions require Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-prepare" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let carrier = path(args.required("carrier")?);
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                origin_outbox_prepare(&host, &config, &carrier, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-prepare requires Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-export" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let transaction = args.required("mini-transaction")?;
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            let transaction = transaction
-                .to_str()
-                .ok_or("--mini-transaction must be UTF-8")?;
-            #[cfg(unix)]
-            {
-                origin_outbox_export(&host, &config, transaction, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-export requires Unix sockets".to_owned())
-            }
-        }
-        "origin-publish" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let carrier = path(args.required("carrier")?);
-            let state_dir = path(args.required("state-dir")?);
-            let post_config = path(args.required("post-config")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET.get().ok_or("origin-publish requires --socket")?;
-                publisher::publish(
-                    &host,
-                    &config,
-                    socket,
-                    &key,
-                    &carrier,
-                    &state_dir,
-                    &post_config,
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-publish requires Unix sockets".to_owned())
             }
         }
         "provider-continuity" => {
@@ -4703,27 +4473,6 @@ mod tests {
         assert!(!continuity_reply(&value).unwrap());
         value["anchor"]["transactionId"] = json!("01");
         assert!(continuity_reply(&value).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn origin_outbox_requires_exact_status_intent_pair() {
-        let mut value = json!({"type":"fn-a-origin-outbox-session-v1",
-            "status":"prepared-decision", "decision":"proposed-fresh",
-            "messageId":"<r@example.invalid>", "sourceIdentity":"ab",
-            "miniOrigin":{"type":"verified-mini-native-prefix-v1"}, "intentHex":"00"});
-        assert_eq!(origin_outbox_intent(&value).unwrap(), Some(vec![0]));
-        value["decision"] = json!("repeated");
-        assert!(origin_outbox_intent(&value).is_err());
-        value["intentHex"] = json!("");
-        assert_eq!(origin_outbox_intent(&value).unwrap(), None);
-        value["status"] = json!("refused");
-        value["decision"] = json!("refused");
-        assert!(origin_outbox_intent(&value)
-            .unwrap_err()
-            .contains("refused"));
-        value["sourceIdentity"] = json!("AB");
-        assert!(origin_outbox_intent(&value).is_err());
     }
 
     #[cfg(unix)]
