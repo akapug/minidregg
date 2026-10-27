@@ -43,7 +43,6 @@ mod grain_source;
 mod grain_create;
 mod homelab;
 mod pending_prepare;
-mod legacy_custody_audit;
 mod mcp;
 mod provider;
 mod provider_failure;
@@ -16602,9 +16601,6 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
-        if tool && legacy_custody_audit::zero_phase_active(self) {
-            return Err("legacy B44 audit requires its exact zero-charge settlement".into());
-        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -18151,8 +18147,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
-                    "reconcile tool legacy b44" => legacy_custody_audit::audit_b44(&mut rt),
-                    "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
