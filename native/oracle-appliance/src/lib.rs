@@ -223,12 +223,38 @@ fn write_reply(
 fn plain_context(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<bool> {
     Ok(ctx.get_cookies()?.is_empty()
         && ctx.get_additional_headers()?.is_empty()
-        && ctx.get_accept()?.is_empty()
         && ctx.get_accept_encoding()?.is_empty()
         && matches!(
             ctx.get_e_tag_precondition().which()?,
             web::web_session::context::e_tag_precondition::None(())
         ))
+}
+
+// JSON is the only representation. A more specific range overrides a wildcard,
+// including q=0: `application/json;q=0, */*;q=1` must not receive JSON.
+fn accepts_json(ctx: web::web_session::context::Reader<'_>) -> capnp::Result<bool> {
+    let accept = ctx.get_accept()?;
+    if accept.is_empty() {
+        return Ok(true);
+    }
+    let mut best = None;
+    for range in accept.iter() {
+        let name = range.get_mime_type()?.to_str()?.to_ascii_lowercase();
+        let specificity = match name.as_str() {
+            "application/json" => 2,
+            "application/*" => 1,
+            "*/*" => 0,
+            _ => continue,
+        };
+        let quality = range.get_q_value();
+        if !quality.is_finite() || !(0.0..=1.0).contains(&quality) {
+            return Ok(false);
+        }
+        if best.is_none_or(|(s, q)| specificity > s || (specificity == s && quality > q)) {
+            best = Some((specificity, quality));
+        }
+    }
+    Ok(best.is_some_and(|(_, quality)| quality > 0.0))
 }
 
 struct MainView(Config);
@@ -294,6 +320,8 @@ impl web::web_session::Server for Session {
         let path = params.get_path()?.to_str()?;
         let reply = if !plain_context(params.get_context()?)? {
             Reply::error(400, "context_unsupported")
+        } else if !accepts_json(params.get_context()?)? {
+            Reply::error(406, "json_not_acceptable")
         } else if !matches!(path, "health" | "capabilities") {
             Reply::error(404, "route_not_found")
         } else if params.get_ignore_body() {
@@ -313,6 +341,8 @@ impl web::web_session::Server for Session {
         let bytes = content.get_content()?;
         let reply = if !plain_context(params.get_context()?)? {
             Reply::error(400, "context_unsupported")
+        } else if !accepts_json(params.get_context()?)? {
+            Reply::error(406, "json_not_acceptable")
         } else if params.get_path()?.to_str()? != "query" {
             Reply::error(404, "route_not_found")
         } else if bytes.len() > MAX_REQUEST {

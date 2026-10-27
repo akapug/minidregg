@@ -49,9 +49,12 @@ as follows; query suffixes and alternative spellings are refused:
 Query content must have MIME type `application/json`, empty content encoding,
 and at most 16 KiB. The bridge forwards the exact JSON bytes, including the
 adapter's `request_id`, `conversation_id` and `text`, without rewriting or
-interpreting them. Request cookies, additional headers, Accept/Accept-Encoding
-lists and ETag preconditions are refused: the narrow API does not implement
-these semantics. HEAD is refused. Other WebSession methods use the schema's
+interpreting them. Accept permits JSON through `application/json`,
+`application/*` or `*/*`, using the most specific matching range and its quality.
+An explicit JSON exclusion overrides a wildcard; no acceptable JSON range
+returns 406 before HTTP delivery. An absent Accept list permits JSON. Request
+cookies, additional headers, Accept-Encoding lists and ETag preconditions remain
+refused: the narrow API does not implement these semantics. HEAD is refused. Other WebSession methods use the schema's
 unimplemented failure. The app is an API, with no browser UI at its root.
 
 Eight HTTP exchanges may be in flight per app process, shared across sessions.
@@ -203,3 +206,20 @@ The bounded check accepts no caller-selected pathname and does not launch an app
 the later one-shot launch still requires the admitted claim. Filesystem, LSM or
 I/O failures after this check can still leave a launch uncertain; there is no
 automatic resend.
+
+After the one-shot spawn succeeds, the app worker closes both its received app
+descriptors and their temporary duplicates before becoming the reaper. The
+reaper therefore cannot keep the app's RPC endpoint or output writers alive;
+once the app and its descendants close them, EOF can arrive while the reaper
+control channel remains open. This makes a
+failed startup observable promptly; it does not authorize replay or turn an
+uncertain RPC result into permission to launch again.
+
+The final native HTTP serializer preserves the original-status header as well
+as the RPC decoder. It accepts exactly one canonical three-digit value from
+200 through 599; the Sandstorm response union still determines the HTTP status
+line. Other app-supplied authority and framing headers remain refused. The
+bridge regression checks full response bytes and this header through both
+receiving layers, including 429 and server errors that lack exact union variants.
+Multiplexed entrances also retain dispatch failure details in the operator log,
+while clients receive the existing bounded error response.
