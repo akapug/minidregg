@@ -446,6 +446,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use crate::{authenticated_ingress::Context, codec::Generation};
     fn config(program: &str, digest: [u8; 32]) -> Config {
         Config {
