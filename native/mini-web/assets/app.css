@@ -10,7 +10,9 @@
   --accent: #0b5cad;
   --admitted: #2a7a3b;
   --refused: #b3261e;
-  --undecided: #9a6b00;
+  /* undecided is also text (.stale): #8f6300 holds 4.5:1 on paper (5.09) and paper-2
+     (4.62); #9a6b00 was 4.49/4.08 and failed AA on the outcome background. */
+  --undecided: #8f6300;
   --term-bg: #15161a;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
