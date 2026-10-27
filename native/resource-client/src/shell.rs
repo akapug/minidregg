@@ -53,8 +53,8 @@ pub(crate) struct Verb {
 
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "app", usage: "app status NAME [--json] | app delegate-lifecycle prepare ID NAME --package PKG --snapshot SNAP --manager SUBJECT | app delegate-lifecycle prepare|submit|recover|status ID", operation: "current app admission | member-signed lifecycle management delegation with retained exact recovery" },
-    Verb { name: "home", usage: "home [REF] [--json]", operation: "mini member --dir WORKSPACE [--name REF]: your resources and exact recovery actions; REF checks current Mini authority" },
-    Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption key id (names the hybrid key an inviter to a private room releases the room key to; private rooms: devnet quality; privacy not audited)" },
+    Verb { name: "home", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "whoami", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
     Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether the recorded next public key matches it" },
     Verb { name: "adopt-next-key", usage: "adopt-next-key NEXTFILE | adopt-next-key lookup ATTEMPT", operation: "commit a next key for an existing identity; recover a retained attempt without signing again" },
@@ -62,18 +62,18 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "init", usage: "init KEYFILE SUBJECT [--no-prerotation]", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace (refuses a subject whose committed next key is not HOME/keys/KEYFILE.next.pub)" },
     Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
     Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
-    Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
-    Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
-    Verb { name: "can", usage: "can [REF] [--all] | can --any REF", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted | --any: one write REF's law admits from its current values, as a line to paste, or the clauses that rule every write out (Host op 150)" },
-    Verb { name: "inspect", usage: "inspect caps [REF] | inspect law REF | inspect receipt ID | inspect turn ID  [--json]", operation: "mini workspace --action inspect --view caps|law|receipt|turn [--name REF|ID] [--json true]: a Lean view (Host inspect cap-tree|law|receipt|turn) over bytes this workspace holds or reads with its own signed views; turn dry-runs (op 130), nothing is submitted" },
-    Verb { name: "why", usage: "why [ATTEMPT] [--json]", operation: "mini workspace --action inspect --view why [--name ATTEMPT] --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
-    Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
-    Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
+    Verb { name: "refs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "read", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "can", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "inspect", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "why", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "describe", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "import", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "kind", usage: "kind create NAME DEFINITION-JSON|@FILE LAW [--in ROOM] | kind show NAME | kind revise ID NAME DEFINITION-JSON|@FILE | kind construct ID NAME PROGRAM-ID PARENTS-JSON|@FILE", operation: "world-resident definition create, signed read, guarded revision, or authenticated source construction" },
     Verb { name: "program", usage: "program create NAME SOURCE-JSON|@FILE LAW [--in ROOM]", operation: "register canonical code and ABI with the existing evaluator, then birth its immutable program cell" },
     Verb { name: "instance", usage: "instance show NAME | instance call ID NAME METHOD [--fund ACCOUNT --max-compute-credits N] | instance set ID NAME FIELD KEY VALUE | instance erase ID NAME FIELD KEY", operation: "signed descriptor and entry read; named guarded edits using the last displayed values" },
     Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
-    Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
+    Verb { name: "propose", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "law", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -81,10 +81,10 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "bid", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "reveal", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "bids", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "submit", usage: "submit ID [--lose-reply-once]", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID (--lose-reply-once: a client-side fault that writes the exact call and never reads the answer; the attempt is retained undecided and `lookup`/`retry` ask for the same decided outcome)" },
-    Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
-    Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
-    Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
+    Verb { name: "submit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "lookup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "retry", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "publish", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "revoke", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "renounce", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     // `doc` is the first verb whose grammar is data (shell_grammar::DOC): its usage and operation
@@ -96,16 +96,16 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
-    Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
-    Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "inbox", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "export", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "pay", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "credit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "tariff", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "topup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
-    Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
-    Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
-    Verb { name: "exit", usage: "exit", operation: "local" },
+    Verb { name: "history", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "help", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "exit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 /// One command catalog for help, completion and member action discovery.
@@ -961,28 +961,27 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "home" => {
-            let mut args = w[1..].to_vec();
-            let json_output = args.last().is_some_and(|s| s == "--json");
-            if json_output { args.pop(); }
-            if args.len() > 1 { return Err(usage_of("home").to_owned()); }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::HOME, &w)?;
             let mut flags = vec![flag("dir", session.workspace.clone()), flag("home", session.home.clone())];
-            if let Some(name) = args.first() { ref_name(name,"reference")?; flags.push(flag("name",name)); }
-            if json_output { flags.push(flag("json","true")); }
-            Plan::Client {command:"member".into(),flags,writes:vec![]}
+            if let Some(name) = p.opt(0) { flags.push(flag("name", name)); }
+            if p.has("--json") { flags.push(flag("json", "true")); }
+            Plan::Client { command: "member".into(), flags, writes: vec![] }
         }
         "whoami" => {
-            arity(&w, 0, 0, u)?;
+            crate::shell_grammar::parse(&crate::shell_grammar::WHOAMI, &w)?;
             Plan::Whoami
         }
         "help" | "?" => {
-            arity(&w, 0, 1, usage_of("help"))?;
-            match w.get(1).map(String::as_str) {
+            let mut named = w.clone();
+            named[0] = "help".into();
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::HELP, &named)?;
+            match p.opt(0) {
                 Some("guide") => Plan::Guide,
-                _ => Plan::Help(w.get(1).cloned()),
+                topic => Plan::Help(topic.map(str::to_owned)),
             }
         }
         "inbox" => {
-            arity(&w, 0, 0, u)?;
+            crate::shell_grammar::parse(&crate::shell_grammar::INBOX, &w)?;
             Plan::Inbox
         }
         "revoke" => {
@@ -1192,7 +1191,9 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "exit" | "quit" => {
-            arity(&w, 0, 0, u)?;
+            let mut named = w.clone();
+            named[0] = "exit".into();
+            crate::shell_grammar::parse(&crate::shell_grammar::EXIT, &named)?;
             Plan::Exit
         }
         "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
@@ -1219,12 +1220,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             client("job", vec![flag("action", "list"), flag("dir", ws()), flag("room", p.arg(0))])
         }
         "history" => {
-            arity(&w, 0, 1, u)?;
-            match w.get(1).map(String::as_str) {
-                None => Plan::History { all: false },
-                Some("all") => Plan::History { all: true },
-                Some(_) => return Err(u.to_owned()),
-            }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::HISTORY, &w)?;
+            Plan::History { all: p.opt(0).is_some() }
         }
         "keygen" => {
             arity(&w, 1, 1, u)?;
@@ -1468,115 +1465,55 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             )
         }
         "refs" => {
-            arity(&w, 0, 0, u)?;
+            crate::shell_grammar::parse(&crate::shell_grammar::REFS, &w)?;
             client("workspace", vec![flag("action", "list"), flag("dir", ws())])
         }
         "inspect" | "why" => {
-            let json_out = w.iter().any(|word| word == "--json");
-            let rest: Vec<&String> = w[1..].iter().filter(|word| *word != "--json").collect();
-            let (view, name) = if w[0] == "why" {
-                match rest.as_slice() {
-                    [] => ("why", None),
-                    [attempt] => ("why", Some((*attempt).clone())),
-                    _ => return Err(u.to_owned()),
-                }
-            } else {
-                match rest.as_slice() {
-                    [view] if view.as_str() == "caps" => ("caps", None),
-                    [view, name] if matches!(view.as_str(), "caps" | "law" | "receipt" | "turn") => {
-                        (view.as_str(), Some((*name).clone()))
-                    }
-                    _ => return Err(u.to_owned()),
-                }
-            };
+            let p = if verb == "why" { crate::shell_grammar::parse(&crate::shell_grammar::WHY, &w)? } else { crate::shell_grammar::parse(&crate::shell_grammar::INSPECT, &w)? };
+            let view = if verb == "why" { "why" } else { p.leaf.path[1] };
             let mut flags = vec![flag("action", "inspect"), flag("dir", ws()), flag("view", view)];
-            if let Some(name) = name {
-                // caps/law name a reference (incl. lab/index under a room);
-                // receipt/turn/why name a proposal or attempt.
-                if matches!(view, "caps" | "law") {
-                    ref_name(&name, "reference name")?;
-                } else {
-                    workspace_name(&name, "name")?;
-                }
+            if let Some(name) = p.opt(0) {
                 flags.push(flag("name", name));
             }
             if view == "why" {
                 flags.push(flag("refusals", session.home.join("refusals")));
             }
-            if json_out {
+            if p.has("--json") {
                 flags.push(flag("json", "true"));
             }
             client("workspace", flags)
         }
         "can" => {
-            arity(&w, 0, 2, u)?;
-            let mut flags = vec![flag("action", "can"), flag("dir", ws())];
-            for word in &w[1..] {
-                if word == "--all" {
-                    flags.push(flag("all", "true"));
-                } else if word == "--any" {
-                    flags.push(flag("any", "true"));
-                } else if flags.iter().any(|(name, _)| name == "name") {
-                    return Err(u.to_owned());
-                } else {
-                    // A reference name, incl. one under a room (lab/notes).
-                    ref_name(word, "reference name")?;
-                    flags.push(flag("name", word.clone()));
-                }
-            }
-            if flags.iter().any(|(name, _)| name == "any")
-                && !flags.iter().any(|(name, _)| name == "name")
-            {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::CAN, &w)?;
+            if p.has("--any") && p.opt(0).is_none() {
                 return Err(u.to_owned());
             }
+            let mut flags = vec![flag("action", "can"), flag("dir", ws())];
+            if let Some(name) = p.opt(0) { flags.push(flag("name", name)); }
+            if p.has("--all") { flags.push(flag("all", "true")); }
+            if p.has("--any") { flags.push(flag("any", "true")); }
             client("workspace", flags)
         }
         "read" | "describe" => {
-            arity(&w, 1, 1, u)?;
-            ref_name(&w[1], "reference name")?;
-            client(
-                "workspace",
-                vec![flag("action", verb.clone()), flag("dir", ws()), flag("name", w[1].clone())],
-            )
+            let p = if verb == "read" { crate::shell_grammar::parse(&crate::shell_grammar::READ, &w)? } else { crate::shell_grammar::parse(&crate::shell_grammar::DESCRIBE, &w)? };
+            client("workspace", vec![flag("action", verb.clone()), flag("dir", ws()), flag("name", p.arg(0))])
         }
         "import" => {
-            arity(&w, 2, 6, u)?;
-            ref_name(&w[1], "reference name")?;
-            let second = &w[2];
-            if second.starts_with('{') || second.starts_with('@') {
-                arity(&w, 2, 2, u)?;
-                let value = json_argument(session, second, "reference")?;
-                let path = session.home.join("inbox").join(format!("{}.json", ref_file(&w[1])));
-                Plan::Client {
-                    command: "workspace".into(),
-                    flags: vec![
-                        flag("action", "import"),
-                        flag("dir", ws()),
-                        flag("name", w[1].clone()),
-                        flag("from-ref", path.clone()),
-                    ],
-                    writes: vec![request_file(path, &value)],
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::IMPORT, &w)?;
+            if p.index_in(&crate::shell_grammar::IMPORT) == 0 {
+                if !(p.arg(1).starts_with('{') || p.arg(1).starts_with('@')) {
+                    return Err(u.to_owned());
                 }
+                let value = json_argument(session, p.arg(1), "reference")?;
+                let path = session.home.join("inbox").join(format!("{}.json", ref_file(p.arg(0))));
+                Plan::Client { command: "workspace".into(), flags: vec![flag("action", "import"), flag("dir", ws()), flag("name", p.arg(0)), flag("from-ref", path.clone())], writes: vec![request_file(path, &value)] }
             } else {
-                arity(&w, 4, 6, u)?;
-                decimal(&w[3], "target")?;
-                decimal(&w[4], "observe capability")?;
-                let mut flags = vec![
-                    flag("action", "import"),
-                    flag("dir", ws()),
-                    flag("name", w[1].clone()),
-                    flag("kind", w[2].clone()),
-                    flag("target", w[3].clone()),
-                    flag("observe-capability", w[4].clone()),
-                ];
-                if let Some(operation) = w.get(5).filter(|v| v.as_str() != "-") {
+                let mut flags = vec![flag("action", "import"), flag("dir", ws()), flag("name", p.arg(0)), flag("kind", p.arg(1)), flag("target", p.arg(2)), flag("observe-capability", p.arg(3))];
+                if let Some(operation) = p.opt(4).filter(|v| *v != "-") {
                     decimal(operation, "operation capability")?;
-                    flags.push(flag("operation-capability", operation.clone()));
+                    flags.push(flag("operation-capability", operation));
                 }
-                if let Some(control) = w.get(6) {
-                    decimal(control, "control capability")?;
-                    flags.push(flag("control-capability", control.clone()));
-                }
+                if let Some(control) = p.opt(5) { flags.push(flag("control-capability", control)); }
                 client("workspace", flags)
             }
         }
@@ -1705,10 +1642,9 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(path, &predicate)] }
         }
         "propose" => {
-            arity(&w, 2, 2, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            let request = json_argument(session, &w[2], "request")?;
-            proposal(session, &w[1], &request)
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PROPOSE, &w)?;
+            let request = json_argument(session, p.arg(1), "request")?;
+            proposal(session, p.arg(0), &request)
         }
         "invoke" => {
             workspace_name(w.get(1).map(String::as_str).unwrap_or(""), "proposal ID")?;
@@ -1799,63 +1735,28 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "submit" => {
-            arity(&w, 1, 2, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            match w.get(2).map(String::as_str) {
-                None => {}
-                Some("--lose-reply-once") => std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::flow::Request::Submit.operation().to_string()),
-                _ => return Err(u.to_owned()),
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::SUBMIT, &w)?;
+            if p.has("--lose-reply-once") {
+                std::env::set_var(mini_sdk::operator::LOSE_REPLY_ENV, mini_sdk::flow::Request::Submit.operation().to_string());
             }
-            client(
-                "workspace",
-                vec![
-                    flag("action", "submit"),
-                    flag("dir", ws()),
-                    flag("intent", ws().join("proposals").join(&w[1]).join("intent.json")),
-                    flag("attempt", ws().join("attempts").join(&w[1])),
-                ],
-            )
+            client("workspace", vec![flag("action", "submit"), flag("dir", ws()),
+                flag("intent", ws().join("proposals").join(p.arg(0)).join("intent.json")), flag("attempt", ws().join("attempts").join(p.arg(0)))])
         }
         "lookup" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            client(
-                "workspace",
-                vec![
-                    flag("action", "recover"),
-                    flag("dir", ws()),
-                    flag("attempt", ws().join("attempts").join(&w[1])),
-                ],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::LOOKUP, &w)?;
+            client("workspace", vec![flag("action", "recover"), flag("dir", ws()), flag("attempt", ws().join("attempts").join(p.arg(0)))])
         }
         "retry" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            client(
-                "retry",
-                vec![
-                    flag("attempt", ws().join("attempts").join(&w[1])),
-                    flag("mode", "submit"),
-                ],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::RETRY, &w)?;
+            client("retry", vec![flag("attempt", ws().join("attempts").join(p.arg(0))), flag("mode", "submit")])
         }
         "publish" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            client(
-                "workspace",
-                vec![
-                    flag("action", "publish-delegation"),
-                    flag("dir", ws()),
-                    flag("proposal-id", w[1].clone()),
-                    flag("attempt", ws().join("attempts").join(&w[1])),
-                ],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PUBLISH, &w)?;
+            client("workspace", vec![flag("action", "publish-delegation"), flag("dir", ws()), flag("proposal-id", p.arg(0)), flag("attempt", ws().join("attempts").join(p.arg(0)))])
         }
         "export" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            Plan::Export(ws().join("proposals").join(&w[1]).join("recipient-reference.json"))
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::EXPORT, &w)?;
+            Plan::Export(ws().join("proposals").join(p.arg(0)).join("recipient-reference.json"))
         }
         other => return Err(format!("unknown verb {other}; type help")),
     })

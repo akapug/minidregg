@@ -241,7 +241,71 @@ pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
     Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS];
+// The attempt lifecycle, the reads and the local verbs.
+pub static PROPOSE: Grammar = Grammar { verb: "propose", leaves: &[
+    Leaf { path: &["propose"], args: &[arg("ID", Kind::Id), arg("REQUEST-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose --request (the request as JSON or @FILE in HOME/requests); `submit ID` is the transition" },
+] };
+pub static SUBMIT: Grammar = Grammar { verb: "submit", leaves: &[
+    Leaf { path: &["submit"], args: &[arg("ID", Kind::Id)], flags: &[dangerous("--lose-reply-once")], effect: Effect::Transition, about: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID (--lose-reply-once: a client-side fault that writes the exact call and never reads the answer; the attempt is retained undecided and `lookup`/`retry` ask for the same decided outcome)" },
+] };
+pub static LOOKUP: Grammar = Grammar { verb: "lookup", leaves: &[
+    Leaf { path: &["lookup"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action recover --attempt attempts/ID (the decided outcome of the exact call, never a second write)" },
+] };
+pub static RETRY: Grammar = Grammar { verb: "retry", leaves: &[
+    Leaf { path: &["retry"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini retry --attempt attempts/ID --mode submit (the exact retry of the retained call)" },
+] };
+pub static PUBLISH: Grammar = Grammar { verb: "publish", leaves: &[
+    Leaf { path: &["publish"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID (writes the recipient's reference)" },
+] };
+pub static HISTORY: Grammar = Grammar { verb: "history", leaves: &[
+    Leaf { path: &["history"], args: &[opt("all", Kind::Choice(&["all"]))], flags: &[], effect: Effect::Local, about: "local: retained attempts and their last Host outcome" },
+] };
+pub static CAN: Grammar = Grammar { verb: "can", leaves: &[
+    Leaf { path: &["can"], args: &[opt("REF", Kind::Ref)], flags: &[switch("--all"), switch("--any")], effect: Effect::Read, about: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted; --any REF: one write REF's law admits from its current values, as a line to paste, or the clauses that rule every write out (Host op 150)" },
+] };
+pub static INSPECT: Grammar = Grammar { verb: "inspect", leaves: &[
+    Leaf { path: &["inspect", "caps"], args: &[opt("REF", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "mini workspace --action inspect --view caps (the capability tree over bytes this workspace holds or reads with its own signed views)" },
+    Leaf { path: &["inspect", "law"], args: &[arg("REF", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view law (the installed law and the current value of each slot it names)" },
+    Leaf { path: &["inspect", "receipt"], args: &[arg("ID", Kind::Id)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view receipt (a Lean view of the retained receipt)" },
+    Leaf { path: &["inspect", "turn"], args: &[arg("ID", Kind::Id)], flags: &[switch("--json")], effect: Effect::Read, about: "inspect --view turn (dry-runs the retained turn, op 130; nothing is submitted)" },
+] };
+pub static WHY: Grammar = Grammar { verb: "why", leaves: &[
+    Leaf { path: &["why"], args: &[opt("ATTEMPT", Kind::Id)], flags: &[switch("--json")], effect: Effect::Local, about: "mini workspace --action inspect --view why --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
+] };
+pub static REFS: Grammar = Grammar { verb: "refs", leaves: &[
+    Leaf { path: &["refs"], args: &[], flags: &[], effect: Effect::Local, about: "mini workspace --action list" },
+] };
+pub static READ: Grammar = Grammar { verb: "read", leaves: &[
+    Leaf { path: &["read"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini workspace --action read --name REF (a signed read)" },
+] };
+pub static DESCRIBE: Grammar = Grammar { verb: "describe", leaves: &[
+    Leaf { path: &["describe"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini workspace --action describe --name REF" },
+] };
+pub static IMPORT: Grammar = Grammar { verb: "import", leaves: &[
+    Leaf { path: &["import"], args: &[arg("NAME", Kind::Ref), arg("REFERENCE-JSON|@FILE", Kind::Word)], flags: &[], effect: Effect::Local, about: "mini workspace --action import --from-ref (a delegated reference, as JSON or @FILE)" },
+    Leaf { path: &["import"], args: &[arg("NAME", Kind::Ref), arg("KIND", Kind::Word), arg("TARGET", Kind::Subject), arg("OBSERVE", Kind::Subject), opt("OPERATION|-", Kind::Word), opt("CONTROL", Kind::Subject)], flags: &[], effect: Effect::Local, about: "mini workspace --action import --kind --target --observe-capability [--operation-capability] [--control-capability]" },
+] };
+pub static EXPORT: Grammar = Grammar { verb: "export", leaves: &[
+    Leaf { path: &["export"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: print proposals/ID/recipient-reference.json" },
+] };
+pub static INBOX: Grammar = Grammar { verb: "inbox", leaves: &[
+    Leaf { path: &["inbox"], args: &[], flags: &[], effect: Effect::Local, about: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
+] };
+pub static HOME: Grammar = Grammar { verb: "home", leaves: &[
+    Leaf { path: &["home"], args: &[opt("REF", Kind::Ref)], flags: &[switch("--json")], effect: Effect::Read, about: "mini member --dir WORKSPACE [--name REF]: your resources and exact recovery actions; REF checks current Mini authority" },
+] };
+pub static WHOAMI: Grammar = Grammar { verb: "whoami", leaves: &[
+    Leaf { path: &["whoami"], args: &[], flags: &[], effect: Effect::Local, about: "local: this session's workspace, home, subject and encryption key id (names the hybrid key an inviter to a private room releases the room key to; private rooms: devnet quality; privacy not audited)" },
+] };
+pub static HELP: Grammar = Grammar { verb: "help", leaves: &[
+    Leaf { path: &["help"], args: &[opt("VERB|guide", Kind::Word)], flags: &[], effect: Effect::Local, about: "local; `help guide` prints the friends' guide" },
+] };
+pub static EXIT: Grammar = Grammar { verb: "exit", leaves: &[
+    Leaf { path: &["exit"], args: &[], flags: &[], effect: Effect::Local, about: "local" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
+    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
     GRAMMARS.iter().copied().find(|g| g.verb == verb)
@@ -512,6 +576,14 @@ mod tests {
         let w = words("job post lab prog --input 3 --price 5 --deadline 60 --account acc");
         let p = parse(&JOB, &w).unwrap();
         assert_eq!((p.arg(0), p.flag("--price")), ("lab", Some(Some("5"))));
+        let w = words("import stolen object 15 11");
+        assert_eq!(parse(&IMPORT, &w).unwrap().index_in(&IMPORT), 1);
+        let w = words("import stolen @ref.json");
+        assert_eq!(parse(&IMPORT, &w).unwrap().index_in(&IMPORT), 0);
+        let w = words("inspect caps");
+        assert_eq!(parse(&INSPECT, &w).unwrap().leaf.path, ["inspect", "caps"]);
+        let w = words("can --any shared");
+        assert!(parse(&CAN, &w).unwrap().has("--any"));
         let w = words("topup lab 5 again");
         let p = parse(&TOPUP, &w).unwrap();
         assert_eq!((p.opt(2), p.opt(3)), (None, Some("again")));
