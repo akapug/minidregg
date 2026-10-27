@@ -217,11 +217,11 @@ impl Store {
             anchor.epoch,
             hex(&anchor.transition)
         );
-        let bytes = Zeroizing::new(crate::decode_hex(
+        let bytes = Zeroizing::new(mini_sdk::hex::decode(
             self.state["keys"][id]
                 .as_str()
                 .ok_or("historical epoch not delegated")?,
-        )?);
+        ).map_err(|e| e.0)?);
         Ok(Zeroizing::new(
             bytes
                 .as_slice()
@@ -262,7 +262,7 @@ impl Store {
             {
                 return Err("operation already bound to another epoch/context".into());
             }
-            return crate::decode_hex(old["wire"].as_str().ok_or("invalid pending wire")?);
+            return mini_sdk::hex::decode(old["wire"].as_str().ok_or("invalid pending wire")?).map_err(|e| e.0);
         }
         let key = self.historical_key(current)?;
         let wire = object_messages::seal(context, &key, writer, plain)?;
@@ -288,9 +288,9 @@ impl Store {
                 || old["context"]!=json!(hex(&context.bytes())) {
                 return Err("authored fragment already bound to another plaintext/context".into());
             }
-            let key=Zeroizing::new(crate::decode_hex(old["key"].as_str().ok_or("invalid fragment key")?)?
+            let key=Zeroizing::new(mini_sdk::hex::decode(old["key"].as_str().ok_or("invalid fragment key")?).map_err(|e| e.0)?
                 .try_into().map_err(|_|"invalid fragment key length")?);
-            return Ok((key,crate::decode_hex(old["wire"].as_str().ok_or("invalid fragment wire")?)?));
+            return Ok((key,mini_sdk::hex::decode(old["wire"].as_str().ok_or("invalid fragment wire")?).map_err(|e| e.0)?));
         }
         let mut key=Zeroizing::new([0u8;32]);
         SystemRandom::new().fill(&mut *key).map_err(|_|"fragment randomness unavailable")?;
@@ -381,9 +381,9 @@ impl Store {
         if row["kind"]!=json!("epoch") && row["kind"]!=json!("control") {
             return Err("operation is not an epoch phase".into());
         }
-        Ok((crate::decode_hex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
-            crate::decode_hex(row["command"].as_str().ok_or("invalid staged command")?)?,
-            row.get("intentJson").map(|intent|crate::decode_hex(intent.as_str().ok_or("invalid staged intent JSON")?)).transpose()?))
+        Ok((mini_sdk::hex::decode(row["manifest"].as_str().ok_or("invalid staged manifest")?).map_err(|e| e.0)?,
+            mini_sdk::hex::decode(row["command"].as_str().ok_or("invalid staged command")?).map_err(|e| e.0)?,
+            row.get("intentJson").map(|intent|mini_sdk::hex::decode(intent.as_str().ok_or("invalid staged intent JSON")?).map_err(|e| e.0)).transpose()?))
     }
     /// Bind the Host-authored command once, without changing its staged JSON,
     /// key, manifest or operation identity. Publication follows this fsync.
@@ -439,8 +439,8 @@ impl Store {
             return Err("epoch is not awaiting source reconciliation".into());
         }
         Ok((
-            crate::decode_hex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
-            crate::decode_hex(row["command"].as_str().ok_or("invalid staged command")?)?,
+            mini_sdk::hex::decode(row["manifest"].as_str().ok_or("invalid staged manifest")?).map_err(|e| e.0)?,
+            mini_sdk::hex::decode(row["command"].as_str().ok_or("invalid staged command")?).map_err(|e| e.0)?,
         ))
     }
     /// Only after source settlement establishes this exact operation's outcome.

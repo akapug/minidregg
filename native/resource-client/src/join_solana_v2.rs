@@ -30,7 +30,7 @@ fn scalar(value: &Value, name: &str) -> Result<u64> {
     number(field(value, name)?, name)
 }
 fn fixed<const N: usize>(text: &str, name: &str) -> Result<[u8; N]> {
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{name} must be {N} bytes"))
 }

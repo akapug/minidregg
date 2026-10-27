@@ -120,7 +120,7 @@ fn submit(mut args: Args) -> Result<()> {
         .pointer("/header/canonical")
         .and_then(Value::as_str)
         .ok_or("refill plan lacks a canonical header")?;
-    let header = crate::decode_hex(header)?;
+    let header = mini_sdk::hex::decode(header).map_err(|e| e.0)?;
     let signature = signing.sign(&header).to_bytes();
     let ingress = invoke(&ctx, "ingress", 114, &pair(&plan, &signature)?)?;
     retain(&ctx.dir, "ingress.bin", &ingress)?;

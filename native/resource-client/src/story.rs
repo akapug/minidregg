@@ -656,7 +656,7 @@ fn table_rows(view: &Value) -> Result<Vec<String>, Done> {
     let mut out = Vec::new();
     for a in atoms {
         let hex = a.get("payload").and_then(Value::as_str).unwrap_or("");
-        let bytes: Option<Vec<u8>> = crate::decode_hex(hex).ok();
+        let bytes: Option<Vec<u8>> = mini_sdk::hex::decode(hex).ok();
         let text = bytes.and_then(|b| String::from_utf8(b).ok()).ok_or_else(|| error("a table row is not UTF-8 text"))?;
         out.extend(rows(&text));
     }

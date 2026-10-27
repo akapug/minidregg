@@ -374,7 +374,7 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
                     continue;
                 };
                 if *verb == "edit" {
-                    let text = String::from_utf8_lossy(&crate::decode_hex(&payload).unwrap_or_default()).into_owned();
+                    let text = String::from_utf8_lossy(&mini_sdk::hex::decode(&payload).unwrap_or_default()).into_owned();
                     let request = invoke(
                         name,
                         json!({"type":"document",

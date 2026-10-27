@@ -13,7 +13,7 @@ use serde_json::Value;
 /// `one_line` boundary `doc show` applies (an OSC 52 clipboard write or a
 /// cursor sequence in a line shows as Control Pictures).
 fn payload_text(hex: &str) -> String {
-    let bytes = crate::decode_hex(hex).ok();
+    let bytes = mini_sdk::hex::decode(hex).ok();
     match bytes {
         Some(bytes) => one_line(&String::from_utf8_lossy(&bytes)),
         None => one_line(&format!("<payload {hex}>")),

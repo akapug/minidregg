@@ -33,11 +33,11 @@ fn source_bytes(v: &Value, name: &str) -> Result<[u8; 32]> {
     Ok(out)
 }
 fn bytes(v: &Value, field: &str) -> Result<[u8; 32]> {
-    crate::decode_hex(
+    mini_sdk::hex::decode(
         v[field]
             .as_str()
             .ok_or_else(|| format!("missing {field}"))?,
-    )?
+    ).map_err(|e| e.0)?
     .try_into()
     .map_err(|_| format!("{field} must be 32 bytes"))
 }
@@ -86,7 +86,7 @@ pub(crate) fn receive_epoch(v: &Value, request: &Path, state: &Path, storage: &P
         }
         pair
     };
-    let manifest = crate::decode_hex(r["manifest"].as_str().ok_or("missing manifest")?)?;
+    let manifest = mini_sdk::hex::decode(r["manifest"].as_str().ok_or("missing manifest")?).map_err(|e| e.0)?;
     let mut epoch_view = v.clone();
     if v["active"] == json!(false) && !v["audienceState"].is_null() {
         epoch_view["transition"] = v["audienceState"]["parent"].clone();

@@ -272,7 +272,7 @@ fn load_pin(path: &Path) -> Result<Pin> {
 }
 
 fn fixed<const N: usize>(text: &str, field: &str) -> Result<[u8; N]> {
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{field} must be {N} bytes"))
 }

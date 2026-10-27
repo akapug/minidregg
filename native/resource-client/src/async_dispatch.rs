@@ -92,7 +92,7 @@ impl AsyncDispatch {
                 .and_then(|v| v.to_str())
                 .and_then(|v| v.strip_suffix(".class"))
             {
-                if crate::decode_hex(stem)?.len() != 16 {
+                if mini_sdk::hex::decode(stem).map_err(|e| e.0)?.len() != 16 {
                     return Err("invalid custody reservation ID".into());
                 }
                 let class = read_private(&path, 1)?;
@@ -273,7 +273,7 @@ fn run_next(
             else {
                 continue;
             };
-            let id: [u8; 16] = crate::decode_hex(stem)?
+            let id: [u8; 16] = mini_sdk::hex::decode(stem).map_err(|e| e.0)?
                 .try_into()
                 .map_err(|_| "invalid custody request ID")?;
             if read_private(&s.journal.path(&id, "class"), 1)? != [class as u8]

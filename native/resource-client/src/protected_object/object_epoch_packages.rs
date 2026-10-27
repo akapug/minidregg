@@ -140,7 +140,7 @@ pub(crate) fn receive(
     // Its admitted digest authenticates the original package law; require all
     // epoch identity fields to match while recovering that signed law binding.
     let encoded =
-        crate::decode_hex(value["context"].as_str().ok_or("missing package context")?)?;
+        mini_sdk::hex::decode(value["context"].as_str().ok_or("missing package context")?).map_err(|e| e.0)?;
     let expected = context.bytes();
     if encoded.len() != expected.len()
         || encoded[..encoded.len() - 32] != expected[..expected.len() - 32]
@@ -176,11 +176,11 @@ pub(crate) fn receive(
         .as_str()
         .ok_or("missing dealer generation")?;
     let mut dealer_present = false;
-    let roster = crate::decode_hex(
+    let roster = mini_sdk::hex::decode(
         value["rosterBytes"]
             .as_str()
             .ok_or("missing roster preimage")?,
-    )?;
+    ).map_err(|e| e.0)?;
     if roster.is_empty() || roster.len() > 4 * 1024 * 1024 {
         return Err("invalid roster preimage size".into());
     }
@@ -229,7 +229,7 @@ pub(crate) fn receive(
         generation,
         secret,
         public,
-        &crate::decode_hex(selected.ok_or("no delegated package for device")?)?,
+        &mini_sdk::hex::decode(selected.ok_or("no delegated package for device")?).map_err(|e| e.0)?,
     )
 }
 
