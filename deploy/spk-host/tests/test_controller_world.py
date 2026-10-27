@@ -379,12 +379,89 @@ class ControllerWorldTests(unittest.TestCase):
              patch.object(c,'HISTORY',self.root/'history'),patch.object(c,'allocate_identity',return_value=100032), \
              patch.object(c.pwd,'getpwall',return_value=[]),patch.object(c.grp,'getgrall',return_value=[]), \
              patch.object(c,'mkdir',side_effect=directory),patch.object(c,'write_new',side_effect=write), \
-             patch.object(c,'ancestry'),patch.object(c,'run',side_effect=command):
+             patch.object(c,'ancestry'),patch.object(c,'account_defaults'),patch.object(c,'run',side_effect=command):
             with self.assertRaisesRegex(ValueError,'injected'):c.create('ab'*8,registry['helper'])
         self.assertEqual(events,['reserved','groupadd','useradd'])
         self.assertTrue((reservations/('ab'*8+'.json')).exists())
         self.assertTrue((base/'pending.json').exists())
         self.assertFalse((base/'namespace.json').exists())
+
+    def test_useradd_uses_system_account_contract_without_invalid_defaults_keys(self):
+        with patch.object(c,'run',return_value=SimpleNamespace(stdout=b'CREATE_MAIL_SPOOL=no\nGROUPS=\n')):
+            c.account_defaults()
+        for raw in (b'CREATE_MAIL_SPOOL=yes\n', b'CREATE_MAIL_SPOOL=no\nGROUPS=operators\n',
+                    b'CREATE_MAIL_SPOOL=no\nCREATE_MAIL_SPOOL=yes\n', b'GROUPS=\n'):
+            with self.subTest(raw=raw), patch.object(c,'run',return_value=SimpleNamespace(stdout=raw)):
+                with self.assertRaises(ValueError): c.account_defaults()
+        with patch.object(c,'run') as execute, patch.object(c,'delegation_owners',return_value=(set(),set())):
+            c.create_account(self.root, 'mini-c-'+'ab'*8, 100032)
+        args = execute.call_args.args[0]
+        self.assertEqual(args, ['/usr/sbin/useradd','--system','--uid','100032','--gid','100032',
+                               '--no-user-group','--no-create-home','--no-log-init',
+                               '--home-dir',str(self.root/'home'),'--shell','/usr/sbin/nologin','mini-c-'+'ab'*8])
+        with patch.object(c,'run'), patch.object(c,'delegation_owners',return_value=({'mini-c-'+'ab'*8},set())):
+            with self.assertRaises(ValueError): c.create_account(self.root, 'mini-c-'+'ab'*8, 100032)
+
+    def test_pending_resume_binds_exact_group_intent_and_exclusive_delegation(self):
+        registry, reservation = self.registry_value(), self.reservation_value()
+        name, identity = reservation['account'], reservation['controllerUid']
+        base = self.root/'pending-controller'; base.mkdir(mode=0o755)
+        pending = {'store':registry['store'],'name':name,'operatorUid':registry['operatorUid']}
+        (base/'pending.json').write_bytes(c.encoded(pending))
+        (base/'lifecycle.lock').write_bytes(b'controller lifecycle lock\n')
+        reservation_path = c.RESERVATIONS/(registry['store']+'.json')
+        group = SimpleNamespace(gr_name=name,gr_gid=identity,gr_mem=[])
+        def read(path,*args,**kwargs):
+            return c.encoded(reservation) if path == reservation_path else path.read_bytes()
+        with c.contextlib.ExitStack() as stack:
+            for owner, attr, kwargs in [
+                (c,'ancestry',{}),(c,'metadata',{}),(c,'read_file',{'side_effect':read}),
+                (c,'occupied_ids',{'return_value':{identity}}),
+                (c,'delegated',{'return_value':([(100000,165536)],[])}),
+                (c,'delegation_owners',{'return_value':(set(),set())}),
+                (c.pwd,'getpwall',{'return_value':[]}), (c.pwd,'getpwnam',{'side_effect':KeyError(name)}),
+                (c.pwd,'getpwuid',{'side_effect':KeyError(identity)}),
+                (c.grp,'getgrall',{'return_value':[group]}), (c.grp,'getgrnam',{'return_value':group}),
+                (c.grp,'getgrgid',{'return_value':group}), (c,'no_processes',{}),
+                (c,'manager_properties',{'return_value':{'LoadState':'not-found'}}),
+                (c,'HISTORY',{'new':self.root/'history'}),(c,'UNITS',{'new':self.root/'units'})]:
+                stack.enter_context(patch.object(owner,attr,**kwargs))
+            self.assertEqual(c.pending_create_identity(registry,base), reservation)
+            foreign = SimpleNamespace(gr_name='foreign',gr_gid=identity,gr_mem=[])
+            for groups in ([foreign],[group,foreign],[SimpleNamespace(gr_name=name,gr_gid=identity,gr_mem=['foreign'])]):
+                with patch.object(c.grp,'getgrall',return_value=groups), self.assertRaises(ValueError):
+                    c.pending_create_identity(registry,base)
+            for own, foreign_ranges in (([],[]), ([(100000,165536)],[(identity,identity+1)])):
+                with patch.object(c,'delegated',return_value=(own,foreign_ranges)), self.assertRaises(ValueError):
+                    c.pending_create_identity(registry,base)
+            with patch.object(c.pwd,'getpwuid',return_value=SimpleNamespace(pw_uid=identity)), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            with patch.object(c,'no_processes',side_effect=ValueError('live identity')), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            with patch.object(c,'manager_properties',return_value={'LoadState':'loaded'}), self.assertRaises(ValueError):
+                c.pending_create_identity(registry,base)
+            reservation['hostId'] = '00'*32
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+            reservation['hostId'] = registry['hostId']
+            (base/'pending.json').write_bytes(c.encoded({**pending,'operatorUid':2000}))
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+            (base/'pending.json').write_bytes(c.encoded(pending))
+            (base/'home').mkdir()
+            with self.assertRaises(ValueError): c.pending_create_identity(registry,base)
+
+    def test_resume_reuses_reserved_identity_without_allocation_or_group_creation(self):
+        registry, reservation = self.registry_value(), self.reservation_value()
+        events = []
+        with patch.object(c,'store_context',return_value=(registry,self.root)), \
+             patch.object(c,'pending_create_identity',return_value=reservation), patch.object(c,'account_defaults'), \
+             patch.object(c,'allocate_identity') as allocate, patch.object(c,'run') as direct_command, \
+             patch.object(c,'create_account',side_effect=lambda *args:events.append(args)), \
+             patch.object(c,'finish_create',return_value={'controllerUid':reservation['controllerUid']}) as finish:
+            result = c.resume_create(registry['store'],registry['helper'])
+        allocate.assert_not_called(); direct_command.assert_not_called()
+        self.assertEqual(events,[(self.root,reservation['account'],reservation['controllerUid'])])
+        finish.assert_called_once_with(registry,self.root,reservation)
+        self.assertTrue(result['resumedPendingCreation'])
 
     def test_exact_reserve_export_has_eight_files_and_no_custody(self):
         r=self.record();prefix='agent-lifetime-reserve-0000000000000042'
