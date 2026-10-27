@@ -961,10 +961,10 @@ fn story_join(session: &Session, name: &str, invitation: &str) -> Result<(), Don
     }
     let existing = if mine { fs::read(record_path(session, name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) } else { None };
     let mut record = match existing {
+        // The author's record keeps its author and GM fields; the role becomes the invitation's
+        // (a player's cell is what the moves need; narrating stays the GM's by the gm field).
         Some(mut r) if r.is_object() => {
-            if r.get("role").is_none() {
-                r["role"] = json!(s("role")?);
-            }
+            r["role"] = json!(s("role")?);
             r
         }
         _ => json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
