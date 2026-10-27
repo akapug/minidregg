@@ -24,10 +24,11 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 
 ## State at hand-off (2026-10-27 night, lane tip after this commit)
 
-- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w8**
-  (`w8/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w8-job.sh` (PID
-  file `w8-job.pid`), which then runs `featured-qualify.sh` (rows in `featured-w8/rows.tsv`).
-  w3 to w7 are gone (w4 and w7 failed before root setup and never registered). Stop a job only
+- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w11**
+  (`w11/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w11-job.sh` (PID
+  file `w11-job.pid`), which then runs `featured-qualify.sh` (rows in `featured-w11/rows.tsv`).
+  w3 to w6 are torn down; w4 and w7 to w10 failed in their store phase before root setup and were
+  never registered. Stop a job only
   by its PID file. After each checkout on the box run `chmod go-w deploy/spk-host/*`: the lanes
   umask leaves `controller-world.py` at 0664 and the installer refuses it.
 - **Proven on w6** (`japps --box`, 26 of 27 rows; `japps-w6.out`): the catalogue, the fetcher, the
@@ -51,9 +52,7 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
   DokuWiki, Hledger Web and Datasette (letters j..p) with one write each beneath the HTML. On w6
   every birth was refused at prepare (`authorityBatch`): the workroom tool task had 4 left of its
   single-journey budget of 50 after three apps. Each birth reserves 5 and each share ticket 3.
-  `world-up.sh` now raises the task budgets to 1,000,000 (`ef368ca4`). w7 also raised the
-  balances and failed its store phase with no named reason, so the balances stay at the
-  provisioner's defaults. **Datasette's row is read-only by design**: version 0.63 has no HTTP
+  `world-up.sh` now gives a standing world a tool budget of 100, enough for about a dozen apps. The store phase checks the workroom's remaining budget; that check was hard-coded at 47 in `native-share-member.sh` and now follows the budget (`4c50e364`); w7 to w10 failed on it. **Datasette's row is read-only by design**: version 0.63 has no HTTP
   write, since uploading a database is the page's own form, so the row records the read and
   says so. **Four apps still need their write recipe** probed against a live grain before they
   go into the harness:
