@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
+import os
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'deploy/oracle/acceptance'))
@@ -89,6 +92,23 @@ class RecoveryTests(unittest.TestCase):
         bad=copy.deepcopy(retained);bad['result']['text']='different result'
         with self.assertRaises(ValueError):r.validate_result(plan,recovered,bad,journal,exported)
 
+    def test_hardlinked_binary_refuses_before_prepared_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run=Path(tmp);(run/'world/evidence').mkdir(parents=True);(run/'continuations').mkdir()
+            (run/'world-identity.json').write_text(json.dumps({'store':'fixture'}))
+            source=run/'source';source.write_bytes(b'fixture')
+            linked=run/'runtime';linked.hardlink_to(source)
+            pin={'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}
+            plan={'protocol':'mini-oracle-foreground-recovery-plan-v1','run':str(run),'store':'fixture','operation_id':13}
+            for key in ('predecessor_export','predecessor_status','runtime','public_mini','spk','inventory','benchmark','qualification_manifest'):
+                plan[key]=pin.copy()
+            plan['runtime']['path']=str(linked)
+            path=run/'plan.json';path.write_text(json.dumps(plan))
+            output=run/'continuations/foreground-13'
+            with patch.object(r,'verify_lock'), self.assertRaisesRegex(ValueError,'exactly one hardlink'):
+                r.prepare(path,run/'unused-export',run/'unused-status',run/'unused-sources',output)
+            self.assertFalse(output.exists())
+
     def test_report_joins_recovery_without_rewriting_original_failure(self):
         report_spec=importlib.util.spec_from_file_location('oracle_report',ROOT/'deploy/oracle/acceptance/report.py')
         report=importlib.util.module_from_spec(report_spec);report_spec.loader.exec_module(report)
@@ -143,6 +163,26 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(report.sha(original),original_sha)
             write(original,retained)
             with self.assertRaises(AssertionError):report.foreground_recovery(run,require)
+
+    def test_public_binary_selection_checks_stopped_pin_without_repeating_upgrade(self):
+        source=(ROOT/'deploy/oracle/acceptance/world.sh').read_text()
+        start=source.index('  if [[ $old_mini == "$new_mini" ]]; then')
+        branch=source[start:source.index('\n  fi\n',start)+len('\n  fi\n')]
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);installer=root/'installer';calls=root/'calls'
+            installer.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["CALLS"],"a").write(sys.argv[1]+"\\n")\nprint(os.environ["STATUS"])\n')
+            installer.chmod(0o755)
+            for index,(old,new,stopped,wanted,ok) in enumerate((
+                ('same','same',True,'same',True),('old','new',True,'new',True),
+                ('same','same',False,'same',False),('same','same',True,'wrong',False))):
+                continuation=root/str(index);continuation.mkdir();calls.write_text('')
+                setup=f'installer={installer}; continuation={continuation}; old_mini={old}; new_mini={new}; candidate=/fixture; store=fixture; helper=/helper;'
+                setup+='timeout() { shift; "$@"; }; sudo() { shift 2; "$@"; }; fail() { exit 19; };'
+                result=subprocess.run(['bash','-eu','-c',setup+branch],env={**os.environ,'CALLS':str(calls),
+                    'STATUS':json.dumps({'stopped':stopped,'publicListener':{'binarySha256':wanted}})},capture_output=True)
+                self.assertEqual(result.returncode==0,ok,result.stderr)
+                self.assertEqual(calls.read_text().splitlines(),['controller-status' if old==new else 'controller-public-listener-upgrade'])
+                if ok and old==new:self.assertEqual(json.loads((continuation/'public-listener.json').read_bytes())['publicListenerSelection'],'already-qualified')
 
     def test_shell_recovery_has_one_fixed_admin_and_no_tool_resubmission(self):
         source=(ROOT/'deploy/oracle/acceptance/world.sh').read_text()
