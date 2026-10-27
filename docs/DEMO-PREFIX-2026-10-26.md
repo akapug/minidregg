@@ -119,8 +119,10 @@ tested rule). The date is re-estimated from each rehearsal's evidence, never pro
   journey installing Hacker Slides and Simple Todos from the real store; Etherpad/TT-RSS refused today
   by the custodian's bridge vocabulary, now being supported: "anything from the store" is the bar). L4's
   provider-test red was its own fixture; L3's clean-box red now names its missing input. The Discord
-  endpoint save still fails although the key matches and a locally signed PING passes; a raw capture
-  between Caddy and the entrance is in place for the next save.
+  endpoint saves failed because the URL was set on a different application in the portal
+  (1554678232631091200; the PING body names it); the box is configured for the Dragon's Egg application
+  1507638321877090374, whose bot is in Wyrmware and whose commands are registered. The key and the
+  entrance were right all along; the capture proved it.
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
