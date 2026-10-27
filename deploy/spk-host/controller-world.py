@@ -124,6 +124,62 @@ def write_new(path, data, uid=0, gid=0, mode=0o600):
         os.close(d)
 
 
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def publish_exact(path, data, uid=0, gid=0, mode=0o600, bound=65536):
+    """Publish exact bytes under the held lifecycle lock; retain partial stages.
+
+    A final conflicting file is never overwritten. An unfinished private stage
+    can only grow from the exact prefix of these already-bound expected bytes.
+    """
+    require(len(data) <= bound, 'exact publication exceeds bound')
+    maximum = max(1, len(data))
+    if path.exists() or path.is_symlink():
+        require(read_file(path, uid, maximum, allow_empty=not data, required_mode=mode) == data,
+                'exact publication final bytes differ')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        sync_directory(path.parent)
+        return
+    temporary = path.with_name('.' + path.name + '-publishing')
+    if not temporary.exists() and not temporary.is_symlink():
+        write_new(temporary, data, uid, gid, mode)
+    else:
+        prefix = read_file(temporary, uid, maximum, allow_empty=True, required_mode=mode)
+        require(data.startswith(prefix), 'exact publication orphan stage conflicts')
+        access = os.O_RDONLY if len(prefix) == len(data) else os.O_WRONLY | os.O_APPEND
+        fd = os.open(temporary, access | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            m = os.fstat(fd); named = temporary.lstat()
+            require(stat.S_ISREG(m.st_mode) and m.st_uid == uid and m.st_nlink == 1
+                    and stat.S_IMODE(m.st_mode) == mode and m.st_size == len(prefix)
+                    and (m.st_dev, m.st_ino) == (named.st_dev, named.st_ino), 'exact publication stage changed')
+            offset = len(prefix)
+            while offset < len(data):
+                written = os.write(fd, data[offset:offset + 65536])
+                require(written > 0, 'exact publication made no progress')
+                offset += written
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    require(read_file(temporary, uid, maximum, allow_empty=not data, required_mode=mode) == data,
+            'exact publication stage differs')
+    # Root-private archives, or a stopped controller's private directory, have
+    # a single writer under the lifecycle lock. Preserve any unexpected final.
+    require(not path.exists() and not path.is_symlink(), 'exact publication final appeared during write')
+    os.replace(temporary, path)
+    sync_directory(path.parent)
+
+
 def mkdir(path, uid=0, gid=0, mode=0o700):
     path.mkdir(mode=mode)
     os.chown(path, uid, gid)
@@ -434,9 +490,11 @@ def consent_storage(config_bytes, operator):
     require(len(anchor) == 120 and anchor.startswith(b'MINIANC2'), 'consent Store anchor format differs')
     # Source reads legitimately replace this inode when the retained head
     # advances. Pin its private parent and validate its custody/format each use.
-    return {'protocol': 'mini-spk-consent-storage-v1', 'root': str(root),
-            'writableParent': str(parent), 'directories': directories,
-            'database': database, 'lock': lock, 'replaceableAnchor': str(root) + '.head-anchor'}
+    result = {'protocol': 'mini-spk-consent-storage-v1', 'root': str(root),
+              'writableParent': str(parent), 'directories': directories,
+              'database': database, 'lock': lock, 'replaceableAnchor': str(root) + '.head-anchor'}
+    require(len(encoded(result)) <= 32768, 'consent Store custody pins exceed bound')
+    return result
 
 
 def manager_properties(name):
@@ -751,7 +809,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False, consent_upgrade_hashes=()):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -768,7 +826,9 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=()):
     for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
-        require(sha(read_file(base / 'bin' / n, 0, 256 * 1024 * 1024, True)) == stage['binaries'][n], 'controller binary changed')
+        digest = sha(read_file(base / 'bin' / n, 0, 256 * 1024 * 1024, True))
+        require(digest == stage['binaries'][n] or (n == 'grain-runtime' and digest in runtime_upgrade_hashes),
+                'controller binary changed')
     if has_consent(r) and not partial:
         pins = stage['consent']
         require(pins['providerSha256'] == stage['binaries'][CONSENT_BIN], 'consent provider pin differs')
@@ -835,16 +895,9 @@ def stopped_controller_units(r):
 
 def replace_root_record(path, data, mode):
     temporary = path.with_name('.' + path.name + '-storage-next')
-    if temporary.exists() or temporary.is_symlink():
-        require(read_file(temporary, 0, 65536, required_mode=mode) == data, 'storage upgrade temporary differs')
-    else:
-        write_new(temporary, data, mode=mode)
+    publish_exact(temporary, data, mode=mode)
     os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    sync_directory(path.parent)
 
 
 def consent_storage_upgrade(store, helper):
@@ -872,16 +925,14 @@ def consent_storage_upgrade(store, helper):
         new_stage['consent']['storage'] = storage
         new_stage['units'][r['units'][4]] = sha(new_unit)
         new_stage_raw = encoded(new_stage)
+        require(len(new_stage_raw) <= 65536, 'storage upgrade stage exceeds bound')
         intent = {'protocol': 'mini-spk-consent-storage-upgrade-v1', 'store': store,
                   'oldStageSha256': sha(old_stage_raw), 'newStageSha256': sha(new_stage_raw),
                   'oldUnitSha256': sha(old_unit), 'newUnitSha256': sha(new_unit)}
         for raw, kind in ((old_stage_raw, 'stage'), (new_stage_raw, 'stage'), (old_unit, 'service'), (new_unit, 'service')):
             path = archive(sha(raw), kind)
-            if path.exists() or path.is_symlink():
-                require(read_file(path, 0, 65536, required_mode=0o600) == raw, 'storage upgrade archive differs')
-            else:
-                write_new(path, raw)
-        write_new(intent_path, encoded(intent))
+            publish_exact(path, raw)
+        publish_exact(intent_path, encoded(intent))
     intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
     require(set(intent) == {'protocol', 'store', 'oldStageSha256', 'newStageSha256', 'oldUnitSha256', 'newUnitSha256'}
             and intent['protocol'] == 'mini-spk-consent-storage-upgrade-v1' and intent['store'] == store,
@@ -914,6 +965,123 @@ def consent_storage_upgrade(store, helper):
     return {'store': store, 'storageUpgrade': str(intent_path),
             'previousStageSha256': intent['oldStageSha256'], 'stageSha256': intent['newStageSha256'],
             'consent': consent_record(base, r, new_stage)}
+
+
+def runtime_upgrade(store, helper, source_arg):
+    _, base, r = load(store, helper)
+    stopped_controller_units(r)
+    source = read_file(canonical(source_arg), r['operatorUid'], 256 * 1024 * 1024, executable=True)
+    source_sha = sha(source)
+    intent_path = base / ('runtime-upgrade-' + source_sha + '.json')
+    root_binary, home_binary = base / 'bin/grain-runtime', Path(r['home']) / 'bin/grain-runtime'
+    stage_path = base / 'stage.json'
+    def archive(digest, kind):
+        require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'runtime upgrade digest malformed')
+        return base / 'configs' / ('runtime-upgrade-' + digest + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        stage = checked_units(base, r)
+        old = read_file(root_binary, 0, 256 * 1024 * 1024, executable=True, required_mode=0o755)
+        require(sha(old) == stage['binaries']['grain-runtime'] and
+                read_file(home_binary, r['uid'], 256 * 1024 * 1024, executable=True, required_mode=0o500) == old,
+                'controller runtime copies differ from retained stage')
+        if old == source:
+            return {'store': store, 'alreadyConfigured': True, 'runtimeSha256': source_sha}
+        old_stage = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage) == stage, 'stage changed before runtime upgrade')
+        stage['binaries']['grain-runtime'] = source_sha
+        new_stage = encoded(stage)
+        require(len(new_stage) <= 65536, 'runtime upgrade stage exceeds bound')
+        intent = {'protocol': 'mini-spk-controller-runtime-upgrade-v1', 'store': store,
+                  'oldBinarySha256': sha(old), 'newBinarySha256': source_sha,
+                  'oldStageSha256': sha(old_stage), 'newStageSha256': sha(new_stage)}
+        for raw, kind in ((old, 'binary'), (source, 'binary'), (old_stage, 'stage'), (new_stage, 'stage')):
+            path = archive(sha(raw), kind)
+            publish_exact(path, raw, bound=256 * 1024 * 1024 if kind == 'binary' else 65536)
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(set(intent) == {'protocol', 'store', 'oldBinarySha256', 'newBinarySha256', 'oldStageSha256', 'newStageSha256'}
+            and intent['protocol'] == 'mini-spk-controller-runtime-upgrade-v1' and intent['store'] == store
+            and intent['newBinarySha256'] == source_sha, 'runtime upgrade intent differs')
+    archives = {}
+    for key, kind in (('oldBinary', 'binary'), ('newBinary', 'binary'), ('oldStage', 'stage'), ('newStage', 'stage')):
+        digest = intent[key + 'Sha256']
+        archives[key] = read_file(archive(digest, kind), 0, 256 * 1024 * 1024 if kind == 'binary' else 65536, required_mode=0o600)
+        require(sha(archives[key]) == digest, 'runtime upgrade archived hash differs')
+    expected = strict_json(archives['oldStage'])
+    require(expected['binaries']['grain-runtime'] == intent['oldBinarySha256'], 'runtime upgrade original pin differs')
+    expected['binaries']['grain-runtime'] = source_sha
+    require(expected == strict_json(archives['newStage']) and archives['newBinary'] == source,
+            'runtime upgrade exceeds exact binary change')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'stage is outside runtime upgrade')
+    allowed = (intent['oldBinarySha256'], source_sha)
+    checked_units(base, r, runtime_upgrade_hashes=allowed)
+    for path, owner, mode in ((root_binary, 0, 0o755), (home_binary, r['uid'], 0o500)):
+        require(sha(read_file(path, owner, 256 * 1024 * 1024, executable=True, required_mode=mode)) in allowed,
+                'runtime copy is outside exact upgrade')
+    for path, owner, group, mode in ((root_binary, 0, 0, 0o755), (home_binary, r['uid'], r['gid'], 0o500)):
+        temporary = path.with_name('.grain-runtime-' + source_sha + '-next')
+        publish_exact(temporary, source, owner, group, mode, 256 * 1024 * 1024)
+        os.replace(temporary, path)
+        sync_directory(path.parent)
+    replace_root_record(stage_path, archives['newStage'], 0o600)
+    checked_units(base, r)
+    return {'store': store, 'runtimeUpgrade': str(intent_path), 'runtimeSha256': source_sha,
+            'previousRuntimeSha256': intent['oldBinarySha256'], 'stageSha256': intent['newStageSha256']}
+
+
+def enroll(store, helper, source_arg):
+    _, base, r = load(store, helper)
+    require(has_consent(r), 'native controller enrollment requires version-2 provisioning')
+    stage = checked_units(base, r)
+    require('storage' in stage['consent'], 'native enrollment requires qualified consent storage access')
+    no_processes(r['uid'])
+    runtime = manager_properties(r['units'][0])
+    require(runtime.get('LoadState') == 'loaded' and runtime.get('Transient') == 'no'
+            and runtime.get('FragmentPath') == str(UNITS / r['units'][0]) and runtime.get('User') == str(r['uid'])
+            and runtime.get('ActiveState') == 'inactive' and runtime.get('MainPID', '0') == '0'
+            and runtime.get('ControlPID', '0') == '0', 'controller runtime must be stopped for native enrollment')
+    raw = read_file(canonical(source_arg), r['operatorUid'], 8192, required_mode=0o600)
+    request = strict_json(raw)
+    require(isinstance(request, dict) and set(request) == {'protocol', 'mode', 'expectedBindingSha256', 'targetConfigSha256'}
+            and request['protocol'] == 'mini-controller-application-enrollment-v1'
+            and request['mode'] in ('bootstrap-dispatch', 'application')
+            and all(isinstance(request[key], str) and re.fullmatch('[0-9a-f]{64}', request[key])
+                    for key in ('expectedBindingSha256', 'targetConfigSha256')), 'native enrollment request shape refused')
+    home = Path(r['home'])
+    config = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    require(sha(config) == request['targetConfigSha256']
+            and read_file(base / 'configs' / (sha(config) + '.json'), 0, 524288, required_mode=0o600) == config,
+            'native enrollment config differs from retained revision')
+    # Source reads need the separately pinned operator services. The controller
+    # runtime remains stopped; no background controller work is launched.
+    prior = {}
+    for unit in r['units'][1:]:
+        value = manager_properties(unit)
+        require(value.get('LoadState') == 'loaded' and value.get('Transient') == 'no'
+                and value.get('FragmentPath') == str(UNITS / unit), 'enrollment prerequisite unit differs')
+        require(value.get('ActiveState') in ('active', 'inactive'), 'enrollment prerequisite unit is transitioning or failed')
+        prior[unit] = value['ActiveState']
+        if unit.endswith('.service'):
+            require(value.get('User') == str(r['operatorUid']), 'enrollment prerequisite service user differs')
+    r['_consentEnvironment'] = consent_environment(r, base, stage['consent'])
+    path = home / 'enroll-requests' / (sha(raw) + '.json')
+    def setup():
+        if not path.parent.exists() and not path.parent.is_symlink():
+            mkdir(path.parent, r['uid'], r['gid'])
+        ancestry(path.parent, {0, r['uid']}); metadata(path.parent, r['uid'], 0o700)
+        publish_exact(path, raw, r['uid'], r['gid'], bound=8192)
+    try:
+        run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][3], r['units'][4]])
+        return controller_child(r, [str(base / 'bin/grain-runtime'), 'application-enroll', 'stopped',
+                                   str(home / 'controller.json'), str(path)], setup, timeout=1800)
+    finally:
+        # Socket activation may also have started the operator proxy service.
+        # Restore only helpers observed inactive, including after native refusal;
+        # never undo enrollment or erase its retained request/record.
+        inactive = [unit for unit, state in prior.items() if state == 'inactive']
+        if inactive:
+            run(['/usr/bin/systemctl', 'stop', *inactive])
 
 
 def service(store, helper, action):
@@ -986,26 +1154,44 @@ def config_update(store, helper, source_arg):
     if has_consent(r):
         require(value.get('hostConfig') == str(home / 'host-config.json')
                 and value.get('cwd') == str(home / 'workspace'), 'consent-bound controller config layout differs')
-    old = read_file(home / 'controller.json', r['uid'], 524288)
-    require((base / 'configs' / (sha(old) + '.json')).is_file(), 'current config is not a retained revision')
+    old = read_file(home / 'controller.json', r['uid'], 524288, required_mode=0o600)
+    require(read_file(base / 'configs' / (sha(old) + '.json'), 0, 524288, required_mode=0o600) == old,
+            'current config differs from retained revision')
     for name, content in proof.items():
         path = home / name
         if path.exists() or path.is_symlink():
             require(read_file(path, r['uid'], FINAL_FILES[name]) == content, 'retained grant evidence differs')
     target = base / 'configs' / (sha(data) + '.json')
-    require(not target.exists(), 'configuration revision already retained')
-    write_new(target, data)
+    intent_path = base / 'configs' / ('config-publication-' + sha(data) + '.json')
+    if not intent_path.exists() and not intent_path.is_symlink():
+        require(not target.exists() or old == data, 'retained noncurrent config lacks a publication intent')
+        intent = {'protocol': 'mini-spk-controller-config-publication-v1', 'store': store,
+                  'previousSha256': sha(old), 'configurationSha256': sha(data),
+                  'proofSha256': {name: sha(content) for name, content in proof.items()}}
+        publish_exact(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(isinstance(intent, dict) and set(intent) ==
+            {'protocol', 'store', 'previousSha256', 'configurationSha256', 'proofSha256'}
+            and intent['protocol'] == 'mini-spk-controller-config-publication-v1' and intent['store'] == store
+            and isinstance(intent['previousSha256'], str) and re.fullmatch('[0-9a-f]{64}', intent['previousSha256'])
+            and intent['configurationSha256'] == sha(data)
+            and intent['proofSha256'] == {name: sha(content) for name, content in proof.items()}
+            and sha(old) in (intent['previousSha256'], sha(data)), 'config publication is outside exact old/new intent')
+    previous = read_file(base / 'configs' / (intent['previousSha256'] + '.json'), 0, 524288, required_mode=0o600)
+    require(sha(previous) == intent['previousSha256'], 'config publication original revision differs')
+    publish_exact(target, data, bound=524288)
     for name, content in proof.items():
         path = home / name
-        if not path.exists():
-            write_new(path, content, r['uid'], r['gid'])
+        publish_exact(path, content, r['uid'], r['gid'], bound=FINAL_FILES[name])
     pending = home / '.controller-next.json'
-    write_new(pending, data, r['uid'], r['gid'])
+    publish_exact(pending, data, r['uid'], r['gid'], bound=524288)
     os.replace(pending, home / 'controller.json')
-    return {'store': store, 'configurationSha256': sha(data), 'previousSha256': sha(old)}
+    sync_directory(home)
+    return {'store': store, 'configurationSha256': sha(data), 'previousSha256': intent['previousSha256'],
+            'publication': str(intent_path), 'replayed': old == data}
 
 
-def controller_child(r, argv, setup=None):
+def controller_child(r, argv, setup=None, timeout=1200):
     def identity():
         os.setsid(); os.setgroups([]); os.setgid(r['gid']); os.setuid(r['uid']); os.umask(0o077)
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -1015,7 +1201,7 @@ def controller_child(r, argv, setup=None):
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             preexec_fn=identity, env={**ENV, 'HOME': r['home'], **r.get('_consentEnvironment', {})})
     try:
-        total = 0; deadline = time.monotonic() + 1200
+        total = 0; deadline = time.monotonic() + timeout
         sel = selectors.DefaultSelector()
         sel.register(proc.stdout, selectors.EVENT_READ, sys.stdout.buffer)
         sel.register(proc.stderr, selectors.EVENT_READ, sys.stderr.buffer)
@@ -1268,6 +1454,10 @@ def main(args):
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
         elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
+        elif action == 'controller-runtime-upgrade' and len(extra) == 1: result = runtime_upgrade(store, helper, extra[0])
+        elif action == 'controller-enroll' and len(extra) == 1:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            return enroll(store, helper, extra[0])
         elif action == 'controller-journal' and not extra:
             _, base, r = load(store, helper)
             result = json.loads(read_file(Path(r['home']) / 'state/journal.json', r['uid'], 8 * 1024 * 1024))

@@ -58,11 +58,43 @@ def consent_evidence(run, require):
             and created['operatorUid'] != created['controllerUid']
             and created.get('consentSocket') == expected['socket']
             and created.get('consentPeerUid') == 0)
-    require('controller_consent_exact_stage_pins', staged.get('consent') == expected)
+    session = run / 'continuations/session-refusal-1'
+    repair = None
+    if session.exists():
+        repair = read(session / 'consent-storage.json')
+        require('controller_consent_original_stage_preserved', staged.get('consent') == expected)
+        require('controller_consent_explicit_storage_upgrade', repair.get('store') == world['store']
+                and repair.get('storageUpgrade') == base + '/consent-storage-upgrade.json'
+                and all(re.fullmatch('[0-9a-f]{64}', repair.get(key, ''))
+                        for key in ('previousStageSha256', 'stageSha256')))
+        installed = repair['consent']
+    else:
+        installed = staged.get('consent', {})
+    storage = installed.get('storage', {})
+    store_root = Path(read(run / 'world/store/base/workroom/deployment/pinned-config.json')['storageRoot'])
+    require('controller_consent_exact_storage_parent',
+            storage.get('protocol') == 'mini-spk-consent-storage-v1'
+            and storage.get('root') == str(store_root)
+            and storage.get('writableParent') == str(store_root.parent)
+            and storage.get('replaceableAnchor') == str(store_root) + '.head-anchor')
+    for key, path in (('database', store_root / 'forward-link.sqlite3'),
+                      ('lock', Path(str(store_root) + '.head-anchor.lock'))):
+        pin = storage.get(key, {})
+        require('controller_consent_storage_' + key, pin.get('path') == str(path)
+                and pin.get('uid') == created['operatorUid'] and pin.get('mode') == 0o600
+                and type(pin.get('dev')) is int and type(pin.get('ino')) is int and pin['ino'] > 0)
+    directories = storage.get('directories', [])
+    require('controller_consent_storage_ancestors',
+            [item.get('path') for item in directories] == [str(path) for path in reversed((store_root, *store_root.parents))]
+            and all(item.get('uid') in (0, created['operatorUid']) and type(item.get('mode')) is int
+                    and item['mode'] & 0o022 == 0 and type(item.get('ino')) is int and item['ino'] > 0
+                    for item in directories))
+    expected['storage'] = storage
+    require('controller_consent_exact_stage_pins', installed == expected)
     require('controller_consent_exact_config_bytes',
             sha(directory / 'controller-stage/host-config.json') == expected['configSha256'])
     starts = {}
-    for label, filename in (('bootstrap', 'controller-bootstrap-start.json'),
+    for label, filename in (('bootstrap', session / 'controller-bootstrap-start.json' if session.exists() else 'controller-bootstrap-start.json'),
                             ('initial', 'controller-start-initial.json'),
                             ('restart', 'controller-start-restart.json')):
         receipt = read(directory / filename)
@@ -104,7 +136,7 @@ def consent_evidence(run, require):
         observations[stage] = {'observation': value,
                                'memory_peak_bytes': bytes_or_unavailable('MemoryPeak'),
                                'memory_limit_bytes': bytes_or_unavailable('MemoryMax')}
-    return {'stage': expected, 'starts': starts, 'resources': observations,
+    return {'stage': expected, 'storage_repair': repair, 'starts': starts, 'resources': observations,
             'scope': 'Startup receipts show process/socket readiness only. Actual agent operations below '
                      'exercise independent consent. Memory observations cover this run, not arbitrary Store sizes.'}
 
@@ -156,6 +188,103 @@ def controller_continuation(run, require):
             'continuation_exit_path': str(directory / 'exit.json'),
             'scope': 'Preserved first failure; continued only the pending account creation and later phases. '
                      'No repeated genesis, installation, publication or application share.'}
+
+
+def controller_enrollments(run, require):
+    root = run / 'agent-lifetime'
+    session = run / 'continuations/session-refusal-1'
+    target = (root / 'native-prepare-bootstrap-dispatch/controller-update/controller.json'
+              if session.exists() else root / 'controller-stage/controller.json')
+    policy = read(root / 'native-prepare-worker-policy/worker-policy.json')
+    config = read(target)
+    require('controller_initial_worker_policy_exact',
+            policy.get('protocol') == 'mini-oracle-bootstrap-worker-policy-v1'
+            and policy.get('controllerConfigSha256') == sha(target)
+            and policy.get('workers') == [config[key]['subject'] for key in ('toolTask', 'dispatchTask')]
+            and policy.get('workerGeneration') == '1'
+            and policy.get('receipt', {}).get('eventId')
+            and Path(policy['attempt']).is_relative_to(root / 'native-prepare-worker-policy'))
+    before, after = read(Path(policy['before']) / 'view.json'), read(Path(policy['after']) / 'view.json')
+    require('controller_owner_policy_extends_initial_version',
+            before['policyId'] == after['policyId'] == config['task']
+            and before['version'] == '0' and after['version'] == '1'
+            and after['previous'] == before['address'])
+    outcome = read(Path(policy['attempt']) / 'outcome.json')
+    require('controller_owner_policy_matches_retained_native_outcome',
+            outcome.get('type') == 'confirmed' and outcome.get('confirmation') in ('installed', 'replayed')
+            and {key: outcome.get(key) for key in ('transactionId', 'eventId', 'acceptedCount', 'worldRoot')} == policy['receipt'])
+    enrolled = {}
+    for label in (['bootstrap-dispatch'] if session.exists() else []) + ['initial', 'restart']:
+        directory = root / ('enrollment-' + label)
+        request, result = read(directory / 'request.json'), read(directory / 'result.json')
+        before, after = read(directory / 'before.json'), read(directory / 'after.json')
+        digest = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+        target_path = target if label == 'bootstrap-dispatch' else root / ('controller-active-' + label + '.json')
+        require('controller_' + label + '_native_binding_enrollment',
+                request.get('protocol') == result.get('protocol') == 'mini-controller-application-enrollment-v1'
+                and request.get('mode') == ('bootstrap-dispatch' if label == 'bootstrap-dispatch' else 'application')
+                and request.get('expectedBindingSha256') == digest(before['binding'])
+                and request.get('targetConfigSha256') == sha(target_path)
+                and result.get('status') == 'enrolled' and result.get('replayed') is False
+                and result.get('requestSha256') == sha(directory / 'request.json')
+                and result.get('bindingSha256') == digest(after['binding'])
+                and before['binding']['configPath'] == after['binding']['configPath']
+                and {k:v for k,v in before.items() if k != 'binding'} ==
+                    {k:v for k,v in after.items() if k != 'binding'})
+        enrolled[label] = {'request': request, 'result': result,
+                           'before_sha256': sha(directory / 'before.json'), 'after_sha256': sha(directory / 'after.json')}
+    return {'owner_policy': policy, 'native_enrollments': enrolled}
+
+
+def session_continuation(run, require):
+    directory = run / 'continuations/session-refusal-1'
+    if not directory.exists():
+        return None
+    value = read(directory / 'prepared.json')
+    require('session_continuation_definite_boundary',
+            value.get('schema') == 'mini-oracle-session-continuation-v1'
+            and value.get('run') == str(run) and value.get('store') == read(run / 'world-identity.json')['store']
+            and value.get('boundary', {}).get('boundary') == 'definite-pre-tool-session-refusal'
+            and value.get('boundary', {}).get('permits_resend') is False
+            and value.get('failed_request_acknowledged') is False and value.get('repeated_phases') == [])
+    for name, digest in value['prior_files'].items():
+        relative = Path(name)
+        require('session_archive_' + name, not relative.is_absolute() and '..' not in relative.parts
+                and sha(directory / 'prior' / relative) == digest)
+    for original, archived in value['archived_original_paths'].items():
+        require('session_original_location_' + original,
+                Path(original).is_relative_to(run) and Path(archived['path']).is_relative_to(directory / 'prior')
+                and sha(Path(archived['path'])) == archived['sha256'])
+    for original, archived in value['store_snapshot'].items():
+        require('session_stopped_store_' + original,
+                Path(archived).is_relative_to(directory / 'prior') and sha(Path(archived)) == value['store_before'][original])
+    for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
+        digest, path = line.split(None, 1)
+        require('session_source_' + path, Path(path).is_absolute() and sha(Path(path)) == digest)
+    require('session_retained_profile_and_config_pins',
+            sha(directory / 'prior/native-profile.json') == value['native_profile_sha256']
+            and sha(directory / 'prior/host-config.json') == value['host_config_sha256']
+            and sha(run / 'world/store/base/workroom/deployment/pinned-config.json') == value['host_config_sha256'])
+    prior = read(directory / 'prior/agent-lifetime/session-birth.result.json')
+    current = read(run / 'agent-lifetime/session-birth.result.json')
+    require('session_new_tool_does_not_recast_original_failure',
+            prior.get('isError') is True and prior.get('operationId') is None
+            and prior.get('requestId') == value['boundary']['request_id']
+            and current.get('isError') is False and current.get('operationId') is not None
+            and current.get('requestId') != prior['requestId']
+            and sha(run / 'agent-lifetime/session-birth.result.json') ==
+                sha(run / 'agent-lifetime/session-birth.retained-result.json')
+            and (run / 'agent-lifetime/session-birth.ack.json').is_file())
+    upgrade = read(directory / 'runtime-upgrade.json')
+    require('session_explicit_runtime_upgrade', upgrade.get('store') == value['store']
+            and upgrade.get('previousRuntimeSha256') == sha(run / 'bin/grain-runtime')
+            and upgrade.get('runtimeSha256') == sha(directory / 'bin/grain-runtime')
+            and upgrade['runtimeSha256'] != upgrade['previousRuntimeSha256'])
+    return {'prepared': value, 'prepared_sha256': sha(directory / 'prepared.json'),
+            'original_failed_tool': prior, 'runtime_upgrade': upgrade,
+            'continuation_exit_path': str(directory / 'exit.json'),
+            'scope': 'Same retained Store; original null-operation refusal preserved without ACK or resend. '
+                     'Explicit source policy and native binding enrollments precede the new session attempt.'}
 
 
 def main():
@@ -393,6 +522,8 @@ def main():
     # dispatch receipt and distinct-purse settlement.
     consent = consent_evidence(run, require)
     continuation = controller_continuation(run, require)
+    resumed_session = session_continuation(run, require)
+    enrollments = controller_enrollments(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
         agent_dir = run / 'agent-lifetime' / stage
@@ -484,6 +615,7 @@ def main():
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
               'controller_consent': consent,
               'controller_continuation': continuation,
+              'session_continuation': resumed_session, 'controller_enrollment': enrollments,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}

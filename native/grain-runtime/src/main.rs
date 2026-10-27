@@ -77,6 +77,8 @@ use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
+mod application_enrollment;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Config {
@@ -17916,6 +17918,16 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() >= 2 && args[1] == "application-enroll" {
+        if args.len() != 5 || args[2] != "stopped" {
+            eprintln!("usage: grain-runtime application-enroll stopped CONFIG REQUEST");
+            return ExitCode::from(2);
+        }
+        return match application_enrollment::run(Path::new(&args[3]), Path::new(&args[4])) {
+            Ok(receipt) => { println!("{receipt}"); ExitCode::SUCCESS },
+            Err(error) => { eprintln!("application enrollment failed; inspect retained state before retry: {error}"); ExitCode::FAILURE },
+        };
+    }
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;

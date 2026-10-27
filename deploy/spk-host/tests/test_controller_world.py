@@ -568,14 +568,15 @@ class ControllerWorldTests(unittest.TestCase):
         stage={'units':{n:c.sha(data) for n,data in files.items()},
                'binaries':{n:c.sha(data) for n,data in binaries.items()},'consent':pins}
         stage_raw=c.encoded(stage);(base/'stage.json').write_bytes(stage_raw);(base/'stage.json').chmod(0o600)
-        original_read,original_write=c.read_file,c.write_new
+        original_read,original_write,original_publish=c.read_file,c.write_new,c.publish_exact
+        def publish(path,data,uid=0,gid=0,mode=0o600,bound=65536):return original_publish(path,data,self.uid if uid==0 else uid,self.gid if gid==0 else gid,mode,bound)
         def read(path,owner,*args,**kwargs):return original_read(path,self.uid if owner==0 else owner,*args,**kwargs)
         def write(path,data,uid=0,gid=0,mode=0o600):return original_write(path,data,self.uid if uid==0 else uid,self.gid if gid==0 else gid,mode)
         def manager(unit):return {'LoadState':'loaded','Transient':'no','FragmentPath':str(units/unit),
                                   'ActiveState':'inactive','MainPID':'0','ControlPID':'0','User':str(self.uid)}
         with patch.object(c,'load',return_value=({},base,r)),patch.object(c,'UNITS',units), \
              patch.object(c,'no_processes'),patch.object(c,'manager_properties',side_effect=manager), \
-             patch.object(c,'read_file',side_effect=read),patch.object(c,'write_new',side_effect=write),patch.object(c,'run'):
+             patch.object(c,'read_file',side_effect=read),patch.object(c,'write_new',side_effect=write),patch.object(c,'publish_exact',side_effect=publish),patch.object(c,'run'):
             yield base,r,units,stage_raw,files[unit]
 
     def test_storage_upgrade_retries_only_exact_old_new_publication_states(self):
@@ -632,6 +633,190 @@ class ControllerWorldTests(unittest.TestCase):
                 database=store/'forward-link.sqlite3';replacement=store/'replacement'
                 replacement.write_bytes(database.read_bytes());replacement.chmod(0o600);replacement.replace(database)
                 with self.assertRaisesRegex(ValueError,'persistent inode pins differ'):c.checked_units(base,r)
+
+    def test_runtime_upgrade_recovers_each_publication_step_and_preserves_old_bytes(self):
+        for fault in range(1,9):
+            with self.subTest(fault=fault), self.storage_upgrade_fixture('runtime'+str(fault)) as (base,r,units,old_stage,old_unit):
+                home=Path(r['home']);(home/'bin').mkdir(mode=0o700)
+                old=(base/'bin/grain-runtime').read_bytes()
+                (home/'bin/grain-runtime').write_bytes(old);(home/'bin/grain-runtime').chmod(0o500)
+                source=self.file('runtime-source-'+str(fault),b'qualified new runtime fixture',0o700)
+                original=c.write_new;writes=[]
+                def interrupt(path,data,*args,**kwargs):
+                    writes.append(path)
+                    if len(writes)==fault and fault!=7:
+                        original(path,data[:max(1,len(data)//2)],*args,**kwargs)
+                        raise OSError('injected runtime partial write')
+                    original(path,data,*args,**kwargs)
+                    if len(writes)==fault:raise OSError('injected runtime durable write interruption')
+                with patch.object(c,'write_new',side_effect=interrupt):
+                    with self.assertRaises(OSError):c.runtime_upgrade(r['store'],'/unused',str(source))
+                result=c.runtime_upgrade(r['store'],'/unused',str(source))
+                self.assertEqual(result['runtimeSha256'],c.sha(source.read_bytes()))
+                self.assertEqual((base/'bin/grain-runtime').read_bytes(),source.read_bytes())
+                self.assertEqual((home/'bin/grain-runtime').read_bytes(),source.read_bytes())
+                self.assertEqual(stat.S_IMODE((home/'bin/grain-runtime').stat().st_mode),0o500)
+                self.assertEqual((base/'configs'/('runtime-upgrade-'+c.sha(old)+'.binary')).read_bytes(),old)
+                self.assertEqual((base/'configs'/('runtime-upgrade-'+c.sha(old_stage)+'.stage')).read_bytes(),old_stage)
+                self.assertEqual(c.runtime_upgrade(r['store'],'/unused',str(source)),result)
+                current=(base/'stage.json').read_bytes()
+                forged=json.loads(current);forged['foreign']='record edit'
+                (base/'stage.json').write_bytes(c.encoded(forged))
+                with self.assertRaises(ValueError):c.runtime_upgrade(r['store'],'/unused',str(source))
+                (base/'stage.json').write_bytes(current)
+                # Neither a staged caller-selected change nor a changed home
+                # binary can be adopted by replaying the retained transaction.
+                (home/'bin/grain-runtime').chmod(0o700);(home/'bin/grain-runtime').write_bytes(b'foreign');(home/'bin/grain-runtime').chmod(0o500)
+                with self.assertRaises(ValueError):c.runtime_upgrade(r['store'],'/unused',str(source))
+
+    def test_enroll_runs_fixed_native_command_once_and_brackets_only_inactive_helpers(self):
+        with self.storage_upgrade_fixture('enroll') as (base,r,units,old_stage,old_unit):
+            c.consent_storage_upgrade(r['store'],'/unused')
+            home=Path(r['home']);config=b'{"retained":"config fixture"}'
+            for path in (home/'controller.json',base/'configs'/(c.sha(config)+'.json')):
+                path.write_bytes(config);path.chmod(0o600)
+            request={'protocol':'mini-controller-application-enrollment-v1','mode':'bootstrap-dispatch',
+                     'expectedBindingSha256':'ab'*32,'targetConfigSha256':c.sha(config)}
+            source=self.file('enroll-request.json',c.encoded(request))
+            calls=[]
+            def manager(unit):
+                return {'LoadState':'loaded','Transient':'no','FragmentPath':str(units/unit),
+                        'ActiveState':'active' if unit == r['units'][3] else 'inactive',
+                        'MainPID':'0','ControlPID':'0','User':str(self.uid)}
+            def child(record,args,setup=None,timeout=0):
+                setup();calls.append((args,timeout,record['_consentEnvironment']));return 1
+            with patch.object(c,'manager_properties',side_effect=manager),patch.object(c,'controller_child',side_effect=child),patch.object(c,'run') as execute:
+                self.assertEqual(c.enroll(r['store'],'/unused',str(source)),1)
+            self.assertEqual(len(calls),1)
+            args,timeout,environment=calls[0]
+            self.assertEqual(args[:4],[str(base/'bin/grain-runtime'),'application-enroll','stopped',str(home/'controller.json')])
+            self.assertEqual(Path(args[4]).read_bytes(),source.read_bytes())
+            self.assertEqual(timeout,1800)
+            self.assertEqual(environment,c.consent_environment(r,base,c.checked_units(base,r)['consent']))
+            self.assertEqual(len(environment),7)
+            commands=[call.args[0] for call in execute.call_args_list]
+            self.assertEqual(commands[0],['/usr/bin/systemctl','start',r['units'][1],r['units'][3],r['units'][4]])
+            self.assertEqual(commands[1],['/usr/bin/systemctl','stop',r['units'][1],r['units'][2],r['units'][4]])
+            self.assertNotIn(r['units'][0],commands[0])
+            self.assertTrue(Path(args[4]).exists()) # Native refusal never erases the request.
+            source.write_bytes(c.encoded({**request,'targetConfigSha256':'00'*32}))
+            with patch.object(c,'controller_child') as child:
+                with self.assertRaisesRegex(ValueError,'config differs'):c.enroll(r['store'],'/unused',str(source))
+                child.assert_not_called()
+
+    def test_enroll_retains_exclusive_lifecycle_lock_after_releasing_allocator(self):
+        lock=self.file('allocator.lock');lifecycle=self.file('lifecycle.lock',b'controller lifecycle lock\n')
+        opened=open
+        def selected(path,*args,**kwargs):
+            return opened(lock if path=='/run/mini-spk-world-install.lock' else path,*args,**kwargs)
+        def child(*args):
+            with opened(lock,'rb') as global_probe,opened(lifecycle,'rb') as local_probe:
+                fcntl.flock(global_probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                with self.assertRaises(BlockingIOError):fcntl.flock(local_probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            return 1
+        with patch('builtins.open',side_effect=selected),patch.object(c.os,'geteuid',return_value=0), \
+             patch.object(c,'store_context',return_value=({},self.root)),patch.object(c,'ancestry'), \
+             patch.object(c.os,'fstat',return_value=SimpleNamespace(st_mode=stat.S_IFREG|0o600,st_uid=0,st_nlink=1)), \
+             patch.object(c,'enroll',side_effect=child):
+            self.assertEqual(c.main(['controller-enroll','ab'*8,'/unused','/request']),1)
+        with opened(lifecycle,'rb') as released:fcntl.flock(released,fcntl.LOCK_EX|fcntl.LOCK_NB)
+
+    def test_enroll_start_and_stop_failures_do_not_resend_or_erase_request(self):
+        for failure in ('start','stop'):
+            with self.subTest(failure=failure),self.storage_upgrade_fixture('enroll-'+failure) as (base,r,units,old_stage,old_unit):
+                c.consent_storage_upgrade(r['store'],'/unused')
+                home=Path(r['home']);config=b'{"retained":"config"}'
+                for path in (home/'controller.json',base/'configs'/(c.sha(config)+'.json')):
+                    path.write_bytes(config);path.chmod(0o600)
+                source=self.file('enroll-'+failure+'.json',c.encoded({'protocol':'mini-controller-application-enrollment-v1',
+                    'mode':'application','expectedBindingSha256':'ab'*32,'targetConfigSha256':c.sha(config)}))
+                native=[];commands=[]
+                def command(args,**kwargs):
+                    commands.append(args)
+                    if args[1]==failure:raise OSError('injected '+failure+' failure')
+                def child(record,args,setup=None,timeout=0):setup();native.append(args);return 0
+                with patch.object(c,'run',side_effect=command),patch.object(c,'controller_child',side_effect=child):
+                    with self.assertRaises(OSError):c.enroll(r['store'],'/unused',str(source))
+                self.assertTrue(source.exists())
+                self.assertEqual(len(native),0 if failure=='start' else 1)
+                if native:self.assertTrue(Path(native[0][-1]).exists())
+                self.assertEqual([args[1] for args in commands],['start','stop'])
+
+    def test_exact_publication_recovers_mid_write_prefix_and_preserves_conflicts(self):
+        target=self.root/'archive';data=b'exact durable archive bytes'
+        original=c.write_new
+        def interrupted(path,content,*args,**kwargs):
+            original(path,content[:8],*args,**kwargs)
+            raise OSError('injected short durable write')
+        with patch.object(c,'write_new',side_effect=interrupted):
+            with self.assertRaises(OSError):c.publish_exact(target,data,self.uid,self.gid)
+        self.assertFalse(target.exists())
+        partial=self.root/'.archive-publishing'
+        self.assertEqual(partial.read_bytes(),data[:8])
+        c.publish_exact(target,data,self.uid,self.gid)
+        self.assertEqual(target.read_bytes(),data)
+        self.assertFalse(partial.exists())
+        c.publish_exact(target,data,self.uid,self.gid)
+        with self.assertRaises(ValueError):c.publish_exact(target,b'other bytes',self.uid,self.gid)
+        self.assertEqual(target.read_bytes(),data)
+        other=self.root/'other';orphan=self.root/'.other-publishing'
+        orphan.write_bytes(b'conflicting prefix');orphan.chmod(0o600)
+        with self.assertRaises(ValueError):c.publish_exact(other,data,self.uid,self.gid)
+        self.assertEqual(orphan.read_bytes(),b'conflicting prefix')
+        self.assertFalse(other.exists())
+
+    def config_files(self,base,r,suffix):
+        home=Path(r['home'])
+        old=c.encoded({'commands':[],'stateDir':str(home/'state'),'controlSocket':str(home/'state/control.sock'),
+                       'hostConfig':str(home/'host-config.json'),'cwd':str(home/'workspace'),'version':1})
+        new=c.encoded({**json.loads(old),'version':2})
+        for path in (home/'controller.json',base/'configs'/(c.sha(old)+'.json')):
+            path.write_bytes(old);path.chmod(0o600)
+        source=self.file('config-source-'+suffix,new)
+        return old,new,source
+
+    def test_config_publication_recovers_mid_write_intent_archive_and_home_stage(self):
+        for fault in (1,2,3):
+            with self.subTest(fault=fault),self.storage_upgrade_fixture('config'+str(fault)) as (base,r,units,stage,unit):
+                old,new,source=self.config_files(base,r,str(fault))
+                original=c.write_new;writes=[]
+                def interrupted(path,data,*args,**kwargs):
+                    writes.append(path)
+                    if len(writes)==fault:
+                        original(path,data[:max(1,len(data)//2)],*args,**kwargs)
+                        raise OSError('injected config partial write')
+                    return original(path,data,*args,**kwargs)
+                with patch.object(c,'write_new',side_effect=interrupted):
+                    with self.assertRaises(OSError):c.config_update(r['store'],'/unused',str(source))
+                self.assertEqual((Path(r['home'])/'controller.json').read_bytes(),old)
+                result=c.config_update(r['store'],'/unused',str(source))
+                self.assertEqual((Path(r['home'])/'controller.json').read_bytes(),new)
+                self.assertEqual(result['previousSha256'],c.sha(old))
+                repeated=c.config_update(r['store'],'/unused',str(source))
+                self.assertTrue(repeated['replayed'])
+                self.assertEqual(repeated['previousSha256'],c.sha(old))
+                self.assertEqual((base/'configs'/(c.sha(old)+'.json')).read_bytes(),old)
+
+    def test_config_rename_fsync_failure_is_recoverable_without_rollback_permission(self):
+        with self.storage_upgrade_fixture('config-sync') as (base,r,units,stage,unit):
+            old,new,source=self.config_files(base,r,'sync');home=Path(r['home'])
+            original=c.sync_directory;calls=[]
+            def interrupted(path):
+                if path==home:
+                    calls.append(path)
+                    if len(calls)==2:raise OSError('injected final config directory fsync failure')
+                return original(path)
+            with patch.object(c,'sync_directory',side_effect=interrupted):
+                with self.assertRaises(OSError):c.config_update(r['store'],'/unused',str(source))
+            self.assertEqual((home/'controller.json').read_bytes(),new)
+            self.assertTrue(c.config_update(r['store'],'/unused',str(source))['replayed'])
+            # Model losing the unsynced rename: only the exact retained previous
+            # state is accepted, and replay republishes the intended new config.
+            (home/'controller.json').write_bytes(old)
+            c.config_update(r['store'],'/unused',str(source))
+            self.assertEqual((home/'controller.json').read_bytes(),new)
+            historical=self.file('historical-config',old)
+            with self.assertRaisesRegex(ValueError,'noncurrent config lacks'):c.config_update(r['store'],'/unused',str(historical))
 
 
 if __name__ == '__main__':
