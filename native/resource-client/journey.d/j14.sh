@@ -113,7 +113,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
+ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; elif [ "$1" = hermes ] && [ -n "${HERMES_WS:-}" ]; then echo "$HERMES_WS"; else echo "$WS/$1"; fi; }
 load1() { cut -d' ' -f1 /proc/loadavg 2>/dev/null; }
 
 T0=0
@@ -275,9 +275,10 @@ for f in alice bob hermes; do
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 A=${SUBJ[alice]} B=${SUBJ[bob]} HS=${SUBJ[hermes]}
-# Hermes's grain: its parent owner, tool worker and provider worker are their
-# own enrolled subjects (keys never shared with Hermes's room workspace).
-for f in hhost htool hprov; do
+# Hermes's grain: Hermes itself is the tool worker (room tools act in the tool
+# task's own workspace); the parent owner and the provider worker are their
+# own enrolled subjects.
+for f in hhost hprov; do
   mkdir -p -m 700 "$H/$f"
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home" \
@@ -363,11 +364,11 @@ install -m 0755 "$BRIDGE" "$SD/runtime-root/grain-provider-bridge"
 # Hermes's grain and controller config, in one command.
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
   --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
-  --arg hk "$H/hhost/keys/mini.key" --arg hs "${SUBJ[hhost]}" --arg tk "$H/htool/keys/mini.key" --arg ts "${SUBJ[htool]}" \
+  --arg hk "$H/hhost/keys/mini.key" --arg hs "${SUBJ[hhost]}" --arg tk "$H/hermes/keys/mini.key" --arg ts "$HS" \
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
   --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
-  --arg ws "$WS/hermes" --arg home "$H/hermes" \
+  --arg ws "$G/state/resource-workspace" --arg home "$G/state/room-home" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
   {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
    root:$root,nonce:"987000",
@@ -388,6 +389,9 @@ operator hermes "CREATE: grain-runtime create births Hermes's grain and writes i
   "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
 cp "$OUT" "$SD/grain-created.json"
 [ "$RC" = 0 ] || finish
+# Room tools act in the tool task's workspace with a home inside stateDir.
+HERMES_WS=$G/state/resource-workspace
+mkdir -p -m 700 "$G/state/room-home"
 # The unit shape install-controller renders (user manager, all three variables).
 jq -n --arg r "$GRAIN_RUNTIME" --arg m "$MINI" --arg h "$HOST" --arg l "$SD/launcher/bwrap" --arg g "$SD/launcher/launch-gate" \
   --arg b "$SD/runtime-root/grain-provider-bridge" '{artifacts:[$r,$m,$h,$l,$g,$b] | map({path:., sha256:""})}' >"$SD/pins.tmp"
@@ -416,7 +420,7 @@ checkp hermes "the controller listens on its control socket" test -S "$G/state/c
 # founder (hermes-handoff registration/registry: what `summon` resolves).
 mkdir -p -m 700 "$SD/registrations" "$H/hermes/inbox" "$H/alice/hermes"
 operator hermes "REGISTER: Hermes's task $PARENT_T for lab (hermes-handoff registration)" \
-  "$MINI" hermes-handoff --action registration --dir "$WS/hermes" --task "$PARENT_T" --room-cell "$LAB" \
+  "$MINI" hermes-handoff --action registration --dir "$HERMES_WS" --task "$PARENT_T" --room-cell "$LAB" \
     --inbox "$H/hermes/inbox" --socket "$SOCKET"
 REG=$SD/registrations/$PARENT_T.json
 install -m 0600 "$OUT" "$REG"
