@@ -12,14 +12,10 @@ mod room_task;
 mod room_resident;
 mod resident_context;
 mod quiescence;
-mod quiescence_transport;
-mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
 mod prompt_outcome;
 mod hermes_session_verify;
-mod session_failure;
-mod resident_outcomes;
 mod resident_origin;
 mod resident_requests;
 mod resident_preflight;
@@ -30,7 +26,6 @@ mod birth_lifecycle_tests;
 mod control;
 mod cgroup_stop;
 mod systemd_manager;
-mod controller_write_scopes;
 // One source shared with `mini key` (resource-client includes it by path):
 // the write verbs are used there, the reserve-time lookups here.
 #[allow(dead_code)]
@@ -44,10 +39,7 @@ mod grain_source;
 mod grain_create;
 mod homelab;
 mod pending_prepare;
-mod legacy_custody_audit;
 mod mcp;
-#[cfg(test)]
-mod hermes_catalogue_probe;
 mod provider;
 mod provider_failure;
 mod provider_profile;
@@ -3943,142 +3935,7 @@ impl Runtime {
             }
             return Ok((id, anchor.clone()));
         }
-        if !hold.reserve_confirmed
-            || hold.reserve_refused
-            || hold.reserve
-                != self
-                    .config
-                    .dispatch_task
-                    .as_ref()
-                    .ok_or("dispatchTask absent")?
-                    .reserve
-        {
-            return Err("dispatch audit lacks exact confirmed reserve hold".into());
-        }
-        let path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *path != self.config.state_dir.join(format!("attempt-{id:016}"))
-            || attempt
-                .reserve_operation_id
-                .is_some_and(|saved| saved != id)
-        {
-            return Err(
-                "dispatch reserve attempt path/operation differs from retained origin".into(),
-            );
-        }
-        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
-        if sha256_file(&source_path)?
-            != hold
-                .reserve_source_sha256
-                .as_deref()
-                .ok_or("dispatch reserve source digest absent")?
-        {
-            return Err("dispatch reserve signed source bytes changed".into());
-        }
-        let source: Value = serde_json::from_slice(&bounded_regular_file(&source_path, 131_072)?)
-            .map_err(|e| format!("dispatch reserve source: {e}"))?;
-        let task = self
-            .config
-            .dispatch_task
-            .as_ref()
-            .ok_or("dispatchTask absent")?;
-        let payload = format!(
-            "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{}",
-            attempt.source_request_digest
-        );
-        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
-            || source.pointer("/grain/subject").and_then(Value::as_str)
-                != Some(task.subject.as_str())
-            || source
-                .pointer("/grain/operation/type")
-                .and_then(Value::as_str)
-                != Some("reserve")
-            || source
-                .pointer("/grain/operation/amount")
-                .and_then(Value::as_str)
-                != Some(hold.reserve.as_str())
-            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, id)
-            || source
-                .pointer("/grain/context/payload")
-                .and_then(Value::as_str)
-                != Some(payload.as_str())
-            || source
-                .pointer("/grain/before/generation")
-                .and_then(Value::as_str)
-                != Some(hold.before_generation.as_str())
-            || source
-                .pointer("/grain/expectedTargetRoot")
-                .and_then(Value::as_str)
-                != Some(hold.before_target_root.as_str())
-        {
-            return Err("dispatch reserve source differs from exact held request".into());
-        }
-        let call_hash = hold
-            .reserve_call_sha256
-            .as_deref()
-            .ok_or("dispatch reserve call digest absent")?;
-        let outcome_path = hold
-            .reserve_outcome_path
-            .as_ref()
-            .ok_or("dispatch reserve outcome path absent")?;
-        let outcome_hash = hold
-            .reserve_outcome_sha256
-            .as_deref()
-            .ok_or("dispatch reserve outcome digest absent")?;
-        if sha256_file(&path.join("call.bin"))? != call_hash
-            || sha256_file(outcome_path)? != outcome_hash
-            || outcome_path.parent() != Some(path.as_path())
-        {
-            return Err("dispatch reserve retained native call/outcome changed".into());
-        }
-        let receipt_path = outcome_path.with_extension("json");
-        let original: Value =
-            serde_json::from_slice(&bounded_regular_file(&receipt_path, 131_072)?)
-                .map_err(|e| format!("dispatch reserve receipt: {e}"))?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve anchor absent")?;
-        if ReserveAnchor::from_confirmed(&original)? != *anchor {
-            return Err("dispatch reserve receipt differs from retained anchor".into());
-        }
-        let retry_result = next_retry_json(path)?;
-        let mut args = vec![
-            "retry",
-            "--attempt",
-            path.to_str().ok_or("dispatch reserve attempt path UTF-8")?,
-            "--mode",
-            "lookup",
-        ];
-        if let Some(socket) = &self.config.host_socket {
-            args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
-        }
-        self.command_output(&self.config.mini, &args)?;
-        let current: Value = serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
-            .map_err(|e| format!("dispatch reserve lookup: {e}"))?;
-        if current.get("type").and_then(Value::as_str) != Some("confirmed")
-            || !matches!(
-                current.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-            || ReserveAnchor::from_confirmed(&current)? != *anchor
-        {
-            return Err("dispatch reserve is absent from current native image".into());
-        }
-        Ok((id, anchor.clone()))
+        Err("dispatch reserve has neither v2 nor lifetime custody (dispatch v1 is retired)".into())
     }
     /// Retain one exact source-authored HTTP request before its separately
     /// paid AgentGrain reserve. The source digest is checked against the full
@@ -5829,217 +5686,6 @@ impl Runtime {
             "planSha256":plan_sha,"signatures":values}))
     }
 
-    fn dispatch_reserve(
-        &mut self,
-        canonical_request: &[u8],
-        source_request_digest: &str,
-        http_operation_id: &str,
-    ) -> Result<Value> {
-        decimal(source_request_digest, "source request digest")?;
-        decimal(http_operation_id, "HTTP operation ID")?;
-        if source_request_digest.len() > 78
-            || http_operation_id.parse::<u64>().is_err()
-            || canonical_request.is_empty()
-            || canonical_request.len() > 10 * 1024 * 1024
-        {
-            return Err("dispatch request coordinates exceed bounds".into());
-        }
-        if self.cancelled.load(Ordering::SeqCst)
-            || !self.prompt_active
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || (self.journal.child.is_none() && self.foreground_operation.is_none())
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-        {
-            return Err("dispatch task or parent prompt is unavailable".into());
-        }
-        let task = self
-            .config
-            .dispatch_task
-            .clone()
-            .ok_or("dispatchTask absent")?;
-        let parent = self.query()?;
-        let parent_state = parent.get("grain").ok_or("parent grain absent")?;
-        let parent_generation = parent_state
-            .get("generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?;
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent root absent")?;
-        if !matches!(
-            parent_state.get("status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("parent prompt is not reserved".into());
-        }
-        let attempt_id = self.next_id()?;
-        let request_path = self
-            .config
-            .state_dir
-            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
-        write_new(&request_path, canonical_request)?;
-        self.journal.dispatch_attempt = Some(DispatchAttempt {
-            id: attempt_id,
-            http_operation_id: http_operation_id.into(),
-            parent_generation: parent_generation.into(),
-            parent_root: parent_root.into(),
-            request_path: request_path.clone(),
-            request_bytes: canonical_request.len(),
-            request_sha256: sha256_file(&request_path)?,
-            source_request_digest: source_request_digest.into(),
-            reserve_operation_id: None,
-            reserve_v2_dir: None,
-            reserve_v2_request_sha256: None,
-            reserve_v2_plan_sha256: None,
-            reserve_v2_source_sha256: None,
-            lifetime: None,
-            dispatch_generation: None,
-            dispatch_post_root: None,
-            no_send_release_started: false,
-            audited_charge: None,
-            settlement: None,
-            send_started: false,
-            committed_dispatch_transaction: None,
-            committed_dispatch_event: None,
-            committed_permit_sha256: None,
-            response_sha256: None,
-        });
-        self.save()?;
-        let authority = self.dispatch()?;
-        let status = self
-            .query_as(&authority)?
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            .ok_or("dispatch grain status absent")?
-            .to_owned();
-        if status == "0" {
-            self.check_not_cancelled()?;
-            self.transition_as(
-                &authority,
-                json!({"type":"attach","soft":false}),
-                "dispatch attach",
-                "agent app dispatch attach",
-                vec![],
-            )?;
-        } else if status != "1" {
-            return Err(format!(
-                "dispatch task status {status} requires reconciliation"
-            ));
-        }
-        self.check_not_cancelled()?;
-        self.mark_hold_as(
-            AuthoritySlot::Dispatch,
-            &authority,
-            &task.reserve,
-            &task.charge,
-        )?;
-        let payload =
-            format!("DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{source_request_digest}");
-        self.transition_as(
-            &authority,
-            json!({"type":"reserve","amount":task.reserve}),
-            "dispatch reserve",
-            &payload,
-            vec![],
-        )?;
-        let dispatch_state = self.query_as(&authority)?;
-        if dispatch_state
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            != Some("3")
-            || dispatch_state
-                .pointer("/grain/reserved")
-                .and_then(Value::as_str)
-                != Some(task.reserve.as_str())
-        {
-            return Err("confirmed dispatch reserve lacks exact signed reserved state".into());
-        }
-        let dispatch_generation = dispatch_state
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("dispatch generation absent after reserve")?
-            .to_owned();
-        let dispatch_post_root = dispatch_state
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("dispatch root absent after reserve")?
-            .to_owned();
-        let hold = self
-            .journal
-            .dispatch_hold
-            .as_ref()
-            .filter(|hold| hold.reserve_confirmed)
-            .ok_or("dispatch reserve has no exact confirmed native hold")?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve has no exact confirmed native anchor")?
-            .clone();
-        let reserve_path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let reserve_name = reserve_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = reserve_name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let reserve_operation_id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *reserve_path
-                != self
-                    .config
-                    .state_dir
-                    .join(format!("attempt-{reserve_operation_id:016}"))
-        {
-            return Err("dispatch reserve attempt path differs from retained source".into());
-        }
-        let reserve_index = anchor
-            .accepted_count
-            .parse::<u64>()
-            .ok()
-            .and_then(|count| count.checked_sub(1))
-            .ok_or("dispatch reserve receipt has no selected history index")?;
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_mut()
-            .ok_or("dispatch attempt disappeared")?;
-        attempt.reserve_operation_id = Some(reserve_operation_id);
-        attempt.dispatch_generation = Some(dispatch_generation.clone());
-        attempt.dispatch_post_root = Some(dispatch_post_root.clone());
-        self.save()?;
-        Ok(json!({
-            "type":"dispatch-reserved-v1",
-            "attemptId":attempt_id.to_string(),
-            "httpOperationId":http_operation_id,
-            "requestSha256":sha256_file(&request_path)?,
-            "sourceRequestDigest":source_request_digest,
-            "reserveOperationId":reserve_operation_id.to_string(),
-            "reserveIndex":reserve_index.to_string(),
-            "dispatchTask":task.task,
-            "dispatchSubject":task.subject,
-            "parentTask":self.config.task,
-            "parentGeneration":parent_generation,
-            "parentRoot":parent_root,
-            "dispatchGeneration":dispatch_generation,
-            "dispatchPostRoot":dispatch_post_root,
-            "reserve":task.reserve,
-            "charge":task.charge,
-            "reserveReceipt":anchor,
-        }))
-    }
-    /// Persist the one-shot external boundary before the physical host writes
-    /// to fd3. The host must already have inspected the exact committed Mini
-    /// permit; this marker does not inspect or mint that permit.
     fn dispatch_mark_send(
         &mut self,
         attempt_id: u64,
@@ -6092,15 +5738,18 @@ impl Runtime {
         if sha256_file(&attempt.request_path)? != request_sha256 {
             return Err("retained dispatch request bytes changed".into());
         }
-        if attempt.reserve_v2_dir.is_some() {
-            self.verified_dispatch_reserve_hold(
-                &attempt,
-                self.journal
-                    .dispatch_hold
-                    .as_ref()
-                    .ok_or("v2 reserve hold absent")?,
-            )?;
+        // Dispatch v1 (a reserve the SPK host's word could settle) is retired:
+        // a send is marked only on a v2 reserve whose custody re-verifies.
+        if attempt.reserve_v2_dir.is_none() {
+            return Err("dispatch attempt has no v2 reserve custody".into());
         }
+        self.verified_dispatch_reserve_hold(
+            &attempt,
+            self.journal
+                .dispatch_hold
+                .as_ref()
+                .ok_or("v2 reserve hold absent")?,
+        )?;
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
             || (!self.prompt_active && self.foreground_operation.is_none())
@@ -6669,61 +6318,6 @@ impl Runtime {
     /// A definite pre-send refusal releases this one purse at zero. Once the
     /// send marker exists, only a definite response or audited reconciliation
     /// may settle it; an old HTTP operation cannot obtain a second attempt.
-    fn dispatch_abort_no_send(&mut self, attempt_id: u64) -> Result<Value> {
-        if self.cancelled.load(Ordering::SeqCst)
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-        {
-            return Err("agent hard EOF requires audited dispatch reconciliation".into());
-        }
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_ref()
-            .ok_or("no dispatch attempt")?;
-        if attempt.id != attempt_id
-            || attempt.send_started
-            || self.journal.dispatch_pending.is_some()
-        {
-            return Err("dispatch may have crossed an external boundary".into());
-        }
-        if let Some(hold) = self.journal.dispatch_hold.clone() {
-            let authority = self.dispatch()?;
-            if hold.reserve_confirmed && hold.reserve_anchor.is_some() {
-                self.journal
-                    .dispatch_attempt
-                    .as_mut()
-                    .ok_or("dispatch attempt disappeared before release")?
-                    .no_send_release_started = true;
-                self.save()?;
-                self.transition_as(
-                    &authority,
-                    json!({"type":"settle","charge":"0"}),
-                    "dispatch release",
-                    "definite refusal before app send",
-                    vec![],
-                )?;
-            } else if hold.reserve_refused || hold.reserve_attempt.is_none() {
-                let current = self.query_as(&authority)?;
-                if current.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-                    || current.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-                    || current.get("targetRoot").and_then(Value::as_str)
-                        != Some(hold.before_target_root.as_str())
-                {
-                    return Err("unsubmitted dispatch reserve differs from held origin".into());
-                }
-                self.journal.dispatch_hold = None;
-                self.save()?;
-            } else {
-                return Err("dispatch reserve may have committed; exact lookup required".into());
-            }
-        } else if attempt.reserve_operation_id.is_some() {
-            return Err("dispatch reserve marker disappeared without settlement".into());
-        }
-        self.journal.dispatch_attempt = None;
-        self.save()?;
-        Ok(json!({"type":"dispatch-aborted-before-send-v1",
-            "attemptId":attempt_id.to_string(),"charge":"0"}))
-    }
     fn dispatch_rpc(&mut self, command: dispatch_custody::Command) -> Result<Value> {
         use dispatch_custody::Command as C;
         let attempt_id = |value: &str| -> Result<u64> {
@@ -6733,14 +6327,6 @@ impl Runtime {
                 .map_err(|_| "dispatch attempt ID exceeds u64".into())
         };
         match command {
-            C::Reserve {
-                http_operation_id,
-                source_request_digest,
-                canonical_request_hex,
-            } => {
-                let request = dispatch_custody::decode_hex(&canonical_request_hex)?;
-                self.dispatch_reserve(&request, &source_request_digest, &http_operation_id)
-            }
             C::ReserveV2 {
                 route_name,
                 forward_operation_id,
@@ -6838,33 +6424,6 @@ impl Runtime {
                 attempt_id: id,
                 response_sha256,
             } => self.dispatch_settle_definite(attempt_id(&id)?, &response_sha256),
-            C::AbortNoSend { attempt_id: id } => self.dispatch_abort_no_send(attempt_id(&id)?),
-            C::Inspect { attempt_id: id } => {
-                let id = attempt_id(&id)?;
-                let attempt = self
-                    .journal
-                    .dispatch_attempt
-                    .as_ref()
-                    .ok_or("no dispatch attempt")?;
-                if attempt.id != id {
-                    return Err("dispatch attempt ID differs".into());
-                }
-                let hold = self.journal.dispatch_hold.as_ref();
-                Ok(json!({"type":"dispatch-attempt-v1",
-                    "attemptId":id.to_string(),
-                    "httpOperationId":attempt.http_operation_id,
-                    "sourceRequestDigest":attempt.source_request_digest,
-                    "requestSha256":attempt.request_sha256,
-                    "parentGeneration":attempt.parent_generation,
-                    "reserveOperationId":attempt.reserve_operation_id.map(|n| n.to_string()),
-                    "reserveConfirmed":hold.is_some_and(|h| h.reserve_confirmed),
-                    "reserveReceipt":hold.and_then(|h| h.reserve_anchor.as_ref()),
-                    "sendStarted":attempt.send_started,
-                    "dispatchTransaction":attempt.committed_dispatch_transaction,
-                    "dispatchEvent":attempt.committed_dispatch_event,
-                    "permitSha256":attempt.committed_permit_sha256,
-                    "responseSha256":attempt.response_sha256}))
-            }
         }
     }
     fn answer_dispatch(&mut self, request: dispatch_custody::Request) {
@@ -6900,11 +6459,6 @@ impl Runtime {
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
-        Self::open_mode(config, config_path, None)
-    }
-    // The migration entrypoint never calls serve or any worker/provider action.
-    // Its only relaxed seam is cross-file transport validation before publication.
-    fn open_mode(config: Config, config_path: PathBuf, migration: Option<&Path>) -> Result<Self> {
         if !config_path.is_absolute() {
             return Err("controller config path must be absolute".into());
         }
@@ -6932,14 +6486,8 @@ impl Runtime {
         }
         let locked_state_dir = config.state_dir.clone();
         systemd_manager::initialize(&config, &config_path)?;
-        session_failure::ensure_publication_known(&config.state_dir)?;
-        let startup = config_migration::recover_startup(&config, &config_path)?;
-        let config: Config = if startup.is_some() {
-            serde_json::from_slice(&bounded_regular_file(&config_path, 262_144)?)
-                .map_err(|e| format!("controller config after migration recovery: {e}"))?
-        } else { config };
         if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
-        if migration.is_none() { validate(&config)?; }
+        validate(&config)?;
         let binding = json!({"config":config,"configPath":config_path});
         let path = config.state_dir.join("journal.json");
         let journal = if path.exists() {
@@ -6955,17 +6503,13 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
-            if let Some(request) = migration {
-                config_migration::check_stopped_open(&config, &config_path, &j, request)?;
-            } else { j.validate_workspace(&config)?; }
+            j.validate_workspace(&config)?;
             j
         } else {
-            if migration.is_some() { return Err("configuration migration requires an existing journal".into()); }
             let j = Journal::fresh(binding);
             atomic_json(&path, &j)?;
             j
         };
-        config_migration::activate_startup(&config.state_dir, startup)?;
         let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
@@ -6994,10 +6538,10 @@ impl Runtime {
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
-        if migration.is_none() && (rt.journal.child.is_some()
+        if rt.journal.child.is_some()
             || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
-            || rt.journal.hard_reconnect_pending)
+            || rt.journal.hard_reconnect_pending
         {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
@@ -7005,8 +6549,6 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
     fn confirmed_publication_receipt(
@@ -7828,13 +7370,7 @@ impl Runtime {
         self.query_as(&a)
     }
     fn query_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_as_via(authority, None)
-    }
-    // Only the query-only topology receiver can construct this transport token.
-    // The shared bounded read path preserves this exact admitted socket on retries.
-    fn query_as_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        self.query_observation_via(authority, transport)
+        self.query_observation_as(authority)
     }
     fn query_policy(&mut self) -> Result<Value> {
         self.query_policy_observation()
@@ -16611,9 +16147,6 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
-        if tool && legacy_custody_audit::zero_phase_active(self) {
-            return Err("legacy B44 audit requires its exact zero-charge settlement".into());
-        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -17964,14 +17497,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
-        if let Err(error) = config_migration::ensure_process_current(&rt.config.state_dir)
-            .and_then(|()|session_failure::ensure_publication_known(&rt.config.state_dir)) {
-            if let Input::Admin(request) = next {
-                request.phase.store(2, Ordering::SeqCst);
-                let _ = request.reply.send(format!("error: {error}"));
-            } else { rt.emit(format!("error: {error}\n")); }
-            continue;
-        }
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
@@ -18034,15 +17559,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         .send("admin action expired before dispatch".into());
                     continue;
                 }
-                if let Some(path) = request.command.strip_prefix("config migrate ") {
-                    let result = rt.migrate_config(Path::new(path), false);
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
                 if let Some(sha)=request.command.strip_prefix("resident prepare ") {
                     let result=rt.prepare_resident_prompt(sha);
                     let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
@@ -18085,33 +17601,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let result = rt.deliver_resident_final(Path::new(path));
                     request.phase.store(2, Ordering::SeqCst);
                     let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("resident supersede-completion ") {
-                    let result = rt.supersede_unsupported_completion(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("session reconcile-failure ") {
-                    let result = rt.reconcile_session_failure(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("quiescence transport ") {
-                    let result = rt.inspect_quiescence_transport(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
                     continue;
                 }
                 if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
@@ -18169,8 +17658,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
-                    "reconcile tool legacy b44" => legacy_custody_audit::audit_b44(&mut rt),
-                    "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
@@ -18307,18 +17794,6 @@ fn main() -> ExitCode {
             Err(error) => { eprintln!("grain-runtime controller-launch: {error}"); ExitCode::FAILURE }
         };
     }
-    if args.len() >= 2 && args[1] == "controller-write-scopes" {
-        return match controller_write_scopes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "config-migrate" {
-        return match config_migration::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime config-migrate: {error}"); ExitCode::from(1) }
-        };
-    }
     if args.len() >= 2 && args[1] == "resident-completion" {
         return match resident_completion::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
@@ -18329,24 +17804,6 @@ fn main() -> ExitCode {
         return match resident_delivery::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime resident-delivery: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "resident-outcome" {
-        return match resident_outcomes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime resident-outcome: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "session-failure" {
-        return match session_failure::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "quiescence-transport" {
-        return match quiescence_transport::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime quiescence-transport: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "quiescence" {

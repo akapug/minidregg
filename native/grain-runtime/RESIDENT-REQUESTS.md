@@ -8,7 +8,8 @@ alias, including its generation. A replacement must be provisioned with matching
 inbox and account coordinates before any new provider work.
 
 Omitted or null `maxPrompts` runs continuously. An explicit value1..1000 limits
-qualified completed turns for a bounded assignment or fixture; restarting does
+completed turns (the source completion receiver's counter in resident.json) for a
+bounded assignment or fixture; restarting does
 not reset the count. There is no fixture-sized lifetime limit by default.
 `intervalSeconds` defaults30, within5..3600.
 

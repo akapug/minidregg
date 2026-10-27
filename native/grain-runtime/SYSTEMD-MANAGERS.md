@@ -27,8 +27,8 @@ workers use that UID's user manager and the existing bwrap isolation. The runtim
 never probes a second manager after a failure. Manager commands use explicit
 manager flags and UID-bound local bus addresses. Controller cgroup proofs retain
 the canonical unit, current MainPID, recursive physical stop proof and existing
-launch-gate fences. All startup, quiescence and config migration consumers share
-those checks.
+launch-gate fences. Startup and quiescence share those checks. A changed controller config is a
+reprovision (a redeploy re-genesises); there is no in-place config migration.
 
 Both runtime and launcher expose `--controller-manager-protocol` with exact output
 `mini-controller-manager-v1`. Before a cross-manager launch reserves work, the
