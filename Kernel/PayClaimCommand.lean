@@ -130,17 +130,38 @@ def marker (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/OPERATION/v1".toUTF8.toList
     (possessionFrame domain semantics command)).digest
 
+/-- The verdict of the possession-signature oracle over the frame these indices determine. Layer 2
+(the TokenCensus claim): only `verifyNative` mints one. The fields record the question the oracle was
+asked (key, frame, signature), each pinned to the indices, so `valid` is the answer to THAT question and
+not a free flag; that the oracle answered truthfully is its runtime fact. -/
 structure Checked (domain semantics : Digest) (ingress : DecodedIngress) where
   private mk ::
   verifier : CredentialSignatureIO.NativeConfig
+  key : List UInt8
+  frame : List UInt8
+  signature : List UInt8
+  keyExact : key = ingress.command.signingKey
+  frameExact : frame = possessionFrame domain semantics ingress.command
+  signatureExact : signature = ingress.ingress.possessionSignature
   valid : Bool
+
+/-- A `Checked` answers the possession question over exactly the key, frame (domain, semantics, command) and
+signature of its ingress. -/
+theorem Checked.asked {domain semantics : Digest} {ingress : DecodedIngress}
+    (checked : Checked domain semantics ingress) :
+    checked.key = ingress.command.signingKey ∧
+      checked.frame = possessionFrame domain semantics ingress.command ∧
+      checked.signature = ingress.ingress.possessionSignature :=
+  ⟨checked.keyExact, checked.frameExact, checked.signatureExact⟩
 
 def verifyNative (config : CredentialSignatureIO.NativeConfig) (domain semantics : Digest)
     (ingress : DecodedIngress) : IO (Except CredentialSignatureIO.Error (Checked domain semantics ingress)) := do
   match ← CredentialSignatureIO.verify config ingress.command.signingKey
       (possessionFrame domain semantics ingress.command) ingress.ingress.possessionSignature with
   | .error reason => return .error reason
-  | .ok valid => return .ok ⟨config, valid⟩
+  | .ok valid =>
+      return .ok ⟨config, ingress.command.signingKey, possessionFrame domain semantics ingress.command,
+        ingress.ingress.possessionSignature, rfl, rfl, rfl, valid⟩
 
 theorem command_roundtrip (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode _
