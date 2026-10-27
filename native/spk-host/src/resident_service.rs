@@ -1793,7 +1793,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     write_new(&config.journal_dir, admitted_name, &admitted_bytes)?;
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
-    let mut resident = prepared.start(&journal, &claim.physical_begin)?;
+    // The last physical boundary before the one-shot spawn: fd5 is the exact
+    // directory the root witness attests, and the witness itself is unchanged
+    // since preflight (RUST-TRIAGE R15).
+    let mut resident = prepared.start_attested(&journal, &claim.physical_begin, &volume)?;
     // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
     // request is refused before it is sent, after the claim is committed.
     let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
