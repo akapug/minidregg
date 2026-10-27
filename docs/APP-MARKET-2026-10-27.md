@@ -34,6 +34,7 @@ Lifecycle passes whose write has not yet run with its recipe:
 - from the featured table: HedgeDoc, DokuWiki;
 - from b1: SandMD, Permanote, TextEditor, Dillinger;
 - from b4: WordPress;
+- from b2: Yet Another TODO, ExpenseOwl, SandCal;
 - from b6: SandForms, Badgepack;
 - from rt: WBO, Gogs.
 
@@ -51,7 +52,7 @@ the app's docs, its package and the rows; a comment above each names its source.
 |---|---|---|
 | featured (built in) | EtherCalc (proven), HedgeDoc, Davros, sntfy, DokuWiki, Hledger Web, Datasette | Datasette 0.63 has no HTTP write: its row records a read and stays red by design. HedgeDoc's own write cannot work, because its package lacks `iconv-lite/encodings` and every HTTP body it parses throws; rt's HedgeDocRT writes over socket.io instead. |
 | b1 | SandMD, Permanote, TextEditor (DDP), Dillinger | SandMD is a HackMD fork and may share HedgeDoc's package defect. |
-| b2 | Yet Another TODO, ExpenseOwl, OrgTodo, SandCal | landing as this is written |
+| b2 | Yet Another TODO, ExpenseOwl, OrgTodo, SandCal | OrgTodo is refused at install: `invalid or oversized sandstorm-manifest` (owed: read the manifest against MAX_MANIFEST and the decoder) |
 | b4 | Hugo, WordPress, Hacker CMS, Hakyll CMS | read-back through the publishing socket `www.sock` (§5a) |
 | b6 | SandForms (DDP), Badgepack, OwnTracks, Hummingbird | |
 | rt | WBO (socket.io), HedgeDocRT (socket.io), Wekan (DDP), Gogs (forms with `_csrf`) | Wekan needs a world with `MINI_IMPORT_PROFILE=market-large-v1` |
