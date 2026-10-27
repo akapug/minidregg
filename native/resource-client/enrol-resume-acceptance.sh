@@ -50,8 +50,11 @@ step() { # NAME EXPECT(ok|fail) COMMAND...
   if [ "$expect" = fail ] && [ "$code" -eq 0 ]; then echo "step $name unexpectedly succeeded" >&2; exit 1; fi
 }
 said() { grep -q "$2" "$LOG/$1.stderr" || { echo "step $1 did not say: $2" >&2; tail -3 "$LOG/$1.stderr" >&2; exit 1; }; }
-nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" >>"$ROOT/public/serve.log" 2>&1 </dev/null &
-printf '%s\n' "$!" >"$ROOT/public/server.pid"
+# The fixture hands over its running server (ROOT/public/server.pid, the socket bound). This run uses
+# that server and stops it by that PID file when it ends, however it ends. (Starting a second
+# `mini serve` here overwrote the PID file and left the fixture's server running after every run.)
+[ -s "$ROOT/public/server.pid" ] && kill -0 "$(cat "$ROOT/public/server.pid")" 2>/dev/null \
+  || { echo 'the fixture handed over no running server (ROOT/public/server.pid)' >&2; exit 1; }
 trap 'kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 waited=0; until [ -S "$SOCKET" ]; do waited=$((waited + 1)); [ "$waited" -lt 1200 ] || { echo 'socket did not appear' >&2; exit 1; }; sleep 0.1; done
 # A tick asserts the wall clock's second; the Host refuses one that does not advance past the last
