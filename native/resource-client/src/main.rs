@@ -1658,22 +1658,6 @@ pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode_any_case(value).map_err(|error| error.0)
 }
 
-fn challenge_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
-    let headers = value
-        .get("headers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "host challenge JSON has no headers array".to_owned())?;
-    headers
-        .iter()
-        .map(|header| {
-            header
-                .as_str()
-                .ok_or_else(|| "host challenge header is not a string".to_owned())
-                .and_then(decode_hex)
-        })
-        .collect()
-}
-
 fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
     let slots = value
         .get("slots")
@@ -4767,9 +4751,7 @@ mod tests {
 
     #[test]
     fn inspected_headers_are_signed_as_exact_bytes_in_order() {
-        let challenge = json!({"headers": ["00ff10", "6d696e69"]});
-        let headers = challenge_headers(&challenge).unwrap();
-        assert_eq!(headers, [vec![0, 255, 16], b"mini".to_vec()]);
+        let headers = vec![vec![0, 255, 16], b"mini".to_vec()];
 
         let signing = SigningKey::from_bytes(&[27; 32]);
         let rendered = sign_headers(&signing, &headers).unwrap();
@@ -5138,17 +5120,9 @@ mod ascii_hex_regression {
         }
         assert_eq!(super::decode_hex("00AaFF").unwrap(), [0, 170, 255]);
         assert!(super::decode_hex("").unwrap().is_empty());
-    }
-}
-
-#[cfg(test)]
-mod decode_hex_tests {
-    #[test]
-    fn decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic() {
-        assert_eq!(super::decode_hex("00aBff").unwrap(), vec![0, 0xab, 0xff]);
-        // A Host plan header (pay refill reads one) with multi-byte text: the
-        // old slicing decoder panicked on the char boundary.
-        for bad in ["\u{e9}\u{e9}", "a\u{e9}a", "a\u{e9}", "+f", "-1", "0x", "abc", "zz", " 1"] {
+        // A Host plan header (pay refill reads one) with multi-byte text: the old slicing decoder
+        // panicked on the char boundary; signs, prefixes, odd lengths and spaces refuse too.
+        for bad in ["a\u{e9}", "-1", "0x", "abc", "zz", " 1"] {
             assert!(super::decode_hex(bad).is_err(), "{bad:?}");
         }
     }
