@@ -761,6 +761,7 @@ usage:
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
   mini apps-front --listen 127.0.0.1:8797 --origins DIR [--domain demo.dregg.online]   the grain entrance behind Caddy
+  mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH]   the operator custodian: installs, routes, lifecycle
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
@@ -2656,6 +2657,8 @@ fn run(mut args: Args) -> Result<()> {
         "apps" => apps::run(args),
         #[cfg(unix)]
         "apps-front" => apps::front::run(args),
+        #[cfg(unix)]
+        "apps-worker" => apps::worker::run(args),
         #[cfg(unix)]
         "mix" => pq_mailbox::run(args),
         #[cfg(unix)]

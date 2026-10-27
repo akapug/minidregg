@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -54,6 +54,9 @@ pub(crate) struct Route {
 pub(crate) struct Origin {
     pub grain: String,
     pub routes: Vec<Route>,
+    /// The worker's edge socket: route sockets live under the operator's 0700
+    /// state root, so the worker connects and hands the socket over SCM_RIGHTS.
+    pub connector: Option<PathBuf>,
 }
 
 fn hex64(text: &str) -> bool {
@@ -99,7 +102,28 @@ pub(crate) fn parse_origin(bytes: &[u8]) -> Result<Origin> {
         }
         routes.push(parsed);
     }
-    Ok(Origin { grain: grain.to_owned(), routes })
+    let connector = match value.get("connector") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(path)) if Path::new(path).is_absolute() => Some(PathBuf::from(path)),
+        _ => return Err("origin table connector must be an absolute path".into()),
+    };
+    Ok(Origin { grain: grain.to_owned(), routes, connector })
+}
+
+/// The custodian socket for a route: directly, or through the worker's connector.
+fn connect_route(origin: &Origin, route: &Route) -> io::Result<UnixStream> {
+    let Some(connector) = &origin.connector else {
+        return UnixStream::connect(&route.socket);
+    };
+    let mut edge = UnixStream::connect(connector)?;
+    edge.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let request = format!("{{\"verb\":\"connect\",\"grain\":\"{}\",\"route\":\"{}\"}}\n", origin.grain, route.member);
+    edge.write_all(request.as_bytes())?;
+    let (reply, socket) = super::worker::receive_with_fd(&edge).map_err(io::Error::other)?;
+    match socket {
+        Some(socket) => Ok(socket),
+        None => Err(io::Error::other(reply.get("refused").and_then(Value::as_str).unwrap_or("connector refused").to_owned())),
+    }
 }
 
 fn token_hash(token: &str) -> String {
@@ -368,7 +392,7 @@ impl Front {
                 false,
             );
         };
-        let mut upstream = match UnixStream::connect(&route.socket) {
+        let mut upstream = match connect_route(&origin, route) {
             Ok(upstream) => upstream,
             Err(_) => return respond(&mut client, "503 Service Unavailable", "grain route not listening; the grain may be stopped or restarting\n", false),
         };
@@ -472,7 +496,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
-    use std::path::Path;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mini-apps-front-{name}-{}", std::process::id()));
