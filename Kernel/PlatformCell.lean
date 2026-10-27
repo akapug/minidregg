@@ -198,6 +198,112 @@ def ReceiverAuthenticated (ctx : Context) (decide : History → Install → Bool
     ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope = true ∧
       ctx.deployment.holdsInstall ctx.deployment.controller i.capability = true
 
+/-! ### Proofs of L1-a, L1-b, L1-c -/
+
+theorem records_push (h : History) (p : Platform) : (h.push p).records = h.records ++ [p] := by
+  simp [History.push, History.records]
+
+theorem current_push (h : History) (p : Platform) : (h.push p).current = p := by
+  simp [History.current, records_push]
+
+/-- Every record of a sorted list is at or below its last. -/
+theorem chain_le_last : ∀ (l : List Platform) (ne : l ≠ []),
+    l.IsChain (fun a b => a.version < b.version) → ∀ p ∈ l, p.version ≤ (l.getLast ne).version
+  | [], ne, _, _, _ => absurd rfl ne
+  | [a], _, _, p, mem => by
+      simp at mem
+      subst mem
+      simp
+  | a :: b :: t, _, chain, p, mem => by
+      have ih := chain_le_last (b :: t) (List.cons_ne_nil _ _) (List.isChain_of_isChain_cons chain)
+      rw [List.getLast_cons_cons]
+      rcases List.mem_cons.mp mem with same | rest
+      · subst same
+        exact Nat.le_of_lt (Nat.lt_of_lt_of_le (List.rel_of_isChain_cons_cons (R := fun a b : Platform => a.version < b.version) chain) (ih b (by simp)))
+      · exact ih p rest
+
+theorem staysSorted (ctx : Context) : StaysSorted ctx := by
+  intro h i sorted admitted
+  unfold Sorted at *
+  rw [records_push, List.isChain_append]
+  refine ⟨sorted, List.isChain_singleton _, ?_⟩
+  intro x last y first
+  simp only [List.head?_cons, Option.mem_def, Option.some.injEq] at first
+  subst first
+  rw [show h.records.getLast? = some h.current from
+    List.getLast?_eq_getLast_of_ne_nil (List.cons_ne_nil _ _)] at last
+  simp only [Option.mem_def, Option.some.injEq] at last
+  subst last
+  exact admitted.2.2.2.1
+
+theorem reachable_sorted (ctx : Context) (h : History) (reachable : Reachable ctx h) : Sorted h := by
+  induction reachable with
+  | genesis _ => exact List.isChain_singleton _
+  | install h i _ admitted ih => exact staysSorted ctx h i ih admitted
+
+theorem versionMonotone (ctx : Context) : VersionMonotone ctx := by
+  refine ⟨reachable_sorted ctx, ?_⟩
+  intro h i reachable admitted p member
+  exact Nat.lt_of_le_of_lt (chain_le_last h.records (List.cons_ne_nil _ _)
+    (reachable_sorted ctx h reachable) p member) admitted.2.2.2.1
+
+theorem recordsValid (ctx : Context) : RecordsValid ctx := by
+  intro h reachable
+  induction reachable with
+  | genesis valid =>
+      intro p member
+      simp [History.records] at member
+      subst member
+      exact valid
+  | install h i _ admitted ih =>
+      intro p member
+      rw [records_push, List.mem_append] at member
+      rcases member with old | new
+      · exact ih p old
+      · simp at new
+        subst new
+        exact admitted.2.2.2.2.1
+
+/-- The custodian rule as the receiver checks it. -/
+def custodianCheck (verifiesKey : List UInt8 → List UInt8 → List UInt8 → Bool)
+    (bytes : List UInt8) (cosign : Option (List UInt8)) :
+    Option (List UInt8) → Option (List UInt8) → Bool
+  | none, _ => true
+  | some _, none => false
+  | some old, some new => decide (old = new) ||
+      (match cosign with | some s => verifiesKey old bytes s | none => false)
+
+theorem custodianCheck_iff (verifiesKey : List UInt8 → List UInt8 → List UInt8 → Bool)
+    (bytes : List UInt8) (cosign : Option (List UInt8)) (old new : Option (List UInt8)) :
+    custodianCheck verifiesKey bytes cosign old new = true ↔
+      CustodianStep verifiesKey bytes cosign old new := by
+  rcases old with _ | o <;> rcases new with _ | n <;>
+    simp only [custodianCheck, CustodianStep, Bool.or_eq_true, decide_eq_true_eq] <;>
+    try simp
+  rcases cosign with _ | c <;> simp
+
+/-- The reference admission the platform receiver runs. -/
+def decideInstall (ctx : Context) (h : History) (i : Install) : Bool :=
+  decide (i.subject = ctx.deployment.controller) &&
+    ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope &&
+    ctx.deployment.holdsInstall ctx.deployment.controller i.capability &&
+    decide (h.current.version < i.next.version) &&
+    i.next.valid &&
+    custodianCheck ctx.deployment.verifiesKey (ctx.encode i) i.custodianCosign
+      h.current.completionCustodianKey i.next.completionCustodianKey
+
+/-- **L1-c proved for the reference receiver.** -/
+theorem decideInstall_decides (ctx : Context) : Decides ctx (decideInstall ctx) := by
+  intro h i
+  simp only [decideInstall, Bool.and_eq_true, decide_eq_true_eq, custodianCheck_iff, Admits,
+    and_assoc]
+
+theorem decides_authenticated (ctx : Context) (decide : History → Install → Bool)
+    (decides : Decides ctx decide) : ReceiverAuthenticated ctx decide := by
+  intro h i admitted
+  have := (decides h i).mp admitted
+  exact ⟨this.2.1, this.2.2.1⟩
+
 /-! ### L1-d: births read the platform of the store they commit against -/
 
 structure Terms where
@@ -780,5 +886,7 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
   charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
   overflow_refused protocol_install_is_spec_at_zero_credit today_install_matches_zero
   today_install_mismatch_with_credit refilled_is_protocol_install
+  records_push current_push chain_le_last staysSorted reachable_sorted versionMonotone recordsValid
+  custodianCheck_iff decideInstall_decides decides_authenticated
 
 end Minidregg.Kernel.PlatformCell
