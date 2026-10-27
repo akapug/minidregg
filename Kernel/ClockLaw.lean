@@ -106,7 +106,9 @@ verb, and a step that carries no clock. A management request (an install, revoca
 delegation projected over the authority cell) has no clock slots, while every clock write
 projects them (`project`), so management is never a clock write and never moves the clock:
 the law says so itself, with no premise about which families write the cell
-(`controlClause_clock_false`). -/
+(`controlClause_clock_false`). Fail-safe premise: a management step that ever carried a
+`clock/*` slot would be refused here, so the premise can only narrow management, never widen
+it. -/
 def controlClause (controller : SubjectId) : Minidregg.Pred.Pred :=
   .all [.eq "request/subject" (Int.ofNat controller.value),
     .memberOf "request/verb" controlVerbTags, absent "clock/now", absent "clock/slot"]
