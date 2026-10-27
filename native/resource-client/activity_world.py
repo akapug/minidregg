@@ -10,6 +10,13 @@ the workspace key signs the header, op 211 assemble, op 212 submit); every refus
 name; the public view (op 214) reads the cells back. ROOT/transcript holds every command's exact
 output.
 
+Every submit carries `--again true` unless a step says `again=False`: a scripted journey never reruns a
+step by accident, so a body it submits a second time (the same birth thrice, a top-up per height, the
+deliberate duplicate a refusal row wants) is always its decision, and what the row asserts is the Host's
+decided answer, by name, never the client's local notice. The client's own rule (the same decided turn
+without `--again` is answered locally, nothing signed) has its own row in
+objective-activity-native-acceptance.py.
+
 A journey records its rows through `World.turn` / `World.check` and groups them with `World.group`
 (one group = one row of the journey table). `World.finish` writes ROOT/results.json and
 ROOT/groups.tsv (ID, STATUS, WALL_S, DETAIL: the journey runner's sub-row format) and returns the
@@ -322,11 +329,13 @@ class World:
         self.totals.append({'after': label, 'height': v.get('height'), 'total': v.get('total')})
         return v
 
-    def submit(self, label, workspace, body, prepare=False):
+    def submit(self, label, workspace, body, prepare=False, again=True):
         """One signed command, unjudged: the Host's outcome value. An `invoke` without an operation id gets
         one minted HERE, written into the caller's body, so no driver can forget it and a driver that
         resubmits the same body (a retry of the same operation) reuses it. An invoke not yet quoted is
-        quoted and submitted by ONE `mini` process (`--quote-front-end`, `front_end_quote`)."""
+        quoted and submitted by ONE `mini` process (`--quote-front-end`, `front_end_quote`). `again`: the
+        driver's decision that a body it already submitted (and the Host decided) is submitted once more
+        (module docstring); a step that wants the client's own local notice passes False."""
         if body.get('kind') == 'invoke' and 'opId' not in body:
             body['opId'] = op_id()
         quote = None
@@ -340,6 +349,8 @@ class World:
             args += ['--quote-front-end', json.dumps(quote)]
         if prepare:
             args += ['--prepare-only', 'true']
+        if again:
+            args += ['--again', 'true']
         value = self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
         if quote is not None:
             self.adopt_quote(label, body, out, value)
@@ -408,13 +419,13 @@ class World:
                     '--request', json.dumps(quote_request(body)))
         return quoted_heap(self.last_json(r))
 
-    def turn(self, label, workspace, body, expect, detail=None, prepare=False):
+    def turn(self, label, workspace, body, expect, detail=None, prepare=False, again=True):
         """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A refusal
         may name its reason in `detail` (a substring, or a list of substrings, of the Host's refusal text).
         A `deliver`/`exhaust` first asks the Host's quote for the heap its checkpoint needs and declares it."""
         if body.get('kind') in RESUME_KINDS:
             body = covering_body(body, self.quote_heap(label, workspace, body), self.payer_of(workspace))
-        value = self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
+        value = self.judge(label, self.submit(label, workspace, body, prepare, again), expect, detail)
         if body.get('kind') == 'publish' and value.get('type') == 'confirmed':
             self.learn_front_end(f'{label}-front-end')
         return value

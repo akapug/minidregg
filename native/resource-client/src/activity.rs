@@ -331,6 +331,23 @@ fn read_ingress(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|error| format!("activity: cannot read {}: {error}", path.display()))
 }
 
+/// A `resubmit` or `lookup` by an attempt's OWN `ingress.bin` decides that attempt: `turn_nonce`
+/// reads the attempt's `outcome.json` to tell a decided record (followed only by `--again true`)
+/// from an undecided one, so a turn prepared with `--prepare-only` and then resubmitted or looked
+/// up would stay "undecided" forever unless the decided answer is retained where the record looks.
+/// Only a decided answer is retained (confirmed or refused), only once, and only beside an ingress
+/// that is an attempt's own (`plan.bin` beside it): a copy or a forged ingress elsewhere decides
+/// nothing.
+fn retain_decision(ingress: &Path, outcome: &Value) -> Result<()> {
+    let Some(dir) = ingress.parent() else { return Ok(()) };
+    let own = ingress.file_name() == Some(std::ffi::OsStr::new("ingress.bin")) && dir.join("plan.bin").is_file();
+    let decided = matches!(outcome.get("type").and_then(Value::as_str), Some("confirmed" | "refused"));
+    if own && decided && !dir.join("outcome.json").exists() {
+        write_new(&dir.join("outcome.json"), outcome.to_string().as_bytes())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action")?.into_string().map_err(|_| "activity action must be UTF-8")?;
     let ws = ws(path(args.required("workspace")?))?;
@@ -360,15 +377,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 submit(&ws, &turn, &out, prepare_only, front_end.as_ref(), again)?
             }
         }
-        "resubmit" => {
-            let ingress = read_ingress(&path(args.required("ingress")?))?;
+        "resubmit" | "lookup" => {
+            let retained = path(args.required("ingress")?);
+            let ingress = read_ingress(&retained)?;
             args.finish()?;
-            inspect(&ws, "outcome", &invoke(&ws, 212, &ingress)?)?
-        }
-        "lookup" => {
-            let ingress = read_ingress(&path(args.required("ingress")?))?;
-            args.finish()?;
-            inspect(&ws, "outcome", &invoke(&ws, 213, &ingress)?)?
+            let op = if action == "resubmit" { 212 } else { 213 };
+            let outcome = inspect(&ws, "outcome", &invoke(&ws, op, &ingress)?)?;
+            retain_decision(&retained, &outcome)?;
+            outcome
         }
         "view" => {
             let request = match args.optional("request") {
