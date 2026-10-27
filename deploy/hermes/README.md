@@ -201,3 +201,51 @@ one credit per purse micro-unit):
   per-operation fees the Host pinned when it was born. A Host tariff with
   different fees refuses the user-route reserve (its hold must equal the law's
   fee) and fails a metered settle closed; a fee change means a new purse.
+
+## The demo box: Hermes's grain and controller config
+
+`controller.json` is not written by hand: two of its fields are capabilities
+allocated when the owner delegates the parent witness, so it comes out of
+`grain-runtime create deploy/hermes/grain-create.demo.json` (run as the Hermes
+grain account against the serving Store). `controller.demo.json` is the exact
+shape that command writes for this spec, kept for review; its
+`WITNESS-FROM-CREATE` values are the two fields create fills, and the
+controller refuses the file until they are real. Then
+`install-controller --system --service-user ACCOUNT --config /var/lib/mini/hermes/g/controller.json ...`
+renders `mini-grain-controller@9870001.service` (controller manager `system`,
+worker `user`, unit name) and writes `/etc/mini/controllers/9870001.json`.
+
+Where each spec field comes from:
+
+- `mini`, `host`: the shipped candidate (`/var/lib/mini/candidate/current/bin`).
+- `hostConfig`, `genesis`, `namespaceRoot`, `sponsor.key`: the Store's own
+  deployment files; `hostConfig` must carry the purse's `providerServices`
+  tariff (the profile's semantics do not change when it is added).
+- `hostSocket`, `room.socket`: the **private operator** socket (`mini
+  serve-operator`); the resident refuses anything that does not answer
+  `operator-status`.
+- `sponsor.subject`/`accountCapability`/`grants`, `template`: the Store's
+  genesis (sponsor enrollment, factory observation) and operator template.
+- `owner`, `workerKey`, `provider.key`: three subjects enrolled for Hermes's
+  grain, keys private to the grain account, never Hermes's room key.
+- `task`, `toolTask`, `provider.task`, `capabilities.*`: unused resource IDs
+  the operator picks (create refuses duplicates among them; the Host refuses
+  IDs in use).
+- `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices (Rust
+  policy today, gr R1).
+- `worker`: the shipped `bwrap` launcher (sibling `launch-gate`), a runtime
+  root holding `hermes-acp`, `grain-runtime` and `grain-provider-bridge`, and
+  `network: none` (the production topology: the worker reaches the model only
+  through the bridge and the controller's Unix gateway).
+- `provider.gateway`: `providers`/`credentialBroker` are the root-owned table
+  and broker client; `provider: "pool"` pins the pool row (set it, or the
+  first row listing the model is chosen); `model` is the infra lane's choice;
+  `reserve` must cover the pool fee plus the metered charge at
+  `maxInputTokens`/`maxOutputTokens` under the Host profile's pool tariff.
+- `room`: the room Hermes is summoned into, its room workspace and account;
+  `restrictTools: true` (also the default).
+
+Hermes cannot settle a provider call until the client consent accepts the
+height-pinned provider settle plan (main's `checkPlan` compares it with the
+unpinned local prepare and refuses; L1 owns the fix). The grain and unit can
+be installed now; turn the unit on with the candidate that carries that fix.
