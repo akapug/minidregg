@@ -164,8 +164,8 @@ tariff before any enrollment can be decided; it is not an operating source of th
    The old single-socket entry (`run.sh serve`, DEPLOY-2b's `5688775a`) has no operator socket, so
    self-enrollment cannot run there. The operator socket checks the peer UID: the tick must run as the
    Store's uid (`mini`; in split tenancy `install.sh` runs every Mini unit as `mini-core`, tick
-   included). `mini-pay-watcher.service` keeps `ReadWritePaths=/var/lib/mini`, which covers
-   connecting to that socket. Without `PAY_ENROL_CAPABILITY` and `PAY_OPERATOR_SOCKET`, an
+   included). `mini-pay-watcher.service` keeps `ReadWritePaths=/var/lib/mini/pay`; connecting to that socket needs no write access
+   to its directory. Without `PAY_ENROL_CAPABILITY` and `PAY_OPERATOR_SOCKET`, an
    enrollment-index record is left undecided every tick (`enrol-unconfigured`, exit 3) and holds the
    enrollment cursor.
 
