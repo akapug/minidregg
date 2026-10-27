@@ -33,29 +33,38 @@ the newest built main that passed the gate; each is reported in one line, and in
   writes its PID file at spawn (`build.pid`, `gate.pid`, `enrol-resume-cN.pid` under the cut's lane dir,
   the chain itself `integ4/cutN.pid`). Stop only by those files.
 
-## Cuts
+## Cuts and builds
 
-| cut | integration sha | candidate | gate |
-|---|---|---|---|
-| r1 | 55e483e0 | hbox `/tank/dregg-build/claude-integration-20261026/C` | rows 118/23/4 (pre-gate-v2) |
-| r2 | 45f45d15 | `/build/candidates/45f45d15…` | rows 112/25/8/3; JWF 24/24 |
-| r3 | 6236826f | `/build/candidates/6236826f…` | rows 131/5/9/3 |
-| 4 | a94bed71 (main 6b824270) | `/build/candidates/a94bed71…` | FAIL: J0 completion key; composed seal |
-| 6 | 23861533 | `/build/candidates/23861533…` | FAIL: tour-chromium timeout; composed apps/connector/residents blocked |
-| 7 | 3315a908 | `/build/candidates/3315a908…` | FAIL: tour-chromium (old jtour); composed at ROOT SETUP (old runner) |
-| 8 | 26418b6b | none (host build killed by memory) | skipped |
-| 9 | 5fdfa393 | none: consent stage red (below) | no gate |
-| 10 | 006cd214 (merged to main by the coordinator) | not built | — |
-| 11 | af84d8cf | folded into 12 | — |
-| 12 | f1ce1626 (main) | stopped by PID for cut 13 (integ8/stop-c12.list) | — |
-| 13 | a75d89d6 (main) | building in integ8 (cut13.sh) | first ship on green |
+| cut | sha | outcome |
+|---|---|---|
+| r1/r2/r3 | 55e483e0 / 45f45d15 / 6236826f | candidates; rows (INTEGRATION-1/2.md) |
+| 4, 6, 7 | a94bed71, 23861533, 3315a908 | candidates `/build/candidates/<sha>`; gate FAIL (named in reports) |
+| 8, 9 | 26418b6b, 5fdfa393 | no candidate (OOM; stale hard-linked olean) |
+| 12 | f1ce1626 | stopped by PID for cut 13 (integ8/stop-c12.list) |
+| 13 | a75d89d6 | host stage OOM-killed by co-tenant memory on swarm.slice |
+| main a7b5afec | — | stopped by PID on the coordinator's word (integ8/stop-main.list) |
+| 14 | aa9366f8 | phase A running: `integ4/cut14-regen.sh` (pid file cut14-regen.pid): seated host closure, then `codec-shapes-regen.py` once; its diff lands in `integ8/regen.patch` |
 
-Cut 11 took: main f392e9bb, hermes e11eef11, custody-drivers e471d6f2, app-market 2a7d092f, hot-path-codec
-acad2eb7, un-assurance e6eac995, un-bend 91f8a83c, un-deputy 3bf7d7be, un-fixtures a6a32103, un-pb-codec
-470f41e7, un-pb-exec 64211340, un-pb-seal 31e65265, un-seats ccb34bc5, un-verify 9f5a7cf4, un-world (newest),
-plus web-frontend 33c13554, lean-l13-laws d8251be0, un-native-rows, un-moves e9d0f2c1, un-pred-census
-already in at cut 10. Held out: lane/lean-critical and lane/un-effects (one flag-day cut, scheduled by the
-coordinator).
+Main since aa9366f8 (also to build): pd-host-rate 9f9bac79 (its test-host-operations reds fixed), oracle-lifetime-grant
+44d55995, oracle-grant-factory 671e614f, lean-audit-c 86f15d3c (main = bca2cc59). The oracle branches add Lean
+fixtures, so the census may want the regen again over the newer tree.
+
+Next steps: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
+build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
+for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
+stage ends cleanly, tell infra (aed5ecf506cf840af) and the coordinator the tree `/build/lanes/integ8/src` for the
+dregg-ref copy. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
+batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
+
+Red routing: lean-audit-c reds go to L1c (a855b4edb693e03ae) directly; un-stream-continuity reds
+(ApplicationStreamContinuityFresh pole proofs, NativeHostReplay.lean:3816) to the deputy a308118209b4a48ea; all
+others through the coordinator. Expected reds, not new: the eight hand-rolled genesis writers (acceptance.sh,
+application-acceptance.sh, authority-acceptance.sh, selected-release-acceptance.sh, grain-runtime/acceptance.sh,
+jpay2.sh, jpay6.sh, scripts/fn-e1e2/setup-mini.sh) until L2 converts them; rows refusing an older world as
+noncanonical/epoch after the re-genesis.
+
+Rules now in force: the Mac runs cargo check and filtered Rust tests only, never Lean (the regen script runs lake
+itself: box only). Lanes do not build; the integrator is the one validator.
 
 ## Cut 9's red, and its cause
 
