@@ -1,6 +1,6 @@
 //! The GF(2^128) reference field the protocols share.
 use crate::codec::bad;
-use std::io::{Error, ErrorKind, Result};
+use std::io::Result;
 /// GF(2^128), reduction x^128+x^7+x^2+x+1. This reference arithmetic is
 /// functional, not a constant-time implementation for online secret computation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

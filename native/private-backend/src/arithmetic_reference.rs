@@ -1,38 +1,8 @@
-//! Public two-bit addition program over the SAME constant/XOR/AND network.
-//! This is an explicit reference program, not a claim that the new Objective
-//! source compiler/type/demand semantics have been refined to this graph.
+//! Test-only drivers that run the Lean-emitted two-bit addition plan
+//! (`fixtures/addition-network-2-plan.bin`) over the SAME constant/XOR/AND
+//! network, with every party honest.
+#[cfg(test)]
 use crate::circuit_batch::{Network, Op};
-pub fn two_bit_addition() -> Network {
-    let mut net = Network {
-        input_count: 4,
-        gates: vec![Op::Constant(true)],
-        outputs: vec![],
-    };
-    // Counted input Boolean qualification precedes all arithmetic and consumes
-    // the SAME full Plan; failure never returns those rows.
-    for input in 0..4 {
-        let x = emit(&mut net, Op::Xor(input, 4));
-        emit(&mut net, Op::And(input, x));
-    }
-    let mut carry = emit(&mut net, Op::Constant(false));
-    let mut sums = vec![];
-    for bit in 0..2 {
-        let (a, b) = (bit, bit + 2);
-        let p = emit(&mut net, Op::Xor(a, b));
-        sums.push(emit(&mut net, Op::Xor(p, carry)));
-        let ab = emit(&mut net, Op::And(a, b));
-        let pc = emit(&mut net, Op::And(p, carry));
-        carry = emit(&mut net, Op::Xor(ab, pc));
-    }
-    sums.push(carry);
-    net.outputs = sums;
-    net
-}
-fn emit(n: &mut Network, op: Op) -> u64 {
-    let wire = n.input_count + n.gates.len() as u64;
-    n.gates.push(op);
-    wire
-}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -283,13 +253,12 @@ pub(crate) mod tests {
         right: u8,
         instance: u64,
     ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
-        completed_network(
-            left,
-            right,
-            instance,
-            two_bit_addition(),
-            b"REFERENCE.NAT2.ADD/carry.retained/qualified4bits",
-        )
+        // The Lean-emitted two-bit addition plan with its counted Boolean
+        // input qualification: the one addition network.
+        let bytes = include_bytes!("../fixtures/addition-network-2-plan.bin");
+        let plan = crate::circuit_batch::Plan::decode(bytes).unwrap();
+        let network = crate::field_network::with_boolean_inputs(&plan.network).unwrap();
+        completed_network(left, right, instance, network, bytes)
     }
     pub(crate) fn completed_network(
         left: u8,
