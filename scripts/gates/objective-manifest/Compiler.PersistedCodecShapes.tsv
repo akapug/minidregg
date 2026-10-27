@@ -1,3 +1,0 @@
-# Compiler.PersistedCodecShapes: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
-# an added, removed, restated, redefined or re-axiomed row needs a line in scripts/gates/objective-contract-decisions.txt.
-def	Minidregg.Compiler.PersistedCodecShapes.pins	2ce458f978c4eb8c257cb23e9ff7e67ee365945046dd3b30a7b4c431d4e62913	5c76f5e0ce1b00852fcc846cb7b1107e731f799a28a3e6e322bb7957a73f23fe	9aed614198556455ef62b30b99cffd7fe77653238e53b7e3ef2c5b99cece7d11	ec8a4feaa03f99b1	-	List (String × String)

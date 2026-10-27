@@ -1,4 +1,0 @@
-# Compiler.SigningKeyCommitment: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
-# an added, removed, restated, redefined or re-axiomed row needs a line in scripts/gates/objective-contract-decisions.txt.
-def	Minidregg.Compiler.SigningKeyCommitment.digest	b7520ba11bbf9e8ede308b92f802b2897f66035febf32333b61c2ac6f31c02a3	9dd750348cef15a1fe9e683e8750019e6567eb7353b1245acce0f759553046d3	6eeadab89744dc3908b758cd6a450e10378ecfe6582151cff86c7facd93561ab	2be2b1ad2b35e53e	Quot.sound,propext	List UInt8 → Minidregg.Theory.TypedAuthorization.Digest
-def	Minidregg.Compiler.SigningKeyCommitment.tag	c412d04e71daa0e5333cbf48221e7a43f08eb3c1f4d090bbfb3b66b7cb65fa0f	268fce01293bcb84de059c093737d89d8980bbc789bd14e1bc6693665008f358	935808af2834aebedfa731cde83bbecf37c1ef7c7b47be539ef2887077ca77c5	7923e2dcec12fcb5	propext	List UInt8
