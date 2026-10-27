@@ -274,15 +274,17 @@ On top of J14's room: the founder sets `hermes/tools 7` and `hermes/compute
      custody keys) → no such file;
    - `ls /proc` → only the sandbox's own PIDs; `cat /proc/1/environ` holds no
      `MINI_` variable;
-   - another resident's scratch: `ls OTHER_TASK_STATE/../workspace` and a
-     marker file planted in a second, concurrently running worker's `/scratch`
-     → neither path exists here;
+   - another resident's state: a host directory holding a marker under the
+     run, standing in for a second resident's state and scratch → absent
+     (a second resident's `/scratch` is a tmpfs in its own mount namespace
+     and has no host path at all);
    - `python3 -c "import socket; socket.create_connection(('1.1.1.1',443),3)"`
      → `Network is unreachable`; the same to the host's operator socket path →
      no such file;
    - `unshare -U true` → refused (`--disable-userns`).
 
-Rows: the session catalogue equals Mini ∪ the seven names; paper gains exactly
+Before the ask, bob's own `tariff lab set hermes/tools 7` is refused: only
+the founder grants. Rows: the session catalogue equals Mini ∪ the seven names; paper gains exactly
 the one line, authored by Hermes; the three planted results are refusals inside
 the sandbox (from the provider's request log of tool results); Hermes's balance
 fell by the doc turn plus `k ≥ 1` compute turns, whose count equals the gate's
