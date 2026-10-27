@@ -111,7 +111,7 @@ textarea,input[type=text]{width:100%;box-sizing:border-box}.warn{border-left:4px
 /// own payment script; nothing is fetched from anywhere else.
 fn asset(path: &str) -> Option<(&'static [u8], &'static str)> {
     Some(match path {
-        "/join/assets/web3.js" => (include_bytes!("../../assets/vendor/web3.js"), "application/javascript; charset=utf-8"),
+        "/join/assets/solpay.js" => (include_bytes!("../../assets/solpay.js"), "application/javascript; charset=utf-8"),
         "/join/assets/wallet.js" => (include_bytes!("../../assets/vendor/wallet.js"), "application/javascript; charset=utf-8"),
         "/join/assets/pay.js" => (include_bytes!("../../assets/pay.js"), "application/javascript; charset=utf-8"),
         _ => return None,
@@ -126,12 +126,11 @@ const WALLET_PAGE: &str = r#"(async () => {
   const say = (t) => { out.querySelector(".status").textContent = t; };
   try {
     const quote = JSON.parse(document.getElementById("quote").textContent);
-    const web3 = solanaWeb3;
-    const conn = new web3.Connection(quote.rpc, "confirmed");
-    const pay = makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) });
+    const conn = new solpay.Connection(quote.rpc, "confirmed", (u, o) => fetch(u, o));
+    const pay = makeDoorPay(solpay, quote, { conn, fetch: (u, o) => fetch(u, o) });
     const late = pay.stale();
     if (late) { say(late); return; }
-    const wallets = await passwapWallets.list(web3, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
+    const wallets = await passwapWallets.list(solpay, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
     if (!wallets.length) { say("No Solana wallet extension was found in this browser (Phantom, Solflare, Backpack, Talisman, ...); the paste path below works with any wallet."); return; }
     for (const w of wallets) {
       const b = document.createElement("button"); b.textContent = "Pay with " + w.name;
@@ -285,7 +284,7 @@ impl Door {
                  <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
                  <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
-                 <script src=/join/assets/web3.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
+                 <script src=/join/assets/solpay.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
                  <script>{WALLET_PAGE}</script>",
                 html(p["amountAtomic"].as_str().unwrap_or("?")),
                 html(p["amountTokens"].as_str().unwrap_or("")),
@@ -600,10 +599,11 @@ mod tests {
         assert_eq!(quote["decimals"], "6");
         assert!(body.contains("Pay with your wallet") && body.contains("/join/assets/pay.js") && body.contains("action=/join/paid"));
         assert!(body.contains("solana-rpc.publicnode.com"));
-        for a in ["/join/assets/web3.js", "/join/assets/wallet.js", "/join/assets/pay.js"] {
+        for a in ["/join/assets/solpay.js", "/join/assets/wallet.js", "/join/assets/pay.js"] {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+        assert!(asset("/join/assets/web3.js").is_none(), "no SDK bundle is served");
     }
 
     #[test]
@@ -642,7 +642,7 @@ mod tests {
     fn vendored_assets_match_their_pins() {
         use sha2::Digest;
         let table = include_str!("../../assets/vendor/VENDOR.md");
-        for (file, bytes) in [("web3.js", &include_bytes!("../../assets/vendor/web3.js")[..]), ("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..])] {
+        for (file, bytes) in [("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..]), ("solpay.js", &include_bytes!("../../assets/solpay.js")[..])] {
             let digest = format!("{:x}", sha2::Sha256::digest(bytes));
             assert!(table.contains(&digest), "{file}: sha256 {digest} is not in VENDOR.md");
         }

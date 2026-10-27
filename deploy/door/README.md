@@ -69,7 +69,7 @@ stranger's ssh secret, the memo's ssh possession is signed **detached**: the sta
 exact statement and one `ssh-keygen -Y sign -n dregg-enrol@v2` command; the stranger pastes the
 signature back; the processor finishes the memo (`--ssh-signature`) and the page shows recipient,
 amount, memo and the quote's expiry hour, and two ways to pay: **Pay with your wallet** (the page's
-vendored `@solana/web3.js` and sol-misc's wallet adapter, `native/discord-entrance/assets/`; the
+own one-shape serializer (`assets/solpay.js`, no SDK) and sol-misc's wallet adapter, `native/discord-entrance/assets/`; the
 browser builds the TransferChecked from the stranger's associated token account to the recipient's
 plus one Memo instruction with the exact memo bytes, the wallet signs, the browser sends it to the
 public RPC `pay.rpc` names and posts the signature itself; the recipient's token account must exist,
