@@ -79,6 +79,14 @@ pub enum Failure {
     Uncertain(String),
 }
 
+/// The environment switch of the lost-reply fault: its value names the operation byte (decimal) whose
+/// next exchange writes and does not read. Consumed on first use.
+pub const LOSE_REPLY_ENV: &str = "MINI_FAULT_LOSE_REPLY_ONCE";
+
+fn lose_reply_armed(operation: u8) -> bool {
+    std::env::var(LOSE_REPLY_ENV).ok().and_then(|v| v.trim().parse::<u8>().ok()) == Some(operation)
+}
+
 /// Where operator requests go.
 #[derive(Debug, Clone)]
 pub enum Route {
@@ -404,6 +412,25 @@ impl Operator {
     pub fn call(&self, operation: u8, payload: &[u8]) -> std::result::Result<Reply, Failure> {
         let frame = request(&self.config, self.host_sha256.as_ref(), operation, payload)
             .map_err(|e| Failure::Unsent(e.0))?;
+        // The lost-reply switch (`submit ID --lose-reply-once`; DEMO-EXPERIENCE A11): a client-side
+        // fault, armed once by the client's own environment, that writes the exact call and then
+        // deliberately never reads the answer. The Host decides as it would; the custody record
+        // holds the call as uncertain; `lookup`/`retry` ask for the same decided outcome.
+        if lose_reply_armed(operation) {
+            std::env::remove_var(LOSE_REPLY_ENV);
+            if let Route::Unix(socket) = &self.route {
+                let mut stream = UnixStream::connect(socket)
+                    .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                stream
+                    .write_all(&(frame.len() as u32).to_le_bytes())
+                    .and_then(|_| stream.write_all(frame.as_slice()))
+                    .and_then(|_| stream.flush())
+                    .map_err(|e| Failure::Uncertain(format!("uncertain host request write: {e}")))?;
+                drop(stream);
+            }
+            return Err(Failure::Uncertain("reply deliberately not read (--lose-reply-once): the Host decided as it would; this exact call is looked up or retried, never re-sent as a second write".into()));
+        }
         let reply = match &self.route {
             Route::Unix(socket) => self.call_unix(socket, &frame)?,
             Route::Ssh(_) => self.channel.as_ref().expect("an ssh route has its channel").exchange(&frame, self.read_deadline)?,
@@ -412,6 +439,7 @@ impl Operator {
     }
 
     fn call_unix(&self, socket: &Path, frame: &[u8]) -> std::result::Result<Vec<u8>, Failure> {
+        let _ = LOSE_REPLY_ENV;
         let mut stream = UnixStream::connect(socket)
             .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
         let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));

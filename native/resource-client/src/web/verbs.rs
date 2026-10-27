@@ -48,6 +48,36 @@ impl Alt {
     }
 }
 
+/// Whether the alternative at `index` of `usage` is a WORLD TRANSITION (a proposal, a submit, a
+/// birth, a payment) rather than a read or a local verb, read from the `operation` segment that
+/// names it (the segments align with the usage alternatives; a verb with one segment applies it
+/// to every alternative). Interim: the structured command grammar (A0) carries this as data.
+pub(super) fn transition(usage: &str, operation: &str, index: usize, literals: &str) -> bool {
+    let segments: Vec<&str> = operation.split(" | ").collect();
+    let alternatives_count = usage.split(" | ").count();
+    let segment = if segments.len() == alternatives_count {
+        segments.get(index).copied().unwrap_or(operation)
+    } else {
+        // Fewer segments than alternatives (`doc`): the segment that names this subcommand
+        // (`doc-show`, or the word inside `propose (payload document: append, edit, …)`).
+        let mut words = literals.split(' ');
+        let verb = words.next().unwrap_or("");
+        match words.next() {
+            Some(sub) => segments
+                .iter()
+                .find(|seg| seg.contains(&format!("{verb}-{sub}")) || seg.starts_with(sub) || seg.contains(&format!(" {sub},")) || seg.contains(&format!(" {sub})")) || seg.contains(&format!(": {sub}")))
+                .copied()
+                .unwrap_or(operation),
+            None => operation,
+        }
+    };
+    let lower = segment.to_ascii_lowercase();
+    let read = lower.starts_with("local") || lower.contains("signed read") || lower.contains("signed view") || lower.contains("signed tail") || lower.contains("--action list") || lower.contains("--action read") || lower.contains("--action describe") || lower.contains("--action inspect") || lower.contains("--action can") || lower.contains("--action recover") || lower.contains("dry-run") || lower.contains("--format") || lower.contains("doc-show") || lower.contains("doc-history") || lower.contains("doc-diff") || lower.contains("--action status") || lower.contains("--action balance") || lower.contains("--action tariff") && !lower.contains("--set") || lower.starts_with("who") || lower.starts_with("describe") || lower.starts_with("chat:") || lower.starts_with("current app admission") || lower.contains("--action search") || lower.contains("--action key-status");
+    // Anything the segment does not name as a read or a local verb is a world transition: the
+    // safe default for a verb that may write (its exit 0 is then "admitted" only when it is).
+    !read
+}
+
 /// Split a usage into alternatives (` | ` between them; a `|` inside a word is a choice).
 pub(super) fn alternatives(usage: &str) -> Vec<Alt> {
     usage.split(" | ").map(|alt| Alt { tokens: tokens(alt) }).filter(|a| !a.tokens.is_empty()).collect()
@@ -176,7 +206,8 @@ pub(super) fn index(site: &Site) -> Page {
     let note = if site.front.read_only {
         "<p class=note>The public reader runs no verb; with a session every one of these is a form.</p>"
     } else {
-        "<p>Every verb of <code>mini shell</code>, as a form: the same words, the same Host, the same decoded outcome. Derived from the shell's verb table, so a verb is here the day it exists.</p>"
+        "<p>Every verb of <code>mini shell</code>, as a form: the same words, the same Host, the same decoded outcome. Derived from the shell's verb table, so a verb is here the day it exists.</p>\
+         <p class=note>Interim: these forms are read from each verb's usage string. The structured command grammar (one data structure per verb: subcommands, typed arguments, reference kinds, uploads, confirmations, outcome schema) that the shell's parsing, help, completion and this page will all consume replaces them verb by verb (docs/DEMO-EXPERIENCE-2026-10-27.md A0).</p>"
     };
     Page { status: 200, title: "Commands".into(), stamp: Stamp::None, body: format!("{note}\n<table><thead><tr><th>verb</th><th>usage</th><th>operation</th></tr></thead><tbody>{rows}</tbody></table>") }
 }
@@ -317,12 +348,17 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
         }
     }
     let mut lines = vec![words.join(" ")];
+    let index = form.get("alt").and_then(|a| a.parse::<usize>().ok()).unwrap_or(0);
+    let mut is_transition = transition(verb.usage, verb.operation, index, &alt.literals());
     if form.get("submit").map(String::as_str) == Some("on") && alt.proposes(verb.operation) && !id.is_empty() {
-        lines.push(format!("submit {id}"));
+        // The tour's lost-reply switch rides on the submit line (DEMO-EXPERIENCE A11).
+        let lose = if form.get("lose").map(String::as_str) == Some("on") { " --lose-reply-once" } else { "" };
+        lines.push(format!("submit {id}{lose}"));
+        is_transition = true;
     }
     let next: Vec<(String, String)> = vec![(format!("{name} again"), format!("/verb/{name}")), ("all commands".into(), "/verb".into())];
     let refs: Vec<(&str, &str)> = next.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-    super::body::act(site, &alt.literals(), lines, &id, &refs)
+    super::body::act_as(site, &alt.literals(), lines, &id, &refs, is_transition)
 }
 
 #[cfg(test)]
@@ -369,6 +405,15 @@ mod tests {
         let html = form("delegate", 0, &alts[0], "propose", "/verb/delegate", "");
         assert!(form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\">").unwrap().contains("action=\"/tour/3\""));
         assert!(form_for("doc", "doc nope", "/x", "").is_none());
+        let doc = crate::shell::command_catalog().find(|v| v.name == "doc").unwrap();
+        let show = alternatives(doc.usage).iter().position(|a| a.literals() == "doc show").unwrap();
+        let append = alternatives(doc.usage).iter().position(|a| a.literals() == "doc append").unwrap();
+        assert!(!transition(doc.usage, doc.operation, show, "doc show"), "doc show is a read");
+        assert!(transition(doc.usage, doc.operation, append, "doc append"), "doc append proposes");
+        for (name, is) in [("whoami", false), ("help", false), ("history", false), ("can", false), ("inspect", false), ("refs", false), ("submit", true), ("delegate", true), ("create", true), ("retry", true)] {
+            let v = crate::shell::command_catalog().find(|v| v.name == name).unwrap();
+            assert_eq!(transition(v.usage, v.operation, 0, name), is, "{name}: {}", v.operation);
+        }
         assert!(html.contains("name=\"a1\"") && html.contains("list=\"refs\"") && html.contains("name=\"submit\""), "{html}");
     }
 }

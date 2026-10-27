@@ -229,7 +229,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         }
         ["laws", "show"] => match query(target, "ref") {
             Some(name) => match verb(site, &[format!("law show {}", quote(&name))]) {
-                Some(ending) => Page { status: 200, title: format!("Law on {name}"), stamp: Stamp::None, body: outcome(&ending, &[("laws", "/laws")]) },
+                Some(ending) => Page { status: 200, title: format!("Law on {name}"), stamp: Stamp::None, body: answered(&ending, &[("laws", "/laws")]) },
                 None => simple(500, "Laws", "this body has no shell paths"),
             },
             None => simple(400, "Laws", "give a reference"),
@@ -280,7 +280,7 @@ fn room(site: &Site, name: &str) -> Page {
         if ending.code == 0 {
             page.body.push_str(&format!("<pre class=\"turns\">{}</pre>\n", escape(ending.text().trim())));
         } else {
-            page.body.push_str(&outcome(&ending, &[]));
+            page.body.push_str(&answered(&ending, &[]));
         }
         if !site.front.read_only {
             page.body.push_str(&format!(
@@ -315,7 +315,7 @@ fn receipts(site: &Site) -> Page {
                 body.push_str(&format!("<table><thead><tr><th>attempt</th><th>outcome</th></tr></thead><tbody>{rows}</tbody></table>"));
             }
         }
-        Some(ending) => body.push_str(&outcome(&ending, &[])),
+        Some(ending) => body.push_str(&answered(&ending, &[])),
         None => body.push_str("<p class=note>no shell paths: receipts are shown through the shell</p>"),
     }
     body.push_str("<form method=\"get\" action=\"/receipts/lookup\" class=\"row\"><label for=\"rid\">Attempt id</label><input id=\"rid\" type=\"text\" name=\"id\" pattern=\"[A-Za-z0-9-]+\" required><button>Open</button></form>");
@@ -327,9 +327,11 @@ fn receipt(site: &Site, id: &str) -> Page {
         return simple(404, "Receipts", "not an attempt id");
     }
     let mut body = String::new();
-    for (heading, line) in [("Outcome", format!("lookup {id}")), ("Receipt", format!("inspect receipt {id}")), ("Why", format!("why {id}"))] {
+    // `lookup` asks the Host for the retained attempt's decided outcome (a transition's class);
+    // the receipt and the explanation are reads.
+    for (heading, line, transition) in [("Outcome", format!("lookup {id}"), true), ("Receipt", format!("inspect receipt {id}"), false), ("Why", format!("why {id}"), false)] {
         if let Some(ending) = verb(site, &[line]) {
-            body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome(&ending, &[])));
+            body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome_of(&ending, &[], transition)));
         }
     }
     if !site.front.read_only {
@@ -347,11 +349,11 @@ fn grants(site: &Site) -> Page {
     if let Some(ending) = verb(site, &["inspect caps --json".to_owned()]) {
         match serde_json::from_str::<Value>(ending.stdout.trim()) {
             Ok(view) if ending.code == 0 => body.push_str(&format!("<section class=\"grants\"><h2>Capability tree</h2>{}</section>\n", json_tree(&view))),
-            _ => body.push_str(&outcome(&ending, &[])),
+            _ => body.push_str(&answered(&ending, &[])),
         }
     }
     if let Some(ending) = verb(site, &["can --all".to_owned()]) {
-        body.push_str(&format!("<section><h2>What they cover</h2>{}</section>\n", outcome(&ending, &[])));
+        body.push_str(&format!("<section><h2>What they cover</h2>{}</section>\n", answered(&ending, &[])));
     }
     // Grains: the identities an app holds for you, and the v1 notice (members of a shared grain look
     // like one user to the app), said here as L13's receipts say it.
@@ -410,7 +412,7 @@ fn keys(site: &Site) -> Page {
     );
     for (heading, line) in [("Who am I", "whoami"), ("Key status", "key-status")] {
         if let Some(ending) = verb(site, &[line.to_owned()]) {
-            body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome(&ending, &[])));
+            body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", answered(&ending, &[])));
         }
     }
     body.push_str("<p><a href=\"/sessions\">Your browser sessions</a> (list and revoke) · <a href=\"/term\">Terminal</a> for <code>rotate-key</code> and <code>adopt-next-key</code>, which take the next key's file.</p>");
@@ -494,7 +496,7 @@ fn operations(site: &Site) -> String {
             "<section class=\"ops chat\" data-live=\"30000\"><h2>Operations room</h2><p class=note>The box's ships, drills, certifier ticks and backup receipts, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",
             escape(ending.text().trim())
         ),
-        Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", outcome(&ending, &[])),
+        Some(ending) => format!("<section class=\"ops\"><h2>Operations room</h2>{}</section>\n", answered(&ending, &[])),
         None => String::new(),
     }
 }
@@ -518,8 +520,14 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             format!("<p><a href=\"/\">the front page</a> · <a href=\"/registry\">the registry</a> · <a href=\"/receipts\">receipts</a></p>{}", operations(site))),
         ("joins", "A name; optionally an ssh public key, Discord, pay-to-enrol. Without an ssh key the box makes the hosted key and the door answers a one-time <em>Open your session</em> link.".into(),
             "<p><a href=\"/join\" data-full>the door</a></p>".into()),
-        ("writes", "A new document, an append, a link to another document, a transclusion; after every action the outcome partial: admitted at a height, or the refusal's clause, or undecided with its exact retry.".into(),
-            forms(3, &[("doc", "doc new"), ("doc", "doc append"), ("doc", "doc link"), ("doc", "doc transclude")])),
+        ("writes", "A new document, an append, a link to another document, a transclusion; after every action the outcome partial: admitted at a height, or the refusal's clause, or undecided with its exact retry. The append form carries the <em>lose this reply</em> switch: a fault in your own client (<code>submit ID --lose-reply-once</code>) that writes the exact call and never reads the answer; the Host admits once, the receipt is undecided with one link, the exact retry, which answers the same decided outcome: one append, one charge.".into(),
+            if member {
+                format!("{}{}{}{}",
+                    forms(3, &[("doc", "doc new")]),
+                    verbs::form_for("doc", "doc append", "/tour/3", "<input type=\"hidden\" name=\"verb\" value=\"doc\"><label class=\"check\"><input type=\"checkbox\" name=\"lose\" value=\"on\"> lose this reply once (a client-side fault; the Host still decides)</label>").unwrap_or_default(),
+                    forms(3, &[("doc", "doc link")]),
+                    forms(3, &[("doc", "doc transclude")]))
+            } else { String::new() }),
         ("is refused, and reads why", "Try to edit a document you do not own: refused, with the clause of the law that refused it. <code>can</code> shows which verbs would pass; <code>why</code> explains the last refusal in the kernel's words.".into(),
             forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
         ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
@@ -685,6 +693,11 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
 
 /// Run the lines as this member and render the ending.
 pub(super) fn act(site: &Site, title: &str, lines: Vec<String>, id: &str, next: &[(&str, &str)]) -> Page {
+    act_as(site, title, lines, id, next, true)
+}
+
+/// `act` for lines that are reads or local verbs: their endings are answers, not transitions.
+pub(super) fn act_as(site: &Site, title: &str, lines: Vec<String>, id: &str, next: &[(&str, &str)], transition: bool) -> Page {
     let Some(ending) = verb(site, &lines) else {
         return simple(500, title, "this body has no shell paths");
     };
@@ -694,7 +707,7 @@ pub(super) fn act(site: &Site, title: &str, lines: Vec<String>, id: &str, next: 
     }
     let refs: Vec<(&str, &str)> = links.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     let status = match ending.code { 0 => 200, 3 => 403, 4 => 202, _ => 400 };
-    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome(&ending, &refs)) }
+    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_of(&ending, &refs, transition)) }
 }
 
 // ---------------------------------------------------------------- the shell as the runner
@@ -718,16 +731,19 @@ impl Ending {
     }
 
     /// The class and the headline the one partial shows (shell.rs: 0 ok, 1 client error,
-    /// 2 usage, 3 refused, 4 undecided).
-    fn class(&self) -> (&'static str, String) {
+    /// 2 usage, 3 refused, 4 undecided). Admitted, refused and undecided name WORLD TRANSITIONS
+    /// only; a local or read verb that returns 0 is "answered", a refused read "read refused".
+    fn class(&self, transition: bool) -> (&'static str, String) {
         // Script mode echoes `mini> LINE` before each line; the ending's own first line follows.
         let first = self.stderr.lines().find(|l| !l.trim().is_empty() && !l.starts_with("mini> ")).unwrap_or("").to_owned();
-        match self.code {
-            0 => ("admitted", "Admitted".into()),
-            3 => ("refused", if first.is_empty() { "Refused".into() } else { first }),
-            4 => ("undecided", if first.is_empty() { "Undecided: the attempt is retained".into() } else { first }),
-            2 => ("refused", if first.is_empty() { "Usage".into() } else { first }),
-            _ => ("refused", if first.is_empty() { "The client could not complete this".into() } else { first }),
+        match (self.code, transition) {
+            (0, true) => ("admitted", "Admitted".into()),
+            (0, false) => ("answered", "Answered".into()),
+            (3, true) => ("refused", if first.is_empty() { "Refused".into() } else { first }),
+            (3, false) => ("refused", if first.is_empty() { "Read refused".into() } else { format!("read {first}") }),
+            (4, _) => ("undecided", if first.is_empty() { "Undecided: the attempt is retained".into() } else { first }),
+            (2, _) => ("error", if first.is_empty() { "Usage".into() } else { first }),
+            _ => ("error", if first.is_empty() { "The client could not complete this".into() } else { first }),
         }
     }
 }
@@ -797,17 +813,31 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     })
 }
 
+/// A world transition's outcome (admitted / refused / undecided).
 pub(super) fn outcome_html(ending: &Ending, next: &[(&str, &str)]) -> String {
     outcome(ending, next)
+}
+
+/// A read's or a local verb's answer (answered / read refused / undecided).
+pub(super) fn answer_html(ending: &Ending, next: &[(&str, &str)]) -> String {
+    outcome_of(ending, next, false)
 }
 
 pub(super) fn json_tree_html(v: &Value) -> String {
     json_tree(v)
 }
 
-/// The one outcome partial (the gateway's CSS: `.outcome.admitted|refused|undecided`).
+/// The one outcome partial (the gateway's CSS: `.outcome.admitted|refused|undecided|answered|error`).
 fn outcome(ending: &Ending, next: &[(&str, &str)]) -> String {
-    let (class, headline) = ending.class();
+    outcome_of(ending, next, true)
+}
+
+fn answered(ending: &Ending, next: &[(&str, &str)]) -> String {
+    outcome_of(ending, next, false)
+}
+
+pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: bool) -> String {
+    let (class, headline) = ending.class(transition);
     let mut links = String::new();
     for (label, href) in next {
         links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
@@ -878,11 +908,11 @@ fn purse(site: &Site) -> Page {
                 escape(&line)
             ));
         }
-        Some(ending) => body.push_str(&outcome(&ending, &[])),
+        Some(ending) => body.push_str(&answered(&ending, &[])),
         None => body.push_str("<p class=note>no shell paths</p>"),
     }
     if let Some(ending) = verb(site, &["pay status".to_owned()]) {
-        body.push_str(&format!("<section><h2>Pay</h2>{}</section>", outcome(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
+        body.push_str(&format!("<section><h2>Pay</h2>{}</section>", answered(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
     }
     Page { status: 200, title: "Purse".into(), stamp: Stamp::None, body }
 }
@@ -967,9 +997,13 @@ mod tests {
     #[test]
     fn endings_classify_by_exit_code_and_first_stderr_line() {
         let refused = Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n  outcome: x\n".into() };
-        assert_eq!(refused.class(), ("refused", "refused: law-denied: field 2 monotone".into()));
+        assert_eq!(refused.class(true), ("refused", "refused: law-denied: field 2 monotone".into()));
+        assert_eq!(refused.class(false).1, "read refused: law-denied: field 2 monotone");
         let undecided = Ending { code: 4, stdout: String::new(), stderr: "undecided: Host outcome uncertain; the attempt is retained, `lookup w-1` asks again\n".into() };
-        assert_eq!(undecided.class().0, "undecided");
+        assert_eq!(undecided.class(true).0, "undecided");
+        let read = Ending { code: 0, stdout: "subject 1\n".into(), stderr: String::new() };
+        assert_eq!(read.class(false), ("answered", "Answered".into()));
+        assert!(answered(&read, &[]).contains("outcome answered"));
         let html = outcome(&undecided, &[]);
         assert!(html.contains("outcome undecided") && html.contains("/receipts/w-1"), "{html}");
         let ok = Ending { code: 0, stdout: "admitted at 12\n".into(), stderr: String::new() };
