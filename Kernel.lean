@@ -109,7 +109,6 @@ import Kernel.ContentResourceForestInstances  -- both poles of View.Forest (hypo
 import Kernel.ContentMarks
 import Kernel.ContentRunEdit
 import Kernel.AgentGrain
-import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceTransactionAudit
