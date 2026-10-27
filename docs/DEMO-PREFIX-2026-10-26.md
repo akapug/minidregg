@@ -71,6 +71,21 @@ evidence spike (§3), not promised now.
   reds: nano's writer fails in bwrap (ENOSYS on /dev; with the nano root); thin consent refuses a
   signed write on this candidate (consent = full until the incremental refresh lands). Seven frame
   bugs found by the first real split-tenancy ship are fixed on dregg-infra main 587169b / demo-vm 8991808.
+- **nano's testground is live on the box** (2026-10-27): `wss://nano.demo.dregg.online/ws` serves
+  (writer under the admitted bwrap exception: `RestrictSUIDSGID=no` + `NoExecPaths`, because systemd's
+  sxid filter returns ENOSYS for `openat2`, which bwrap 0.12 needs); a Chromium visitor at the Pages
+  link joins the box's World as a member in ~0.6 s. The first browser-reachable surface on the box.
+- **A dedicated Linux build box exists**: `dregg-build` (Hetzner ccx33, 8 dedicated vCPU / 32 GB, SSD,
+  fsn1, `178.105.4.114`, dies with the demo on 2026-11-11; dregg-infra `demo-vm` `edge/tofu-build/`):
+  Lean + Rust toolchains, warm Lake cache, a `lanes` user; lanes run their Linux checks and the
+  integration build there instead of queueing on hbox's HDD. hbox's SSD (`rpool`, `/othersys/lanes`) now
+  holds lane hot work; `/tank` keeps the warm base and candidates. The Mac rebuilt the host closure in
+  ~25 minutes and is the Lean box for per-file work.
+- **The coordination rewrite is on `lane/coordination`** (34460623): `docs/COORDINATION-2026-10-27.md`
+  (one present-state description of how the project is developed) and the deletion of the gate
+  bookkeeping that measured itself: 653 files, −116,517 lines (Objective contract manifests, the
+  known-red ceremony, guard-discipline, waste-model, carrier census; host-closure.pin folded to one
+  number; the hypothesis ledger and censuses moved to the nightly). Merges in integration round 2.
 - **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
   but ember's harness has used it). It is torn down once the demo box serves.
 - **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
