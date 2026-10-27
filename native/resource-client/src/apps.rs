@@ -13,6 +13,8 @@
 
 #[path = "apps_front.rs"]
 pub(crate) mod front;
+#[path = "apps_worker.rs"]
+pub(crate) mod worker;
 
 use crate::{absolute, hex, path, Args, Result};
 use serde_json::{json, Map, Value};
@@ -414,12 +416,28 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
                     ));
                 }
             }
+            // The worker cannot read a member's 0700 home: the three documents travel
+            // in the request (bounded), and the worker re-checks them against the Store.
+            let document = |file: &Path| -> Result<Value> {
+                let bytes = crate::fsio::read_bounded(file, 64 * 1024)?;
+                serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", file.display()))
+            };
             let id = request_id()?;
+            let delegation_doc = document(&delegation)?;
+            // The member's signed choice: the request cell under law.apps (§3 step 3),
+            // its manager the delegation's. A class of auto is recorded once the worker
+            // sizes it, so the cell takes S/M/L only; auto births it after the receipt.
+            let manager = delegation_doc.get("managementSubject").and_then(Value::as_str).ok_or("delegationRefused: the delegation names no managementSubject")?.to_owned();
+            let request_cell_name = format!("apps-{}", &id[..12]);
+            let cell = if class == "auto" { Value::Null } else {
+                let ws = crate::workspace::load(&root)?;
+                request_cell(&root, &ws, &request_cell_name, &entry.package_id, &entry.app_id, &class, &manager)?
+            };
             let retained = json!({
                 "protocol":WORKER_PROTOCOL,"verb":"install","requestId":id,
                 "appId":entry.app_id,"packageId":entry.package_id,"class":class,
-                "birthSource":source,"birthReceipt":receipt,"delegation":delegation,
-                "indexName":entry.name,"indexVersion":entry.version
+                "birthSource":document(&source)?,"birthReceipt":document(&receipt)?,"delegation":delegation_doc,
+                "requestCell":cell,"indexName":entry.name,"indexVersion":entry.version
             });
             let file = requests.join(format!("{id}.json"));
             crate::workspace::atomic_json(&file, &retained, None)?;
@@ -568,6 +586,124 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     }
 }
 
+
+// ------------------------------------------------ the request cell (law.apps)
+
+/// The app-install request law in the shell grammar, rendered from
+/// `Kernel/AppsRequest.lean` by `scripts/AppsRequestTemplate.lean`.
+pub(crate) const LAW_TEMPLATE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/apps/request/law.apps"));
+pub(crate) const FIELD_STATE: u64 = 1;
+pub(crate) const FIELD_PACKAGE_HI: u64 = 2;
+pub(crate) const FIELD_PACKAGE_LO: u64 = 3;
+pub(crate) const FIELD_APP0: u64 = 4;
+pub(crate) const FIELD_CLASS: u64 = 8;
+pub(crate) const FIELD_GRAIN: u64 = 9;
+pub(crate) const FIELD_GENERATION: u64 = 10;
+
+/// The law for one request: the template with its two placeholders bound,
+/// comment lines dropped, parsed by the shell grammar.
+pub(crate) fn law(requester: &str, manager: &str) -> Result<Value> {
+    for (label, subject) in [("requester", requester), ("manager", manager)] {
+        crate::workspace::decimal(subject, label)?;
+    }
+    let text = LAW_TEMPLATE
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("{REQUESTER}", requester)
+        .replace("{MANAGER}", manager);
+    crate::shell::law::parse(&text).map_err(|error| format!("apps request law template: {error}"))
+}
+
+/// A 32-hex packageId as two 64-bit words: the cell's integer fields 2 and 3.
+pub(crate) fn package_words(package_id: &str) -> Result<[u64; 2]> {
+    if !valid_package_id(package_id) {
+        return Err("packageId is not 32 lowercase hex digits".into());
+    }
+    Ok([
+        u64::from_str_radix(&package_id[..16], 16).map_err(|e| e.to_string())?,
+        u64::from_str_radix(&package_id[16..], 16).map_err(|e| e.to_string())?,
+    ])
+}
+
+const BASE32: &[u8; 32] = b"0123456789acdefghjkmnpqrstuvwxyz";
+
+/// A 52-digit appId (Sandstorm's base32 alphabet `0123456789acdefghjkmnpqrstuvwxyz`) as 32
+/// bytes: 5 bits per digit, little-endian bit order, the four padding bits dropped. The
+/// member verb and the worker both derive the cell's four words this way, so the encoding
+/// is one injective naming of the appId in the kernel's record; it is not claimed to equal
+/// the signing key's hash byte for byte (that identity is the signed package's, checked by
+/// the ingest).
+pub(crate) fn app_bytes(app_id: &str) -> Result<[u8; 32]> {
+    if !valid_app_id(app_id) {
+        return Err("appId is not 52 base32 digits".into());
+    }
+    let mut bytes = [0_u8; 32];
+    let mut bit = 0_usize;
+    for digit in app_id.bytes() {
+        let value = BASE32.iter().position(|b| *b == digit).ok_or("appId holds a digit outside Sandstorm's base32 alphabet")? as u32;
+        for k in 0..5 {
+            let position = bit + k;
+            if position < 256 && (value >> k) & 1 == 1 {
+                bytes[position / 8] |= 1 << (position % 8);
+            }
+        }
+        bit += 5;
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn app_words(app_id: &str) -> Result<[u64; 4]> {
+    let bytes = app_bytes(app_id)?;
+    let mut words = [0_u64; 4];
+    for (i, word) in words.iter_mut().enumerate() {
+        *word = u64::from_be_bytes(bytes[i * 8..i * 8 + 8].try_into().map_err(|_| "word")?);
+    }
+    Ok(words)
+}
+
+pub(crate) fn class_code(class: &str) -> Result<u64> {
+    match class {
+        "S" => Ok(1),
+        "M" => Ok(2),
+        "L" => Ok(3),
+        _ => Err("classRefused: the request cell records S, M or L".into()),
+    }
+}
+
+/// `apps-<id>`: the member's signed package choice, born under `law.apps` and
+/// set up in one write (state 0, the words, the class, grain and generation 0).
+/// Idempotent on the reference: an existing cell is not born twice.
+pub(crate) fn request_cell(root: &Path, ws: &Value, name: &str, package_id: &str, app_id: &str, class: &str, manager: &str) -> Result<Value> {
+    crate::workspace::validate_name(name)?;
+    if let Ok(reference) = crate::workspace::reference(root, name) {
+        return Ok(reference);
+    }
+    let requester = crate::workspace::member(ws, "subject")?.to_owned();
+    let predicate = law(&requester, manager)?;
+    let law_path = root.join("sources").join(format!("apps-law-{name}-{}.json", crate::workspace::random_nonce()?));
+    crate::create_private(&law_path, &serde_json::to_vec(&predicate).map_err(|e| e.to_string())?)?;
+    crate::workspace::create(root, ws, name, "declared", &law_path, None, "object", None, None, Some(&format!("{FIELD_STATE}-{FIELD_GENERATION}")))?;
+    let [hi, lo] = package_words(package_id)?;
+    let app = app_words(app_id)?;
+    let mut actions = vec![
+        crate::market::scalar(FIELD_STATE, "0", None),
+        crate::market::scalar(FIELD_PACKAGE_HI, &hi.to_string(), None),
+        crate::market::scalar(FIELD_PACKAGE_LO, &lo.to_string(), None),
+    ];
+    for (i, word) in app.iter().enumerate() {
+        actions.push(crate::market::scalar(FIELD_APP0 + i as u64, &word.to_string(), None));
+    }
+    actions.push(crate::market::scalar(FIELD_CLASS, &class_code(class)?.to_string(), None));
+    actions.push(crate::market::scalar(FIELD_GRAIN, "0", None));
+    actions.push(crate::market::scalar(FIELD_GENERATION, "0", None));
+    let id = format!("setup-{name}");
+    crate::market::propose_writes(root, ws, name, &id, actions)?;
+    crate::workspace::submit_intent(root, ws, &root.join("proposals").join(&id).join("intent.json"), "intent", false, Some(&root.join("attempts").join(&id)))?;
+    crate::workspace::reference(root, name)
+}
+
 /// A grain id is `a<app>`: the app resource's canonical decimal, DNS-safe.
 pub(crate) fn valid_grain(text: &str) -> bool {
     text.len() >= 2
@@ -706,6 +842,31 @@ mod tests {
         assert_eq!(verdict_line(&pad), "refused: unsupportedBridge: apiPath \"../x\"");
         fs::write(verdicts.join("5830d70137cdae158118884da8790870.json"), br#"{"verdict":"verified","running":2}"#).unwrap();
         assert_eq!(verdict_line(&verdict(&verdicts, &meta, "5830d70137cdae158118884da8790870")), "verified, running 2");
+    }
+
+
+    #[test]
+    fn apps_request_law_renders_from_lean_and_binds_its_two_placeholders() {
+        let bound = law("12648853121532543039", "8").unwrap();
+        let text = serde_json::to_string(&bound).unwrap();
+        assert!(!text.contains("{REQUESTER}") && !text.contains("{MANAGER}"));
+        assert!(LAW_TEMPLATE.contains("Written by scripts/AppsRequestTemplate.lean"));
+        assert_eq!(LAW_TEMPLATE.lines().filter(|l| !l.trim_start().starts_with("--")).count(), 3, "three clauses: management, setup, outcome");
+        assert!(law("12", "x").is_err());
+    }
+
+    #[test]
+    fn apps_request_words_encode_the_package_and_app_identity() {
+        let [hi, lo] = package_words("f0277a5dce2e1c6af0cce188241411a4").unwrap();
+        assert_eq!(hi, 0xf0277a5dce2e1c6a);
+        assert_eq!(lo, 0xf0cce188241411a4);
+        assert!(package_words("F0277a5dce2e1c6af0cce188241411a4").is_err());
+        let words = app_words("7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh").unwrap();
+        assert!(words.iter().any(|w| *w != 0));
+        assert_ne!(words, app_words("0dp7n6ehj8r5ttfc0fj0au6gxkuy1nhw2kx70wussfa1mqj8tf80").unwrap());
+        assert!(app_bytes("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").is_err(), "b is outside Sandstorm's alphabet");
+        assert_eq!(class_code("M").unwrap(), 2);
+        assert!(class_code("auto").is_err());
     }
 
     #[test]

@@ -81,14 +81,18 @@ because every statement the install needs is already a kernel-admitted record:
    authority the worker later exercises is the delegated app capability
    (`Kernel/ApplicationShareIssueDelegation.lean` records it; the custodian never holds the
    member's key: custody contract L2).
-3. **The package choice** is the one statement with no record yet: which signed package, which
-   class. It is a write to the member's `apps` cell under the law `law.apps`, rendered from Lean by
-   `scripts/AppsLawTemplate.lean` the way `law.market` is rendered from `Kernel/SealedMarket.lean`:
-   fields packageId (two u64), appId digest (four u64), class, app resource; the requester writes
-   them once; the manager (subject 8) writes the outcome fields (grain state, generation) and
-   nothing else. Until that template lands, the choice travels over the worker socket (§4) and the
-   INSTALL BEGIN (lifecycle v3, `prospectiveManifest`) is the signed statement of which package
-   runs; the receipt names this gap.
+3. **The package choice** is the third statement: a write to the member's `apps-<id>` cell under
+   the law `law.apps`, rendered from Lean by `scripts/AppsRequestTemplate.lean` from
+   `Kernel/AppsRequest.lean` the way `law.market` is rendered from `Kernel/SealedMarket.lean`
+   (`native/resource-client/templates/apps/request/{law.apps,fields.json}`): fields packageId (two
+   u64), appId (four u64), class, state, grain, generation; the requester writes the choice once and
+   it is frozen (`choice_frozen_after_setup`, pole `package_change_refused`); the manager (the
+   delegation's `managementSubject`) writes the outcome once, 0 → 1 running with a nonzero grain or
+   0 → 2 refused (`outcome_once_by_manager`, pole `requester_cannot_decide`); the law admits no
+   install and no revoke (`no_install_no_revoke`). `mini apps install` births the cell and writes
+   the setup before it asks the worker (an `auto` class is sized by the worker first, then recorded);
+   the worker records the cell with the grain and writes the outcome as the manager (its own
+   workspace; the write is the next increment, named in the batch).
 
 The verb then hands the worker, over the authenticated socket, the three pointers (birth source and
 receipt, the delegation file) and the choice. **Refusals by name** before any effect:
@@ -162,6 +166,14 @@ request, in order, each step idempotent on its retained artifact, as `grain-jour
    its socket path and the SHA-256 of its three tokens. Token *hashes* are not secrets; the tokens
    stay 0600 in the route directory.
 6. **Receipt** written; the request's state file (`requests/<id>.json`) moves to `running`.
+
+**Route sockets and the front.** `spk-host grain route` places a route under the operator's 0700
+state chain (`<state>/apps/<app>/routes/<name>/http.sock`) and never sets `edgeGid`, so the front
+cannot reach a socket directly without widening that custody. The worker therefore serves an **edge
+connector** (`STATE/edge.sock`, 0660 `mini-core:mini-edge`): the front asks `connect {grain, route}`
+and receives the connected custodian socket over `SCM_RIGHTS`; the worker adds no authority (the
+custodian still checks the token the browser presents) and the front still parses HTTP as
+`mini-apps-edge` with `/var/lib/mini` hidden. The origin table names the connector.
 
 **The worker socket** (`/run/mini-apps/worker.sock`, 0660 `mini-core:mini-sessions`, peer named by
 `SO_PEERCRED` exactly as `mini-keys`'s broker does): one JSON line per request, bounded 64 KiB,

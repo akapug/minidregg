@@ -287,7 +287,7 @@ pub(crate) fn clear(supply: i128, bids: &[Bid]) -> (i128, Vec<(u64, i128)>) {
 
 // ------------------------------------------------------------ actions
 
-fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
+pub(crate) fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
     let mut action = json!({"type": if expected.is_some() {"write"} else {"create"},
         "key":{"type":"object","field":field.to_string()},"value":value});
     if let Some(expected) = expected {
@@ -296,7 +296,7 @@ fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
     action
 }
 
-fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Value>) -> Result<()> {
+pub(crate) fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Value>) -> Result<()> {
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":name,"payload":{"type":"scalar","actions":actions}}]});
     let path = root.join("sources").join(format!("market-{id}.json"));
