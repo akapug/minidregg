@@ -263,8 +263,8 @@ theorem admitsObserved_decides (ctx : PlatformCell.Context) (h : PlatformCell.Hi
     command.next.completionCustodianKey (fun k s hk hs => (cosigned k s hk hs).symm)
   simp only [installOf] at sponsor custodian
   simp only [admitsObserved, cellHolds, controllerHolds, PlatformCell.decideInstall, installOf,
-    sponsor, held, custodian, unexpired]
-  exact Iff.rfl
+    sponsor, held, custodian, ← unexpired]
+  simp only [Bool.and_eq_true, decide_eq_true_eq]
 
 /-- The oracle answers a deployment gives for an install over a history. -/
 def oracle (ctx : PlatformCell.Context) (h : PlatformCell.History) (i : PlatformCell.Install) :
