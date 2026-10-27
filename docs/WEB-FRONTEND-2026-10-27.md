@@ -35,8 +35,12 @@ search · Log out), a rail of places, and the stage.
 
 **Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
 the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is
-visual the day its row enters the table; the journey's `verb-parity` row checks every verb `help`
-lists against `/verb/NAME` and names any without a face. Bespoke views sit where a place deserves
+visual the day its row enters the table; the journey's `face-coverage` row checks every verb × subcommand leaf
+`help` lists against `/verb/NAME`'s forms and names any without a face (and red-proofs itself on a
+verb the shell lacks); it is coverage, not parity, until every leaf also has an outcome test. The
+usage-derived forms are the interim; the structured command grammar (A0) replaces them verb by verb.
+Outcome truth: admitted / refused / undecided name world transitions only; a read or a local verb
+answers (`answered`, `read refused`), classified per usage alternative from the verb table. Bespoke views sit where a place deserves
 one: the document page, history and diff pages, the board, the room as a live stream (the chat
 section refreshes), the receipt, the grants drawn as a tree from the Host's capability view, the
 purse as a meter, and a refusal as its clause highlighted.
