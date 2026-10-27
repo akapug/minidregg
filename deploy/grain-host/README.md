@@ -58,10 +58,10 @@ entry alone must never trigger an automatic kill of a possibly reused unit.
 ## Controller unit installation
 
 `install-controller` creates a direct `mini-grain-controller@TASK.service`
-user unit for a persistent `grain-runtime serve` process. The historical
-`mini-grain-controller@.service` template shows the same service limits, but
-the installer writes the exact task, executable and config paths so the
-operator need not edit a template. The runtime JSON must configure
+user unit for a persistent `grain-runtime serve` process, writing the exact
+task, executable and config paths; there is no template unit to edit (the
+historical one, which could not satisfy the controller, was deleted on
+2026-10-26; dregg-infra keeps its own). The runtime JSON must configure
 `controlSocket` directly inside its durable private `stateDir` (for example,
 `/var/lib/mini/grains/task-7001/control.sock`). The task account must own
 that directory and keep it at mode 0700. The service
