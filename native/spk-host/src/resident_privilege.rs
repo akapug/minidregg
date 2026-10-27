@@ -594,6 +594,15 @@ mod tests {
         if operator_pid == 0 {
             drop(receiver);
             let result = (|| -> io::Result<()> {
+                // Every host input this test needs, refused by name when absent
+                // (never a bare ENOENT): the mapping helpers, the subordinate-id
+                // grants, the namespace holder's and the launched app's programs.
+                for input in ["/etc/subuid", "/etc/subgid", "/usr/bin/newuidmap", "/usr/bin/newgidmap",
+                    "/usr/bin/true", "/usr/bin/sleep"] {
+                    if fs::symlink_metadata(input).is_err() {
+                        return Err(refused(&format!("tenancy bootstrap test input absent: {input}")));
+                    }
+                }
                 let operator = Identity {
                     uid: unsafe{libc::geteuid()},
                     gid: unsafe{libc::getegid()},

@@ -71,12 +71,19 @@ pub(crate) fn pinned_bwrap(path: &Path, sha256: &str) -> io::Result<()> {
     }
     Ok(())
 }
+/// Name the step and the path an OS error came from: a bare ENOENT from the
+/// namespace bootstrap says nothing about which helper or file is missing.
+fn at(step: &str, path: &str) -> impl FnOnce(io::Error) -> io::Error {
+    let (step, path) = (step.to_owned(), path.to_owned());
+    move |error| io::Error::new(error.kind(), format!("namespace bootstrap {step} ({path}): {error}"))
+}
 fn map(program: &str, pid: u32, operator: u32, app: u32) -> io::Result<()> {
     eprintln!("namespace-map helper={program} pid={pid} operator={operator} app={app}");
     let status = Command::new(program)
         .args([pid.to_string(), operator.to_string(), operator.to_string(), "1".into(), app.to_string(), app.to_string(), "1".into()])
         .env_clear()
-        .status()?;
+        .status()
+        .map_err(at("mapping helper", program))?;
     if !status.success() {
         return Err(refused("namespace identity mapping refused"));
     }
@@ -125,7 +132,8 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
             Ok(())
         });
     }
-    let mut holder = command.spawn()?;
+    let bwrap_text = bwrap.display().to_string();
+    let mut holder = command.spawn().map_err(at("bwrap spawn", &bwrap_text))?;
     drop(info_w);
     drop(block_r);
     let result = (|| -> io::Result<()> {
@@ -138,11 +146,13 @@ pub(crate) fn enter(bwrap: &Path, bwrap_sha256: &str, operator_uid: u32, operato
             .and_then(|p| u32::try_from(p).ok())
             .filter(|p| *p > 1)
             .ok_or_else(|| refused("namespace bwrap child absent"))?;
-        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+        let status_path = format!("/proc/{pid}/status");
+        let status = fs::read_to_string(&status_path).map_err(at("bwrap child status", &status_path))?;
         if !status.lines().any(|l| l.split_whitespace().collect::<Vec<_>>() == ["PPid:", &holder.id().to_string()]) {
             return Err(refused("namespace holder is not the bwrap child"));
         }
-        let ns = File::open(format!("/proc/{pid}/ns/user"))?;
+        let ns_path = format!("/proc/{pid}/ns/user");
+        let ns = File::open(&ns_path).map_err(at("bwrap child namespace", &ns_path))?;
         if ns.metadata()?.ino() == fs::metadata("/proc/self/ns/user")?.ino() {
             return Err(refused("namespace bwrap did not create a user namespace"));
         }
