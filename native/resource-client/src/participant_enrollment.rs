@@ -1140,8 +1140,10 @@ fn plan(mut args: Args) -> Result<()> {
             let consent_stale = crate::client_consent::take_stale_observation();
             stale_refusal(&host, &public_socket, &retained_config, decision) || consent_stale
         },
-        |number| {
-            crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
+        // The loop counts its own re-plans from 1; the directory may already hold retirements from an
+        // earlier resume or a no-record refusal, so the slot is the directory's next free one.
+        |_| {
+            crate::replan::retire(&directory, next_retirement(&directory)?, &["request.json", "config.json", "enrollment.lock"])
                 .map(|_| ())
         },
     )?;

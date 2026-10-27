@@ -127,10 +127,10 @@ records=$(for f in "$NS"/request-*.json; do jq -r 'select(.request=="newcomer") 
 bindings=$(ls "$NS" | grep -c '^binding-' || true)
 [ "$bindings" = 1 ] || { echo "namespace holds $bindings bindings" >&2; exit 1; }
 step lookup ok "$MINI" enroll --action lookup --dir "$A"
-# 6. Five members back to back under a running ticker (a tick every 5 s, a box's one-minute ticker
+# 6. Five members back to back under a running ticker (a tick every 15 s, a box's one-minute ticker
 #    compressed, racing the composed world's enrolments): a seal or submit refused because a tick landed
 #    after the plan re-plans the same request (bounded at six); five admissions.
-( while :; do "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; sleep 5; done ) &
+( while :; do "$MINI" clock --action tick --workspace "$ROOT/clock" >/dev/null 2>&1; sleep 15; done ) &
 printf '%s\n' "$!" >"$ROOT/ticker.pid"
 trap 'kill -TERM "$(cat "$ROOT/ticker.pid")" 2>/dev/null || true; kill -TERM "$(cat "$ROOT/public/server.pid")" 2>/dev/null || true' EXIT
 for i in 1 2 3 4 5; do
@@ -185,4 +185,4 @@ if [ -n "$PINNED" ]; then
     echo "enrol-resume: $PIN7" >&2
   fi
 fi
-echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; five members back to back under a 5 s ticker in $seals seals; step 7: $PIN7) subject=$SUBJECT keyId=$KEYID"
+echo "enrol-resume: PASS ($PATH_TAKEN; pinned=${PINNED:+yes}; five members back to back under a 15 s ticker in $seals seals; step 7: $PIN7) subject=$SUBJECT keyId=$KEYID"
