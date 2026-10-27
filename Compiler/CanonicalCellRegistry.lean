@@ -106,10 +106,17 @@ inductive Kind where
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
-  last observed chain slot.  `ClockTickReceiver` advances it under the clock's
-  own committed law; PayObservation and PayEnrol(V2) also advance it today
-  WITHOUT judging that law (measured at 3b709c87: a live bypass, cv task
-  01a1087d-8a58), until they move onto `Kernel.Receiving.Family`. -/
+  last observed chain slot.  `lawBearing`: its own committed law
+  (`Kernel.ClockLaw.clockPredicate`) judges EVERY write, whoever proposes it:
+  the ticker's `ClockTickReceiver`, and the three pay families that advance it
+  to their verified chain tip (`PayObservationReceiver`, `PayEnrolReceiver`,
+  `PayEnrolV2Receiver`), each a `Kernel.Receiving.Family` whose `lawStepOf`
+  projects the clock write's step (`ClockLaw.step`, their `lawStepOf_clock`),
+  so `Receiving.Family.receive_committed_lawful` covers it: their
+  `committed_lawful` theorems carry the clock clause.  Until 5d0b452d
+  (2026-10-04) the three advanced it unjudged (cv task 01a1087d-8a58, measured
+  at 3b709c87); dropping a family's clock arm of `lawStepOf` would reopen that,
+  and `receive_committed_lawful` refuses the shape. -/
   | clock
   /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
   and the tail bound `L`, written only by a certify record. -/
