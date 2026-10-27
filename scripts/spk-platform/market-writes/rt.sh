@@ -43,36 +43,27 @@ write_Wekan() {
 }
 
 # Gogs 0.11.34: reverse-proxy (Sandstorm header) login; forms carry `_csrf` and are bound to the
-# session cookies Gogs sets (i_like_gogits, _csrf), so this request keeps a cookie jar on top of
+# session cookies Gogs sets (i_like_gogits, _csrf), so this recipe uses jreq (featured-qualify.sh), a cookie jar on top of
 # the route token. Create: POST /repo/create (routers/repo/repo.go CreatePost: user_id, repo_name,
 # auto_init). File: POST /<owner>/<repo>/_new/master/ (routers/repo/editor.go NewFilePost:
 # tree_path, content, commit_summary, commit_choice=direct). Read: GET /<owner>/<repo>/raw/master/<file>.
 # `git push` needs streamed request bodies, which the bridge does not serve yet: waiting on streamed bodies.
-gogs_req() { # METHOD PATH [CURL ARGS]; keeps $gogs_jar across calls
-  local method=$1 path=$2; shift 2
-  curl -sS --max-time 900 --unix-socket "$dir/http.sock" -X "$method" -H 'Host: grain.test' \
-    -H "Cookie: __Host-mini_spk_session=$(cat "$dir/browser.token")${gogs_jar:+; $gogs_jar}" -H 'Origin: https://grain.test' \
-    -o "$body" -D "$body.headers" -w '%{http_code}' "$@" "http://grain.test$path" 2>>"$out/curl.err"
-  local c; while read -r c; do
-    gogs_jar=$(printf '%s\n%s\n' "${gogs_jar//; /$'\n'}" "$c" | awk -F= 'NF&&!seen[$1]++{printf "%s%s", (n++?"; ":""), $0}')
-  done < <(grep -i '^set-cookie:' "$body.headers" | tr -d '\r' | sed 's/^[Ss]et-[Cc]ookie: *//; s/;.*//')
-}
 write_Gogs() {
-  gogs_jar=""
-  local form; form=$(gogs_req GET /repo/create)
+  jar=""
+  jreq GET /repo/create; local form=$JS
   local csrf uid; csrf=$(grep -o 'name="_csrf" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
   uid=$(grep -o 'name="user_id" value="[0-9]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
   [[ $form == 200 && -n $csrf && -n $uid ]] || { echo "0 GET /repo/create $form, _csrf '${csrf:-}', user_id '${uid:-}'"; return; }
-  local made; made=$(gogs_req POST /repo/create --data-urlencode "_csrf=$csrf" --data-urlencode "user_id=$uid" \
+  jreq POST /repo/create --data-urlencode "_csrf=$csrf" --data-urlencode "user_id=$uid" \
     --data-urlencode repo_name=featured --data-urlencode 'description=made by a resident' --data-urlencode auto_init=on \
-    --data-urlencode readme=Default)
+    --data-urlencode readme=Default; local made=$JS
   local repo; repo=$(grep -i '^location:' "$body.headers" | tr -d '\r' | awk '{print $2}'); repo=${repo#https://grain.test}
   [[ $made =~ ^30 && -n $repo ]] || { echo "0 POST /repo/create $made (app output names the cause)"; return; }
-  local ed; ed=$(gogs_req GET "$repo/_new/master/")
+  jreq GET "$repo/_new/master/"; local ed=$JS
   csrf=$(grep -o 'name="_csrf" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"//')
   [[ $ed == 200 && -n $csrf ]] || { echo "0 GET $repo/_new/master/ $ed, _csrf '${csrf:-}'"; return; }
-  local save; save=$(gogs_req POST "$repo/_new/master/" --data-urlencode "_csrf=$csrf" --data-urlencode tree_path=featured.txt \
-    --data-urlencode 'content=filed by a resident' --data-urlencode 'commit_summary=resident' --data-urlencode commit_choice=direct)
-  local got; got=$(gogs_req GET "$repo/raw/master/featured.txt")
+  jreq POST "$repo/_new/master/" --data-urlencode "_csrf=$csrf" --data-urlencode tree_path=featured.txt \
+    --data-urlencode 'content=filed by a resident' --data-urlencode 'commit_summary=resident' --data-urlencode commit_choice=direct; local save=$JS
+  jreq GET "$repo/raw/master/featured.txt"; local got=$JS
   [[ $save =~ ^30 && $got == 200 ]] && grep -q 'filed by a resident' "$body" && echo "1 POST /repo/create $made -> $repo; _new save $save; raw $got"
 }
