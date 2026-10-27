@@ -37,6 +37,7 @@ import Kernel.DeployedRepresentsCheck
 import Kernel.DeployedCharge
 import Kernel.TurnLog
 import Kernel.DurableEngine
+import Kernel.DurableEngineSuffix
 import Compiler.WorldCompact
 
 namespace Minidregg.Compiler.DurableReceiverIO
@@ -949,20 +950,32 @@ def foldRecords (rootBytes : List UInt8 → Digest) :
               | .error reason => .error s!"height {height + 1}: the World refuses the turn: {repr reason}"
               | .ok w' => foldRecords rootBytes (WorldCompact.compactEvery (height + 1) w') (height + 1) rest
 
-/-- **The World of a resumed image**: the seed's genesis World, the log folded
-as turns, and the representation decided against the resumed snapshot. -/
+/-- The seed's genesis World (`TurnLog.genesisOfSeed`), or why it has none. -/
+def genesisWorld (seed : Seed) : Except String HostRefinesWorld.DWorld :=
+  match TurnLog.genesisOfSeed seed with
+  | .error refusal => .error s!"the seed has no genesis World: {repr refusal}"
+  | .ok genesis => .ok genesis
+
+/-- The World a resumed snapshot holds, from a World the open folded (or why it has none): the
+representation DECIDED against the snapshot (`representsCheck_sound`). -/
+def trackOfWorld (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {state : State}
+    {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot)
+    (world : Except String HostRefinesWorld.DWorld) : WorldTrack snapshot image.accepted.length :=
+  match world with
+  | .error message => .lost message
+  | .ok w =>
+      if ok : HostRefinesWorld.representsCheck image snapshot w = true then
+        .held w (HostRefinesWorld.representsCheck_sound resumed ok)
+      else .lost "the folded World does not represent the resumed snapshot"
+
+/-- **The World of a resumed image**: the seed's genesis World, the whole log folded as turns, and
+the representation decided against the resumed snapshot. The genesis replay (`loadImage`, the
+audit) uses it; the open folds only the records after its checkpoint (`openState`). -/
 def trackOf (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {state : State}
     {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot) :
     WorldTrack snapshot image.accepted.length :=
-  match TurnLog.genesisOfSeed image.seed with
-  | .error refusal => .lost s!"the seed has no genesis World: {repr refusal}"
-  | .ok genesis =>
-      match foldRecords rootBytes genesis 0 image.accepted with
-      | .error message => .lost message
-      | .ok w =>
-          if ok : HostRefinesWorld.representsCheck image snapshot w = true then
-            .held w (HostRefinesWorld.representsCheck_sound resumed ok)
-          else .lost "the folded World does not represent the resumed snapshot"
+  trackOfWorld rootBytes image resumed
+    ((genesisWorld image.seed).bind fun genesis => foldRecords rootBytes genesis 0 image.accepted)
 
 /-- A checkpoint's World: its state's cells decoded as genesis decodes the seed's
 (`TurnLog.genesisOfSeed`), beside the system store the v4 body carries. -/
@@ -977,28 +990,6 @@ def worldOfCheckpoint (state : State)
 def _root_.Minidregg.Compiler.DurableCheckpointCodec.Body.world (body : Body) :
     Option HostRefinesWorld.DWorld :=
   body.system.bind (worldOfCheckpoint body.state)
-
-/-- **The World of a resumed image, fast-forwarded** (HOT-PATH §2(h), option A): from a v4
-checkpoint's World at the resume height, fold only the records after it, then decide the
-representation as `trackOf` does. No record below the checkpoint is executed. From genesis, or a
-checkpoint whose sealing session had lost its World, this is `trackOf`. -/
-def trackFrom (rootBytes : List UInt8 → Digest) (image : Image) {height : Nat} {state : State}
-    {snapshot : DataSnapshot rootBytes} (resumed : resume rootBytes image height state = some snapshot)
-    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) :
-    WorldTrack snapshot image.accepted.length :=
-  match height, system with
-  | 0, _ => trackOf rootBytes image resumed
-  | _, none => trackOf rootBytes image resumed
-  | _ + 1, some system =>
-      match worldOfCheckpoint state system with
-      | none => .lost "the checkpoint's cells do not decode as a World's"
-      | some base =>
-          match foldRecords rootBytes base height (image.accepted.drop height) with
-          | .error message => .lost message
-          | .ok w =>
-              if ok : HostRefinesWorld.representsCheck image snapshot w = true then
-                .held w (HostRefinesWorld.representsCheck_sound resumed ok)
-              else .lost "the fast-forwarded World does not represent the resumed snapshot"
 
 /-- Re-decide a held World against a re-materialized snapshot of the same image. -/
 def WorldTrack.recheck {rootBytes : List UInt8 → Digest} {snapshot snapshot' : DataSnapshot rootBytes}
@@ -1237,16 +1228,186 @@ def walkFrontier : Nat → List (Nat × Digest) → List (Entry × Digest) →
             .error s!"durable log tag at height {height + 1} carries a frontier the accumulator does not reach"
           else walkFrontier (height + 1) next rest
 
-/-- The single open path, keeping the chain value after every stored record
-(`chainPrefixes`, which the open computes to check the tags) for a caller that
-cuts the image at a past height (`Loaded.prefixAt`). Every check refuses;
-nothing reinterprets. -/
+/-- **The executing part of the open** (HOT-PATH §2(h); `DurableFastForwardSpec.Impl.ffState`): what
+the checkpoint and the entries after it determine. Nothing below the checkpoint is among its
+inputs: the suffix's tags verify chained from the checkpoint's chain, the accumulator walks on from
+the checkpoint's frontier, the suffix is replayed with no prefix nullifier or transaction id known
+(`DurableEngine.resume_suffix` says when that is the resume), and its turns fold from the
+checkpoint's World. -/
+structure OpenState (rootBytes : List UInt8 → Digest) (suffix : List Entry) where
+  base : OpenBase rootBytes
+  /-- The chain at the base: the checkpoint's, or the seed's log start. -/
+  baseChain : Digest
+  records : List IntentRecord
+  decoded : List.Forall₂ (fun bytes record => recordFrame.decode bytes = some record)
+    (suffix.map (·.record)) records
+  /-- The chain before and after each suffix record, from `baseChain`. -/
+  chains : List Digest
+  chainsEq : chains = DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
+  frontier : List (Nat × Digest)
+  /-- The suffix replayed from the checkpoint state alone. -/
+  engine : DurableEngine.Engine
+  replayed : (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records = some engine
+  /-- The checkpoint's World with the suffix folded as turns (or why there is none). -/
+  world : Except String HostRefinesWorld.DWorld
+
+/-- The executing part of the open, from the checkpoint's bytes (none: the seed at height 0), the
+stored entries after it and the Store's head height. -/
+def openState (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Digest) (seed : Seed)
+    (checkpoint : Option (List UInt8)) (suffix : List Entry) (head : Nat) :
+    Except String (OpenState rootBytes suffix) := do
+  let ⟨base, baseChain, start⟩ ← match checkpoint with
+    | none =>
+        pure (⟨⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩, logStart, genesisWorld seed⟩ :
+          OpenBase rootBytes × Digest × Except String HostRefinesWorld.DWorld)
+    | some bytes =>
+        match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes bytes
+            (fun _ => RootCache.build _) (fun _ built => built.1.root)
+            (fun _ => RootCache.ofEntries_root _) with
+        | .error reason => throw s!"checkpoint refused: {repr reason}"
+        | .ok ⟨body, built⟩ =>
+            pure (⟨⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩,
+              body.chain,
+              match body.world with
+              | none => .error "the checkpoint carries no World its cells decode into"
+              | some w => .ok w⟩ : OpenBase rootBytes × Digest × Except String HostRefinesWorld.DWorld)
+  if base.1 + suffix.length ≠ head then
+    throw "the checkpoint and the entries after it do not reach the log head"
+  let chains := DurableLogTags.chainPrefixesStored baseChain (suffix.map (·.record))
+  verifyTags key base.1 chains (suffix.map (·.tag))
+  let ⟨records, decoded⟩ ← match found : decodeRecordsFrom (base.1 + 1) suffix with
+    | .error message => throw message
+    | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ _ _ _ found⟩ :
+        {records : List IntentRecord // List.Forall₂
+          (fun bytes record => recordFrame.decode bytes = some record) (suffix.map (·.record)) records})
+  let frontier ← walkFrontier base.1 base.2.2.1 (suffix.zip chains.tail)
+  let ⟨engine, replayed⟩ ← match found : (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records with
+    | none => throw "durable log suffix does not replay through the canonical executor"
+    | some engine => pure (⟨engine, found⟩ : {engine : DurableEngine.Engine //
+        (DurableEngine.Engine.ofState base.2.1 []).replay rootBytes records = some engine})
+  return ⟨base, baseChain, records, decoded, chains, rfl, frontier, engine, replayed,
+    start.bind fun w => foldRecords rootBytes w base.1 records⟩
+
+/-- A decided fact as a value, or the refusal naming it. -/
+private def require (fact : Prop) [Decidable fact] (message : String) : Except String (PLift fact) :=
+  if holds : fact then .ok ⟨holds⟩ else .error message
+
+/-- **The gate, then the session build** (`DurableFastForwardSpec.Impl.ff`'s gate, then `ofOpened`).
+The entries below the checkpoint number its height, every tag among them verifies chained from the
+seed's log start, and their chain is the checkpoint's. Nothing below is executed: the records are
+decoded, the six indexes and the root log rebuilt from them and the tags, and two facts decided
+over the decoded records, the checkpoint state's admissibility for the whole log and that no
+record after it carries a nullifier or transaction id below it: then the executing part's replay
+is the resume (`DurableEngine.resume_suffix`), the session's resume proof. -/
+def openLoaded (key : MacKey) (rootBytes : List UInt8 → Digest) (logStart : Digest) (seed : Seed)
+    (below suffix : List Entry) (opened : OpenState rootBytes suffix) :
+    Except String ((loaded : Loaded rootBytes) ×'
+      {chains : List Digest // chains = chainPrefixes loaded.logStart loaded.image.accepted}) := do
+  let baseHeight := opened.base.1
+  let base := opened.base.2.1
+  let ⟨count⟩ ← require (below.length = baseHeight)
+    "the entries below the checkpoint do not number its height"
+  let prefixChains := DurableLogTags.chainPrefixesStored logStart (below.map (·.record))
+  verifyTags key 0 prefixChains (below.map (·.tag))
+  let ⟨chained⟩ ← require (prefixChains.getLastD logStart = opened.baseChain)
+    "checkpoint does not match the log chain"
+  -- The checkpoint's accumulator frontier and index root are the ones the (MAC-verified) tag of
+  -- the entry at its height carries.
+  if 0 < baseHeight then
+    match below.getLast?.bind (trailerCarried ·.tag) with
+    | some carried =>
+        if carried.frontier ≠ frontierDigest baseHeight opened.base.2.2.1 ∨
+            carried.indexRoot ≠ opened.base.2.2.2.1 then
+          throw "checkpoint accumulator differs from its log entry's tag"
+    | none => throw "checkpoint height has no log entry"
+  let ⟨prefixRecords, prefixDecoded⟩ ← match found : decodeRecordsFrom 1 below with
+    | .error message => throw message
+    | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ _ _ _ found⟩ :
+        {records : List IntentRecord // List.Forall₂
+          (fun bytes record => recordFrame.decode bytes = some record) (below.map (·.record)) records})
+  let image : Image := ⟨seed, prefixRecords ++ opened.records⟩
+  let ⟨admissible⟩ ← require (DurableEngine.admissibleFast image base = true)
+    "the checkpoint state is not admissible for the log"
+  let ⟨disjoint⟩ ← require (DurableEngine.disjointFast prefixRecords opened.records = true)
+    "a record after the checkpoint carries a nullifier or transaction id below it"
+  have height : prefixRecords.length = baseHeight := by
+    rw [← prefixDecoded.length_eq, List.length_map]; exact count
+  -- The session's engine: the replayed head state over every record (journal, history and the
+  -- consumed and recorded sets from the records; no record executed).
+  let engine := DurableEngine.Engine.ofState (DurableEngine.Engine.headState opened.engine) image.accepted
+  have resumed : resume rootBytes image baseHeight base = some (engine.view rootBytes) := by
+    rw [DurableEngine.Engine.view_ofState, ← height]
+    exact DurableEngine.resume_suffix rootBytes
+      ((DurableEngine.admissibleFast_iff _ _).mp admissible)
+      ((DurableEngine.disjointFast_iff _ _).mp disjoint) opened.replayed
+  let chains := prefixChains ++ opened.chains.tail
+  have chainsEq : chains = chainPrefixes logStart image.accepted := by
+    have pre := DurableLogTags.chainPrefixesStored_eq logStart _ _ prefixDecoded
+    have suf := DurableLogTags.chainPrefixesStored_eq opened.baseChain _ _ opened.decoded
+    have baseChain : opened.baseChain = chainAfter logStart prefixRecords := by
+      have last := DurableLogTags.chainPrefixes_getLast? logStart prefixRecords
+      rw [← pre, ← List.getLastD_eq_getLast?] at last
+      rw [← last]; exact chained.symm
+    show DurableLogTags.chainPrefixesStored logStart (below.map (·.record)) ++ opened.chains.tail =
+      chainPrefixes logStart (prefixRecords ++ opened.records)
+    rw [opened.chainsEq, suf, pre, baseChain]
+    simp only [DurableLogTags.chainPrefixes, List.scanl_append]
+    rfl
+  let headChain := chains.getLast?.getD logStart
+  have within : baseHeight ≤ image.accepted.length := by
+    show baseHeight ≤ (prefixRecords ++ opened.records).length
+    rw [List.length_append, height]; exact Nat.le_add_right _ _
+  let built : (cache : RootCache) ×'
+      RootsExact cache (entriesOf image (engine.view rootBytes) headChain) :=
+    match opened.base.2.2.2.2 with
+    | none => RootCache.build (entriesOf image (engine.view rootBytes) headChain)
+    | some ⟨baseChain, cache, exact⟩ =>
+        exact.advance (checkpointSlots (rootBytes := rootBytes) image base (image.accepted.drop baseHeight)
+            image.accepted.length headChain)
+          (entriesOf_checkpoint_step image base baseHeight (engine.view rootBytes) resumed
+            baseChain headChain)
+  let entries := below ++ suffix
+  -- Every entry's verified tag carries the receipt root after it (`DurableLogTags.verifyTags_carried`).
+  let rootLog : Array (Option Digest) :=
+    (entries.map fun entry => some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)).toArray
+  let ⟨sized⟩ ← require (rootLog.size = image.accepted.length)
+    "durable log entries and records differ in number"
+  let loaded : Loaded rootBytes :=
+    ⟨image, baseHeight, base, engine, engine.view rootBytes, rfl, within, resumed, logStart,
+    headChain,
+    (by show chains.getLast?.getD logStart = _; rw [chainsEq]
+        exact DurableLogTags.chainPrefixes_getLast? logStart image.accepted),
+    built.1, built.2,
+    PresenceIndex.ofRecords image.accepted, rfl, LinkIndex.ofRecords image.accepted, rfl,
+    SessionIndex.CellIds.ofImage image, SessionIndex.CellIds.ofImage_exact image,
+    SessionIndex.TxIndex.ofRecords image.accepted, SessionIndex.TxIndex.ofRecords_exact image.accepted,
+    SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted,
+    SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
+    SessionIndex.KeyIndex.ofRecords (fun record => record.writes.map DataWrite.cellId) image.accepted,
+    SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
+      image.accepted,
+    rootLog, sized, some opened.frontier,
+    entries.getLast?.map (·.tag), trackOfWorld rootBytes image resumed opened.world⟩
+  if let .lost reason := loaded.track then
+    throw s!"durable log is not a turn log: {reason}"
+  -- The head's stored root is the root this open just served: a rewritten head root refuses
+  -- here, not at a later receipt.
+  match rootLog.back? with
+  | some (some stored) =>
+      if stored ≠ loaded.worldRoot then
+        throw "durable log head root differs from the replayed root"
+  | _ => pure ()
+  return ⟨loaded, chains, chainsEq⟩
+
+/-- The single open path, keeping the chain value after every stored record (`chainPrefixes`) for
+a caller that cuts the image at a past height (`Loaded.prefixAt`): the executing part
+(`openState`) over the checkpoint and the entries after it, then the gate and the session build
+(`openLoaded`) over the entries below it. Every check refuses; nothing reinterprets. -/
 def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String ((loaded : Loaded rootBytes) ×'
       {chains : List Digest // chains = chainPrefixes loaded.logStart loaded.image.accepted})) := do
   -- Operator measurement control (as `DurableServed.openHead`): MINI_OPEN_TIMING=1 prints each
-  -- stage's elapsed time to stderr. Every stage below the checkpoint's height is O(history) on
-  -- this path: the read, the decode, the chain, the tags, the six indexes and the World fold.
+  -- stage's elapsed time to stderr.
   let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
   let started ← IO.monoMsNow
   let lap := fun (label : String) => do
@@ -1268,127 +1429,22 @@ def loadChained (transport : Transport) (rootBytes : List UInt8 → Digest) :
       if let some refusal := (SeedEpoch.ofBytes seedBytes).refusal then
         return .error s!"durable store refused: {refusal}"
       let some seed := seedFrame.decode seedBytes | return .error "noncanonical durable seed"
-      let ⟨records, decoded⟩ ← match found : decodeRecordsFrom 1 stored.entries with
-        | .error message => return .error message
-        | .ok records => pure (⟨records, decodeRecordsFrom_forall₂ 1 _ _ found⟩ :
-            {records : List IntentRecord // List.Forall₂
-              (fun bytes record => recordFrame.decode bytes = some record)
-              (stored.entries.map (·.record)) records})
-      lap "decode"
-      let logStart := transport.logStart seed
-      -- The chain over the STORED bytes (no re-encode), equal to the
-      -- specification chain over the decoded records (`chainPrefixesStored_eq`).
-      let chains := DurableLogTags.chainPrefixesStored logStart (stored.entries.map (·.record))
-      have chainsEq : chains = chainPrefixes logStart records :=
-        DurableLogTags.chainPrefixesStored_eq logStart _ _ decoded
-      let headChain := chains.getLast?.getD logStart
-      lap "chain"
-      -- The checkpoint's open evaluates its world root once, as a tree the head advances.
-      let openedWith : OpenBase rootBytes ×
-          Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys) ← match stored.checkpoint with
-        | none => pure ((⟨0, State.ofSeed seed, [], DurableIndex.emptyDigest, none⟩ : OpenBase rootBytes), none)
-        | some checkpoint =>
-            match openSealedWith (α := CheckpointRoots rootBytes) key rootBytes checkpoint.bytes
-                (fun _ => RootCache.build _) (fun _ built => built.1.root)
-                (fun _ => RootCache.ofEntries_root _) with
-            | .error reason => return .error s!"checkpoint refused: {repr reason}"
-            | .ok ⟨body, built⟩ =>
-                if body.height ≠ checkpoint.height ∨ body.height > stored.head then
-                  return .error "checkpoint height does not match the log"
-                if body.chain ≠ chains.getD body.height ⟨0⟩ then
-                  return .error "checkpoint does not match the log chain"
-                pure ((⟨body.height, body.state, body.frontier, body.indexRoot, some ⟨body.chain, built⟩⟩ :
-                  OpenBase rootBytes), body.system)
-      let opened := openedWith.1
-      lap s!"checkpoint (height {opened.1})"
-      let baseHeight := opened.1
-      let base := opened.2.1
-      let baseFrontier := opened.2.2.1
-      let baseSpent := opened.2.2.2.1
       if stored.entries.length ≠ stored.head then
         return .error "durable log head does not match its entries"
-      if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
-        return .error message
-      lap "tags"
-      -- The checkpoint's accumulator frontier and index root are the ones the
-      -- (MAC-verified) tag of the entry at its height carries.
-      if baseHeight > 0 then
-        match stored.entries[baseHeight - 1]?.bind (trailerCarried ·.tag) with
-        | some carried =>
-            if carried.frontier ≠ frontierDigest baseHeight baseFrontier ∨
-                carried.indexRoot ≠ baseSpent then
-              return .error "checkpoint accumulator differs from its log entry's tag"
-        | none => return .error "checkpoint height has no log entry"
-      let frontier ← match walkFrontier baseHeight baseFrontier
-          ((stored.entries.drop baseHeight).zip (chains.drop (baseHeight + 1))) with
-        | .error message => return .error message
-        | .ok frontier => pure frontier
-      lap "frontier"
-      let image : Image := ⟨seed, records⟩
-      -- Every entry's verified tag carries the receipt root after it
-      -- (`DurableLogTags.verifyTags_carried`).
-      let rootLog : Array (Option Digest) :=
-        (stored.entries.map fun entry =>
-          some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)).toArray
-      if sized : rootLog.size ≠ image.accepted.length then
-        return .error "durable log entries and records differ in number"
-      else if within : baseHeight ≤ image.accepted.length then
-        match found : DurableEngine.resumeEngine rootBytes image baseHeight base with
-        | none => return .error "durable log suffix does not replay through the canonical executor"
-        | some engine =>
-            lap "resume"
-            have resumed := DurableEngine.resume_of_resumeEngine found
-            let built : (cache : RootCache) ×'
-                RootsExact cache (entriesOf image (engine.view rootBytes) headChain) :=
-              match opened.2.2.2.2 with
-              | none => RootCache.build (entriesOf image (engine.view rootBytes) headChain)
-              | some ⟨baseChain, cache, exact⟩ =>
-                  exact.advance (checkpointSlots (rootBytes := rootBytes) image base (image.accepted.drop baseHeight)
-                      image.accepted.length headChain)
-                    (entriesOf_checkpoint_step image base baseHeight (engine.view rootBytes) resumed
-                      baseChain headChain)
-            lap "roots"
-            -- The indexes and the World, each named so its stage is timed; the structure below
-            -- is the same term (the `rfl`s and `_exact`s see through the `let`s).
-            let presence := PresenceIndex.ofRecords image.accepted
-            lap "presence index"
-            let links := LinkIndex.ofRecords image.accepted
-            lap "link index"
-            let cellIds := SessionIndex.CellIds.ofImage image
-            let txs := SessionIndex.TxIndex.ofRecords image.accepted
-            let nullifiers := SessionIndex.KeyIndex.ofRecords IntentRecord.nullifiers image.accepted
-            let writesAt := SessionIndex.KeyIndex.ofRecords
-              (fun record => record.writes.map DataWrite.cellId) image.accepted
-            lap "session indexes"
-            let track := trackFrom rootBytes image resumed openedWith.2
-            if let .lost _ := track then pure () else pure ()
-            lap "world fold"
-            let loaded : Loaded rootBytes :=
-              ⟨image, baseHeight, base, engine, engine.view rootBytes, rfl, within, resumed, logStart,
-              headChain,
-              (by show chains.getLast?.getD logStart = _; rw [chainsEq]
-                  exact DurableLogTags.chainPrefixes_getLast? logStart records),
-              built.1, built.2,
-              presence, rfl, links, rfl,
-              cellIds, SessionIndex.CellIds.ofImage_exact image,
-              txs, SessionIndex.TxIndex.ofRecords_exact image.accepted,
-              nullifiers, SessionIndex.KeyIndex.ofRecords_exact IntentRecord.nullifiers image.accepted,
-              writesAt,
-              SessionIndex.KeyIndex.ofRecords_exact (fun record => record.writes.map DataWrite.cellId)
-                image.accepted,
-              rootLog, Decidable.of_not_not sized, some frontier,
-              stored.entries.getLast?.map (·.tag), track⟩
-            if let .lost reason := loaded.track then
-              return .error s!"durable log is not a turn log: {reason}"
-            -- The head's stored root is the root this open just served: a
-            -- rewritten head root refuses here, not at a later receipt.
-            match rootLog.back? with
-            | some (some stored) =>
-                if stored ≠ loaded.worldRoot then
-                  return .error "durable log head root differs from the replayed root"
-            | _ => pure ()
-            return .ok ⟨loaded, chains, chainsEq⟩
-      else return .error "checkpoint beyond the log head"
+      let logStart := transport.logStart seed
+      -- The split the transport names; `openState` binds it (the checkpoint's own height plus
+      -- the entries after it must reach the head) and `openLoaded` checks the count below it.
+      let height := (stored.checkpoint.map (·.height)).getD 0
+      let suffix := stored.entries.drop height
+      match openState key rootBytes logStart seed (stored.checkpoint.map (·.bytes)) suffix stored.head with
+      | .error message => return .error message
+      | .ok opened =>
+          lap s!"fast-forward (checkpoint {opened.base.1}, {suffix.length} entries after it)"
+          match openLoaded key rootBytes logStart seed (stored.entries.take height) suffix opened with
+          | .error message => return .error message
+          | .ok result =>
+              lap "gate and rebuild"
+              return .ok result
 
 /-- The open path (`loadChained` without the chain prefixes). -/
 def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
