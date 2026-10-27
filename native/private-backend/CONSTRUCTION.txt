@@ -419,3 +419,8 @@ rebuilds a basis from a retained receipt verified against the exact manifest and
 allocates nothing; reserve_new is manifest + burn_preparation + extract. Executed: a kill -9 mid-King recovers
 with one dealer event per instance, no new anchor allocation, complete exact checked triples. Cost and what
 leaks: docs/MPC-PROFILE-P2.md. The component limits above are unchanged.
+
+Open (P6, lost reply on reserve and burn): an anchor request "return my existing
+allocation for (generation, ids)" is not built. Its verifier exists and is tested
+on a live anchor: allocation_receipt::verify_anchor_receipt with
+VerifiedAnchorReceipt and the bounded SourceAllocationReceipt projection.
