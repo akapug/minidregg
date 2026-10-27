@@ -98,6 +98,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "bend", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "inbox", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "export", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "pay", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -1157,6 +1158,25 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
             }
             client("job", flags)
+        }
+        "bend" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::BEND, &w)?;
+            let mut flags = vec![flag("dir", ws())];
+            match p.leaf.path[1] {
+                "publish" => {
+                    let file = p.arg(1).trim_start_matches('@');
+                    session_file(file, "bend source")?;
+                    flags.extend([flag("action", "publish"), flag("name", p.arg(0)), flag("source", session.home.join("requests").join(file))]);
+                }
+                "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
+                "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
+                action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
+            }
+            if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }
+            for (name, value) in &p.flags {
+                if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
+            }
+            client("bend", flags)
         }
         "jobs" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::JOBS, &w)?;
@@ -2848,6 +2868,22 @@ mod tests {
         );
         assert_eq!(client(plan(&s, "jobs lab").unwrap()).1, pairs(&[("action", "list"), ("dir", "/w"), ("room", "lab")]));
         assert!(plan(&s, "job post lab 42 --sneaky 1").is_err());
+        // `bend`: the source is `@FILE` under HOME/requests; one client operation each.
+        let home = s.home.display().to_string();
+        assert_eq!(
+            client(plan(&s, "bend publish tally @Tally.obend --entry tally").unwrap()),
+            ("bend".into(), pairs(&[("dir", "/w"), ("action", "publish"), ("name", "tally"), ("source", &format!("{home}/requests/Tally.obend")), ("entry", "tally")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "bend run tally counter --deposit 9000 --seed {\"tag\":\"natural\",\"value\":\"1\"}").unwrap()).1,
+            pairs(&[("dir", "/w"), ("action", "run"), ("name", "tally"), ("object", "counter"), ("deposit", "9000"), ("seed", r#"{"tag":"natural","value":"1"}"#)])
+        );
+        assert_eq!(client(plan(&s, "bend show counter").unwrap()).1, pairs(&[("dir", "/w"), ("action", "show"), ("object", "counter")]));
+        assert!(plan(&s, "bend publish tally Tally.obend").is_err(), "the source is @FILE, not a path word");
+        assert!(plan(&s, "bend run tally").is_err());
+        assert_eq!(client(plan(&s, "bend run tally counter --lose-reply-once").unwrap()).1, pairs(&[("dir", "/w"), ("action", "run"), ("name", "tally"), ("object", "counter"), ("lose-reply-once", "true")]));
+        assert_eq!(client(plan(&s, "bend lookup tally").unwrap()).1, pairs(&[("dir", "/w"), ("action", "lookup"), ("name", "tally")]));
+        assert_eq!(client(plan(&s, "bend retry tally").unwrap()).1, pairs(&[("dir", "/w"), ("action", "retry"), ("name", "tally")]));
         assert_eq!(
             client(plan(&s, "submit first-action").unwrap()),
             (
