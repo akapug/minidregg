@@ -41,7 +41,6 @@ import Kernel.SealedMarket  -- SEALED-MARKET: the sealed-bid market law (the tem
 
 -- Previously orphaned general carry claims and their regression gates.
 import Theory.CheckedCarry
-import Compiler.LegacyStoreCarryChecks
 import Verify.JointDecisionRecovery
 -- The Objective Bend front end's compiled vectors (the front end itself is reached through Host.Main).
 import Compiler.Sha256Vectors
