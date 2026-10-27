@@ -1,0 +1,28 @@
+--- a/acp_adapter/server.py	2026-10-27 07:52:33
++++ b/acp_adapter/server.py	2026-10-27 07:52:33
+@@ -602,10 +602,24 @@
+                 )
+         self._schedule_available_commands_update(state.session_id)
+         self._schedule_soon(lambda: self._send_usage_update(state))
++        field_meta = self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id))
++        if os.environ.get("HERMES_MINI_TOOL_CATALOGUE") == "1":
++            # Mini's restricted room resident admits a session only when the
++            # agent reports the exact tool surface it loaded: every name must
++            # be one of the Mini room MCP tools (the controller compares the
++            # list with its own catalogue). `valid` is false if any other tool
++            # (a built-in toolset, another MCP server) is on the surface.
++            names = sorted(getattr(state.agent, "valid_tool_names", None) or [])
++            field_meta = dict(field_meta or {})
++            field_meta["miniToolCatalogue"] = {
++                "type": "mini-hermes-tool-catalogue-v1",
++                "valid": bool(names) and all(n.startswith("mcp__mini_grain__") for n in names),
++                "names": names,
++            }
+         return {
+             "models": self._build_model_state(state),
+             "modes": self._session_modes(state),
+-            "field_meta": self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id)),
++            "field_meta": field_meta,
+         }
+ 
+     async def _attach_session_mcp(self, state: SessionState, mcp_servers: list | None, log: str, *log_args) -> None:

@@ -872,11 +872,17 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
         .iter()
         .rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))
         .ok_or("attach brief absent")?;
-    let brief: Value = messages[user]
-        .get("content")
-        .and_then(Value::as_str)
-        .and_then(|t| serde_json::from_str(t).ok())
-        .ok_or("the attach brief is not JSON")?;
+    // The user turn is the assignment JSON itself (the J14 stand-in) or the
+    // controller's prompt as upstream Hermes sends it: text (or text parts)
+    // ending "Assignment: {...}".
+    let content = &messages[user]["content"];
+    let text: String = match content {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect(),
+        _ => String::new(),
+    };
+    let json_text = text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, rest)| rest).trim();
+    let brief: Value = serde_json::from_str(json_text).map_err(|_| "the attach brief is not JSON")?;
     let me = brief.get("me").and_then(Value::as_str).ok_or("brief.me absent")?.to_owned();
     // The assignment names each document as {name, target, verbs}; older
     // briefs named it by its bare name.
@@ -1714,6 +1720,19 @@ mod tests {
             c["id"].as_str().unwrap().to_owned(),
             c["function"]["name"].as_str().unwrap().to_owned(),
             serde_json::from_str(c["function"]["arguments"].as_str().unwrap()).unwrap())).collect()
+    }
+
+    #[test]
+    fn the_librarian_reads_the_assignment_from_the_controller_prompt_text() {
+        let assignment = brief()["content"].as_str().unwrap().to_owned();
+        let prompt = format!("Carry out this Mini room resident assignment ... Assignment: {assignment}");
+        for content in [json!(prompt), json!([{"type":"text","text":prompt}])] {
+            let first = room_reply_for(&room_request(json!([{"role":"system","content":"program"},
+                {"role":"user","content":content}]))).unwrap();
+            let reads: Vec<String> = calls_of(&first.0).into_iter().map(|c| c.0).collect();
+            assert_eq!(reads, ["ls", "index", "digest", "tail"]);
+        }
+        assert!(room_reply_for(&room_request(json!([{"role":"user","content":"no assignment here"}]))).is_err());
     }
 
     #[test]

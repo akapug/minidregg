@@ -358,8 +358,16 @@ BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
 operator hermes "LAUNCHER: materialize bwrap for $BWRAP" python3 "$REPO/deploy/grain-host/materialize-bwrap.py" \
   --physical-bwrap "$BWRAP" --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$SD/launcher/bwrap"
 install -m 0700 "$LAUNCH_GATE" "$SD/launcher/launch-gate"; chmod 700 "$SD/launcher/bwrap"
+# J14_HERMES_ROOT: a runtime root staged by deploy/hermes/build-runtime-root
+# (upstream Hermes Agent + the Mini tool-catalogue patch). Unset: the ACP
+# stand-in journey.d/j14-hermes-acp.
+if [ -n "${J14_HERMES_ROOT:-}" ]; then
+  cp -a "$J14_HERMES_ROOT"/. "$SD/runtime-root/"
+  mkdir -p -m 700 "$SD/worker-work/.cache" "$SD/worker-work/.config" "$SD/worker-work/.local/share"
+else
+  install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
+fi
 install -m 0755 "$GRAIN_RUNTIME" "$SD/runtime-root/grain-runtime"
-install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
 install -m 0755 "$BRIDGE" "$SD/runtime-root/grain-provider-bridge"
 # Hermes's grain and controller config, in one command.
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
