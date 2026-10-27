@@ -3233,8 +3233,6 @@ fn run(mut args: Args) -> Result<()> {
         )),
         "fleet" => fleet::run(args),
         #[cfg(unix)]
-        "traffic" => scheduled_transport::run(args),
-        #[cfg(unix)]
         "mix" => pq_mailbox::run(args),
         #[cfg(unix)]
         "mix-live" => cohort_tcp::run(args),
