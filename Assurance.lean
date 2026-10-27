@@ -15,6 +15,7 @@ import Assurance.CapabilityRevocationAudit
 import Assurance.RenounceAudit
 import Assurance.EvaluatorAudit  -- required evaluator admission poles, outside Host runtime imports
 import Assurance.StoryLaw  -- P-STORY: the story law for every table; no skip, no rewind, never re-lawed (also in Deployed)
+import Assurance.StoryHistory  -- P-STORY history over the controller's own checked legs: no skip, no rewind given the chain; poles on the tale; residuals R1-R3 named in the file (NOT in Deployed)
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation
