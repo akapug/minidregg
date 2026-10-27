@@ -3368,7 +3368,7 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit", "summon"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "reveal", "retry", "revoke", "renounce", "react", "reports"]);
         assert_eq!(complete(&s, "bid "), ["factory", "shared"]);
         assert_eq!(complete(&s, "bids s"), ["shared"]);
         assert_eq!(complete(&s, "market s"), ["settle"]);
