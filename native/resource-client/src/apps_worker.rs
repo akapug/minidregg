@@ -720,9 +720,26 @@ pub(crate) fn receive_with_fd(stream: &UnixStream) -> Result<(Value, Option<Unix
     Ok((value, fd))
 }
 
-fn bind(path: &Path, mode: u32) -> Result<UnixListener> {
+/// The gid of a group name, from the passwd database.
+fn group_id(name: &str) -> Result<u32> {
+    let c = std::ffi::CString::new(name).map_err(|_| "group name".to_owned())?;
+    let entry = unsafe { libc::getgrnam(c.as_ptr()) };
+    if entry.is_null() {
+        return Err(format!("groupUnavailable: no group {name:?} on this host"));
+    }
+    Ok(unsafe { (*entry).gr_gid })
+}
+
+/// Bind a socket with its mode and, when a group is named, that group (the
+/// unit's SupplementaryGroups makes the chgrp possible; a group this process
+/// cannot resolve refuses the start, never a silently private socket).
+fn bind(path: &Path, mode: u32, group: Option<&str>) -> Result<UnixListener> {
     let _ = fs::remove_file(path);
     let listener = UnixListener::bind(path).map_err(|e| format!("cannot bind {}: {e}", path.display()))?;
+    if let Some(group) = group {
+        let gid = group_id(group)?;
+        std::os::unix::fs::chown(path, None, Some(gid)).map_err(|e| format!("cannot give {} to group {group}: {e} (the unit needs SupplementaryGroups={group})", path.display()))?;
+    }
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|e| e.to_string())?;
     Ok(listener)
 }
@@ -1132,19 +1149,22 @@ impl World for ProcessWorld {
     }
 }
 
-/// `mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH] [--dev-member NAME]`
+/// `mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH]
+/// [--member-group mini-sessions] [--edge-group mini-edge] [--dev-member NAME]`
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let state = absolute(&path(args.required("state")?))?;
     let world_path = absolute(&path(args.required("world")?))?;
     let socket = args.optional("socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| PathBuf::from("/run/mini-apps/worker.sock"));
     let edge = args.optional("edge-socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| state.join("edge.sock"));
     let dev_member = args.optional("dev-member").map(|v| v.into_string().map_err(|_| "--dev-member must be UTF-8".to_owned())).transpose()?;
+    let member_group = args.optional("member-group").map(|v| v.into_string().map_err(|_| "--member-group must be UTF-8".to_owned())).transpose()?;
+    let edge_group = args.optional("edge-group").map(|v| v.into_string().map_err(|_| "--edge-group must be UTF-8".to_owned())).transpose()?;
     args.finish()?;
     private_dir(&state)?;
     let world = ProcessWorld::load(&world_path)?;
     let worker = Arc::new(Worker::open(state, Box::new(world))?);
-    let members = bind(&socket, 0o660)?;
-    let edge_listener = bind(&edge, 0o660)?;
+    let members = bind(&socket, 0o660, member_group.as_deref())?;
+    let edge_listener = bind(&edge, 0o660, edge_group.as_deref())?;
     println!("mini apps-worker: members at {}, edge connector at {}", socket.display(), edge.display());
     std::io::stdout().flush().map_err(|e| e.to_string())?;
     serve(worker, members, edge_listener, dev_member)
@@ -1354,8 +1374,9 @@ mod tests {
         let worker = Arc::new(w);
         let edge_path = root.join("edge.sock");
         let members_path = root.join("worker.sock");
-        let edge = bind(&edge_path, 0o600).unwrap();
-        let members = bind(&members_path, 0o600).unwrap();
+        let edge = bind(&edge_path, 0o600, None).unwrap();
+        let members = bind(&members_path, 0o600, None).unwrap();
+        assert!(bind(&root.join("none.sock"), 0o600, Some("no-such-group-anywhere")).unwrap_err().starts_with("groupUnavailable"));
         let served = worker.clone();
         std::thread::spawn(move || { let _ = serve(served, members, edge, Some("alice".into())); });
         // The front asks for alice's route and receives a connected socket.
