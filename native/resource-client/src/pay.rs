@@ -1010,6 +1010,26 @@ fn clock_slot(view: &Value) -> Result<u128> {
         .and_then(|clock| number(clock, "slot"))
 }
 
+/// Whether an `alreadyConsumed` refusal at `tip` may have spent the tip's TICK nullifier
+/// rather than a record's own. The tick nullifier is spent by the report that moves the clock
+/// to the tip, so: if the view read before the submit, or a view read after the refusal
+/// (retained in `attempt/after-refusal/`), has its clock at or past the tip, the refusal is
+/// not attributable to the record and the record waits for a newer tip. A competing report
+/// (a manual heartbeat, a second observer) that committed between the first read and the
+/// submit is always visible in the second read, which closes the false "already credited"
+/// receipt of resource-client C F4.
+fn tick_may_be_spent(session: &Session, attempt: &Path, before: &Value, tip: &Tip) -> Result<bool> {
+    if clock_slot(before)? >= tip.slot {
+        return Ok(true);
+    }
+    let directory = attempt.join("after-refusal");
+    if !directory.exists() {
+        workspace::make_private_dir(&directory)?;
+    }
+    let after = read_view(session, &directory)?;
+    Ok(clock_slot(&after)? >= tip.slot)
+}
+
 fn receipt_path(session: &Session, record: &Record) -> PathBuf {
     session.receipts_dir().join(record.name())
 }
@@ -1200,7 +1220,7 @@ fn probe(
                     credited(session, &attempt, single, tally)?;
                     return Ok(Step::Done);
                 }
-                (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+                (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                     decide(&attempt, "waiting", &result)?;
                     waiting(tally, "tipReported", tip, &view);
                     return Ok(Step::Stop);
@@ -1629,8 +1649,8 @@ fn enrol_records(
                     tally.enrol_pending = records.len() - position - 1;
                     return Ok(Step::Done);
                 }
-                // At a tip equal to the clock the spent nullifier may be the tick's.
-                (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+                // At a tip the clock has reached the spent nullifier may be the tick's.
+                (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                     decide(&attempt, "waiting", &result)?;
                     waiting(tally, "tipReported", tip, &view);
                     tally.enrol_pending = records.len() - position;
@@ -1834,9 +1854,9 @@ fn observe_records(
                 waiting(tally, reason, tip, &view);
                 return Ok(Step::Stop);
             }
-            // The tick nullifier of a tip at the clock is spent by the report that set the
-            // clock; a newer tip's cannot be, so there the spent nullifier is a record's.
-            (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+            // The tick nullifier of a tip the clock has reached (before the submit, or in a
+            // view read after the refusal) may be the spent one; otherwise it is a record's.
+            (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                 decide(&attempt, "waiting", &result)?;
                 waiting(tally, "tipReported", tip, &view);
                 return Ok(Step::Stop);

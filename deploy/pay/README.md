@@ -189,8 +189,8 @@ tariff before any enrollment can be decided; it is not an operating source of th
   | `confirmed` | Credited. Each record gets a receipt, `pay/receipts/SIGNATURE.ADDRESS` → the attempt. |
   | `stalePay` / `staleAuthority` | An assignment or tariff change landed after the read. Re-read and re-sign once. |
   | `tickTooSoon` / `tipBehindClock` | Wait for the next tick. |
-  | `alreadyConsumed` at a tip equal to the clock | That tip is already reported. Wait. |
-  | `alreadyConsumed` at a newer tip, or a per-observation refusal | Probe the records one per report (below). |
+  | `alreadyConsumed` while the clock is at the tip (in the view read before the submit, or in a view read after the refusal and retained as `after-refusal/`) | That tip is already reported, possibly by another report. Wait. |
+  | `alreadyConsumed` with the clock behind the tip in both views, or a per-observation refusal | Probe the records one per report (below). |
   | anything else | Stop: exit 3 (refused) or 4 (undecided). |
 
   - **Probing.** A refused report consumes nothing, so the client submits the records one per
@@ -224,7 +224,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   |---|---|
   | `confirmed` | Decided (enrolled, renewed or journalled). Receipt `pay/receipts/SIGNATURE.ADDRESS` → the attempt; the enrollment cursor may pass it. |
   | `alreadyConsumed` at a newer tip than the clock | Decided before (`already-decided`). Receipt. Next record at the same tip. |
-  | `alreadyConsumed` at the clock's tip, `tipBehindClock` | Wait for the next tip. |
+  | `alreadyConsumed` with the clock at the tip (either view, as above), `tipBehindClock` | Wait for the next tip. |
   | `stalePay` / `staleAuthority` | Re-read and re-sign once. |
   | `verifier:…` (the native verifier failed) | Nothing decided or consumed: wait, exit 4, retry next tick. |
   | `decision:…`, `keyTaken`, `allocation`, … (refused, nothing consumed) | Quarantined, no receipt (read again next tick). Next record. |
