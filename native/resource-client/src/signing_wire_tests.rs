@@ -85,7 +85,20 @@ fn custody_listing(attempt: &Path) -> String {
     let mut out = String::new();
     for name in names {
         let bytes = fs::read(attempt.join(&name)).unwrap();
-        if name == "attempt.json" {
+        if name == mini_sdk::phase::RECORD {
+            // The record's index: which files it holds, and each one's length and digest (the
+            // path-bearing manifest by name only); its payload is those files' bytes.
+            let text = String::from_utf8_lossy(&bytes);
+            let index: Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
+            for row in index["files"].as_array().unwrap() {
+                if row["name"] == "attempt.json" {
+                    out.push_str("custody seal.record holds attempt.json\n");
+                } else {
+                    out.push_str(&format!("custody seal.record holds {} {} {}\n", row["name"].as_str().unwrap(),
+                        row["length"], row["sha256"].as_str().unwrap()));
+                }
+            }
+        } else if name == "attempt.json" {
             let value: Value = serde_json::from_slice(&bytes).unwrap();
             let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
             keys.sort();
@@ -126,7 +139,7 @@ fn the_dry_run_wire_bytes_are_pinned() {
 }
 
 fn pinned(golden: &str, dry_run: bool) {
-    let dir = std::env::temp_dir().join(format!("mini-wire-{}-{}", std::process::id(),
+    let dir = std::env::temp_dir().join(format!("mini-wire-{}-{}-{}", if dry_run { "dry" } else { "submit" }, std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     fs::create_dir(&dir).unwrap();
     let host = stand_in(&dir, "host", HOST);

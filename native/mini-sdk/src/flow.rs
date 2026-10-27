@@ -13,7 +13,8 @@
 //! 3. [`Flow::present`]: the local codec presents a plan (op 8, `plan.json`).
 //! 4. [`Flow::seal`]: consent names the plan headers the intent permits (222, or thin 232); the
 //!    caller's release sees exactly what would be signed; the headers are signed
-//!    (`transaction-signatures.{json,bin}`), assembled (op 11) into `call.bin`, and the call and
+//!    (`transaction-signatures.{json,bin}`), assembled (op 11) into `call.bin`, and the attempt's
+//!    ONE record (`seal.record`, [`crate::phase`]: every file so far, `call.bin` included) and
 //!    every ancestor directory are synced BEFORE anything can transmit it.
 //! 5. [`Flow::transmit`]: the exact retained call is submitted (op 2) or looked up (op 3), and the
 //!    local codec presents the answer. A lost reply is answered by looking up the SAME call
@@ -206,7 +207,11 @@ impl<'a, H: Local + Operator + ?Sized> Flow<'a, H> {
         let signatures_bin = self.sign(plan_bin, release)?;
         let call = self.path("call.bin");
         self.host.assemble(plan_bin, &signatures_bin, &call)?;
-        sync_retained(self.dir, &call)?;
+        // The attempt's ONE durable record: every file written so far, `call.bin` included, is
+        // now a cache of it (`crate::phase`). Synced, with its directory and ancestors, before
+        // anything can transmit the call.
+        crate::phase::seal(self.dir)?;
+        sync_retained(self.dir, &self.path(crate::phase::RECORD))?;
         Ok(call)
     }
 
