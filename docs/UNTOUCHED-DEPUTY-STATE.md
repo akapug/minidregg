@@ -23,7 +23,9 @@ Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; t
 ## Decided
 - fn: out of this demo (ember); the exchange row stays UNCONFIGURED by name; sentence published.
 - provider-services/Check.lean is JPAY6's (L1). The resource-client dead dep is the L2 successor's.
-- private-backend: NOT moved; SYNTHESIS q6 / BACKLOG E5 is owner-only (rescue R1/R2/R3/R7/R8 undecided).
+- private-backend STAYS (ember, E5/q6; the MOVE is cancelled). Source: docs/review/2026-10-26-native-crates/private-backend.md §5, SYNTHESIS §C row 21.
+  - Tier 1, NOW (faerie batches): R7 pinned_execution.rs as the one copy (resource-client's transport.rs twin deleted; reader thread; legacy native_worker path deleted) + P12 KAT [lane/un-pb-exec, in flight]; R8 the two Lean codec fixtures as gated lean_exe rows vs check-wire-fixtures/circuit_batch.rs, hbox paths dropped, workspace member or explicit exclude, one sha3 pin [lane/un-pb-codec, in flight]; R2 transition_journal repaired (torn tail refused, interior truncation refused, re-deal test inverted, P4 dzk test gated) and promoted to the anchor's WAL [next]; R3 capsule epoch bound to CurrentRecipientRecord, seeds wrapped at rest, secrets zeroized (P7, P13) [next]; delete the ~2.2K true twins of §5.3 with grep proof [after R2/R7, which touch custody.rs/native_worker.rs].
+  - Tier 2, AFTER the opening: R1, the in-process four-party MPC run as a demo door "private computation" (a CLI arm, a derived form, one row, the curious-holder transcript as the page's evidence, labelled research; no transport). R4-R6 (transport, ReleaseAdmission, ACS wiring) stay parked as Phase 3.
 - Contracts Cuts/Snapshot/Refinements/Futures: kept (parked, proved, censused).
 - Pred BoundedQuantifiedView/CoordinationDial: kept (no live consumer without closure growth).
 - four-source fixture: not in the Simplex gate (a four-process mesh); it is second-node work.
