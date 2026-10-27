@@ -608,7 +608,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev nativeprotocolframes_callframe_4cd7d6ce : String := "DREGG/NATIVE-HOST/SIGNED-CALL/v4"
 @[persisted_codec_tag] abbrev nativeprotocolframes_draftframe_7af8fd37 : String := "DREGG/NATIVE-HOST/DRAFT/v5"
 @[persisted_codec_tag] abbrev nativeprotocolframes_signingplanframe_6d288d35 : String := "DREGG/NATIVE-HOST/SIGNING-PLAN/v6"
-@[persisted_codec_tag] abbrev nativeprotocolframes_outcomeframe_11a5eba7 : String := "DREGG/NATIVE-HOST/OUTCOME/v6"
+@[persisted_codec_tag] abbrev nativeprotocolframes_outcomeframe_11a5eba7 : String := "DREGG/NATIVE-HOST/OUTCOME/v7"
 @[persisted_codec_tag] abbrev nativeprotocolframes_intentframe_ad208d3e : String := "DREGG/NATIVE-HOST/OBSERVE-INTENT/v7"
 @[persisted_codec_tag] abbrev nativeprotocolframes_challengeframe_5b33ffe4 : String := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v10"
 @[persisted_codec_tag] abbrev nativeprotocolframes_signedframe_c007c7c1 : String := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v10"
