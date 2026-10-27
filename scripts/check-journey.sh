@@ -3,7 +3,9 @@
 #
 # Builds what the journey runs FROM THIS CHECKOUT (lake build minidregg-host;
 # cargo build --release of mini, the Store helper, the verifier, grain-runtime,
-# spk-host and pay-watcher into $CARGO_TARGET_DIR, default <repo>/target-gates),
+# spk-host, pay-watcher, the grain launch gate and the journey fixtures of
+# `deploy/candidate/package.py --fixture-roles` into $CARGO_TARGET_DIR, default
+# <repo>/target-gates),
 # writes a manifest with sha256 pins, and runs native/resource-client/journey.sh
 # under a SHORT private root (mktemp under $XDG_RUNTIME_DIR, else /run/user/UID,
 # else /tmp), because grain sockets must fit sun_path (108 bytes).
@@ -38,7 +40,8 @@ die() { echo "journey-gate: FAIL: $*"; exit 1; }
 build_die() { local log=$1; shift; echo "journey-gate: tail of $log:"; tail -n 40 "$log" | sed 's/^/  | /'; die "$@"; }
 
 lake build minidregg-host >"$root/build-logs/gate5-host.log" 2>&1 || build_die "$root/build-logs/gate5-host.log" "lake build minidregg-host (build-logs/gate5-host.log)"
-for c in resource-client hyperdocument-link-sqlite-store credential-signature-verifier grain-runtime spk-host pay-watcher; do
+for c in resource-client hyperdocument-link-sqlite-store credential-signature-verifier grain-runtime spk-host pay-watcher launch-gate \
+    $(python3 deploy/candidate/package.py --fixture-roles | awk '{print $2}'); do
   (cd "native/$c" && cargo "+$rust" build --release --locked -j "${LOCAL_GATES_CARGO_JOBS:-6}") \
     >"$root/build-logs/gate5-cargo-$c.log" 2>&1 || build_die "$root/build-logs/gate5-cargo-$c.log" "cargo build --release native/$c (build-logs/gate5-cargo-$c.log)"
 done
@@ -67,6 +70,7 @@ levels=${LOCAL_GATES_GROWTH_LEVELS:-10 100 500 1000}
 # its lake build and the other gates; a run that reaches it is red with a reason, never
 # cut by the job limit with no verdict. LOCAL_GATES_JOURNEY_BUDGET_S=0 removes it.
 env_args=(JOURNEY_GROWTH_LEVELS="$levels" PAY_WATCHER_BIN="$bin/pay-watcher"
+  LAUNCH_GATE="$bin/launch-gate" TEST_PROVIDER="$bin/mini-hermes-test-provider"
   JOURNEY_BUDGET_S="${LOCAL_GATES_JOURNEY_BUDGET_S:-14400}")
 [ -n "${LOCAL_GATES_JOURNEY_ONLY:-}" ] && env_args+=(JOURNEY_ONLY="$LOCAL_GATES_JOURNEY_ONLY")
 for v in NOCK_TEMPLATES NOCK_RUN NOCK_DOOR_JAM NOCK_DOOR_FUEL; do

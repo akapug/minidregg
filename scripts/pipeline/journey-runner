@@ -47,7 +47,7 @@ product_inputs() {
   export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher
   export CANDIDATE=$set/provenance.json
   export M7_REFERENCE=${MINI_M7_REFERENCE:-$(m7_reference_for "$set")}
-  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/bin/mini-hermes-test-provider}
+  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/fixtures/mini-hermes-test-provider}  # a journey fixture, not a candidate output (package.py --fixture-roles)
   export LAUNCH_GATE=${MINI_LAUNCH_GATE_BIN:-$set/bin/launch-gate}
   export MINI_FN_LAUNCHER=${MINI_FN_LAUNCHER:-} MINI_FN_CORE=${MINI_FN_CORE:-}
 }
