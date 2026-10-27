@@ -89,12 +89,40 @@ private def checkTerminalEcho : IO Unit := do
     unless result == .ok (.undecided .truncated, some expected, 3120) do
       throw (IO.userError s!"terminal echo {label} changed: {repr result}")
 
+-- Z.AI's coding-plan Chat Completions stream, as measured on 2026-10-27
+-- (`api.z.ai/api/coding/paas/v4`, glm-5.3-flash, max_tokens 8): reasoning
+-- chunks whose choice carries no `finish_reason` key at all, and the usage
+-- record on the finishing chunk itself, with token details beside the three
+-- counts. An absent `finish_reason` before the finish reads as null.
+private def zaiTariff : Tariff := ⟨1, "glm-5.3-flash", 4, ⟨2, 1000000, 2000000⟩, ⟨0, 1000000, 2000000⟩⟩
+private def zaiRequest : List UInt8 :=
+  "{\"model\":\"glm-5.3-flash\",\"stream\":true}".toUTF8.toList
+private def zaiStream : String :=
+  r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Let"}}]}"# ++ "\n\n" ++
+  r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":"length","delta":{"role":"assistant","content":""}}],"usage":{"prompt_tokens":14,"completion_tokens":8,"total_tokens":22,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":5}}}"# ++ "\n\n" ++
+  doneFrame
+
+private def checkZaiStream : IO Unit := do
+  let result := classify (quoteResponse zaiTariff .pool .complete zaiRequest zaiStream.toUTF8.toList
+    "text/event-stream" 200 500)
+  -- Pool fee 2 + ⌈(14·10⁶ + 8·2·10⁶)/10⁶⌉ = 32.
+  unless result == .ok (.reported ⟨14, 8, 22⟩, none, 32) do
+    throw (IO.userError s!"Z.AI coding-plan stream changed: {repr result}")
+  -- Data after the terminal usage is still refused.
+  let echoed := zaiStream.replace doneFrame
+    (r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"delta":{"content":""}}]}"# ++ "\n\n" ++ doneFrame)
+  let refused := classify (quoteResponse zaiTariff .pool .complete zaiRequest echoed.toUTF8.toList
+    "text/event-stream" 200 500)
+  unless refused == .ok (.undecided .truncated, some "SSE data follows terminal usage", 500) do
+    throw (IO.userError s!"Z.AI data after usage changed: {repr refused}")
+
 /-- Executable parser regression gate. Its closed examples do not replace the
 general theorems in `Kernel.ProviderMetering` (`failed_leg_settle_decided`). It raises
 an error during this module's narrow Lean check if any framing or classification
 result changes. -/
 def check : IO Unit := do
   checkTerminalEcho
+  checkZaiStream
   let positive := classify (quoteResponse tariff .pool .complete request complete
     "text/event-stream; charset=UTF-8" 200 7)
   unless positive == .ok (.reported ⟨1, 2, 3⟩, none, 7) do

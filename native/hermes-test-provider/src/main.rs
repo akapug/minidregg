@@ -48,8 +48,19 @@ enum Mode {
     /// the room tools (PLACE §2.7, J14). `--room-librarian-metered`: the
     /// same program as a pool upstream, whose stream ends with a usage event
     /// (the record the Host quotes a metered call from) and whose log names
-    /// the bearer it was paid with.
-    RoomLibrarian { metered: bool },
+    /// the bearer it was paid with. `--room-librarian-zai`: metered in the
+    /// stream shape Z.AI's coding-plan Chat Completions endpoint sends
+    /// (measured 2026-10-27): `reasoning_content` deltas before the content,
+    /// and the usage record on the finishing chunk itself (with an inert
+    /// delta and the token details), not on a separate `choices: []` event.
+    RoomLibrarian { usage: StreamUsage },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StreamUsage {
+    Absent,
+    Terminal,
+    OnFinish,
 }
 
 fn decimal(value: &str) -> bool {
@@ -1087,7 +1098,7 @@ fn write_http(stream: &mut TcpStream, status: &str, content_type: &str, body: &[
     stream.flush()
 }
 
-fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str, metered_usage: bool) -> io::Result<()> {
+fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str, usage: StreamUsage) -> io::Result<()> {
     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n")?;
     let mut delta = json!({"role":"assistant"});
     if let Some(content) = message.get("content").and_then(Value::as_str) {
@@ -1099,12 +1110,24 @@ fn write_stream(stream: &mut TcpStream, id: &str, message: &Value, finish: &str,
             "function":call["function"]
         })).collect::<Vec<_>>());
     }
+    if usage == StreamUsage::OnFinish {
+        let thinking = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
+            "choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Reading the assignment."}}]});
+        write!(stream, "data: {thinking}\n\n")?;
+    }
     let first = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
         "choices":[{"index":0,"delta":delta,"finish_reason":null}]});
-    let last = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
-        "choices":[{"index":0,"delta":{},"finish_reason":finish}]});
+    let last = if usage == StreamUsage::OnFinish {
+        json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
+            "choices":[{"index":0,"finish_reason":finish,"delta":{"role":"assistant","content":""}}],
+            "usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3,
+                "prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":1}}})
+    } else {
+        json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
+            "choices":[{"index":0,"delta":{},"finish_reason":finish}]})
+    };
     write!(stream, "data: {first}\n\ndata: {last}\n\n")?;
-    if metered_usage {
+    if usage == StreamUsage::Terminal {
         let terminal = json!({"id":id,"object":"chat.completion.chunk","created":1,"model":MODEL,
             "choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}});
         write!(stream, "data: {terminal}\n\n")?;
@@ -1254,8 +1277,12 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let id = format!("chatcmpl-mini-fixture-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
     let streaming = request.get("stream").and_then(Value::as_bool) == Some(true);
     if streaming {
-        write_stream(&mut stream, &id, &message, finish,
-            matches!(mode, Mode::MeteredUsage | Mode::RoomLibrarian { metered: true }))
+        let usage = match mode {
+            Mode::MeteredUsage => StreamUsage::Terminal,
+            Mode::RoomLibrarian { usage } => usage,
+            _ => StreamUsage::Absent,
+        };
+        write_stream(&mut stream, &id, &message, finish, usage)
             .map_err(|e| e.to_string())?;
     } else {
         let (prompt_tokens, completion_tokens, total_tokens) =
@@ -1276,7 +1303,8 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     }
     // A metered fixture also names the bearer it was paid with (as a digest),
     // so a journey can prove which payer a route used.
-    let paid = if matches!(mode, Mode::MeteredUsage | Mode::RoomLibrarian { metered: true }) { format!(" auth={auth}") } else { String::new() };
+    let paid = if matches!(mode, Mode::MeteredUsage)
+        || matches!(mode, Mode::RoomLibrarian { usage } if usage != StreamUsage::Absent) { format!(" auth={auth}") } else { String::new() };
     let id = request.get("user").and_then(Value::as_str).unwrap_or("-");
     log_event(log, &format!("completion id={id} bytes={size} stream={streaming} stage={stage}{paid}"))
         .map_err(|e| e.to_string())?;
@@ -1310,8 +1338,9 @@ fn main() -> Result<(), String> {
         Some("--content-receipt-8801") => Mode::ContentReceipt8801,
         Some("--content-stale-8901") => Mode::ContentStale8901,
         Some("--content-birth-9301") => Mode::ContentBirth9301,
-        Some("--room-librarian") => Mode::RoomLibrarian { metered: false },
-        Some("--room-librarian-metered") => Mode::RoomLibrarian { metered: true },
+        Some("--room-librarian") => Mode::RoomLibrarian { usage: StreamUsage::Absent },
+        Some("--room-librarian-metered") => Mode::RoomLibrarian { usage: StreamUsage::Terminal },
+        Some("--room-librarian-zai") => Mode::RoomLibrarian { usage: StreamUsage::OnFinish },
         Some(_) => return Err("unknown fixture mode".into()),
     };
     let receipt_path = if matches!(mode, Mode::ContentReceipt8801) {

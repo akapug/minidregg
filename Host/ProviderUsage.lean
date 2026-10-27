@@ -238,7 +238,9 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
             -- the next data event must be [DONE], as enforced above.
             usage := some (← usageOfJson (← field event "usage"))
         | none =>
-            let reason ← field choice "finish_reason"
+            -- Before the finish, an absent finish_reason reads as null
+            -- (Z.AI's coding-plan stream omits the key on its delta chunks).
+            let reason := (choice.getObjVal? "finish_reason").toOption.getD .null
             if reason != .null then
               let name ← reason.getStr?.mapError (fun _ => "finish_reason must be a string")
               if name.isEmpty then throw "empty finish_reason"
