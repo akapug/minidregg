@@ -34,10 +34,9 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
     let identity = match who {
         Some(who) => format!(
             "<span class=\"me\" title=\"session {}\">{}</span>\
-             <form method=\"post\" action=\"/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><button class=\"quiet\">Log out</button></form>",
+             <form method=\"post\" action=\"/logout\" class=\"inline\"><button class=\"quiet\">Log out</button></form>",
             h(&who.prefix()),
-            h(&who.name),
-            h(&who.csrf)
+            h(&who.name)
         ),
         None => "<span class=\"me public\">public reader</span><a class=\"button\" href=\"/join\" data-full>Join</a>".to_owned(),
     };
@@ -56,6 +55,29 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
         path = h(path),
         world = h(WORLD_READABLE),
     )
+}
+
+/// Every POST form on the stage carries the session's CSRF token: the body renders plain forms
+/// and never learns the token; the gateway adds one hidden field after each `<form … method=post>`
+/// opening tag (case-insensitive, quoted or bare). GET forms (search, lookups) are left alone.
+pub fn inject_csrf(html: &str, csrf: &str) -> String {
+    let field = format!("<input type=\"hidden\" name=\"csrf\" value=\"{}\">", h(csrf));
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len() + 256);
+    let mut at = 0;
+    while let Some(start) = lower[at..].find("<form") {
+        let start = at + start;
+        let Some(end) = lower[start..].find('>') else { break };
+        let end = start + end + 1;
+        let tag = &lower[start..end];
+        out.push_str(&html[at..end]);
+        if tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post") {
+            out.push_str(&field);
+        }
+        at = end;
+    }
+    out.push_str(&html[at..]);
+    out
 }
 
 /// The outcome partial the gateway uses for its own actions; the body renders the same shape for
@@ -93,19 +115,19 @@ pub fn public_only(what: &str) -> String {
     )
 }
 
-pub fn term_index(terminals: &[(String, bool, bool)], csrf: &str) -> String {
+pub fn term_index(terminals: &[(String, bool, bool)]) -> String {
     let mut rows = String::new();
     for (id, attached, exited) in terminals {
         let state = match (attached, exited) { (_, true) => "ended", (true, _) => "attached", (false, _) => "waiting" };
         rows.push_str(&format!(
             "<tr><td><a href=\"/term/{id}\" data-pane>shell {}</a></td><td>{state}</td>\
-             <td><form method=\"post\" action=\"/term/{id}/close\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button class=\"quiet\">Close</button></form></td></tr>",
+             <td><form method=\"post\" action=\"/term/{id}/close\" class=\"inline\"><button class=\"quiet\">Close</button></form></td></tr>",
             h(&id[..6])
         ));
     }
     format!(
         "<p><code>mini shell</code> as your account, in the page: the same shell <code>ssh -t</code> opens, with the same verbs, Tab completion and history.</p>\
-         <form method=\"post\" action=\"/term\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button>Open a terminal</button></form>\
+         <form method=\"post\" action=\"/term\"><button>Open a terminal</button></form>\
          {}",
         if rows.is_empty() { String::new() } else { format!("<table><thead><tr><th>terminal</th><th>state</th><th></th></tr></thead><tbody>{rows}</tbody></table>") }
     )
@@ -118,7 +140,7 @@ pub fn term_page(id: &str) -> String {
     )
 }
 
-pub fn sessions_page(sessions: &[(String, u64, u64, bool)], csrf: &str) -> String {
+pub fn sessions_page(sessions: &[(String, u64, u64, bool)]) -> String {
     let mut rows = String::new();
     for (prefix, created, last, current) in sessions {
         rows.push_str(&format!(
@@ -127,9 +149,9 @@ pub fn sessions_page(sessions: &[(String, u64, u64, bool)], csrf: &str) -> Strin
             when(*created),
             when(*last),
             if *current {
-                format!("<form method=\"post\" action=\"/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button class=\"quiet\">Log out</button></form>")
+                "<form method=\"post\" action=\"/logout\" class=\"inline\"><button class=\"quiet\">Log out</button></form>".to_owned()
             } else {
-                format!("<form method=\"post\" action=\"/sessions/revoke\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><input type=\"hidden\" name=\"prefix\" value=\"{prefix}\"><button class=\"quiet\">Revoke</button></form>")
+                format!("<form method=\"post\" action=\"/sessions/revoke\" class=\"inline\"><input type=\"hidden\" name=\"prefix\" value=\"{prefix}\"><button class=\"quiet\">Revoke</button></form>")
             }
         ));
     }
@@ -170,10 +192,13 @@ mod tests {
         let html = page("Documents", Some(&who), "/doc", "<p>x</p>", "11 November 2026");
         assert!(html.contains("aria-current=\"page\">Documents"));
         assert!(html.contains("alice"));
-        assert!(html.contains("name=\"csrf\" value=\"c\""));
+        assert!(html.contains("action=\"/logout\""));
         assert!(html.contains(WORLD_READABLE.split(':').next().unwrap()));
         assert!(html.contains("11 November 2026"));
         assert!(!html.contains("xterm.js"), "xterm loads only with a terminal on the stage");
+        let injected = inject_csrf("<form method=\"post\" action=\"/x\"><button>Go</button></form><form method=\"get\"><input></form><FORM METHOD=POST class=\"row\">", "tok");
+        assert_eq!(injected.matches("name=\"csrf\" value=\"tok\"").count(), 2, "{injected}");
+        assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
         let anon = page("Mini", None, "/", &term_page("abc"), "");
         assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
         assert_eq!(when(0), "1970-01-01 00:00Z");

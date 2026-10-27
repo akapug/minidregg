@@ -148,11 +148,17 @@ impl Gateway {
             Reply::Upgraded => return,
             Reply::Raw(response) => self.finish(response),
             Reply::Stage { status, title, html, who, path, set_cookie } => {
-                let mut response = if fragment {
-                    Response::html(status, html).with("X-Mini-Title", &title.replace(['\r', '\n'], " "))
-                } else {
-                    Response::html(status, page(&title, who.as_ref(), &path, &html, &self.shutdown))
+                // Every POST form on the page (the shell's and the stage's) gets this session's
+                // token; the body's forms are plain and the token never reaches the body.
+                let document = if fragment { html } else { page(&title, who.as_ref(), &path, &html, &self.shutdown) };
+                let document = match &who {
+                    Some(who) => page::inject_csrf(&document, &who.csrf),
+                    None => document,
                 };
+                let mut response = Response::html(status, document);
+                if fragment {
+                    response = response.with("X-Mini-Title", &title.replace(['\r', '\n'], " "));
+                }
                 if let Some(cookie) = set_cookie {
                     response = response.with("Set-Cookie", &cookie);
                 }
@@ -277,7 +283,7 @@ impl Gateway {
                         Some((w.first()?.to_string(), w.get(1)?.parse().ok()?, w.get(2)?.parse().ok()?, w.get(3) == Some(&"1")))
                     })
                     .collect();
-                self.stage(200, "Sessions", page::sessions_page(&rows, &who.csrf), Some(who.clone()), request)
+                self.stage(200, "Sessions", page::sessions_page(&rows), Some(who.clone()), request)
             }
             Err(e) => self.stage(502, "Sessions", refusal("Cannot list sessions", &e.to_string()), Some(who.clone()), request),
         }
@@ -300,7 +306,7 @@ impl Gateway {
             };
         }
         let list: Vec<(String, bool, bool)> = self.terminals.of(&who.prefix()).iter().map(|t| (t.id.clone(), t.attached(), t.exited())).collect();
-        self.stage(200, "Terminal", page::term_index(&list, &who.csrf), Some(who.clone()), request)
+        self.stage(200, "Terminal", page::term_index(&list), Some(who.clone()), request)
     }
 
     fn websocket(&self, request: &Request, stream: &mut TcpStream, id: &str, who: &Who) -> Reply {
@@ -409,9 +415,8 @@ impl Gateway {
             let id = app["id"].as_str().unwrap_or("");
             let about = app["description"].as_str().unwrap_or("");
             let install = match who {
-                Some(who) => format!(
-                    "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><input type=\"hidden\" name=\"id\" value=\"{}\"><button class=\"quiet\">Install</button></form>",
-                    h(&who.csrf),
+                Some(_) => format!(
+                    "<form method=\"post\" action=\"/apps/install\" class=\"inline\"><input type=\"hidden\" name=\"id\" value=\"{}\"><button class=\"quiet\">Install</button></form>",
                     h(id)
                 ),
                 None => String::new(),

@@ -89,9 +89,10 @@ browser ──443──▶ Caddy ──loopback 8797──▶ mini-web (uid mini
   to the helper, which deletes the record and mints a session: 32 random bytes, stored by sha256
   under `sessions/`, with the name, a CSRF secret, created / last-seen / expires (idle 24 h, hard
   7 d). The cookie is `__Host-mini_session`, `Secure; HttpOnly; SameSite=Strict; Path=/`; it names a
-  session, never a key. Every POST carries the session's CSRF token and must arrive with
-  `Sec-Fetch-Site: same-origin` (or none) and an `Origin` equal to the public origin; the WebSocket
-  upgrade checks `Origin` the same way. `/sessions` lists this account's sessions and revokes any;
+  session, never a key. Every POST carries the session's CSRF token (the gateway adds the hidden field to every
+  POST form on the page it serves, the body's forms included, so the token never reaches the body)
+  and must arrive with `Sec-Fetch-Site: same-origin` (or none) and an `Origin` equal to the public
+  origin; the WebSocket upgrade checks `Origin` the same way. `/sessions` lists this account's sessions and revokes any;
   logout revokes the current one and ends its body and shells.
 - **Terminal transport.** `/ws/term/ID`: RFC 6455 server side in the gateway (SHA-1 via `ring`, which
   the workspace already links); binary frames carry pty bytes both ways, one text frame
@@ -125,11 +126,11 @@ Studio stays routed nowhere in the body (its deletion is L2's, D7).
 
 | path | what |
 |---|---|
-| `native/mini-web/` | the gateway: `main.rs` (listener, pool), `http.rs`, `session.rs` (cookie, CSRF, helper client), `ws.rs` (RFC 6455), `term.rs` (pty bridge, replay ring), `shell.rs` (the page shell and partials), `assets/` (`app.css`, `app.js`, `vendor/xterm*`) |
+| `native/mini-web/` | the gateway: `main.rs` (listener, pool, router), `http.rs`, `session.rs` (cookie, CSRF, helper client), `ws.rs` (RFC 6455), `term.rs` (pty bridge, replay ring), `proxy.rs` (the body over the helper's fd), `page.rs` (the page shell and partials), `assets/` (`app.css`, `app.js`, `vendor/xterm*` pinned in `VENDOR.md`); `tests/dev_flow.rs` runs the real helper (`--dev`) and gateway end to end without a Host |
 | `native/mini-web-spawn/` | the helper: `main.rs` (socket loop, peer check, verbs), `spawn.rs` (pty, setpriv line, scope), `store.rs` (logins, sessions) |
 | `native/resource-client/src/web.rs` + `web/` | the body face |
 | `deploy/web-frontend/` | `mini-web.service`, `mini-web-spawn.{socket,service}`, the 60-demo-confine drop-ins against the demo floor, `Caddyfile.app`, `door.patch`, `INSTALL.md` |
-| `native/resource-client/journey.d/jweb-frontend.sh` | signup → login link → terminal `whoami` → document append → receipt admitted → logout revokes; `--dry` on a Mac, `--box` on Linux |
+| `native/resource-client/journey.d/jweb-frontend.sh` (+ `jweb-frontend-ws.py`) | the JWF step after WEB: login code → cookie → terminal `whoami` over the WebSocket → `doc new` and append through the forms → receipt admitted → logout revokes → public reader; as a journey hook, `--dry` from the environment, `--box NAME` on the box |
 
 ## 5. Seams owned elsewhere
 
