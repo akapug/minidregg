@@ -4018,6 +4018,8 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
 /// Reading this status does not advance receipt-continuity custody.
 pub(crate) enum AttemptOutcome {
     Confirmed(Value),
+    /// Admitted with only its price posted (`disposition: charged`): terminal, not accepted.
+    Charged(Value),
     Refused,
     Pending,
 }
@@ -4026,6 +4028,7 @@ pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome>
     // The rule and the reading of the retained files are the SDK's (`AttemptDir::standing`).
     Ok(match mini_sdk::store::AttemptDir(attempt.to_path_buf()).standing()? {
         mini_sdk::custody::Standing::Confirmed(value) => AttemptOutcome::Confirmed(value),
+        mini_sdk::custody::Standing::Charged(value) => AttemptOutcome::Charged(value),
         mini_sdk::custody::Standing::Refused => AttemptOutcome::Refused,
         mini_sdk::custody::Standing::Pending => AttemptOutcome::Pending,
     })
@@ -4045,6 +4048,10 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
             receipt_continuity::finish_attempt(continuity, &value, true)?;
             Ok(Some(value))
         }
+        // Not accepted, and never pending either: the call is decided and must not be resent.
+        AttemptOutcome::Charged(value) => Err(format!(
+            "the Host admitted this call as a charged failure: only its price was posted, nothing else was written (cause {})",
+            value.get("cause").unwrap_or(&Value::Null))),
         AttemptOutcome::Refused | AttemptOutcome::Pending => Ok(None),
     }
 }

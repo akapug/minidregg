@@ -1791,6 +1791,56 @@ struct Observed {
     signed: PathBuf,
 }
 
+/// The CLI's side of `mini_sdk::flow`: this process's codec child and consent provider
+/// (`client_consent`) and its transport (`process`: the pinned socket session, or a one-shot
+/// local Host). The order of steps, the signed bytes and the attempt layout are the SDK's.
+pub(crate) struct CliHost<'a> {
+    pub(crate) host: &'a Path,
+    pub(crate) config: &'a Path,
+}
+
+impl mini_sdk::flow::Local for CliHost<'_> {
+    fn author(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(author(self.host, self.config, OsStr::new(kind), input, output)?)
+    }
+    fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<Value> {
+        Ok(inspect(self.host, self.config, kind, input, output)?)
+    }
+    fn signatures(&mut self, json: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("signatures"), json, output])?)
+    }
+    fn observe_assemble(&mut self, challenge: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("observe-assemble"), challenge, signatures, output])?)
+    }
+    fn assemble(&mut self, plan: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("assemble"), plan, signatures, output])?)
+    }
+    fn consent_intent(&mut self, intent: &Path, key: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(client_consent::intent(self.host, self.config, intent, key)?)
+    }
+    fn consent_observation(&mut self, intent: &Path, signature: &Path, challenge: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+        Ok(client_consent::observation(self.host, self.config, intent, signature, challenge, key)?)
+    }
+    fn consent_plan(&mut self, intent: &Path, plan: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+        Ok(client_consent::plan(self.host, self.config, intent, plan, key)?)
+    }
+}
+
+impl mini_sdk::flow::Operator for CliHost<'_> {
+    fn request(&mut self, request: mini_sdk::flow::Request, inputs: &[&Path], output: &Path) -> mini_sdk::Result<()> {
+        let mut arguments = vec![Path::new(request.verb())];
+        arguments.extend_from_slice(inputs);
+        arguments.push(output);
+        Ok(host_files(self.host, self.config, &arguments)?)
+    }
+}
+
+/// The member typed the command: that is the release. The consent provider has already limited
+/// the headers to what the retained intent permits for this plan.
+fn command_release(_: &mini_sdk::flow::Sealing<'_>) -> mini_sdk::Result<()> {
+    Ok(())
+}
+
 fn authorize_observation(
     host: &Path,
     config: &Path,
@@ -1800,46 +1850,13 @@ fn authorize_observation(
     directory: &Path,
 ) -> Result<Observed> {
     note_signer(host, config, intent, intent_kind, signing);
-    let intent_bin = directory.join("intent.bin");
-    let intent_signature = directory.join("intent-signature.bin");
-    let challenge_bin = directory.join("challenge.bin");
-    let challenge_json = directory.join("challenge.json");
-    let signatures_json = directory.join("observation-signatures.json");
-    let signatures_bin = directory.join("observation-signatures.bin");
-    let signed = directory.join("signed-observation.bin");
-    if intent_kind == OsStr::new("binary") {
-        copy_new(intent, &intent_bin)?;
+    let source = if intent_kind == OsStr::new("binary") {
+        mini_sdk::flow::Source::Binary(intent)
     } else {
-        author(host, config, intent_kind, intent, &intent_bin)?;
-    }
-    // The local native verifier binds the retained intent and current subject
-    // to custody before even the observation's initial signature is released.
-    let intent_bytes = client_consent::intent(host, config, &intent_bin, signing)?;
-    write_new(&intent_signature, &signing.sign(&intent_bytes).to_bytes())?;
-    host_files(
-        host,
-        config,
-        &[Path::new("challenge"), &intent_bin, &intent_signature, &challenge_bin],
-    )?;
-    inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
-    encode_signatures(
-        host,
-        config,
-        signing,
-        client_consent::observation(host, config, &intent_bin, &intent_signature, &challenge_bin, signing)?,
-        &signatures_json,
-        &signatures_bin,
-    )?;
-    host_files(
-        host,
-        config,
-        &[
-            Path::new("observe-assemble"),
-            &challenge_bin,
-            &signatures_bin,
-            &signed,
-        ],
-    )?;
+        mini_sdk::flow::Source::Authored { kind: intent_kind.to_str().ok_or("intent kind must be UTF-8")?, path: intent }
+    };
+    let mut cli = CliHost { host, config };
+    let signed = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: signing }.observe(source)?;
     Ok(Observed { signed })
 }
 
@@ -1918,92 +1935,55 @@ fn submit_once(
         &signing,
         directory,
     )?;
-    let plan_bin = directory.join("plan.bin");
+    let mut cli = CliHost { host, config: &retained_config };
+    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
+    let plan_bin = flow.prepare(&observed.signed)?;
     let plan_json = directory.join("plan.json");
-    let signatures_json = directory.join("transaction-signatures.json");
-    let signatures_bin = directory.join("transaction-signatures.bin");
-    let call = directory.join("call.bin");
-    let prepared_bin = if provider_continuity.is_some() {
-        directory.join("original-plan.bin")
-    } else {
-        plan_bin.clone()
-    };
-    let prepared_json = if provider_continuity.is_some() {
-        directory.join("original-plan.json")
-    } else {
-        plan_json.clone()
-    };
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("prepare"), &observed.signed, &plan_bin],
-    )?;
-    if provider_continuity.is_some() {
+    let (prepared_bin, prepared_json) = if provider_continuity.is_some() {
         // Preserve the existing plan.bin prepare-refusal contract. Only a
         // successful prepare becomes the immutable original guarded plan.
-        fs::hard_link(&plan_bin, &prepared_bin)
+        let (original_bin, original_json) = (directory.join("original-plan.bin"), directory.join("original-plan.json"));
+        fs::hard_link(&plan_bin, &original_bin)
             .map_err(|e| format!("cannot retain original continuity plan: {e}"))?;
         fs::remove_file(&plan_bin)
             .map_err(|e| format!("cannot move original continuity plan: {e}"))?;
-    }
-    let presentation = inspect(host, &retained_config, "plan", &prepared_bin, &prepared_json)?;
+        (original_bin, original_json)
+    } else {
+        (plan_bin.clone(), plan_json.clone())
+    };
+    let presentation = flow.present(&prepared_bin, &prepared_json)?;
     if provider_continuity.is_some() {
         sync_retained_call(directory, &prepared_bin)?;
         sync_retained_call(directory, &prepared_json)?;
     }
     #[cfg(unix)]
-    let presentation = match provider_continuity {
-        Some(descriptor) => match provider_continuity::guard(
+    if let Some(descriptor) = provider_continuity {
+        if let Err(error) = provider_continuity::guard(
             host, &retained_config, descriptor, directory,
             &prepared_bin, &presentation, &plan_bin, &plan_json,
         ) {
-            Ok(presentation) => presentation,
-            Err(error) => {
-                let retained = provider_continuity::retain_rejection(directory, &retained_intent);
-                // This return is the positive control-flow guarantee recorded
-                // by the marker: no transaction signing or submit follows it.
-                return Err(match retained {
-                    Ok(()) => error,
-                    Err(retention) => format!("{error}; cannot retain continuity rejection: {retention}"),
-                });
-            }
-        },
-        None => presentation,
-    };
+            let retained = provider_continuity::retain_rejection(directory, &retained_intent);
+            // This return is the positive control-flow guarantee recorded
+            // by the marker: no transaction signing or submit follows it.
+            return Err(match retained {
+                Ok(()) => error,
+                Err(retention) => format!("{error}; cannot retain continuity rejection: {retention}"),
+            });
+        }
+    }
     #[cfg(not(unix))]
     if provider_continuity.is_some() {
+        let _ = presentation;
         return Err("provider continuity requires Unix sockets".into());
     }
-    encode_signatures(
-        host,
-        &retained_config,
-        &signing,
-        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
-        &signatures_json,
-        &signatures_bin,
-    )?;
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("assemble"), &plan_bin, &signatures_bin, &call],
-    )?;
-    sync_retained_call(directory, &call)?;
+    flow.seal(&plan_bin, &mut command_release)?;
     if prepare_only {
         return Ok(());
     }
-    let outcome_bin = directory.join("outcome.bin");
-    let outcome_json = directory.join("outcome.json");
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("submit"), &call, &outcome_bin],
-    )?;
-    let outcome = inspect(
-        host,
-        &retained_config,
-        "outcome",
-        &outcome_bin,
-        &outcome_json,
+    let outcome = flow.transmit(
+        mini_sdk::flow::Request::Submit,
+        &directory.join("outcome.bin"),
+        &directory.join("outcome.json"),
     )?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, false)?;
@@ -2106,7 +2086,7 @@ pub(crate) fn dry_run(
         host,
         &retained_config,
         &signing,
-        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
+        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, signing.verifying_key().as_bytes())?,
         &directory.join("transaction-signatures.json"),
         &signatures_bin,
     )?;
@@ -2316,7 +2296,7 @@ fn query_batch_once(
         copy_new(intent, &source)?;
         let binary = child.join("intent.bin");
         author(host, &retained_config, OsStr::new("intent"), &source, &binary)?;
-        let bytes = client_consent::intent(host, &retained_config, &binary, &signing)?;
+        let bytes = client_consent::intent(host, &retained_config, &binary, signing.verifying_key().as_bytes())?;
         let signature = signing.sign(&bytes).to_bytes();
         write_new(&child.join("intent-signature.bin"), &signature)?;
         let width: u32 = bytes.len().try_into().map_err(|_| "batch intent too large")?;
@@ -2350,7 +2330,7 @@ fn query_batch_once(
         }
         encode_signatures(host, &retained_config, &signing,
             client_consent::observation(host, &retained_config, &child.join("intent.bin"),
-                &child.join("intent-signature.bin"), &binary, &signing)?, &child.join("observation-signatures.json"),
+                &child.join("intent-signature.bin"), &binary, signing.verifying_key().as_bytes())?, &child.join("observation-signatures.json"),
             &child.join("observation-signatures.bin"))?;
         let signed = child.join("signed-observation.bin");
         host_files(host, &retained_config, &[Path::new("observe-assemble"), &binary,
