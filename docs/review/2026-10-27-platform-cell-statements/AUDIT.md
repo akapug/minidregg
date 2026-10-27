@@ -229,3 +229,58 @@ and no admitted refill.
 **May proof work start?** L1 (platform cell, births, custodian): yes. M2: after two statement-level
 additions, the install-link Prop and the source-confined `CreditConfined`; proving against the mirror
 would reproduce the integration gap ATLAS law 5 names.
+
+## 2026-10-27, fourth pass: the receiver, the holder law, the plan-time birth verdict (6fffa0de)
+
+| item | verdict |
+|---|---|
+| `admitsObserved_decides` | SOUND as "gate = spec", relative to the oracles |
+| `receiverDecides`, `receiverContext` | WEAK: synthetic store, and the signed bytes are not `encode` |
+| `installPatch_record_only` (controller fixed) | WEAK: installs only; genesis and other writers not covered |
+| custodian rotation by raw cosign | SOUND |
+| `unsigned_refused`, `delegate_refused`, `controller_install_admitted` | real gate poles; they do not touch the codec or the signature path |
+| `holderPolicy` and its five theorems | SOUND for mutations; "nothing else" overstated |
+| capability check before the law | SOUND |
+| `grainPolicy_member_witness_refused` | motivating closed instance, not teeth of `holderPolicy` |
+| `birthRefusal` | no agreement theorem; three divergences |
+
+**(a) Receiver.** `admitNative` is the real path (`verifyNative`, `authorize`, `cosignAnswer` under the `old`
+key `decideRecord` read from the same loaded cell, then the gate). The cosign covers `commandCodec.encode command`, which includes `expectedPlatformRoot`,
+so it cannot be replayed onto another pre-state. Rotation is closed. Two gaps:
+1. *The sponsor does not sign `encode i`.* The envelope is over the `signingHeader` of `request …`,
+   which commits to the command only through `argsDigestBytes` (a cSHAKE of the command bytes and the
+   declaration). `receiverContext.encode` is `commandCodec.encode`. So the real verifier's transcript has no entry over
+   `encode i`, and the `sponsor` hypothesis of `admitsObserved_decides` cannot be discharged from a real
+   receipt. `receiverContext` is never used. Fix: make the context's `encode` the signed header bytes, and state `covers` through the
+   header (with hash collision-resistance named as a boundary beside the verifier's).
+2. *`receiverDecides` runs the gate on `genesisStore controller h.current`,* a store built from the
+   spec, and feeds it the spec's own `oracle`. It is a corollary, not a theorem about the loaded
+   cell. Missing: for every durable snapshot reached from genesis,
+   `PlatformCellDomain.load` yields `recordOf = some h.current` and `controllerOf = some
+   genesis.factoryController`. `installPatch_record_only` is the install half; the genesis
+   half and "no other family writes the cell" are missing.
+
+The poles posit `Observed` booleans; add one pure pole through `prepare` on a concrete snapshot.
+
+**(b) Holder law.** For verb-2 mutations outside the refill slot, `holderPolicy_nonowner_only_witness`
+forces `witnessCaveat`, which zeroes all four `State` deltas: settlement and management are
+unreachable through the witness form. But the outer `.any` also admits verbs 1 and 3 (observe, delegate) and the refill edge
+for every non-owner. A holder may re-delegate its parent grant, so witness authority spreads at
+holders' discretion, bounded only by the grant carrier's attenuation. Restate it as "nothing else among mutations", or keep delegate out of member grants. Ordering holds: `DeclaredResourceController.authorizeLeg` (lines 706-717) obtains capability evidence
+per leg before the law is judged, and `law.admit` consumes it by type.
+
+**(c) Plan versus submit.** `birthRefusal` evaluates `Pred.eval law.predicate step.oldState
+step.newState`. `admitBranch` runs `law.admit wanted evidence law.witness …` after the epoch and
+revision checks. Divergences: (1) unlike `invokeRefusal`, it skips the range and cast verdicts, so a
+`policyInputRange`/`policyCastAlias` refusal at submission stays undisclosed;
+(2) a `prepareDraft`/`preparePending` failure at plan returns `none`, so the plan is silent;
+(3) plan and submit prepare at different heights and snapshots. The statement owed, on one snapshot
+and height:
+`birthRefusal … (.birth b c) = some _ → ∀ cred r, (pending.admitBranch .factory cred r) is .error`
+(a plan refusal is never one submission would admit), and
+`admitBranch … = .error .policyRejected → birthRefusal … = some _` (every law refusal is disclosed).
+Both need `law.admit … ≠ none ↔ eval ∧ ranges ∧ casts`.
+Across time, claim only that drift makes the submission stale.
+
+**Before proofs:** (a) signed-bytes `encode` and the loaded-cell controller invariant; (b) the
+"nothing else" scope fixed; (c) the agreement statement, with range and cast in `birthRefusal`.
