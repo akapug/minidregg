@@ -446,17 +446,34 @@ pub(super) fn post(site: &Site, name: &str, form: &std::collections::BTreeMap<St
     super::body::act_as(site, &title, lines, &id, &refs, is_transition)
 }
 
-/// A placeholder value of each field kind for the dry run: a reference this workspace holds (or
-/// `paper`), a fresh id, `1`, a word, text; files the journey seeds under HOME/requests.
-fn placeholder(kind: &Kind, refs: &[String]) -> String {
+/// A placeholder value for one grammar argument in the dry run, by its kind and name: a reference
+/// this workspace holds (or `paper`), a fresh id, `1`, `sealed` for a law, the files the journey
+/// seeds (`HOME/requests/x.txt`, `x.json`, `HOME/keys/x.txt`), a plausible word for a name.
+fn placeholder(kind: crate::shell_grammar::Kind, name: &str, refs: &[String]) -> String {
+    use crate::shell_grammar::Kind as G;
     match kind {
-        Kind::Id => super::body::fresh_id(),
-        Kind::Ref => refs.first().cloned().unwrap_or_else(|| "paper".into()),
-        Kind::Number => "1".into(),
-        Kind::Choice(options) => options.first().cloned().unwrap_or_default(),
-        Kind::Text => "hello".into(),
-        Kind::Rest => "hello there".into(),
-        Kind::Word => "1".into(),
+        G::Id => super::body::fresh_id(),
+        G::Ref => refs.first().cloned().unwrap_or_else(|| "paper".into()),
+        G::Subject | G::Number => "1".into(),
+        G::TextOrFile => "hello".into(),
+        G::File | G::FileOrStdin => "@x.txt".into(),
+        G::Law => "sealed".into(),
+        G::Choice(options) => options.first().map(|o| o.to_string()).unwrap_or_default(),
+        G::Rest => "hello there".into(),
+        G::Word => {
+            let n = name.to_ascii_uppercase();
+            if n.contains("JSON") { "@x.json".into() }
+            else if n.contains("GRAIN") { "a1".into() }
+            else if n.contains("HEX") { "ab".repeat(32) }
+            else if n.contains("@FILE") || n.contains("FILE") { "@x.txt".into() }
+            else if n.contains("CELL:SEQUENCE") { "1:1".into() }
+            else if n.contains("ABS_PATH") { "/tmp/x".into() }
+            else if n.contains("STORAGE") { "declared".into() }
+            else if n.contains("LAW") { "sealed".into() }
+            else if n.contains("EXIT") || n.contains("SCENE") || n.contains("ITEM") || n.contains("VERB") || n.contains("METHOD") || n.contains("TASK") || n.contains("PROVIDER") || n.contains("MODEL") || n.contains("RUNNER") || n.contains("MEMBER") || n.contains("NAME") || n.contains("ROOM") || n.contains("PETNAME") || n.contains("TERM") || n.contains("CATEGORY") || n.contains("APP") || n.contains("PACKAGE") || n.contains("REQUEST") || n.contains("ID") { "bob".into() }
+            else if n.contains("FIELD") || n.contains("KEY") || n.contains("VALUE") || n.contains("EXPECTED") || n.contains("EMOJI") || n.contains("N") { "1".into() }
+            else { "x1".into() }
+        }
     }
 }
 
@@ -469,26 +486,25 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
         return simple(404, "No such verb", &format!("the shell has no verb {name}"));
     };
     let alts = alternatives_of(name, verb.usage);
+    let grammar = crate::shell_grammar::grammar(name);
     let refs = site.names();
     let mut rows = String::new();
     let mut errors = 0usize;
     for (index, alt) in alts.iter().enumerate() {
+        let leaf = grammar.and_then(|g| g.leaves.get(index));
         let mut form = std::collections::BTreeMap::new();
         form.insert("alt".to_owned(), index.to_string());
+        // Required positional arguments only (optional ones stay empty), by the grammar's kinds;
+        // flags are left out: the leaf's plain shape is what every form must plan.
+        let mut position = 0usize;
         for (i, tok) in alt.tokens.iter().enumerate() {
-            match tok {
-                Tok::Arg { kind, .. } => {
-                    let value = match (name, kind) {
-                        // Files the journey seeds; a JSON word for JSON-or-file arguments.
-                        (_, Kind::Text) => "@x.txt".to_owned(),
-                        _ => placeholder(kind, &refs),
-                    };
-                    form.insert(format!("a{i}"), value);
+            if let Tok::Arg { name: label, optional, .. } = tok {
+                let kind = leaf.and_then(|l| l.args.get(position)).map(|a| a.kind).unwrap_or(crate::shell_grammar::Kind::Word);
+                position += 1;
+                if *optional {
+                    continue;
                 }
-                Tok::Flag { value: Some((_, kind)), .. } => {
-                    form.insert(format!("a{i}"), placeholder(kind, &refs));
-                }
-                _ => {}
+                form.insert(format!("a{i}"), placeholder(kind, label, &refs));
             }
         }
         let (class, detail) = match assemble(site, name, &form) {

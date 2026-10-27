@@ -58,27 +58,27 @@ case $mode in
 hook|--dry)
   if [ "$mode" = hook ]; then
     D=${JOURNEY_STEP_DIR:?}; WS=${NEWCOMER_WS:?}; SUBJECT=${NEWCOMER_SUBJECT:?}
-    # The document rows birth a document, which the spine's newcomer cannot (no birth context). JWF
-    # provisions its own member `jwf` from the sponsor's shell, the way the docuverse provisions its
-    # authors (K12C): keygen, enroll plan/seal/submit, provision, the birth context, init.
-    if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
-      M=$D/jwf-member; mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
-      mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
-        "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
-      }
-      pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
-      mline "$WS" "$M/home" "keygen mini.key" >/dev/null         && install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/jwf.key"         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan jwf jwf.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal jwf" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit jwf" >"$M/submit.out"         && rm -f "$M/sponsor-home/keys/jwf.key"         && JSUBJ=$(jq -r '.subject // empty' "$M/submit.out") && [ -n "$JSUBJ" ]         && printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"         && "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name jwf --holder "$JSUBJ" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err"         && install -m 0600 "$SPONSOR_WS/provisions/jwf/birth-context.json" "$M/home/provision/birth-context.json"         && mline "$M/home/workspace" "$M/home" "init mini.key $JSUBJ" >/dev/null 2>&1 || true
-      if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
-        WS=$M/home/workspace; SUBJECT=$JSUBJ; JWF_HOME=$M/home
-        echo "jwf: provisioned member jwf as subject $JSUBJ" >&2
-      else
-        echo "jwf: could not provision its own member ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$M/provision.err" 2>/dev/null)); using the newcomer" >&2
-      fi
-    fi
   else
     D=${STEP_DIR:?STEP_DIR}; WS=${WS:?WS}; SUBJECT=${SUBJECT:?SUBJECT}
   fi
   : "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}"
+  # The document rows birth a document, which the spine's newcomer cannot (no birth context). JWF
+  # provisions its own member `jwf` from the sponsor's shell, the way the docuverse provisions its
+  # authors (K12C): keygen, enroll plan/seal/submit, provision, the birth context, init.
+if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
+    M=$D/jwf-member; mkdir -p -m 700 "$M/home/requests" "$M/home/provision" "$M/sponsor-home/keys" "$M/sponsor-home/requests"
+    mline() { # WORKSPACE HOME LINE -> stdout; rc in $?
+      "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
+    }
+    pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
+    mline "$WS" "$M/home" "keygen mini.key" >/dev/null         && install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/jwf.key"         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan jwf jwf.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal jwf" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit jwf" >"$M/submit.out"         && rm -f "$M/sponsor-home/keys/jwf.key"         && JSUBJ=$(jq -r '.subject // empty' "$M/submit.out") && [ -n "$JSUBJ" ]         && printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"         && "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name jwf --holder "$JSUBJ" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err"         && install -m 0600 "$SPONSOR_WS/provisions/jwf/birth-context.json" "$M/home/provision/birth-context.json"         && mline "$M/home/workspace" "$M/home" "init mini.key $JSUBJ" >/dev/null 2>&1 || true
+    if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
+      WS=$M/home/workspace; SUBJECT=$JSUBJ; JWF_HOME=$M/home
+      echo "jwf: provisioned member jwf as subject $JSUBJ" >&2
+    else
+      echo "jwf: could not provision its own member ($(tail -1 "$M/last.err" 2>/dev/null; tail -1 "$M/provision.err" 2>/dev/null)); using the newcomer" >&2
+    fi
+  fi
   BIN=$(dirname "$MINI")
   GATEWAY=${MINI_WEB_BIN:-$BIN/mini-web}; HELPER=${MINI_WEB_SPAWN_BIN:-$BIN/mini-web-spawn}
   [ -x "$GATEWAY" ] && [ -x "$HELPER" ] || unconfigured "no mini-web / mini-web-spawn beside $MINI (cargo build -p minidregg-mini-web -p minidregg-mini-web-spawn), or set MINI_WEB_BIN / MINI_WEB_SPAWN_BIN"
@@ -186,7 +186,7 @@ for v in $verbs; do
 done
 # PARITY = every leaf has a route and a no-JS form (above) AND its placeholder-filled form assembles
 # to a line the shell's planner accepts (`/verb/NAME/dry`: the real parser and plan builder, no Host).
-mkdir -p "${HOMEDIR:-$R/home}/requests"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"
+mkdir -p "${HOMEDIR:-$R/home}/requests" "${HOMEDIR:-$R/home}/keys"; printf 'hello\n' >"${HOMEDIR:-$R/home}/requests/x.txt"; printf '{}\n' >"${HOMEDIR:-$R/home}/requests/x.json"; printf 'k\n' >"${HOMEDIR:-$R/home}/keys/x.txt"
 dry_leaves=0; dry_errors=0; dry_bad=""
 for v in $verbs; do
   page=$(req GET "/verb/$v/dry")
