@@ -7,7 +7,7 @@ set -euo pipefail
 umask 077
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller|--continue-session] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -18,6 +18,8 @@ it must not exist. --resume requires the exact U3 initial allocation/authoring
 selectors and a retained prepared INSTALL; older receiving-only worlds refuse.
 --continue-controller requires the exact preserved pre-START controller-create
 failure after both installs, publication and share. It never repeats those phases.
+--continue-session preserves the definite null-operation session refusal, applies
+qualified stopped-controller repairs, and uses a new tool ID after native enrollment.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -32,6 +34,7 @@ mode=new
 case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
+  --continue-session) mode=continue-session; shift ;;
 esac
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
@@ -103,14 +106,16 @@ export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_T
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
 preserve_existing_exit=0
-[[ $mode != continue-controller ]] || preserve_existing_exit=1
+[[ $mode != continue-controller && $mode != continue-session ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
 controller_create_verb=controller-create
-if [[ $mode == continue-controller ]]; then
+if [[ $mode == continue-session ]]; then
+  world_continue_session "$run" "$repo"
+elif [[ $mode == continue-controller ]]; then
   world_continue_controller "$run" "$repo"
 else
 disk_plan=$(world_disk_plan) || fail 'fresh journey does not fit unchanged import and later verification space guards'
@@ -131,7 +136,7 @@ cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
-if [[ $mode != continue-controller ]]; then
+if [[ $mode != continue-controller && $mode != continue-session ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -147,7 +152,7 @@ world_disk_snapshot after-publication
 phase share-a
 fi
 publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
-world_controller_prepare
+if [[ $mode != continue-session ]]; then world_controller_prepare; fi
 phase start-a
 world_controller_activate "$run/world/evidence/start-a.stdout" initial
 world_controller_probe initial probe
