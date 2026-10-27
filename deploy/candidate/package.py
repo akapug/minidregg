@@ -141,6 +141,35 @@ def tar_commit(archive):
     return commit
 
 
+def archive_tree(archive):
+    """The git tree id of the archive's files, written in a throw-away repository. It needs no
+    checkout of the commit, and for `git archive COMMIT` (the tree has no export-subst or
+    export-ignore attributes) it equals COMMIT^{tree}."""
+    with tempfile.TemporaryDirectory(prefix="package-tree-") as tmp:
+        tmp = Path(tmp)
+        work = tmp / "files"
+        work.mkdir()
+        subprocess.run(["tar", "-xf", str(Path(archive).resolve()), "-C", str(work)], check=True)
+        env = {**os.environ, "GIT_DIR": str(tmp / "git"), "GIT_WORK_TREE": str(work),
+               "GIT_INDEX_FILE": str(tmp / "index"), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        def git(*args):
+            out = subprocess.run(["git", *args], cwd=work, env=env, capture_output=True, text=True)
+            if out.returncode:
+                die(f"{archive}: cannot compute its tree (git {' '.join(args)}): {out.stderr.strip()}")
+            return out.stdout.strip()
+        init = subprocess.run(["git", "init", "-q", "--bare", str(tmp / "git")], capture_output=True, text=True,
+                              env={k: v for k, v in env.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")})
+        if init.returncode:
+            die(f"{archive}: cannot compute its tree (git init): {init.stderr.strip()}")
+        for key, value in (("core.filemode", "true"), ("core.symlinks", "true"), ("core.autocrlf", "false")):
+            git("config", key, value)
+        git("add", "-A", "-f", ".")
+        tree = git("write-tree")
+    if not HEX40.fullmatch(tree):
+        die(f"{archive}: no tree id computed")
+    return tree
+
+
 def version_key(v):
     return tuple(int(x) for x in v.split("."))
 
@@ -232,9 +261,14 @@ def build_identity(archive, commit, toolchains):
         die("build provenance requires the builder's rustc -vV")
     if not isinstance(flags, dict) or not flags.get("rust") or not flags.get("native"):
         die("build provenance requires buildFlags.rust and buildFlags.native")
-    tree = subprocess.run(["git", "rev-parse", commit + "^{tree}"], capture_output=True, text=True)
-    if tree.returncode or not HEX40.fullmatch(tree.stdout.strip()):
-        die("source tree unavailable: package in a repository containing the archive commit")
+    tree = archive_tree(archive)
+    # A repository that holds the commit (lane-build, a checkout) must agree with the archive's own
+    # tree: the archive is `git archive COMMIT` or it is refused. Without one (build.sh
+    # --source-archive in an extracted tree) the archive's tree is the identity.
+    repo = subprocess.run(["git", "rev-parse", "--verify", "-q", commit + "^{tree}"], capture_output=True, text=True)
+    if repo.returncode == 0 and repo.stdout.strip() != tree:
+        die(f"{archive}: its files hash to tree {tree}, but {commit[:12]}^{{tree}} in this repository is "
+            f"{repo.stdout.strip()}: the archive is not `git archive {commit[:12]}`")
     with tarfile.open(archive) as tar:
         try:
             lean = tar.extractfile("lean-toolchain").read().decode()
@@ -244,7 +278,7 @@ def build_identity(archive, commit, toolchains):
             locks = {"Cargo.lock": hashlib.sha256(tar.extractfile("Cargo.lock").read()).hexdigest()}
         except KeyError:
             die("source archive lacks workspace Cargo.lock")
-    return {"sourceTree": tree.stdout.strip(), "rustcVerbose": rustc,
+    return {"sourceTree": tree, "rustcVerbose": rustc,
             "leanToolchain": lean, "cargoLockSha256": locks, "flags": flags}
 
 
