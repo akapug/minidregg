@@ -76,7 +76,7 @@ pub(crate) struct Pinned {
 fn parse_pinned(value: &Value, package_id: &str) -> Result<Option<Pinned>> {
     let sha256 = match value.get("sha256") {
         None | Some(Value::Null) => return Ok(None),
-        Some(Value::String(text)) if text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) => text.clone(),
+        Some(Value::String(text)) if mini_sdk::hex::is_canonical_len(text, 32) => text.clone(),
         _ => return Err("pinned sha256 is not 64 lowercase hex digits".into()),
     };
     if !sha256.starts_with(package_id) {
@@ -102,7 +102,7 @@ pub(crate) fn valid_app_id(text: &str) -> bool {
 
 /// A packageId: the first 16 bytes of the SPK's SHA-256, lowercase hex.
 pub(crate) fn valid_package_id(text: &str) -> bool {
-    text.len() == 32 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    mini_sdk::hex::is_canonical_len(text, 16)
 }
 
 fn bounded_text(value: &Value, key: &str, required: bool) -> Result<String> {
@@ -528,7 +528,7 @@ fn install(mut args: Args, paths: &Paths, as_json: bool) -> Result<()> {
     let is_retry = retry.is_some();
     let (id, retained) = match retry {
         Some(id) => {
-            if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            if !mini_sdk::hex::is_canonical_len(&id, 16) {
                 return Err("--retry takes the 32-hex request id the first attempt printed".into());
             }
             let retained = crate::workspace::bounded_json(&requests.join(format!("{id}.json")))?;

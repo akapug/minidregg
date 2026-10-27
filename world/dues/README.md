@@ -1,7 +1,8 @@
 # world/dues — standing dues and prepaid leases for rooms
 
 `StandingDues.obend` + `preview-cohort.json` (49 rows). Evidence class: **executed in the
-effect-free preview** (`tests/objective-bend-source/check-preview.ts`); not native.
+effect-free preview** (`tests/objective-bend-source/check-preview.ts`); **not admitted natively**.
+Native: needs the activity kernel's `pay` Plan and event Response (the kernel performs only `await` Plans); Phase 3. Attempts: `docs/evidence/2026-10-27-world-native/`.
 
 ## What it does
 A payer owes a room `amount` every `period` heights from `start`, for `periods` periods.

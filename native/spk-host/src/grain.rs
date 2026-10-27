@@ -31,6 +31,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use crate::canonical::hex64;
 
 #[path = "grain_profile_upgrade.rs"]
 mod profile_upgrade;
@@ -71,13 +72,6 @@ fn unresolved(reason: impl Into<String>) -> io::Error {
     io::Error::other(format!("UNRESOLVED: {}", reason.into()))
 }
 
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 fn exists(path: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -88,30 +82,7 @@ fn exists(path: &Path) -> io::Result<bool> {
 
 /// Owner-private regular file, single link, bounded.
 fn read_private(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !path.is_absolute()
-        || !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > max
-    {
-        return Err(invalid(format!(
-            "private file identity refused: {}",
-            path.display()
-        )));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    Read::by_ref(&mut file).take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != meta.len() {
-        return Err(invalid("private file changed while reading"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "private file identity refused")
 }
 
 fn read_json(path: &Path) -> io::Result<Value> {
@@ -262,8 +233,8 @@ struct Host {
     profile: HostProfile,
     identity: HostIdentity,
     management_key_id: String,
-    /// The Store key: Mini's `storeTag` of the deployment's genesis seed
-    /// identity, read from the pinned Host's profile at every load. Resident
+    /// The Store key: Mini's `storeTag` of the Store identity (the genesis seed
+    /// at the Store's root), read from the pinned Host's profile at every load. Resident
     /// unit, volume, mount, witness and slice names and the state root carry it.
     store: String,
     // Serializes profile selection with grain lifecycle operations.

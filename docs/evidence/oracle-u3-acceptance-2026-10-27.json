@@ -63,18 +63,261 @@
           "world/store/base/workroom/store.head-anchor": "6f7197630c8845e6d96afe6fc54b4f42ee874dba9387c2e7c6341b7d38214787"
         }
       }
+    },
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3-r3/run-v5",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/r3-state-checkpoint.json",
+      "receipt_sha256": "8a157e02c3b11fd7797927193a689be57fb830827a07b5c38c6d6f137579a638",
+      "receipt": {
+        "schema": "mini-oracle-u3-retained-progress-v1",
+        "status": "incomplete",
+        "run": "/build/lanes/oracle-acceptance-u3-r3/run-v5",
+        "store": "d4090a0c4c356d31",
+        "original_exit": {
+          "execution_exit": 1,
+          "cleanup_exit": 0,
+          "namespace_preserved": true
+        },
+        "continuation_exit": {
+          "execution_exit": 1,
+          "cleanup_exit": 1,
+          "namespace_preserved": true
+        },
+        "successful_phases": {
+          "store": {
+            "exit": 0,
+            "seconds": 316.93870306
+          },
+          "birth-a": {
+            "exit": 0,
+            "seconds": 46.749005079
+          },
+          "install-a": {
+            "exit": 0,
+            "seconds": 121.390343904
+          },
+          "birth-b": {
+            "exit": 0,
+            "seconds": 100.90039587
+          },
+          "install-b": {
+            "exit": 0,
+            "seconds": 106.780818462
+          },
+          "share-a": {
+            "exit": 0,
+            "seconds": 172.817754745
+          }
+        },
+        "files": {
+          "exit.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/exit.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/exit.json",
+            "sha256": "877fbbc9ca8e675f0bed6f8cc62c11feae308e044b2eda93810dd483658cf4cf"
+          },
+          "world-identity.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/world-identity.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/world-identity.json",
+            "sha256": "f179097c16bc8c73e66cd449d96bf4d43979ed13abd594179c4a79c32d1e56c2"
+          },
+          "publication.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/publication.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/publication.json",
+            "sha256": "872aea444f6aebffb144c3ceb50415d463c5fdcb19aeb44d695c82612779d69c"
+          },
+          "continuations/controller-create-1/prepared.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/prepared.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/prepared.json",
+            "sha256": "cbf7c6660ed27d64a1ef396607644df8bf4b2246783072a0cce502f47eefdee4"
+          },
+          "continuations/controller-create-1/exit.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/exit.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/exit.json",
+            "sha256": "143100ba54fdca1d9b91b9a86c335bf8bc0cfc003f28498fd2092c4e6bbc5f55"
+          },
+          "continuations/controller-create-1/status-9101.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/status-9101.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/status-9101.json",
+            "sha256": "af48276d83f2f84b307a8d81f1d38630d6e575209f54920be5514363c916c3ec"
+          },
+          "continuations/controller-create-1/status-9201.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/continuations/controller-create-1/status-9201.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/continuations/controller-create-1/status-9201.json",
+            "sha256": "97a1d1adbb586204841b3f447679db886bead1df2ca2a5c3d7d3e2de40a46547"
+          },
+          "agent-lifetime/controller-create.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-create.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-create.json",
+            "sha256": "b719afca28ab8816728391884b732639eeffb2b26b0fb48d81cf293b2e2463f1"
+          },
+          "agent-lifetime/controller-stage-receipt.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-stage-receipt.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-stage-receipt.json",
+            "sha256": "974ee9f301a22c9ea83ca13bf7d83113ebb695ee0d196cda35851b1bce7329d3"
+          },
+          "agent-lifetime/controller-bootstrap-start.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-bootstrap-start.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-bootstrap-start.json",
+            "sha256": "46f91f42a350b6c7f12f4d77fb6d3b2923620f471f6e4d844076d08c44e5bb78"
+          },
+          "agent-lifetime/session-birth.request-id": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.request-id",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.request-id",
+            "sha256": "8e6cbc111a38f9919eab3e9e61193e27df62fe24d2e6730f91ea71e286f20579"
+          },
+          "agent-lifetime/session-birth.arguments.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.arguments.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.arguments.json",
+            "sha256": "bcf0e0e5fd2952d0fe7fdf7091a0a95d2602289d8450aacc0909227982651d94"
+          },
+          "agent-lifetime/session-birth.result.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.result.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.result.json",
+            "sha256": "3b9f68894d5ee542de926cd6fe1136e6562df994703aa5507f739fc6bc7d2b1a"
+          },
+          "agent-lifetime/session-birth.stderr": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/session-birth.stderr",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/session-birth.stderr",
+            "sha256": "846e96ac0f1f35eff862332858fa2ba06f758679a3e88017acd690350be5ff64"
+          },
+          "agent-lifetime/controller-final-journal.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-final-journal.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-final-journal.json",
+            "sha256": "37f2a43a4fb161fe4b02775d929d8f64c906084a44897dc8503228f5451bda85"
+          },
+          "agent-lifetime/consent-memory-before-stop-cleanup.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/consent-memory-before-stop-cleanup.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/consent-memory-before-stop-cleanup.json",
+            "sha256": "27bdaeb47e2aa921d67394a352468ea83a7d5fe3aaa270f16a4ea0066b5b5315"
+          },
+          "agent-lifetime/controller-stop-cleanup.json": {
+            "original_path": "/build/lanes/oracle-acceptance-u3-r3/run-v5/agent-lifetime/controller-stop-cleanup.json",
+            "retained_path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/retained-continuation/agent-lifetime/controller-stop-cleanup.json",
+            "sha256": "95cf81e696d4c15acb7eef4a0045daa6e801570a16ce5a8f961b3f3649da2755"
+          }
+        },
+        "session_request_id": "715a6097ed194196f68356d70a3d7ddc",
+        "session_result": {
+          "isError": true,
+          "operationId": null,
+          "requestId": "715a6097ed194196f68356d70a3d7ddc",
+          "result": "foreground tool requires an attached, reconciled idle task",
+          "type": "tool-complete",
+          "v": 1
+        },
+        "diagnostic": {
+          "path": "/build/lanes/oracle-acceptance-u3-r3-diagnostics/evidence/controller-service-logs.json",
+          "sha256": "d2ff8ef22864c440d9eb5cfd2ccea78d06a884799b1d00d9ccf274698e2d96d3",
+          "cause": "consent helper native durable read failed: sqlite-store Read-only file system (os error 30)"
+        },
+        "no_application_START": true,
+        "no_session_birth": true,
+        "no_retry": true,
+        "report_json_present": false
+      }
+    },
+    {
+      "kind": "preflight-only",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session",
+      "receipt_sha256": "7ea6568f9b3fcbd616e1ee7f9bcd003e4aab46d7db023b7dcab87b436c4d657c",
+      "cause": "continuation guard initially rejected legitimate named-controller execute ACL",
+      "native_source_attempt": false
+    },
+    {
+      "kind": "archive-only",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session-r2",
+      "receipt_sha256": "d206f51e4a9ff4407bbaf512124be7c8a239c01eabf83be50fec5c7cd84350b1",
+      "cause": "deployment source manifest omitted volume cleanup planner; durable backup retained, no repairs or native source attempt"
+    },
+    {
+      "kind": "physical-repairs-complete",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-session-r3",
+      "receipt_sha256": "0c8a30b2f0d1efab1c0c30ccbe27a24c7ec7e5f47c28bb4181cf46402a536965",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-session-r3/failed-launch.json",
+      "completed": [
+        "consent-storage",
+        "controller-runtime-upgrade"
+      ],
+      "failed_phase": "public participant service restart rejected named execute ACL",
+      "seconds": 1.569751263,
+      "native_source_attempt": false,
+      "execution_exit": 1,
+      "cleanup_exit": 0
+    },
+    {
+      "kind": "checkpoint-source-continuation",
+      "remote_execution": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2",
+      "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2/final-result.json",
+      "receipt_sha256": "b1a380c8ec7fe3c45b8ecd1c5a7da27763c433ab64787b493987f22f69b9639b",
+      "source_manifest_sha256": "367ccb9052a5e00c3a4eaec4073204ba937f208b8e5a4b9ea7d0d3198a5a7772",
+      "unit": "oracle-u3-v5-r3-checkpoint-r2.service",
+      "invocation": "72347a19d93f486d9582ec3e2887848d",
+      "exit": {
+        "execution_exit": 1,
+        "cleanup_exit": 0,
+        "namespace_preserved": true
+      },
+      "phases": {
+        "bootstrap-enrollment": {
+          "completed": true,
+          "started_sha256": "d3c0a3083b2ef66be42dfb92349e163aabc439873c34dbc68b1a9f29c8227e43",
+          "completed_sha256": "da7fcce9840caee2385ae506c6203e13f167bef7eb65fb0ccdfa2cc19da02080",
+          "seconds": 132.641155361
+        },
+        "bootstrap-target": {
+          "completed": true,
+          "started_sha256": "a764e7919872a36c0f3258d8073004b60d091cd77934d84577488368e581a278",
+          "completed_sha256": "c9c86a8edcba2f0e531994f2cb617481607dec2f37e1aa2e020aafa1552c5b4c",
+          "seconds": 0.26894588
+        },
+        "controller-start": {
+          "completed": true,
+          "started_sha256": "d010fa1c60a39e71c8ceef8de954160ba8f69285bcb9c81def7b9ab4657b6e0e",
+          "completed_sha256": "e808e4e130722b5f31a0570eb759d32a8276aa2abfbadfd61d5ff219a4c3ce50",
+          "seconds": 1.233729819
+        },
+        "public-listener": {
+          "completed": true,
+          "started_sha256": "2d03e1f98cc1811abf01ce25901fff545822cbec4419197c6bd968dabe8dece6",
+          "completed_sha256": "87817d80ba7b72dd7d5b33889e4d5201e8046e63caa204f82366a7fad54bc440",
+          "seconds": 2.482939061
+        },
+        "services": {
+          "completed": true,
+          "started_sha256": "b56078651ea37a6a33c82e1b957049f95047699cc2decf21c9c372fe3c1d45b9",
+          "completed_sha256": "81ac821860bc32b771f513039b29ff21bbda3140965bd675652f5cfca7b340d1",
+          "seconds": 1.809224611
+        },
+        "session-and-grant": {
+          "completed": false,
+          "started_sha256": "f1debe805382f3253c02c13f448e2b5c785265fa4b42627ef706cce5bdbec037",
+          "completed_sha256": null,
+          "seconds": null
+        },
+        "worker-policy": {
+          "completed": true,
+          "started_sha256": "7e6704f18432101d2c003a41903035369dffbefceeca7ff274a364fecc3dcaa5",
+          "completed_sha256": "04f3f137899f8c9d7128ab594cf6ff83ef427832fe0bee9ea224dc0f044eb85d",
+          "seconds": 13.186464181
+        }
+      },
+      "report_json_present": false,
+      "services_stopped": true
     }
   ],
   "qualification_limits": [
-    "No U3 application installation, START, query, agent lifetime dispatch or STOP has completed.",
-    "The second attempt created a logical genesis Store; it has no signed or submitted birth call and no physical Store namespace.",
-    "Controller consent transport remains unqualified; existing source configuration parsing refuses its lifetime authoring target field.",
-    "Old U2 partial results remain separate."
+    "Both v5 applications are admitted and installed; 26 public files are published and application A is shared. No v5 application START, query, lifetime dispatch, STOP or restart has completed.",
+    "Supported same-Store account recovery, consent writable-parent repair and controller runtime upgrade completed with separate archived receipts. Earlier failures remain retained.",
+    "The final public listener registration/restart passed. Ordinary owner policy was admitted and read back at version1 with workers20011/20012; native bootstrap-dispatch enrollment completed in132.641155361 seconds; controller attached soft.",
+    "New session request839a6731941b62b1179b4de9c076f0df reached native foreground operation13 and became uncertain during historical grain-share issue lookup. The exact refusal is operation unavailable on selected socket. No resend or ACK occurred.",
+    "The retained controller has a confirmed parent reserve of1 and uncertain foreground13, without a retained foreground result or any born session resource. This is not a rolled-back or completed session.",
+    "The final attempt ended execution1/cleanup0. All owned services stopped, the public socket is absent, and both already-unmounted volumes and all journals remain retained.",
+    "Separate fixture qualification, copied-Store benchmarks, U2 application answers and upstream U5 Engine results are not a passing v5 end-to-end acceptance result. No specialist panel scores are claimed by this lane."
   ],
   "next_work": [
-    "Qualify exact-config consent parser and actual distinct-UID controller consent transport.",
-    "Create new isolated R3 with new genesis provenance after both consent fixes qualify; preserve R2 logical Store and pre-sign attempt.",
-    "Complete genuine two-grain receiving, lifetime-tool, authority, restart, data-refusal and STOP/reconciliation journey."
+    "Audit the qualified source routing of recipient historical grain-share issue lookup: runtime uses public hostSocket while opcode55 remains operator-only. Preserve the current socket refusal as observed evidence; this explanation is source-traced.",
+    "Qualify source-authorized exact recovery of foreground13 and its confirmed parent hold. Inspect the retained native attempt and never resend its original session request or manufacture an ACK.",
+    "After exact recovery, complete actual v5 session/grant/START, lifetime discovery/invoke, authority controls, two-grain isolation, dataset refusals, restart/replay and STOP/reconciliation. No automatic repair or relaunch is scheduled."
   ],
   "continuation_decision": {
     "retained_attempt": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
@@ -83,6 +326,61 @@
     "supported_retry_available": false,
     "reason": "native retry requires call.bin; submit uses exclusive creates; provisioning has no post-genesis resume",
     "selected_next_attempt": "fresh isolated R3 only after parser and distinct-UID consent transport qualification",
-    "retained_store_mutated": false
+    "retained_store_mutated": false,
+    "historical_decision": true
+  },
+  "qualified_prerequisites": {
+    "consent_exact_original_config": {
+      "receipt_sha256": "ff3319ae835295e70f651e8553e344a8953ef7a8730bca3352e0b70a35737ee2",
+      "passed": true
+    },
+    "consent_distinct_uid_copied_genesis_store": {
+      "receipt_sha256": "7e6660d445ab8fed9ebcf3dfc6836e6b9cbed44e81a786d26632bca88feaa57e",
+      "passed": true,
+      "max_rss_kib": 101504,
+      "full_history_or_production_installer_qualification": false
+    }
+  },
+  "current_continuation": {
+    "store": "d4090a0c4c356d31",
+    "current_boundary": "uncertain session foreground13 during historical issue lookup",
+    "request_id": "839a6731941b62b1179b4de9c076f0df",
+    "operation_id": 13,
+    "selected_next_action": "future audited exact recovery; this batch stopped",
+    "services_stopped": true,
+    "namespace_preserved": true,
+    "report_passed": false,
+    "parent_reserve_confirmed": true,
+    "parent_reserve": "1",
+    "resend_performed": false,
+    "ack_performed": false,
+    "native_birth_resources": []
+  },
+  "cleanup_observation": {
+    "host": "dregg-build",
+    "path": "/build/lanes/oracle-volume-cleanup-probe-20261027/retained-r3-plan.json",
+    "planner_sha256": "dd7023cdf029ed55e0e87c736bc3d0b2a6613b4acd6d30e68b6bde6437d32737",
+    "actions": [
+      "already-unmounted",
+      "already-unmounted"
+    ],
+    "admission_or_cleanup_mutation": false,
+    "historical_read_only_observation": true
+  },
+  "final_checkpoint": {
+    "receipt_path": "/build/lanes/oracle-acceptance-u3-r3-checkpoint-r2/final-result.json",
+    "receipt_sha256": "b1a380c8ec7fe3c45b8ecd1c5a7da27763c433ab64787b493987f22f69b9639b",
+    "elapsed_wall_seconds": 185,
+    "execution_memory_peak_bytes": 1243181056,
+    "source_operation_error": "foreground operation 13 requires exact recovery: native historical lookup exited exit status: 1: mini: socket rejected request: operation unavailable on selected socket; fence=Ok(())",
+    "lookup_ingress_sha256": "1811bf42e6dc1f4ba238700480727050cf547714d38b695e3cc7df4d6e2c55da",
+    "lookup_opcode_source_trace": 55,
+    "scope": "exact fixed-installer export, observed refusal, archived receipts and stopped state; source trace does not authorize replay",
+    "cleanup_volume_actions": [
+      "already-unmounted",
+      "already-unmounted"
+    ],
+    "original_request_preserved": "715a6097ed194196f68356d70a3d7ddc",
+    "new_request": "839a6731941b62b1179b4de9c076f0df"
   }
 }

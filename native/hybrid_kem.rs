@@ -401,6 +401,19 @@ mod tests {
     const SUITE: &[u8] = b"DREGG.TEST.KEK/x25519+ml-kem-768/v1";
     const FRAME: &[u8] = b"DREGG/TEST/v1";
 
+    /// Independent known answer (pure-Python FIPS 203 `kyber-py`
+    /// `_keygen_internal(d, z)`, not the code under test): the ML-KEM-768
+    /// encapsulation key AWS-LC derives from the seed `0, 1, .. 63`. Travels
+    /// with the file, so every includer runs it.
+    #[test]
+    fn the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation() {
+        use sha2::{Digest, Sha256};
+        let seed: [u8; KEM_SEED_LEN] = std::array::from_fn(|i| i as u8);
+        let (_, ek) = ml_kem_768_from_seed(&seed).unwrap();
+        let digest: String = Sha256::digest(ek).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(digest, "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9");
+    }
+
     #[test]
     fn an_encapsulation_opens_for_its_recipient_and_only_with_the_same_context() {
         let a = HybridSecret::generate().unwrap();

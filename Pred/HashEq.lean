@@ -171,13 +171,15 @@ theorem hashEq_wide_blinder_refused (vs : List Slot) (b c : Slot) (old new : Sta
 
 /-- **Binds or collides.** Two admitted `hashEq` steps whose commit slots hold the same integer
 have the same opening — the same cell, the same field names in the same order, the same values
-and the same blinder — unless cSHAKE256 (at this customization) has a collision. -/
+and the same blinder — unless cSHAKE256 (at this customization) collides on the two openings'
+preimages. -/
 theorem hashEq_binds_or_collides {vs vs' : List Slot} {b c b' c' : Slot}
     {old new old' new' : State}
     (h : eval (.hashEq vs b c) old new = true) (h' : eval (.hashEq vs' b' c') old' new' = true)
     (same : new.get c = new'.get c') :
     (∃ o, hashEqOpening new vs b c = some o ∧ hashEqOpening new' vs' b' c' = some o) ∨
-      Collision deployed := by
+      CollisionAmong deployed (fun x => ∃ o, (hashEqOpening new vs b c = some o ∨
+        hashEqOpening new' vs' b' c' = some o) ∧ x = o.preimage) := by
   simp only [eval, evalWith] at h h'
   obtain ⟨o, ho, hc⟩ := (hashEqHolds_iff _ _ _ _ _).mp h
   obtain ⟨o', ho', hc'⟩ := (hashEqHolds_iff _ _ _ _ _).mp h'
@@ -186,7 +188,10 @@ theorem hashEq_binds_or_collides {vs vs' : List Slot} {b c b' c' : Slot}
   rw [hc, hc'] at same
   rcases binds_or_collides deployed hadm hadm' (Option.some.inj same) with heq | hcol
   · subst heq; exact .inl ⟨o, ho, ho'⟩
-  · exact .inr hcol
+  · exact .inr (hcol.mono fun x hx => by
+      rcases hx with rfl | rfl
+      · exact ⟨o, .inl ho, rfl⟩
+      · exact ⟨o', .inr ho', rfl⟩)
 
 /-- **`reveal_binds_committed`** on Mini: under one set of field names, a commit value admits at
 most one (tuple, blinder) — a bidder cannot reveal a different order than the one committed,
@@ -194,7 +199,9 @@ unless cSHAKE256 collides. -/
 theorem hashEq_reveal_binds {vs : List Slot} {b c : Slot} {old new old' new' : State}
     (h : eval (.hashEq vs b c) old new = true) (h' : eval (.hashEq vs b c) old' new' = true)
     (same : new.get c = new'.get c) :
-    (new.getAll vs = new'.getAll vs ∧ new.get b = new'.get b) ∨ Collision deployed := by
+    (new.getAll vs = new'.getAll vs ∧ new.get b = new'.get b) ∨
+      CollisionAmong deployed (fun x => ∃ o, (hashEqOpening new vs b c = some o ∨
+        hashEqOpening new' vs b c = some o) ∧ x = o.preimage) := by
   rcases hashEq_binds_or_collides h h' same with ⟨o, ho, ho'⟩ | hcol
   · have e := hashEqOpening_eq_some.mp ho
     have e' := hashEqOpening_eq_some.mp ho'
@@ -206,7 +213,9 @@ tuple, unless cSHAKE256 collides: a bidder cannot keep the price and change the 
 theorem hashEq_reveal_binds_each {vs : List Slot} {b c : Slot} {old new old' new' : State}
     (h : eval (.hashEq vs b c) old new = true) (h' : eval (.hashEq vs b c) old' new' = true)
     (same : new.get c = new'.get c) :
-    (∀ v ∈ vs, new.get v = new'.get v) ∨ Collision deployed := by
+    (∀ v ∈ vs, new.get v = new'.get v) ∨
+      CollisionAmong deployed (fun x => ∃ o, (hashEqOpening new vs b c = some o ∨
+        hashEqOpening new' vs b c = some o) ∧ x = o.preimage) := by
   rcases hashEq_reveal_binds h h' same with ⟨hall, -⟩ | hcol
   · refine .inl (fun v hv => ?_)
     obtain ⟨xs, hxs⟩ := Option.isSome_iff_exists.mp
@@ -242,7 +251,8 @@ theorem hashEq_context_bound {vs vs' : List Slot} {b c b' c' : Slot} {old new ol
     (same : new.get c = new'.get c')
     (differ : new.get "request/target" ≠ new'.get "request/target" ∨ vs ≠ vs' ∨ b ≠ b' ∨
       c ≠ c') :
-    Collision deployed := by
+    CollisionAmong deployed (fun x => ∃ o, (hashEqOpening new vs b c = some o ∨
+      hashEqOpening new' vs' b' c' = some o) ∧ x = o.preimage) := by
   rcases hashEq_binds_or_collides h h' same with ⟨o, ho, ho'⟩ | hcol
   · exfalso
     obtain ⟨c1, -, -, hv, hb, hc, -⟩ := hashEqOpening_eq_some.mp ho
@@ -322,7 +332,7 @@ theorem hiding_at_equality_is_a_collision (H : Hash) (h : HashEqHiding H (· = �
   have a1 := opening_vbc_admissible 1 (by decide) (by decide)
   rcases binds_or_collides H a0 a1 (congrFun (h 0 ["v"] "b" "c" [0] [1] a0 a1) 0) with hab | hcol
   · simp at hab
-  · exact hcol
+  · exact hcol.global
 
 /-- **Satisfiable** (toy hash): under the length hash the commit does not depend on the value, so the
 hiding schema holds at the strongest relation, equality. The same hash is the refuting pole of binding

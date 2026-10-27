@@ -10,43 +10,14 @@ use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io;
+use crate::canonical::{decimal, hex};
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(refused("lifetime signature hex refused"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| refused("lifetime hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| refused("lifetime signature hex refused"))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -131,11 +102,7 @@ impl LifetimeCustodyV3 {
             if ![&pin.role, &pin.index, &pin.key_id, &pin.key_epoch]
                 .into_iter()
                 .all(|value| decimal(value))
-                || pin.public_key_hex.len() != 64
-                || !pin
-                    .public_key_hex
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                || !crate::canonical::hex64(&pin.public_key_hex)
                 || !pin.seed_path.is_absolute()
                 || self.app_signers[..index]
                     .iter()

@@ -41,7 +41,8 @@ private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("issuerEpoch", number 2), ("genesisHeight", number 10),
   ("factoryPredicate", emptyRule), ("enrollments", .arr #[]),
   ("factoryControllerSubject", number 8),
-  ("factoryControllerCapability", number 53), ("tailBound", number 256),
+  ("factoryControllerCapability", number 53), ("payControlCapability", number 54),
+  ("tailBound", number 256),
   ("issuanceCap", number 1000000000000000),
   ("clockGenesisNow", number 0), ("clockMaxStepSeconds", number 300),
   ("meterAllowance", meter), ("clockTickers", .arr #[])]

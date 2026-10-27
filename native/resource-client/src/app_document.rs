@@ -303,7 +303,7 @@ fn checked_receipt(headers: &[u8], body: &[u8], binding: &Value, capture: &str) 
     if receipts.len() != 1 {
         return Err("app route supplied no unique admitted export receipt".into());
     }
-    let bytes = crate::decode_hex(receipts[0].1.trim())?;
+    let bytes = mini_sdk::hex::decode(receipts[0].1.trim()).map_err(|e| e.0)?;
     if bytes.len() > 8192 {
         return Err("export receipt exceeds bound".into());
     }
@@ -558,7 +558,7 @@ fn draft(v: &Value) -> Result<Vec<u8>> {
     text.extend(format!("\nSheet {} · app {} generation {} · exported by {}\nExport {} · operation {} · receipt {}\n",
         member(b,"sheet")?,member(b,"app")?,member(b,"generation")?,member(b,"subject")?,
         member(r,"bodySha256")?,member(r,"operation")?,member(r,"transaction")?).as_bytes());
-    text.extend(crate::decode_hex(member(v, "body")?)?);
+    text.extend(mini_sdk::hex::decode(member(v, "body")?).map_err(|e| e.0)?);
     if !text.ends_with(b"\n") {
         text.push(b'\n');
     }

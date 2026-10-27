@@ -1,6 +1,28 @@
 # Oracle shared-data acceptance
 
-The current result is **partial acceptance, not a full pass**. The retained
+The latest v5/U3 attempt is **incomplete**. Both grains are installed and the
+public dataset is published. The retained Store is `d4090a0c4c356d31` on
+`dregg-build`; no v5 application START or query has occurred.
+
+The final checked continuation repaired public-listener restart, admitted the
+owner's worker policy, completed native bootstrap enrollment in 132.6 seconds,
+and attached the controller. Session request
+`839a6731941b62b1179b4de9c076f0df` then reached native foreground operation 13
+and became uncertain: its historical grain-share issue lookup was refused by
+the selected socket. The qualified source sends that recipient lookup to the
+public socket while opcode 55 remains operator-only. That is a source-traced
+explanation of the observed refusal, not a qualified recovery.
+
+The attempt ended with execution 1 and cleanup 0. Services are stopped; both
+volumes and journals remain. The controller retains a confirmed parent reserve
+of 1 and the uncertain foreground operation, with no retained foreground result
+or born session resource. Nothing was resent or acknowledged. Further work
+requires audited exact recovery before the remaining application, lifetime-tool,
+data-refusal and restart journey. No repair or relaunch is scheduled in this
+checkpoint. [Exact U3 evidence](evidence/oracle-u3-acceptance-2026-10-27.json)
+records the receipts and separates earlier failures from these observed results.
+
+The earlier v4 result is **partial acceptance, not a full pass**. The retained
 `hbox:/othersys/oracle-acceptance-20261027/run-v4-r2` run installed and started
 the signed v4 runtime in two real Mini grains, enrolled both API sessions, and
 completed 13 of 16 planned POST requests through Mini’s admitted HTTP route.
@@ -175,3 +197,12 @@ checks the retained package/inventory/binary hashes and original native archive,
 then resumes native materialization/completion. It is not a recovery command for
 the final retained Store. Replacing a pinned executable in place is not a native
 upgrade procedure.
+
+
+The checkpoint continuation accepts only its explicitly checked, unstarted
+phase boundary. It holds an exclusive per-run lock through cleanup, archives
+prior evidence before effects, and writes durable started/completed phase
+records. A started source operation without a validated native outcome is
+inspect-only; a wrapper's successful exit never establishes source admission.
+The retained final checkpoint is uncertain and is not eligible for automatic
+continuation.

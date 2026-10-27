@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     display_name: "Operator integration probe".into(),
                     preferred_handle: "operator".into(),
                     permissions: vec![true],
-                    tab_id: vec![],
+                    tab_id: [b"mini-session-v1\0".as_slice(), &1_u64.to_be_bytes(), &2_u64.to_be_bytes(), &3_u64.to_be_bytes()].concat(),
                     base_path: "/".into(),
                     user_agent: "operator-probe".into(),
                     acceptable_languages: vec![],

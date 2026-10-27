@@ -25,6 +25,7 @@
 #   job6  synchronous: truth in state 1 by A refused, by B admitted, decide 1->3
 # Exit 0 = every row matched. Last stdout line = rows.tsv.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR JOB_PROGRAMS; do
   if [ -z "${!name:-}" ]; then echo "jjob1: $name is required" >&2; exit 2; fi
@@ -85,14 +86,15 @@ row all "fresh Store: A sponsors; B enrolled (account 121); the operator's tarif
 # collatz: reads job field 2 as `input`, writes field 15 (truth).
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/open.json"
 PID=$(python3 - "$CONFIG" "$SOCK" "$JOB_PROGRAMS/collatz.jam" "$D/collatz.check.json" <<'PY'
-import json, socket, struct, sys
+import hashlib, json, socket, struct, sys
 cfg = open(sys.argv[1], "rb").read(); sock = sys.argv[2]; jam = open(sys.argv[3], "rb").read()
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 abi = {"evaluator": "nock", "version": "5", "context": "live", "arm": "2", "fuel": "5000000",
        "sample": [{"target": "0", "slot": "resource/field/2/before", "key": "input", "type": "nat"}],
        "outputs": [{"key": "truth", "target": "0", "field": "15", "type": "nat"}], "libraries": []}
 payload = struct.pack("<I", len(jam)) + jam + json.dumps(abi).encode()
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(sock)
-body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([131]) + payload
+body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([131]) + payload
 s.sendall(struct.pack("<I", len(body)) + body)
 def exact(n):
     out = b""
@@ -121,8 +123,8 @@ clause() { sed -n "$(($1 + 1))p" "$D/law.shell" | sed -e 's/;$//' -e 's/not (ver
 # refusal WS ID: the Host's outcome as "phase: detail", or the pre-submit refusal line.
 refusal() {
   local a=$1/attempts/jjob1-$2
-  if [ -f "$a/outcome.json" ] && jq -e '.type == "refused"' "$a/outcome.json" >/dev/null 2>&1; then
-    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+  if [ -f "$a/outcome.json" ] && attempt_answer "$a/outcome.json" | jq -e '.type == "refused"' >/dev/null 2>&1; then
+    printf '%s: %s' "$(attempt_answer "$a/outcome.json" | jq -r '.phase // empty' | xxd -r -p)" "$(attempt_answer "$a/outcome.json" | jq -r '.detail // empty' | xxd -r -p)"
   elif [ -f "$a/pre-submit-refusal.json" ]; then
     printf '%s: %s' "$(jq -r '.stage // empty' "$a/pre-submit-refusal.json")" "$(grep -m1 '^refused:' "$D/$2-submit.err" 2>/dev/null)"
   elif [ -s "$D/$2-submit.err" ]; then
@@ -143,7 +145,7 @@ attempt() {
   [ "$(cat "$D/$id-propose.rc")" = 0 ] || return 1
   run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
     --intent "$ws/proposals/jjob1-$id/intent.json" --attempt "$ws/attempts/jjob1-$id"
-  [ "$(cat "$D/$id-submit.rc")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/jjob1-$id/outcome.json" >/dev/null 2>&1
+  [ "$(cat "$D/$id-submit.rc")" = 0 ] && attempt_answer "$ws/attempts/jjob1-$id/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 admit() {
   local job=$1 id=$1-$2 label=$3 ws=$4; shift 4
@@ -195,7 +197,7 @@ for j in 1 2 3 4 5 6; do
   run "import-$j" "$MINI" workspace --action import --dir "$WS_B" --name "$n" \
     --from-ref "$WS_A/proposals/jjob1-grant-$j/recipient-reference.json"
   row "job$j" "A delegates observe+mutate to B (clause 0: the caller delegates); B imports" "imported" \
-    "grant=$(jq -r .type "$WS_A/attempts/jjob1-grant-$j/outcome.json" 2>/dev/null) import rc=$(cat "$D/import-$j.rc")" \
+    "grant=$(attempt_answer "$WS_A/attempts/jjob1-grant-$j/outcome.json" | jq -r .type 2>/dev/null) import rc=$(cat "$D/import-$j.rc")" \
     "$([ "$(cat "$D/import-$j.rc")" = 0 ]; echo $?)"
 done
 
@@ -290,7 +292,7 @@ install() {  # install ID NAME -> 0 iff installed
   run "$1-propose" "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/$1.json" --proposal-id "jjob1-$1"
   run "$1-submit" "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jjob1-$1/intent.json" \
     --attempt "$WS_A/attempts/jjob1-$1"
-  jq -e '.type == "confirmed"' "$WS_A/attempts/jjob1-$1/outcome.json" >/dev/null 2>&1
+  attempt_answer "$WS_A/attempts/jjob1-$1/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 install install-ctl jjob1-ctl; rctl=$?
 install install-job jjob1-2; rjob=$?

@@ -222,9 +222,9 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op70-requested.json", &active)?;
     write_new(parent, "lifecycle-completion-v2-active.json", &active)?;
-    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 70, PLAN_TAG)?;
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -262,9 +262,9 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
-    let reply = operator.invoke(71, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 71, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(AssembledLaunchCompletion {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -302,31 +302,7 @@ fn checked_assembled(
 }
 
 fn retained_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("v3 completion retained artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("v3 completion retained artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("v3 completion retained artifact length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "v3 completion retained artifact identity refused")
 }
 
 /// Reopens one protected op71 result after process restart. The caller must
@@ -409,9 +385,9 @@ pub(crate) fn submit_fresh_once(
         "op38-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(38, &assembled.ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, &assembled.ingress)?;
     write_new(attempt, "op38-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 38, OUTCOME_TAG)?;
+    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt, "op38-outcome.bin", outcome)?;
     let inspected = operator.tool(
         "inspect",
@@ -455,8 +431,8 @@ pub(crate) fn recover_receipt_only(
     std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt.join(format!("op39-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
-    let reply = operator.invoke(39, &assembled.ingress)?;
-    let payload = framed_payload(&reply, 39, OUTCOME_TAG)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, &assembled.ingress)?;
+    let payload = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",
@@ -536,12 +512,12 @@ mod tests {
             result.push(0);
             result
         };
-        let ingress = frame(71, INGRESS_TAG);
-        assert!(framed_payload(&ingress, 71, INGRESS_TAG).is_ok());
-        assert!(framed_payload(&ingress, 38, OUTCOME_TAG).is_err());
+        let ingress = frame(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG);
+        assert!(framed_payload(&ingress, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG).is_ok());
+        assert!(framed_payload(&ingress, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG).is_err());
         assert!(framed_payload(
             &ingress,
-            71,
+            crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE,
             b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v1"
         )
         .is_err());

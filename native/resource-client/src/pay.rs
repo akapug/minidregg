@@ -52,10 +52,10 @@ const ENROL_OPS: Ops = Ops {
     submit: 119,
     lookup: 120,
 };
-const VIEW_OP: u8 = 107;
+const VIEW_OP: u8 = mini_sdk::host_operations::PAY_VIEW;
 /// The public clock view (K-CLOCK): the deployment clock's `{now, slot}`.
-const CLOCK_VIEW_OP: u8 = 129;
-const ENROLMENT_VIEW_OP: u8 = 112;
+const CLOCK_VIEW_OP: u8 = mini_sdk::host_operations::CLOCK_VIEW;
+const ENROLMENT_VIEW_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_VIEW;
 
 /// The durable preflight's refusal of a spent nullifier, exactly as the Host renders it
 /// (phase `durable`). On a report whose tip is newer than the clock it can only be an
@@ -213,7 +213,7 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
-        [255, body @ ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, body @ ..] => Err(format!(
             "Host refused op{operation} before a decision: {}",
             String::from_utf8_lossy(body)
         )),
@@ -235,18 +235,16 @@ fn number(value: &Value, field: &str) -> Result<u128> {
         Some(Value::Number(number)) => number.to_string(),
         _ => return Err(format!("{field} must be an unsigned integer")),
     };
-    if raw.is_empty() || (raw.len() > 1 && raw.starts_with('0')) {
-        return Err(format!("{field} must be a canonical unsigned integer"));
-    }
-    raw.parse::<u128>()
-        .map_err(|_| format!("{field} must be an unsigned integer below 2^128"))
+    // The Host's rule (`toString n == raw`): `+5` and `05` are refused, not read as 5.
+    mini_sdk::decimal::parse::<u128>(&raw)
+        .ok_or_else(|| format!("{field} must be a canonical unsigned integer below 2^128"))
 }
 
 fn hex_exact(value: &str, bytes: usize, field: &str) -> Result<Vec<u8>> {
     if value.len() != bytes * 2 || value.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(format!("{field} must be {bytes} bytes of lowercase hex"));
     }
-    decode_hex(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
+    mini_sdk::hex::decode(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
 }
 
 fn base58(bytes: &[u8]) -> String {
@@ -366,7 +364,7 @@ fn hex_text(value: &Value, field: &str) -> String {
     value
         .get(field)
         .and_then(Value::as_str)
-        .and_then(|text| decode_hex(text).ok())
+        .and_then(|text| mini_sdk::hex::decode(text).ok())
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default()
 }
@@ -461,13 +459,13 @@ fn prepare(
     if text(&plan_view, "commandBytes")? != hex(&command_bytes) {
         return Err("the Host's plan is not for the authored command".into());
     }
-    let header = decode_hex(
+    let header = mini_sdk::hex::decode(
         plan_view
             .get("header")
             .and_then(|header| header.get("canonical"))
             .and_then(Value::as_str)
             .ok_or("the Host's plan has no canonical header")?,
-    )?;
+    ).map_err(|e| e.0)?;
     let signature = read_secret(&session.key)?.sign(&header).to_bytes();
     create_private(&directory.join("signature.bin"), &signature)?;
     let length: u32 = plan.len().try_into().map_err(|_| "plan too large")?;
@@ -1420,7 +1418,7 @@ fn memo_key(session: &Session, record: &Record, directory: &Path) -> Result<Opti
     };
     let bin = directory.join("memo.bin");
     if !bin.exists() {
-        create_private(&bin, &decode_hex(memo)?)?;
+        create_private(&bin, &mini_sdk::hex::decode(memo).map_err(|e| e.0)?)?;
     }
     let parsed = session.inspect("pay-enrol-memo", &bin, &directory.join("memo.json"))?;
     Ok(if parsed.get("accepted").and_then(Value::as_bool) == Some(true) {
@@ -1437,7 +1435,7 @@ fn v2_memo_identity(record: &Record) -> Result<Option<String>> {
     let Some(encoded) = record.value.get("memo").and_then(Value::as_str) else {
         return Ok(None);
     };
-    let bytes = decode_hex(encoded)?;
+    let bytes = mini_sdk::hex::decode(encoded).map_err(|e| e.0)?;
     let Ok(text) = std::str::from_utf8(&bytes) else { return Ok(None); };
     Ok(crate::pay_memo_v2::SignedMemo::parse(text).ok()
         .map(|memo| hex(&memo.unsigned.identity_key)))
@@ -1493,8 +1491,8 @@ fn v2_enrol_decision(session: &Session, attempt: &Path, record: &Record)
         workspace::bounded_json(&path)?
     } else {
         let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
-        let frame = session.call(181, &payload)?;
-        let body = frame_body(&frame, 181)?;
+        let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+        let body = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
         if body.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
         serde_json::from_slice(body).map_err(|e| format!("invalid source paid status: {e}"))?
     };
@@ -1963,8 +1961,8 @@ fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: boo
         let mut statuses = Vec::new();
         for request in &requests {
             let payload = serde_json::to_vec(request).map_err(|e|e.to_string())?;
-            let frame = session.call(181, &payload)?;
-            let bytes = frame_body(&frame, 181)?;
+            let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+            let bytes = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
             if bytes.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
             let value = serde_json::from_slice(bytes).map_err(|e|format!("source paid status: {e}"))?;
             statuses.push(crate::pay_status::parse(&value, request)?);

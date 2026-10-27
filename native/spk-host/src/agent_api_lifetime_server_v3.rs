@@ -33,16 +33,13 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use crate::canonical::hex;
 
 const MAX_APP_RESPONSE: usize = 65_536;
 const MAX_SOURCE_INSPECTION: usize = 12_102_759;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -59,26 +56,7 @@ fn child<'a>(value: &'a Value, name: &str) -> io::Result<&'a Value> {
 }
 
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(refused("lifetime request hex refused"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| refused("lifetime hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| refused("lifetime request hex refused"))
 }
 
 pub(crate) struct ResidentLifetimeAgent<'a> {

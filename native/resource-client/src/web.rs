@@ -37,6 +37,8 @@ mod body;
 mod verbs;
 #[path = "web/apps.rs"]
 mod apps;
+#[path = "web/subscribe.rs"]
+mod subscribe;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -330,6 +332,8 @@ pub(crate) struct ReadContext {
     pub height: String,
     pub authority_root: String,
     pub cell_root: String,
+    /// The world root the Host reported with this read (an export's manifest names the same).
+    pub world_root: String,
 }
 
 impl ReadContext {
@@ -339,28 +343,18 @@ impl ReadContext {
             height: text(&challenge["height"]),
             authority_root: text(&challenge["authorityRoot"]),
             cell_root: text(&view["cell"]["root"]),
+            world_root: text(&challenge["worldRoot"]),
         }
     }
 }
 
-pub(crate) fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for character in text.chars() {
-        match character {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            other => out.push(other),
-        }
-    }
-    out
-}
+/// The one escaper (and its URL-attribute twin), defined beside the HTML renderer.
+pub(crate) use crate::render::html::{escape, url};
 
 fn short(id: &str) -> String {
-    if id.len() > 14 {
-        format!("<span class=id title=\"{}\">{}...</span>", escape(id), escape(&id[..12]))
+    if id.chars().count() > 14 {
+        let head: String = id.chars().take(12).collect();
+        format!("<span class=id title=\"{}\">{}...</span>", escape(id), escape(&head))
     } else {
         format!("<span class=id>{}</span>", escape(id))
     }
@@ -833,6 +827,7 @@ impl Site {
             height: challenge["height"].as_str().unwrap_or("?").to_owned(),
             authority_root: challenge["authorityRoot"].as_str().unwrap_or("?").to_owned(),
             cell_root: read.document["cellRoot"].as_str().unwrap_or("?").to_owned(),
+            world_root: challenge["worldRoot"].as_str().unwrap_or("?").to_owned(),
         };
         let entries = read.entries.clone();
         let base = self.base();

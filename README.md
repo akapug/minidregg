@@ -91,11 +91,13 @@ From the integrator's latest cut report (2026-10-27) and the plan's §2. Box pat
 | Parity (structured command grammar) | 203 leaves dry-run through the real handlers: 0 usage and 0 world refusals; face coverage, not outcome tests | plan §2; `native/resource-client/src/shell_grammar.rs`, `src/web/verbs.rs` |
 | Reproducible build (M7) | PASS: a cold build on a second Debian 13 box reproduces all 26 outputs byte for byte | [evidence](docs/evidence/2026-10-27-m7-round2-dregg-ref/) |
 | SPK sandbox floor on Debian 13 | audit PASS | [evidence](docs/evidence/2026-10-27-sandbox-floor-dregg-build/) |
+| Private-constructor census (`TokenCensus`) | 374 private constructors reviewed as of 2026-10-27, each minted only at home (23 are open `defect` rows, not yet fixed); the census catches a planted forgery for every one of the 374 and 11 scripted fault kinds, red-proving inside `lake build TokenCensus`. Regenerate with `scripts/token-census-count.sh` | [`TokenCensus/Table.lean`](TokenCensus/Table.lean); [`TokenCensus/SelfTest.lean`](TokenCensus/SelfTest.lean) |
+| fn transport | The fn transport is not on this demo; the exchange row runs in the nightly against a loopback peer when its image exists. | [AFFORDANCES](docs/review/2026-10-26-deploy/AFFORDANCES.md) §1.7 |
 | Lost reply and exact retry | the custody record and its crash tests; the tour's lose-reply, exact-retry and `can --any` paste-back rows PASS on the build box | plan §2; `native/mini-sdk/src/custody.rs` |
 | The `public` member | **not live**: its `enroll plan` goes stale while the clock writes, so the front page answers 502 to the public reader. Owner: the client lane | plan §2 |
 | Hermes residents on the box | **not live**: the controller is not stood up and `HERMES-LIVE` has not run through the pool route. Owner: L4 | plan §2, §5 R4 |
 | Apps on the box | **not live**: the apps world's metered tasks wait on L13's bootstrap verb; Etherpad and TT-RSS qualify from the real store (`japps --box` 22/22), units and ports staged on the box | plan §2; [APP-MARKET](docs/APP-MARKET-2026-10-27.md) |
-| The oracle | **not live**: the veri7vn appliance is landing as a grain through the same grain gate. Owner: the oracle lane (ember's codex session) | [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); plan §5 R15 |
+| The oracle | **not live**: the veri7vn appliance is landing as a grain through the same grain gate. Owner: the oracle lane (ember's codex session) | [Appliance overview](docs/oracle-appliance.md); [ORACLE-GRAIN](docs/ORACLE-GRAIN-2026-10-27.md); plan §5 R15 |
 | Pay-to-enrol | **not live**: mainnet endpoints and the enrolment address are configured on the box; the payment observer is fixed at genesis and arrives with rehearsal #3's re-genesis; 50 DREGG a week from the first open day | [enrol-terms.json](deploy/pay/enrol-terms.json); plan §1 |
 
 A row's state is the run it cites, not this commit. The public-opening contract (plan §1) is

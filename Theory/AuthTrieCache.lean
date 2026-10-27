@@ -985,11 +985,16 @@ theorem wf_canon (lengths : ∀ k, (bitsOf k).length = L) {es : List (K × V)}
 
 /-- **Binding of the root of a list.**  Two lists with distinct paths and one
 root give every key the same last value — or two different node inputs share
-a digest. -/
+a digest, each hashed by the canonical tree over `es` or by the climb of the
+honest opening of `k` built from `es'` (finitely many, fixed by the two lists). -/
 theorem root_lastVal_eq (lengths : ∀ k, (bitsOf k).length = L) {es es' : List (K × V)}
     (inj : PathsInjective bitsOf es) (inj' : PathsInjective bitsOf es')
     (hr : root dig bitsOf L es = root dig bitsOf L es') (k : K) :
-    lastVal es' k = lastVal es k ∨ Collision dig := by
+    lastVal es' k = lastVal es k ∨
+      CollisionAmong dig (fun x => TreeNode dig L (entries bitsOf (canon es)) x ∨
+        ClimbNode dig ((build (dig := dig) lengths es').opening k).terminal
+          ((bitsOf k).take ((build (dig := dig) lengths es').opening k).siblings.length)
+          ((build (dig := dig) lengths es').opening k).siblings x) := by
   have built := build_holds (dig := dig) lengths es'
   have opened := opening_complete lengths built inj' k
   rw [digest_eq built, ← hr, root] at opened

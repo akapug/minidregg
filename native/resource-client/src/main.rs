@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod attempt_state;
 mod bounds;
 mod fsio;
 pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
@@ -51,6 +52,7 @@ mod meter;
 #[cfg(unix)]
 mod market;
 mod checkpoint;
+mod world_export;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
@@ -78,6 +80,10 @@ mod operator_drain;
 mod scheduled_transport;
 #[path = "../../hybrid_kem.rs"]
 mod hybrid_kem;
+// Shared with private-backend; only the sealed-snapshot primitive is used here.
+#[allow(dead_code)]
+#[path = "../../pinned_execution.rs"]
+mod pinned_execution;
 #[cfg(unix)]
 #[path = "../../crypto_transit.rs"]
 mod crypto_transit;
@@ -129,6 +135,7 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+mod bend;
 mod seat;
 #[cfg(unix)]
 mod shell;
@@ -419,7 +426,7 @@ pub(crate) fn outcome_text(value: Option<&Value>) -> String {
     // A controller's nested `Reject` is printed by Lean's `repr` across lines;
     // line breaks and tabs become single spaces. Any other control character
     // keeps the text out of the terminal: it is shown as hex.
-    match decode_hex(hex)
+    match mini_sdk::hex::decode(hex).map_err(|e| e.0)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
     {
@@ -725,6 +732,10 @@ usage:
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol tariff]
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP [--enrol-capability C_ENROL --operator-socket OPERATOR-SOCKET] (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
+  mini bend --action publish --dir WORKSPACE --name NAME --source FILE.obend [--entry DEF] [--account REF]   an Objective Bend, captured and lowered by the Host's front end, then published
+  mini bend --action run --dir WORKSPACE --name NAME --object REF [--seed JSON] [--input JSON] [--deposit N] [--state-type JSON] [--account REF]   create REF pinning the bend when it has no record, then birth its activity
+  mini bend --action show --dir WORKSPACE --object REF
+  mini bend --action lookup|retry --dir WORKSPACE --name NAME   the receipt-only lookup of, or the exact retry of, NAME's last retained attempt
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
   mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
   mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
@@ -737,7 +748,7 @@ usage:
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
   mini enrollment-bootstrap --host HOST --config PUBLIC-CONFIG --socket PUBLIC-SOCKET --listen 127.0.0.1:8794 --metadata PUBLIC-BOOTSTRAP.json [--trusted-proxy IP]
-  mini enrollment-view --socket SOCKET [--config CONFIG]
+  mini enrollment-view --socket SOCKET [--config CONFIG] (--host HOST | --host-sha256 HEX)
   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
   mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
   mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
@@ -747,6 +758,7 @@ usage:
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|invite-check|transition|rotate|kick|register|rewrap|pin-member|list|open|forget --dir WORKSPACE --name ROOM [op options]
+  mini workspace --action room-key --op wrap-atom --dir WORKSPACE --epoch E --gen G --member SUBJECT   (the atom a wrap lands at: Kernel/PrivateRoomKeys.lean wrapAtomId)
       private rooms: DEVNET QUALITY; PRIVACY NOT AUDITED (hybrid X25519 + ML-KEM-768 wraps; docs/PRIVATE-ROOMS-DESIGN.txt)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini web --dir WORKSPACE --listen 127.0.0.1:PORT [--home H]   (loopback hypertext over this workspace's signed reads, with the document edit/create POST forms; the developer's and the journeys' direct face)
@@ -784,7 +796,18 @@ usage:
     one attempt chain per request: a rerun reports the retained attempt and authors nothing new
   mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
-  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
+  mini fleet-sign join|send|transfer|receipt|incoming|retry [--profile P] ...   (dregg-client-sign's verbs on Mini, plus `incoming` for the helm adapter; `mini fleet-sign --help`)
+  mini member --dir WORKSPACE [--name REF] [--home H] [--json true|false] [--action workspace|app-status]   (what `home` prints: your resources and exact recovery actions)
+  mini clock --action init ... | view|tick --workspace WORKSPACE [--capability CAP]
+  mini checkpoint --action view|certify --workspace WORKSPACE [--control CAP --min-tail N]
+  mini activity --action submit|quote|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini seat --action submit|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini hermes-handoff --action registration|activation|registry|dispatch [action options]   (Hermes's task registrations and dispatch bundles)
+  mini story-law --table TABLE.txt [--player SUBJECT]   (the story law a table of rooms and ways compiles to, printed; installs nothing)
+  mini mix --action registrar-key|native-key|key|seal|batch|scan --state DIR [action options]   (the post-quantum mailbox mix)
+  mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
+  mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
+  mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -826,6 +849,7 @@ usage:
     --workspace takes the Host, config, key and socket from the workspace: the challenge and the query
     are answered by its serving session (ops 4/5), not by two cold Host opens of the Store.
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
+  mini attempt-state --attempt ATTEMPT [--file outcome.json|retry-NNNN.json] [--json]   (local: the retained state, repaired from seal.record)
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
   mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
@@ -838,9 +862,10 @@ usage:
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
   mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
                          requires one systemd-activated listener; controller clients pin --operator-peer-uid
-  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
+                         --controller-uid: exact controller traversal/socket ACLs, retained across restart
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock [--peer-uid UID]...
                          admitted peers: this service's uid plus each --peer-uid (never a session uid)
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
@@ -890,17 +915,22 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Self> {
-        let mut raw = env::args_os().skip(1);
+        Self::parse_from(env::args_os().skip(1))
+    }
+
+    fn parse_from(raw: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let mut raw = raw.into_iter();
         let mut values = Vec::new();
-        let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        let no_command = || format!("no command given\n\n{USAGE}");
+        let mut command = raw.next().ok_or_else(no_command)?;
         if command == OsStr::new("--verify-host") {
             VERIFY_HOST.store(true, Ordering::Relaxed);
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());
@@ -927,7 +957,7 @@ impl Args {
             // The valueless switches: opting out of pre-rotation is a
             // deliberate act and reads as one; `web --body` / `--anonymous` name a face; `apps --json` a shape.
             if rendered == "--no-prerotation" || command == OsStr::new("web") && matches!(rendered.as_ref(), "--body" | "--anonymous")
-                || command == OsStr::new("apps") && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
+                || matches!(command.to_str(), Some("apps" | "attempt-state")) && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }
@@ -1364,7 +1394,7 @@ fn socket_process(
         // outcome`). A failed decode leaves the decision undecoded; it is
         // never reconstructed here. The class is the marker's (`is_refusal`).
         let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
-            .and_then(|request| session_invoke(host, socket, config, 8, &request))
+            .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
@@ -1560,8 +1590,8 @@ fn validate_public_inspection(kind: &str, value: &Value, input: Option<&[u8]>) -
                 .get("canonical")
                 .and_then(Value::as_str)
                 .ok_or("schema inspection lacks canonical bytes")?;
-            let decoded = decode_hex(canonical)?;
-            if hex(&decoded) != canonical || Some(decoded.as_slice()) != input {
+            let decoded = mini_sdk::hex::decode(canonical).map_err(|e| e.0)?;
+            if Some(decoded.as_slice()) != input {
                 return Err("schema inspection canonical bytes differ from exact input".into());
             }
             Ok(())
@@ -1644,10 +1674,10 @@ fn inspect_public(
     result
 }
 
-/// The crate's hex codec is mini_sdk::hex: lowercase on encode; this decoder accepts either case
-/// (what a person or another tool may type), ASCII digits only, even length, never a panic on
-/// non-ASCII input and never `from_str_radix`'s leading `+`. Where the spelling is part of the
-/// contract, callers check `mini_sdk::hex::is_canonical*` or decode strictly with `mini_sdk::hex::decode`.
+/// The crate's hex codec for text a person or another tool may type: lowercase on encode; this
+/// decoder accepts either case, ASCII digits only, even length, never a panic on non-ASCII input
+/// and never `from_str_radix`'s leading `+`. Values the Host produced or this client retained
+/// are contract spellings: their sites decode strictly with `mini_sdk::hex::decode`.
 pub(crate) use mini_sdk::hex::encode as hex;
 pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode_any_case(value).map_err(|error| error.0)
@@ -1664,7 +1694,7 @@ fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
             slot.get("header")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "host plan slot has no header string".to_owned())
-                .and_then(decode_hex)
+                .and_then(|header| mini_sdk::hex::decode(header).map_err(|e| e.0))
         })
         .collect()
 }
@@ -2268,7 +2298,7 @@ fn batch_inspect(host: &Path, config: &Path, directory: &Path, stem: &str,
         &directory.join(format!("{stem}.json")))?;
     let rows = value.as_array().ok_or("Host batch is not a collection")?;
     if rows.len() != count { return Err("Host batch count differs from signed intents".into()); }
-    rows.iter().map(|row| decode_hex(row.as_str().ok_or("Host batch item is not hex")?))
+    rows.iter().map(|row| mini_sdk::hex::decode(row.as_str().ok_or("Host batch item is not hex")?).map_err(|e| e.0))
         .collect()
 }
 
@@ -2528,7 +2558,7 @@ fn continuity(
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
     sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
-    let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if is_outcome_frame(frame[0]) {
         return Err("Host refused provider continuity; complete frame retained".into());
@@ -2548,10 +2578,11 @@ fn continuity(
 /// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
 /// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
 /// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
-/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config.
+/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config, and the Host
+/// image the socket serves (`--host HOST`, or its `--host-sha256`) pins the v2 envelope (v1 is retired).
 #[cfg(unix)]
-fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
-    let frame = transport::invoke(socket, config, 112, &[])?;
+fn enrollment_view(socket: &Path, config: &Path, host_sha256: &str) -> Result<()> {
+    let frame = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::PAY_ENROLLMENT_VIEW, &[])?;
     let body = match frame.as_slice() {
         [112, body @ ..] => body,
         [code, rest @ ..] => {
@@ -2566,7 +2597,7 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
     let mut request = (kind.len() as u16).to_le_bytes().to_vec();
     request.extend_from_slice(kind);
     request.extend_from_slice(body);
-    let inspected = transport::invoke(socket, config, 8, &request)?;
+    let inspected = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::INSPECT, &request)?;
     let json = match inspected.as_slice() {
         [8, json @ ..] => json,
         _ => return Err("the Host could not decode its own enrollment view".into()),
@@ -2652,9 +2683,11 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
+        "export-world" => world_export::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
+        "bend" => bend::run(args),
         "seat" => seat::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
@@ -2700,10 +2733,17 @@ fn run(mut args: Args) -> Result<()> {
         "enrollment-bootstrap" => enrollment_bootstrap::run(args),
         "enrollment-view" => {
             let config = args.optional("config").map(path);
+            let host = args.optional("host").map(path);
+            let sha = args.optional("host-sha256").map(|s| s.into_string().map_err(|_| "--host-sha256 must be UTF-8".to_owned())).transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("enrollment-view requires --socket")?;
             let config = config.unwrap_or_else(|| socket.with_extension("config"));
-            enrollment_view(socket, &config)
+            let host_sha256 = match (host, sha) {
+                (Some(host), None) => host_image_sha256(&host)?,
+                (None, Some(sha)) => sha,
+                _ => return Err("enrollment-view requires exactly one of --host HOST or --host-sha256 HEX (the v2 envelope pins the Host image)".to_owned()),
+            };
+            enrollment_view(socket, &config, &host_sha256)
         }
         #[cfg(unix)]
         "selected-exchange" => {
@@ -2767,9 +2807,12 @@ fn run(mut args: Args) -> Result<()> {
                 .optional("socket-gid")
                 .map(|gid| gid.to_str().and_then(|gid| gid.parse::<u32>().ok()).ok_or("--socket-gid is a decimal gid"))
                 .transpose()?;
+            let controller = args.optional("controller-uid")
+                .map(|uid| uid.to_str().and_then(|uid| uid.parse::<u32>().ok()).ok_or("--controller-uid is a decimal UID"))
+                .transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
-            public_proxy::serve(socket, &upstream, &config, group)
+            public_proxy::serve(socket, &upstream, &config, group, controller)
         }
         #[cfg(target_os = "linux")]
         "serve-agent-operator-proxy" => {
@@ -3529,6 +3572,14 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             objective_invoke::submit(&host, &config, &request, &intent_nonce, &key, &directory, prepare_only)
         }
+        "attempt-state" => {
+            let directory = path(args.required("attempt")?);
+            let file = args.optional("file").map(|f| f.into_string().map_err(|_| "--file must be UTF-8".to_owned())).transpose()?;
+            // `--json` (valueless) is the only rendering; accepted so callers can say what they read.
+            let _ = args.optional("json");
+            args.finish()?;
+            attempt_state::run(&directory, file.as_deref())
+        }
         "retry" => {
             let directory = path(args.required("attempt")?);
             let mode = args
@@ -3688,6 +3739,37 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mini_with_no_command_ends_non_zero_and_help_still_ends_zero() {
+        let no_command = Args::parse_from(Vec::<OsString>::new()).err().expect("no command is an error");
+        assert_ne!(no_command, USAGE);
+        assert!(no_command.starts_with("no command given"));
+        assert_ne!(main_ending(Err(no_command), 0).code, 0);
+        let help = Args::parse_from([OsString::from("--help")]).err().expect("--help prints usage");
+        assert_eq!(main_ending(Err(help), 0).code, 0);
+    }
+
+    #[test]
+    fn every_command_the_dispatcher_runs_is_named_in_usage() {
+        let source = include_str!("main.rs");
+        let body = &source[source.find("\nfn run(").expect("fn run")..source.find("\nfn main()").expect("fn main")];
+        let mut hidden = Vec::new();
+        for line in body.lines() {
+            let Some(rest) = line.strip_prefix("        \"") else { continue };
+            let Some((names, _)) = rest.split_once(" =>") else { continue };
+            let names = names.split_once(" if ").map_or(names, |(names, _)| names);
+            for name in names.split(" | ").map(|n| n.trim_matches('"')) {
+                if !name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+                    && !USAGE.contains(&format!("mini {name} ")) && !USAGE.contains(&format!("mini {name}|"))
+                    && !USAGE.contains(&format!("mini --verify-host {name} "))
+                {
+                    hidden.push(name.to_owned());
+                }
+            }
+        }
+        assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
 
     #[test]
     fn store_audit_argv_is_the_host_arm_and_optional_receipts() {

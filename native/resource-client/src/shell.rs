@@ -85,6 +85,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "submit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "lookup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "retry", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "attempt", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "publish", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "revoke", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "renounce", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -97,6 +98,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "bend", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "inbox", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "export", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "pay", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -801,6 +803,7 @@ fn session_file(value: &str, label: &str) -> std::result::Result<(), String> {
 }
 
 /// Exactly `length` bytes spelled as lowercase or uppercase hex.
+// A shell word a person typed (a key, a signature): either case reads.
 fn hex_bytes(word: &str, length: usize) -> Option<Vec<u8>> {
     if word.len() != 2 * length {
         return None;
@@ -979,7 +982,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "renounce" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::RENOUNCE, &w)?;
             let request = if p.index_in(&crate::shell_grammar::RENOUNCE) == 1 {
-                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","capability":p.arg(1),"kind":p.opt(2).unwrap_or("object")})
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","capability":p.arg(1),"kind":p.arg(2)})
             } else {
                 json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","name":p.arg(1)})
             };
@@ -1155,6 +1158,25 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
             }
             client("job", flags)
+        }
+        "bend" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::BEND, &w)?;
+            let mut flags = vec![flag("dir", ws())];
+            match p.leaf.path[1] {
+                "publish" => {
+                    let file = p.arg(1).trim_start_matches('@');
+                    session_file(file, "bend source")?;
+                    flags.extend([flag("action", "publish"), flag("name", p.arg(0)), flag("source", session.home.join("requests").join(file))]);
+                }
+                "run" => flags.extend([flag("action", "run"), flag("name", p.arg(0)), flag("object", p.arg(1))]),
+                "show" => flags.extend([flag("action", "show"), flag("object", p.arg(0))]),
+                action => flags.extend([flag("action", action), flag("name", p.arg(0))]),
+            }
+            if p.has("--lose-reply-once") { flags.push(flag("lose-reply-once", "true")); }
+            for (name, value) in &p.flags {
+                if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
+            }
+            client("bend", flags)
         }
         "jobs" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::JOBS, &w)?;
@@ -1612,6 +1634,10 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let p = crate::shell_grammar::parse(&crate::shell_grammar::LOOKUP, &w)?;
             client("workspace", vec![flag("action", "recover"), flag("dir", ws()), flag("attempt", ws().join("attempts").join(p.arg(0)))])
         }
+        "attempt" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::ATTEMPT, &w)?;
+            client("attempt-state", vec![flag("attempt", ws().join("attempts").join(p.arg(0)))])
+        }
         "retry" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::RETRY, &w)?;
             client("retry", vec![flag("attempt", ws().join("attempts").join(p.arg(0))), flag("mode", "submit")])
@@ -1622,6 +1648,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "export" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::EXPORT, &w)?;
+            if p.leaf.path == ["export", "world"] {
+                let name = p.opt(0).unwrap_or("world.tar");
+                if !crate::shell_grammar::is_session_file(name) {
+                    return Err("export world NAME: a plain file name (letters, digits, '-', '_', '.'; no leading dot), written under HOME/exports".into());
+                }
+                return Ok(client("export-world", vec![flag("workspace", ws()), flag("home", session.home.clone()), flag("out", session.home.join("exports").join(name))]));
+            }
             Plan::Export(ws().join("proposals").join(p.arg(0)).join("recipient-reference.json"))
         }
         other => return Err(format!("unknown verb {other}; type help")),
@@ -1656,7 +1689,7 @@ fn hex_text(value: Option<&Value>) -> String {
     let Some(hex) = value.and_then(Value::as_str) else {
         return "(absent)".into();
     };
-    let bytes: Option<Vec<u8>> = crate::decode_hex(hex).ok();
+    let bytes: Option<Vec<u8>> = mini_sdk::hex::decode(hex).ok();
     match bytes.and_then(|b| String::from_utf8(b).ok()) {
         Some(text) if !text.chars().any(char::is_control) => format!("{text:?}"),
         _ => format!("hex {hex}"),
@@ -1852,7 +1885,10 @@ fn prune_refusals(dir: &Path, keep: usize) {
 /// first component of every request the line writes.
 fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: &[(PathBuf, Vec<u8>)]) -> Result<()> {
     let mut folders = vec!["keys".to_owned(), "enroll".to_owned()];
-    for (path, _) in writes {
+    // Any flag naming a file under the home (`--out`'s export, `room concierge`'s program in
+    // HOME/concierge/, an outbox) gets its first folder as a request does.
+    let flagged = flags.iter().map(|(_, value)| PathBuf::from(value));
+    for path in writes.iter().map(|(path, _)| path.clone()).chain(flagged) {
         if let Ok(relative) = path.strip_prefix(&session.home) {
             let mut parts = relative.components();
             if let (Some(std::path::Component::Normal(first)), Some(_)) = (parts.next(), parts.next()) {
@@ -2267,7 +2303,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("ask" | "dismiss" | "summon", 1) => refs(),
         ("home" | "read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
-        ("lookup" | "retry", 1) => attempts(),
+        ("lookup" | "retry" | "attempt", 1) => attempts(),
         ("history", 1) => vec!["all".into()],
         ("pay", 1) => ["address", "status", "audit"].map(String::from).to_vec(),
         ("pay", 2) if w[1] != "audit" => refs(),
@@ -2565,6 +2601,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn export_world_writes_into_a_private_exports_folder_under_home() {
+        let home = std::env::temp_dir().join(format!("mini-export-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let s = Session { home: home.clone(), ..session() };
+        let Plan::Client { command, flags, writes } = plan(&s, "export world w1").unwrap() else { panic!("not a client plan") };
+        assert_eq!(command, "export-world");
+        assert!(flags.iter().any(|(k, v)| k == "out" && PathBuf::from(v) == home.join("exports/w1")));
+        admit_session_paths(&s, &flags, &writes).unwrap();
+        assert_eq!(std::fs::metadata(home.join("exports")).unwrap().permissions().mode() & 0o777, 0o700);
+        assert!(plan(&s, "export world ../x").is_err());
+        assert!(matches!(plan(&s, "export p1").unwrap(), Plan::Export(_)), "export ID keeps its meaning");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     fn client(plan: Plan) -> (String, Vec<(String, String)>, Vec<(PathBuf, String)>) {
         let Plan::Client { command, flags, writes } = plan else {
             panic!("not a client plan: {plan:?}");
@@ -2815,6 +2868,22 @@ mod tests {
         );
         assert_eq!(client(plan(&s, "jobs lab").unwrap()).1, pairs(&[("action", "list"), ("dir", "/w"), ("room", "lab")]));
         assert!(plan(&s, "job post lab 42 --sneaky 1").is_err());
+        // `bend`: the source is `@FILE` under HOME/requests; one client operation each.
+        let home = s.home.display().to_string();
+        assert_eq!(
+            client(plan(&s, "bend publish tally @Tally.obend --entry tally").unwrap()),
+            ("bend".into(), pairs(&[("dir", "/w"), ("action", "publish"), ("name", "tally"), ("source", &format!("{home}/requests/Tally.obend")), ("entry", "tally")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "bend run tally counter --deposit 9000 --seed {\"tag\":\"natural\",\"value\":\"1\"}").unwrap()).1,
+            pairs(&[("dir", "/w"), ("action", "run"), ("name", "tally"), ("object", "counter"), ("deposit", "9000"), ("seed", r#"{"tag":"natural","value":"1"}"#)])
+        );
+        assert_eq!(client(plan(&s, "bend show counter").unwrap()).1, pairs(&[("dir", "/w"), ("action", "show"), ("object", "counter")]));
+        assert!(plan(&s, "bend publish tally Tally.obend").is_err(), "the source is @FILE, not a path word");
+        assert!(plan(&s, "bend run tally").is_err());
+        assert_eq!(client(plan(&s, "bend run tally counter --lose-reply-once").unwrap()).1, pairs(&[("dir", "/w"), ("action", "run"), ("name", "tally"), ("object", "counter"), ("lose-reply-once", "true")]));
+        assert_eq!(client(plan(&s, "bend lookup tally").unwrap()).1, pairs(&[("dir", "/w"), ("action", "lookup"), ("name", "tally")]));
+        assert_eq!(client(plan(&s, "bend retry tally").unwrap()).1, pairs(&[("dir", "/w"), ("action", "retry"), ("name", "tally")]));
         assert_eq!(
             client(plan(&s, "submit first-action").unwrap()),
             (

@@ -164,7 +164,7 @@ successor lane/fence (the Debian 13 floor audit PASS; now the SPK resident readi
 lane/hermes 0b8cc8bb (the real upstream Hermes agent through bwrap → bridge → gateway → broker → provider
 → v4 settle on the build box, 105 rows PASS; the v4 `leg` frame; reconcile after the record; the demo-box
 install sequence and worker root; the ask pass's completion boundary and the librarian fixture are its
-last reds). L12 web lane lane/web-frontend db61a971+ (parity 203/203 leaves with 0 refusals; JWF 35/35;
+last reds). L12 web lane lane/web-frontend abf33668 (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; "Export my world" end to end on the box (a member's documents, receipts and key as one archive streamed through the gateway, deleted after download, manifest root equal to the live world; the 10 Nov notice on the front page); the Subscribe page for the GLM tier (price, allowance, window as a date; `pay subscribers week` then Join from the inbox invitation; ember's policy sentence a marked placeholder); the seven pay-page audit fixes; tour-chromium green on the box at a0f9c246; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
 the tour's doors 11 and 12; progressive `can`; "Pay with your wallet" on the paid route; the door's
 funding figure). L13 lane/app-market f68de59f+ (Hacker Slides and Simple Todos through create, install,
 share, start, enrol and page load on a live world; `HackSessionContext` served; the member's own install
@@ -188,6 +188,18 @@ grows ~1.2 ms per record (the consent re-check the box still runs in full mode; 
 switches on when thin consent's JP2 is green); submit is flat near 0.9 s; the cold reopen's growth
 (the full open re-hashes the whole chain before the light open) is a hot-path item with the
 before/after at 1.7k records owed.
+
+**First Linux runs that never happened before** (dregg-build, cut 6's candidate, 2026-10-27): `objective-cgen`
+PASS; `objective-c` 1,218 of 1,219 packet differentials with one Lean timeout under a loaded box
+(StressCount; a nightly matter); the demo journey 19/40 in a 5,000 s run budget (its K12 docuverse
+steps take ~15 min each; the nightly gets the full 10,800 s and measures rather than truncates);
+`m6grain` on Debian 13 rerunning after the test-SPK cache path was provided. None of these gates a
+rehearsal: the gate is the tour plus the composed scenario.
+
+**Consent mode, decided** (2026-10-27 afternoon): the box stays on full consent; with the O(1) recheck
+(`ConsentAnchor.recheckHeld`, in every candidate since round 2) the propose cost is flat, so thin consent buys
+nothing the demo needs and lacks a birth arm (JP2 refuses a thin birth by name until a thin-birth design
+exists: Phase 3). The soak's propose slope was the pre-recheck binaries.
 
 **The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
 replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
@@ -323,7 +335,18 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+(ember, same morning). **The app market ships a curated, agent-hackable set** (ember, same afternoon: "a
+more comprehensive selection of SPK apps than just etherpad … easy but powerful datamodels … because
+agents will be running ham beneath the human-visible html layer"): two to three dozen apps (ember, same evening: "way more apps … like 2–3 dozen"), the featured 13 first, chosen for the data
+model and API a resident can drive beneath the HTML, each proven by the lifecycle rows plus one
+beneath-HTML write; selection evidence `docs/review/2026-10-27-spk-selection/`; L13 owns it. **fn is out of this demo** (ember, same evening: "fn is not yet ready"; the page says so; the `exchange` row stays UNCONFIGURED by name). **The `bend` verb is in** (Objective Bend authoring on the activity route with its derived form; the untouched-areas deputy builds it). **No daily restore drill** (the one at each ship is the infra lane's). **private-backend stays in the tree** (ember, same evening): the substrate rescues (pinned execution as one copy, the gated Lean codec fixtures, the crash WAL repaired and promoted, the capsule's key epoch bound) now; the in-process four-party MPC as a research-labelled door after the opening; a networked MPC service is weeks away (no transport, no release law) and not before 11 Nov. **The policy text** on the join, subscribe and export pages, with a research-consent checkbox at the door recorded as a member fact and honoured by the teardown (consented worlds exported, age-encrypted, into the backup bucket's `research-cc0/` prefix for ember's own privacy review before any release, eventually on HuggingFace; the rest deleted): "Nothing you make here is retained after the 11 November 2026 deletion, except encrypted backups that expire within 22 days and cannot be opened by anyone but the operator, unless you tick the box to contribute it for research, in which case you dedicate it to the public domain under CC0; we keep contributed data privately and release it, if at all, only after a privacy review. That choice is recorded in your world and shown on your export page. When you use the AI features, your prompts and the documents the agent reads are sent to the model provider (OpenRouter, or Z.ai on the subscriber tier) under their terms." **A subscriber tier** (its house Hermes on glm-5.3-flash: ember, 2026-10-27 evening) (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
+through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
+resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the
+GLM provider-route capability for 30 days on `pay subscribers 4000`; L4 builds the Anthropic-messages
+adapter and the row; infra seals the key; the web lane the Subscribe form). Whether the coding plan's
+terms permit serving third parties' agents is ember's call, flagged; the join page carries the sentence
+ember supplies. The 1Password state bundle is re-saved in a few days when the state stabilises.
 Main advances after every integration round; other sessions' work in the shared worktree is committed
 as found and fixed forward.
 

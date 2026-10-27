@@ -291,7 +291,8 @@ ok leave alice "room invite i-carl lab $C --verbs observe"
 handoff leave alice i-carl
 ok leave carl "import labc $REF"
 ok leave carl "read labc"
-ok leave carl "renounce c-bob $BOBCAP"
+# by number with its kind: carl holds no reference to bob's grant (a bare number names a reference)
+ok leave carl "renounce c-bob $BOBCAP object"
 named leave carl "submit c-bob" notHolder
 ok leave bob "read lab"
 ok leave bob "room leave l-bob lab"
@@ -320,8 +321,8 @@ ok leave bob "room leave l-bob2 lab"
 named leave bob "submit l-bob2" alreadyRevoked
 ok leave bob "retry l-bob"
 check leave "the exact retry returns the original receipt (replayed, same transaction)" \
-  jq -e -s '.[0].transactionId == .[1].transactionId and .[0].eventId == .[1].eventId
-    and .[1].confirmation == "replayed"' "$WS/bob/attempts/l-bob/outcome.json" "$WS/bob/attempts/l-bob/retry-0001.json"
+  sh -c '"$MINI" attempt-state --attempt "$1" --json | jq -e ".outcome.transactionId == .retries[0].outcome.transactionId
+    and .outcome.eventId == .retries[0].outcome.eventId and .retries[0].outcome.confirmation == \"replayed\""' - "$WS/bob/attempts/l-bob"
 fails leave alice "room leave l-alice lab" 1 "not a room you joined"
 ok leave alice "room invite i-bob2 lab $B --verbs observe,place"
 handoff leave alice i-bob2

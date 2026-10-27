@@ -16,7 +16,90 @@ HELPER = ROOT / "scripts/oracle-agent-lifetime-journey.sh"
 OVERLAY = ROOT / "scripts/spk-platform/agent-genesis-overlay.sh"
 
 
+def factory_lean_probe(predicate, agents):
+    """Render emitted JSON syntax into production Pred.eval checks; no evaluator here."""
+    def lean(node):
+        if node["type"] == "eq" and set(node) == {"type","slot","value"}:
+            return "(.eq " + json.dumps(node["slot"]) + " " + str(int(node["value"])) + ")"
+        if node["type"] in ("all","any") and set(node) == {"type","predicates"}:
+            return "(." + node["type"] + " [" + ",".join(map(lean,node["predicates"])) + "])"
+        raise ValueError("unexpected emitted factory predicate syntax")
+    lines = ["import Pred.Core", "open Minidregg.Pred", "def fixtureLaw : Pred := " + lean(predicate)]
+    for subject in (7,8,9,20010,20011,20012,20013):
+        for verb, mode in ((1,False),(2,False),(2,True)):
+            slots = [("request/subject",subject),("request/verb",verb)]
+            if mode: slots.append(("birth/mode/grain-backed",1))
+            state = "⟨[" + ",".join("("+json.dumps(k)+","+str(v)+")" for k,v in slots) + "]⟩"
+            expected = subject == 7 or (subject in ((8,20011) if agents else (8,)) and (verb == 1 or mode))
+            lines.append("#guard eval fixtureLaw ⟨[]⟩ " + state + " == " + str(expected).lower())
+    return "\n".join(lines) + "\n"
+
+
 class HarnessTests(unittest.TestCase):
+    def test_owner_worker_policy_uses_exact_native_source_and_readback(self):
+        spec = importlib.util.spec_from_file_location("oracle_agent_policy", ROOT / "deploy/oracle/acceptance/agent.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_text())["agents"][0]
+        for fault in (None, "active", "changed-policy", "wrong-readback", "unknown-worker"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                op = object.__new__(module.Operator)
+                op.agent, op.calls, op.workroom = allocation, root, root
+                op.mini, op.host, op.config, op.public = map(Path, ("/mini", "/host", "/config", "/socket"))
+                a, caps = allocation, allocation["plannedCaps"]
+                config = {"task": a["controller"]["task"], "subject": a["controller"]["subject"],
+                    "capability": caps["parentOwner"], "queryCapability": caps["parentOwner"],
+                    "policyControlCapability": caps["parentControl"],
+                    "toolTask": {key:a["tool"][key] for key in ("task", "subject")},
+                    "dispatchTask": {key:a["dispatch"][key] for key in ("task", "subject")}}
+                if fault == "unknown-worker": config["dispatchTask"]["subject"] = "777"
+                config_path = root / "controller.json"
+                module.write(config_path, config)
+                original = {"owner":a["controller"]["subject"], "workerSubjects":[a[role]["subject"] for role in ("tool", "dispatch", "provider")], "workerGeneration":"1"}
+                desired = dict(original, workerSubjects=[a[role]["subject"] for role in ("tool", "dispatch")])
+                calls = []
+                def query(label, subject, task, capability, key, view="resource"):
+                    path = root / label
+                    path.mkdir()
+                    if view == "resource":
+                        value = {"cell":{"grain":{"task":task,"generation":"0","status":"2" if fault == "active" else "0","reserved":"0"}}}
+                    else:
+                        after = label == "policy-after"
+                        value = {"policyId":task,"version":"1" if after else "0", "previous":"old-address" if after else None,
+                            "domain":"10","semantics":"20","address":"old-address","canonical":"aa",
+                            "predicate":desired if after else original}
+                        if fault == "changed-policy" and not after: value["predicate"] = {"changed":True}
+                        if fault == "wrong-readback" and after: value["previous"] = "wrong"
+                    module.write(path / "view.json", value)
+                    module.write(path / "challenge.json", {"authorityRoot":"source-root"})
+                    return path
+                def call(label, args):
+                    calls.append((label,args))
+                    if args[1] == "author":
+                        source = Path(args[args.index("--input")+1])
+                        output = Path(args[args.index("--output")+1])
+                        module.write(output, json.dumps(module.read(source),sort_keys=True).encode())
+                    elif args[1] == "submit":
+                        self.assertEqual(args[args.index("--intent-kind")+1], "grain-policy-install-intent")
+                        source = module.read(args[args.index("--intent")+1])
+                        self.assertEqual(source["currentSourceHex"],"aa")
+                        self.assertEqual(source["expectedPreRoot"],"source-root")
+                        self.assertEqual(source["expectedVersion"],"0")
+                        self.assertEqual(source["control"],caps["parentControl"])
+                        self.assertEqual(source["workerSubjects"],desired["workerSubjects"])
+                        path = Path(args[args.index("--dir")+1]); path.mkdir()
+                        module.write(path / "outcome.json", {"type":"confirmed","confirmation":"installed", "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})
+                    else: self.fail("unexpected native operation")
+                op.query, op.call = query, call
+                if fault is None:
+                    report = module.read(op.prepare_worker_policy(config_path))
+                    self.assertEqual(report["workers"],desired["workerSubjects"])
+                    self.assertEqual(report["receipt"]["acceptedCount"],"3")
+                else:
+                    with self.assertRaises(ValueError): op.prepare_worker_policy(config_path)
+                    self.assertEqual(sum(args[1] == "submit" for _,args in calls), 1 if fault == "wrong-readback" else 0)
+
     def test_complete_grain_store_overlay_on_frozen_339_source(self):
         # Run the real grain-store -> positive-base -> native-share-member
         # transformations. Stub only native executables, stopping exactly at
@@ -35,7 +118,8 @@ class HarnessTests(unittest.TestCase):
                     path = repo / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(subprocess.check_output(["git", "show", baseline + ":" + name], cwd=ROOT))
-                for name in ("scripts/spk-platform/grain-store.sh", "scripts/spk-platform/agent-genesis-overlay.sh"):
+                for name in ("scripts/spk-platform/grain-store.sh", "scripts/spk-platform/agent-genesis-overlay.sh",
+                             "scripts/grain-birth/native-share-member.sh"):
                     path = repo / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes((ROOT / name).read_bytes())
@@ -89,6 +173,35 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 self.assertEqual(config["tariffPerInitialPayloadByte"], 1)
                 self.assertEqual(genesis["tariffPerInitialPayloadByte"], "1")
                 self.assertFalse((root / "new-world/base/workroom/deployment").exists())
+                # This is the actual predicate emitted by all production source
+                # transforms, not a separately generated test policy.
+                original_law = {"type":"any","predicates":[
+                    {"type":"eq","slot":"request/subject","value":"7"},
+                    {"type":"all","predicates":[
+                        {"type":"eq","slot":"request/subject","value":"8"},
+                        {"type":"any","predicates":[
+                            {"type":"eq","slot":"request/verb","value":"1"},
+                            {"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}
+                expected_law = json.loads(json.dumps(original_law))
+                if mode != "legacy":
+                    addition = json.loads(json.dumps(original_law["predicates"][1]))
+                    addition["predicates"][0]["value"] = "20011"
+                    expected_law["predicates"].append(addition)
+                self.assertEqual(genesis["factoryPredicate"], expected_law)
+                predicate_file = next(root.glob("new-world/base/workroom.source-stage/factory-predicate.json"))
+                self.assertEqual(json.loads(predicate_file.read_bytes()), expected_law)
+                if mode == "legacy":
+                    # Exact canonical predicate bytes retain the original literal.
+                    self.assertEqual(predicate_file.read_text(), json.dumps(original_law,separators=(",",":"))+"\n")
+                else:
+                    pin = predicate_file.with_name("agent-factory-allocation.sha256").read_text().split()[0]
+                    self.assertEqual(pin,hashlib.sha256((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_bytes()).hexdigest())
+                evidence = os.environ.get("ORACLE_FACTORY_EVIDENCE")
+                if evidence:
+                    destination = Path(evidence) / (mode + "-predicate.json")
+                    with destination.open("x") as out: json.dump(genesis["factoryPredicate"],out,sort_keys=True)
+                    with destination.with_suffix(".lean").open("x") as out:
+                        out.write(factory_lean_probe(genesis["factoryPredicate"],mode != "legacy"))
                 if mode == "legacy":
                     self.assertNotIn("agentLifetimeDispatchTargets", config)
                     self.assertEqual(len(genesis["enrollments"]), 3)
@@ -100,6 +213,30 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                     self.assertNotIn("issueIndex", targets[0]["legacy"])
                     self.assertNotIn("grantIssueIndex", targets[0])
                     self.assertEqual(len(genesis["enrollments"]), 7)
+
+    def test_actual_factory_allocation_guard(self):
+        source = (ROOT / "scripts/grain-birth/native-share-member.sh").read_text()
+        start = source.index("FACTORY_PREDICATE=")
+        end = source.index("# shellcheck",start)
+        for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_bytes())
+                if fault == "duplicate": allocation["agents"].append(allocation["agents"][0])
+                if fault == "other-role": allocation["agents"][0]["tool"]["subject"] = allocation["agents"][0]["dispatch"]["subject"]
+                if fault == "owner": allocation["agents"][0]["tool"]["subject"] = "7"
+                if fault == "nonnumeric": allocation["agents"][0]["tool"]["subject"] = "20011|invalid"
+                path = root / "allocation.json";path.write_text(json.dumps(allocation))
+                selected = str(path)
+                if fault == "empty": selected = ""
+                if fault == "relative": selected = "allocation.json"
+                if fault == "missing": selected = str(root / "absent")
+                if fault == "symlink":
+                    linked = root / "link.json";linked.symlink_to(path);selected = str(linked)
+                env = dict(os.environ,STAGE=str(root),SPK_AGENT_ALLOCATION=selected)
+                result = subprocess.run(["sh","-eu"],input=source[start:end],env=env,capture_output=True,text=True)
+                self.assertEqual(result.returncode,0 if fault is None else 2,result.stderr)
+                self.assertEqual((root / "factory-predicate.json").exists(),fault is None)
 
     def test_fixed_cases_cover_bounded_operations_and_errors(self):
         cases = json.loads((ROOT / "deploy/oracle/acceptance/agent-cases.json").read_text())

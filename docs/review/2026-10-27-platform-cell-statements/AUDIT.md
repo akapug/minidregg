@@ -229,3 +229,158 @@ and no admitted refill.
 **May proof work start?** L1 (platform cell, births, custodian): yes. M2: after two statement-level
 additions, the install-link Prop and the source-confined `CreditConfined`; proving against the mirror
 would reproduce the integration gap ATLAS law 5 names.
+
+## 2026-10-27, fourth pass: the receiver, the holder law, the plan-time birth verdict (6fffa0de)
+
+| item | verdict |
+|---|---|
+| `admitsObserved_decides` | SOUND as "gate = spec", relative to the oracles |
+| `receiverDecides`, `receiverContext` | WEAK: synthetic store, and the signed bytes are not `encode` |
+| `installPatch_record_only` (controller fixed) | WEAK: installs only; genesis and other writers not covered |
+| custodian rotation by raw cosign | SOUND |
+| `unsigned_refused`, `delegate_refused`, `controller_install_admitted` | real gate poles; they do not touch the codec or the signature path |
+| `holderPolicy` and its five theorems | SOUND for mutations; "nothing else" overstated |
+| capability check before the law | SOUND |
+| `grainPolicy_member_witness_refused` | motivating closed instance, not teeth of `holderPolicy` |
+| `birthRefusal` | no agreement theorem; three divergences |
+
+**(a) Receiver.** `admitNative` is the real path (`verifyNative`, `authorize`, `cosignAnswer` under the `old`
+key `decideRecord` read from the same loaded cell, then the gate). The cosign covers `commandCodec.encode command`, which includes `expectedPlatformRoot`,
+so it cannot be replayed onto another pre-state. Rotation is closed. Two gaps:
+1. *The sponsor does not sign `encode i`.* The envelope is over the `signingHeader` of `request …`,
+   which commits to the command only through `argsDigestBytes` (a cSHAKE of the command bytes and the
+   declaration). `receiverContext.encode` is `commandCodec.encode`. So the real verifier's transcript has no entry over
+   `encode i`, and the `sponsor` hypothesis of `admitsObserved_decides` cannot be discharged from a real
+   receipt. `receiverContext` is never used. Fix: make the context's `encode` the signed header bytes, and state `covers` through the
+   header (with hash collision-resistance named as a boundary beside the verifier's).
+2. *`receiverDecides` runs the gate on `genesisStore controller h.current`,* a store built from the
+   spec, and feeds it the spec's own `oracle`. It is a corollary, not a theorem about the loaded
+   cell. Missing: for every durable snapshot reached from genesis,
+   `PlatformCellDomain.load` yields `recordOf = some h.current` and `controllerOf = some
+   genesis.factoryController`. `installPatch_record_only` is the install half; the genesis
+   half and "no other family writes the cell" are missing.
+
+The poles posit `Observed` booleans; add one pure pole through `prepare` on a concrete snapshot.
+
+**(b) Holder law.** For verb-2 mutations outside the refill slot, `holderPolicy_nonowner_only_witness`
+forces `witnessCaveat`, which zeroes all four `State` deltas: settlement and management are
+unreachable through the witness form. But the outer `.any` also admits verbs 1 and 3 (observe, delegate) and the refill edge
+for every non-owner. A holder may re-delegate its parent grant, so witness authority spreads at
+holders' discretion, bounded only by the grant carrier's attenuation. Restate it as "nothing else among mutations", or keep delegate out of member grants. Ordering holds: `DeclaredResourceController.authorizeLeg` (lines 706-717) obtains capability evidence
+per leg before the law is judged, and `law.admit` consumes it by type.
+
+**(c) Plan versus submit.** `birthRefusal` evaluates `Pred.eval law.predicate step.oldState
+step.newState`. `admitBranch` runs `law.admit wanted evidence law.witness …` after the epoch and
+revision checks. Divergences: (1) unlike `invokeRefusal`, it skips the range and cast verdicts, so a
+`policyInputRange`/`policyCastAlias` refusal at submission stays undisclosed;
+(2) a `prepareDraft`/`preparePending` failure at plan returns `none`, so the plan is silent;
+(3) plan and submit prepare at different heights and snapshots. The statement owed, on one snapshot
+and height:
+`birthRefusal … (.birth b c) = some _ → ∀ cred r, (pending.admitBranch .factory cred r) is .error`
+(a plan refusal is never one submission would admit), and
+`admitBranch … = .error .policyRejected → birthRefusal … = some _` (every law refusal is disclosed).
+Both need `law.admit … ≠ none ↔ eval ∧ ranges ∧ casts`.
+Across time, claim only that drift makes the submission stale.
+
+**Before proofs:** (a) signed-bytes `encode` and the loaded-cell controller invariant; (b) the
+"nothing else" scope fixed; (c) the agreement statement, with range and cast in `birthRefusal`.
+
+## 2026-10-27, fifth pass: fast-forward open statements (lane/hot-path-codec acad2eb7, HOT-PATH §2(h))
+
+| statement | verdict |
+|---|---|
+| 1 MAC gate over v4 | SOUND (about the deployed `openSealed`) |
+| 2 suffix extends snapshot | SOUND, with one unstated scope (truncation) |
+| 3 exactness over snapshot + suffix | NOT WELL-TYPED against today's `Loaded`; `representsCheck` cannot run |
+| 4 keystone | WEAK: premise is provenance the open cannot decide, no teeth; must be an induction; needs World equality |
+| 5 audit | SOUND; needs a refusal pole |
+
+**1.** `openSealed` (`DurableCheckpointCodec.lean:693`) is the deployed gate; its check order matches
+the named poles, and the MAC hashes `bodyStream.encode body`, so the new fields are covered.
+
+**2.** Real, but a tail-truncated suffix (rollback to any height above the checkpoint) is accepted,
+as replay accepts a truncated log: state it, or bind the open to the head anchor (`headTag`).
+
+**3. The blocking finding.** `Loaded` carries `image : Image` with
+`chainExact : chain = chainAfter logStart image.accepted` and
+`indexExact : index = PresenceIndex.ofRecords image.accepted` (`DurableReceiverCore.lean:981-1009`).
+`representsCheck` (`DeployedRepresentsCheck.lean:68`) reads `image.accepted` for the nullifier keys,
+the transaction ids and `w.head = image.accepted.length`. An open that "reads no entry below the
+checkpoint" has no `image.accepted` for the prefix. Statement 3 either re-reads the prefix or cannot be built. Before elaboration, `Loaded` needs a
+checkpoint-relative shape: `prefix : Body` with
+`chainExact : chain = chainAfter prefix.chain suffix`, indexes `= prefix.ix.extendFrom prefix.height
+suffix`, and `representsCheck` restated over the six indexes (keys from `spentAt`, txs from `txs`,
+head from `height`) instead of `image.accepted`.
+
+**4. Keystone.** (i) *Circularity.* An ff-opened `L` inherits `B`'s World, so its next seal is the replay's value only if `B` was. State it inductively: define `HostWritten key fold : Store → Prop` (genesis; append; a seal by
+`storeCheckpoint` of a `Loaded` from either open of a `HostWritten` store). Then prove
+`HostWritten s → ∀ checkpoint at h, body = replayBody fold (s.prefix h)`. Inhabitant: the genesis Store plus appends. (ii) *No teeth at the open.* `Body` has no semantics or World-fold identity, and the key is the Store's. A Host binary with a different World
+fold that opens the same Store seals under the same key and passes gate 1. "A Store this Host wrote"
+is a provenance premise the open cannot decide (law 1). Fix: put `profile.semantics` and a
+`worldFoldVersion` in the v4 body (under the MAC) and refuse a mismatch by name (`.foreignFold`). The
+teeth pole is then expressible: a body sealed with another fold identity is refused. A same-version fold divergence stays audit-only; say so.
+(iii) *`representsCheck` is not enough.* It checks consistency, not equality: `rowOk` is `true`
+for every `.head`/`.allowance` row, and spent/journal rows are checked for membership, not value. A `system` that differs from the fold in those rows passes. The keystone
+must state `B.system = (foldWorld (prefix h)).system` (and `decodeCells B.state` equal to its cells).
+`representsCheck` stays a guard, not the trust argument.
+
+**Light session** (`DurableServed.lean:1059`). It must hold `track` and state, per append,
+`track' = WorldTrack.advance track record` (the `ofIntent_run` step). At a seal it must state
+`lightSeal L = storeCheckpoint transport rootBytes L indexRoot` byte for byte, so the light sealer is
+one more constructor case of `HostWritten`, not a third body producer. `checkpointDifferential` (`:2080`) and the audit
+(`DurableStoreAudit.lean:213`) likewise: all three call one `bodyOf L`.
+
+**5.** Add a pole: a Store whose checkpoint at `h` differs from `replayBody` in any field (system
+included) is refused naming `h`. A fold divergence is caught nightly, never at open.
+
+**Before `DurableFastForwardSpec.lean`:** the checkpoint-relative `Loaded` and an index-based
+`representsCheck`; the fold identity in the v4 body with its refusal; the keystone as `HostWritten`
+induction concluding World equality; one shared `bodyOf` for the three sealers.
+
+## 2026-10-27, sixth pass: `Compiler/DurableFastForwardSpec.lean` (lane/hot-path-world-checkpoint 93e94fa2)
+
+| statement | verdict |
+|---|---|
+| `Derived`, `Body4`, the three `Honest` | SOUND: every field pinned to the genesis replay; World by equality |
+| `MacGate`, `MacGateRefusals` | SOUND, but vacuous in isolation (below) |
+| `SuffixGate` | SOUND; the anchor closes the foreign-checkpoint hole at the open |
+| `TailCutAsReplay` | WEAK: existence only; cuts below the checkpoint uncovered |
+| `Exact`, `Wrote`, `Keystone` | SOUND in shape; one `step` for two sessions |
+| `AuditSound`, `AuditRefuses` | SOUND |
+| `HeadSealZero` | SOUND; the only pole forcing `seal4`/`open4` to round-trip |
+
+**Trivial instantiations.** `ff` cannot replay: its type receives only the checkpoint, the anchor and
+the suffix. `bodyOf` cannot carry nothing: `Body4.Honest` pins every `Derived` field. But each `def`
+takes its own parameters. With `decode4 := fun _ => none`, `MacGate` holds, and then the checkpoint
+branch of `Exact`, `reopenCheckpoint` and `SuffixGate` all hold vacuously (their premises need
+`open4 … = .ok`). Only `HeadSealZero` forces `ff` (hence, through `SuffixGate`, `open4`) to accept
+`seal4`'s output. **Bundle them:**
+one structure `Spec rootBytes logStart semanticsId open4 step bodyOf seal4 ff audit` holding all
+eleven, plus `SealOpens : open4 key (seal4 key b) = .ok b` (for this key and semantics), plus an
+inhabitation pole: a `Wrote` derivation through `append`, `seal` at a positive height, and
+`reopenCheckpoint`.
+
+**Foreign checkpoint versus backup.** `Wrote` reopens only from `(height, body) ∈ store.checkpoints`.
+At the open itself the hole is closed by `SuffixGate`'s anchor clause: the stored entry at the body's
+height must carry this key's trailer over `body.chain` and its world root, so a different Store's body
+fails unless its chain is this one's. An atomic backup is an earlier `Written`, so restore is covered. A non-atomic backup (a checkpoint newer than the copied entries)
+leaves the anchor missing. State the Host's selection: the newest checkpoint whose height is at most
+the head, falling back to genesis.
+
+**`TailCutAsReplay`.** It needs no named refusal. Rollback detection rests on the signer's `headTag` (ruling (f)). But "as the genesis
+replay opens it" is not what it says. It asserts only that some `view'` exists, and only for cuts
+inside the suffix. Strengthen it: the cut opens to `View.Honest` of `⟨seed, records.take n⟩`, for
+every `n`, including cuts below the newest checkpoint, through the selection rule.
+
+**Light session.** Whole-World equality (`world = worldAt image`) is the right strength. Per append it is the `foldRecords` append step. But `Wrote`
+has one `step` and one `genesisView`, while the light session (`DurableServed`) is a separate code
+path. Add a `lightAppend` constructor or a theorem `lightStep = step` on `View`; otherwise the light
+session is outside the keystone.
+
+**`Loaded` reshape.** Yes, state it now. `View` fixes the observable part, but `representsCheck`,
+`chainExact` and `indexExact` still read `image.accepted`. Add `LoadedView : Loaded → View` with
+`View.Honest image (LoadedView L)` as the invariant, and `representsCheck` restated over `Derived`.
+
+**Verdict:** proofs may start once there is the bundled `Spec` with `SealOpens` and the inhabitation
+pole, plus the light-session clause in `Wrote`. Strengthen `TailCutAsReplay` and add the `Loaded`
+Prop in the same commit.

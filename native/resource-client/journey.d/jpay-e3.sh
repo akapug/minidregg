@@ -41,6 +41,10 @@ resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || e
 exec python3 - "$DIR" <<'PY'
 import base64, json, os, struct, subprocess, sys, time
 import nacl.signing
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
@@ -393,7 +397,7 @@ def mini_submit(name, intent, signer):
                            "--key", path(f"subject-{signer}.key"), "--dir", path(f"{name}-attempt")],
                           capture_output=True)
     result_path = path(f"{name}-attempt/outcome.json")
-    result = json.load(open(result_path)) if os.path.exists(result_path) else {}
+    result = attempt_answer(result_path) if os.path.exists(result_path) else {}
     return done.returncode, result, (done.stdout + done.stderr).decode("utf-8", "replace")[-400:]
 def factory_policy(name):
     intent = {"subject": str(EMBER), "nonce": fresh(),

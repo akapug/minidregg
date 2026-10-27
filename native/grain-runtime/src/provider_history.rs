@@ -106,6 +106,53 @@ fn validate_fence_source(
 }
 
 impl Runtime {
+    /// Within `provider_settle`, right after its own custody child failed:
+    /// the pending settle has no call.bin, and its continuity-rejection
+    /// marker verifies. The sender-stopped proof is narrower than the
+    /// quiescence proof (a worker may still be live mid-prompt) and exact for
+    /// this attempt: `command_output` observed the child's exit status with
+    /// both output pipes at EOF. The hold stays; only the attempt retires.
+    pub(super) fn retire_reaped_settle_rejection(&mut self, error: &str) -> Result<bool> {
+        let Some(pending) = self.journal.provider_pending.clone() else {
+            return Ok(false);
+        };
+        if pending.operation != "provider settle"
+            || pending.attempt.join("call.bin").exists()
+            || !self.custody_exit_reaped.load(Ordering::SeqCst)
+        {
+            return Ok(false);
+        }
+        let reaped = || -> Result<()> {
+            if self.custody_exit_reaped.load(Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err("the settle's custody child is not proven reaped".into())
+            }
+        };
+        let evidence = match provider_continuity_rejection::inspect(&self.config, &pending, reaped)? {
+            Some(evidence) => serde_json::to_value(evidence).map_err(|e| e.to_string())?,
+            // Killed at the deadline before it assembled a call: the pinned
+            // client seals `call.bin` (fsynced with its directory) before it
+            // transmits anything, and its whole process group is dead, so the
+            // settle was never sent. Re-preparing is safe twice over: the next
+            // attempt re-reads the signed hold and refuses if it moved.
+            None if error.contains("undecided (deadline)") => json!({
+                "basis":"deadline: the custody child's process group was killed and reaped before call.bin existed",
+                "attempt":pending.attempt}),
+            None => return Ok(false),
+        };
+        self.journal.reconciliation_log.push(json!({
+            "action":"retire-provider-settle-before-call",
+            "operationId":pending.operation_id.to_string(), "operation":pending.operation,
+            "attempt":pending.attempt, "evidence":evidence, "error":error,
+            "senderStopped":"custody child exit observed with output pipes at EOF",
+            "heldAllowanceReleased":false, "providerRequestRepeated":false
+        }));
+        self.journal.provider_pending = None;
+        self.save()?;
+        Ok(true)
+    }
+
     pub(super) fn retire_continuity_rejection(&mut self, pending: &Pending) -> Result<bool> {
         if !matches!(
             pending.operation.as_str(),

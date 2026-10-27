@@ -14,7 +14,9 @@ named on the command line. `generate.sh` points that at `verify-logger.py`, whic
 records every triple the admission asks about: that record is the transcript
 `Fixtures.NativeAcceptedFixture` replays without a process.
 
-usage: lake env lean --run replay.lean DIR SETTINGS VERIFIER HEIGHT
+usage: lake env lean --run replay.lean DIR SETTINGS VERIFIER HEIGHT [doc]
+  `doc` prints the projection of a member's document write
+  (`Fixtures.NativeDocWriteFixtureProjection`) instead of the Objective acceptance's.
   DIR holds seed.bin, rec-1.bin .. rec-HEIGHT.bin (the Store's own frames), call.bin
   (the retained op-2 call) and, for an accepted call, host-record.bin (the record the
   Host appended after it).
@@ -24,13 +26,16 @@ then the call's semantic projection (`PROJECTION key = value` lines,
 against the hand-written authority), exit 0; any other outcome exits non-zero. The interpreter recurses deeply: run it
 under `ulimit -s unlimited`.
 -/
+import Theory.Sp800185Cshake256Native
 import Host.ClientConsentCore
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Fixtures.NativeAcceptedFixtureProjection
+import Fixtures.NativeDocWriteFixtureProjection
 open Minidregg Minidregg.Compiler Minidregg.Kernel
 open Minidregg.Compiler.DurableCheckpointCodec Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Fixtures.NativeAcceptedFixtureProjection (projectAccepted projectRefused reasonName receiptSubjects)
+open Minidregg.Fixtures.NativeDocWriteFixtureProjection (projectDocWrite)
 
 def printProjection (lines : List (String × String)) : IO Unit :=
   for (key, value) in lines do IO.println s!"PROJECTION {key} = {value}"
@@ -39,8 +44,10 @@ def readBytes (p : System.FilePath) : IO (List UInt8) := do
   return (← IO.FS.readBinFile p).toList
 
 def main (args : List String) : IO UInt32 := do
-  let [dir, settingsPath, verifier, heightText] := args
-    | IO.eprintln "usage: replay.lean DIR SETTINGS VERIFIER HEIGHT"; return 2
+  let (dir, settingsPath, verifier, heightText, doc) ← match args with
+    | [dir, settingsPath, verifier, heightText] => pure (dir, settingsPath, verifier, heightText, false)
+    | [dir, settingsPath, verifier, heightText, "doc"] => pure (dir, settingsPath, verifier, heightText, true)
+    | _ => IO.eprintln "usage: replay.lean DIR SETTINGS VERIFIER HEIGHT [doc]"; return 2
   let some height := heightText.toNat? | IO.eprintln "HEIGHT must be a number"; return 2
   let dir := System.FilePath.mk dir
   let settings ← Minidregg.Host.ClientConsentCore.loadSettings settingsPath
@@ -82,8 +89,12 @@ def main (args : List String) : IO UInt32 := do
         let host ← readBytes (dir / "host-record.bin")
         let root := NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics (image.append intent)
         IO.println s!"ACCEPTED record={if record == host then "same" else "DIFFERENT"} root={root.value}"
-        printProjection (projectAccepted config.deployment command (IntentRecord.ofIntent intent)
-          (receiptSubjects accepted))
+        if doc then
+          printProjection (projectDocWrite config.deployment command (IntentRecord.ofIntent intent)
+            (receiptSubjects accepted))
+        else
+          printProjection (projectAccepted config.deployment command (IntentRecord.ofIntent intent)
+            (receiptSubjects accepted))
         return 0
     else
       IO.println "REFUSED physicalPreparation"

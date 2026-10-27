@@ -277,18 +277,26 @@ fn project(
         base_path,
         user_agent,
     } = project_http(&call, http, display_name, preferred_handle, base_path)?;
+    let session_resource = matched.session_resource.parse::<u64>()
+        .map_err(|_| invalid("Mini session resource exceeds physical host range"))?;
+    let subject = matched.subject.parse::<u64>()
+        .map_err(|_| invalid("Mini subject exceeds physical host range"))?;
+    if matched.subject != subject.to_string()
+        || matched.session_resource != session_resource.to_string() {
+        return Err(invalid("Mini session identity coordinates must be canonical unsigned integers"));
+    }
+    // Sandstorm tabId correlates a source session across process restarts. It
+    // is not a browser label or request header and carries no new authority.
+    let mut tab_id = b"mini-session-v1\0".to_vec();
+    for id in [matched.app, subject, session_resource] {
+        tab_id.extend_from_slice(&id.to_be_bytes());
+    }
     Ok((
         SessionBinding {
             app: matched.app,
             process_generation: matched.app_generation,
-            session_resource: matched
-                .session_resource
-                .parse()
-                .map_err(|_| invalid("Mini session resource exceeds physical host range"))?,
-            subject: matched
-                .subject
-                .parse()
-                .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
+            session_resource,
+            subject,
             projection_fingerprint: matched.session_fingerprint,
             ticket_resource: None,
             kind,
@@ -297,7 +305,7 @@ fn project(
                 display_name: display_name.to_owned(),
                 preferred_handle: preferred_handle.to_owned(),
                 permissions: matched.effective_bits.clone(),
-                tab_id: Vec::new(),
+                tab_id,
                 base_path,
                 user_agent: user_agent.unwrap_or_else(|| "Mini SPK Host".to_owned()),
                 acceptable_languages: Vec::new(),
@@ -355,9 +363,9 @@ fn project_http(
                 }
                 context.etag_precondition = etags(value, name == "if-match")?;
             }
-            "x-requested-with" | "x-csrftoken" | "x-csrf-token" | "oc-total-length"
-            | "oc-chunk-size" | "x-oc-mtime" | "oc-fileid" | "oc-chunked" | "oc-checksum"
-            | "oc-chunk-offset" | "oc-lazyops" => {
+            // The rest of Lean's ordinaryHeaderName (generated): carried as additional headers. The
+            // names with their own projection are matched above this arm.
+            other if crate::host_operations::ordinary_header_name(other) => {
                 context.additional_headers.push(Header {
                     name: name.clone(),
                     value: value.clone(),
@@ -448,6 +456,25 @@ mod tests {
             effective_bits: vec![true, false],
             app_path_and_query: "repo.git/git-receive-pack".into(),
             method: "POST".into(),
+        }
+    }
+
+    #[test]
+    fn source_session_tab_is_stable_across_restart_and_separates_sessions() {
+        let mut source=matched();
+        let http=HttpProjection {method:"POST",path_and_query:"repo.git/git-receive-pack",
+            ordered_headers:&[],body:b"",route:Route::Api {signed_path:"/repo.git/"}};
+        let project_tab=|m:&MatchedInspection| physical_web_input(m,&http,"label","handle","/")
+            .map(|p|p.binding.params.tab_id);
+        let original=project_tab(&source).unwrap();
+        assert_eq!(original,[b"mini-session-v1\0".as_slice(),&6100_u64.to_be_bytes(),&9_u64.to_be_bytes(),&6209_u64.to_be_bytes()].concat());
+        source.app_generation+=1;source.session_fingerprint=[7;32];
+        assert_eq!(project_tab(&source).unwrap(),original);
+        source.session_resource="6210".into();assert_ne!(project_tab(&source).unwrap(),original);
+        source.app=0;source.subject="0".into();source.session_resource="0".into();
+        assert_eq!(project_tab(&source).unwrap(),[b"mini-session-v1\0".as_slice(), &[0_u8;24]].concat());
+        for bad in ["","01","+9","18446744073709551616"] {
+            source.session_resource=bad.into();assert!(project_tab(&source).is_err());
         }
     }
 

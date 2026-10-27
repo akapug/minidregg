@@ -393,7 +393,7 @@ fn lookup(operator: &PrivateOperator, attempt_dir: &Path, ingress: &[u8]) -> io:
     File::open("/dev/urandom")?.read_exact(&mut nonce)?;
     let directory = attempt_dir.join(format!("op35-lookup-{}", hex(&nonce)));
     fs::DirBuilder::new().mode(0o700).create(&directory)?;
-    let reply = match operator.invoke_until(35, ingress, deadline) {
+    let reply = match operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_LOOKUP, ingress, deadline) {
         Ok(reply) => reply,
         Err(error) => {
             note(&directory, &format!("op35 transport: {error}"))?;
@@ -401,7 +401,7 @@ fn lookup(operator: &PrivateOperator, attempt_dir: &Path, ingress: &[u8]) -> io:
         }
     };
     write_new(&directory, "frame.bin", &reply)?;
-    let Ok(payload) = framed_payload(&reply, 35, OUTCOME_TAG) else {
+    let Ok(payload) = framed_payload(&reply, crate::host_operations::APPLICATION_DISPATCH_LOOKUP, OUTCOME_TAG) else {
         note(&directory, "op35 reply was not an op35 outcome frame")?;
         return Ok(None);
     };
@@ -457,7 +457,7 @@ pub(crate) fn decide(
     // marker it came under.
     let (marker, original) = match &reply {
         Reply::Frame(frame) => {
-            let payload = framed_payload(frame, 34, OUTCOME_TAG)
+            let payload = framed_payload(frame, crate::host_operations::APPLICATION_DISPATCH_SUBMIT, OUTCOME_TAG)
                 .or_else(|_| framed_payload(frame, RESPONSE_NO_RECORD, OUTCOME_TAG))
                 .or_else(|_| framed_payload(frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
             let view = match payload {
@@ -869,7 +869,7 @@ mod tests {
             let attempt = fake.root.join("dispatch-op-1");
             DirBuilder::new().mode(0o700).create(&attempt).unwrap();
             let frame = outcome_frame(marker, "refused");
-            let error = refused_before_submit(&fake.operator, &attempt, "1", 36, &frame);
+            let error = refused_before_submit(&fake.operator, &attempt, "1", crate::host_operations::APPLICATION_DISPATCH_PLAN, &frame);
             let outcome = DispatchOutcome::of(&error).unwrap();
             assert_eq!(outcome.status, Status::Refused, "marker {marker}");
             assert_eq!(outcome.lean.as_deref(), Some("op36 refused operationRejected"));
@@ -887,11 +887,11 @@ mod tests {
             (Some(7), "refused"),
         ]);
         let deadline = || Instant::now() + Duration::from_secs(10);
-        let no_record = fake.operator.invoke_until(34, b"submit", deadline()).unwrap();
+        let no_record = fake.operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submit", deadline()).unwrap();
         assert_eq!(no_record[4], RESPONSE_NO_RECORD);
-        let undecided = fake.operator.invoke_until(36, b"plan", deadline()).unwrap();
+        let undecided = fake.operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"plan", deadline()).unwrap();
         assert_eq!(undecided[4], RESPONSE_HOST_OUTCOME);
-        let stray = fake.operator.invoke_until(34, b"submit", deadline()).unwrap_err();
+        let stray = fake.operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submit", deadline()).unwrap_err();
         assert_eq!(stray.to_string(), "Mini operator reply opcode mismatch");
         let opcodes: Vec<u8> = served.join().unwrap().into_iter().map(|(op, _)| op).collect();
         assert_eq!(opcodes, vec![34, 36, 34]);
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn decide_answered_contention_then_absent_settles_no_record() {
         let fake = FakeHost::new("fence-contention");
-        let frame = outcome_frame(34, "contention");
+        let frame = outcome_frame(crate::host_operations::APPLICATION_DISPATCH_SUBMIT, "contention");
         let (active, marker, ingress) = armed(&fake.root, 1, Some(&frame));
         let served = fake.serve(vec!["absent"]);
         let outcome = decide(&fake.operator, &active, &marker, "1", &ingress, Reply::Frame(&frame));

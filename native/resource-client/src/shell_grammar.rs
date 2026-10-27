@@ -201,7 +201,7 @@ pub static REVOKE: Grammar = Grammar { verb: "revoke", leaves: &[
 ] };
 pub static RENOUNCE: Grammar = Grammar { verb: "renounce", leaves: &[
     Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
-    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("CAPABILITY", Kind::Subject), opt("object|account|program", Kind::Choice(&["object", "account", "program"]))], flags: &[], effect: Effect::Propose, about: "propose (action renounce, by capability id and kind)" },
+    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("CAPABILITY", Kind::Subject), arg("object|account|program", Kind::Choice(&["object", "account", "program"]))], flags: &[], effect: Effect::Propose, about: "propose (action renounce, by capability id and kind; the kind is required: without it the number reads as a reference name)" },
 ] };
 pub static LAW: Grammar = Grammar { verb: "law", leaves: &[
     Leaf { path: &["law", "show"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "the installed law from the signed policy view, as the Host prints it" },
@@ -221,7 +221,7 @@ pub static CREDIT: Grammar = Grammar { verb: "credit", leaves: &[
 ] };
 pub static TARIFF: Grammar = Grammar { verb: "tariff", leaves: &[
     Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini credit --action tariff --room ROOM (a signed read of the room cell's tariff fields)" },
-    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref), arg("set", Kind::Choice(&["set"])), arg("week|birth|hermes/turn|period|open", Kind::Choice(&["week", "birth", "hermes/turn", "period", "open"])), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini credit --action tariff --set FIELD --value N (one scalar turn on the room cell: only its founder holds write)" },
+    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref), arg("set", Kind::Choice(&["set"])), arg("week|birth|hermes/turn|period|open|hermes/provider", Kind::Choice(&["week", "birth", "hermes/turn", "period", "open", "hermes/provider"])), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini credit --action tariff --set FIELD --value N (one scalar turn on the room cell: only its founder holds write)" },
 ] };
 pub static TOPUP: Grammar = Grammar { verb: "topup", leaves: &[
     Leaf { path: &["topup"], args: &[arg("ROOM", Kind::Ref), arg("N", Kind::Number), opt("hermes|concierge", Kind::Choice(&["hermes", "concierge"])), opt("again", Kind::Choice(&["again"]))], flags: &[valued("--account", "REF", Kind::Id)], effect: Effect::Transition, about: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
@@ -251,6 +251,13 @@ pub static JOB: Grammar = Grammar { verb: "job", leaves: &[
     Leaf { path: &["job", "fund"], args: &[arg("NAME", Kind::Word)], flags: &[JOB_ACCOUNT], effect: Effect::Transition, about: "mini job --action fund" },
     Leaf { path: &["job", "truth"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini job --action truth" },
 ] };
+pub static BEND: Grammar = Grammar { verb: "bend", leaves: &[
+    Leaf { path: &["bend", "publish"], args: &[arg("NAME", Kind::Id), arg("@FILE", Kind::File)], flags: &[valued("--entry", "DEF", Kind::Word), valued("--account", "REF", Kind::Word), dangerous("--lose-reply-once")], effect: Effect::Transition, about: "mini bend --action publish: the Objective Bend source in HOME/requests, captured and lowered by the Host's own front end, then published (one activity turn) from my account; NAME is the bend, DEF its entry definition (default NAME)" },
+    Leaf { path: &["bend", "run"], args: &[arg("NAME", Kind::Id), arg("OBJECT", Kind::Ref)], flags: &[valued("--seed", "JSON", Kind::Word), valued("--input", "JSON", Kind::Word), valued("--deposit", "N", Kind::Number), valued("--state-type", "JSON", Kind::Word), valued("--account", "REF", Kind::Word), dangerous("--lose-reply-once")], effect: Effect::Transition, about: "mini bend --action run: create OBJECT pinning the published bend when it has no record, then birth its activity under a full envelope (INPUT: the program's start value, default the Tally's; DEPOSIT: the activity's purse, default seven envelope prices)" },
+    Leaf { path: &["bend", "lookup"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini bend --action lookup: the receipt-only lookup (Host op 213) of the retained ingress of NAME's last publish or run attempt; absence never submits (--lose-reply-once on publish or run: a client-side fault that writes the exact call and never reads the answer)" },
+    Leaf { path: &["bend", "retry"], args: &[arg("NAME", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini bend --action retry: the exact retained bytes of NAME's last attempt submitted again (a replay, never a new nonce)" },
+    Leaf { path: &["bend", "show"], args: &[arg("OBJECT", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini bend --action show: the public view of OBJECT (its pin, declared state, activity record and purse)" },
+] };
 pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
     Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
 ] };
@@ -267,6 +274,9 @@ pub static LOOKUP: Grammar = Grammar { verb: "lookup", leaves: &[
 ] };
 pub static RETRY: Grammar = Grammar { verb: "retry", leaves: &[
     Leaf { path: &["retry"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini retry --attempt attempts/ID --mode submit (the exact retry of the retained call)" },
+] };
+pub static ATTEMPT: Grammar = Grammar { verb: "attempt", leaves: &[
+    Leaf { path: &["attempt"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: mini attempt-state --attempt attempts/ID --json (the retained answers, the record's phase and the standing; no Host call)" },
 ] };
 pub static PUBLISH: Grammar = Grammar { verb: "publish", leaves: &[
     Leaf { path: &["publish"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID (writes the recipient's reference)" },
@@ -301,6 +311,7 @@ pub static IMPORT: Grammar = Grammar { verb: "import", leaves: &[
 ] };
 pub static EXPORT: Grammar = Grammar { verb: "export", leaves: &[
     Leaf { path: &["export"], args: &[arg("ID", Kind::Id)], flags: &[], effect: Effect::Local, about: "local: print proposals/ID/recipient-reference.json" },
+    Leaf { path: &["export", "world"], args: &[opt("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini export-world: your world as one tar at HOME/exports/NAME (default world.tar): every document as the Host renders it to you now and its signed view, every retained attempt with its standing, your room state, your public key and the custody statement, and a manifest with the world root; reads only" },
 ] };
 pub static INBOX: Grammar = Grammar { verb: "inbox", leaves: &[
     Leaf { path: &["inbox"], args: &[], flags: &[], effect: Effect::Local, about: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
@@ -340,7 +351,7 @@ pub static REACT: Grammar = Grammar { verb: "react", leaves: &[
 pub static CHAT: Grammar = Grammar { verb: "chat", leaves: &[
     Leaf { path: &["chat", "new"], args: &[arg("ROOM", Kind::Word)], flags: &[switch("--private")], effect: Effect::Transition, about: "a chat room (its roster, its streams); --private: a private room (devnet quality; privacy not audited)" },
     Leaf { path: &["chat", "adopt"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Transition, about: "the founder gives a room it already controls the chat roster" },
-    Leaf { path: &["chat", "invite"], args: &[arg("ROOM", Kind::Word), arg("SUBJECT", Kind::Subject), opt("NAME", Kind::Word)], flags: &[valued("--enc", "ENC-PUB|@FILE", Kind::Word), dangerous("--i-know"), valued("--verbs", "V,...", Kind::Word)], effect: Effect::Propose, about: "the room grant for SUBJECT (observe, append; --verbs widens it), a petname; --enc releases a private room's key" },
+    Leaf { path: &["chat", "invite"], args: &[arg("ROOM", Kind::Word), arg("SUBJECT", Kind::Subject), opt("NAME", Kind::Word)], flags: &[valued("--enc", "ENC-PUB|@FILE", Kind::Word), dangerous("--i-know"), valued("--verbs", "V,...", Kind::Word), switch("--roster-only")], effect: Effect::Propose, about: "the room grant for SUBJECT (observe, append; --verbs widens it), a petname; --enc releases a private room's key; --roster-only: the stream and roster row alone (the grant is SUBJECT's concierge window)" },
     Leaf { path: &["chat", "join"], args: &[arg("ROOM", Kind::Word), arg("INVITE-JSON|@FILE", Kind::Rest)], flags: &[], effect: Effect::Local, about: "import the invitation" },
     Leaf { path: &["chat", "enter"], args: &[arg("ROOM", Kind::Word)], flags: &[], effect: Effect::Local, about: "make ROOM the current room" },
     Leaf { path: &["chat", "rooms"], args: &[], flags: &[], effect: Effect::Local, about: "local: the rooms this session holds" },
@@ -475,8 +486,8 @@ pub static BOARD: Grammar = Grammar { verb: "board", leaves: &[
     Leaf { path: &["board", "take"], args: &[arg("ID", Kind::Id), arg("BOARD", Kind::Ref), arg("TASK", Kind::Number)], flags: &[], effect: Effect::Propose, about: "propose (action invoke: the task's owner field 2*TASK+3 := me)" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
-    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
+pub static GRAMMARS: &[&Grammar] = &[&BOARD, &KEY, &KEYGEN, &KEY_STATUS, &ADOPT_NEXT_KEY, &ROTATE_KEY, &INIT, &ENROLL, &PROVISION, &CREATE, &INVOKE, &KIND, &PROGRAM, &INSTANCE, &APP, &FORGET, &APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS, &BEND,
+    &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &ATTEMPT, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
@@ -794,7 +805,7 @@ pub fn check(kind: Kind, value: &str, name: &str) -> Result<(), String> {
     let ok = match kind {
         Kind::Id => !value.is_empty() && value.len() <= 64 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
         Kind::Ref => validate_ref_name(value).is_ok(),
-        Kind::Subject | Kind::Number => !value.is_empty() && value.len() <= 40 && value.bytes().all(|b| b.is_ascii_digit()),
+        Kind::Subject | Kind::Number => value.len() <= 40 && mini_sdk::decimal::is_digits(value),
         Kind::TextOrFile => !value.is_empty() && (!value.starts_with('@') || is_session_file(&value[1..])),
         Kind::File => value.strip_prefix('@').is_some_and(is_session_file),
         Kind::KeyFile => is_session_file(value),

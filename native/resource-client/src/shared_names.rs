@@ -22,12 +22,9 @@ pub(crate) struct Binding {
 
 fn text(value: &Value, field: &str) -> Result<String> {
     let encoded = member(value, field)?;
-    let bytes = crate::decode_hex(encoded)?;
-    // Canonical bytes have only one JSON hex spelling. Reject alternate
-    // presentations rather than letting different clients normalize differently.
-    if crate::hex(&bytes) != encoded {
-        return Err(format!("noncanonical shared-name {field}"));
-    }
+    // Canonical bytes have only one JSON hex spelling: the strict decode refuses
+    // an alternate presentation, so clients cannot normalize differently.
+    let bytes = mini_sdk::hex::decode(encoded).map_err(|e| e.0)?;
     String::from_utf8(bytes).map_err(|_| format!("shared-name {field} is not UTF-8"))
 }
 
@@ -54,7 +51,7 @@ pub(crate) fn binding(entry: &Value) -> Result<Option<Binding>> {
     if link_target.get("type").and_then(Value::as_str) != Some("external") {
         return Ok(None);
     }
-    if crate::decode_hex(member(link_target, "scheme")?)? != SCHEME.as_bytes() {
+    if mini_sdk::hex::decode(member(link_target, "scheme")?).map_err(|e| e.0)? != SCHEME.as_bytes() {
         return Ok(None);
     }
     text(link_target, "scheme")?;

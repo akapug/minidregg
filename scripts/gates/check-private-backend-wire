@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# check-private-backend-wire -- the Lean codecs and native/private-backend agree byte for byte.
+#
+#   scripts/gates/check-private-backend-wire [LEAN_BIN_DIR]     (default .lake/build/bin)
+#
+# The lean_exe targets private-backend-boundary-fixture and private-circuit-plan-fixture print the
+# canonical frames the Lean codecs produce (custody journal, reservation request, allocation receipt;
+# Circuit Plan with its schedule). The Rust crate's `check-wire-fixtures` / `check-plan-fixture` arms
+# decode them, re-encode, and must agree. Control: one byte of each output is flipped and the Rust side
+# must REFUSE it; a checker that accepts a flipped byte is not a gate.
+# Needs the two exes built (the exe-roots row builds every lean_exe).
+set -uo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd "$root" || exit 2
+export PATH=$HOME/.cargo/bin:$PATH
+bin=${1:-.lake/build/bin}
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target-gates}
+rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+die() { echo "private-backend-wire: FAIL: $*"; exit 1; }
+for e in private-backend-boundary-fixture private-circuit-plan-fixture; do [ -x "$bin/$e" ] || die "no $bin/$e (lake build $e)"; done
+(cd native/private-backend && cargo "+$rust" build --release --locked -j "${LOCAL_GATES_CARGO_JOBS:-6}") >"${TMPDIR:-/tmp}/pb-wire-cargo.log" 2>&1 \
+  || { tail -20 "${TMPDIR:-/tmp}/pb-wire-cargo.log"; die "cargo build native/private-backend"; }
+pb=$CARGO_TARGET_DIR/release/mini-private-backend
+[ -x "$pb" ] || pb=$(cd native/private-backend && cargo "+$rust" metadata --locked --offline --format-version 1 --no-deps | python3 -c 'import json,sys;print(json.load(sys.stdin)["target_directory"])')/release/mini-private-backend
+[ -x "$pb" ] || die "no private-backend binary"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/pb-wire.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+"$bin/private-backend-boundary-fixture" >"$tmp/boundary.txt" || die "boundary exe failed"
+"$bin/private-circuit-plan-fixture" >"$tmp/plan.txt" || die "plan exe failed"
+"$pb" check-wire-fixtures "$tmp/boundary.txt" | grep -q 'WIRE PASS' || die "boundary frames: Rust refuses the Lean bytes"
+"$pb" check-plan-fixture "$tmp/plan.txt" | grep -q 'PLAN PASS' || die "Plan: Rust refuses the Lean bytes"
+# controls: flip one byte value in the first number list of each output
+python3 - "$tmp" <<'PY'
+import re,sys
+d=sys.argv[1]
+t=open(d+"/boundary.txt").read().split("\n")
+t[3]=re.sub(r"\[(\d+),", lambda m:"[%d,"%((int(m.group(1))+1)%256), t[3], 1)  # first byte of the receipt frame
+open(d+"/boundary-flipped.txt","w").write("\n".join(t))
+p=open(d+"/plan.txt").read()
+open(d+"/plan-flipped.txt","w").write(re.sub(r'("bytes":\[)(\d+)', lambda m:m.group(1)+str((int(m.group(2))+1)%256), p, 1))
+PY
+"$pb" check-wire-fixtures "$tmp/boundary-flipped.txt" >/dev/null 2>&1 && die "control: a flipped boundary byte was ACCEPTED"
+"$pb" check-plan-fixture "$tmp/plan-flipped.txt" >/dev/null 2>&1 && die "control: a flipped Plan byte was ACCEPTED"
+echo "private-backend-wire: PASS (journal, request, receipt, Plan: Lean bytes decode and re-encode in Rust; flipped byte refused in both)"

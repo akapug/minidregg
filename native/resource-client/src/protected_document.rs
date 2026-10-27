@@ -357,7 +357,7 @@ fn validate_stage(stage:&Value,identity:&Value)->Result<()> {
     nat32(text(stage,"transition")?)?;
     nat32(text(stage,"catalogNonce")?)?;
     nat32(text(stage,"catalogQueryNonce")?)?;
-    let operation=crate::decode_hex(text(stage,"operation")?)?;
+    let operation=mini_sdk::hex::decode(text(stage,"operation")?).map_err(|e| e.0)?;
     if operation.len()!=32 {return Err("retained enrollment operation must be 32 bytes".into());}
     if !stage["device"].is_object() {return Err("retained enrollment lacks its device publication".into());}
     Ok(())
@@ -437,7 +437,7 @@ fn continue_enrollment(root:&std::path::Path,workspace:&Value,name:&str,stage:&V
     let (state,storage)=ensure_custody(root)?;
     let public=&stage["device"];
     // Reopen the exact retained device; losing it is not permission to keygen.
-    let generation: [u8;32]=crate::decode_hex(text(public,"generation")?)?.try_into().map_err(|_|"invalid retained device generation")?;
+    let generation: [u8;32]=mini_sdk::hex::decode(text(public,"generation")?).map_err(|e| e.0)?.try_into().map_err(|_|"invalid retained device generation")?;
     let store=custody(root)?;
     let (_,retained_public)=store.load_device(&generation)?;
     if crate::object_keys_hybrid::public_from_record(public)?!=retained_public {
@@ -550,7 +550,7 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
             &super::member_path(workspace,"key")?,&state,&key,&phase)?;
         return finish_enrollment(root,workspace,name,home);
     }
-    let operation: [u8;32]=crate::decode_hex(text(&meta,"operation")?)?.try_into().map_err(|_|"invalid enrollment operation")?;
+    let operation: [u8;32]=mini_sdk::hex::decode(text(&meta,"operation")?).map_err(|e| e.0)?.try_into().map_err(|_|"invalid enrollment operation")?;
     let store=custody(root)?;
     let staged=store.pending_epoch(&operation);
     drop(store);
@@ -698,7 +698,7 @@ pub(crate) fn export_epoch(root:&std::path::Path,workspace:&Value,name:&str,outp
     if length!=(manifest.len()-72) as u64{return Err("retained manifest length differs".into());}
     let signed_manifest:Value=serde_json::from_slice(&manifest[8..manifest.len()-64]).map_err(|e|e.to_string())?;
     let writer=text(&signed_manifest,"writer")?;
-    if crate::decode_hex(writer)?.len()!=32{return Err("retained manifest writer is invalid".into());}
+    if mini_sdk::hex::decode(writer).map_err(|e| e.0)?.len()!=32{return Err("retained manifest writer is invalid".into());}
     let bundle=json!({"type":"mini-protected-document-epoch-v1","object":target,
         "epoch":audience.anchor.epoch.to_string(),"manifest":crate::hex(&manifest),
         "operation":meta["operation"],"writer":writer,
@@ -721,7 +721,7 @@ pub(crate) fn import_epoch(root:&std::path::Path,workspace:&Value,name:&str,cata
     let catalog_ref=super::local_reference(root,catalog)?;
     let (_,_,catalog_signed)=super::signed_view(root,workspace,&catalog_ref,"resource")?;
     let attempt=signed.parent().ok_or("missing import observation directory")?;
-    let roster_bytes=crate::decode_hex(text(&bundle,"rosterBytes")?)?;
+    let roster_bytes=mini_sdk::hex::decode(text(&bundle,"rosterBytes")?).map_err(|e| e.0)?;
     let roster=attempt.join("import-roster.bin");
     crate::create_private(&roster,&roster_bytes)?;
     let state_path=attempt.join("import-audience.json");
@@ -760,7 +760,7 @@ fn fixed<const N:usize>(bytes:&[u8]) -> Result<[u8;N]> {
 /// Current document observation authority must already have succeeded. Historical
 /// epoch keys open historical atoms; current epoch is not substituted into them.
 pub(crate) fn open_atom(object:&str, atom:&str, payload:&str, store:&Store) -> Result<Vec<u8>> {
-    let bytes = crate::decode_hex(payload)?;
+    let bytes = mini_sdk::hex::decode(payload).map_err(|e| e.0)?;
     let prefix = FRAME.len();
     let min = prefix+64+MESSAGE_FRAME.len()+32+8+32+32+32+32+24+16+64;
     if bytes.len()<min || !bytes.starts_with(FRAME) { return Err("malformed protected atom envelope".into()); }

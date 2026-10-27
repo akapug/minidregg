@@ -1,0 +1,13 @@
+candidate 203ed84c5873d207fe7761b187cd2e866928b401  method /build/lanes/un-world/world/send/Sends.obend  entry deposit  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create-poster                                installed confirmed  
+create-counter                               installed confirmed  
+post-4                                       installed confirmed  
+queued-not-delivered                         check     ok {"message": 101141698466626614518899625610724549362045313298508530648095705514551872700458}
+deliver-4                                    installed confirmed  
+delivered-lands-once                         check     ok {"message": 101141698466626614518899625610724549362045313298508530648095705514551872700458}
+deliver-again-refused                        refused   refused conflict transaction identity conflict
+send-to-bare-refused                         refused   refused operation-rejected .CallRefusal.notAnObject 14633915052329262203) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }
+{"rows": 10, "failed": []}
+overall rc=0

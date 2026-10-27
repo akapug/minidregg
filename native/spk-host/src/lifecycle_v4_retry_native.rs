@@ -614,9 +614,9 @@ pub(crate) fn submit_once(
     // As in v3: no second attempt in this journal can invoke op66/67/22 after
     // an uncertain response. Recovery inspects this attempt and may only look up.
     write_new(parent, ACTIVE_MARKER, &active)?;
-    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 66, PLAN_TAG)?;
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspection = operator.tool(
         "inspect",
@@ -653,9 +653,9 @@ pub(crate) fn submit_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
-    let reply = operator.invoke(67, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 67, BEGIN_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, BEGIN_INGRESS_FILE, &ingress)?;
     let marker = json!({
         "protocol":"mini-spk-launch-retry-begin-submit-requested-v4",
@@ -671,9 +671,9 @@ pub(crate) fn submit_once(
         "op22-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(22, &ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, OUTCOME_TAG)?;
+    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",
@@ -916,8 +916,8 @@ mod tests {
         reply.push(66);
         reply.extend_from_slice(PLAN_TAG);
         reply.push(1);
-        assert!(framed_payload(&reply, 66, PLAN_TAG).is_ok());
-        assert!(framed_payload(&reply, 66, b"DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-PLAN/v1").is_err());
-        assert!(framed_payload(&reply, 67, PLAN_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, PLAN_TAG).is_ok());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, b"DREGG/APPLICATION/LAUNCH-BEGIN-OPERATOR-PLAN/v1").is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, PLAN_TAG).is_err());
     }
 }

@@ -17,14 +17,14 @@ const INGRESS_TYPE: &str = "application-session-enrollment-ingress-v1";
 const REQUEST_ROUTE: &str = "application-session-enrollment-request";
 const PLAN_ROUTE: &str = "application-session-enrollment-plan";
 const INGRESS_ROUTE: &str = "application-session-enrollment-ingress";
-const PLAN_OP: u8 = 82;
-const ASSEMBLE_OP: u8 = 83;
-const SUBMIT_OP: u8 = 84;
-const LOOKUP_OP: u8 = 85;
+const PLAN_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_PLAN;
+const ASSEMBLE_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_ASSEMBLE;
+const SUBMIT_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_SUBMIT;
+const LOOKUP_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_LOOKUP;
 
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "enrollment Host refused op{operation}; frame retained"
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),

@@ -14,6 +14,8 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
+    ("Subscribe", "/subscribe", "The subscriber tier: a house Hermes in the subscribers room; your window and its end."),
+    ("Export", "/export", "Your world as one archive, to take with you."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
     ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans; the default laws."),
     ("Tour", "/tour", "Fifteen minutes from a browser: the twelve steps, with the real forms."),
@@ -49,11 +51,12 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
          <body data-path=\"{path}\">\n\
+         <a class=\"skip\" href=\"#stage\">Skip to content</a>\n\
          <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
          <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
          <div class=\"identity\">{identity}</div></header>\n\
          <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
-         <main class=\"stage\" id=\"stage\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
          <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
         title = h(title),
         path = h(path),
@@ -75,13 +78,28 @@ pub fn inject_csrf(html: &str, csrf: &str) -> String {
         let end = start + end + 1;
         let tag = &lower[start..end];
         out.push_str(&html[at..end]);
-        if tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post") {
+        let post = tag.contains("method=\"post\"") || tag.contains("method='post'") || tag.contains("method=post");
+        if post && form_stays_here(&html[start..end]) {
             out.push_str(&field);
         }
         at = end;
     }
     out.push_str(&html[at..]);
     out
+}
+
+/// A form whose `action` is this origin (absent, or a same-origin path): only those carry the
+/// session's token. A form posting elsewhere (a grain's one-time bootstrap to its own origin) is
+/// left as the body drew it, so the token never reaches another origin.
+fn form_stays_here(tag: &str) -> bool {
+    let lower = tag.to_ascii_lowercase();
+    let Some(at) = lower.find(" action=") else { return true };
+    let rest = &tag[at + " action=".len()..];
+    let value = match rest.chars().next() {
+        Some(q @ ('"' | '\'')) => rest[1..].split(q).next().unwrap_or(""),
+        _ => rest.split(|c: char| c.is_whitespace() || c == '>').next().unwrap_or(""),
+    };
+    value.is_empty() || crate::http::same_origin_path(value)
 }
 
 /// The outcome partial the gateway uses for its own actions; the body renders the same shape for
@@ -92,7 +110,7 @@ pub fn outcome(class: &str, headline: &str, detail: &str, next: &[(&str, &str)])
         links.push_str(&format!("<a href=\"{}\" data-pane>{}</a> ", h(href), h(label)));
     }
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}</div>",
         h(headline),
         if detail.is_empty() { String::new() } else { format!("<pre>{}</pre>", h(detail)) },
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
@@ -139,7 +157,9 @@ pub fn term_index(terminals: &[(String, bool, bool)]) -> String {
 
 pub fn term_page(id: &str) -> String {
     format!(
-        "<div class=\"term\" data-ws=\"/ws/term/{}\" tabindex=\"0\"><noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
+        "<div class=\"term\" data-ws=\"/ws/term/{}\" role=\"region\" tabindex=\"0\" aria-label=\"Terminal: mini shell in the page (every verb is also a form under Commands)\">\
+         <p class=\"vh\">This pane is a terminal: the same shell <code>ssh -t</code> opens. Every verb it understands is also a keyboard-friendly form: <a href=\"/verb\">every shell verb as a form</a>. Recent terminal output is mirrored in text at the end of this region.</p>\
+         <noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
         h(id)
     )
 }
@@ -280,6 +300,69 @@ fn civil(z: i64) -> (i64, u32, u32) {
 mod tests {
     use super::*;
 
+    /// The heading levels of a rendered page, in document order. `<h2` names a heading
+    /// only as a whole tag (`<header` is not one), so the character after the level is
+    /// checked; the scan collects (offset, level) pairs and sorts once.
+    fn heading_levels(html: &str) -> Vec<u8> {
+        let mut levels: Vec<(usize, u8)> = Vec::new();
+        for n in 1..=6u8 {
+            let marker = format!("<h{n}");
+            let mut at = 0;
+            while let Some(start) = html[at..].find(&marker) {
+                let start = at + start;
+                let after = html[start + 3..].chars().next();
+                if after.is_none_or(|c| c == ' ' || c == '>' || c == '\n' || c == '\t') {
+                    levels.push((start, n));
+                }
+                at = start + 3;
+            }
+        }
+        levels.sort_unstable();
+        levels.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// Headings nest: no level jumps more than one step down (h1 then h3 is the failure).
+    fn headings_nest(html: &str) -> bool {
+        let mut last = 0u8;
+        for n in heading_levels(html) {
+            if n > last + 1 {
+                return false;
+            }
+            last = n;
+        }
+        true
+    }
+
+    /// The shell is one landmark set with a keyboard route past the chrome: one `main`, one
+    /// `nav`, a skip link as the first thing focusable, headings that nest, the outcome
+    /// partial as a live region, and a terminal pane that names itself and its alternative.
+    #[test]
+    fn a11y_page_shell_landmarks_skip_link_and_nested_headings() {
+        let who = Who { sid: "s".into(), name: "al".into(), csrf: "c".into() };
+        let stage = "<section><h2>A place</h2><p>body</p><h3>Under it</h3></section><div class=\"outcome admitted\" role=\"status\"><p class=\"headline\">Admitted</p></div>";
+        let html = page("Documents", Some(&who), "/doc", stage, "");
+        assert_eq!(html.matches("<main").count(), 1, "exactly one main");
+        assert_eq!(html.matches("<nav").count(), 1, "exactly one nav");
+        assert!(html.contains("<nav class=\"rail\" aria-label=\"Places\""));
+        assert!(html.contains("<main class=\"stage\" id=\"stage\" tabindex=\"-1\""));
+        let skip = html.find("<a class=\"skip\" href=\"#stage\"").expect("a skip link to the stage");
+        let first_other_link = html.find("<a ").filter(|at| *at != skip);
+        assert!(skip < html.find("<nav").unwrap(), "the skip link comes before the rail");
+        assert!(first_other_link.is_none_or(|at| skip < at), "the skip link is the page's first link");
+        assert!(html.contains(">Skip to content</a>"));
+        assert_eq!(heading_levels(&html).first(), Some(&1), "the page's first heading is the h1 title");
+        assert!(headings_nest(&html), "headings nest under the h1: {:?}", heading_levels(&html));
+        // Red-proof the walker: a stage that opens at h3 must be named.
+        let bad = page("Bad", Some(&who), "/doc", "<section><h3>Skipped a level</h3></section>", "");
+        assert!(!headings_nest(&bad), "the nesting check must catch an h1 to h3 jump");
+        // The gateway's own outcome partial and the terminal.
+        let outcome_html = outcome("undecided", "Undecided", "the attempt is retained", &[("the receipt", "/receipts/w-1")]);
+        assert!(outcome_html.contains("role=\"status\"") && outcome_html.contains("aria-live=\"polite\"") && outcome_html.contains("Undecided"));
+        let term = term_page("abc123");
+        assert!(term.contains("role=\"region\"") && term.contains("aria-label=\"Terminal"), "{term}");
+        assert!(term.contains("href=\"/verb\""), "the terminal names the keyboard route to the same verbs");
+    }
+
     #[test]
     fn the_shell_carries_the_rail_identity_and_the_sentence() {
         let who = Who { sid: "s".into(), name: "alice".into(), csrf: "c".into() };
@@ -292,6 +375,9 @@ mod tests {
         assert!(!html.contains("xterm.js"), "xterm loads only with a terminal on the stage");
         let injected = inject_csrf("<form method=\"post\" action=\"/x\"><button>Go</button></form><form method=\"get\"><input></form><FORM METHOD=POST class=\"row\">", "tok");
         assert_eq!(injected.matches("name=\"csrf\" value=\"tok\"").count(), 2, "{injected}");
+        let foreign = inject_csrf("<form method=\"post\" action=\"https://a7.demo.dregg.online/__mini/bootstrap\" target=\"_blank\"><input name=\"token\"></form><form method=post action=//evil.example/x></form><form method=\"post\" action=\"/doc/a/append\"></form><form method=\"post\"></form>", "tok");
+        assert_eq!(foreign.matches("name=\"csrf\"").count(), 2, "only the same-origin forms carry the token: {foreign}");
+        assert!(!foreign.split("</form>").next().unwrap().contains("csrf"), "{foreign}");
         assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
         let anon = page("Mini", None, "/", &term_page("abc"), "");
         assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));

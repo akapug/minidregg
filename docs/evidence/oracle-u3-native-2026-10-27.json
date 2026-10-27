@@ -203,5 +203,43 @@
     "transport_adversarial_tests": "7 passed, fake provider; log sha256 ff45c1fc680014cbb9cf0f97eea3d77faf6d7a9d14cc385e8bbbb1571450434e",
     "cohort": "/build/lanes/oracle-u3/rust-bin-consent",
     "cohort_manifest_sha256": "9f2366fec193a9be6060b5f63610d446b002da29361ab1bf4afb15f735b2e7a0"
+  },
+  "enrollment_runtime": {
+    "status": "qualified runtime and distinct cohort transferred; actual raw-gate regression passed",
+    "source": "/othersys/lanes/oracle-u3-enrollment-src",
+    "source_manifest_sha256": "9d0bf6b5d6ef199154aec1b3b8891c02cad266d4ef707d90227ddf8677a7f12e",
+    "main_sha256": "9c343eef723c2116d58d005e1c60b49c7670dc587e31158ef42fdc857f55c9aa",
+    "control_sha256": "7f826a153a28ae11e03274a03e187b74957985991d7f62b1335ed146c3ec15c2",
+    "enrollment_sha256": "d21b5a590ee62c1aec915bb6e0a90de730a0cf2ad14ffa63faad72edc11e4d8c",
+    "binary_sha256": "19ba92fa97e048f5a63d4bf09b5c086ceaa28cade676b99e691bdc2837f708a4",
+    "binary": "/othersys/lanes/oracle-u3-enrollment-evidence-final-r4/grain-runtime",
+    "tests": "7 enrollment tests and 2 diagnostic tests passed on byte-identical production modules; main changed only reviewed failure wording",
+    "cli_smoke": "missing request on hbox and dregg failed with inspect-state wording; no state files created",
+    "testonly": "separate raw gate test overlay, no release code change",
+    "enrollment_test_log_sha256": "2f893194012dfcaeee8d9157455bce33d14584c7f9e182d34ad9bd014fa7c780",
+    "diagnostic_test_log_sha256": "476b0de2dce1a153ac84a2793bb55a79b6d50df9892668c36641519524026585",
+    "raw_gate_test_log_sha256": "21928df5b253f601391fda89f04bcd809118ed4ead94e88c8cde136e7b2b2c23",
+    "testonly_adversary_sha256": "8d2ea1f2a17aa228aab9684114390b58c510405f4b40abd5e8cfaac87ec3611e",
+    "cross_host_cohort": "/build/lanes/oracle-u3/rust-bin-enrollment-final",
+    "cross_host_manifest_sha256": "ceb4ce7e2586e20948c489fcc04f55e50970603e78be45c5fbd44b578a8d3e79"
+  },
+  "public_proxy_restart": {
+    "status": "15 tests, optimized build, distinct-UID restart fixture and cross-host CLI smoke passed",
+    "source": "/othersys/lanes/oracle-u3-public-restart-src",
+    "patch_sha256": "25fbc88e569ad24ebd6b5b0b5ef27f252c6e4bce0d62aa6f6ba5e2a1d4d206e0",
+    "main_sha256": "f811f451cb93ae957ad948b56c9d3eaf02aed0a91a713c3e9b2703bb68239170",
+    "public_proxy_sha256": "f3c9b5f9f6b0a6a0593c5eed12ce5bfe8c440ee54500bdc0ad4c5fa236b4fb38",
+    "source_manifest_sha256": "5f0e28ee3972f374287d08e8ce0f6366642f014387a503722cf89656e09d487b",
+    "source_manifest_scope": "native source excluding patch-generated .orig backups, plus Cargo and protocol inputs",
+    "mini_sha256": "ac7323a9c56b901903a7cef54c359f0cffeee62051deed23323aa81d419c7334",
+    "test_log_sha256": "264c55680197359a94928b416d4858ab9e979ab400f1c953cec65852b74ca656",
+    "physical_report": "/othersys/lanes/oracle-u3-public-restart-physical/report.json",
+    "physical_report_sha256": "2f23724fed31cccc229fbef74c3a047d9ead642364d2c25e12a0bc12d80505a1",
+    "physical_scope": "real ordinary mini proxy, distinct controller UID, named ACLs, restart and refusal cases with fake upstream; not Mini admission",
+    "physical_script_sha256": "ce2901c1cc74b72677dc62c2f1ca9c9771eb729d4451f3f1be2dddc8ec633ca8",
+    "cross_host_cohort": "/build/lanes/oracle-u3/rust-bin-public-restart",
+    "cross_host_manifest_sha256": "a1487fe99b67fb09782ab7ee556eddce833cc34a8d2c9739cf174c3444bf0e2a",
+    "cross_host_help_sha256": "fb2cc3f2634f7407612a1e7bce9b96290af2e137532f85296625af5a44729fc4",
+    "previous_runtime_sha256": "19ba92fa97e048f5a63d4bf09b5c086ceaa28cade676b99e691bdc2837f708a4"
   }
 }

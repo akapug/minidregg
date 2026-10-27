@@ -42,14 +42,14 @@ pub(crate) fn refuse_pre_hybrid(row: &Value) -> Result<()> {
 pub(crate) fn public_from_record(row: &Value) -> Result<HybridPublic> {
     refuse_pre_hybrid(row)?;
     let text = row["hybridPublic"].as_str().ok_or("missing hybridPublic")?;
-    HybridPublic::from_bytes(&crate::decode_hex(text)?)
+    HybridPublic::from_bytes(&mini_sdk::hex::decode(text).map_err(|e| e.0)?)
 }
 
 /// Retained device custody, strict.
 pub(crate) fn secret_from_record(row: &Value) -> Result<HybridSecret> {
     refuse_pre_hybrid(row)?;
     let text = row["hybridSecret"].as_str().ok_or("missing hybridSecret")?;
-    HybridSecret::from_bytes(&Zeroizing::new(crate::decode_hex(text)?))
+    HybridSecret::from_bytes(&Zeroizing::new(mini_sdk::hex::decode(text).map_err(|e| e.0)?))
 }
 
 fn parts<'a>(context: &'a [u8], device_generation: &'a [u8; 32]) -> [&'a [u8]; 2] {

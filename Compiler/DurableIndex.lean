@@ -31,7 +31,7 @@ namespace Minidregg.Compiler.DurableIndex
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Theory.AuthTrie (NodeIn Collision WF entries tree)
+open Minidregg.Theory.AuthTrie (NodeIn Collision CollisionAmong TreeNode ClimbNode WF entries tree)
 
 set_option autoImplicit false
 
@@ -126,13 +126,10 @@ theorem nodeBytes_injective {a b : NodeIn IndexKey (List UInt8) Digest}
 def dig (node : NodeIn IndexKey (List UInt8) Digest) : Digest :=
   (Sp800185Cshake256.hash nodeCustomization (nodeBytes node)).digest
 
-/-- **A node collision is a cSHAKE256 collision**: two different inputs under the
-node customization with one 32-byte output. -/
-theorem collision_is_cshake (collision : Collision dig) :
-    ∃ x y : List UInt8, x ≠ y ∧
-      Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
-  obtain ⟨a, b, differ, same⟩ := collision
-  refine ⟨nodeBytes a, nodeBytes b, fun eq => differ (nodeBytes_injective eq), ?_⟩
+/-- One node digest is one cSHAKE256 output over the node bytes. -/
+theorem hash_eq_of_dig_eq {a b : NodeIn IndexKey (List UInt8) Digest} (same : dig a = dig b) :
+    Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+      Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
   have bytesEq := congrArg Sp800185Cshake256.digestBytesLE same
   simp only [dig, Sp800185Cshake256.Output.digest] at bytesEq
   rw [Sp800185Cshake256.digestBytesLE_digestOfBytesLE _ (Sp800185Cshake256.hash _ _).length_exact,
@@ -144,22 +141,46 @@ theorem collision_is_cshake (collision : Collision dig) :
   subst bytesEq
   rfl
 
+/-- **A node collision is a cSHAKE256 collision**: two different inputs under the
+node customization with one 32-byte output. -/
+theorem collision_is_cshake (collision : Collision dig) :
+    ∃ x y : List UInt8, x ≠ y ∧
+      Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+  obtain ⟨a, b, differ, same⟩ := collision
+  exact ⟨nodeBytes a, nodeBytes b, fun eq => differ (nodeBytes_injective eq), hash_eq_of_dig_eq same⟩
+
+/-- **A scoped node collision is a scoped cSHAKE256 collision**: the two colliding
+cSHAKE256 inputs are the node bytes of two of the named nodes. -/
+theorem collisionAmong_is_cshake {S : NodeIn IndexKey (List UInt8) Digest → Prop}
+    (collision : CollisionAmong dig S) :
+    ∃ a b, S a ∧ S b ∧ nodeBytes a ≠ nodeBytes b ∧
+      Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+        Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
+  obtain ⟨a, b, ha, hb, differ, same⟩ := collision
+  exact ⟨a, b, ha, hb, fun eq => differ (nodeBytes_injective eq), hash_eq_of_dig_eq same⟩
+
 /-! ## Soundness at the deployed shape -/
 
 /-- The canonical root of a logical map (key ↦ value bytes). -/
 def rootOf (kvs : List (IndexKey × List UInt8)) : Digest := tree dig 520 (entries bitsOf kvs)
 
 /-- **A verified single answer is the map's** (presence with its value, or verified
-absence), or a cSHAKE256 collision is exhibited. -/
+absence), or a cSHAKE256 collision between the node bytes of two nodes the
+canonical tree or this opening's climb hashed. -/
 theorem lookup_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
     (k : IndexKey) (answer : Option (List UInt8))
     (opening : Theory.AuthTrie.Opening IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.verify dig bitsOf (rootOf kvs) k answer opening = true) :
     answer = Theory.AuthTrie.lookup (entries bitsOf kvs) k ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y :=
+      ∃ a b, (TreeNode dig 520 (entries bitsOf kvs) a ∨
+          ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings a) ∧
+        (TreeNode dig 520 (entries bitsOf kvs) b ∨
+          ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings b) ∧
+        nodeBytes a ≠ nodeBytes b ∧
+        Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+          Sp800185Cshake256.hash nodeCustomization (nodeBytes b) :=
   (Theory.AuthTrie.verify_sound dig bitsOf 520 bitsOf_length kvs wf k answer opening accepted).imp_right
-    collision_is_cshake
+    collisionAmong_is_cshake
 
 /-- **A verified reveal answers exactly the members under its prefix** — none
 omitted (so an empty answer is a verified absence of the whole family member
@@ -262,14 +283,21 @@ def Answer.height {root : Digest} {k : IndexKey} (answer : Answer root k) : Opti
   answer.value.bind heightOf
 
 /-- **The verified answer is the map's** (at the deployed shape): whatever opening
-was accepted, its value is the logical map's lookup, or cSHAKE256 collides. -/
+was accepted, its value is the logical map's lookup, or that accepted opening's
+climb and the canonical tree hashed two nodes whose bytes collide under cSHAKE256. -/
 theorem Answer.sound {kvs : List (IndexKey × List UInt8)} {k : IndexKey}
     (wf : WF 520 (entries bitsOf kvs)) (answer : Answer (rootOf kvs) k) :
     answer.value = Theory.AuthTrie.lookup (entries bitsOf kvs) k ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+      ∃ opening : Opening, verify (rootOf kvs) k answer.value opening = true ∧
+        ∃ a b, (TreeNode dig 520 (entries bitsOf kvs) a ∨
+            ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings a) ∧
+          (TreeNode dig 520 (entries bitsOf kvs) b ∨
+            ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings b) ∧
+          nodeBytes a ≠ nodeBytes b ∧
+          Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+            Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
   obtain ⟨opening, accepted⟩ := answer.opens
-  exact lookup_sound kvs wf k answer.value opening accepted
+  exact (lookup_sound kvs wf k answer.value opening accepted).imp_right fun c => ⟨opening, accepted, c⟩
 
 theorem empty_absent (k : IndexKey) : verify emptyDigest k none ⟨[], .empty⟩ = true := by
   simp [verify, Theory.AuthTrie.verify, Theory.AuthTrie.climb, Theory.AuthTrie.Terminal.input, emptyDigest]

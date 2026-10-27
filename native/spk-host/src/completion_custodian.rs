@@ -6,25 +6,10 @@ use crate::dispatch_native::PrivateOperator;
 use serde_json::Value;
 use std::io;
 use std::path::Path;
+use crate::canonical::{decimal as canonical_decimal, hex};
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
-}
-
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn pinned_context(

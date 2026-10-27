@@ -7,32 +7,27 @@ predicate algebra (`Pred`), the effect registry (`Effects`) and the native host
 the proof-system research: the `Selvage` modules and the proof-system `Assurance`
 apex theorems, which `Minidregg` (the research umbrella) still builds. Mini admits
 by re-execution, not by proof (decision 10-01), so the admission path needs none of
-that research; the one exception is the digest backend named under Residual.
+that research, and the closure carries no module of it (see the Selvage paragraph below).
 
 `AxiomCensus` checks this umbrella; `AxiomCensusResearch` checks `Minidregg`.
 `scripts/lane/ub.sh` builds this; `scripts/lane/rb.sh` builds the research set.
 
-Residual: the `Host.Main` import closure holds 12 `Selvage` modules (7,488 lines,
-measured 2026-10-26), so the Deployed set is not Selvage-free. The chain is
-`Host.Main` -> `Kernel.ObjectiveBendNativeAdmission` -> `Compiler.Evaluator` ->
-`Compiler.Sp800185Cshake256` -> `Compiler.Tower256CshakeMerkleController` ->
-`Selvage.BinaryLookup` and `Compiler.AuthenticatedColumnPlan` -> `Selvage.Commitment`.
+No module in this closure imports `Selvage`. The Tower256 digest backend that
+once carried 12 Selvage modules in (`Tower256CshakeMerkleController` ->
+`Selvage.BinaryLookup`, `AuthenticatedColumnPlan` -> `Selvage.Commitment`) takes
+its cube addresses from `Theory.BinaryCubeAddress`, and the Selvage adapters live
+in `Compiler.AuthenticatedColumnSelvage`, which only `Minidregg` builds.
 -/
 import Theory
 import Kernel
 import Pred
 import Effects
 import Assurance.EvaluatorAudit  -- required evaluator admission poles, outside Host runtime imports
-import Assurance.NockDoorAudit  -- required concrete Nock door poles, outside the Host runtime closure
 import Assurance.StoryLaw  -- P-STORY: a sealed story's table is the law on every player's cell (sealed_story_scene_monotone, sealed_story_never_relawed); kernel-level, not proof-system Assurance: it imports Kernel.LawView and Kernel only
 import Host
 -- Kernel and policy modules `Minidregg` roots beside the per-directory roots
 -- (none imports Selvage or Assurance; the arithmetization and zkML roots stay research):
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep

@@ -28,6 +28,7 @@
 #   audit                Host audit re-admits every accepted record        -> re-admitted
 # Exit 0 = every row as expected. Last stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 TW=$W/third-workspace
@@ -49,8 +50,8 @@ invoke() { # NAME WS ACTIONS-JSON -> prints the record's log height
     >"$D/req/$name.json"
   run "$name-propose" "$MINI" workspace --action propose --dir "$ws" --request "$D/req/$name.json" --proposal-id "$name"; ok "$name-propose"
   run "$name" "$MINI" workspace --action submit --dir "$ws" --intent "$ws/proposals/$name/intent.json" --attempt "$ws/attempts/$name"; ok "$name"
-  jq -e '.type == "confirmed"' "$ws/attempts/$name/outcome.json" >/dev/null || { echo "$name not confirmed" >&2; exit 1; }
-  jq -r .acceptedCount "$ws/attempts/$name/outcome.json"
+  attempt_answer "$ws/attempts/$name/outcome.json" | jq -e '.type == "confirmed"' >/dev/null || { echo "$name not confirmed" >&2; exit 1; }
+  attempt_answer "$ws/attempts/$name/outcome.json" | jq -r .acceptedCount
 }
 delegate() { # NAME RECIPIENT-SUBJECT VERBS-JSON TO-WS
   jq -n --arg r "$2" --argjson v "$3" \

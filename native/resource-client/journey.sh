@@ -48,6 +48,14 @@
 #          and unsigned calls cost nothing; another subject is untouched (journey.d/jrefusal-lane.sh)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
 #   (journey.d/m3.sh, m4.sh, m5.sh); their detail lines say so.
+#   JESC   R8: the escrow loop (enc-public, keygen --escrow-to-sponsor, escrow-recover), then the Host
+#          answers a read signed with the RECOVERED key as the friend (journey.d/jescrow.sh)
+#   JFLEETIN R10: `fleet-sign incoming` (the helm adapter's reader of Host op 180) after a transfer, a
+#          refused overdraw and a topic send (journey.d/jfleet-incoming.sh)
+#   JSLK   A7/A8 on the shell path: law install/refusal/revision, kind create/revise, the built-in story
+#          (journey.d/jstorylaw.sh; the web path's rows are jweb-frontend's tour rows)
+#   JR17   R17: home, key, app, adopt-next-key, hermes through mini shell, each ended by the Host's
+#          decision or a named refusal (journey.d/jr17.sh)
 #   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
 #          the Host only through the ssh byte proxy (journey.d/jpriv2.sh)
 #
@@ -97,6 +105,13 @@
 # JOURNEY_STEPS (default: every step) runs only the named steps, in this
 # script's order; the frontier is computed over those alone. A step whose
 # dependency is not selected is blocked, so a subset must carry its deps.
+# --only STEP (repeatable, or JOURNEY_ONLY_CLOSURE="STEP ..."): run those steps and exactly the steps
+# they depend on (the `run_step ID DEP...` lines below, transitively), nothing else: one red step re-run
+# on its own world in the minutes its spine takes, never the whole journey.
+# --keep-going (or JOURNEY_KEEP_GOING=1): a step whose dependency FAILED still runs, so one run reports
+# every failure instead of the first and its shadow; its detail names the failed dependencies, and a
+# step that then passes is still PASS (it asserted its own rows). J0 is the one exception: without the
+# world nothing can run, so a failed J0 blocks everything as before. A SKIPPED dependency still blocks.
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -106,7 +121,7 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
 . "$HERE/journey.d/lib/shortdir.sh"
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB JWF KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 # The two journeys (docs/JOURNEY.md "Two journeys"; DEMO-PREFIX lane L9). SPINE, the tree-neutral J0-J8
 # of the 2026-09-29 bake-off, runs in both. Every other step is in exactly one set:
 #   demo    what the public demo's surfaces need: the ssh shell, documents and the web, rooms, Hermes
@@ -117,7 +132,7 @@ STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K1
 # JOURNEY_SET=demo|kernel selects SPINE + that set (unset: every step). A step in no set, in two, or a
 # set naming no step refuses every run before anything starts: a new step must be placed.
 SPINE=(J0 J1 J2 J3 J4 J5 J6 J7 J8)
-DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+DEMO_STEPS=(J12X JSERVE THIN KC KT K10 KIX K10C JLI KTPL JPRIV1 JCHAT J14 J17 K12C K12T K12M K12H K12R K12I WEB JWF J12 J12W JNAMES JDV JPD M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JESC JFLEETIN JSLK JR17 JAUDIT)
 KERNEL_STEPS=(P7KR G K4 KBW JJ K11 KCH KF KH JMKT K12N K12E KW J15 JN2 JN3 JN3P JN5 JSYNC BD J13 JJOB1 JJOB JJOBM KCL J12A JINSPECT JLS)
 journey_sets_check() {
   local id n bad=""
@@ -144,6 +159,32 @@ if [ "${1:-}" = --list-set ]; then
   esac
   exit 0
 fi
+ONLY_CLOSURE=${JOURNEY_ONLY_CLOSURE:-}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --only) [ "$#" -ge 2 ] || { echo "journey: --only needs a step id" >&2; exit 2; }; ONLY_CLOSURE="$ONLY_CLOSURE $2"; shift 2 ;;
+    --keep-going) JOURNEY_KEEP_GOING=1; shift ;;
+    *) break ;;
+  esac
+done
+JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-0}
+if [ -n "${ONLY_CLOSURE// /}" ]; then
+  [ -z "${JOURNEY_STEPS:-}${JOURNEY_SET:-}" ] || { echo "journey: give --only, JOURNEY_SET or JOURNEY_STEPS, not two" >&2; exit 2; }
+  # The dependency graph is this script's own `run_step` lines: read, never restated.
+  declare -A DEPS_OF=()
+  while read -r _ id deps; do DEPS_OF[$id]=$deps; done < <(grep -E '^run_step [A-Z0-9]+' "$SELF")
+  declare -A WANT=()
+  read -r -a pending <<<"$ONLY_CLOSURE"
+  while [ "${#pending[@]}" -gt 0 ]; do
+    id=${pending[0]}; pending=("${pending[@]:1}")
+    [ -n "${WANT[$id]:-}" ] && continue
+    [ "${DEPS_OF[$id]+set}" = set ] || { echo "journey: --only names unknown step $id" >&2; exit 2; }
+    WANT[$id]=1; read -r -a more <<<"${DEPS_OF[$id]}"; pending+=("${more[@]}")
+  done
+  JOURNEY_STEPS=""
+  for id in "${STEPS[@]}"; do [ -n "${WANT[$id]:-}" ] && JOURNEY_STEPS="$JOURNEY_STEPS $id"; done
+  echo "journey: --only$ONLY_CLOSURE runs$JOURNEY_STEPS" >&2
+fi
 if [ -n "${JOURNEY_SET:-}" ]; then
   [ -z "${JOURNEY_STEPS:-}" ] || { echo "journey: give JOURNEY_SET or JOURNEY_STEPS, not both" >&2; exit 2; }
   case "$JOURNEY_SET" in
@@ -153,7 +194,7 @@ if [ -n "${JOURNEY_SET:-}" ]; then
   esac
 fi
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 MANIFEST.json NEW_RUN_ROOT | $0 --list-set demo|kernel|all" >&2
+  echo "usage: $0 [--only STEP]... [--keep-going] MANIFEST.json NEW_RUN_ROOT | $0 --list-set demo|kernel|all" >&2
   exit 2
 fi
 MANIFEST=$1
@@ -331,6 +372,10 @@ TITLE[JROTL]="key rotation through the generic Receiver: a lost reply is found b
 TITLE[JRLANE]="refusal lane: authenticated refusals close the signer's lane, wrongly signed ones cost nothing, another subject stays open"
 TITLE[JGATE]="gateway law: an ordinary subject's signed direct call on the gateway's content target is refused, the target unchanged"
 TITLE[JDISCLOSE]="disclosure: a narrowed refusal, authentication before any target, the installer's lockout, eight client fixes"
+TITLE[JESC]="escrow: enc-public, keygen --escrow-to-sponsor and escrow-recover (wrong subject and wrong sponsor refused); the Host answers a read signed with the recovered key as the friend"
+TITLE[JFLEETIN]="fleet incoming: the helm adapter's incoming ledger (Host op 180) holds exactly the confirmed transfer and topic send, not the refused overdraw"
+TITLE[JSLK]="shell path of doors 11 and 12: a law installed, a write refused by its clause, the law revised, a kind defined and revised, the built-in story sealed with a legal move admitted and the impossible one refused"
+TITLE[JR17]="R17 verbs through mini shell: home, key, app, adopt-next-key and hermes each end in the Host's decision or a named refusal"
 TITLE[JAUDIT]="mini store audit: the Store re-derived from genesis, then every ingress re-admitted; one flipped byte of a non-head record in a copy is refused naming its height"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
@@ -449,7 +494,7 @@ frontier() {
 }
 
 # run_step ID DEP... : a step whose dependency did not pass is FAIL (blocked).
-# The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
+# The operator's checkpoint timer (the deployed certifier (dregg-infra edge/mini/mini-certify.timer)), run between steps: certify
 # the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
 # the journey's Store (L = 256) never reaches its tail bound between certifies.
 # Every certify, and every skip, is logged to $S/certify.log; a confirmed
@@ -492,7 +537,12 @@ run_step() {
     result_json "$(frontier)"
     return
   fi
+  local failed_deps=""
   for dep in "$@"; do
+    if [ "${STATUS[$dep]:-}" != PASS ] && [ "$JOURNEY_KEEP_GOING" = 1 ] && [ "$dep" != J0 ] && [ "${STATUS[$dep]:-}" != SKIPPED ]; then
+      failed_deps="$failed_deps $dep"
+      continue
+    fi
     if [ "${STATUS[$dep]:-}" != PASS ]; then
       STATUS[$id]=FAIL; WALL[$id]=0.000; ART[$id]=""; DET[$id]="blocked: $dep did not pass"
       printf '%s\t%s\t%s\t%s\t%s\n' "$id" FAIL 0.000 "" "${DET[$id]}" >>"$TSV"
@@ -522,6 +572,7 @@ run_step() {
     5) STATUS[$id]=UNCONFIGURED ;;
     *) STATUS[$id]=FAIL ;;
   esac
+  [ -z "$failed_deps" ] || DETAIL="(kept going past failed:$failed_deps) $DETAIL"
   WALL[$id]=$(elapsed "$t0" "$t1"); ART[$id]=$ARTIFACT; DET[$id]=$DETAIL
   printf '%s\t%s\t%s\t%s\t%s\n' "$id" "${STATUS[$id]}" "${WALL[$id]}" "$ARTIFACT" "$DETAIL" >>"$TSV"
   echo "STEP $id ${STATUS[$id]} ${WALL[$id]}s $DETAIL" >&2
@@ -1115,6 +1166,10 @@ step_JRLANE() { hook jrefusal-lane "wrongly signed and unsigned calls are refuse
 step_JGATE() { hook jgateway "the gateway content target under request/subject == gateway: the gateway appends; an ordinary subject with a valid observe+mutate grant signs a direct append through its own workspace and is refused law-denied, the Host's read of the target unchanged (cv 01a1177f-1ba6)"; }
 step_JDISCLOSE() { hook jdisclose "a --fields 1 guest is refused naming no clause over field 2 and never its value, with one frame whatever field 2 holds, while the owner keeps clause and value; a never-enrolled key gets one frame at challenge for a present and an absent target; a law its installer can never pass is refused without --i-lock-myself-out, sealed keeps --allow-unsatisfiable, a law it can never change warns; can --all, room ls, inspect law, help forget, a stale delegation hint, tail members, a sealed doc read back and sealed by cell (lane fix-disclose)" shell; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
+step_JESC() { hook jescrow "the escrow loop closes: the sponsor recovers the friend's key from the escrow, and the Host answers a signed read made with it as the friend (R8)"; }
+step_JFLEETIN() { hook jfleet-incoming "fleet-sign incoming (the helm adapter) lists exactly the accepted fleet turns that paid the profile: the transfer and the topic send, not the refused overdraw (R10, Host op 180)"; }
+step_JSLK() { hook jstorylaw "shell path of the tour's doors 11 and 12: law, kind and the built-in story with the Host's admitted / refused-by-clause outcomes named (DEMO A7, A8)" shell; }
+step_JR17() { hook jr17 "home, key, app, adopt-next-key and hermes through mini shell, each ended by the Host's decision or a named refusal (R17)" shell; }
 step_JAUDIT() { hook jstoreaudit "mini store audit re-derives the Store from genesis (chain, tags, accumulator, spent map, checkpoints, head root) then re-admits every ingress and exits 0 printing both lines; one flipped byte of a non-head record in a copy exits 1 naming its height (lane plat-store-audit)"; }
 step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
@@ -1203,6 +1258,10 @@ run_step JROTL J1
 run_step JRLANE J1
 run_step JGATE J4
 run_step JDISCLOSE J0
+run_step JESC J0
+run_step JFLEETIN J0
+run_step JSLK J0
+run_step JR17 J0
 run_step JAUDIT J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2

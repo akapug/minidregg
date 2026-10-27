@@ -27,7 +27,7 @@ DEPENDENCIES = {
 BRIDGE_CONFIG = '''(apiPath = "/", viewInfo = (
   appTitle = (defaultText = "Oracle7"),
   permissions = [(name = "query", title = (defaultText = "Ask questions"),
-    description = (defaultText = "Use this appliance's shared conversation workspace"))],
+    description = (defaultText = "Use a session-isolated workspace on a bounded shared Oracle runtime"))],
   roles = [(title = (defaultText = "Researcher"),
     verbPhrase = (defaultText = "can ask questions"),
     description = (defaultText = "Ask questions and inspect this appliance"),

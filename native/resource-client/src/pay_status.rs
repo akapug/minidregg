@@ -1,7 +1,9 @@
 //! Typed decoder for the exact Host.PayClaims status181 JSON projection.
 //! Payment state comes only from the exact source index. Membership, a journal
 //! marker, or matching text never substitutes for a consumed origin.
-use crate::{decode_hex, hex, Result};
+use crate::{hex, Result};
+#[cfg(test)]
+use crate::decode_hex;
 use serde_json::Value;
 use std::cmp::Ordering;
 
@@ -275,7 +277,7 @@ fn bytes(value: &Value, key: &str, max: usize) -> Result<Vec<u8>> {
             && mini_sdk::hex::is_lower(text),
         "paid status requires bounded lowercase hexadecimal",
     )?;
-    decode_hex(text)
+    mini_sdk::hex::decode(text).map_err(|e| e.0)
 }
 fn fixed<const N: usize>(value: &Value, key: &str) -> Result<[u8; N]> {
     bytes(value, key, N)?
@@ -285,10 +287,10 @@ fn fixed<const N: usize>(value: &Value, key: &str) -> Result<[u8; N]> {
 fn request_fixed<const N: usize>(value: &Value, key: &str) -> Result<[u8; N]> {
     let text = string(value, key)?;
     need(
-        text.len() == N * 2 && text.bytes().all(|b| b.is_ascii_hexdigit()),
+        mini_sdk::hex::is_canonical_len(text, N),
         "status request hexadecimal width",
     )?;
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| "status request hexadecimal width".into())
 }

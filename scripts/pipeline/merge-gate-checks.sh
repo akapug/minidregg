@@ -80,6 +80,12 @@ builders() {
   # plant (the follower skipping a failed guard) red at its recorded seed and step. Needs the world-sim
   # exe (exe-roots, just above, builds it). The nightly knob is in the script header.
   run world-sim       bash scripts/gates/check-world-sim .lake/build/bin/world-sim
+  # native/private-backend codec agreement: the two Lean fixture exes (exe-roots built them) emit the canonical
+  # frames and Plan; the Rust crate must decode and re-encode them, and refuse a flipped byte.
+  run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
+  # Generic Simplex (Kernel/GenericSimplex*): the harness, log-reopen and load programs exe-roots builds,
+  # run, each with its plant red (fixed timer, split tip, flipped journal bit). Seconds; header names them.
+  run generic-simplex bash scripts/gates/check-generic-simplex .lake/build/bin
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
@@ -121,11 +127,17 @@ readers() {
   run shell-paths     bash scripts/check-shell-paths.sh
   run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
   run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
+  # The story law files and Kernel/StoryLaw.lean (generated region) are the client's own generator output: build `mini` and
+  # require that `mini story-law` still produces exactly the embedded text (a stale embed is how a theorem
+  # about `law taleTable` stops being about the law `story seal` installs; the rfl in the build only holds
+  # the Lean side, this holds the Rust side).
+  run gen-storylaw    $SB bash -c 'cargo build --quiet --manifest-path native/resource-client/Cargo.toml --bin mini && python3 scripts/gen-storylaw.py --check --mini "$CARGO_TARGET_DIR/debug/mini"'
   run website         python3 website/gen-status.py --check
   # A generated fixture's authority (a hand-written file no generator writes) never changes in the same
   # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
   # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
   run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
+  run intent-vector-authority python3 scripts/pipeline/check-intent-vector-authority.py
   python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || echo "rust-rows RED (selector failed)" | tee -a "$S"
   cat "$L/gate-$TAG-rust-rows.txt"
   run rust-rows       $SB bash "$B/tmp-rust-rows-$TAG.sh"

@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use std::time::{Duration, Instant};
 
-const STATUS_OP: u8 = 181;
-const QUOTE_OP: u8 = 182;
+const STATUS_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_VIEW;
+const QUOTE_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_QUOTE;
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
@@ -18,19 +18,13 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("missing string {name}"))
 }
 fn number(text: &str, name: &str) -> Result<u64> {
-    let n = text
-        .parse::<u64>()
-        .map_err(|_| format!("{name} must be u64 decimal"))?;
-    if n.to_string() != text {
-        return Err(format!("{name} must be canonical decimal"));
-    }
-    Ok(n)
+    mini_sdk::decimal::parse(text).ok_or_else(|| format!("{name} must be a canonical u64 decimal"))
 }
 fn scalar(value: &Value, name: &str) -> Result<u64> {
     number(field(value, name)?, name)
 }
 fn fixed<const N: usize>(text: &str, name: &str) -> Result<[u8; N]> {
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{name} must be {N} bytes"))
 }
@@ -630,13 +624,14 @@ fn finish_detached(common: &Common, pin: &Pin, signing: &ed25519_dalek::SigningK
         "memo":memo,"enrolAddress":hex(&pin.context.recipient),"mint":hex(&pin.context.mint),"tokenProgram":hex(&pin.context.token_program),"login":pin.login,
         "enrolPin":pin.value,"quote":state["quote"].clone(),"sourceContext":state["sourceContext"].clone(),"amountAtomic":quote.split().amount_atomic.to_string(),
         "bootstrapUrl":common.bootstrap,"bootstrapMetadata":state["bootstrapMetadata"].clone(),
-        "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin,"sshSignature":"detached"});
+        "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin,"sshSignature":"detached",
+        "asOfHour":hour.to_string()});
     check_pins(common)?;
     save_payment(common, &record, initial)?;
     let _ = fs::remove_file(&state_path);
     println!("recipient {}", bs58::encode(pin.context.recipient).into_string());
     println!("amount {} atomic", quote.split().amount_atomic);
-    println!("expires at processing-chain hour {}", expected.expiry_hour);
+    println!("expires at processing-chain hour {} (now {hour})", expected.expiry_hour);
     println!("memo {memo}");
     println!("pay from your wallet; preflight the whole signed transaction, including wallet wrappers. No payment was submitted.");
     println!("then mini join --memo-version v2 --wait --dir {} --signature TX (with the same --host and --config)",common.directory.display());
@@ -1174,7 +1169,10 @@ mod tests {
         let base = format!("http://{}/mini/v2", listener.local_addr().unwrap());
         let thread = std::thread::spawn(move || {
             listener.set_nonblocking(true).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(8);
+            // The test ends the mock with `/stop`; this bound only reaps a mock whose test died first.
+            // It must outlast the test under a loaded box (an 8 s bound refused the test's own late
+            // requests on dregg-build: curl exit 7, then the wrong status), so it is far above any run.
+            let deadline = Instant::now() + Duration::from_secs(300);
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {

@@ -15,7 +15,6 @@ import Host.ProviderUsageAudit
 import Host.KeyRotationInspectionChecks
 import Host.ReceiptContinuityCheck
 
-import Host.ApplicationManagedPolicyAuthoringCheck
 
 import Host.CapacityJson  -- the declared envelope's JSON surface (18 Capacity lanes), one definition for the seat and activity authoring
 import Host.ObjectiveActivityJson  -- the kernel activity's JSON surface: command authoring, plan/ingress inspection, the public view (op 214), the activity artifact

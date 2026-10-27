@@ -9,43 +9,14 @@ use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io;
+use crate::canonical::{decimal, hex};
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(invalid("noncanonical source hex"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| invalid("source hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| invalid("source hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| invalid("noncanonical source hex"))
 }
 
 fn field<'a>(object: &'a Value, name: &str) -> io::Result<&'a str> {

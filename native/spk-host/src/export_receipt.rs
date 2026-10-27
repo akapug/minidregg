@@ -7,14 +7,12 @@ use crate::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io;
+use crate::canonical::hex;
 
 pub(crate) const CAPTURE_HEADER: &str = "x-mini-export-capture";
 const RECEIPT_HEADER: &str = "X-Mini-Export-Receipt";
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Reject an unsupported export request before any Mini or physical call.
@@ -55,10 +53,7 @@ pub(crate) fn requested(
         ));
     }
     let id = capture.ok_or_else(|| invalid("export capture route requires a capture identity"))?;
-    if id.len() != 32
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    if !crate::canonical::lower_hex_of(&id, 16)
     {
         return Err(invalid("invalid export capture identity"));
     }

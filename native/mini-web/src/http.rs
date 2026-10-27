@@ -208,6 +208,10 @@ fn decode(text: &str, plus_is_space: bool) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The gateway's escaper, the same function as the body's (`resource-client`
+/// `render::html::escape`; the two crates share no library, so `escapes_like_the_body` pins the
+/// same vectors): the five metacharacters, and controls, bidirectional overrides/isolates and
+/// invisible separators made visible.
 pub fn html_escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -217,10 +221,21 @@ pub fn html_escape(text: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&#39;"),
+            '\n' | '\r' | '\t' => out.push(c),
+            '\u{7f}' => out.push('\u{2421}'),
+            c if (c as u32) < 0x20 => out.push(char::from_u32(0x2400 + c as u32).unwrap_or('\u{fffd}')),
+            '\u{80}'..='\u{9f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200b}' | '\u{2060}' | '\u{feff}' => {
+                out.push_str(&format!("[U+{:04X}]", c as u32))
+            }
             c => out.push(c),
         }
     }
     out
+}
+
+/// A same-origin path a form, a link or a redirect may name (`/…`, never `//…` or `/\…`).
+pub fn same_origin_path(target: &str) -> bool {
+    target.starts_with('/') && !target.starts_with("//") && !target.starts_with("/\\") && !target.chars().any(|c| c.is_control() || c == '\\')
 }
 
 #[derive(Debug, Clone)]
@@ -355,5 +370,23 @@ mod tests {
         assert_eq!(parsed.body, b"<p>hi</p>");
         assert_eq!(html_escape("<a href=\"x\">&'</a>"), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;");
         assert_eq!(percent_decode("a%2Fb+c%zz"), "a/b c%zz");
+    }
+
+    #[test]
+    fn escapes_like_the_body() {
+        for (input, want) in [
+            ("<script>alert(1)</script>", "&lt;script&gt;alert(1)&lt;/script&gt;"),
+            ("\"><img src=x onerror=alert(1)>", "&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"),
+            ("evil\u{202e}gnp.exe", "evil[U+202E]gnp.exe"),
+            ("ali\u{200b}ce", "ali[U+200B]ce"),
+            ("\u{1b}]52;c;x\u{7}", "\u{241b}]52;c;x\u{2407}"),
+            ("a\nb\tc", "a\nb\tc"),
+            ("\u{200d}\u{200f}", "\u{200d}\u{200f}"),
+        ] {
+            assert_eq!(html_escape(input), want, "{input:?}");
+        }
+        for (path, ok) in [("/doc/a", true), ("/", true), ("//evil.example", false), ("/\\evil", false), ("javascript:x", false), ("https://evil.example", false), ("/a\r\nSet-Cookie: x", false)] {
+            assert_eq!(same_origin_path(path), ok, "{path:?}");
+        }
     }
 }

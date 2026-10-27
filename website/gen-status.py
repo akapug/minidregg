@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate website/status.html from the "Honest state" section of README.md.
+"""Generate website/status.html from the "What is live" section of README.md.
 
     python3 website/gen-status.py           write website/status.html
     python3 website/gen-status.py --check   exit 1 if status.html is not what the README
@@ -27,7 +27,7 @@ README = ROOT / "README.md"
 OUT = SITE / "status.html"
 BLOB = "https://github.com/emberian/minidregg/blob/main/"
 TREE = "https://github.com/emberian/minidregg/tree/main/"
-HEADINGS = ["Component", "Evidence", "Boundary"]
+HEADINGS = ["surface", "state", "evidence"]
 
 
 class Refuse(Exception):
@@ -37,9 +37,9 @@ class Refuse(Exception):
 def section(readme: str) -> list[str]:
     lines = readme.splitlines()
     try:
-        start = lines.index("## Honest state")
+        start = lines.index("## What is live")
     except ValueError:
-        raise Refuse('README.md has no "## Honest state" heading')
+        raise Refuse('README.md has no "## What is live" heading')
     body = []
     for line in lines[start + 1:]:
         if line.startswith("## "):
@@ -102,7 +102,7 @@ def render_body(readme: str) -> str:
         else:
             para.append(line.strip())
     if len(table) < 3:
-        raise Refuse("the Honest state section has no table with at least one row")
+        raise Refuse("the What is live section has no table with at least one row")
     head = cells(table[0])
     if head != HEADINGS:
         raise Refuse(f"table headings are {head}, expected {HEADINGS}")
@@ -139,13 +139,13 @@ def render(readme: str, index: str) -> str:
     header = header.replace('<a href="status.html">', '<a href="status.html" aria-current="page">')
     header = re.sub(r"<title>[^<]*</title>", "<title>Status · Mini</title>", header)
     header = re.sub(r'<meta name="description" content="[^"]*">',
-                    '<meta name="description" content="The state of each Mini component, by evidence class, '
-                    'generated from the Honest state table of the repository README.">', header)
+                    '<meta name="description" content="What is live on the Mini demo box, '
+                    'generated from the What is live table of the repository README.">', header)
     intro = (
         "<h1>Status</h1>\n"
-        "<p class=\"lede\">Each component of Mini, graded by the strongest evidence for it.</p>\n"
-        "<p class=\"small muted\">This page is generated from the Honest state table of the "
-        f"repository <a href=\"{BLOB}README.md#honest-state\">README</a> by "
+        "<p class=\"lede\">What is live on the demo box and what is not, each row with the run it rests on.</p>\n"
+        "<p class=\"small muted\">This page is generated from the What is live table of the "
+        f"repository <a href=\"{BLOB}README.md#what-is-live\">README</a> by "
         "<code>website/gen-status.py</code>, and a gate fails when it is stale. "
         "Edit the README, not this page.</p>\n"
     )
@@ -178,7 +178,7 @@ def check() -> int:
         red += 1
     # Control 1: a changed table cell must change the page.
     lines = readme.splitlines()
-    first_row = lines.index("## Honest state") + next(
+    first_row = lines.index("## What is live") + next(
         i for i, l in enumerate(section(readme)) if l.startswith("|")) + 3
     lines[first_row] = lines[first_row].replace(" |", " CONTROL-MUTATION |", 1)
     if "CONTROL-MUTATION" not in render("\n".join(lines), index):

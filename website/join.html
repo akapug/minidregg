@@ -4,78 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Join · Mini</title>
-<meta name="description" content="Get an account on the Mini demo box yourself, and what it means that everything there is world-readable.">
+<meta http-equiv="refresh" content="0; url=https://demo.dregg.online/join">
+<link rel="canonical" href="https://demo.dregg.online/join">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
-<header class="site">
-<div class="wrap wide">
-<a class="brand" href="index.html">Mini</a>
-<nav class="primary" aria-label="Site">
-<ul>
-<li><a href="index.html">Overview</a></li>
-<li><a href="language.html">Language</a></li>
-<li><a href="laws.html">Laws</a></li>
-<li><a href="architecture.html">Architecture</a></li>
-<li><a href="status.html">Status</a></li>
-<li><a href="join.html" aria-current="page">Join</a></li>
-<li><a href="https://github.com/emberian/minidregg">Source</a></li>
-</ul>
-</nav>
-</div>
-</header>
 <main id="main">
 <div class="wrap">
 <h1>Join</h1>
-<p class="lede">Get an account on the demo box yourself, at
-<a href="https://demo.dregg.online/join">demo.dregg.online/join</a>. No one needs to add you by hand.</p>
-<div class="note">
-<p><strong>Everything on this box is world-readable.</strong> Every member can read the whole demo
-Store, and your Mini signing key is held on the box (a hosted account): readable by the operator, by your
-own account and by no other member's. Keep nothing private or precious there.</p>
-</div>
-<p>Reading needs no account: <a href="https://demo.dregg.online/">demo.dregg.online</a> is the Mini
-application as the public reader sees it, the documents members chose to publish. With an account the
-same page is your workspace: documents, boards, rooms, apps, receipts, grants and laws, your keys, and
-a terminal running <code>mini shell</code>, in the browser or over SSH.</p>
-<ol>
-<li>Optionally make an SSH key: <code>ssh-keygen -t ed25519</code> (the paid route needs one; the free route does not).</li>
-<li>At <a href="https://demo.dregg.online/join">/join</a>, choose a name; paste the public half of an ssh
-key (<code>~/.ssh/id_ed25519.pub</code>) if you want ssh too, or give none and use the browser alone. Keep
-the status page it gives you: its address is your request's only key.</li>
-<li>Choose free (the box funds a small starting balance while it lasts) or pay (50 DREGG a week on
-Solana; your wallet, SSH key and account are then publicly linked on-chain).</li>
-<li>When the page says your account is ready, it shows two doors to the same account: a one-time link that
-opens your workspace in the browser (a session cookie, never a key), and
-<code>ssh -t mini-s-NAME@demo.dregg.online</code>, which opens the <code>mini&gt;</code> prompt. The guide is
-<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>.</li>
-<li>To use Mini from Discord, tick "link Discord" and type the code the page shows:
-<code>/mini line:link CODE</code>.</li>
-<li>To publish a document to the public reader, delegate <code>observe</code> on it
-(<code>delegate ID DOC PUBLIC observe 0</code>, <code>submit ID</code>, <code>publish ID</code>, or the
-Grants page); <code>revoke</code> takes it down.</li>
-</ol>
-
-<h2>What to expect</h2>
-<p>The demo is redeployed every few days and may be re-genesised: your SSH key stays, and everything
-you made is erased. FRIENDS.md lists what the shipped node has.</p>
-
-<h2>Contributing</h2>
-<p>Read the <a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>,
-<a href="https://github.com/emberian/minidregg/blob/main/AGENTS.md">AGENTS.md</a> and the
-<a href="https://github.com/emberian/minidregg/blob/main/docs/DEVELOPING.md">developer
-guide</a>. Nothing in Mini has users, so a format change is a rebuild: an old shape must
-refuse to load, and the commit says what it breaks.</p>
-
+<p>The join page is at <a href="https://demo.dregg.online/join">demo.dregg.online/join</a>.
+If you are not taken there, follow the link. The demo shuts down on 11 November 2026.</p>
+<p><a href="index.html">Back to the overview</a></p>
 </div>
 </main>
-<footer class="site">
-<div class="wrap wide">
-<p>Every claim here maps to a file at main
-(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
-The repository overrides this site.</p>
-</div>
-</footer>
 </body>
 </html>

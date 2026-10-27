@@ -135,7 +135,10 @@ def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
   absent := engine.absent
   cells := intent.writes.foldr (fun write table => table.insert write.cellId write.canonicalPostBytes)
     engine.cells
-  available := fun lane => engine.available lane - intent.exactCharge lane
+  -- Keep the ten remaining allowances as values. Retaining the subtraction
+  -- closure would re-evaluate every prior intent's charge on each later check.
+  available := (Charge.materialize fun lane =>
+    engine.available lane - intent.exactCharge lane).toCharge
   spentBefore := engine.spentBefore
   spent := intent.nullifiers.foldl (fun spent nullifier => spent.insert nullifier) engine.spent
   journal := Thunk.mk fun _ => (intent.transactionId, intent.erase) :: engine.journal.get
@@ -154,6 +157,13 @@ def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
       have differs' : (transactionId == intent.transactionId) = false := by simp [Ne.symm same]
       simp [differs, differs']
   historyRev := Thunk.mk fun _ => intent.erase.event :: engine.historyRev.get
+
+/-- Materializing the remaining budget preserves every lane, including exact
+exhaustion and natural-number subtraction at zero. -/
+theorem available_install (engine : Engine) (intent : DataIntent rootBytes) :
+    (engine.install rootBytes intent).available =
+      fun lane => engine.available lane - intent.exactCharge lane :=
+  Charge.materialize_eq _
 
 theorem get_foldr (writes : List DataWrite) (table : CellTable) (cellId : CellId) :
     (writes.foldr (fun write table => table.insert write.cellId write.canonicalPostBytes) table).get
@@ -209,6 +219,7 @@ theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
     congr 1
     all_goals first
       | exact rootsEq
+      | exact Charge.materialize_eq _
       | (funext nullifier
          show ((intent.nullifiers.foldl _ engine.spent).contains nullifier ||
            engine.spentBefore nullifier) = _

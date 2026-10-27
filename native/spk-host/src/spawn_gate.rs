@@ -68,11 +68,7 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
                 spec.program.file_name().and_then(OsStr::to_str),
                 Some("bwrap" | "mini-grain-bwrap")
             ))
-        || spec.sha256.len() != 64
-        || !spec
-            .sha256
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !crate::canonical::hex64(&spec.sha256)
         || spec.args.len() > MAX_BWRAP_ARGS
     {
         return Err(invalid("invalid pinned app launch shape"));

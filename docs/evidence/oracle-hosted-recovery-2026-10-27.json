@@ -1,0 +1,60 @@
+{
+  "protocol": "mini-oracle-hosted-recovery-evidence-v1",
+  "date": "2026-10-27",
+  "status": "Retained v5 stopped after a definite pre-submit birth refusal; parent error settlement pending. Fresh v7 not launched.",
+  "store": "d4090a0c4c356d31",
+  "request_id": "839a6731941b62b1179b4de9c076f0df",
+  "operation_id": 13,
+  "attempts": [
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r1",
+      "result": "Pre-upgrade binary custody refusal (Cargo artifact had two hardlinks); no native recovery invocation.",
+      "preservation_sha256": "7857517813a1bceb98ecedeb02ed6b04ddc9ec1e0d66cadd1ff11988e76c7fa6"
+    },
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r2",
+      "result": "One native recovery; original reserve lookup confirmed through the dedicated controller. Parent comparison refused because the client checked a nonexistent projection field. Store unchanged.",
+      "summary_sha256": "3e2f5abf64d9bb144d5813c48007084599e2f576b33691a3695b4d46013d4e21"
+    },
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r3",
+      "result": "One native recovery with corrected signed-parent comparison. Factory policy refused tool20011 at prepare, before birth submission. Tool attach/reserve/zero-charge settlement/disconnect were admitted as events41\u201344. Outer recovery still retained uncertainty and parent reserve1.",
+      "summary_sha256": "4a4aebc39b0945f8060fe75327ea076bd0d01d76fbe2036ee2d72d2beb94d89a"
+    }
+  ],
+  "current_state": {
+    "all_controller_units_stopped": true,
+    "connection": "fenced",
+    "next_operation_id": 47,
+    "parent_reserved": 1,
+    "tool_hold": null,
+    "birth_pending": null,
+    "born_resources": [],
+    "foreground_result": null,
+    "acknowledged": false,
+    "birth_attempt39_call_or_submit_marker": false,
+    "evidence": "Private operator export remains on build host; no keys or raw private export included here.",
+    "expanded_export_sha256": "f66e35349df3fb3226c2428aad46475436841396dece5b1ec60baab8de1d52ad",
+    "expanded_export_files": 644
+  },
+  "qualified_changes": {
+    "exporter": {
+      "source": "deploy/spk-host/controller-world.py",
+      "limits": "4096 files,1024 directories; unchanged32MiB total,8MiB/file,depth16 and custody checks",
+      "checks": "Linux3 boundary tests + installer companion pin passed; actual644-file stopped export succeeded. Earlier empty export preserved."
+    },
+    "fresh_factory": {
+      "source": "scripts/grain-birth/native-share-member.sh",
+      "behavior": "Preserves owner7 and worker8 exactly; explicit fresh allocation adds only tool subjects, requiring read or kernel grain-backed birth mode. Other roles receive no added permission.",
+      "source_sha256": "2cca47bd42984e05c2cf121b31831fcc00e4fa3b8526d3c9cd63baab6eeed048",
+      "composition": "dregg-build:/build/lanes/oracle-factory-policy/evidence-final:2 tests passed, actual full frozen339 source transformations and malformed allocation controls. Bootstrap was stubbed; no Store created.",
+      "evaluator": "hbox:/othersys/lanes/oracle-factory-policy:42 production Pred.eval guards passed on actual generated laws (original7/8; allocated20011 read/governed birth and bare refusal; unrelated9/20010/20012/20013 refusals).",
+      "qualification_sha256": "c1e9b7d25aee51916602dd137a9c7fb5610c9815be4970b588087fd7dde8cbda"
+    },
+    "fresh_browser": "Optional native web-session B with private loopback Caddy and exact Host/Origin;6 fixture tests passed, including real TLS\u2192Unix forwarding and bounded process cleanup. Actual native browser journey pending.",
+    "fresh_tenant_probe": "Optional same-grain A owner-query/agent-invoke request-ID collision and later agent replay;3 report/control tests passed. Actual pooled receiving evidence pending; does not claim same-principal coverage."
+  },
+  "next": "Qualify native definite-error completion, settle original parent and ordinarily acknowledge without retrying birth. Preserve v5 failure. Then launch separately reviewed fresh v7 with corrected source policy, actual agent discover/call/restart and browser/tenant checks.",
+  "package_v7_sha256": "e860a781dc8b897eadd002f28e388b799de92de0f019f1b357d140a9264a3888",
+  "scope": "No specialist panel scores in this infrastructure lane; no successful lifetime Oracle call claimed yet."
+}

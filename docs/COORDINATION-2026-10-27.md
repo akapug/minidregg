@@ -153,6 +153,22 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
 - **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
   the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
+- **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
+  `dregg-build` builds the Host closure for the integrator's cut; a lane elaborates per file (`lean-ask`,
+  `lake env lean`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
+  nanodregg's announced measurement windows: ember, 2026-10-27 evening, "USE all these machines while we
+  have them"), or on the Mac's warm `.lake`, or waits for the cut (2026-10-27
+  afternoon: four concurrent closures put the box at load 25 and a cut's host build was killed by
+  memory). A lane that needs a box closure asks the orchestrator for the slot after the cut's host stage.
+- **Design the whole change before the first build.** A Lean change that adds a kind, a field or a
+  frame is planned from the import graph and `rg` over every exhaustive site and downstream match first,
+  written as one commit, and built once; iterating "build, fix the next error the compiler names, build"
+  is the loop the audit measured. The same for a journey: one run with `JOURNEY_KEEP_GOING=1`, every red
+  read together, one fix set, one confirming run.
+- **Converge.** A lane whose piece is not on the opening contract (plan §1) stops after its current
+  piece with a state file in the tree and is resumed after the opening; the box, the cuts and the
+  orchestrator's attention go to the lanes that are. Every run's end stops its own servers (an EXIT trap
+  on the PID file); an idle `mini serve` from a finished run is a leak, not a fixture.
 
 ## 5. Boxes
 

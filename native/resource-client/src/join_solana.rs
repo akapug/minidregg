@@ -39,8 +39,8 @@ const SSH_BLOB_PREFIX: [u8; 19] = [
 const MEMO_LENGTH: usize = 400;
 /// The template's value: the operator has not published the enrollment address yet.
 const ADDRESS_PLACEHOLDER: &str = "EMBER_ENROL_ADDRESS";
-const QUOTE_OP: u8 = 121;
-const ENROLMENT_VIEW_OP: u8 = 112;
+const QUOTE_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_QUOTE;
+const ENROLMENT_VIEW_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_VIEW;
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 // ---------------------------------------------------------------- the memo (PayEnrolMemo)
@@ -272,7 +272,7 @@ fn load_pin(path: &Path) -> Result<Pin> {
 }
 
 fn fixed<const N: usize>(text: &str, field: &str) -> Result<[u8; N]> {
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{field} must be {N} bytes"))
 }
@@ -301,7 +301,7 @@ fn natural(value: &Value, name: &str) -> Result<u128> {
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
-        [255, body @ ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, body @ ..] => Err(format!(
             "Host refused op{operation}: {}",
             String::from_utf8_lossy(body)
         )),

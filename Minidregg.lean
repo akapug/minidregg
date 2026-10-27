@@ -31,10 +31,6 @@ import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
@@ -45,8 +41,6 @@ import Kernel.SealedMarket  -- SEALED-MARKET: the sealed-bid market law (the tem
 
 -- Previously orphaned general carry claims and their regression gates.
 import Theory.CheckedCarry
-import Compiler.LegacyStoreCarryChecks
-import Compiler.CarryConfigurationChecks
 import Verify.JointDecisionRecovery
 -- The Objective Bend front end's compiled vectors (the front end itself is reached through Host.Main).
 import Compiler.Sha256Vectors

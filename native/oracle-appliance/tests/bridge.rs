@@ -18,7 +18,7 @@ fn params(permissions: Vec<bool>) -> SessionParameters {
         display_name: "Fixture".into(),
         preferred_handle: "fixture".into(),
         permissions,
-        tab_id: vec![],
+        tab_id: [b"mini-session-v1\0".as_slice(), &1_u64.to_be_bytes(), &2_u64.to_be_bytes(), &3_u64.to_be_bytes()].concat(),
         base_path: "/".into(),
         user_agent: "fixture".into(),
         acceptable_languages: vec![],
@@ -119,6 +119,7 @@ async fn supervisor_preserves_full_evidence_and_error_status() {
                 let info = conn.get_view_info().await.unwrap();
                 assert_eq!(info.permission_names, vec!["query"]);
                 assert_eq!(info.app_title, "Oracle7");
+                assert_eq!(info.permissions[0].description.default_text, "Use a session-isolated workspace on a bounded shared Oracle runtime");
                 let session = conn.new_api_session(&params(vec![true])).await.unwrap();
                 let reply = dispatch_web(
                     &session,
@@ -435,4 +436,74 @@ async fn maximum_evidence_body_survives_supervisor() {
             http.await.unwrap();
         })
         .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authenticated_session_scopes_tenant_header_across_bridge_restart() {
+    tokio::task::LocalSet::new().run_until(async {
+        let input=br#"{"request_id":"same","conversation_id":"same","text":"test","tenant":"forged"}"#;
+        let mut observed=vec![];
+        for case in 0..5 {
+            let (port,http)=fixture(response(200,b"{}")).await;
+            let conn=connect(port,Duration::from_secs(2));
+            let mut p=params(vec![true]);
+            if case==1 {p.tab_id[39]=4;} // Same principal, another source session.
+            if case==2 {p.identity_id=[2;32];}
+            if case==3 {p.display_name="Untrusted new label".into();p.preferred_handle="other".into();}
+            let session=if case==4 {conn.new_web_session(&p).await.unwrap()} else {conn.new_api_session(&p).await.unwrap()};
+            dispatch_web(&session,&request(Method::Post,"query",input),MAX_REPLY,Duration::from_secs(3)).await.unwrap();
+            let bytes=http.await.unwrap();assert!(bytes.ends_with(input));
+            let head=std::str::from_utf8(&bytes[..bytes.windows(4).position(|w| w==b"\r\n\r\n").unwrap()]).unwrap();
+            let headers=head.lines().filter_map(|l|l.strip_prefix("X-Mini-Oracle-Tenant: ")).collect::<Vec<_>>();
+            assert_eq!(headers.len(),1);assert_eq!(headers[0].len(),64);observed.push(headers[0].to_owned());
+        }
+        assert_ne!(observed[0],observed[1]);assert_ne!(observed[0],observed[2]);
+        assert_eq!(observed[0],observed[3]);assert_eq!(observed[0],observed[4]);
+        use sha2::{Digest,Sha256};
+        let p=params(vec![true]);let mut h=Sha256::new();h.update(b"mini-oracle-tenant-v1\0");h.update(p.identity_id);h.update(p.tab_id);
+        let expected:String=h.finalize().iter().map(|b|format!("{b:02x}")).collect();
+        assert_eq!(observed[0],expected);
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn missing_source_binding_and_header_spoof_refuse_before_backend() {
+    tokio::task::LocalSet::new().run_until(async {
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let conn=connect(listener.local_addr().unwrap().port(),Duration::from_secs(2));
+        for which in 0..3 {
+            let mut p=params(vec![true]);
+            if which==0 {p.identity_id=[0;32];} else if which==1 {p.tab_id.clear();} else {p.tab_id[0]=b'x';}
+            assert!(conn.new_api_session(&p).await.is_err());
+        }
+        let session=conn.new_api_session(&params(vec![true])).await.unwrap();
+        let mut req=request(Method::Post,"query",b"{}");
+        req.context.additional_headers.push(minidregg_spk_rpc::Header {name:"x-mini-oracle-tenant".into(),value:"a".repeat(64)});
+        assert!(dispatch_web(&session,&req,MAX_REPLY,Duration::from_secs(3)).await.is_err());
+        req.context.additional_headers[0].name="x-csrftoken".into();
+        let response=dispatch_web(&session,&req,MAX_REPLY,Duration::from_secs(3)).await.unwrap();
+        assert_eq!(status(&response),400);
+        assert!(tokio::time::timeout(Duration::from_millis(30),listener.accept()).await.is_err());
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn browser_root_and_identity_encoding_do_not_require_backend() {
+    tokio::task::LocalSet::new().run_until(async {
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let conn=connect(listener.local_addr().unwrap().port(),Duration::from_secs(2));
+        let session=conn.new_web_session(&params(vec![true])).await.unwrap();
+        let mut req=request(Method::Get,"",&[]);
+        req.context.accept=vec![("text/html".into(),1000),("*/*".into(),800)];
+        req.context.accept_encoding=vec![("gzip".into(),1000),("br".into(),1000)];
+        let reply=dispatch_web(&session,&req,MAX_REPLY,Duration::from_secs(2)).await.unwrap();
+        match reply.result {WebResult::Content {mime_type,body,..}=>{
+            assert_eq!(mime_type,"text/html; charset=utf-8");
+            assert!(String::from_utf8(body).unwrap().contains("Oracle"));
+        },other=>panic!("unexpected root response: {other:?}")}
+        req.context.accept_encoding=vec![("identity".into(),0),("*".into(),1000)];
+        let reply=dispatch_web(&session,&req,MAX_REPLY,Duration::from_secs(2)).await.unwrap();
+        assert_eq!(status(&reply),406);
+        assert!(tokio::time::timeout(Duration::from_millis(30),listener.accept()).await.is_err());
+    }).await;
 }

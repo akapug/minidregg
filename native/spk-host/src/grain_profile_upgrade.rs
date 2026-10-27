@@ -2,7 +2,8 @@
 //! a portable history proof. Immutable profiles retain the complete old custody;
 //! the only changes are explicitly pinned image/config fields and the stable
 //! genesis config hash (the profile lineage). The Store key is Mini's
-//! `storeTag`, unchanged by an upgrade because the genesis seed is.
+//! `storeTag`, unchanged by an upgrade because the genesis seed and the Store
+//! root are.
 use super::*;
 use crate::dispatch_author::FixedAuthoring;
 use std::os::fd::AsRawFd;

@@ -118,22 +118,55 @@ confirmed() {
 service_up() {
   name=$1 socket=$2 mode=$3
   pidfile=$RUN/sock/$name.pid
+  service_binary=$MINI controller_uid=
+  if [ "$mode" = serve-public-proxy ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+    # Only the fixed installer registration selects a distinct public listener.
+    # The ordinary clients and the private operator service keep their pins.
+    jq -e --arg socket "$socket" --arg root "$GRAINS_ROOT/controller/public-listener/mini" \
+      --argjson operator "$(id -u)" '
+      .publicListener.socket == $socket and .publicListener.binary == $root and
+      .publicListener.operatorUid == $operator and
+      (.publicListener.controllerUid | type == "number" and . > 0 and floor == .) and
+      (.publicListener.binarySha256 | test("^[0-9a-f]{64}$"))' "$SPK_PUBLIC_LISTENER_RECEIPT" >/dev/null ||
+      fail 'public listener registration differs'
+    service_binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+    controller_uid=$(jq -er .publicListener.controllerUid "$SPK_PUBLIC_LISTENER_RECEIPT")
+    [ -f "$service_binary" ] && [ ! -L "$service_binary" ] &&
+      [ "$(stat -c '%u:%h' "$service_binary")" = 0:1 ] &&
+      [ "$(sha "$service_binary")" = "$(jq -er .publicListener.binarySha256 "$SPK_PUBLIC_LISTENER_RECEIPT")" ] ||
+      fail 'public listener registered binary differs'
+  fi
+  service_pin=$(printf '%s\n' "$mode" "$service_binary" "$(sha "$service_binary")" "$controller_uid" | sha256sum | cut -d ' ' -f 1)
   if [ -S "$socket" ] && [ -s "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     # Do not accept the old independent public native session as this proxy.
     [ -s "$pidfile.mode" ] && [ "$(cat "$pidfile.mode")" = "$mode" ] ||
       fail "$name service mode differs; retain this fixture and use a fresh one"
+    [ -s "$pidfile.pin" ] && [ "$(cat "$pidfile.pin")" = "$service_pin" ] || fail "$name live service pin differs"
+    service_identity check "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary" ||
+      fail "$name live process/socket identity differs"
     return 0
   fi
   mkdir -p -m 700 "${socket%/*}"
   rm -f "$socket"
+  if [ -f "$pidfile.identity.json" ]; then
+    archived_identity=$pidfile.identity.$(sha "$pidfile.identity.json").json
+    if [ -e "$archived_identity" ]; then
+      cmp "$pidfile.identity.json" "$archived_identity" || fail 'prior service identity archive differs'
+      rm "$pidfile.identity.json"
+    else
+      mv "$pidfile.identity.json" "$archived_identity"
+    fi
+  fi
   case "$mode" in
     serve-operator)
       set -- "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$socket" ;;
     serve-public-proxy)
-      set -- "$MINI" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG" ;;
+      set -- "$service_binary" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG"
+      [ -z "$controller_uid" ] || set -- "$@" --controller-uid "$controller_uid" ;;
     *) fail "unsupported fixture service mode $mode" ;;
   esac
   printf '%s\n' "$mode" >"$pidfile.mode"
+  printf '%s\n' "$service_pin" >"$pidfile.pin"
   setsid "$@" >"$RUN/sock/$name.log" 2>&1 </dev/null &
   echo "$!" >"$pidfile"
   tick=0
@@ -142,6 +175,43 @@ service_up() {
     tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "$name socket timeout"
     sleep 0.5
   done
+  service_identity capture "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary"
+}
+
+service_identity() {
+  python3 - "$@" <<'PYSERVICE'
+import hashlib,json,os,pathlib,signal,stat,sys
+action,record,pid,socket,binary=sys.argv[1:]
+p=pathlib.Path('/proc')/pid; s=pathlib.Path(socket); record=pathlib.Path(record)
+def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+if action in ('capture','check','stop'):
+    pidfd=None
+    if action=='stop':
+        try: pidfd=os.pidfd_open(int(pid))
+        except ProcessLookupError: raise SystemExit(0)
+    fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+    sm=s.lstat()
+    assert p.stat().st_uid == os.getuid() and stat.S_ISSOCK(sm.st_mode) and sm.st_uid == os.getuid()
+    value={'pid':int(pid),'startTicks':fields[19], 'executableSha256':digest(p/'exe'),
+           'socket':str(s),'socketDevice':sm.st_dev,'socketInode':sm.st_ino}
+    assert value['executableSha256']==digest(pathlib.Path(binary))
+    if action=='capture': record.write_text(json.dumps(value,sort_keys=True)+'\n')
+    else: assert value==json.loads(record.read_bytes())
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd,signal.SIGTERM)
+        os.close(pidfd)
+else:
+    value=json.loads(record.read_bytes())
+    assert value['pid']==int(pid) and value['socket']==str(s)
+    if p.exists():
+        fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+        assert fields[19]!=value['startTicks'] or fields[0]=='Z', 'recorded service remains alive'
+    if s.exists():
+        sm=s.lstat()
+        assert stat.S_ISSOCK(sm.st_mode) and sm.st_uid==os.getuid()
+        assert (sm.st_dev,sm.st_ino)==(value['socketDevice'],value['socketInode']), 'socket replacement refused'
+        s.unlink()
+PYSERVICE
 }
 
 services() {
@@ -157,7 +227,25 @@ stop_services() {
   for name in participant operator; do
     pidfile=$RUN/sock/$name.pid
     [ -s "$pidfile" ] || continue
-    kill "$(cat "$pidfile")" 2>/dev/null || :
+    if [ -f "$pidfile.identity.json" ]; then
+      binary=$MINI
+      if [ "$name" = participant ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+        binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+      fi
+      if kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        service_identity stop "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$binary" ||
+          fail "$name stop identity differs"
+      fi
+    else
+      kill "$(cat "$pidfile")" 2>/dev/null || :
+    fi
+    if [ -f "$pidfile.identity.json" ]; then
+      tick=0
+      until service_identity remove-stale "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$MINI" 2>/dev/null; do
+        tick=$((tick+1)); [ "$tick" -lt 100 ] || fail "$name stop/owned socket cleanup timeout"
+        sleep .1
+      done
+    fi
     rm -f "$pidfile"
   done
 }
@@ -342,6 +430,14 @@ delegate_observe() (
 # same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
+  expected_host=grain.test
+  if [ "$label" = b ] && [ -n "${GRAIN_EXPECTED_HOST_B:-}" ]; then
+    expected_host=$GRAIN_EXPECTED_HOST_B
+    case "$expected_host" in localhost:*) ;; *) fail "browser-B expected host must be localhost with an explicit port" ;; esac
+    host_port=${expected_host#localhost:}
+    case "$host_port" in ''|0*|*[!0-9]*) fail "browser-B port must be canonical decimal" ;; esac
+    [ "$host_port" -ge 1024 ] && [ "$host_port" -le 65535 ] || fail "browser-B port out of range"
+  fi
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
     "$EV/${label%[0-9]}-app-author/source.json")
@@ -405,11 +501,11 @@ share() (
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
   case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
-  jq -n --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
+  jq -n --arg host "$expected_host" --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
     --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
-    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
+    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:$host,
      displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
@@ -526,10 +622,11 @@ enroll() (
 # (curl header arguments, one per line): the API bearer, or the browser
 # session cookie the bootstrap would set (the operator owns the route dir).
 cred() {
+  expected_host=$(jq -er .expectedHost "$2/custodian.json")
   case "$1" in
     api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
     web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
-      -H "Origin: https://grain.test" ;;
+      -H "Origin: https://$expected_host" ;;
     *) echo "unknown route kind $1" >&2; return 1 ;;
   esac
 }
@@ -539,14 +636,15 @@ cred() {
 http_post() (
   label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Host: $expected_host" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # One authenticated request through the resident's route: the resident asks
@@ -554,13 +652,14 @@ http_post() (
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
   dir=$STATE/apps/$app/routes/${5:-owner-$kind}
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -H "Host: $expected_host" "$@" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # floor APP: the M11 floor as the running app sees it. Every process in the

@@ -312,17 +312,22 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"{action}\">{hidden}<input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
         escape(&alt.literals()),
     );
-    let _ = name;
+    // Each form's fields carry ids unique on the page (a verb renders one form per
+    // alternative, and the tour embeds several verbs' forms on one page), so a
+    // `label for` always resolves to its own field; the `name` stays positional
+    // (`a{i}`): the assembler reads it.
+    let prefix = format!("{name}-{index}");
     for (i, tok) in alt.tokens.iter().enumerate() {
         let field = format!("a{i}");
+        let id = format!("{prefix}-{i}");
         match tok {
             Tok::Lit(_) => {}
-            Tok::Arg { name, optional, kind } => out.push_str(&input(&field, name, *optional, kind)),
+            Tok::Arg { name, optional, kind } => out.push_str(&input(&id, &field, name, *optional, kind)),
             Tok::Flag { name, value: None, optional } => {
-                out.push_str(&format!("<label class=\"check\"><input type=\"checkbox\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
+                out.push_str(&format!("<label class=\"check\" for=\"flag-{id}\"><input type=\"checkbox\" id=\"flag-{id}\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
             }
             Tok::Flag { name, value: Some((placeholder, kind)), optional } => {
-                out.push_str(&input(&field, &format!("{name} {placeholder}"), *optional, kind));
+                out.push_str(&input(&id, &field, &format!("{name} {placeholder}"), *optional, kind));
             }
         }
     }
@@ -331,27 +336,29 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         None => alt.proposes(operation),
     };
     if proposes {
-        out.push_str("<label class=\"check\"><input type=\"checkbox\" name=\"submit\" value=\"on\" checked> and <code>submit ID</code> at once</label>");
+        out.push_str(&format!("<label class=\"check\" for=\"{prefix}-submit\"><input type=\"checkbox\" id=\"{prefix}-submit\" name=\"submit\" value=\"on\" checked> and <code>submit ID</code> at once</label>"));
     }
     out.push_str("</div><p><button>Run</button></p></form></section>\n");
     out
 }
 
-fn input(field: &str, label: &str, optional: bool, kind: &Kind) -> String {
+/// One field of a derived form: labelled by the grammar leaf's argument name (and kind, as the
+/// placeholder shows), with a page-unique `id` so the label resolves to this field and no other.
+fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind) -> String {
     let req = if optional { "" } else { " required" };
     let shown = format!("{}{}", escape(label), if optional { " <span class=note>(optional)</span>" } else { "" });
     match kind {
-        Kind::Text => format!("<label for=\"{field}\">{shown}</label><textarea id=\"{field}\" name=\"{field}\" maxlength=\"4096\"{req}></textarea>"),
+        Kind::Text => format!("<label for=\"{id}\">{shown}</label><textarea id=\"{id}\" name=\"{field}\" maxlength=\"4096\"{req}></textarea>"),
         Kind::Choice(options) => format!(
-            "<label for=\"{field}\">{shown}</label><select id=\"{field}\" name=\"{field}\">{}{}</select>",
+            "<label for=\"{id}\">{shown}</label><select id=\"{id}\" name=\"{field}\">{}{}</select>",
             if optional { "<option value=\"\">—</option>" } else { "" },
             options.iter().map(|o| format!("<option>{}</option>", escape(o))).collect::<String>()
         ),
-        Kind::Ref => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}>"),
-        Kind::Id => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
-        Kind::Number => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
-        Kind::Word => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\"{req}>"),
-        Kind::Rest => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
+        Kind::Ref => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}>"),
+        Kind::Id => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
+        Kind::Number => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
+        Kind::Word => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\"{req}>"),
+        Kind::Rest => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
     }
 }
 
@@ -578,6 +585,79 @@ mod tests {
         assert!(verbs > 60, "{verbs} verbs");
     }
 
+    /// The tags of one kind in generated HTML: `<input …>`, `<select …>`, whole opening tags.
+    fn tags(html: &str, kind: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = 0;
+        while let Some(start) = html[at..].find(&format!("<{kind}")) {
+            let start = at + start;
+            let end = start + html[start..].find('>').unwrap_or(html[start..].len());
+            out.push(html[start..=end].to_owned());
+            at = end + 1;
+        }
+        out
+    }
+
+    /// `attr="value"` of one tag, unescaped-enough for ids and labels (ids are `[a-z0-9-]`).
+    fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+        let marker = format!("{name}=\"");
+        let start = tag.find(&marker)? + marker.len();
+        let end = tag[start..].find('"')? + start;
+        Some(&tag[start..end])
+    }
+
+    /// Every leaf form of every verb labels its fields and holds page-unique ids: the
+    /// accessibility contract of the derived forms, checked at the one place they render
+    /// (a `label for` resolving past its own form is the failure this catches).
+    #[test]
+    fn web_leaf_forms_label_every_field() {
+        let mut verbs = 0;
+        let mut forms = 0;
+        let mut controls = 0;
+        for v in crate::shell::command_catalog() {
+            verbs += 1;
+            let alts = alternatives_of(v.name, v.usage);
+            // The page a verb renders: one form per alternative, concatenated.
+            let page: String = alts
+                .iter()
+                .enumerate()
+                .map(|(i, alt)| form(v.name, i, alt, v.operation, &format!("/verb/{}", v.name), ""))
+                .collect();
+            assert!(!page.is_empty(), "{} renders no form", v.name);
+            forms += alts.len();
+            // Every id (fields, checkboxes, the submit box) appears once on the page.
+            let mut ids: Vec<String> = Vec::new();
+            for tag in ["input", "select", "textarea", "datalist"].iter().flat_map(|k| tags(&page, k)) {
+                if let Some(id) = attr(&tag, "id") {
+                    ids.push(id.to_owned());
+                }
+            }
+            let mut sorted = ids.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), ids.len(), "{}: duplicate field ids on one page", v.name);
+            let label_fors: Vec<String> = tags(&page, "label")
+                .iter()
+                .filter_map(|label| attr(label, "for").map(str::to_owned))
+                .collect();
+            for tag in ["input", "select", "textarea"].iter().flat_map(|k| tags(&page, k)) {
+                if attr(&tag, "type") == Some("hidden") {
+                    continue; // hidden fields carry no meaning to label
+                }
+                controls += 1;
+                let labelled = attr(&tag, "aria-label").is_some_and(|a| !a.is_empty())
+                    || attr(&tag, "id").is_some_and(|id| label_fors.iter().any(|f| f == id));
+                assert!(labelled, "{}: unlabelled control: {tag}", v.name);
+            }
+            // Every `label for` names exactly one field of this page and says something.
+            for id in &label_fors {
+                let named = ids.iter().filter(|x| *x == id).count();
+                assert_eq!(named, 1, "{}: label for={id} names {named} fields", v.name);
+            }
+        }
+        assert!(verbs >= 60 && forms >= 200 && controls > 500, "{verbs} verbs, {forms} forms, {controls} controls");
+    }
+
     #[test]
     fn grammar_shapes_render_and_assemble() {
         let alts = alternatives("delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST");
@@ -614,6 +694,15 @@ mod tests {
         assert!(!transition_of("doc", doc.usage, doc.operation, show, "doc show"), "doc show is a read");
         assert!(transition_of("doc", doc.usage, doc.operation, append, "doc append"), "doc append proposes");
         assert_eq!(alts.len(), crate::shell_grammar::DOC.leaves.len(), "one form per grammar leaf");
+        // `bend`: one derived form per leaf; publish and run are transitions, show a read.
+        let bend = crate::shell::command_catalog().find(|v| v.name == "bend").expect("the shell has bend");
+        let bends = alternatives_of("bend", bend.usage);
+        assert_eq!(bends.iter().map(|a| a.literals()).collect::<Vec<_>>(), ["bend publish", "bend run", "bend lookup", "bend retry", "bend show"]);
+        assert_eq!(bends.len(), crate::shell_grammar::BEND.leaves.len(), "one form per grammar leaf");
+        for (i, is) in [true, true, false, true, false].into_iter().enumerate() {
+            assert_eq!(transition_of("bend", bend.usage, bend.operation, i, &bends[i].literals()), is, "{}", bends[i].literals());
+        }
+        assert!(form("bend", 1, &bends[1], bend.operation, "/verb/bend", "").contains("--deposit"), "bend run's form carries --deposit");
         assert_eq!(alts[append].tokens[4], Tok::Arg { name: "TEXT|@FILE".into(), optional: false, kind: Kind::Text });
         // The rendered usage parses to the same leaves as the grammar names (help and the forms agree).
         assert_eq!(alternatives(doc.usage).iter().map(|a| a.literals()).collect::<Vec<_>>(), alts.iter().map(|a| a.literals()).collect::<Vec<_>>());
@@ -622,5 +711,8 @@ mod tests {
             assert_eq!(transition(v.usage, v.operation, 0, name), is, "{name}: {}", v.operation);
         }
         assert!(html.contains("name=\"a1\"") && html.contains("list=\"refs\"") && html.contains("name=\"submit\""), "{html}");
+        // The page-unique ids: this form's fields are `delegate-0-*`, not the bare `a{i}`
+        // (token 0 is the literal `delegate`, so the first field is index 1).
+        assert!(html.contains("id=\"delegate-0-1\"") && html.contains("id=\"delegate-0-submit\""), "{html}");
     }
 }

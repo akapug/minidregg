@@ -7,7 +7,6 @@ import Kernel.ConsentAnchor
 import Compiler.ResourceTargetAdmission
 import Compiler.ResourceAuthorityProjection
 import Compiler.CanonicalAccountView
-import Compiler.CanonicalAccountViewAudit
 import Compiler.Signature    -- N3: abstract signatures, Term (= WType), fold_unique, agree_by_initiality, the syntactic-leaves-forced obligation
 import Compiler.Air  -- the arithmetization DSL (derived): circuit⟺executor by initiality (N3), the first gadget; [AIR-poseidon]/[AIR-membership] the rungs toward a note-spend
 import Compiler.AirFlatten  -- [AIR-flatten] CLOSED: nested expressions → degree-≤2 gate systems with aux wires, the flatten a fold; wire-forcing refinement (sound+complete+unique) → gate system ⟺ executor
@@ -33,7 +32,6 @@ import Compiler.TypedAuthorizationRequestCodec  -- `LawfulCodec (Request .object
 import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the wire: identifiers, finite tags, records, atom kinds, embeds, and stable ranges, all on `StreamCodec`; the remaining half of what a `Config` demands
 import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-index cells are StoreCodec at declared wires; the four-slot/overflow pages and the bounded-page catalog, registry and upgrade are deleted (DATAMODEL §5 B1)
 import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (DATAMODEL §5 B1)
-import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
 import Compiler.StreamCell  -- a stream is a head cell (binding, count, tail key) plus one cell per entry; an append = one head write + one fresh entry cell, bytes independent of the stream length (FLEET-TOPIC-ON-STREAM)
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
 import Compiler.PlanFootprintCodec  -- a plan footprint as canonical bytes: (wire address, optional wire value) reads, carried by the signed header (Theory.PlanBinding)
@@ -63,6 +61,7 @@ import Compiler.TranscriptController -- Lean-owned phased transcript program: na
 import Compiler.AuthenticatedColumnPlan -- typed columns, derived roots, one roots-before-challenges transcript, checked opaque work/openings/representation edges, and a trace-indexed terminal attestation
 import Compiler.AuthenticatedColumnLogupBridge -- a terminal attestation's reflected LogUp statement and authentic first-draw root prefix discharge canonical linkage, Tower arithmetic, root binding, and exact indexed evaluation; PCS/CR/ROM remain explicit
 import Compiler.Tower256CshakeMerkleController -- shared Lean-selected cSHAKE framing, exact logarithmic cube-Merkle openings, Tower256 codec/profile obligations, and arbitrary-native-reply exactness; CR/ROM/PCS remain explicit
+import Compiler.AuthenticatedColumnSelvage -- the controller and Merkle backend schemes as Selvage opening schemes and binding commitments (kept out of the Host closure)
 import Compiler.Sp800185Cshake256 -- exact Lean Keccak-f[1600] + SP 800-185 framing instantiate the controller's proved 32-byte cSHAKE256 API; no CR/ROM claim
 import Compiler.BinaryTower256Profile -- inhabits the Tower256 controller profile with Lean's binaryTower 8 and exact 32-byte codec; no native representation claim
 import Compiler.Tower256NativeByteBoundary -- arbitrary native Tower256 compute returns bytes only; Lean's exact Fan--Paar decoder plus a reflected Lean checker are the sole path to an accepted semantic value
@@ -118,7 +117,6 @@ import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness
 import Compiler.PredOrderWide  -- a bound on every value an instance touches gives the order range premise and, over a prime field of characteristic at least 2B, the cast premise
 import Compiler.PredRangeLeaf  -- an input-range refusal names the out-of-range order atom and its two values (rangeLeaf_none_iff, ofRange_out_of_range)
-import Compiler.NativeOrderPoles  -- the native profile (ZMod (2^127-1), width 125) decides clock/now = 1,790,846,960 against small fields, balances 10^12 apart and the edges of R as eval does
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v3 + ABI/v4, programId, birth admissibility
@@ -138,3 +136,4 @@ import Compiler.FnWireFncu  -- fncu.cursor read by the interpreter (replaces fn 
 import Compiler.FnWireSized  -- the `sized` node's teeth; the poll-reply accepted-arm grammar
 import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame) read by the interpreter
 import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth
+import Compiler.DurableFastForwardSpec  -- HOT-PATH §2(h): the fast-forward open (checkpoint v4) stated before proof

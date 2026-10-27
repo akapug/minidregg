@@ -25,58 +25,19 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use crate::canonical::hex as hex_bytes;
 
 const MAX_RETAINED_DESCRIPTOR: u64 = 12_102_759;
 
 fn retained_descriptor_file(path: &Path) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("descriptor parent absent"))?;
-    private_dir(parent)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.nlink() != 1
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > MAX_RETAINED_DESCRIPTOR
-    {
-        return Err(invalid("retained signed descriptor file custody refused"));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.by_ref()
-        .take(MAX_RETAINED_DESCRIPTOR + 1)
-        .read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != meta.len()
-        || after.dev() != meta.dev()
-        || after.ino() != meta.ino()
-        || after.len() != meta.len()
-        || after.mtime() != meta.mtime()
-        || after.mtime_nsec() != meta.mtime_nsec()
-    {
-        return Err(invalid("retained signed descriptor changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("descriptor parent absent"))?)?;
+    crate::private_file::read(path, MAX_RETAINED_DESCRIPTOR, "retained signed descriptor file custody refused")
 }
 
 fn source_text<'a>(view: &'a Value, name: &str) -> io::Result<&'a str> {
     view.get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("retained signed descriptor source field absent"))
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("hex String");
-    }
-    result
 }
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -466,7 +427,6 @@ impl PreparedResident {
     /// Compare the root-owned custody handoff with the exact directory held
     /// open for fd5. This is a physical observation; the caller must also
     /// compare the witness bytes and volume ID to the source-owned v3 claim.
-    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
     pub(crate) fn compare_attested_volume(&self, witness: &VolumeWitness) -> io::Result<()> {
         witness.compare_open_mount(self._persistent_var.as_raw_fd())?;
         witness.recheck_handoff()
@@ -475,7 +435,7 @@ impl PreparedResident {
     /// Repeat the fixed handoff/FD5 check at the last physical boundary before
     /// consuming the journal's one-shot spawn. This does not mint Mini launch
     /// authority or promise cancellation of a later operator mount change.
-    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
+    /// `resident_service::run` starts every resident through this.
     pub(crate) fn start_attested(
         self,
         journal: &Journal,

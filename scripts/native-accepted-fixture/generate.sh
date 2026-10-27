@@ -54,7 +54,7 @@ cd "$root"
 for name in first refused; do
   h=$height; [ "$name" = refused ] && h=$((height + 1))
   REAL_VERIFIER=$verifier VERIFY_LOG=$work/$name-verify.jsonl \
-    lake env lean --run "$here/replay.lean" "$work/$name" "$settings" "$here/verify-logger.py" "$h" \
+    lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$here/replay.lean" "$work/$name" "$settings" "$here/verify-logger.py" "$h" \
     >"$work/$name.out" 2>"$work/$name.err" || { cat "$work/$name.err" >&2; echo "generate: replay of $name failed" >&2; exit 1; }
   echo "replay $name: $(cat "$work/$name.out")"
 done

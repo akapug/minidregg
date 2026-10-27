@@ -254,7 +254,12 @@ theorem market_reveal_binds {p' : Params} {o' n' : State} {k : Nat} (hk : k < sl
     (same : n.get (fA (bid k).commit) = n'.get (fA (bid k).commit)) :
     (n.get (fA (bid k).price) = n'.get (fA (bid k).price) ∧
       n.get (fA (bid k).qty) = n'.get (fA (bid k).qty) ∧
-      n.get (fA (bid k).blinder) = n'.get (fA (bid k).blinder)) ∨ Collision deployed := by
+      n.get (fA (bid k).blinder) = n'.get (fA (bid k).blinder)) ∨
+      Theory.HashBytes.CollisionAmong deployed (fun x => ∃ op,
+        (Minidregg.Pred.hashEqOpening n [fA (bid k).price, fA (bid k).qty] (fA (bid k).blinder)
+            (fA (bid k).commit) = some op ∨
+          Minidregg.Pred.hashEqOpening n' [fA (bid k).price, fA (bid k).qty] (fA (bid k).blinder)
+            (fA (bid k).commit) = some op) ∧ x = op.preimage) := by
   have e := moved_opening_opens h hw hs hk moved
   have e' := moved_opening_opens h' hw' hs' hk moved'
   rcases Minidregg.Pred.hashEq_reveal_binds_each e e' same with each | hcol

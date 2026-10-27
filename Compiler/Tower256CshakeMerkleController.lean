@@ -10,7 +10,8 @@ column controller and a first Tower256/additive deployment:
   cube, with an actual logarithmic authentication path and a proved honest
   opening equation;
 * that tree is exported as the *same* `CommitmentScheme` consumed by
-  `AuthenticatedColumnPlan` and, through its existing adapter, by Selvage;
+  `AuthenticatedColumnPlan` and, through the adapter in
+  `Compiler.AuthenticatedColumnSelvage`, by Selvage;
 * a native cSHAKE call can return only bytes for the result already selected by
   Lean.  Native failure blocks, and a different digest cannot be accepted.
 
@@ -22,14 +23,14 @@ proves functional tree/opening correctness, not those security games.
 -/
 
 import Compiler.AuthenticatedColumnPlan
-import Selvage.BinaryLookup
+import Theory.BinaryCubeAddress
 
 namespace Minidregg.Compiler.Tower256CshakeMerkleController
 
 open Minidregg.Compiler.AuthenticatedColumnPlan
 open Minidregg.Compiler.NativeKernelPlan (WorkKind)
 open Minidregg.Compiler.SemanticManifest
-open Minidregg.Selvage
+open Minidregg.Theory.BinaryCubeAddress
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest)
 
@@ -234,16 +235,6 @@ def bindingMerkleCommitmentScheme
   toCommitmentScheme := merkleCommitmentScheme domains port
   binding := binding
 
-/-- The controller and Selvage consume literally the same Merkle root function. -/
-theorem bindingMerkle_toSelvage_commit_exact
-    {cshake : Cshake256} (domains : MerkleDomains cshake)
-    (port : ColumnPort Semantic Representation (Fin (2 ^ k)))
-    (binding : (merkleCommitmentScheme domains port).PositionBinding)
-    (column : Fin (2 ^ k) -> Representation) :
-    (bindingMerkleCommitmentScheme domains port binding).toSelvage.commit column =
-      (merkleCommitmentScheme domains port).commit column :=
-  rfl
-
 /-! ## One cSHAKE-framed global transcript -/
 
 /-- Codecs and domain strings for the one global controller transcript.  The
@@ -416,8 +407,6 @@ theorem checkedXofCall_reply_exact (cshake : Cshake256)
 
 /-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.recompute_cubePath' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms recompute_cubePath
-/-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.bindingMerkle_toSelvage_commit_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms bindingMerkle_toSelvage_commit_exact
 /-- info: 'Minidregg.Compiler.Tower256CshakeMerkleController.checkedXofCall_reply_exact' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms checkedXofCall_reply_exact
 

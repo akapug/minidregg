@@ -16,13 +16,14 @@ structure AllocationReceipt where
 
 def receiptFrame : List UInt8 := "DREGG.PRIVATE.ALLOCATION".toUTF8.toList ++ [1]
 def receiptStream : StreamCodec AllocationReceipt :=
-  StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-      (StreamCodec.product bytesStream (StreamCodec.product bytesStream bytesStream))))
-    (fun receipt => (receiptFrame, receipt.requestBytes, receipt.descriptorBytes,
-      receipt.journalBytes, receipt.rowCommitment))
-    (fun tuple => ⟨tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
-    (by intro receipt; cases receipt; rfl)
+  StreamCodec.framed (bytesStream.encode receiptFrame)
+    (StreamCodec.xmap
+      (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+        (StreamCodec.product bytesStream bytesStream)))
+      (fun receipt => (receipt.requestBytes, receipt.descriptorBytes,
+        receipt.journalBytes, receipt.rowCommitment))
+      (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
+      (by intro receipt; cases receipt; rfl))
 
 structure ReceiptBinding (descriptor : Descriptor) (receipt : AllocationReceipt) where
   request : ReservationRequest
@@ -93,15 +94,14 @@ def sourceReceiptFrame : List UInt8 :=
   "DREGG.PRIVATE.ALLOCATION.SOURCE".toUTF8.toList ++ [1]
 
 def sourceReceiptStream : StreamCodec SourceAllocationReceipt :=
-  StreamCodec.xmap
-    (StreamCodec.product bytesStream (StreamCodec.product bytesStream
+  StreamCodec.framed (bytesStream.encode sourceReceiptFrame)
+    (StreamCodec.xmap
       (StreamCodec.product bytesStream (StreamCodec.product bytesStream
-        (StreamCodec.product bytesStream StreamCodec.nat)))))
-    (fun receipt => (sourceReceiptFrame, receipt.requestBytes, receipt.descriptorBytes,
-      receipt.rowCommitment, receipt.originalPrefixDigest, receipt.originalPrefixCount))
-    (fun tuple => ⟨tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
-    (by intro receipt; cases receipt; rfl)
+        (StreamCodec.product bytesStream (StreamCodec.product bytesStream StreamCodec.nat))))
+      (fun receipt => (receipt.requestBytes, receipt.descriptorBytes,
+        receipt.rowCommitment, receipt.originalPrefixDigest, receipt.originalPrefixCount))
+      (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
+      (by intro receipt; cases receipt; rfl))
 
 structure SourceReceiptBinding (descriptor : Descriptor) (receipt : SourceAllocationReceipt) where
   request : ReservationRequest

@@ -87,7 +87,24 @@ theorem ofBE_lt (bytes : List UInt8) : ofBE bytes < 256 ^ bytes.length := by
 /-- A byte hash. -/
 abbrev Hash := List UInt8 → List UInt8
 
-/-- A collision of `H` at the integer reading of its output. -/
+/-- A collision of `H` at the integer reading of its output. Over all byte strings
+and a fixed-width `H` this is true by pigeonhole (`Theory.CollisionFloor`), so a
+binding theorem ends in `CollisionAmong` over the inputs it actually hashed. -/
 def Collision (H : Hash) : Prop := ∃ a b : List UInt8, a ≠ b ∧ ofBE (H a) = ofBE (H b)
+
+/-- A collision of `H` between two inputs that both satisfy `S`. -/
+def CollisionAmong (H : Hash) (S : List UInt8 → Prop) : Prop :=
+  ∃ a b : List UInt8, S a ∧ S b ∧ a ≠ b ∧ ofBE (H a) = ofBE (H b)
+
+theorem CollisionAmong.mono {H : Hash} {S T : List UInt8 → Prop} (sub : ∀ x, S x → T x)
+    (c : CollisionAmong H S) : CollisionAmong H T := by
+  obtain ⟨a, b, ha, hb, ne, eq⟩ := c
+  exact ⟨a, b, sub a ha, sub b hb, ne, eq⟩
+
+/-- The scoped collision forgets to the global one (never the converse). -/
+theorem CollisionAmong.global {H : Hash} {S : List UInt8 → Prop} (c : CollisionAmong H S) :
+    Collision H := by
+  obtain ⟨a, b, _, _, ne, eq⟩ := c
+  exact ⟨a, b, ne, eq⟩
 
 end Minidregg.Theory.HashBytes

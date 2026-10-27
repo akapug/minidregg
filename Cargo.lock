@@ -955,6 +955,7 @@ dependencies = [
  "libc",
  "minidregg-spk-rpc",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
 ]
@@ -1002,7 +1003,6 @@ dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
  "libc",
- "minidregg-compatible-upgrade-custody",
  "minidregg-mini-keys",
  "minidregg-mini-sdk",
  "minidregg-pay-watcher",

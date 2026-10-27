@@ -38,7 +38,7 @@ pub type Result<T> = std::result::Result<T, String>;
 
 pub struct KeyPair {
     /// `X25519 secret (32) || FIPS 203 seed (64)`.
-    pub secret: Vec<u8>,
+    pub secret: zeroize::Zeroizing<Vec<u8>>,
     /// `X25519 public key (32) || ML-KEM-768 encapsulation key (1184)`.
     pub public: Vec<u8>,
 }
@@ -69,7 +69,7 @@ impl SealedParts {
 pub fn generate_keypair() -> Result<KeyPair> {
     let key = HybridSecret::generate()?;
     Ok(KeyPair {
-        secret: key.to_bytes().to_vec(),
+        secret: key.to_bytes(),
         public: key.public().to_bytes(),
     })
 }

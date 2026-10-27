@@ -42,7 +42,7 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 48 shapes is accepted, and each
+* `census_shapes_admitted_at_w0`: each of the 48 representative shapes is accepted at `w0`, and each
   of the ten ROM-birth receivers (the six above, the control bootstrap and the enrol branches of
   `payEnrol`, `payEnrolV2` and `payClaim`) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
@@ -650,18 +650,20 @@ encoding. -/
 def theListWithoutRomBirth : List Ctor :=
   Ctor.all.filter fun c => c.romBirth && (rejectOf (World.admit censusH w0 c.romByLeg)).isSome
 
-theorem every_admission_is_turn_all :
+theorem census_shapes_admitted_at_w0_all :
     ∀ c ∈ Ctor.all, rejectOf (World.admit censusH w0 c.turn) = none ∧
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 48 admission shapes is
-accepted by the one transition, and each receiver that creates a ROM
-policy-source cell does so by a create carrying its image. -/
-theorem every_admission_is_turn (c : Ctor) :
+/-- **`census_shapes_admitted_at_w0`.**  For each of the 48 constructors, its
+one representative census turn `c.turn` is accepted by the one transition at the
+fixed census world `w0`, and each receiver that creates a ROM policy-source cell
+does so by a create carrying its image. This is a statement about 48 fixed
+constructions at one world, not about every admission `Turn.ofAccepted` derives. -/
+theorem census_shapes_admitted_at_w0 (c : Ctor) :
     rejectOf (World.admit censusH w0 c.turn) = none ∧
       (c.romBirth = true → HasRomBirth c.turn = true) :=
-  every_admission_is_turn_all c (Ctor.mem_all c)
+  census_shapes_admitted_at_w0_all c (Ctor.mem_all c)
 
 /-- **THE LIST is empty.** -/
 theorem theList_empty : theList = [] := by decide +kernel
@@ -791,12 +793,12 @@ theorem payBook_conserves {w w' : CWorld} (h : World.step censusH w (Ctor.turn .
 #assert_axioms step_conserves
 #assert_axioms payPostings_balanced
 #assert_axioms payBook_conserves
-#assert_axioms every_admission_is_turn
+#assert_axioms census_shapes_admitted_at_w0
 #assert_axioms theList_empty
 #assert_axioms rom_by_leg_refused
 #assert_axioms theListWithoutRomBirth_eq
-/-- info: 'Minidregg.Kernel.TurnCensus.every_admission_is_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms every_admission_is_turn
+/-- info: 'Minidregg.Kernel.TurnCensus.census_shapes_admitted_at_w0' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms census_shapes_admitted_at_w0
 /-- info: 'Minidregg.Kernel.TurnCensus.theList_empty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms theList_empty
 

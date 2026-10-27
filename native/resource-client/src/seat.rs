@@ -76,19 +76,12 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 }
 
 fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, value.to_string().as_bytes()))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, value.to_string().as_bytes()))
 }
 
 fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("seat: invalid Host inspection of {kind}: {error}"))
-}
-
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
 }
 
 fn nonce() -> Result<String> {
@@ -100,7 +93,7 @@ fn nonce() -> Result<String> {
 }
 
 fn view(ws: &Ws, request: &Value) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 219, request.to_string().as_bytes())?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::SEAT_VIEW, request.to_string().as_bytes())?)
         .map_err(|error| format!("seat: invalid view: {error}"))
 }
 
@@ -122,15 +115,15 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
     write_new(&out.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "seat", &command)?;
     write_new(&out.join("command.bin"), &command_bytes)?;
-    let plan = invoke(ws, 215, &command_bytes)?;
+    let plan = invoke(ws, mini_sdk::host_operations::SEAT_PLAN, &command_bytes)?;
     write_new(&out.join("plan.bin"), &plan)?;
     let inspected = inspect(ws, "seat-plan", &plan)?;
     let canonical = inspected.pointer("/header/canonical").and_then(Value::as_str)
         .ok_or("seat: plan lacks a header")?;
-    let header = crate::decode_hex(canonical).map_err(|error| format!("seat: {error}"))?;
+    let header = mini_sdk::hex::decode(canonical).map_err(|error| format!("seat: {error}"))?;
     let donation = donation_gate(&inspected, file)?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header).to_bytes();
-    let ingress = invoke(ws, 216, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::SEAT_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     write_new(&out.join("ingress.bin"), &ingress)?;
     let transaction = inspected.pointer("/command/transaction").cloned().unwrap_or(Value::Null);
     let seat = inspected.pointer("/command/seatAccount").cloned().unwrap_or(Value::Null);
@@ -139,7 +132,7 @@ fn submit(ws: &Ws, file: &Value, out: &Path, prepare_only: bool) -> Result<Value
         return Ok(json!({"type": "prepared", "ingress": out.join("ingress.bin"), "transaction": transaction,
             "seatAccount": seat, "mintIds": minted, "donation": donation}));
     }
-    let mut outcome = inspect(ws, "outcome", &invoke(ws, 217, &ingress)?)?;
+    let mut outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::SEAT_SUBMIT, &ingress)?)?;
     write_new(&out.join("outcome.json"), outcome.to_string().as_bytes())?;
     outcome["transaction"] = transaction;
     outcome["seatAccount"] = seat;
@@ -188,12 +181,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "resubmit" => {
             let ingress = read_ingress(&path(args.required("ingress")?))?;
             args.finish()?;
-            inspect(&ws, "outcome", &invoke(&ws, 217, &ingress)?)?
+            inspect(&ws, "outcome", &invoke(&ws, mini_sdk::host_operations::SEAT_SUBMIT, &ingress)?)?
         }
         "lookup" => {
             let ingress = read_ingress(&path(args.required("ingress")?))?;
             args.finish()?;
-            inspect(&ws, "outcome", &invoke(&ws, 218, &ingress)?)?
+            inspect(&ws, "outcome", &invoke(&ws, mini_sdk::host_operations::SEAT_LOOKUP, &ingress)?)?
         }
         "view" => {
             let request = match args.optional("request") {

@@ -17,7 +17,10 @@ Run `minidregg-oracle-appliance --port 7070` with the connected Sandstorm app
 socket on fd 3. The resident/supervisor uses the server side of two-party RPC;
 the app uses the client side and exports its main view as bootstrap. A launcher
 must start the Oracle adapter separately in the same network namespace, using
-one fixed workspace per grain, and keep fd 3 out of the adapter process.
+one private tenant-pool root per grain, and keep fd 3 out of the adapter process.
+The new launcher selects `--tenant-pool --max-resident 1 --max-tenants 128`;
+old packaged v5 binaries are unchanged. The new bridge requires the tenant-aware
+adapter and does not silently fall back to a shared workspace.
 
 The app advertises title `Oracle7` and one permission:
 
@@ -25,17 +28,38 @@ The app advertises title `Oracle7` and one permission:
 | --- | --- |
 | name | `query` |
 | title | Ask questions |
-| description | Use this appliance's shared conversation workspace |
+| description | Use a session-isolated workspace on a bounded shared Oracle runtime |
 
 Role zero is `Researcher`, verb phrase `can ask questions`, description
 `Ask questions and inspect this appliance`, permissions `[true]`, default false.
 A session requires exactly that one true permission. This check is application
 attenuation, not proof of Mini admission. Package permission metadata must match.
 
-All members granted access to a grain share its Oracle conversation workspace.
-The bridge does not pretend that display names, caller conversation IDs or the
-synthetic identity used by the probe establish isolated user identities. Use
-separate grains/workspaces for separate tenants.
+Each source session has its own Oracle workspace and request journal. Mini's
+host projects the source-inspected principal into `UserInfo.identityId`, and
+projects `mini-session-v1\0` followed by application, subject and session-resource
+IDs (three unsigned 64-bit big-endian integers) into Sandstorm's `tabId`.
+The app requires a 32-byte principal that is not all zero and this exact 40-byte tab
+shape with nonzero resource IDs. Missing or malformed bindings refuse session
+creation before contacting Oracle. Display names and request fields are not
+identity evidence.
+
+The bridge sends exactly one private `X-Mini-Oracle-Tenant` header containing
+64 lowercase hexadecimal characters: SHA-256 of `mini-oracle-tenant-v1\0`, the
+32 principal bytes and the 40 tab bytes, in that order. No caller HTTP header is
+forwarded. The adapter must reject duplicate or malformed tenant headers and
+scope every conversation, request ID and replay record under this key. Same
+source session and principal intentionally share state across Web/API sessions
+and grain restarts; different source sessions isolate agents even when their
+principal is the same. Grain generation, display name and permission-fingerprint
+changes do not rename the tenant. A newly issued source session is a new tenant;
+this is session isolation, not automatic cross-session user history sharing.
+
+This header is trustworthy only on the private bridge-to-adapter loopback
+connection inside the grain network namespace. It is not public authentication.
+An operator with raw fd3 or adapter access can fabricate test identities. The
+bounded warm-engine pool is independent of tenant count; this transport does not
+itself prove that the Python engine confines tenant state.
 
 The signed API path is `/`. Sandstorm operation paths are relative and map only
 as follows:
@@ -64,10 +88,15 @@ interpreting them; `/invoke` uses the adapter's structured operation envelope.
 Accept permits JSON through `application/json`,
 `application/*` or `*/*`, using the most specific matching range and its quality.
 An explicit JSON exclusion overrides a wildcard; no acceptable JSON range
-returns 406 before HTTP delivery. An absent Accept list permits JSON. Request
-cookies, additional headers, Accept-Encoding lists and ETag preconditions remain
+returns 406 before HTTP delivery. An absent Accept list permits JSON. Identity response encoding is used; an explicit exclusion receives 406. Request
+cookies, additional headers and ETag preconditions remain
 refused: the narrow API does not implement these semantics. HEAD is refused. Other WebSession methods use the schema's
-unimplemented failure. The app is an API, with no browser UI at its root.
+unimplemented failure. The empty Sandstorm path serves a small HTML interface using these same JSON
+operations; it never accepts a tenant selector. The signed class-L package starts
+one warm engine within its 2-GiB budget. The operator can raise the pool size
+together with the resource budget after measuring engine memory. Concurrent
+work beyond the configured pool is refused with 429 rather than queued without
+a bound.
 
 Eight HTTP exchanges may be in flight per app process, shared across sessions.
 Excess calls return `bridge_busy` before contacting the adapter. The adapter's
@@ -117,7 +146,7 @@ cargo build --offline -p minidregg-oracle-appliance --bin minidregg-oracle-appli
 cargo test --offline -p minidregg-oracle-appliance --all-targets
 ```
 
-With the real Oracle adapter already listening on 127.0.0.1:7070, create a JSON
+With the tenant-aware Oracle adapter already listening on 127.0.0.1:7070, create a JSON
 request file containing a fresh request ID and run:
 
 ```sh
@@ -132,7 +161,7 @@ full response JSON to stdout and app metadata/original status to stderr. It exit
 nonzero on adapter errors and terminates only its own bridge child. It is not a
 Mini admission test or a public user interface.
 
-Six narrow tests cover exact payloads, permission and route refusal, context and
+The narrow tests cover tenant identity and restart boundaries, the browser root, exact payloads, permission and route refusal, context and
 request bounds, malformed/oversized responses, all current adapter error statuses,
 a full 2 MiB response, deadlines, the global connection bound, and the actual fd 3
 executable. These are component tests; a signed package, resident launch and
@@ -140,9 +169,15 @@ current Mini admission require separate integration evidence. No specialist
 accuracy or theorem coverage claim follows from these transport tests.
 
 For a reusable real-engine smoke, `scripts/oracle-transport-smoke.py` starts the
-candidate's own adapter with 120-second query and 180-second engine startup
+candidate's tenant-aware adapter with one resident worker, eight allowed tenant
+workspaces, 120-second query and 180-second engine startup
 bounds, invokes the probe, and terminates its recorded child processes. It
-requires a new output directory outside the runtime:
+requires a new output directory outside the runtime. `--adapter /path/to/serve.py`
+can select a new tenant-aware adapter without editing an older runtime; its
+neighboring `tenant_pool.py` must be present and both hashes enter the report.
+The direct HTTP replay uses the same synthetic principal/source-session key as
+the fd3 probe, while health remains unscoped:
+
 
 ```sh
 python3 scripts/oracle-transport-smoke.py \
@@ -157,7 +192,10 @@ It asks about Leaves of Grass, ISA temperature at 3,000 metres, an invalid
 metres-per-second altitude, Emma and a pronoun follow-up. It compares complete
 bridge bytes with direct HTTP replay, repeats through the bridge, checks changed
 request bytes return 409, restarts the adapter and repeats all five retained
-replies and the conflict. A non-answer to the invalid unit can be an upstream
+replies and the conflict. It also submits the same request/conversation IDs under
+a second synthetic source-session tenant and verifies the first tenant's exact
+replay survives the switch. This is a private operator probe, not evidence that
+a public caller may select a tenant. A non-answer to the invalid unit can be an upstream
 `clarification` or `withheld`; the smoke records the actual status.
 
 The report retains complete replies and hashes, binary hashes and cleanup results.

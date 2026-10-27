@@ -360,7 +360,7 @@ impl Worker {
 
     fn revoke_identity(&self, grain: &str, record: Value, request: &Value) -> Value {
         let token = request.get("token").and_then(Value::as_str).unwrap_or("");
-        if token.len() != 64 || !token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        if !mini_sdk::hex::is_canonical_len(token, 32) {
             return refused("tokenRefused", "a saved-identity token is 64 lowercase hex digits (mini apps identities)");
         }
         let app = record["app"].as_str().unwrap_or("");
@@ -376,7 +376,7 @@ impl Worker {
         let Some(id) = request.get("requestId").and_then(Value::as_str) else {
             return refused("requestRefused", "install needs a 32-hex requestId");
         };
-        if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if !mini_sdk::hex::is_canonical_len(id, 16) {
             return refused("requestRefused", "requestId is not 32 hex digits");
         }
         let file = request_file(&self.state, id);
@@ -1011,7 +1011,7 @@ impl ProcessWorld {
                 return Err(format!("signerUnavailable: the plan asks key {key_id}; the worker holds the management key {} only", self.management_key_id));
             }
             let header_hex = slot.get(header).and_then(Value::as_str).ok_or("slot lacks its header")?;
-            let header_bytes = (0..header_hex.len()).step_by(2).map(|i| u8::from_str_radix(&header_hex[i..i + 2], 16).map_err(|e| e.to_string())).collect::<Result<Vec<u8>>>()?;
+            let header_bytes = mini_sdk::hex::decode(header_hex).map_err(|e| e.0)?;
             use sha2::Digest;
             signers.push(json!({"role":slot["role"],"index":slot["index"],"keyId":key_id,"keyEpoch":slot["signing"]["keyEpoch"],
                 "publicKey":self.management_public_hex,"headerSha256":hex(&sha2::Sha256::digest(&header_bytes)),"keyPath":self.management_seed}));

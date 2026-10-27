@@ -16,9 +16,12 @@ the re-verification.
 Output, one line per triple: `TRIPLE<TAB>constant<TAB>index<TAB>key<TAB>frame<TAB>signature`
 (lowercase hex), then `TRANSCRIPTS<TAB>n<TAB>triples<TAB>m`.
 
-Run: `lake env lean scripts/NativeTranscripts.lean` (needs AxiomCensusResearch built).
+Run: `lake env lean scripts/NativeTranscripts.lean` (needs AxiomCensusResearch and Fixtures built;
+the Fixtures library is imported by no umbrella, so it is named here: every recording it holds is
+listed, and a recording added there is listed with no edit to this file).
 -/
 import AxiomCensusResearch
+import Fixtures
 
 open Lean Meta
 

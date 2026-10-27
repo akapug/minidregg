@@ -18,10 +18,10 @@
 #                  every vector's exact decoder answer, planted-fault controls (scripts/check-fn-wire.sh;
 #                  FN_REPO=<fn clone> also compares the file with fn's at that revision)
 #   native-transcripts every recorded verifier transcript (CredentialSignatureIO.Transcript; the
-#                  one Fixtures.NativeAcceptedFixture replays the first native Objective acceptance
-#                  with) is still the pinned verifier's answer: scripts/check-native-transcripts.sh
-#                  lists them all from AxiomCensusResearch and re-submits each triple (verified; a
-#                  flipped signature byte must read invalid)
+#                  ones the Fixtures/ recordings replay native admissions with: the first Objective
+#                  acceptance, a member's document write) is still the pinned verifier's answer:
+#                  scripts/check-native-transcripts.sh lists them all from the Fixtures library and
+#                  re-submits each triple (verified; a flipped signature byte must read invalid)
 #   objective-proofs   ObjectiveProofs and the checkpoint round trip build (scripts/check-objective-proofs.sh proofs;
 #                  the manifest ratchet that lived here was deleted 2026-10-27: docs/COORDINATION-2026-10-27.md §2)
 #   objective-c    the C backend differential against runBounded, State bytes included
@@ -48,7 +48,7 @@
 #                  against its `expected`; a row count that differs from the file is red, and a
 #                  planted wrong expectation must be refused each run (scripts/check-world-cohorts.sh)
 #   website        website/status.html is what website/gen-status.py generates from README.md's
-#                  Honest state table, and every <pre data-source=PATH> block on a page is text
+#                  What is live table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused
 #   workspace      every Cargo package is a root-workspace member or an `exclude` with its reason; no member
 #                  carries its own lock; the root lock is current; each member compiles, all targets

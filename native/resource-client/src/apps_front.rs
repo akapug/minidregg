@@ -60,7 +60,7 @@ pub(crate) struct Origin {
 }
 
 fn hex64(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    mini_sdk::hex::is_canonical_len(text, 32)
 }
 
 /// `origins/<grain>.json`, written by the worker; refused whole on any drift.
@@ -146,7 +146,7 @@ pub(crate) fn www_grain_of_host(host: &str, domain: &str) -> Option<String> {
 
 fn token_hash(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    mini_sdk::hex::encode(&digest)
 }
 
 fn valid_token(token: &str) -> bool {

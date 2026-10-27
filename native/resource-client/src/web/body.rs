@@ -136,6 +136,9 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
                     body.extend_from_slice(&buffer[..read]);
                 }
                 body.truncate(length);
+                if let ["export", name, "download"] = parts.as_slice() {
+                    return export_download(&mut stream, site, name);
+                }
                 let _mutation = site.mutations.lock().map_err(|_| "custody lock poisoned")?;
                 post(site, &parts, &body)
             }
@@ -149,11 +152,13 @@ fn serve(site: &Site, mut stream: UnixStream, deadline: Instant) -> Result<()> {
 fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
     let context = match &page.stamp {
         Stamp::Read(read) => format!(
-            "<details class=\"ctx\"><summary>Authorized read</summary><p>read as subject <span class=id>{}</span> at height <span class=id data-height=\"{h}\">{h}</span> | authority root {} | cell root {}</p></details>\n",
+            "<details class=\"ctx\"><summary>Authorized read</summary><p>read as subject <span class=id>{}</span> at height <span class=id data-height=\"{h}\">{h}</span> | authority root {} | cell root {} | world root <span class=id data-world-root=\"{w}\">{ws}</span></p></details>\n",
             escape(&site.subject),
             short(&read.authority_root),
             short(&read.cell_root),
-            h = escape(&read.height)
+            h = escape(&read.height),
+            w = escape(&read.world_root),
+            ws = short(&read.world_root)
         ),
         Stamp::EditBase(read) => format!("<p class=\"ctx\">Editor base snapshot at height <span class=id>{}</span>; sidebar observations may be newer.</p>\n", escape(&read.height)),
         Stamp::Refused => format!("<p class=\"ctx\">subject <span class=id>{}</span> | the Host refused this page's signed read</p>\n", escape(&site.subject)),
@@ -177,6 +182,8 @@ fn answer(stream: &mut UnixStream, page: &Page, site: &Site) -> Result<()> {
 fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
         ["tour"] => tour(site, None),
+        ["export"] if !site.front.read_only => export_page(site, None),
+        ["subscribe"] if !site.front.read_only => super::subscribe::page(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
@@ -191,6 +198,13 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
                     page.body
                 );
             }
+            if let Some(summary) = super::subscribe::summary() {
+                let next = if site.front.read_only { "<a href=\"/join\">Join</a>, then subscribe from your workspace" } else { "<a href=\"/subscribe\">Subscribe</a>" };
+                page.body.push_str(&format!("<section><h2>Subscribers</h2><p>{summary} {next}.</p></section>\n"));
+            }
+            if !site.front.read_only && now_secs() >= EXPORT_NOTICE_FROM {
+                page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p>Take your world with you: <a href=\"/export\">Export my world</a> hands you one archive of your documents, attempts, rooms and keys' public half, with the world root it was read at.</p></section>\n");
+            }
             if !site.front.read_only {
                 page.body.push_str(
                     "<section><h2>New document</h2><form method=\"post\" action=\"/doc/new\" class=\"row\"><div><label for=\"dn\">Name</label><input id=\"dn\" name=\"name\" type=\"text\" required pattern=\"[A-Za-z0-9-]+\"></div>\
@@ -203,6 +217,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["board"] | ["room"] => place_index(site, parts[0]),
         ["search"] => search::page(site, target),
         ["purse"] => purse(site),
+        ["purse", "meter"] => Page { status: 200, title: "Purse".into(), stamp: Stamp::None, body: purse_meter(site, false) },
         ["apps"] => apps::market(site, target),
         ["apps", app] => apps::show(site, app),
         ["grain"] => apps::grains(site),
@@ -584,7 +599,7 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
         ("summons an agent", "First a bounded grant on one document to the resident's subject (<code>delegate … --until H</code>: the grant's expiry is a height); then a Hermes resident into your room with a budget funded from your purse (the meter); ask it to read the document and post a summary; its turns land as paid, admitted writes with receipts and the meter drains; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant; <code>dismiss</code> refunds the remainder.".into(),
             if member {
-                format!("{}{}", purse_meter(site), forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
+                format!("{}{}", PURSE_LATER, forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
             } else { String::new() }),
         ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
             format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
@@ -670,6 +685,35 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                 lines.push(format!("submit {id}"));
             }
             act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
+        }
+        ["export", "consent"] => {
+            // The member's own turns on their own fact: a write from the value read now (the
+            // compare-and-write refuses if it changed meanwhile), or the cell's birth if absent.
+            let want = if form.get("choice").map(String::as_str) == Some("cc0") { 1 } else { 0 };
+            let id = fresh_id();
+            let lines = match research_consent(site) {
+                Some(now) if now == want => {
+                    return export_page(site, Some(format!("Your world already records that choice (field 1 = {want}).")));
+                }
+                Some(now) => vec![format!("invoke {id} research-consent write 1 {want} {now}"), format!("submit {id}")],
+                None => vec!["create research-consent declared open".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
+            };
+            let mut page = act(site, "Research consent", lines, &id, &[("export", "/export")]);
+            page.title = "Research consent".into();
+            page
+        }
+        ["subscribe", "pay"] => super::subscribe::pay(site),
+        ["subscribe", "join"] => super::subscribe::join(site),
+        ["export"] => {
+            let name = format!("world-{}", now_secs());
+            // The run's own words land beside the archive (NAME.log), so a failure is said on the page.
+            let started = site.shell.as_ref().is_some_and(|shell| {
+                let dir = shell.home.join("exports");
+                fs::create_dir_all(&dir).is_ok()
+                    && fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).is_ok()
+                    && verb_detached(site, &format!("export world {name}"), &dir.join(format!("{name}.log")))
+            });
+            export_page(site, Some(if started { format!("Preparing <code>{name}</code>: every document is read as the Host renders it to you now. Reload this page; the download appears when it is ready.") } else { "The export could not be started (no shell paths for this body).".to_owned() }))
         }
         ["tour", step] => {
             let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
@@ -777,7 +821,23 @@ pub(super) fn act_as(site: &Site, title: &str, lines: Vec<String>, id: &str, nex
     }
     let refs: Vec<(&str, &str)> = links.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     let status = match ending.code { 0 => 200, 3 => 403, 4 => 202, _ => 400 };
-    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_of(&ending, &refs, transition)) }
+    // Only `can --any`'s own ending may offer its composed line as a one-click submit: any other
+    // verb's stdout can carry a stranger's words (a document, a room, an app's claims), and a
+    // `paste:` line planted there must stay text, never become a button that runs as this member.
+    let paste = if lines.len() == 1 && asks_can_any(&lines[0]) { paste_form(&ending) } else { String::new() };
+    Page { status, title: title.to_owned(), stamp: Stamp::None, body: format!("<p class=note><code>{}</code></p>\n{}", escape(&lines.join("\n")), outcome_parts(&ending, &refs, transition, &paste)) }
+}
+
+/// The line is the shell's `can … --any …` (the one verb that composes a line to paste).
+fn asks_can_any(line: &str) -> bool {
+    crate::shell::words(line).is_ok_and(|w| w.first().map(String::as_str) == Some("can") && w.iter().any(|x| x == "--any"))
+}
+
+/// `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
+fn paste_form(ending: &Ending) -> String {
+    ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
+        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
+    }).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- the shell as the runner
@@ -846,65 +906,206 @@ pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
     Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
 }
 
-/// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
-/// proposal and its `submit`), the same binary and subcommand the ssh login runs.
-pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
+/// From 10 November 2026 (UTC) the member's front page points at the export.
+const EXPORT_NOTICE_FROM: u64 = 1_794_268_800;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The member's research-consent fact: field 1 of their `research-consent` cell (1 = CC0, 0 =
+/// none), by a signed read; None when the cell is not in this workspace or not readable.
+fn research_consent(site: &Site) -> Option<i128> {
+    let reference = site.reference("research-consent").ok()?;
+    let (view, _, _) = site.read(&reference, "resource").ok()?;
+    view["cell"]["entries"].as_array()?.iter().find(|e| e["key"]["field"] == "1")?["value"].as_str()?.parse().ok()
+}
+
+/// A finished export's file under HOME/exports, by its name (letters, digits, '-').
+fn export_file(site: &Site, name: &str) -> Option<PathBuf> {
     let shell = site.shell.as_ref()?;
-    let exe = std::env::current_exe().ok()?;
-    let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
-    if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
-        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    (!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| shell.home.join("exports").join(name))
+}
+
+/// `/export`: what the archive holds, the exports ready to download (each a POST that streams the
+/// file and then deletes it: no copy stays on the box), those still being prepared, and the button.
+fn export_page(site: &Site, said: Option<String>) -> Page {
+    let mut body = String::from(
+        "<p>One <code>.tar</code> of your world, made by your own <code>mini</code> (<code>export world</code>, reads only): every reference you hold; each document as the Host renders it to you now, \
+         as text and as its signed view; every retained attempt with its decided standing (admitted, refused, charged, or undecided with its exact <code>retry</code>); your room state; your public key and the custody statement; \
+         and <code>manifest.json</code> with the world root and height of the last read and a sha256 per file. Your secret key is not in it.</p>\n",
+    );
+    if let Some(said) = said {
+        body.push_str(&format!("<p class=\"note\">{said}</p>\n"));
     }
+    body.push_str(&format!("<section><h2>What is kept</h2><p class=\"policy\">{}</p>", escape(super::subscribe::RETENTION.trim_end())));
+    let current = research_consent(site);
+    let shown = match current {
+        Some(1) => "contributed for research (CC0)".to_owned(),
+        Some(0) => "not contributed".to_owned(),
+        Some(other) => format!("an unknown value ({other})"),
+        None => "not recorded in your world".to_owned(),
+    };
+    body.push_str(&format!(
+        "<p>Your choice, as your world records it (<code>research-consent</code>, field 1): <strong>{shown}</strong>.</p>\
+         <form method=\"post\" action=\"/export/consent\"><label><input type=\"checkbox\" name=\"choice\" value=\"cc0\"{}> contribute my data for research (CC0; kept private until reviewed)</label> <button>Record my choice</button></form></section>\n",
+        if current == Some(1) { " checked" } else { "" }
+    ));
+    let mut ready = Vec::new();
+    let mut preparing = Vec::new();
+    let mut failed = Vec::new();
+    if let Some(dir) = site.shell.as_ref().map(|s| s.home.join("exports")) {
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(base) = name.strip_suffix(".log") {
+                // A run whose archive is neither ready nor in progress ended without one: say why.
+                let dir = entry.path().with_file_name("");
+                if !dir.join(base).exists() && !dir.join(format!("{base}.part")).exists() {
+                    let said = fs::read_to_string(entry.path()).unwrap_or_default();
+                    let why = said.lines().rev().find(|l| l.contains("error") || l.contains("refused") || l.contains("usage")).unwrap_or("");
+                    if !why.is_empty() {
+                        failed.push((base.to_owned(), why.to_owned()));
+                    } else {
+                        preparing.push(base.to_owned());
+                    }
+                }
+                continue;
+            }
+            match name.strip_suffix(".part") {
+                Some(_) => {}
+                None if export_file(site, &name).is_some() => ready.push((name, entry.metadata().map(|m| m.len()).unwrap_or(0))),
+                None => {}
+            }
+        }
+    }
+    ready.sort();
+    preparing.sort();
+    for (name, bytes) in &ready {
+        body.push_str(&format!(
+            "<form method=\"post\" action=\"/export/{n}/download\" class=\"row\"><p><code>{n}</code>, {bytes} bytes</p><button>Download</button></form>\n",
+            n = escape(name)
+        ));
+    }
+    for name in &preparing {
+        body.push_str(&format!("<p class=\"note\"><code>{}</code> is being prepared.</p>\n", escape(name)));
+    }
+    for (name, why) in &failed {
+        body.push_str(&format!("<p class=\"note\"><code>{}</code> ended without an archive: <code>{}</code></p>\n", escape(name), escape(why)));
+    }
+    body.push_str("<form method=\"post\" action=\"/export\"><button>Export my world</button></form>\n");
+    Page { status: 200, title: "Export my world".into(), stamp: Stamp::None, body }
+}
+
+/// Stream a finished export as an attachment, then delete it: the archive leaves the box with
+/// the member, and nothing of it stays behind.
+fn export_download(stream: &mut UnixStream, site: &Site, name: &str) -> Result<()> {
+    let Some(path) = export_file(site, name).filter(|p| p.is_file()) else {
+        return answer(stream, &simple(404, "Export", "no finished export by that name"), site);
+    };
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let length = file.metadata().map_err(|e| e.to_string())?.len();
+    let subject: String = site.subject.chars().filter(char::is_ascii_digit).collect();
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Disposition: attachment; filename=\"mini-{subject}-{name}.tar\"\r\nContent-Length: {length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+    );
+    stream.set_write_timeout(Some(Duration::from_secs(60))).map_err(|e| e.to_string())?;
+    stream.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
+    let sent = std::io::copy(&mut file, stream).map_err(|e| e.to_string())?;
+    if sent == length {
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_file_name(format!("{name}.log")));
+    }
+    Ok(())
+}
+
+/// `mini shell` as this member, in script mode, in its own process group: a read stopped at the
+/// deadline is stopped whole, the client the shell ran for it included (a killed shell alone left
+/// `mini workspace --action can` judging on, ahead of the member's next request).
+fn shell_command(site: &Site, exe: &std::path::Path, shell: &Shell) -> Command {
     let mut command = Command::new(exe);
     command.arg("shell");
     // The deployment's socket, as the ssh wrapper passes it; a workspace that pins one takes it from the pin.
     if let Some(socket) = super::super::SOCKET.get() {
         command.arg("--socket").arg(socket);
     }
-    let mut child = command
+    command
         .arg("--workspace").arg(&site.root)
         .arg("--home").arg(&shell.home)
         .arg("--host").arg(&shell.host)
         .arg("--config").arg(&shell.config)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
-        .env("HOME", &shell.home)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
+        .env("HOME", &shell.home);
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command
+}
+
+/// Run one shell line as this member in the background, to its end (a thread reaps it): the
+/// export, which reads every document and may take longer than one request.
+fn verb_detached(site: &Site, line: &str, log: &std::path::Path) -> bool {
+    let (Some(shell), Ok(exe)) = (site.shell.as_ref(), std::env::current_exe()) else { return false };
+    let Ok(log) = fs::OpenOptions::new().write(true).create_new(true).open(log) else { return false };
+    let Ok(log2) = log.try_clone() else { return false };
+    let mut command = shell_command(site, &exe, shell);
+    command.stdin(Stdio::piped()).stdout(Stdio::from(log)).stderr(Stdio::from(log2));
+    let Ok(mut child) = command.spawn() else { return false };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(format!("{line}\n").as_bytes());
+    }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    true
+}
+
+/// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
+/// proposal and its `submit`), the same binary and subcommand the ssh login runs.
+pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
+    let shell = site.shell.as_ref()?;
+    #[cfg(test)]
+    if let Some(ending) = redteam::FAKE_SHELL.with(|fake| fake.borrow().as_ref().map(|answer| answer(lines))) {
+        return Some(ending);
+    }
+    let exe = std::env::current_exe().ok()?;
+    let script = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
+    if script.bytes().any(|b| b.is_ascii_control() && b != b'\n') {
+        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    }
+    let mut command = shell_command(site, &exe, shell);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes());
     }
-    let mut out = child.stdout.take()?;
-    let mut err = child.stderr.take()?;
-    // Both pipes are drained on their own threads: a read on this thread would block until the
-    // shell exits, and the deadline below could never fire while a long `can` runs.
-    let reader = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        let _ = out.read_to_end(&mut s);
-        s
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut s = Vec::new();
-        let _ = err.read_to_end(&mut s);
-        s
-    });
+    let out = child.stdout.take()?;
+    let err = child.stderr.take()?;
+    // Both pipes are drained on their own threads into shared buffers: the deadline below can then
+    // fire while the shell runs, and a page can carry what was printed so far.
+    let drain = |mut pipe: Box<dyn Read + Send>| {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = buf.clone();
+        let handle = std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            while let Ok(n) = pipe.read(&mut chunk) {
+                if n == 0 { break; }
+                if let Ok(mut b) = sink.lock() { b.extend_from_slice(&chunk[..n]); }
+            }
+        });
+        (buf, handle)
+    };
+    let (out_buf, out_thread) = drain(Box::new(out));
+    let (err_buf, err_thread) = drain(Box::new(err));
+    let snapshot = |b: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| b.lock().map(|v| v.clone()).unwrap_or_default();
     // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
-    // member can read (what was decided so far, and a named notice), never as the gateway's 504.
+    // member can read, never as the gateway's 504.
     let deadline = Instant::now() + Duration::from_secs(100);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
+            _ => break None,
         }
     };
-    let stdout = reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
     let cap = |v: Vec<u8>| {
         let mut s = String::from_utf8_lossy(&v).into_owned();
         if s.len() > 64 * 1024 {
@@ -913,22 +1114,53 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         }
         s
     };
-    Some(match status {
-        Some(status) => Ending { code: status.code().unwrap_or(1), stdout: cap(stdout), stderr: cap(stderr) },
-        None => {
-            let stdout = cap(stdout);
-            // A bare `can` judges every reference held, printing each as it is decided: the notice
-            // counts them. Any other line that ran out of time says so and keeps what it printed.
-            let first = lines.first().map(String::as_str).unwrap_or("");
-            let bare_can = first == "can" || first == "can --all";
-            let notice = if bare_can {
-                let judged = stdout.lines().filter(|l| !l.is_empty() && !l.starts_with(' ') && !l.starts_with("mini> ")).count();
-                format!("error: {judged} of {} grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)\n", site.names().len())
-            } else {
-                "error: the shell did not finish within 100 s; what it printed stands above, and an attempt, if any, is retained under Receipts\n".to_owned()
-            };
-            Ending { code: 1, stdout, stderr: notice }
-        }
+    if let Some(status) = status {
+        let _ = out_thread.join();
+        let _ = err_thread.join();
+        return Some(Ending { code: status.code().unwrap_or(1), stdout: cap(snapshot(&out_buf)), stderr: cap(snapshot(&err_buf)) });
+    }
+    if !only_answers(lines) {
+        // A line that may move the world is never cut short: the shell keeps running to its
+        // decision (a thread reaps it), and the page says undecided, with where the outcome lands.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            let _ = out_thread.join();
+            let _ = err_thread.join();
+        });
+        let mut stderr = cap(snapshot(&err_buf));
+        stderr.push_str("undecided: still deciding after 100 s; the shell keeps running to its decision, which lands under Receipts (or `lookup ID` / `retry ID` for this attempt)\n");
+        return Some(Ending { code: 255, stdout: cap(snapshot(&out_buf)), stderr });
+    }
+    // Reads and local verbs are stopped at the deadline: nothing they do can be left half-done.
+    // The group is the child's own (process_group(0) above), so its id is the child's pid.
+    if let Ok(pgid) = i32::try_from(child.id()) {
+        unsafe { libc::kill(-pgid, libc::SIGKILL) };
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = out_thread.join();
+    let _ = err_thread.join();
+    let stdout = cap(snapshot(&out_buf));
+    // A bare `can` judges every reference held, printing each as it is decided: the notice counts them.
+    let first = lines.first().map(String::as_str).unwrap_or("");
+    let notice = if first == "can" || first == "can --all" {
+        let judged = stdout.lines().filter(|l| !l.is_empty() && !l.starts_with(' ') && !l.starts_with("mini> ")).count();
+        format!("error: {judged} of {} grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)\n", site.names().len())
+    } else {
+        "error: the read did not finish within 100 s; what it printed stands above\n".to_owned()
+    };
+    Some(Ending { code: 1, stdout, stderr: notice })
+}
+
+/// Whether every line is a read or a local verb by its grammar leaf (stopping one cannot leave the
+/// world half-moved). A line the grammar cannot place counts as one that may move the world.
+fn only_answers(lines: &[String]) -> bool {
+    use crate::shell_grammar::{grammar, parse, parse_line, Effect};
+    lines.iter().all(|line| {
+        let Ok(words) = crate::shell::words(line) else { return false };
+        let Some(g) = words.first().and_then(|w| grammar(w)) else { return false };
+        let Ok(p) = parse(g, &words).or_else(|_| parse_line(g, line)) else { return false };
+        matches!(p.leaf.effect, Effect::Read | Effect::Local)
     })
 }
 
@@ -956,10 +1188,14 @@ fn answered(ending: &Ending, next: &[(&str, &str)]) -> String {
 }
 
 pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: bool) -> String {
+    outcome_parts(ending, next, transition, "")
+}
+
+fn outcome_parts(ending: &Ending, next: &[(&str, &str)], transition: bool, paste: &str) -> String {
     let (class, headline) = ending.class(transition);
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     if class == "undecided" {
         if let Some(id) = ending.stderr.split("lookup ").nth(1).and_then(|r| r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).next()).filter(|s| !s.is_empty()) {
@@ -967,12 +1203,8 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         }
     }
     let detail = ending.text();
-    // `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
-    let paste = ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
-        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
-    }).unwrap_or_default();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -1018,16 +1250,21 @@ fn json_tree(v: &Value) -> String {
 
 /// The member's purse as a meter (`credit`): the balance a summon's budget is funded from and
 /// that a resident's paid turns drain; on the purse page and in the tour's agent step.
-fn purse_meter(site: &Site) -> String {
+/// The tour's purse meter, filled in after the page by app.js (`data-load`): the tour itself runs
+/// no shell, so a form's answer is never held behind a Host read; without JS it is a link.
+const PURSE_LATER: &str = "<section data-load=\"/purse/meter\"><div class=\"fill\"><p class=\"note\"><a href=\"/purse\">your purse, as a meter</a></p></div></section>\n";
+
+fn purse_meter(site: &Site, live: bool) -> String {
     match verb(site, &["credit".to_owned()]) {
         Some(ending) if ending.code == 0 => {
             let line = ending.stdout.lines().find(|l| l.starts_with("credit ")).unwrap_or("").to_owned();
             let balance: u64 = line.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
             let scale = balance.max(1000);
             format!(
-                "<section class=\"purse\" data-live=\"15000\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
-                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
+                "<section class=\"purse\"{}><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
+                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\" aria-label=\"Purse balance: {balance} credits\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
+                if live { " data-live=\"15000\"" } else { "" },
                 scale / 10,
                 escape(&line)
             )
@@ -1039,7 +1276,7 @@ fn purse_meter(site: &Site) -> String {
 
 /// `/purse`: the member's account as a meter (`credit`), then `pay status`.
 fn purse(site: &Site) -> Page {
-    let mut body = purse_meter(site);
+    let mut body = purse_meter(site, true);
     if let Some(ending) = verb(site, &["pay status".to_owned()]) {
         body.push_str(&format!("<section><h2>Pay</h2>{}</section>", answered(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
     }
@@ -1049,13 +1286,13 @@ fn purse(site: &Site) -> Page {
 fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> Page {
     let mut links = String::new();
     for (label, href) in next {
-        links.push_str(&format!("<a href=\"{}\">{}</a> ", escape(href), escape(label)));
+        links.push_str(&format!("<a href=\"{}\">{}</a> ", url(href), escape(label)));
     }
     Page {
         status: if class == "refused" { 403 } else { 200 },
         title: title.to_owned(),
         stamp: Stamp::None,
-        body: format!("<div class=\"outcome {class}\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
+        body: format!("<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
     }
 }
 
@@ -1111,7 +1348,21 @@ pub(super) fn quote(word: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "body/redteam.rs"]
+mod redteam;
+
+#[cfg(test)]
 mod tests {
+    #[test]
+    fn only_reads_and_local_lines_may_be_stopped_at_the_deadline() {
+        let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(super::only_answers(&l(&["can"])));
+        assert!(super::only_answers(&l(&["whoami", "help"])));
+        assert!(!super::only_answers(&l(&["story new t --from tale"])));
+        assert!(!super::only_answers(&l(&["can", "submit p1"])));
+        assert!(!super::only_answers(&l(&["no-such-verb x"])));
+    }
+
     use super::*;
 
     #[test]
@@ -1121,6 +1372,34 @@ mod tests {
             let words = crate::shell::words(&line).unwrap();
             assert_eq!(words, vec!["say".to_owned(), word.to_owned()], "{line}");
         }
+    }
+
+    /// The one outcome partial is a live region for every class: the line a form post
+    /// produces (admitted, refused with its clause, undecided with its retry) must reach
+    /// assistive tech, and the word — never the colour alone — carries the outcome.
+    #[test]
+    fn web_outcome_partial_is_a_live_region() {
+        for (code, transition, class, word) in [
+            (0, true, "admitted", "Admitted"),
+            (0, false, "answered", "Answered"),
+            (3, true, "refused", "refused"),
+            (4, true, "undecided", "undecided"),
+            (2, false, "error", "Usage"),
+        ] {
+            let ending = Ending { code, stdout: "done\n".into(), stderr: String::new() };
+            let html = outcome_of(&ending, &[("next", "/x")], transition);
+            assert!(
+                html.contains(&format!("class=\"outcome {class}\" role=\"status\"")) && html.contains("aria-live=\"polite\"") && html.contains("aria-atomic=\"true\""),
+                "{class}: {html}"
+            );
+            assert!(html.contains(word), "{class} carries its word: {html}");
+        }
+        // The partial the gateway renders for the anonymous POST refusal, same shape.
+        let page = outcome_page("Refused", "refused", "This body is the public reader", ANONYMOUS, &[]);
+        assert!(page.body.contains("role=\"status\"") && page.body.contains("aria-live=\"polite\""));
+        // A refusal's clause is highlighted, and the word stays beside it.
+        let refused = outcome_of(&Ending { code: 3, stdout: String::new(), stderr: "refused: law-denied: field 2 monotone\n".into() }, &[], true);
+        assert!(refused.contains("refused") && refused.contains("mark class=\"clause\""), "{refused}");
     }
 
     #[test]

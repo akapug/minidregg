@@ -621,7 +621,6 @@ Assurance.NoteSpendProofControllerAdmission	5.3	3747884	0
 Assurance.HyperdocumentTransclusionReferenceDeployment	3.1	3747676	0
 Compiler.WorldKindLawDependencies	2.2	3747348	0
 Assurance.HyperdocumentAgentOperation	5.5	3745736	0
-Assurance.PrivateEscrowSettlementJoin	2.6	3745620	0
 Compiler.ResourceTargetAdmission	2.3	3745252	0
 Assurance.ReactiveOutboxDelivery	3.4	3743876	0
 Compiler.NockProgramCodec	3.2	3743148	0
@@ -640,13 +639,11 @@ Assurance.HyperdocumentLinkPageDurableWeld	2.9	3736276	0
 Assurance.SameCoinGameProduct	2.5	3734740	0
 Kernel.WorldRoot	3.4	3734592	0
 Theory.TypedAuthorization	5.0	3734480	0
-Kernel.PrivateEscrowSettlement	3.2	3733792	0
 Compiler.HyperdocumentCell	3.6	3733464	0
 Kernel.ObjectiveActivityWire	3.1	3732964	0
 Assurance.NoteSpendConcreteCellAdapter	2.8	3732696	0
 Assurance.HyperdocumentLinkClientLocalFileCutover	2.2	3731504	0
 Compiler.ObjectiveBendLawCodec	3.7	3729068	0
-Kernel.QuotaGcSettlement	3.2	3728836	0
 Compiler.ResourceBirthCodec	3.2	3728764	0
 Compiler.ObjectiveBendPublication	2.2	3728580	0
 Assurance.HyperdocumentReactiveCarrierWitness	2.9	3728572	0
@@ -706,7 +703,6 @@ Kernel.ReactiveTerminalCell	3.2	3705080	0
 Compiler.WorldKindCell	2.4	3704676	0
 Assurance.Ext6GateProofDeploymentAdmission	2.1	3704068	0
 Assurance.BfvSuiteMigrationBoundary	2.2	3704036	0
-Compiler.DeployedCellRegistry	2.3	3703780	0
 Assurance.ProofCompositionGame	2.6	3703180	0
 Assurance.Tower256AdditiveFriRawAdmission	2.7	3703100	0
 Kernel.WorldKindProjection	2.3	3703020	0
@@ -724,7 +720,6 @@ Kernel.CanonicalPolicyRegistry	2.4	3696172	0
 Kernel.ContentResourceForestInstances	2.0	3695752	0
 Compiler.ObjectiveInvocationClaim	2.6	3695532	0
 Kernel.FieldClosure	2.5	3695048	0
-Assurance.QuotaGcSettlementWitness	2.3	3694472	0
 Compiler.StreamCell	2.8	3693128	0
 Theory	1.9	3692232	0
 Kernel.PayChainTip	2.3	3692216	0
@@ -1314,5 +1309,4 @@ Selvage.Statements	0.3	468072	0
 Compiler.Placeholder	0.3	467892	0
 Theory.Channel	0.3	466900	0
 Theory.Sp800185Cshake256Core	0.3	465344	0
-Pred.Placeholder	0.3	463976	0
 Effects.Placeholder	0.3	461664	0

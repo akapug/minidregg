@@ -58,7 +58,11 @@ SOCKET=${SOCKET:-$ROOT/public/mini.sock}
 # restored world IS the world the knobs describe (same genesis, same keys, same records), so nothing
 # a caller asserts changes; what it shares with other callers of the same candidate is test keys.
 # The Store (sqlite files and the head anchor) holds no path; every text file naming one is rewritten.
-TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR:-}
+# ON BY DEFAULT (ember 2026-10-27: keep snapshots and fast-forward them; avoid replays): unset means
+# $TMPDIR/minidregg-world-templates-UID (the variant digests the binaries, so candidates never share a
+# template); NEWPARTICIPANT_TEMPLATE_DIR="" (journey-runner's JOURNEY_WORLD_TEMPLATES=0) builds fresh,
+# the control for the published before/after number.
+TEMPLATE_DIR=${NEWPARTICIPANT_TEMPLATE_DIR-${TMPDIR:-/tmp}/minidregg-world-templates-$(id -u)}
 TEMPLATE_VARIANT= TEMPLATE_TAR= TEMPLATE_META=
 variant_digest() {
   # contents only (`sha256sum -` names no path): a caller's spec file lives under its own run root
@@ -244,6 +248,7 @@ jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OW
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2
 sh "$GENESIS_PARAMS_SH" fill-genesis "$ROOT/genesis-params.json"
+fill_completion_custodian "$ROOT/genesis-params.json" "$ROOT" "$MINI" || exit 2
 EXTRA_GENESIS_ENROLLMENTS="$ROOT/pay/genesis-enrollments-all.json" \
 GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \
   sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" "$CLOCK_PUBLIC" \

@@ -259,7 +259,7 @@ ok room alice "room invite i-bob lab $B @decl-lab-bob.json --verbs observe,place
 check room "the grant is K-ROOM's delegation under lab (not yet submitted)" \
   jq -e --arg lab "$LAB" '.purpose.draft.command.child.room == $lab' "$WS/alice/proposals/i-bob/intent.json"
 check room "the release records were bound first (turn 1), then the wrap disclosed (turn 2): both admitted" \
-  sh -c "jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-bind/outcome.json' && jq -e '.type == \"confirmed\"' '$WS/alice/attempts/i-bob-keys-wraps/outcome.json'"
+  sh -c "\"\$MINI\" attempt-state --attempt '$WS/alice/attempts/i-bob-keys-bind' --file outcome.json | jq -e '.type == \"confirmed\"' && \"\$MINI\" attempt-state --attempt '$WS/alice/attempts/i-bob-keys-wraps' --file outcome.json | jq -e '.type == \"confirmed\"'"
 check room "turn 1 carried no ciphertext (commitments only); the wrap atom of turn 2 is 1532 bytes: key id, hybrid wrap, grant, certificate, delivery" \
   sh -c "! grep -q 'DREGG' '$WS/alice/proposals/i-bob-keys-bind/intent.json' && jq -e '[.purpose.draft.command.targets[0].payload.actions[].payload | length / 2] == [1532]' '$WS/alice/proposals/i-bob-keys-wraps/intent.json'"
 exported room alice i-bob
@@ -420,7 +420,7 @@ raw outsider carl "reads sa with bob's capability number" "no-grant" "$MINI" wor
 declare_for carl lab
 # The generation a wrap is addressed to is the key epoch of the recipient's signed record (an enrolled key starts at 1).
 CGEN=$(jq -r .keyEpoch "$H/alice/requests/decl-lab-carl.json")
-CWRAP=$(python3 -c "import sys; print(2**96 + int(sys.argv[1]) * 2**64 + int(sys.argv[2]))" "$CGEN" "$C")
+CWRAP=$("$MINI" workspace --action room-key --op wrap-atom --dir "$WS/alice" --epoch 0 --gen "$CGEN" --member "$C")
 operator keyslaw "bob imports the keys cell by his room grant (the grant under lab that covers it)" "$MINI" workspace --action import \
   --dir "$WS/bob" --name lab-keys --kind object --target "$KEYS" --observe-capability "$(jq -r .observeCapability "$WS/bob/refs/lab.json")"
 raw keyslaw bob "invites carl himself (room-key --op invite): his CLIENT refuses, he is not the founder-key chain's tip" "current founder key" \
@@ -484,7 +484,7 @@ expectgot carl "carl opens the epoch-1 line" "$T_A1" "$(jq -r '.entries[1].priva
 expectgot carl "carl does not hold epoch 0: the marker (default: current epoch only)" \
   "[sealed under epoch 0 — you do not hold that key]" "$(jq -r '.entries[0].private' "$OUT")"
 ok carl alice "room invite i-carl-past lab $C @decl-lab-carl.json --past --verbs observe"
-# The wrap of (epoch 0, generation = carl's record key epoch, carl): (0 + 1) * 2^96 + gen * 2^64 + carl (Kernel/PrivateRoomKeys.lean wrapAtomId).
+# The wrap of (epoch 0, generation = carl's record key epoch, carl), as the client addresses it (room-key --op wrap-atom).
 check carl "--past wrote only the epoch carl lacked (epoch 0)" \
   jq -e --arg c "$CWRAP" '[.purpose.draft.command.targets[0].payload.actions[].atom] == [$c]' \
     "$WS/alice/proposals/i-carl-past-keys-wraps/intent.json"
@@ -560,8 +560,8 @@ check rotkey "alice now pins carl's NEW signing key for pc" \
   jq -e --arg k "$CARL_SIGNING" --arg old "$CARL_SIGNING0" '.signingKey == $k and $k != $old' "$OUT"
 ok rotkey alice "room rotate r-pc pc"
 # the rotation is two turns: r-pc-bind (release records) then r-pc-wraps (the wraps)
-# pc's epoch 1 for carl at generation 2 (his key epoch): (1 + 1) * 2^96 + 2 * 2^64 + carl.
-RK_ID=$(python3 -c "import sys; print(2 * 2**96 + 2 * 2**64 + int(sys.argv[1]))" "$C")
+# pc's epoch 1 for carl at generation 2 (his key epoch).
+RK_ID=$("$MINI" workspace --action room-key --op wrap-atom --dir "$WS/alice" --epoch 1 --gen 2 --member "$C")
 check rotkey "the rotation wrapped pc's new epoch to carl's RECORD (generation = his key epoch 2, his new key)" \
   jq -e --arg id "$RK_ID" --arg k "$ENC_NEW" '[.purpose.draft.command.targets[0].payload.actions[] | select(.atom == $id and (.payload | startswith($k)))] | length == 1' \
     "$WS/alice/proposals/r-pc-wraps/intent.json"

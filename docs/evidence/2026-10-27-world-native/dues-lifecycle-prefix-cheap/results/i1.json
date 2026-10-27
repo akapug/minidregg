@@ -1,0 +1,23 @@
+{
+ "label": "i1",
+ "expect": "confirmed",
+ "rc": 1,
+ "before": {
+  "height": "13",
+  "notesRoot": "65058464821972158154222778098056073681237929830966888410518147628831121724167",
+  "worldRoot": "15496145636468227713122332984017189964173748932415050931541496274699398864043"
+ },
+ "after": {
+  "height": "13",
+  "notesRoot": "65058464821972158154222778098056073681237929830966888410518147628831121724167",
+  "worldRoot": "15496145636468227713122332984017189964173748932415050931541496274699398864043"
+ },
+ "unchanged": true,
+ "refused": true,
+ "diagnostic": "mini: /build/candidates/3315a9083c4e54220801c839a4297a62b29ea274/bin/minidregg-host exited exit status: 1; request status uncertain: minidregg-host: source/input gate refused: Minidregg.Kernel.DeclaredResourceController.Reject.objectiveInput",
+ "attempt": "/build/lanes/wn-dues-lifecycle-prefix-cheap-2632169/w/sponsor/attempts/objective-i1",
+ "expectDetail": null,
+ "stdout": "",
+ "reason": "client (quote/consent, before signing)",
+ "detail": "Minidregg.Kernel.DeclaredResourceController.Reject.objectiveInput"
+}

@@ -1,0 +1,9 @@
+#### variant 2
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  regg.Kernel.ObjectiveActivityReceiver.Reject.kernel (Minidregg.Kernel.ObjectiveActivity.Refusal.outcomeProtocol "reply")
+{"record": {}, "state": null, "purse": 0, "height": "14"}
+{"rows": 4, "failed": ["birth"]}
+ALLDONE
+swarm-build: rc=0 wall_s=16 cgroup_peak_rss_bytes=386367488 (368 MiB)

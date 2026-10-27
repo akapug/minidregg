@@ -395,7 +395,7 @@ theorem rootBinding_of_noCollision (lengths : ∀ k, (ix k).length = L) {w w' : 
         (AuthTrie.Cache.wf_canon lengths (pathsInjective cellRoot sysRoot ix hix)) k _ _ accepted with
       read | collision
     · rwa [AuthTrie.Cache.lookup_canon] at read
-    · exact absurd collision nodes
+    · exact absurd (AuthTrie.CollisionAmong.global dig collision) nodes
   index' := hix'
   cells := cells
   system := system
@@ -541,7 +541,7 @@ theorem deployedRoot_binds {es es' : List (Key × Digest)} (hr : deployedRoot es
   · rcases deployed_paths es' with inj' | c
     · rcases AuthTrie.Cache.root_lastVal_eq deployedIx_length inj inj' hr k with same | c
       · exact Or.inl same
-      · exact Or.inr (worldDig_collision c)
+      · exact Or.inr (worldDig_collision (AuthTrie.CollisionAmong.global _ c))
     · exact Or.inr c
   · exact Or.inr c
 

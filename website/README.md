@@ -5,19 +5,19 @@ no JavaScript, no external fonts or scripts.
 
 | Page | Content |
 | --- | --- |
-| `index.html` | what Mini is, its state, its four rules |
+| `index.html` | what Mini is, where to try it, the shutdown date and the free and paid routes, links to the README, the experience document and the plan |
 | `language.html` | Objective Bend: Core4, one example, what is and is not proved |
 | `laws.html` | laws, object records, the Objective pin, activities, seats, and which a Host runs |
 | `architecture.html` | admission, laws, receipts, consent, private rooms, agreement |
-| `status.html` | **generated**: the README's Honest state table (`gen-status.py`); every row names the landing commit or journey row it rests on |
-| `join.html` | how to get an account, what the public node has, contributing |
+| `status.html` | **generated**: the README's What is live table (`gen-status.py`); every row names the landing commit or journey row it rests on |
+| `join.html` | a redirect to the join page on the demo host (the door owns the join copy) |
 
 ## Rules
 
 - Every factual sentence comes from a file at main, and `SOURCES.md` maps it to file and
   lines. When a source changes, change the page and the map together. Where a page and
   the repository disagree, the repository is right.
-- Never edit `status.html`. Edit the Honest state table in `README.md`, then run
+- Never edit `status.html`. Edit the What is live table in `README.md`, then run
   `python3 website/gen-status.py`. The header and footer are copied from `index.html`.
 - A code block marked `<pre data-source="PATH">` must be text of `PATH`.
 - `python3 website/gen-status.py --check` (the `website` row of `scripts/local-gates.sh`,
