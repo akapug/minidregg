@@ -267,6 +267,29 @@ row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$L
 page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
 docpage=$(req GET "/doc/$DOC")
 row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+# The tour's refusal and the write its law admits (step 4): editing a line of the note through
+# the editor (the pinned read, then the save) is refused by the note's law (`content/atom-edits
+# == 0`); `can --any` on the note answers the law and one write it admits (as slot witnesses: the
+# shell line to paste is lawsat's to print); the append, the write the law admits, is admitted.
+pre_of() { python3 -I -c 'import sys,re,html; m=re.search(r"<pre>(.*?)</pre>", sys.stdin.read(), re.S); print(html.unescape(m.group(1)) if m else "")'; }
+page=$(req GET "/doc/$DOC/edit")
+EDIT_URL=$(grep -o 'action="/doc/[^"]*/edit/[^"/]*"' <<<"$page" | head -1 | sed 's/action="//; s/"$//')
+NEWTEXT=$(python3 -I -c 'import sys,re,html; m=re.search(r"<textarea name=text[^>]*>\n?(.*?)</textarea>", sys.stdin.read(), re.S); t=html.unescape(m.group(1)) if m else ""; lines=t.split("\n"); lines[0]="edited: " + lines[0] if lines else ["edited"]; print("\n".join(lines))' <<<"$page")
+page=$(req POST "${EDIT_URL:-/doc/$DOC/edit/none}" --data-urlencode "csrf=$CSRF" --data-urlencode "text=$NEWTEXT")
+row tour-refused "$(grep -q 'data-save-status="refused"' <<<"$page" && echo 1 || echo 0)" "$(st) ${EDIT_URL:-no editor form} $(grep -o 'data-save-status="[a-z]*"[^>]*>[^<]*' <<<"$page" | head -1 | cut -c1-160)"
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
+row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -qE 'outcome (admitted|refused|undecided)' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# The tour's lost reply (DEMO-EXPERIENCE A11): the append form with `lose this reply once` comes
+# back undecided with its retained attempt; the retry shows the decided outcome; one line landed.
+alt=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
+fields=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' ')
+set -- $fields; F_ID=${1:-a2}; F_NAME=${2:-a3}; F_TEXT=${3:-a4}
+LOSE_ID="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"; LOSE_TEXT="lost once $(date +%s)"
+page=$(req POST /tour/3 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=doc" --data-urlencode "alt=${alt:-0}" --data-urlencode "$F_ID=$LOSE_ID" --data-urlencode "$F_NAME=$DOC" --data-urlencode "$F_TEXT=$LOSE_TEXT" --data-urlencode "submit=on" --data-urlencode "lose=on")
+row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$LOSE_ID" <<<"$page" && echo 1 || echo 0)" "$(st) alt=${alt:-?} fields=$F_ID,$F_NAME,$F_TEXT $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-140)"
+page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
+docpage=$(req GET "/doc/$DOC")
+row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 # The tour's refusal and the write its law admits (step 4): striking a line of the note is
 # refused by the note's law (`content/tombstones == 0`), the clause highlighted; `can --any` on
 # the note answers the law and one write it admits (as slot witnesses: the shell line to paste is

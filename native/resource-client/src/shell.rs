@@ -1887,6 +1887,9 @@ fn execute(session: &Session, plan: Plan) -> Ending {
             return Ending::Client(e);
         }
     }
+    // The retained attempt this command works on, when it names one: an uncertain transmission
+    // (the reply never read) is then an undecided ending that names the lookup, not a client error.
+    let attempt_id = flags.iter().find(|(name, _)| name == "attempt").and_then(|(_, value)| Path::new(value).file_name().map(|n| n.to_string_lossy().into_owned()));
     let args = Args {
         command: OsString::from(&command),
         values: flags
@@ -1913,6 +1916,10 @@ fn execute(session: &Session, plan: Plan) -> Ending {
     }
     match (result, decision) {
         (Ok(()), _) => Ending::Done,
+        (Err(client), None) if client.starts_with("uncertain host") && attempt_id.is_some() => Ending::Rendered(
+            EXIT_UNDECIDED,
+            format!("undecided: {client}; the attempt is retained, `lookup {}` asks again\n", attempt_id.unwrap_or_default()),
+        ),
         (Err(client), None) => Ending::Client(client),
         (Err(client), Some(decision)) => {
             let (evidence, decoded) = match &decision {
