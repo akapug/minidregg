@@ -49,6 +49,19 @@ source-consistent codec census generation remains outstanding. Decoder metadata
 may move closure fingerprints even though ordinary/reserve encoders did not
 change; pins must not be bypassed or edited by hand.
 
+After its normal coherent dependency build, the central validator should run
+these explicitly: the new fixture files are not added to an umbrella target.
+
+```sh
+lake env lean tests/lean/LifetimeGrantObserverAdversary.lean
+lake env lean tests/lean/LifetimeGrantSourceAdversary.lean
+lake env lean Host/NativeLifecycleConsent.lean
+python3 scripts/codec-shapes-regen.py
+```
+
+Use the central build's resource wrapper and normal codec-regeneration workflow;
+these commands are instructions for that validator, not additional lane jobs.
+
 Compose this branch with lane/oracle-grant-factory (34aaf5044) for a fresh Store.
 Then run the real agent/browser journey through grant issue, dispatch, answer,
 restart and exact retry. No event27 submission, repaired hosted answer or current
