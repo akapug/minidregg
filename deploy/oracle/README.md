@@ -19,6 +19,13 @@ data path; the [v3 receipt](runtime-v3-receipt.json) remains historical evidence
 The host must also include the native status-header serialization fix recorded
 in the v4 receipt.
 
+The [actual receiving run](../../docs/oracle-shared-data-2026-10-27.md) reached
+admitted Oracle queries in two grains, shared read-only data, and separate
+conversation state. Full acceptance is incomplete: the wrong-inventory fixture
+failed for its directory mode, and cleanup exposed an already-stopped resident
+recovery limitation. The dated record preserves those failures and the remaining
+restart checks; component tests and packaging receipts do not replace that run.
+
 ## Exact inputs
 
 `candidate-2026-10-26.json` retains the historical monolithic candidate pin. Each

@@ -190,7 +190,10 @@ mkdir -m 755 "$publication"
 jq '.files[0].sha256 = ("0" * 64)' "$held/inventory.json" >"$publication/inventory.json"
 cp "$held/receipt.json" "$publication/receipt.json"
 chmod 444 "$publication/inventory.json" "$publication/receipt.json"
-mkdir -m 755 "$publication/data"
+mkdir -m 555 "$publication/data"
+# Match a real publication's immutable directory modes so this case reaches
+# the signed inventory mismatch instead of stopping at a custody-mode refusal.
+chmod 555 "$publication"
 refuse_start wrong-data
 grep -q "published inventory differs from signed attachment digest" "$run/wrong-data.stderr" "$run/wrong-data.unit.log" || fail 'wrong inventory refused for an unrelated reason'
 restore_publication
