@@ -2,7 +2,7 @@
 # build-runtime-root SOURCE OUT GRAIN_RUNTIME GRAIN_PROVIDER_BRIDGE
 #
 # Stage the nonsecret Hermes worker runtime root the bwrap launcher mounts at
-# /agent: upstream Hermes Agent (Nous Research) with its ACP extra in a venv,
+# /agent: upstream Hermes Agent (Nous Research) with its ACP and MCP extras in a venv,
 # Mini's tool-catalogue patch (hermes-agent/mini-tool-catalogue.patch: the
 # restricted room resident admits a session only when Hermes reports the exact
 # Mini MCP tool surface it loaded), the keyless grain-runtime the worker runs
@@ -35,7 +35,7 @@ patch -d "$out/source.tmp" -p1 --forward --batch <"$here/hermes-agent/mini-tool-
 mv "$out/source.tmp" "$out/source"
 ( cd "$out/source" && UV_PROJECT_ENVIRONMENT="$out/venv" UV_CACHE_DIR="$out.build/cache" UV_CONCURRENT_DOWNLOADS=2 \
     UV_CONCURRENT_BUILDS=2 UV_CONCURRENT_INSTALLS=2 \
-    "$UV" sync --locked --no-dev --extra acp --python /usr/bin/python3 --no-install-project )
+    "$UV" sync --locked --no-dev --extra acp --extra mcp --python /usr/bin/python3 --no-install-project )
 rm -rf -- "$out.build"
 install -m 0755 "$runtime" "$out/grain-runtime"
 install -m 0755 "$bridge" "$out/grain-provider-bridge"
