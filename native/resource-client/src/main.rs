@@ -146,6 +146,8 @@ mod web;
 mod receipt_continuity;
 #[cfg(unix)]
 mod client_consent;
+#[cfg(unix)]
+mod consent_proxy;
 mod workspace;
 #[cfg(unix)]
 #[path="protected_object/object_keys.rs"]
@@ -2778,6 +2780,18 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-agent-operator-proxy requires --socket")?;
             public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-controller-consent" => {
+            let consent = path(args.required("consent")?);
+            let config = path(args.required("config")?);
+            let anchors = path(args.required("anchors")?);
+            let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
+            let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
+            let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors)
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {

@@ -226,9 +226,10 @@ else
     >"$ROOT/pay/genesis-enrollments-all.json"
 fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
-{"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}
+{"subject":"30","capability":"4030","enrolCapability":"4032"}
 EOF
-# The one genesis template (genesis.sh) from the example params, with this
+# The one genesis template (genesis.sh) from the example params, without its grain platform (this
+# world hosts no grains; the example's null completionCustodianKey is refused unfilled), with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
 # MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" --argjson balance "$SPONSOR_BALANCE" \
@@ -237,7 +238,8 @@ jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OW
   '.domain = $domain | .sponsor.subject = $subject | .sponsor.initialBalance = $balance | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end
-   | if $objective != "" then .objectiveInvocation = $objective else . end' \
+   | if $objective != "" then .objectiveInvocation = $objective else . end
+   | del(.grainPlatform)' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2
@@ -291,7 +293,7 @@ jq -e '.type == "minidregg-participant-reference-v1" and .target == "10" and
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --socket "$SOCKET" --key "$ROOT/pay/observer.key" --subject 30 --no-prerotation \
   --dir "$ROOT/pay/observer" >"$ROOT/pay/observer-workspace.stdout"
-jq -e '.payObserver == {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}' \
+jq -e '.payControlCapability == "4031" and .payObserver == {"subject":"30","capability":"4030","enrolCapability":"4032"}' \
   "$ROOT/genesis.json" >/dev/null
 [ -s "$ROOT/deployment/pay-ledger-genesis.json" ] || { echo 'bootstrap retained no genesis pay ledger' >&2; exit 1; }
 

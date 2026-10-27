@@ -43,7 +43,7 @@ variable {R : Registry} {D : Type} [DecidableEq D]
 is indexed by the `DataIntent` it admits: each of its 37 constructors carries
 the private receiving object (`AcceptedBirth`, `AcceptedInvocation`, …) whose
 intent is that index.  So the turn of an admission is the turn of its index,
-and one derivation covers all 37 -- there is no per-constructor `ofIntent`. -/
+and one derivation covers all 48 -- there is no per-constructor `ofIntent`. -/
 def Turn.ofAdmission (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (w : World R TransactionId D) {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes}

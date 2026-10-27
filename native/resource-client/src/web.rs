@@ -1,4 +1,4 @@
-//! `mini web`: a workspace's view of the node as plain hypertext, in three faces.
+//! `mini web`: a workspace's view of the node as plain hypertext, in two faces.
 //!
 //! Every page that shows kernel state is one or more signed reads under the
 //! workspace's own key, through `workspace::signed_view` /
@@ -13,7 +13,7 @@
 //!   journeys' direct face over one workspace: reads plus the document editor and
 //!   creation POST forms, which use the native client's pinned diff and durable
 //!   attempt and sign under the workspace key. It binds 127.0.0.1 only, accepts
-//!   only `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard),
+//!   only `Host: 127.0.0.1:8080` / `localhost:PORT` (the DNS-rebinding guard),
 //!   refuses a foreign `Origin`, and every path sits under a per-launch secret.
 //! - **Body** (`--body`, `web/body.rs`): the same renders as stage fragments plus
 //!   every verb action, for the web gateway (docs/WEB-FRONTEND-2026-10-27.md),
@@ -29,7 +29,6 @@ mod inspect;
 mod resident;
 #[path = "web/world.rs"]
 mod world;
-mod studio;
 #[path = "web/search.rs"]
 mod search;
 #[path = "web/body.rs"]
@@ -294,7 +293,7 @@ pub(crate) fn gate(request: &Request, front: &Front, token: &str) -> Gate {
     }
     let parts: Vec<_> = segments.iter().map(String::as_str).collect();
     if request.method == "POST" {
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "preview"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -676,8 +675,6 @@ impl Site {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
                     ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
-                    ["studio","new"] => studio::post(self,None,"new",&body),
-                    ["studio",id,action @ ("manifest" | "snapshot" | "compose" | "fork" | "preview")] => studio::post(self,Some(id),action,&body),
                     ["new-document",id] => create::post(self,id,&body,"create"),
                     ["new-document",id,op] => create::post(self,id,&body,op),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
@@ -686,9 +683,7 @@ impl Site {
             Gate::Route(segments) if segments == ["search"] => search::page(self, &request.target),
             Gate::Route(segments) => {
                 let draft = matches!(segments.first().map(String::as_str), Some("new-document"))
-                    || segments.get(2).is_some_and(|part| part == "edit" || part == "new-document")
-                    || segments.first().is_some_and(|part| part == "studio")
-                        && segments.get(2).is_some_and(|part| part == "module");
+                    || segments.get(2).is_some_and(|part| part == "edit" || part == "new-document");
                 let _mutation = if draft {
                     Some(self.mutations.lock().map_err(|_| "browser custody lock poisoned")?)
                 } else { None };
@@ -702,15 +697,6 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
-            ["studio"] => studio::index(self),
-            ["studio","new"] => studio::new(self),
-            ["studio",id] => studio::package(self,id),
-            ["studio",id,"module",index] => studio::module(self,id,index,false),
-            ["studio",id,"module",index,"fresh"] => studio::module(self,id,index,true),
-            ["studio",id,"draft",submission] => studio::retained_draft(self,id,submission),
-            ["studio",id,"snapshot",snapshot] => studio::captured(self,id,snapshot),
-            ["studio",id,"snapshot",snapshot,"preview",run] => studio::preview(self,id,snapshot,run),
-            ["studio",id,"history",revision] => studio::history(self,id,revision),
             ["new-document"] => create::open(self,None,None),
             ["new-document",id] => create::open(self,Some(id),None),
             ["room",name,"new-document"] => create::open(self,None,Some(name)),
@@ -821,7 +807,7 @@ impl Site {
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
             ) + &if self.front.read_only { String::new() } else {
-                format!("<p><a href=\"{base}/studio\">Source studio</a> | <a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
+                format!("<p><a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
             },
         }
     }
@@ -1350,13 +1336,74 @@ moved 1002: after the start -> after 1001
         }
     }
 
+    /// Every file under `root` with its length: what a read must leave alone.
+    fn tree(root: &std::path::Path) -> BTreeSet<(PathBuf, u64)> {
+        let mut found = BTreeSet::new();
+        let mut pending = vec![root.to_owned()];
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let meta = entry.metadata().unwrap();
+                if meta.is_dir() { pending.push(entry.path()) } else { found.insert((entry.path(), meta.len())); }
+            }
+        }
+        found
+    }
+
+    /// One request through the real `serve` over loopback; returns the raw reply.
+    fn exchange(site: &Arc<Site>, raw: &str) -> String {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served = site.clone();
+        let worker = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = served.serve(stream, Instant::now() + Duration::from_secs(5));
+        });
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(raw.as_bytes()).unwrap();
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        worker.join().unwrap();
+        String::from_utf8_lossy(&reply).into_owned()
+    }
+
     #[test]
     fn get_router_calls_no_submit_path() {
-        let source = include_str!("web.rs");
-        let router = &source[source.find("fn route(").unwrap()..source.find("fn names(").unwrap()];
-        for word in ["POST", "PUT", "DELETE", "PATCH", "propose", "submit"] {
-            assert!(!router.contains(word), "{word}");
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-web-get-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(root.join("refs")).unwrap();
+        let site = Arc::new(Site {
+            mutations: Mutex::new(()),
+            home: None,
+            root: root.clone(),
+            workspace: Value::Null,
+            subject: "7".into(),
+            token: "s3cret".into(),
+            front: Front::loopback(8080, false),
+            base: "/s3cret".into(),
+            face: Face::Server,
+            shell: None,
+        });
+        let before = tree(&root);
+        for target in ["/", "/doc/paper", "/doc/paper/history", "/doc/paper/inspect", "/doc/paper/diff/1/2",
+            "/at/5/doc/paper", "/object/o", "/object/o/behavior", "/board/b", "/room/r", "/room/r/resident",
+            "/stream/s", "/search?q=x", "/nowhere"] {
+            let reply = exchange(&site, &format!("GET /s3cret{target} HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n"));
+            assert!(reply.starts_with("HTTP/1.1 "), "{target}: {reply}");
+            for refused in ["405", "421", "403"] {
+                assert!(!reply.starts_with(&format!("HTTP/1.1 {refused}")), "{target}: gate refused a read");
+            }
+            assert_eq!(tree(&root), before, "GET {target} changed the workspace");
         }
+        // The same read-only addresses refuse a POST instead of submitting.
+        for target in ["/doc/paper", "/doc/paper/history", "/room/r", "/board/b"] {
+            let reply = exchange(&site, &format!(
+                "POST /s3cret{target} HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nContent-Length: 0\r\n\r\n"));
+            assert!(reply.starts_with("HTTP/1.1 405"), "POST {target}: {reply}");
+            assert_eq!(tree(&root), before, "POST {target} changed the workspace");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

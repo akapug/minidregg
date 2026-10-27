@@ -94,7 +94,7 @@ Nobody edits the roster by hand on the demo box. A stranger who joins at `demo.d
 entrance, which only proves the Discord id (the signed interaction), writes one bounded request to the door's
 link spool (`MINI_DISCORD_DOOR_LINKS`, default `/var/lib/mini-discord/door-links`, at most 64 pending) and
 answers at once. The door's root processor matches the code to its account and is the only writer of
-`/etc/mini/discord-roster.json`. A code is single-use, expires after 7 days, can never map to the sponsor or an
+`/etc/mini/discord-roster.json`. A code is single-use, expires after `linkTtlHours` (default 168, `mini-door-process.rs:129`), can never map to the sponsor or an
 operator name, and a Discord id already on the roster is refused (`deploy/door/README.md`).
 
 ## Retention
@@ -117,15 +117,15 @@ its split drop-in, and the runner. ember's part:
 
 1. **The application.** At <https://discord.com/developers/applications>, New Application; copy the
    Application ID and Public Key into `/etc/mini/discord.env` (`discord.env.example`, root:root 0600,
-   installed with `mini-config install discord-env`).
+   installed by dregg-infra's `install.sh`).
 2. **Commands.** From ember's machine (the bot token is used once and never stored on the box):
    ```sh
    curl -X PUT -H "Authorization: Bot $TOKEN" -H 'Content-Type: application/json' \
      --data @deploy/discord/commands.json https://discord.com/api/v10/applications/$APP_ID/commands
    ```
 3. **Endpoint.** Set Interactions Endpoint URL to `https://demo.dregg.online/interactions`. Discord sends a PING
-   and a badly signed request; saving succeeds only on PONG and 401. Caddy's route is
-   `edge/demo/host/caddy/Caddyfile`.
+   and a badly signed request; saving succeeds only on PONG and 401. Caddy's route is in
+   dregg-infra (`edge/demo/host/caddy/Caddyfile`, not in this repository).
 4. **Install.** Add the app to a server with `applications.commands`, or allow user install.
 
 ## The room mirror (off on the demo)
@@ -163,5 +163,6 @@ RECONNECT then RESUME, INVALID_SESSION then a fresh IDENTIFY, and a missed ACK t
 exercise signed HTTP interactions, deferral-before-custody, persisted restart and UNKNOWN handling,
 actor-bound status, revocation, linking, retention, and the runner socket protocol against a stand-in. The
 mirror's tests start a real key broker and need Linux. `tests/native-world.py` composes a fake signed Discord
-with the actual entrance and a fresh native Host/Store; it predates the broker-held mirror secrets and does not
-pass its mirror rows.
+with the actual entrance and a fresh native Host/Store; its mirror rows still set `MINI_MIRROR_WEBHOOK_URL`,
+`MINI_MIRROR_CHANNEL_URL` and `MINI_MIRROR_BOT_TOKEN` (`native/discord-entrance/tests/native-world.py:108`),
+which the mirror refuses with exit 78 (`mini-discord-mirror.rs:397`), so those rows do not pass.

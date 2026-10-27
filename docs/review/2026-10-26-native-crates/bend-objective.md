@@ -20,13 +20,13 @@ Reader scope: `native/bend-ir2-proof/` (Rust, 812 lines of src+tests, plus provi
 | `src/config.rs` | 104 | Plonky3 `StarkConfig`: BabyBear, quartic extension, Poseidon2-16 hiding Merkle MMCS, `HidingFriPcs` with 4 mask rows, the `FullDegreeChallenger` wrapper. Two profiles: V4 `PROFILE` (`config.rs:31`) and V5 `ARTIFACT_PROFILE` (`config.rs:33`) |
 | `src/full_degree_challenger.rs` | 146 | Challenger wrapper. It rejection-samples degree-4 extension challenges until `{1,a,a²,a³}` spans the extension (`:14-34`, `:56-70`), panicking after 128 tries (`:69`). Has 5 unit tests |
 | `src/masking_budget.rs` | 32 | `REQUIRED_TRACE_MASKS = 4·2 + 19 = 27`, `MIN_TRACE_ROWS = 32` (`:9-12`). `TraceCapacity::checked` (`:17-29`) |
-| `src/legacy_config.rs` | 64 | V2 profile with no transcript framing. **Not declared as a module in `main.rs`** (`main.rs:3-5`); only `tests/short_trace_disclosure.rs:7-8` includes it, via `#[path]` |
-| `tests/artifact_binding.rs` | 36 | V5 rejects a proof once a trailing space is added to the descriptor (`:14,33`). Needs `BEND_IR2_FIXTURE` |
-| `tests/bounded_commitment.rs` | 55 | Runs the binary against `BEND_COMMITMENT_FIXTURE`. Wrong digest/validity publics are rejected; a flipped private wire refuses to prove (`:18-25`, `:43-54`) |
-| `tests/masking_observations.rs` | 88 | Gaussian-elimination falsifier that 27 linear observations are covered by 32-row masks and not by a 1-row mask |
-| `tests/quotient_masking.rs` | 46 | Calls the real `get_quotient_ldes` and `recompose_quotient_from_chunks`: masked chunks recombine to zero |
-| `tests/short_trace_disclosure.rs` | 115 | Adversarial test: a 1-row raw proof leaks the private trace from public openings (`:72-78`). Also checks capacity refusals and capacity binding |
-| `tests/test_provision.py` | 30 | Unit test of `provision.verify` |
+| `src/legacy_config.rs` | 64 | V2 profile with no transcript framing. **Not declared as a module in `main.rs`** (`main.rs:3-5`); only `short_trace_disclosure.rs [not in tree]:7-8` includes it, via `#[path]` |
+| `artifact_binding.rs [not in tree]` | 36 | V5 rejects a proof once a trailing space is added to the descriptor (`:14,33`). Needs `BEND_IR2_FIXTURE` |
+| `bounded_commitment.rs [not in tree]` | 55 | Runs the binary against `BEND_COMMITMENT_FIXTURE`. Wrong digest/validity publics are rejected; a flipped private wire refuses to prove (`:18-25`, `:43-54`) |
+| `masking_observations.rs [not in tree]` | 88 | Gaussian-elimination falsifier that 27 linear observations are covered by 32-row masks and not by a 1-row mask |
+| `quotient_masking.rs [not in tree]` | 46 | Calls the real `get_quotient_ldes` and `recompose_quotient_from_chunks`: masked chunks recombine to zero |
+| `short_trace_disclosure.rs [not in tree]` | 115 | Adversarial test: a 1-row raw proof leaks the private trace from public openings (`:72-78`). Also checks capacity refusals and capacity binding |
+| `test_provision.py [not in tree]` | 30 | Unit test of `provision.verify` |
 | `provision.py` | 46 | Checks SHA-256 of 374 pinned files under a given breadstuffs path, then symlinks `native/bend-proof-deps/bread` to it (`:34-40`) |
 | `dependencies.lock.json` | 380 | `plonky3Revision`, `scope`, `files` (374 hashes: 196 `circuit/tests`, 135 `circuit/src`, 9+7 vendor Plonky3 patches, dregg-dsl, dregg-codec, the root `Cargo.toml`) |
 | `.config/nextest.toml` | 6 | Excludes the two `bounded_commitment` tests from the default profile |
@@ -126,7 +126,7 @@ Neither crate sits on an admission, authority, funding, retry, identity, orderin
 
 **F2 (the pinned root `Cargo.toml` exists nowhere).** `dependencies.lock.json` `scope` says "root workspace membership narrowed to three crates; not an upstream release pin". I hashed `Cargo.toml` at all 384 commits touching it in the local breadstuffs history: no match. **Scenario:** a fresh box with a breadstuffs checkout must hand-write a narrowed manifest that hashes to an unknown preimage. That is effectively impossible. **Harm:** R32/R33 are non-reproducible by construction.
 
-**F3 (R32's headline test is gone).** `QUALIFICATION-R32.txt:20-24, 89-96` and `R33:36-41` rest on `tests/controller_commitment.rs` and `Verify/BendControllerCommitmentEmit.lean`. Both were retired (`OBJECTIVE-ONLY-MIGRATION.txt:39-44`) and are absent from the tree. **Scenario:** a reviewer runs `cargo nextest … --test controller_commitment` and gets "no such test target". **Harm:** the files still sit in the crate root, presenting as current qualification.
+**F3 (R32's headline test is gone).** `QUALIFICATION-R32.txt:20-24, 89-96` and `R33:36-41` rest on `controller_commitment.rs [not in tree]` and `Verify.BendControllerCommitmentEmit [deleted 008fd5e7]`. Both were retired (`OBJECTIVE-ONLY-MIGRATION.txt:39-44`) and are absent from the tree. **Scenario:** a reviewer runs `cargo nextest … --test controller_commitment` and gets "no such test target". **Harm:** the files still sit in the crate root, presenting as current qualification.
 
 **F4 (the default nextest profile is red without fixtures).** `.config/nextest.toml:3` excludes only the two `bounded_commitment` tests. `artifact_binding.rs:12`, `short_trace_disclosure.rs:28-29` and `short_trace_disclosure.rs:94` `unwrap()`/`expect()` the `BEND_IR2_FIXTURE` env var. **Scenario:** a plain `cargo nextest run` on a provisioned box reports 3 panics. A lane reads that as a backend regression.
 
@@ -167,11 +167,11 @@ Neither crate sits on an admission, authority, funding, retry, identity, orderin
 **bend-ir2-proof (the whole crate is unwired):**
 - Not in the workspace members (`/Users/ember/dev/minidregg/Cargo.toml:3`).
 - No reference from `lakefile.toml`, `.github/`, `scripts/` (except the skip notice at `scripts/pipeline/prime-cargo:12`) or `deploy/`.
-- The only live mentions are in `docs/BEND-GENERAL-ZKVM-PATH-20261003.txt` and `docs/construction/source-intake-20261003.json`. That intake file still lists the deleted `tests/unrolled_controller.rs` and `controller_commitment.rs`.
+- The only live mentions are in `docs/BEND-GENERAL-ZKVM-PATH-20261003.txt` and `docs/construction/source-intake-20261003.json`. That intake file still lists the deleted `unrolled_controller.rs [not in tree]` and `controller_commitment.rs`.
 - `src/legacy_config.rs` is dead code for the binary: it is not a `mod` of `main.rs`. It survives only as a regression oracle in `short_trace_disclosure.rs`.
 - `config::for_capacity` and V4 `PROFILE` are reachable only from tests (`artifact_binding.rs:26`, `quotient_masking.rs:18`, `short_trace_disclosure.rs:39,100,109`).
 
-**Is it live or superseded?** Neither. The migration file swaps language routes: upstream Bend was deleted on 2026-10-04 (`git show b91abe35`, which kept `tests/artifact_binding.rs` after reading it). The crate's stated next step, "a real Objective native execution proof awaits the actual packed controller producer" (`OBJECTIVE-ONLY-MIGRATION.txt:53-55`), has no producer. The Lean side of that route (`Assurance/ObjectiveBendZkClaims.lean`, `Compiler/BendCommitted*.lean`, `Theory/BendQuotient*`, `Theory/BendMaskingDescent`) is imported only from `ResearchWip.lean`. That is the opt-in library (`lakefile.toml`, "Source-first research is an explicit opt-in build"). Its named theorems do exist: `arithmetic_observes_source` (`Assurance/ObjectiveBendCommittedSource.lean:37`), `direct_forces_both_success`, `accepted_run`, `prepare_exact`, `prepare_payload_aliases`.
+**Is it live or superseded?** Neither. The migration file swaps language routes: upstream Bend was deleted on 2026-10-04 (`git show b91abe35`, which kept `artifact_binding.rs [not in tree]` after reading it). The crate's stated next step, "a real Objective native execution proof awaits the actual packed controller producer" (`OBJECTIVE-ONLY-MIGRATION.txt:53-55`), has no producer. The Lean side of that route (`Assurance/ObjectiveBendZkClaims.lean`, `Compiler/BendCommitted*.lean`, `Theory/BendQuotient*`, `Theory/BendMaskingDescent`) is imported only from `ResearchWip.lean`. That is the opt-in library (`lakefile.toml`, "Source-first research is an explicit opt-in build"). Its named theorems do exist: `arithmetic_observes_source` (`Assurance/ObjectiveBendCommittedSource.lean:37`), `direct_forces_both_success`, `accepted_run`, `prepare_exact`, `prepare_payload_aliases`.
 
 **Twin.** minidregg's chosen proof system is Selvage (`prover/`, "Selvage sumcheck engine", `prover/Cargo.toml:5`). bend-ir2-proof is a second, unrelated backend: breadstuffs' Plonky3 STARK. It depends directly on `dregg-circuit`, the 271K-line breadstuffs component that the mission names as the #1 collapse target. Keeping it means a second prover stack with its own masking theory (`Theory/BendQuotient*`).
 
@@ -180,7 +180,7 @@ Neither crate sits on an admission, authority, funding, retry, identity, orderin
   - The gates `objective-c` (preview cohort + `extra-cohort.json` + `fixtures/`) and `objective-cgen` (1000 generated seeds, with the 2 text mutants `spec-apply-metadata` and `add-carry`) run via `scripts/local-gates.sh:84,97-98` in CI (`.github/workflows/build.yml:310`). They are not in the merge gate: `scripts/pipeline/merge-gate-checks.sh:121` runs only `objective-proofs`.
 - **Wired only manually:**
   - `transparency` (`check-objective-proofs.sh transparency|all`). It is not in the `local-gates` `GATES` list (`local-gates.sh:84`), so the "executed cross-check of forcingTransparent_of_yieldedPlan" never runs in CI.
-  - `scripts/check-objective-machine-perf.sh`, which uses `fastmachine/build.sh`, `Stress.obend` and `packets.ts`. It is not in `GATES`.
+  - `check-objective-machine-perf.sh [deleted 3b2aa109]`, which uses `fastmachine/build.sh`, `Stress.obend` and `packets.ts`. It is not in `GATES`.
 - **No caller at all:**
   - `cdiff_minimize.py` (a developer tool).
   - `build-lean-native.sh` (cited only in docs).

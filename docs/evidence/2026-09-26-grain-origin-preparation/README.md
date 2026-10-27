@@ -3,9 +3,9 @@
 `Host/GrainOriginPreparation.lean` SHA-256
 `1e299497956ff0874ba7ed15539c2a0863beff80f94dc780e4f3b129c8aef6e7`
 typechecked in the isolated `/tmp/minidregg-overnight-20260926-grain-origin`
-snapshot. The focused probe `scripts/probe-grain-origin-preparation.lean`
+snapshot. The focused probe `scripts.probe-grain-origin-preparation [deleted 1e68f88d]`
 SHA-256 `8410e4cb7b43e07ca0f3f813943336235adc02f4f8c49504b17d7e1fba38b9c3`
-ran with `LEAN_NUM_THREADS=2 lake env lean scripts/probe-grain-origin-preparation.lean`
+ran with `LEAN_NUM_THREADS=2 lake env lean scripts.probe-grain-origin-preparation [deleted 1e68f88d]`
 and exited 0. Its emitted result is [verified-r.log](verified-r.log).
 
 The probe loaded the independent origin pin and the recorded accepted

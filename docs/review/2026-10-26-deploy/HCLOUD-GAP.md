@@ -210,7 +210,7 @@ load-bearing").
 - Idle Store about 320 MB. A full journey peaked at 726 MB for its unit and 1.04 GB for the
   slice (candidate 45a9974, 2026-09-30; `dregg-infra edge/mini/README.md:92-94`).
 - Host ELF 159 MB, bare spawn 80 MB RSS (`docs/PERFORMANCE-REVIEW-2026-10-03.md:26`). One
-  Lean process start costs about 40 ms on a 173 MB image (`docs/WASTE-MODEL.md:57`).
+  Lean process start costs about 40 ms on a 173 MB image (`WASTE-MODEL.md [deleted 3b2aa109]:57`).
 - The resident Host now holds package replays (perf-memo, 10-16). **Current main's
   runtime RSS has not been measured.**
 - Latency, recorded:

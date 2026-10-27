@@ -1,6 +1,6 @@
 # Accepted B/A historical selector replay
 
-The read-only Lean probe [`scripts/probe-fn-accepted-history-selectors.lean`](../../../scripts/probe-fn-accepted-history-selectors.lean)
+The read-only Lean probe [`scripts.probe-fn-accepted-history-selectors [deleted 1e68f88d]`](../../../scripts/probe-fn-accepted-history-selectors.lean)
 reopened the completed, independent B and A Mini Stores through
 `NativeHost.openExisting` under the coherent next-source snapshot
 `/tmp/minidregg-overnight-20260926-next` (committed full-command selector

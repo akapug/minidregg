@@ -3298,10 +3298,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the operator harness's disposable running user unit mini-spk-s0123456789abcdef-a991007-g1.service; run with --run-ignored only-ignored"]
     fn source_stop_already_inactive_actual_manager_probe() {
         // The operator harness installs/starts only this disposable fixture.
         // This exercises the real manager/cgroup receiver, not Mini admission.
-        if std::env::var("MINI_SPK_STOPPED_RUNNING_PROBE").as_deref() != Ok("1") { return; }
         assert_ne!(unsafe { libc::geteuid() }, 0);
         let unit = "mini-spk-s0123456789abcdef-a991007-g1.service";
         let manager = systemd_show(unit).unwrap();
@@ -3367,10 +3367,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the operator harness's installed disposable user unit (app 991005); run with --run-ignored only-ignored"]
     fn installed_user_unit_stop_audit_probe() {
-        if std::env::var("MINI_SPK_SYSTEMD_AUDIT_PROBE").as_deref() != Ok("1") {
-            return;
-        }
         assert_ne!(unsafe { libc::geteuid() }, 0);
         let identity = VerifiedBegin {
             app: 991005,
@@ -3413,10 +3411,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "must run inside the disposable user unit mini-spk-s0123456789abcdef-a991006-g1.service; run with --run-ignored only-ignored"]
     fn unit_process_matches_manager_invocation_probe() {
-        if std::env::var("MINI_SPK_UNIT_INSTANCE_PROBE").as_deref() != Ok("1") {
-            return;
-        }
         assert_ne!(unsafe { libc::geteuid() }, 0);
         let instance = UnitInstance::current("mini-spk-s0123456789abcdef-a991006-g1.service").unwrap();
         assert_eq!(instance.invocation_id.len(), 32);

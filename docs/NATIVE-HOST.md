@@ -21,7 +21,7 @@ The process-level acceptance is the journey, `native/resource-client/journey.sh
 MANIFEST.json NEW_RUN_ROOT` (steps J0-J8, growth, K4, M3-M7; see `docs/JOURNEY.md`
 where it has landed). The Lean acceptance drivers that were compiled against the
 host closure (`probe-native-host-cli` and the page-era receiver probes) and
-`scripts/build-native-acceptance-runner.sh` were deleted at wave S4: they built
+`build-native-acceptance-runner.sh [deleted b8651eef]` were deleted at wave S4: they built
 fixtures through the retired page and catalogue materializers, and the journey
 runs the same user actions through the public host.
 

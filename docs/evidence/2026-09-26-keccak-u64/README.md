@@ -1,6 +1,6 @@
 # Proved UInt64 Keccak permutation and matched native admission
 
-The committed `Compiler/Sp800185Cshake256Core.lean` at `b609133` keeps the
+The committed `Theory/Sp800185Cshake256Core.lean` at `b609133` keeps the
 original `keccakF1600 : Array (BitVec 64) → Array (BitVec 64)` definition and
 adds a UInt64 implementation plus the general `@[csimp]` theorem
 `keccakF1600_eqUInt64`. The theorem covers **every** input array, including
@@ -13,7 +13,7 @@ equivalence.
 
 The Core source SHA-256 is
 `aa4e9294eab4243590a51b3ecfbb54c7e613f6807a37b055800cc649437949c0`.
-`LEAN_NUM_THREADS=2 lake env lean Compiler/Sp800185Cshake256Core.lean` passed.
+`LEAN_NUM_THREADS=2 lake env lean Theory/Sp800185Cshake256Core.lean` passed.
 Compiling the same Core to C (`lake env lean -c`) produced SHA-256
 `2d176d368e80080df8ef5bcb351e6ae0ed04701d61690830216aac0df51d0aff`.
 The bounded [generated-C call graph](generated-c-callgraph.txt) shows both

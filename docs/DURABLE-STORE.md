@@ -1,7 +1,7 @@
 # The durable Store: interfaces an operator depends on
 
-Present-state contract, rewritten whole on 2026-10-26 against
-`native/hyperdocument-link-sqlite-store` (schema 5). One Mini Store is one
+Present-state contract for `native/hyperdocument-link-sqlite-store` (schema 5,
+`src/lib.rs:603`). One Mini Store is one
 directory (`storageRoot` in the operator configuration), one MAC key file, and
 an independently retained **sibling head anchor** that lives *outside* the
 Store directory. Back up the anchor with the Store or a restore refuses (see
@@ -48,7 +48,7 @@ directory fsync) before it answers. A committed record may live only in
 database is the database file together with its `-wal`** (and `-shm`, which is
 rebuildable). A process killed right after `COMMIT` leaves the record in
 `-wal`; the next open recovers it exactly
-(`tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
+(`native/hyperdocument-link-sqlite-store/tests/durable_anchor.rs::a_crash_after_commit_keeps_the_record_in_the_wal`).
 This is the behaviour of the linked SQLite and the host's `fsync` as observed
 by tests that kill processes; it is not a proof about media under power loss.
 
@@ -61,8 +61,9 @@ unseeded v2–v4 Store gains the durable tables; a **seeded v2–v4 Store refuse
 takes no write lock and writes nothing.
 
 Checkpoints: the Host opens from the latest one; `durable-checkpoint-at H`
-reads the latest at or below `H` (history views). Nothing prunes them, so the
-table grows by one row per `checkpointEvery` records.
+reads the latest at or below `H` (history views). Nothing prunes them (the
+only write is the upsert by height at `native/hyperdocument-link-sqlite-store/src/lib.rs:1386`, and no
+code path deletes a `durable_checkpoint` row), so the table grows by one row per `checkpointEvery` records.
 
 ## What the key means, and what it does not
 
@@ -88,7 +89,7 @@ that the receipt signatures do not already carry.
 - **Loss of the key.** The Store refuses to open. The log and seed are intact,
   and nothing reinterprets them.
 - **Rotation.** Stop the service. Replace `checkpoint.key` (mode `0600`). Then
-  seal a checkpoint at the head under the new key (DATAMODEL §6 Q1).
+  seal a checkpoint at the head under the new key (the trust it rests on: `docs/NATIVE-HOST.md:64`).
   - The new checkpoint's log-root value vouches for every earlier entry.
   - Tags on later entries use the new key.
   - There is no rotation command yet. A Store opened under a key whose id
@@ -144,7 +145,6 @@ that the receipt signatures do not already carry.
 | a record after the checkpoint no longer replays | `durable log suffix does not replay through the canonical executor` |
 | log not rooted at this deployment's genesis log root | `log chain not rooted at this deployment's genesis` |
 | a live session sees the log shrink | `durable log shrank beneath the session` (session poisoned) |
-| the incremental world-root cache disagrees with a full rebuild | `world root cache disagrees with a full rebuild` (session poisoned) |
 
 The helper never resets or rewrites anything implicitly. A forged or corrupt
 entry stays visible to the operator.
@@ -182,13 +182,16 @@ serve
 | 7 | **disk refused a write**: full (`ENOSPC`, `EDQUOT`, `SQLITE_FULL`) or read-only (`EROFS`, `SQLITE_READONLY`) | uncertain today; Lean ask: report it as such, never as absent |
 | 1 | anything else (opaque SQLite or filesystem failure, anchor refusal) | uncertain |
 
-Before 2026-10-26 a bound violation exited 4, so a Lean codec that produced
-an over-long tag reloaded and retried forever. The crash and hold fixtures
-(`*-crash`, `publish-hold`) are no longer verbs of this binary (`serve`
-forwarded them to any caller): the crate's lifecycle tests run them from the
-test binary itself (`tests/support`). `Compiler/DurableReceiverCore.lean`'s
-`append … crashAt` parameter therefore has no binary to drive; production
-passes `none`, and its removal is a Lean ask.
+Exit 4 is reserved for a real CAS conflict, so a codec that produces an
+over-long tag does not reload and retry (`tests/durable_anchor.rs`,
+`an_append_over_a_bound_exits_six_not_conflict`). The crash and hold fixtures
+are not verbs of this binary: they live in `tests/support` and run from the
+crate's test binaries, and as a process in the separate
+`minidregg-link-sqlite-store-fixtures` binary, built only with
+`--features fixtures` for the Lean probe `scripts/durable-receiver.lean`
+(`Cargo.toml`, `src/bin/fixtures.rs`); never ship that binary.
+`Compiler/DurableReceiverCore.lean`'s `append … crashAt` parameter
+(`:234-261`) drives only the fixtures binary; production passes `none`.
 
 ## Independent head continuity and upgrade
 
@@ -241,11 +244,18 @@ submit a different operation.
 
 - **Online (the service running): SQLite's online backup API**, which reads
   through the WAL, so the snapshot holds every committed transaction and is one
-  self-contained file. dregg-infra's `mini-backup` does this
-  (`sqlite3 DB ".backup SNAP"`, run as the Store's account so any `-wal`/`-shm`
-  it creates belongs to that account), then `PRAGMA integrity_check` on the
-  copy. Never `cp` the database file of a live Store: it can miss the
-  committed transactions still in `-wal`.
+  self-contained file (run it as the Store's account so any `-wal`/`-shm` it
+  creates belongs to that account). Never `cp` the database file of a live
+  Store: it can miss the committed transactions still in `-wal`. The helper
+  takes no backups. `mini-backup` and `mini-restore-check` belong to
+  dregg-infra, not to this repository (named at `deploy/shell/OPERATOR.md:80-81`
+  and `deploy/door/infra/dregg-infra.patch:213`; the script is not in the
+  tree). The commit that moved the Store to WAL (`43ede087`) records a hand
+  check, against the system sqlite3, that the online `.backup` captures a
+  record present only in `-wal`; no repository test covers the backup path.
+  The demo box pushes to an Object Lock bucket and runs the restore check
+  (`docs/DEMO-PREFIX-2026-10-26.md:77`, a recorded run, not a property of this
+  crate).
 - **Cold (the service stopped): copy the database file, its `-wal` and its
   `-shm` together** (or first run `PRAGMA wal_checkpoint(TRUNCATE)` as the
   Store's account, after which the database file alone is whole). A cold copy
@@ -263,12 +273,33 @@ submit a different operation.
   another copy into it. Preserve any newer live anchor separately; never
   overwrite it to make a historic backup open. An old database with the newer
   anchor correctly refuses.
-- Freezing a retired Store (`ship.sh --regenesis`): checkpoint with
-  `TRUNCATE` and set `journal_mode=DELETE` before making it read-only; it is
-  then read with `immutable=1` (`mini-restore-check`).
+- Freezing a retired Store (`ship.sh --regenesis`, `deploy/shell/OPERATOR.md:63`):
+  checkpoint with `TRUNCATE` (`wal_checkpoint`, `src/lib.rs:547`) and set
+  `journal_mode=DELETE` before making it read-only, so no `-wal` remains and
+  it can be read `immutable=1`. `ship.sh` is dregg-infra's.
 - Restoring an old database **and its old anchor** together cannot detect the
   joint rollback. Client receipt memory and external witnesses address that;
   a local file is not a witness.
+
+## Guarantees and what backs them
+
+"exists" means code with a crate or Lean test; "proved" means a Lean theorem
+(not a statement about SQLite, the filesystem or media); "journeyed" means a
+recorded run, none of which is claimed here unless named.
+
+| guarantee | backing | word |
+| --- | --- | --- |
+| an acknowledged write survives a kill at every publication boundary | `killed_publisher_recovers_before_and_after_commit_and_anchor`, `crash_after_commit_reopens_exact_and_retry_is_idempotent` | exists (process kills, not power loss) |
+| a record committed only to `-wal` is recovered | `a_crash_after_commit_keeps_the_record_in_the_wal` | exists |
+| concurrent appenders cannot fork the log or anchor | `concurrent_publishers_serialize_anchor_with_commit`, `concurrent_cas_writers_cannot_both_replace_the_same_preimage` | exists |
+| a rolled-back or foreign database refuses | `genesis or retained head conflicts` and missing-anchor cases in `tests/durable_anchor.rs` | exists |
+| bound violations exit 6, a read needs no writable disk, a refused write is typed (7) | `an_append_over_a_bound_exits_six_not_conflict`, `a_read_needs_no_writable_disk_and_a_refused_write_is_typed` | exists |
+| the production binary has no crash or hold verb | `serve_answers_in_process_and_the_production_binary_has_no_crash_verbs` | exists |
+| the first wrong log tag is named; a valid chain verifies | `Compiler/DurableLogTags.lean`: `verifyTags_ok_iff`, `verifyTags_refuses_at`, `verifyTags_refuses_head` | proved |
+| history accumulator entries verify against their frontier | `Compiler/DurableHistory.lean`: `verifyAt_sound`, `verifyAt_refuses` | proved |
+| cold reopen, MAC chain, checkpoints and replay together | `scripts/durable-receiver.lean` | exists (a probe; no recorded journey cited here) |
+| power-loss survival of an acknowledged write | SQLite `synchronous=FULL` plus `fullfsync` as linked (`src/lib.rs:503-525`) | an assumption about the host stack, neither proved nor tested |
+| the anchor detects a joint rollback of database and anchor | none | not provided |
 
 ## Dependencies and tests
 

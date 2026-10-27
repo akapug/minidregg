@@ -328,6 +328,21 @@ KillMode=control-group
 TimeoutStopSec=60
 NoNewPrivileges=yes
 PrivateTmp=yes
+# The Store serves a Unix socket only; its one writable tree is the state
+# directory (TMPDIR, logs, public/, the Store itself). The candidate directory
+# is read-only. ProtectHome is read-only, not hidden, so a state directory
+# under /home still works: ReadWritePaths reopens exactly it.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=$STATE
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=8G
+LimitCORE=0
 
 [Install]
 WantedBy=default.target
