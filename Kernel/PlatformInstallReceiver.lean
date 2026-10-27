@@ -202,6 +202,9 @@ structure Observed where
   sponsorVerified : Bool
   capabilityHeld : Bool
   cosignVerified : Bool
+  /-- The envelope controller's expiry check: the signed `validUntil` against the admission
+  height. -/
+  unexpired : Bool
   deriving DecidableEq, Repr
 
 /-- **The commit gate.** The receiver commits an install only when this holds of the loaded
@@ -213,7 +216,8 @@ def admitsObserved (store : PlatformStore) (command : Command) (cosign : Option 
       decide (command.sponsor = controller) && o.sponsorVerified && o.capabilityHeld &&
         decide (current.version < command.next.version) && command.next.valid &&
         PlatformCell.custodianCheck (fun _ _ _ => o.cosignVerified) [] cosign
-          current.completionCustodianKey command.next.completionCustodianKey
+          current.completionCustodianKey command.next.completionCustodianKey &&
+        o.unexpired
   | _, _ => false
 
 /-! ### The gate is the spec's admission -/
@@ -249,7 +253,8 @@ theorem admitsObserved_decides (ctx : PlatformCell.Context) (h : PlatformCell.Hi
     (held : ctx.deployment.holdsInstall ctx.deployment.controller command.control = o.capabilityHeld)
     (cosigned : ∀ old s, h.current.completionCustodianKey = some old → cosign = some s →
       ctx.deployment.verifiesKey old (ctx.encode h.current (installOf command envelope cosign validUntil)) s =
-        o.cosignVerified) :
+        o.cosignVerified)
+    (unexpired : decide (ctx.height ≤ validUntil) = o.unexpired) :
     admitsObserved store command cosign o = true ↔
       PlatformCell.Admits ctx h (installOf command envelope cosign validUntil) := by
   rw [← PlatformCell.decideInstall_decides]
@@ -258,7 +263,7 @@ theorem admitsObserved_decides (ctx : PlatformCell.Context) (h : PlatformCell.Hi
     command.next.completionCustodianKey (fun k s hk hs => (cosigned k s hk hs).symm)
   simp only [installOf] at sponsor custodian
   simp only [admitsObserved, cellHolds, controllerHolds, PlatformCell.decideInstall, installOf,
-    sponsor, held, custodian]
+    sponsor, held, custodian, unexpired]
   exact Iff.rfl
 
 /-- The oracle answers a deployment gives for an install over a history. -/
@@ -268,19 +273,20 @@ def oracle (ctx : PlatformCell.Context) (h : PlatformCell.History) (i : Platform
     ctx.deployment.holdsInstall ctx.deployment.controller i.capability,
     match h.current.completionCustodianKey, i.custodianCosign with
     | some old, some s => ctx.deployment.verifiesKey old (ctx.encode h.current i) s
-    | _, _ => false⟩
+    | _, _ => false,
+    decide (ctx.height ≤ i.validUntil)⟩
 
 /-- Teeth: an unverified sponsor signature is refused whatever else holds. -/
 theorem unsigned_refused (store : PlatformStore) (command : Command) (cosign : Option (List UInt8))
-    (held cosigned : Bool) :
-    admitsObserved store command cosign ⟨false, held, cosigned⟩ = false := by
+    (held cosigned unexpired : Bool) :
+    admitsObserved store command cosign ⟨false, held, cosigned, unexpired⟩ = false := by
   unfold admitsObserved; split <;> simp
 
 /-- Teeth: a sponsor other than the cell's controller is refused, every oracle answering yes. -/
 theorem delegate_refused (controller : SubjectId) (current : Platform) (command : Command)
     (cosign : Option (List UInt8)) (other : command.sponsor ≠ controller) :
     admitsObserved (PlatformCellLayout.genesisStore controller current) command cosign
-      ⟨true, true, true⟩ = false := by
+      ⟨true, true, true, true⟩ = false := by
   simp [admitsObserved, other]
 
 /-- Satisfiable pole: the controller's signed install of its valid record one version up,
@@ -291,7 +297,7 @@ theorem controller_install_admitted (controller : SubjectId) (current : Platform
     admitsObserved (PlatformCellLayout.genesisStore controller current)
       ⟨controller, control, roots.1, roots.2.1, roots.2.2,
         { current with version := current.version + 1 }⟩ none
-      ⟨true, true, false⟩ = true := by
+      ⟨true, true, false, true⟩ = true := by
   rcases current with ⟨v, c, g, k, o, l⟩
   simp only at noKey
   subst noKey
@@ -565,7 +571,7 @@ structure Accepted [DecidableEq F]
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
   cosignVerified : Bool
-  gate : admitsObserved prepared.platform.cell.logical command cosign ⟨true, true, cosignVerified⟩ = true
+  gate : admitsObserved prepared.platform.cell.logical command cosign ⟨true, true, cosignVerified, true⟩ = true
 
 theorem Accepted.sound [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command cosign} {ingress : DecodedIngress}
@@ -575,7 +581,7 @@ theorem Accepted.sound [DecidableEq F]
         (request deployment prepared.authority.snapshot prepared.platform.cell profile.semantics ambient
           command prepared.plan)) ∧
       admitsObserved prepared.platform.cell.logical command cosign
-        ⟨true, true, accepted.cosignVerified⟩ = true :=
+        ⟨true, true, accepted.cosignVerified, true⟩ = true :=
   ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩, accepted.gate⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
@@ -594,7 +600,7 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
         | .ok semantic =>
             let cosigned ← cosignAnswer native receipt.prepared.controller.frame prepared.need
             if gate : admitsObserved prepared.platform.cell.logical command cosign
-                ⟨true, true, cosigned⟩ = true then
+                ⟨true, true, cosigned, true⟩ = true then
               return .ok ⟨receipt, same, semantic, cosigned, gate⟩
             else return .error .custodianCosignRejected
       else return .error .capabilityRejected
@@ -661,6 +667,7 @@ plan) by the effect digest, and the source covers the whole record through the c
 def receiverContext (d : PlatformCell.Deployment) (m : Moment) (roots : Digest × Digest × Digest) :
     PlatformCell.Context where
   deployment := d
+  height := m.ambient.height
   encode current i := m.frame current (commandAt roots i) i.validUntil
   source current i := effectSource m.snapshot.domain m.semantics (commandAt roots i)
     (declaration m.snapshot.domain m.semantics (commandAt roots i) ⟨current, i.next⟩)
@@ -705,7 +712,7 @@ theorem receiverDecides (ctx : PlatformCell.Context) (roots : Digest × Digest �
   have := admitsObserved_decides ctx h (load h) (commandAt roots i) i.envelope i.custodianCosign
     i.validUntil (oracle ctx h i) (holds h) (reach h).controller_stays
     (by rw [same]; rfl) rfl
-    (by intro old s hk hs; rw [same]; simp [oracle, hk, hs])
+    (by intro old s hk hs; rw [same]; simp [oracle, hk, hs]) (by simp [oracle])
   rwa [same] at this
 
 theorem frame_mk (header : CredentialSignedEnvelopeController.SignedHeader) (signature : List UInt8) :
@@ -749,7 +756,8 @@ theorem signed_command_admitted (d : PlatformCell.Deployment) (m : Moment) (stor
     (recorded : (key, m.frame h.current command validUntil, signature) ∈ d.transcript.verified)
     (held : d.holdsInstall d.controller command.control = true)
     (up : h.current.version < command.next.version) (valid : command.next.valid = true)
-    (keyKept : command.next.completionCustodianKey = h.current.completionCustodianKey) :
+    (keyKept : command.next.completionCustodianKey = h.current.completionCustodianKey)
+    (unexpired : m.ambient.height ≤ validUntil) :
     let envelope : CredentialSignedEnvelopeController.SignedEnvelope :=
       ⟨m.header h.current command validUntil, signature⟩
     let roots := (command.expectedFactoryRoot, command.expectedAuthorityRoot,
@@ -768,7 +776,7 @@ theorem signed_command_admitted (d : PlatformCell.Deployment) (m : Moment) (stor
     show m.frame h.current (commandAt roots install) validUntil = _
     rw [atRoots]
   have admits : PlatformCell.Admits (receiverContext d m roots) h install := by
-    refine ⟨sponsor, ?_, held, up, valid, ?_⟩
+    refine ⟨sponsor, ?_, held, up, valid, ?_, unexpired⟩
     · show d.verifies d.controller _ signature = true
       rw [encodes]
       simp [PlatformCell.Deployment.verifies, enrolled, recorded]
@@ -778,7 +786,8 @@ theorem signed_command_admitted (d : PlatformCell.Deployment) (m : Moment) (stor
       cases h.current.completionCustodianKey <;> simp [PlatformCell.CustodianStep]
   have gate := (admitsObserved_decides (receiverContext d m roots) h store command signature none
     validUntil (oracle (receiverContext d m roots) h install) holds reach.controller_stays
-    (by unfold oracle; rfl) (by unfold oracle; rfl) (by intro old s _ hs; cases hs)).mpr admits
+    (by unfold oracle; rfl) (by unfold oracle; rfl) (by intro old s _ hs; cases hs)
+    (by unfold oracle; rfl)).mpr admits
   let ingress : Ingress := ⟨commandCodec.encode command,
     CredentialSignatureAdmission.canonicalEnvelopeCodec.encode envelope, none⟩
   obtain ⟨decoded, decodes, sameCommand, sameEnvelope⟩ := decodeIngress_of (ingress := ingress)
@@ -862,7 +871,7 @@ theorem AcceptedInstall.sound [DecidableEq F] {ingress : DecodedIngress}
     (accepted : AcceptedInstall deployment profile ambient durable ingress) :
     accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
       admitsObserved accepted.prepared.platform.cell.logical ingress.command
-        ingress.ingress.custodianCosign ⟨true, true, accepted.accepted.cosignVerified⟩ = true ∧
+        ingress.ingress.custodianCosign ⟨true, true, accepted.accepted.cosignVerified, true⟩ = true ∧
       Nonempty (Authorized (policyConfig accepted.prepared).portal
         accepted.prepared.authority.snapshot.authState
         (request deployment accepted.prepared.authority.snapshot accepted.prepared.platform.cell

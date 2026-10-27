@@ -143,6 +143,8 @@ def pinDigest (customization bytes : List UInt8) : Digest :=
 current record, and the command bytes those signed bytes pin by digest. -/
 structure Context where
   deployment : Deployment
+  /-- The logical admission height the signed `validUntil` is checked against. -/
+  height : Nat
   /-- The bytes the controller's signature (and a custodian's cosignature) covers. -/
   encode : Platform → Install → List UInt8
   /-- The command bytes the signed bytes pin through `pinDigest customization`. -/
@@ -188,7 +190,8 @@ def Admits (ctx : Context) (h : History) (i : Install) : Prop :=
     h.current.version < i.next.version ∧
     i.next.valid = true ∧
     CustodianStep ctx.deployment.verifiesKey (ctx.encode h.current i) i.custodianCosign
-      h.current.completionCustodianKey i.next.completionCustodianKey
+      h.current.completionCustodianKey i.next.completionCustodianKey ∧
+    ctx.height ≤ i.validUntil
 
 /-- The cell's reachable histories: the deployment's genesis record, then admitted installs. -/
 inductive Reachable (ctx : Context) : History → Prop
@@ -315,7 +318,8 @@ def decideInstall (ctx : Context) (h : History) (i : Install) : Bool :=
     decide (h.current.version < i.next.version) &&
     i.next.valid &&
     custodianCheck ctx.deployment.verifiesKey (ctx.encode h.current i) i.custodianCosign
-      h.current.completionCustodianKey i.next.completionCustodianKey
+      h.current.completionCustodianKey i.next.completionCustodianKey &&
+    decide (ctx.height ≤ i.validUntil)
 
 /-- **L1-c proved for the reference receiver.** -/
 theorem decideInstall_decides (ctx : Context) : Decides ctx (decideInstall ctx) := by
@@ -413,6 +417,7 @@ def toyDeployment (host : NativeHost.Config) (genesis : Config) (key : List UInt
 
 def toyContext (d : Deployment) : Context where
   deployment := d
+  height := 0
   encode _ := wireEncode
   source _ := wireEncode
   customization := []
@@ -502,6 +507,12 @@ theorem trustsSubjectField_not_decides (host : NativeHost.Config) (genesis : Con
       simpa [Platform.valid, h, History.current, History.records] using valid⟩)
   exact forged_refused _ _ _ (by
     simp [toyContext, Deployment.verifies, Deployment.controller, toyDeployment]) admitted
+
+/-- Teeth: a signature past its `validUntil` at the admission height is refused (the envelope
+controller's expiry, `CredentialSignedEnvelopeController.prepare`). -/
+theorem expired_refused (ctx : Context) (h : History) (i : Install)
+    (expired : i.validUntil < ctx.height) : ¬ Admits ctx h i :=
+  fun admitted => absurd admitted.2.2.2.2.2.2 (Nat.not_le.mpr expired)
 
 theorem stale_version_refused (ctx : Context) (h : History) (i : Install)
     (stale : i.next.version ≤ h.current.version) : ¬ Admits ctx h i :=
@@ -907,6 +918,7 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
   · funext n
     simp
 
+#assert_axioms expired_refused
 #assert_axioms lawful_injective installWire_covers wireEncode_covers toy_admits premises_inhabited
   forged_refused relay_swap_refused trustsSubjectField_not_decides stale_version_refused
   invalid_refused zero_lifetime_invalid custodian_drop_refused uncosigned_rotation_refused
