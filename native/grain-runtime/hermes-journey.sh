@@ -147,10 +147,15 @@ WITNESS=$(jq -er .delegation.childCapability "$RUN/host-workspace/proposals/witn
 mark "parent witness capability $WITNESS delegated to worker subject 9"
 
 # --- Human friend enrolls through the ordinary sponsor-sealed path ----------
+# Each step is named by fail() (set -e would otherwise exit through the trap with only
+# "services stopped", the step unnamed): the 2026-10-27 seal red looked like a services fault.
 "$MINI" enroll --action plan --sponsor-workspace "$ROOT/sponsor" --factory-ref factory \
-  --name friend --new-key "$ROOT/newcomer.key" --dir "$ROOT/attempts/friend" >/dev/null
-"$MINI" enroll --action seal --dir "$ROOT/attempts/friend" >/dev/null
-"$MINI" enroll --action submit --dir "$ROOT/attempts/friend" >"$EV/friend-enroll.json"
+  --name friend --new-key "$ROOT/newcomer.key" --dir "$ROOT/attempts/friend" \
+  >"$EV/friend-plan.stdout" 2>"$EV/friend-plan.stderr" || fail "friend enrollment plan refused"
+"$MINI" enroll --action seal --dir "$ROOT/attempts/friend" \
+  >"$EV/friend-seal.stdout" 2>"$EV/friend-seal.stderr" || fail "friend enrollment seal refused"
+"$MINI" enroll --action submit --dir "$ROOT/attempts/friend" >"$EV/friend-enroll.json" \
+  2>"$EV/friend-submit.stderr" || fail "friend enrollment submit refused"
 FRIEND=$(jq -er .subject "$ROOT/attempts/friend/enrollment.json")
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
   --enrollment "$ROOT/attempts/friend/enrollment.json" --dir "$ROOT/friend" >/dev/null
