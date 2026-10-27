@@ -41,16 +41,15 @@ Not done here, by decision: grain-runtime's ~13 bounded readers (another crate's
 the sandbox lane's); `crate::decode_hex` stays any-case (`hex::decode_any_case`): it reads typed
 input as well as Host values, and splitting its ~200 call sites is its own pass.
 
-## Enrol / world template: waiting on a candidate
+## Enrol / world template
 
-1. Step 7 of `native/resource-client/enrol-resume-acceptance.sh` asserts a pinned plan is admitted
-   across two ticks; it needs a candidate carrying L1's `92341df2` (the integrator's cut 8). None on
-   dregg-build has it yet (checked: 203ed84c, 23861533, 45f45d15, 6236826f, a94bed71, a972c742).
-   Run: `enrol-resume-acceptance.sh HOST MINI STORE VERIFIER NEW_DIR` with this tip's `mini`
-   beside the candidate's host/store/verifier, `CANDIDATE=<set>`; template
-   `/build/lanes/custody-drivers-logs/run-enrol-10.sh`. Expect
-   `enrol-resume: PASS (...; pinned plan admitted across two ticks)`.
-2. On that candidate, the standing run with `JOURNEY_WORLD_TEMPLATES=0` then `=1`
+1. `native/resource-client/enrol-resume-acceptance.sh` PASSES on cut 7 (3315a908, which carries L1's
+   `92341df2`) with this lane's `mini` at `182e5494`: every step, five members under the 15 s ticker
+   in 5 seals, and step 7's pinned plan admitted across two ticks (two confirmed ticks, rising
+   count and second, two world roots). Every tick waits for a wall-clock second later than the last
+   tick's (the Host refuses a non-advancing tick, `clockNotAdvancing`). Template:
+   `/build/lanes/custody-drivers-logs/run-enrol-12.sh`.
+2. On cut 9 (28235a17) or later, the standing run with `JOURNEY_WORLD_TEMPLATES=0` then `=1`
    (`/build/lanes/custody-drivers-logs/run-measure.sh`; re-add the frozen tree
    `/build/lanes/custody-drivers-measure` at the tip). Last numbers (a94bed71 binaries, which lack
    this lane's mini fixes): 1119 s off, 1089 s on, both cut short by J1's seal red.
