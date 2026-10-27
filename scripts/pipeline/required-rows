@@ -14,15 +14,16 @@
 # flips to required only once main's own baseline run has it PASS (every line NAME, NAME/*). Until then landing.sh
 # prints its status and does not count it; the baseline-relative rule (b) still applies to it like any line.
 #
-# BASELINE-RELATIVE RULE (ROOT, 2026-10-14). A candidate lands when:
+# BASELINE-RELATIVE RULE (ROOT 2026-10-14; reds named, never ledgered: docs/COORDINATION-2026-10-27.md §2, 2026-10-27).
+# A candidate lands when:
 #   (a) its static gate is red=0, AND
 #   (b) its standing run on this box has NO line non-PASS (or missing) that was PASS in main's own most recent
 #       standing run on the same box ($ARTIFACT_ROOT/main -> $JOURNEY_ROOT/<main>/results.tsv), AND
-#   (c) every required line is PASS or declared absent by name ($PIPELINE_ROOT/absent-inputs.tsv), EXCEPT lines
-#       already non-PASS at main's baseline that are listed below as `known-red ROW CV-TASK note`: those block
-#       nothing until fixed. A pre-existing red WITHOUT a known-red line still blocks (open the cv task first).
+#   (c) every required line is PASS, or declared absent by name ($PIPELINE_ROOT/absent-inputs.tsv), or was ALREADY
+#       non-PASS at main's baseline: such a line prints as PRE-RED by name and blocks nothing. There is no list of
+#       accepted reds to maintain: the run's output names them, and a lane's brief names which one it owns.
 # landing.sh prints "new reds vs baseline: N" and "required unmet: [...] (of which pre-existing at main: [...])";
-# exit 0 iff new reds = 0 and nothing required is unmet beyond the known-red list.
+# exit 0 iff new reds = 0 and nothing required is unmet beyond the pre-existing ones.
 activity
 seats
 call
@@ -65,11 +66,6 @@ jpay/JPAY6
 jpay
 exchange
 hostupgrade
-# known red at main's hbox baseline 7dea0626 (2026-10-14); remove the line when the row is fixed
-known-red jpay/JPAY6 01a13c42-dc55 Host/ClientConsentCore.lean consent allowlist refuses the continuityProviderResourceId/providerMetering keys jpay6 writes; non-PASS at main (it was UNCONFIGURED, input declared absent)
-known-red jpay 01a13c42-dc55 the jpay parent row is FAIL only through its sub-row JPAY6 (JPAY1-4 PASS)
-known-red m6grain 01a14736-3181 the standing run executes install-user-world from its private extract /run/user/1000/pjs.*, outside /etc/sudoers.d/mini-operator paths (journeys/.trees/*, claude-lanes/*/src)
-known-red m7 01a14736-31a4 no M7 reference: no other READY set on hbox has the compiled inputs of the batch-1 epoch
 # The journey split (DEMO-PREFIX L9; journey.sh SPINE/DEMO_STEPS/KERNEL_STEPS). Every line above stays required.
 # `demo` is new: the demo journey's steps no other row runs (documents, web, rooms, chat, Hermes in a room, PAY
 # enrollment, keys over the proxy, disclosure). It becomes required the first time main runs it green. The

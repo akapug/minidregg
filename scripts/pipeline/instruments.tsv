@@ -6,6 +6,4 @@
 # instrument over unchanged plant targets gives the same answer it gave at <sha>.
 # Not listed, so always run: TokenCensus's per-row plants. They run inside `lake build TokenCensus`, whose trace does
 # not see an environment switch: a build that skipped them would leave an olean a later planting build reuses.
-hyp-ledger	scripts/check-hypothesis-ledger.sh scripts/HypothesisLedger.lean scripts/hypothesis-ledger-allow.txt scripts/trivial-structure-allow.txt Selvage/PolishchukSpielman.lean Selvage/PolishchukSpielmanRefutation.lean
 kernel-transport	scripts/check-kernel-transport.sh scripts/KernelTransportCensus.lean Kernel/NativeHost.lean Kernel/NativeHostContext.lean Kernel/NativeHostGenesis.lean
-objective	scripts/check-objective-proofs.sh scripts/objective-manifest.py scripts/ObjectiveManifest.lean scripts/ObjectiveManifestMathlib.lean Verify/ObjectiveManifest.lean Kernel/ObjectiveBendAdmissionSemantics.lean Theory/ObjectiveBendOpenRecursion.lean

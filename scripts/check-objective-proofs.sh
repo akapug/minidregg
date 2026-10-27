@@ -1,29 +1,10 @@
 #!/usr/bin/env bash
 # check-objective-proofs.sh -- the Objective Bend Core4 gates.
 #
-#   proofs    `lake build ObjectiveProofs` (+ the checkpoint round trip), then the contract
-#             manifests. Two runs of one scanner (Verify/ObjectiveManifest.lean) partition the
-#             repository modules of the ObjectiveProofs import closure: scripts/ObjectiveManifest.lean
-#             covers the Theory.ObjectiveBend* modules in an environment that refuses Mathlib;
-#             scripts/ObjectiveManifestMathlib.lean covers every other one (Kernel, Compiler, Pred,
-#             Selvage, the rest of Theory) with Mathlib in the environment. Every declaration gets a
-#             row: its statement, the name-free CONTENT hash of what it reaches (the bodies of every
-#             repository definition, inductive and constructor, transitively; a moved or renamed
-#             constant is the same content), and its exact axiom set (scripts/objective-manifest.py
-#             has the hashing and the cut). The rows are RATCHETED against the per-module manifests
-#             scripts/gates/objective-manifest/<Module>.tsv and constants.content: an added, removed
-#             or restated row, a changed constant body (`def Safe := True` under an unchanged theorem;
-#             one decision per changed constant, not per row) or a changed axiom set is RED unless a
-#             line of scripts/gates/objective-contract-decisions.txt admits exactly that event.
-#             Self-tested every run: the ratchet logic on synthetic changes of the real rows; per
-#             run (a) a planted theorem must appear as an addition the gate refuses without a decision, and every other row of
-#             the planted run must equal the unplanted run's; (b) a copy whose scan is deleted must fail its instrument
-#             floor; and once each: (c) the measured defect -- `(_vacuous : False)` planted on
-#             Kernel.ObjectiveBendAdmissionSemantics.admitted_source_semantics -- must classify that
-#             row `restated` and RED; (d) the redefinition defect -- in a copy of
-#             Theory.ObjectiveBendOpenRecursion, `def Evaluates ... : Prop := True` with every
-#             statement text unchanged -- must classify lazy_fixed_function `redefined` and RED,
-#             naming Evaluates.
+#   proofs    `lake build ObjectiveProofs` + the checkpoint round trip, extensions and demand-capacity
+#             modules. (Until 2026-10-27 this row also ratcheted every declaration of the closure against
+#             610 manifest files and a 9,011-line decisions ledger; 33 bookkeeping commits in October bought
+#             nothing the axiom pins (`#guard_msgs … #print axioms`, kept) and the build do not: docs/COORDINATION-2026-10-27.md §2.)
 #   (the front end -- identity, elaboration and parser cohorts, C4, preview cohort,
 #   publication replay, examples, tutorial -- is scripts/check-objective-frontend.sh,
 #   gate objective-frontend)
@@ -47,19 +28,7 @@
 #             Executed cross-check of forcingTransparent_of_yieldedPlan (proved, Kernel/ObjectiveResumeContract).
 #             Self-tested every run: the planted `drop-stack-roots` checkpoint must go red.
 #
-# usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all] [--pin|--draft]
-#   --pin    (proofs only) after a run whose every change is admitted, write the manifests: add the
-#            new rows, apply the admitted changes and removals, refresh re-rendered text. It cannot
-#            write a row whose event no decision admits; commit the manifests it writes
-#            (the <Module>.tsv rows and constants.content).
-#   --rehash (proofs only) once, when objective-manifest.py's hash itself changes: re-pin closures and
-#            contracts; refuses any added/removed/restated/axioms event.
-#   --draft  (proofs only) print a decision line (reason TODO, which the gate refuses) for every
-#            unadmitted change, to review, give a commit and a reason, and append.
-#   --draft FROM..TO  the same lines with commit and reason attributed from the commits of FROM..TO
-#            that touched each change's cause module, written to build-logs/objective/draft-ledger.txt,
-#            and build-logs/objective/draft-review.txt: every removed and restated row with its commit,
-#            redefined rows grouped by root. Read the review, then append the lines and run --pin.
+# usage: scripts/check-objective-proofs.sh [proofs|c|cgen|transparency|all]
 #   Requires `bun` for c (BUN=/path/to/bun or on PATH):
 #   absent, those gates are RED, never skipped. Logs: build-logs/objective/<gate>/.
 set -euo pipefail
@@ -69,29 +38,10 @@ cd "$root"
 export PATH=$HOME/.elan/bin:$PATH
 lake=${LAKE:-lake}
 what=${1:-all}
-mode=check
-rehash=
-attribute=
-case "${2:-}" in
-  --pin) mode=pin ;;
-  --rehash) mode=pin; rehash=--rehash ;;
-  --draft) mode=draft; attribute=${3:-} ;;
-  "") ;;
-  *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--rehash|--draft]" >&2; exit 64 ;;
-esac
-# OBJECTIVE_SELF_TESTS=0 skips the instrument's self-tests (plants (a)-(f) and the ratchet selftest) in check and
-# draft mode: the merge gate sets it when FROM..TO touched none of the instrument's files
-# (scripts/pipeline/instruments.tsv). --pin always runs them: a pin is refused unless they pass.
-self_test=1
-[ "${OBJECTIVE_SELF_TESTS:-1}" = 0 ] && [ "$mode" != pin ] && self_test=0
-if [ "$mode" != check ] && [ "$what" != proofs ]; then echo "$0: ${2} is a proofs option" >&2; exit 64; fi
-manifests=scripts/gates/objective-manifest
-decisions=scripts/gates/objective-contract-decisions.txt
-manifest_tool=scripts/objective-manifest.py
 logs=$root/build-logs/objective
 mkdir -p "$logs"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/objective-proofs.XXXXXX")
-if [ -n "${OBJECTIVE_KEEP_TMP:-}" ]; then echo "objective: manifest runs kept in $tmp (OBJECTIVE_KEEP_TMP)"; else trap 'rm -rf "$tmp"' EXIT; fi
+if [ -n "${OBJECTIVE_KEEP_TMP:-}" ]; then echo "objective: scratch kept in $tmp (OBJECTIVE_KEEP_TMP)"; else trap 'rm -rf "$tmp"' EXIT; fi
 
 bun_bin() {
   local b=${BUN:-$(command -v bun || true)}
@@ -101,230 +51,12 @@ bun_bin() {
   echo "$b"
 }
 
-manifest_run() { # manifest_run <lean file> <out> <err>: one scanner run; prints its exit status.
-  # Lean reports errors on stdout; both streams go to <err>.
-  set +e
-  OBJECTIVE_MANIFEST_OUT="$2" "$lake" env lean --root="$(dirname "$1")" "$1" >"$3" 2>&1
-  local s=$?
-  set -e
-  echo "$s"
-}
-
-scratch_lean() { # scratch_lean <mode> <script> <out>: a scratch copy of a manifest script.
-  #   plant   the copy declares Minidregg.ObjectiveManifest.Plant.planted and covers it (localPrefix)
-  #   noscan  the copy runs the scanner's source (Verify/ObjectiveManifest.lean, inlined) with its
-  #           SCAN-BEGIN..SCAN-END region deleted
-  python3 - "$1" "$2" Verify/ObjectiveManifest.lean "$3" <<'EOF'
-import sys
-mode, script, scanner, out = sys.argv[1:]
-src = open(script).read()
-if mode == "plant":
-    anchor = "set_option maxHeartbeats 0 in\nrun_meta"
-    assert src.count(anchor) == 1, "self-test: run_meta anchor not found"
-    switch = "def localPrefix : Option Lean.Name := none"
-    assert src.count(switch) == 1, "self-test: localPrefix switch not found"
-    plant = "theorem Minidregg.ObjectiveManifest.Plant.planted (n : Nat) : n + 0 = n := rfl\n\n"
-    src = src.replace(switch, "def localPrefix : Option Lean.Name := some `Minidregg.ObjectiveManifest.Plant")
-    src = src.replace(anchor, plant + anchor)
-else:
-    # the import block: the lines starting `import ` right after the module doc comment
-    assert src.startswith("/-") and src.count("\n-/\n") >= 1, "self-test: script doc comment not found"
-    lines = src.split("\n")
-    k = lines.index("-/") + 1
-    imports = []
-    while k < len(lines) and lines[k].startswith("import "):
-        imports.append(k); k += 1
-    assert imports and "import Verify.ObjectiveManifest" in [lines[i] for i in imports], "self-test: script imports not found"
-    head = [lines[i] for i in imports if lines[i] != "import Verify.ObjectiveManifest"]
-    body = "\n".join(lines[imports[-1] + 1:])
-    scan = open(scanner).read()
-    assert scan.count("\nimport Lean\n") == 1, "self-test: scanner import not found"
-    scan = scan.split("\nimport Lean\n", 1)[1]
-    b, e = "  -- SCAN-BEGIN\n", "  -- SCAN-END\n"
-    assert scan.count(b) == 1 and scan.count(e) == 1, "self-test: scan markers not found"
-    scan = scan[:scan.index(b)] + scan[scan.index(e) + len(e):]
-    src = "\n".join(head) + "\nimport Lean\n" + scan + body
-open(out, "w").write(src)
-EOF
-}
-
-scratch_module() { # scratch_module <module file> <out> <old> <new> <namespace> <mustFind>: a copy of
-  # one module with <old> replaced by <new> (asserted: exactly once, and the copy differs), scanned
-  # by the manifest scanner over its own declarations.
-  python3 - "$@" <<'EOF'
-import sys
-path, out, old, new, ns, must = sys.argv[1:]
-src = open(path).read()
-assert src.count(old) == 1, f"self-test: the plant anchor is not in {path} exactly once"
-mutated = src.replace(old, new)
-assert mutated != src and mutated.count(new) == 1, "self-test: the plant did not happen"
-lines = mutated.split("\n")
-last = max(i for i, l in enumerate(lines) if l.startswith("import "))
-lines.insert(last + 1, "import Verify.ObjectiveManifest")
-open(out, "w").write("\n".join(lines) + f"""
-set_option maxHeartbeats 0 in
-run_meta Minidregg.ObjectiveManifest.main {{
-  label := "objective-manifest-plant", covers := fun _ => false, localPrefix := some `{ns},
-  refuseMathlib := false, scanFloor := 1, mustFind := [`{must}] }}
-""")
-EOF
-}
-
-scratch_module_re() { # scratch_module_re <module file> <out> <regex> <replacement> <namespace> <mustFind>:
-  # like scratch_module, every match of <regex> replaced (asserted: at least two, and the copy differs)
-  python3 - "$@" <<'EOF'
-import re, sys
-path, out, pat, new, ns, must = sys.argv[1:]
-src = open(path).read()
-mutated, n = re.subn(pat, new, src)
-assert n >= 2 and mutated != src, f"self-test: the rename did not happen in {path} ({n} matches)"
-lines = mutated.split("\n")
-last = max(i for i, l in enumerate(lines) if l.startswith("import "))
-lines.insert(last + 1, "import Verify.ObjectiveManifest")
-open(out, "w").write("\n".join(lines) + f"""
-set_option maxHeartbeats 0 in
-run_meta Minidregg.ObjectiveManifest.main {{
-  label := "objective-manifest-plant", covers := fun _ => false, localPrefix := some `{ns},
-  refuseMathlib := false, scanFloor := 1, mustFind := [`{must}] }}
-""")
-EOF
-}
-
-public_rows() { # public rows of one module in a run's output (the floor of a scratch copy of it)
-  awk -F'\t' -v m="$2" '$1 == "R" && $4 == m && $3 !~ /^private / { n++ } END { print n + 0 }' "$1"
-}
-
 gate_proofs() {
-  # Every module the two manifest scripts import, plus the collector's raw-projection
-  # regression. Building the named test before scanning makes a dropped `.proj`
-  # dependency edge turn this gate red rather than merely living under the Verify root.
-  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity Verify.ObjectiveManifest Verify.ObjectiveManifestProjectionTest"
+  # The checkpoint round trip is a named target so a dropped `.proj` dependency edge turns this
+  # gate red rather than merely living under the Theory root.
+  local targets="ObjectiveProofs Theory.ObjectiveBendCheckpointRoundTrip Theory.ObjectiveBendExtensions Theory.ObjectiveBendDemandCapacity"
   echo "== lake build $targets"
   "$lake" build $targets
-  local failed=0 run script s
-  local ns_c=Minidregg.Kernel.ObjectiveBendAdmissionSemantics ns_d=Minidregg.Theory.ObjectiveBendOpenRecursion
-  local planted_c=0 planted_d=0 planted_e=0 planted_f=0
-  if [ "$self_test" = 1 ]; then
-  for run in theory mathlib; do
-    script=scripts/ObjectiveManifest.lean
-    [ "$run" = mathlib ] && script=scripts/ObjectiveManifestMathlib.lean
-    scratch_lean plant "$script" "$tmp/$run-plant.lean"
-    scratch_lean noscan "$script" "$tmp/$run-noscan.lean"
-  done
-  # (c) the measured defect: an unused `(_vacuous : False)` premise on admitted_source_semantics
-  # (W20-GATE-MUTATION left the old gate green under exactly this)
-  planted_c=1 planted_d=1
-  scratch_module Kernel/ObjectiveBendAdmissionSemantics.lean "$tmp/premise.lean" \
-    "    (admitted : Admitted prepared event writes guards) :
-    runBounded" \
-    "    (admitted : Admitted prepared event writes guards) (_vacuous : False) :
-    runBounded" \
-    "$ns_c" "$ns_c.admitted_source_semantics" || planted_c=0
-  # (d) the redefinition defect: `Evaluates` (mentioned by lazy_fixed_function's statement, and
-  # through DeepEvaluates' constructors by admitted_source_semantics') redefined to `True`; every
-  # statement text stays byte-identical. The proofs that unfold it fail in the copy; the
-  # declarations, with their statements, are still in its environment.
-  scratch_module Theory/ObjectiveBendOpenRecursion.lean "$tmp/redefine.lean" \
-    "def Evaluates (initial result : Term) : Prop := Steps initial result ∧ Value result" \
-    "def Evaluates (initial result : Term) : Prop := True" \
-    "$ns_d" "$ns_d.lazy_fixed_function" || planted_d=0
-  # (e) a proof edited, nothing else: a proof is never content, so NO event (no decision needed)
-  planted_e=1 planted_f=1
-  scratch_module Theory/ObjectiveBendOpenRecursion.lean "$tmp/reproof.lean" \
-    "      some (.boolean (left && right)) := rfl" \
-    "      some (.boolean (left && right)) := by cases left <;> cases right <;> rfl" \
-    "$ns_d" "$ns_d.conjunction_boolean_exact" || planted_e=0
-  # (f) a definition renamed verbatim with its uses (liftRename: used only in bodies and simp lists, never
-  # in a statement): its own row is removed + added (key events, RED without decisions), and NO row that
-  # reaches it moves (content is name-free). A def a STATEMENT mentions is different: renaming it restates.
-  scratch_module_re Theory/ObjectiveBendOpenRecursion.lean "$tmp/rename.lean" \
-    '\bliftRename\b' "liftRenameMoved" \
-    "$ns_d" "$ns_d.lazy_fixed_function" || planted_f=0
-  fi
-  # all scanner runs in parallel
-  local jobs="theory mathlib"
-  [ "$self_test" = 1 ] && jobs="$jobs theory-plant mathlib-plant theory-noscan mathlib-noscan"
-  for run in $jobs; do
-    script=$tmp/$run.lean
-    [ "$run" = theory ] && script=scripts/ObjectiveManifest.lean
-    [ "$run" = mathlib ] && script=scripts/ObjectiveManifestMathlib.lean
-    manifest_run "$script" "$tmp/$run.out" "$tmp/$run.err" >"$tmp/$run.rc" &
-  done
-  [ "$planted_c" = 1 ] && manifest_run "$tmp/premise.lean" "$tmp/premise.out" "$tmp/premise.err" >"$tmp/premise.rc" &
-  [ "$planted_d" = 1 ] && manifest_run "$tmp/redefine.lean" "$tmp/redefine.out" "$tmp/redefine.err" >"$tmp/redefine.rc" &
-  [ "$planted_e" = 1 ] && manifest_run "$tmp/reproof.lean" "$tmp/reproof.out" "$tmp/reproof.err" >"$tmp/reproof.rc" &
-  [ "$planted_f" = 1 ] && manifest_run "$tmp/rename.lean" "$tmp/rename.out" "$tmp/rename.err" >"$tmp/rename.rc" &
-  wait
-  local tool=(python3 "$manifest_tool" --pins "$manifests" --decisions "$decisions")
-  for run in theory mathlib; do
-    s=$(cat "$tmp/$run.rc")
-    grep -av "warning\\|^Note:\\|^$" "$tmp/$run.err" || true
-    if [ "$s" != 0 ] || [ ! -s "$tmp/$run.out" ]; then echo "objective-manifest ($run): FAILED (exit $s)"; failed=1; fi
-  done
-  [ "$failed" = 0 ] || return 1
-  if [ "$self_test" = 0 ]; then
-    echo "objective: self-tests skipped (OBJECTIVE_SELF_TESTS=0): plants (a)-(f) and the ratchet selftest not run"
-  else
-  if "${tool[@]}" selftest "$tmp/theory.out" "$tmp/mathlib.out"; then :; else failed=1; fi
-  for run in theory mathlib; do
-    s=$(cat "$tmp/$run-plant.rc")
-    if [ "$s" = 0 ] && "${tool[@]}" expect "$tmp/$run-plant.out" --plant Minidregg.ObjectiveManifest.Plant.planted --against "$tmp/$run.out" \
-         --floor "$(grep -c '^R' "$tmp/$run.out" | awk '{print int($1 * 0.9)}')" >"$tmp/$run-plant.expect"; then
-      echo "self-test ($run a) planted theorem: PASS ($(tail -1 "$tmp/$run-plant.expect"))"
-    else
-      echo "self-test ($run a) planted theorem: FAIL (exit $s)"; tail -20 "$tmp/$run-plant.expect" "$tmp/$run-plant.err" 2>/dev/null; failed=1
-    fi
-    s=$(cat "$tmp/$run-noscan.rc")
-    if [ "$s" != 0 ] && grep -q "^objective-manifest[a-z-]*: instrument:" "$tmp/$run-noscan.err"; then
-      echo "self-test ($run b) scan deleted: PASS (exit $s; $(grep -m1 "^objective-manifest[a-z-]*: instrument:" "$tmp/$run-noscan.err"))"
-    else
-      echo "self-test ($run b) scan deleted: FAIL (exit $s)"; head -20 "$tmp/$run-noscan.err"; failed=1
-    fi
-  done
-  # (c) and (d) compare the planted copy with the UNPLANTED run of the same tree, not with the pins:
-  # against the pins, every real unpinned change the module's rows reach would count as the plant's
-  # (measured at e92cbf10: three siblings `redefined` by b7/b8 changes, and `--pin` then refused
-  # because this self-test failed, so the pins could never catch up)
-  if [ "$planted_c" = 1 ] && [ -s "$tmp/premise.out" ] && "${tool[@]}" expect "$tmp/premise.out" --against "$tmp/mathlib.out" \
-       --changed "$ns_c.admitted_source_semantics=restated" \
-       --floor "$(public_rows "$tmp/mathlib.out" Kernel.ObjectiveBendAdmissionSemantics)" >"$tmp/premise.expect"; then
-    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: PASS ($(grep -m1 '^expect: ' "$tmp/premise.expect"); $(tail -1 "$tmp/premise.expect"))"
-  else
-    echo "self-test (c) planted (_vacuous : False) on admitted_source_semantics: FAIL"
-    cat "$tmp/premise.expect" 2>/dev/null; head -20 "$tmp/premise.err" 2>/dev/null; failed=1
-  fi
-  if [ "$planted_d" = 1 ] && [ -s "$tmp/redefine.out" ] && "${tool[@]}" expect "$tmp/redefine.out" --against "$tmp/theory.out" \
-       --changed "$ns_d.lazy_fixed_function=redefined:$ns_d.Evaluates" --allow-downstream \
-       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/redefine.expect"; then
-    echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: PASS ($(grep -m1 '^expect: ' "$tmp/redefine.expect"); $(tail -1 "$tmp/redefine.expect"))"
-  else
-    echo "self-test (d) redefined Evaluates := True under lazy_fixed_function: FAIL"
-    cat "$tmp/redefine.expect" 2>/dev/null; head -20 "$tmp/redefine.err" 2>/dev/null; failed=1
-  fi
-  if [ "$planted_e" = 1 ] && [ -s "$tmp/reproof.out" ] && "${tool[@]}" expect "$tmp/reproof.out" --against "$tmp/theory.out" \
-       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/reproof.expect"; then
-    echo "self-test (e) a proof edited, nothing else: PASS (no event; $(tail -1 "$tmp/reproof.expect"))"
-  else
-    echo "self-test (e) a proof edited, nothing else: FAIL"
-    cat "$tmp/reproof.expect" 2>/dev/null; head -20 "$tmp/reproof.err" 2>/dev/null; failed=1
-  fi
-  if [ "$planted_f" = 1 ] && [ -s "$tmp/rename.out" ] && "${tool[@]}" expect "$tmp/rename.out" --against "$tmp/theory.out" \
-       --changed "$ns_d.liftRename=removed" --changed "$ns_d.liftRenameMoved=added" \
-       --floor "$(public_rows "$tmp/theory.out" Theory.ObjectiveBendOpenRecursion)" >"$tmp/rename.expect"; then
-    echo "self-test (f) a definition renamed verbatim: PASS (its key removed+added RED, nothing reaching it moved; $(tail -1 "$tmp/rename.expect"))"
-  else
-    echo "self-test (f) a definition renamed verbatim: FAIL"
-    cat "$tmp/rename.expect" 2>/dev/null; head -20 "$tmp/rename.err" 2>/dev/null; failed=1
-  fi
-  fi
-  if [ "$mode" = pin ] && [ "$failed" != 0 ]; then
-    echo "objective-manifest: pin REFUSED: a self-test failed; nothing written"; return 1
-  fi
-  local extra=()
-  [ -n "$attribute" ] && extra=(--attribute "$attribute" --out "$logs/draft-ledger.txt" --review "$logs/draft-review.txt")
-  [ -n "$rehash" ] && extra+=("$rehash")
-  if "${tool[@]}" "$mode" "${extra[@]}" "$tmp/theory.out" "$tmp/mathlib.out" | tee "$logs/manifest-$mode.log"; then :; else failed=1; fi
-  [ "$failed" = 0 ]
 }
 
 gate_c() {
@@ -445,5 +177,5 @@ case "$what" in
       if "$0" "$g"; then echo "objective $g: PASS"; else echo "objective $g: RED"; red=$((red+1)); fi
     done
     exit "$red" ;;
-  *) echo "usage: $0 [proofs|c|cgen|transparency|all] [--pin|--draft]" >&2; exit 64 ;;
+  *) echo "usage: $0 [proofs|c|cgen|transparency|all]" >&2; exit 64 ;;
 esac

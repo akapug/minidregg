@@ -44,45 +44,58 @@ four parts, measured on the demo box itself:
    money or write path reruns without a record; provider failures (non-200, timeout,
    malformed, crash-after-send) leave a decided purse; a failed first CREATE on a grain is
    recoverable; restart, certifier failure and backup drills pass.
-4. **Performance and week scale**: the growth judge's criterion is write **maximum ≤ 5 s**
-   (not p99: `native/resource-client/journey.sh:858-866`) and cold reopen ≤ 60 s at 1000
-   records, measured on the demo box (not a loaded build box), plus a 10k-record soak (a
-   week of minute ticks alone is ~10,080 records) with the numbers written down.
+4. **Performance is measured and published, never a gate** (ember, 2026-10-27: "growth / perf
+   isn't a good reason to avoid deploying this demo right now, we'll do more focused performance
+   engineering later"). The growth judge's numbers (write MAX, p99, reopen at 1000 records; the
+   journey's criterion is MAX ≤ 5 s, `native/resource-client/journey.sh:858-866`) and a 10k-record
+   soak are measured on the demo box and written on the join page and in the plan; they do not
+   block a rehearsal or the opening. L11 continues as engineering, off the critical path.
 
-The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; it
-must be green for the candidate that opens. "Every surface in ~two weeks" is a target the
+The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; for the
+candidate that opens, its composed phases and its non-performance journey rows must be green
+(growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
+tested rule). "Every surface in ~two weeks" is a target the
 council unanimously called not yet evidence-backed; the date is re-estimated after Phase 0's
 evidence spike (§3), not promised now.
 
-## 2. Where we stand (2026-10-26 evening)
+## 2. Where we stand (2026-10-27, early)
 
-- **One public node exists** (`dregg-workhorse`, cx33 fsn1, candidate 5688775a of Sep 30 over
-  ssh; nobody but ember's harness has used it). It is torn down once the new box is up.
-- **main `d4f30d1f`** = the Oct 14–17 integrator batches + today's housekeeping, review corpus
-  and this plan. Tracked lines 1.69M (HISTORY §0.3; its "422K native Rust" counts every
-  tracked file under `native/`; the `.rs`-only count is 292K: both exceed the 290K founding
-  budget on their own). Host executable closure 784 modules / 330K Lean lines.
-- **Today's candidate of main** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the warm base
-  (cold Lean time still unmeasured; the M7 reference build now in flight measures it); rows
-  PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against a baseline of 137/2/5/3 (the one
-  delta, m6grain, is a harness path, now being fixed); `jdeploy3` FAIL: growth over the MAX
-  bar at every level on a loaded box; the composed scenario never ran because dregg-infra's
-  manifest rewrite dropped the v2 contract.
-- **dregg-infra** is reconciled and PUSHED (main 5501f4f, demo-vm dbc17c7, both remotes): the
-  full v2 manifest rebuilt from provenance (18/18 self-test), the DelveTalk candidate restored
-  by a forward commit, the certifier merged onto split tenancy (its 320-record claim still
-  only the branch's own report), genesis `issuanceCap` and `lifetime` 200000 set, the roster
-  fix. The confined box (`edge/demo/`, `edge/tofu-demo/`) is written and validated, unapplied.
-- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (a
-  70-byte socket-path row in the journey driver, AND the consent allowlist lacks fields:
-  both diagnoses are being fixed); `m6grain` (sudoers path, being fixed); `m7` (no reference,
-  being built); pending `births`, `HERMES-LIVE`, `jcertify`.
-- **In flight right now** (lanes, each on its own `lane/*` branch in a worktree): L1 Lean
-  critical path (hbox), L2 custody, L3 fence+sandbox, L4 Hermes+rooms, L5 door+PAY+Discord,
-  L6 keys+store, L7 web, L8 fn+fleet, L9 build gating, L11 performance, the infra lane, the
-  hbox lane (composed-gate re-run on the fixed frame, then the M7 reference build). Ember's
-  codex session is landing the oracle appliance in the main worktree (`native/oracle-appliance`,
-  `native/spk-package-stream`, `deploy/oracle/`, an SPK `import-profile`); it is the oracle lane.
+- **Rehearsal ship #1 is SERVING on the demo box** (2026-10-27, ~04:30 UTC): `dregg-demo`
+  (Hetzner `ccx23`, fsn1, Debian 13, `167.233.199.225` / `2a01:4f8:c17:873b::1`; `demo.`, `calc.demo.`,
+  `nano.demo.dregg.online` resolve) runs candidate a0db11f8a8bc under `ship.sh --rehearsal` with every
+  login closed and the reds named in the notice; `mini-health` OK (signed read 0.33 s); Store, public
+  ingress, key broker (sealed OpenRouter pool key, BYOK row), certifier and clock timers, Caddy with
+  valid TLS are up; `/join` answers 503 with the maintenance text and the 11 Nov shutdown line; Hermes
+  (no controller.json yet), Discord (bot in zero guilds), PAY (devnet config, no observer key), the
+  door (not in this candidate) and roster sync (rehearsal) are off with their reasons recorded. Known
+  reds: nano's writer fails in bwrap (ENOSYS on /dev; with the nano root); thin consent refuses a
+  signed write on this candidate (consent = full until the incremental refresh lands). Seven frame
+  bugs found by the first real split-tenancy ship are fixed on dregg-infra main 587169b / demo-vm 8991808.
+- **One older public node still runs** (`dregg-workhorse`, candidate 5688775a of Sep 30; nobody
+  but ember's harness has used it). It is torn down once the demo box serves.
+- **main `1f180a75`** = the Oct 14–17 batches + today's housekeeping, review corpus, council and
+  plan. Tracked lines 1.69M; host executable closure 784 modules / 330K Lean lines.
+- **Lane branches pushed and done** (integration into `integration/2026-10-26` running):
+  `lane/custody` (L2 core: one signing path in the SDK, the four refusal fixes; L2 continues
+  with call sites and deletions), `lane/web` (L7), `lane/build` (L9, contains web), `lane/fn-fleet`
+  (L8), `lane/door` (L5), `lane/keys-store` (L6), `lane/fence` (L3, one follow-up commit coming:
+  absent-after-lost-reply is undecided, not no-record). Still working: `lane/lean-critical`
+  (L1, hbox), `lane/hermes` (L4), `lane/perf` (L11).
+- **Today's candidate of main a0db11f8** (HBOX-CANDIDATE): 35 min fetch-to-candidate off the
+  warm base; rows PASS 136 / FAIL 2 / UNCONFIGURED 6 / UNJUDGED 3 against 137/2/5/3; `jdeploy3`
+  FAIL (growth over the write MAX bar on a loaded box; the composed scenario never ran because
+  the infra manifest rewrite dropped the v2 contract: fixed in dregg-infra 5501f4f; the
+  composed phases are being re-run now, with the M7 reference build and the `exchange` row).
+- **dregg-infra** main 5501f4f and `demo-vm` 8fca5ad, pushed to both remotes: the full v2
+  manifest, the certifier on split tenancy, genesis `issuanceCap` + `lifetime` 200000, the
+  roster fix, the confined box roots, the nano tenant contract. Queued on `demo-vm`: the
+  door's infra patch (L5) and the mini-keys config changes (L6), effective at rehearsal #2.
+- **Known reds on main**: `Fixtures.NativeAcceptedFixture` (fixture-only); `jpay/JPAY6` (driver
+  row AND consent fields, both in L1); `m6grain` (sudoers path, hbox lane); `m7` (reference being
+  built); pending `births`, `HERMES-LIVE`, `jcertify`.
+- **Ember's codex session** is landing the oracle appliance in the main worktree (uncommitted:
+  `native/oracle-appliance`, `native/spk-package-stream`, `deploy/oracle/`, the SPK
+  `import-profile`); it is the oracle lane and reconciles with `lane/fence` when it commits.
 
 ## 3. The prefix
 
@@ -150,20 +163,16 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 
 ## 4. Rules for the prefix (binding on every lane brief)
 
+How lanes, the orchestrator, the boxes and the cadence work is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md) §3–§6
+(2026-10-27; it replaced the seven rules that stood here). Three rules are specific to this prefix
+and stay here:
+
 1. Rescue, repair, delete, in that order; "delete the twin" keeps and repairs the better one.
-2. Every lane's deletions are named in its brief; the first deletion commit lands within a
-   day of the lane's repair going green; a size ratchet refuses growth of the host closure.
-3. Lean interface changes land first and rebuild early; no statement packets for code being
-   removed; only a lane's top-level theorem must be non-vacuous.
-4. Rehearsals ship on the day with reds named; the opening waits for the §1 contract and
-   nothing else; the gate is never relaxed and never grown ahead of the surfaces.
-5. One root per project; resume the agent that holds the context; no censuses or ledgers
-   unless they unblock the ship; every lane brief carries the system framing, the report
-   sections, `path:line` pointers, the worktree and branch, and the verification it must run.
-6. Engineering decisions are made by the orchestrator after a multi-model synthesis; only
-   money, dates and credentials go to ember.
-7. `swarm-build` on hbox, `/tank` only; named-file commits; no `git stash`; no pattern kills;
-   filtered tests only.
+2. Every lane's deletions are named in its brief; the first deletion commit lands within a day of the
+   lane's repair going green; `scripts/gates/host-closure.max` (one number) refuses growth of the Host
+   closure.
+3. Lean interface changes land first and rebuild early (on `dregg-build`); no statement packets for
+   code being removed; only a lane's top-level theorem must be non-vacuous.
 
 ## 5. Decisions
 
@@ -182,15 +191,14 @@ grain operations (L1b), the full economy in Phase 3; R13 workspace gate day one 
 README rewritten whole as lanes land and once more against the shipped candidate; R15 the
 oracle ships through the same grain gate, with its format blocker owned by the oracle lane.
 
-**For ember** (the residue all three reviewers left; answer when convenient, the lanes do not
-block on it):
-
-1. **Money**: the OpenRouter hard spend cap; the sponsor's total funding cap and the
-   per-stranger provisioning amount; week-1 pay-to-enrol on mainnet (one real payment from
-   your wallet to accept it) or devnet-only.
-2. **Lifetime**: the shutdown date the demo advertises and the backup retention period.
-
-Everything else you supply is a provisioning action, listed in Phase 0.3.
+**Answered by ember (2026-10-27)**: the OpenRouter pool key exists at `~/.openrouter-key` with
+a $50 hard cap set at OpenRouter (the broker's pool ceiling is $40, $0.10 worst-case per call;
+BYOK on); the Dragon's Egg bot (application 1507638321877090374) is in guild 1507637841235017768;
+the demo's **shutdown date is 2026-11-11**, written on the join page and in the teardown plan;
+backup retention defaults to 7 days after shutdown. Still open, with the engineering default that
+applies meanwhile: **mainnet vs devnet for week-1 pay-to-enrol** (default: devnet, two providers,
+until ember says mainnet; the sponsor's total cap and per-stranger funding amount are the door's
+configured values, published on the join page).
 
 ## 6. What this file is not
 

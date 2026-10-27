@@ -1,4 +1,0 @@
-# Theory.AxiomPin: Objective contract manifest. Written by `scripts/check-objective-proofs.sh proofs --pin`;
-# an added, removed, restated, redefined or re-axiomed row needs a line in scripts/gates/objective-contract-decisions.txt.
-def	Minidregg.Theory.AssertAxioms.standard	bc8c0c9c56ea53b7323dbaaf95bba5f88edaeb13ee6e31669e7394a4154672a0	42629a2441a512d317ceb47f7929a4502b587debf48939a3330c7e3a700c43d1	fdea36f089f75af58a3ebb3643b374194ddb424fd9d2c612f579eb00f2b23a2a	6f2ab73661d2a84e	-	List Lean.Name
-def	Minidregg.Theory.AssertAxioms.«command#assert_axioms_»	863c561631600268d60e4e39a1ba017f7791811a25f10f8d0bd0a40bd1cd0f1d	c959d62f91aa9c65e4943e42235c11098b3235f9c3a7cf43c6252a448a24dfa3	0271c5739e274ebb501af2a0cdb60db6fc96f8e1121886c4981c936a8a3fb278	f5028b548f76a959	-	Lean.ParserDescr

@@ -393,41 +393,11 @@ physical completion. Compatibility modules are migration views, not proof of cut
    one real offline merge UI.
 7. Run matched **B** workloads against candidate external stacks and apply Selvage's kill criteria.
 
-## Performance and evidence discipline
+## Process
 
-The landed native benchmark at source `54295c6` and evidence `4d1f290` validates byte identity and
-measures only generated work-9101 dispatch overhead: ratio `0.985–1.040` on hbox and
-`0.985–1.025` on persvati for lengths 1–16384. It sets no threshold and proves no semantics.
-
-Future benchmarks must use the actual admitted protocol and measure proof size, memory, checkpoint
-cadence, tail latency, dense/sparse crossover, and CPU/SIMD/GPU kernels. Remote evidence uses exact
-committed archives and isolated run trees through [`scripts/remote-check.sh`](scripts/remote-check.sh).
-
-## Work discipline
-
-Each step closes one edge in the composition graph:
-
-1. state the exact relation and false neighboring claim;
-2. land the theorem or Lean controller that owns the edge;
-3. commit immediately in a thematic commit, green or not;
-4. fix forward with a separate commit;
-5. record exact residuals and maturity boundary; and
-6. measure only a selected, admitted path.
-
-No step adds a second semantic implementation in Rust. New native code is generated data/dispatch
-or caller-parameterized opaque computation. Decisions with cross-layer consequences receive a
-record under [`docs/decisions/`](docs/decisions/).
-
-## Public-claim gate
-
-A diagram or poster may describe the design today. A deployment claim requires:
-
-- one canonical typed multi-cell turn through a real durable handler;
-- two concrete Lean-owned proof controllers with priced security reductions;
-- lookup/RAM linked to semantic columns and a real consumer;
-- succinct history on the same security game as its checkpoint proof;
-- sealed compute plus separately authorized disclosure; and
-- matched committed-source performance evidence.
-
-Until those conditions hold, the construction is an ambitious and increasingly concrete research
-program—not a deployed universal kernel or completed proof system.
+How this project is developed (what we optimise, the gates and their verdicts, how a lane and the
+orchestrator work, the boxes, the cadence) is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md); the work and the public-opening
+contract are [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md). Two rules from the
+older text that still hold: no step adds a second semantic implementation in Rust (new native code is
+generated data/dispatch or caller-parameterized opaque computation), and performance is measured on
+the actual admitted path and published, never a gate.

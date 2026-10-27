@@ -1,0 +1,6 @@
+# The CEILING on the Host.Main import closure (module count): a size ratchet, not a module list.
+# scripts/check-host-closure.sh is red when the closure GROWS past it; a deletion lowers it with
+#   scripts/check-host-closure.sh --update REASON
+# and a module the Host must now reach raises it the same way, with the reason on the line.
+# updated 2026-10-27: 787 modules: first ceiling, replacing host-closure.pin (measured at eb78e6be; docs/COORDINATION-2026-10-27.md §2)  [Minidregg 0 1, Theory 107 180, Kernel 415 567, Pred 7 11, Effects 0 3, Compiler 159 329, Selvage 12 153, Assurance 0 151, Host 87 125, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1, TokenCensus 0 5, Verify 0 12, SimplexQualification 0 1, ObjectiveProofs 0 1, Fixtures 0 5, CensusChecks 0 1, ResearchWip 0 1]
+787

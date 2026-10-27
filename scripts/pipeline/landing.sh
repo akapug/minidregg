@@ -51,8 +51,8 @@ judge() {
   base_t=$(readlink "$ARTIFACT_ROOT/main" 2>/dev/null || true)
   if [ -n "$base_t" ] && [ -f "$JOURNEY_ROOT/$base_t/DONE" ]; then base_res=$JOURNEY_ROOT/$base_t/results.tsv; fi
   # POLICY: the required-rows of the BASELINE's own tree (the tree main's standing run executed,
-  # $JOURNEY_ROOT/.trees/<main>), never the candidate's (a candidate cannot add its own known-red
-  # lines) and never the warm base's (a build cache, not policy; ROOT 2026-10-16). No baseline tree:
+  # $JOURNEY_ROOT/.trees/<main>), never the candidate's (a candidate cannot drop its own required
+  # rows) and never the warm base's (a build cache, not policy; ROOT 2026-10-16). No baseline tree:
   # no policy, so no verdict.
   req=$JOURNEY_ROOT/.trees/${base_t:-none}/scripts/pipeline/required-rows
   if [ -z "$base_t" ] || [ ! -f "$req" ]; then
@@ -89,13 +89,11 @@ judge() {
   python3 - "$req" "$J/results.tsv" "$decl" "$base_res" <<'PY'
 import re, sys
 req_f, res_f, decl_f, base_f = sys.argv[1:]
-req, pending, known = [], [], {}
+req, pending = [], []
 for l in open(req_f):
     l = l.strip()
     if not l or l.startswith('#'): continue
     if l.startswith('pending '): pending.append(l[8:]); continue
-    if l.startswith('known-red '):
-        p = l.split(None, 3); known[p[1]] = (p[2], p[3] if len(p) > 3 else ''); continue
     req.append(l)
 rows = [l.rstrip('\n').split('\t') for l in open(res_f) if l.strip()]
 base = {}
@@ -160,18 +158,15 @@ for p in pending:
         print(f"required  {pid} (was pending; the row exists now)")
     else:
         print(f"pending   {p}")
-# (c) a required line unmet in the candidate that was ALSO non-PASS at main's baseline is pre-existing: it
-# blocks nothing only when required-rows lists it as `known-red ROW CV-ID note` (the fix has an owner).
+# (c) a required line unmet in the candidate that was ALSO non-PASS at main's baseline is PRE-EXISTING: printed
+# by name, blocks nothing (reds are named in the run, never ledgered: docs/COORDINATION-2026-10-27.md §2).
 pre, blocking = [], []
 for rid, st, det in unmet:
-    top = rid.split('/')[0]
     was = base.get(rid)
-    if was is not None and was != 'PASS' and (rid in known or top in known):
-        cv = known.get(rid, known.get(top))[0]
-        pre.append(f"{rid} (cv {cv})"); print(f"PRE-RED   {rid} {st} (non-PASS at main's baseline too: {was}; cv {cv}): {det}")
+    if was is not None and was != 'PASS':
+        pre.append(rid); print(f"PRE-RED   {rid} {st} (non-PASS at main's baseline too: {was}): {det}")
     else:
-        why = "" if was is None or was == 'PASS' else f" (non-PASS at main's baseline too: {was}, but no known-red cv task in required-rows: open one)"
-        blocking.append(rid); print(f"NOT MET   {rid} {st}{why}: {det}")
+        blocking.append(rid); print(f"NOT MET   {rid} {st}: {det}")
 bad += len(blocking)
 print(f"required unmet: {[u[0] for u in unmet]} (of which pre-existing at main: {pre})")
 ok = not new and not bad

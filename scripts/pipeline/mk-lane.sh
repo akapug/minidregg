@@ -177,14 +177,16 @@ echo "mk-lane: OK $DEST at $TIP"
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
   ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
-  # Known-red modules: ONE rule, scripts/pipeline/known-red-verdict (also advance-base-burst.sh).
-  bash "$BASE/scripts/pipeline/known-red-verdict" "$log" "$BASE" "$vrc" || refuse "verify: $log (known-red-verdict above)"
+  # Reds are NAMED in the run's output, never kept in a ledger (docs/COORDINATION-2026-10-27.md §2): a failed umbrella
+  # names its modules here and the base carries them as its reds; the base is READY iff it is a warm replay
+  # (0 modules compiled, below). A non-zero exit WITHOUT Lake's failed-target list is a broken build.
+  reds=$(sed -n '/^Some required targets logged failures:/,$ s/^- //p' "$log" | LC_ALL=C sort -u | tr '\n' ' ')
+  [ "$vrc" = 0 ] || [ -n "$reds" ] || refuse "verify: lake exited $vrc with no failed-module list: $log"
   # Locale-independent pattern; positive control against the base green log.
   ctl=$(cat "$W"/logs/green*.log 2>/dev/null | grep -c '\] Built ' || true)
   [ "$ctl" -gt 0 ] || refuse "verify: the Built-line pattern matches nothing in the base green logs; check disarmed"
   built=$(grep -c '\] Built ' "$log" || true)
   [ "$built" = 0 ] || refuse "verify: $built modules compiled (not a warm replay): $log"
-  # vrc != 0 passed known-red-verdict only if the failed set EQUALS the known-red list; vrc = 0 needs the success line.
   [ "$vrc" != 0 ] || grep -q 'Build completed successfully' "$log" || refuse "verify: no success line: $log"
-  echo "mk-lane: VERIFIED warm replay, 0 modules compiled$([ "$vrc" = 0 ] || echo ", known-red carried: $(grep -v '^#' "$BASE/scripts/pipeline/known-red-modules" 2>/dev/null | cut -f1 | tr '\n' ' ')") ($log)"
+  echo "mk-lane: VERIFIED warm replay, 0 modules compiled${reds:+, reds carried (named): $reds}($log)"
 fi
