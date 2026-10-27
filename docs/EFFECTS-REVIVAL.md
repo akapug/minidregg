@@ -279,6 +279,13 @@ State at the first push:
   `ContentAgreement` (unfold `computeTarget`'s content arm, `prepareCell_ok_of_run`,
   `Patch.run_append`) and `ContentComplete` (per action, by the lowering's write sites);
   the fixture inhabitant of `ContentAccepted`/`HostAccepted` is owed.
+* Auditor's addendum (accepted at `3dac92b91`), two proof notes:
+  - `HostPremise`'s `pack (select cell) = cell` needs `CellState.materialize
+    contentMaterializer value.logical = value`.  `Materialized` is a one-field structure
+    (`mk :: logical`, `Theory/CellState.lean:47`), so this is structure eta.  Prove it
+    first anyway.
+  - `HostTeeth`'s ghost clause needs an admitted command whose seal is non-empty.  It rests
+    on the same doc-write fixture `HostAccepted` owes.
 * Risk to watch: `contentActionFrame` is a declared table.  If an action writes a field
   the table omits, `ContentComplete` is false, and the fix is to the table, after
   checking which addresses the lowering writes (`ContentResource.step`).
