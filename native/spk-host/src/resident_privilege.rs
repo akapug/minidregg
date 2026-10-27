@@ -7,6 +7,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -307,11 +308,9 @@ pub(crate) fn launch(spec: &SpawnSpec) -> io::Result<Option<BoundedChild>> {
     let f = spec
         .fds
         .ok_or_else(|| refused("admitted launch descriptors absent"))?;
-    send_rights(
-        &client.stream,
-        1,
-        &[f.rpc, f.image, f.persistent_var, f.seccomp, f.output],
-    )?;
+    let mut descriptors = vec![f.rpc, f.image, f.persistent_var, f.seccomp, f.output];
+    descriptors.extend(f.public_data);
+    send_rights(&client.stream, 1, &descriptors)?;
     send_frame(
         &mut client.stream,
         &Launch {
@@ -330,6 +329,52 @@ pub(crate) fn launch(spec: &SpawnSpec) -> io::Result<Option<BoundedChild>> {
     client.pid = r.pid;
     client.start = r.start;
     Ok(Some(BoundedChild::remote(r.pid as i32, client)))
+}
+/// Resolve the pinned public directory exactly as bubblewrap will, under the
+/// existing worker's app identity. This read-only preflight precedes BEGIN and
+/// does not consume the single authorized launch or accept a host pathname.
+pub(crate) fn check_public_data_access(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    let lock = LAUNCH.get().ok_or_else(|| refused("public-data access check requires app worker"))?;
+    let mut guard = lock.lock().map_err(|_| refused("launch channel poisoned"))?;
+    let client = guard.as_mut().ok_or_else(|| refused("generation launch channel already consumed"))?;
+    send_rights(&client.stream, 4, &[fd.as_raw_fd()])?;
+    let reply: Reply = receive_frame(&mut client.stream)?;
+    if reply.pid != 0 || !reply.start.is_empty() || reply.reaped || reply.status.is_some() {
+        return Err(refused("public-data access reply binding differs"));
+    }
+    if let Some(error) = reply.error { return Err(io::Error::other(error)); }
+    Ok(())
+}
+fn public_data_access(fd: &OwnedFd) -> io::Result<()> {
+    let proc_path = format!("/proc/self/fd/{}", fd.as_raw_fd());
+    let held = fs::metadata(&proc_path)?;
+    let resolved = fs::canonicalize(&proc_path)?;
+    let named = fs::metadata(resolved)?;
+    if !held.is_dir() || !named.is_dir() || (held.dev(), held.ino()) != (named.dev(), named.ino()) {
+        return Err(refused("public-data backing pathname differs from pinned directory"));
+    }
+    Ok(())
+}
+fn receive_launch_rights(stream: &mut UnixStream, app: Identity) -> io::Result<Vec<OwnedFd>> {
+    let (mut tag, mut fds) = receive_rights(stream)?;
+    if tag == 4 && fds.len() == 1 {
+        let checked = public_data_access(&fds[0]).map_err(|error| io::Error::new(error.kind(),
+            format!("public-data backing path inaccessible to app uid {} gid {} before BEGIN: {}", app.uid, app.gid, error)));
+        send_frame(stream, &Reply { pid: 0, start: String::new(), reaped: false, status: None,
+            error: checked.as_ref().err().map(ToString::to_string) })?;
+        checked?;
+        drop(fds);
+        // Exactly one optional read-only preflight; a second is refused by the
+        // ordinary launch tag/descriptor check below.
+        (tag, fds) = receive_rights(stream)?;
+    }
+    stream.set_read_timeout(Some(TIMEOUT))?;
+    if tag != 1 || !matches!(fds.len(), 5 | 6) {
+        return Err(refused(
+            "one launch with five descriptors and optional public-data descriptor required",
+        ));
+    }
+    Ok(fds)
 }
 fn worker(stream: UnixStream, app: Identity) -> io::Result<()> {
     worker_inner(stream, app, false)
@@ -350,13 +395,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
     }
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(TIMEOUT))?;
-    let (tag, fds) = receive_rights(&stream)?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    if tag != 1 || fds.len() != 5 {
-        return Err(refused(
-            "one launch with exactly five admitted descriptors required",
-        ));
-    }
+    let fds = receive_launch_rights(&mut stream, app)?;
     let wire: Launch = receive_frame(&mut stream)?;
     let mut owned = Vec::new();
     for fd in &fds {
@@ -372,6 +411,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
         persistent_var: owned[2].as_raw_fd(),
         seccomp: owned[3].as_raw_fd(),
         output: owned[4].as_raw_fd(),
+        public_data: owned.get(5).map(AsRawFd::as_raw_fd),
     };
     let spec = SpawnSpec {
         program: wire.program,
@@ -405,6 +445,12 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(e);
         }
     };
+    // The child inherited its own descriptor table at fork. The reaper must
+    // release both SCM_RIGHTS originals and high duplicates now: retaining an
+    // RPC peer or output writer would hide EOF after the app exits, until the
+    // supervisor sends a wait/kill command or closes this control channel.
+    drop(fds);
+    drop(owned);
     // Only the admitted one-shot fork precedes this filter. Once it becomes
     // the reaper, this app-uid process cannot create or enter namespaces.
     // Installing here keeps bubblewrap's existing namespace setup intact.
@@ -533,6 +579,34 @@ pub fn run(path: &Path) -> io::Result<()> {
     result
 }
 
+/// Root-only mount audit setup. Exercise the production descriptor receiver and
+/// app-identity worker without pretending to construct a Mini admission receipt.
+/// This hook is absent from production binaries and has no request entrypoint.
+#[cfg(test)]
+pub(crate) fn initialize_mount_audit_worker(app_uid: u32, app_gid: u32) -> io::Result<libc::pid_t> {
+    if unsafe { libc::geteuid() } != 0 || app_uid == 0 || app_gid == 0 || LAUNCH.get().is_some() {
+        return Err(refused("mount audit needs root and one fresh app worker"));
+    }
+    let (parent, child) = UnixStream::pair()?;
+    let app = Identity { uid: app_uid, gid: app_gid };
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 {
+        drop(parent);
+        let status = match worker(child, app) {
+            Ok(()) => 0,
+            Err(error) => { eprintln!("mount audit app worker: {error}"); 1 }
+        };
+        unsafe { libc::_exit(status) }
+    }
+    drop(child);
+    parent.set_read_timeout(Some(TIMEOUT))?;
+    parent.set_write_timeout(Some(TIMEOUT))?;
+    LAUNCH.set(Mutex::new(Some(Client { stream: parent, start: String::new(), pid: 0, worker: pid })))
+        .map_err(|_| refused("mount audit worker already initialized"))?;
+    Ok(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +636,39 @@ mod tests {
         let (tag, fds) = receive_rights(&b).unwrap();
         assert_eq!(tag, 3);
         assert!(fds.is_empty());
+    }
+    #[test]
+    fn public_data_preflight_is_bounded_and_does_not_authorize_launch() {
+        let app = Identity { uid: unsafe { libc::geteuid() }, gid: unsafe { libc::getegid() } };
+        let directory = fs::File::open("/").unwrap();
+        let regular = fs::File::open("/dev/null").unwrap();
+        for (tag, count) in [(4, 0), (4, 2), (9, 5), (1, 4)] {
+            let (a, mut b) = UnixStream::pair().unwrap();
+            send_rights(&a, tag, &vec![directory.as_raw_fd(); count]).unwrap();
+            assert!(receive_launch_rights(&mut b, app).is_err());
+        }
+        for scenario in ["success", "repeat", "failed"] {
+            let (mut a, mut b) = UnixStream::pair().unwrap();
+            let receiver = std::thread::spawn(move || receive_launch_rights(&mut b, app));
+            let fd = if scenario == "failed" { regular.as_raw_fd() } else { directory.as_raw_fd() };
+            send_rights(&a, 4, &[fd]).unwrap();
+            let reply: Reply = receive_frame(&mut a).unwrap();
+            assert_eq!(reply.pid, 0);
+            assert!(reply.start.is_empty() && !reply.reaped && reply.status.is_none());
+            if scenario == "failed" {
+                assert!(reply.error.unwrap().contains("before BEGIN"));
+                assert!(receiver.join().unwrap().is_err());
+            } else {
+                assert!(reply.error.is_none());
+                if scenario == "repeat" {
+                    send_rights(&a, 4, &[fd]).unwrap();
+                    assert!(receiver.join().unwrap().is_err());
+                } else {
+                    send_rights(&a, 1, &[fd; 5]).unwrap();
+                    assert_eq!(receiver.join().unwrap().unwrap().len(), 5);
+                }
+            }
+        }
     }
     #[test]
     fn bootstrap_channel_loss_never_confirms_child_death() {

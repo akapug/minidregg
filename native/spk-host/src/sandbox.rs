@@ -34,6 +34,8 @@ pub(crate) const RPC_FD: RawFd = 3;
 pub(crate) const IMAGE_FD: RawFd = 4;
 pub(crate) const VAR_FD: RawFd = 5;
 pub(crate) const SECCOMP_FD: RawFd = 6;
+pub(crate) const PUBLIC_DATA_FD: RawFd = 7;
+const PUBLIC_DATA_ARGS: [&str; 3] = ["--ro-bind-fd", "7", "/opt/oracle-data"];
 
 /// Every token before the package's environment, in order. `--disable-userns`
 /// follows `--unshare-user` (it requires it); `--seccomp 6` is the compiled
@@ -72,10 +74,10 @@ const fn fixed_bytes() -> usize {
 }
 
 /// Largest bubblewrap argument vector an admitted command can produce.
-pub(crate) const MAX_BWRAP_ARGS: usize = FIXED_ARGS.len() + 3 * MAX_ENV + 1 + MAX_ARGV;
+pub(crate) const MAX_BWRAP_ARGS: usize = FIXED_ARGS.len() + PUBLIC_DATA_ARGS.len() + 3 * MAX_ENV + 1 + MAX_ARGV;
 /// Largest total argument bytes an admitted command can produce.
 pub(crate) const MAX_BWRAP_ARG_BYTES: usize =
-    fixed_bytes() + MAX_ENV * "--setenv".len() + "--".len() + MAX_COMMAND_BYTES;
+    fixed_bytes() + "--ro-bind-fd".len() + "7".len() + "/opt/oracle-data".len() + MAX_ENV * "--setenv".len() + "--".len() + MAX_COMMAND_BYTES;
 
 /// Per-generation cap on retained app stdout/stderr. Bytes past the cap are read
 /// and dropped (so the app never blocks on a full pipe) and counted in a trailer.
@@ -233,14 +235,16 @@ fn invalid(message: &'static str) -> io::Error {
 }
 
 pub(crate) fn directory_entry(root: RawFd, name: &str) -> io::Result<()> {
-    let name = CString::new(name).expect("constant");
-    let fd = unsafe {
-        libc::openat(root, name.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC)
-    };
-    if fd < 0 {
-        return Err(invalid("SPK mountpoint missing or symlinked"));
+    let mut current = inherited_fd(root)?;
+    let path = Path::new(name);
+    if name.is_empty() { return Err(invalid("empty SPK mountpoint")); }
+    for component in path.components() {
+        let Component::Normal(name) = component else { return Err(invalid("invalid SPK mountpoint")); };
+        let name = CString::new(name.as_bytes()).map_err(|_| invalid("invalid SPK mountpoint"))?;
+        let fd = unsafe { libc::openat(current.as_raw_fd(), name.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_CLOEXEC) };
+        if fd < 0 { return Err(invalid("SPK mountpoint missing or symlinked")); }
+        current = unsafe { OwnedFd::from_raw_fd(fd) };
     }
-    unsafe { libc::close(fd) };
     Ok(())
 }
 
@@ -338,11 +342,19 @@ pub(crate) fn validate_command(argv: &[String], environ: &[(String, String)]) ->
 /// One exact argument sequence for both the private compatibility smoke and
 /// the operator resident gate. The package's ordered environment is retained.
 pub(crate) fn bwrap_args(spec: &SandboxSpec) -> io::Result<Vec<String>> {
+    bwrap_args_with_public_data(spec, false)
+}
+
+/// Exactly one fixed public-data mount, emitted only for a checked signed declaration.
+pub(crate) fn bwrap_args_with_public_data(spec: &SandboxSpec, public_data: bool) -> io::Result<Vec<String>> {
     validate_command(&spec.argv, &spec.environ)?;
     let mut args: Vec<String> = FIXED_ARGS
         .iter()
         .map(|token| (*token).to_owned())
         .collect();
+    if public_data {
+        args.extend(PUBLIC_DATA_ARGS.iter().map(|s| (*s).to_owned()));
+    }
     for (key, value) in &spec.environ {
         args.push("--setenv".into());
         args.push(key.clone());
@@ -351,6 +363,13 @@ pub(crate) fn bwrap_args(spec: &SandboxSpec) -> io::Result<Vec<String>> {
     args.push("--".into());
     args.extend(spec.argv.iter().cloned());
     Ok(args)
+}
+
+/// Inspect only the host's fixed argument prefix, never package argv/env values.
+pub(crate) fn has_public_data_args(args: &[String]) -> bool {
+    args.get(..FIXED_ARGS.len()).is_some_and(|prefix| prefix.iter().map(String::as_str).eq(FIXED_ARGS))
+        && args.get(FIXED_ARGS.len()..FIXED_ARGS.len()+PUBLIC_DATA_ARGS.len())
+            .is_some_and(|part| part.iter().map(String::as_str).eq(PUBLIC_DATA_ARGS))
 }
 
 /// Spawn a package's real command in a package-rooted namespace. The child end of
@@ -470,6 +489,40 @@ mod tests {
     }
 
     #[test]
+    fn public_data_mount_is_optional_fixed_and_read_only() {
+        let spec = spec(vec!["/start".into()], vec![]);
+        let plain = bwrap_args(&spec).unwrap();
+        let attached = bwrap_args_with_public_data(&spec, true).unwrap();
+        assert!(!has_public_data_args(&plain));
+        assert!(has_public_data_args(&attached));
+        assert_eq!(&attached[FIXED_ARGS.len()..FIXED_ARGS.len()+3], PUBLIC_DATA_ARGS);
+        assert_eq!(attached.len(), plain.len()+3);
+        assert!(attached.len() <= MAX_BWRAP_ARGS);
+        assert!(attached.iter().map(String::len).sum::<usize>() <= MAX_BWRAP_ARG_BYTES);
+    }
+
+    #[test]
+    fn public_data_mountpoint_refuses_missing_and_symlinked_ancestors() {
+        let base = std::env::temp_dir().join(format!("spk-data-mountpoint-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&base).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(base.clone());
+        let root = File::open(&base).unwrap();
+        assert!(directory_entry(root.as_raw_fd(), "opt/oracle-data").is_err());
+        std::fs::create_dir_all(base.join("real/oracle-data")).unwrap();
+        std::os::unix::fs::symlink("real", base.join("opt")).unwrap();
+        assert!(directory_entry(root.as_raw_fd(), "opt/oracle-data").is_err());
+        std::fs::remove_file(base.join("opt")).unwrap();
+        std::fs::create_dir(base.join("opt")).unwrap();
+        std::os::unix::fs::symlink("../real/oracle-data", base.join("opt/oracle-data")).unwrap();
+        assert!(directory_entry(root.as_raw_fd(), "opt/oracle-data").is_err());
+        std::fs::remove_file(base.join("opt/oracle-data")).unwrap();
+        std::fs::create_dir(base.join("opt/oracle-data")).unwrap();
+        directory_entry(root.as_raw_fd(), "opt/oracle-data").unwrap();
+    }
+
+    #[test]
     fn floor_flags_are_present_and_ordered() {
         let args = bwrap_args(&spec(vec!["/start".into()], vec![])).unwrap();
         let at = |token: &str| args.iter().position(|a| a == token).unwrap();
@@ -510,7 +563,7 @@ mod tests {
     fn profile_admits_exactly_what_the_gate_accepts() {
         let (argv, environ) = maximal_command();
         validate_command(&argv, &environ).unwrap();
-        let args = bwrap_args(&spec(argv.clone(), environ.clone())).unwrap();
+        let args = bwrap_args_with_public_data(&spec(argv.clone(), environ.clone()), true).unwrap();
         assert!(args.len() <= MAX_BWRAP_ARGS);
         assert!(args.iter().map(String::len).sum::<usize>() <= MAX_BWRAP_ARG_BYTES);
 

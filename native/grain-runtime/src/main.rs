@@ -5,6 +5,7 @@ mod deadline;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
+mod oracle_tools;
 mod application_tools;
 mod concierge;
 mod hermes_room;
@@ -147,6 +148,9 @@ struct ToolTask {
     /// Current execution generations come from each source-inspected plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_application_lifetime_routes: Vec<application_api_tools::LifetimeRoutePin>,
+    /// Protocol discovery profiles over existing lifetime API routes; never grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    application_services: Vec<oracle_tools::ServiceProfile>,
     /// Only an explicitly certified Mini Host with the agent event21 route
     /// may enable the forward API tool. The SPK host still obtains and checks
     /// a fresh event21 permit for each request.
@@ -3133,6 +3137,8 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
         } else if t.lifetime_api_host_sha256.is_some() {
             return Err("lifetime API Host pin has no operator route".into());
         }
+        oracle_tools::validate_profiles(&t.application_services,
+            &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -8115,6 +8121,19 @@ impl Runtime {
         };
         let _ = request.reply.send(response);
     }
+    /// A product tool constructs ordinary HTTP only. Dispatch below still
+    /// checks the current route, signed authority, native permit and settlement.
+    fn application_tool_arguments(&self, name: &str, arguments: &Value) -> Result<Value> {
+        if oracle_tools::is_tool(name) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            oracle_tools::http_arguments(name, arguments, &tool.application_services)
+        } else if matches!(name, "mini_application_api" | "__mini_gitweb_http_raw") {
+            Ok(arguments.clone())
+        } else {
+            Err("unknown application tool".into())
+        }
+    }
+
     fn begin_application_api(
         &mut self,
         arguments: &Value,
@@ -12651,7 +12670,9 @@ impl Runtime {
                     }
                 }
             }
-            "mini_application_api" => {
+            "mini_application_api" | "mini_oracle_discover" | "mini_oracle_call" => {
+                let mapped = self.application_tool_arguments(&request.name, arguments)?;
+                let arguments = &mapped;
                 let mut allowed = tool
                     .allowed_application_api_routes
                     .iter()
@@ -12775,6 +12796,8 @@ impl Runtime {
                 | "mini_create_application_session"
                 | "mini_publish"
                 | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
         ) {
             return Err("foreground tool is not delegated".into());
         }
@@ -12859,8 +12882,9 @@ impl Runtime {
             self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
             self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Executing;
             self.save()?;
-            let result = if request.name == "mini_application_api" {
-                self.foreground_application_api(&request.arguments, input)?
+            let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
+                let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+                self.foreground_application_api(&arguments, input)?
             } else {
                 self.tool_call(&request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
@@ -14108,6 +14132,9 @@ impl Runtime {
             } else {
                 Vec::new()
             },
+            oracle_applications: if tool.lifetime_api_host_sha256.is_some() {
+                oracle_tools::applications(&tool.application_services)
+            } else { Vec::new() },
             resource_workspace: tool.resource_workspace.is_some(),
             room_tools: tool.room.is_some(),
             resource_workspace_create: if let Some(root) = &tool.resource_workspace {
@@ -14958,18 +14985,20 @@ impl Runtime {
                         if matches!(
                             request.name.as_str(),
                             "mini_application_api" | "__mini_gitweb_http_raw"
+                                | "mini_oracle_discover" | "mini_oracle_call"
                         ) =>
                     {
                         if application_api_call.is_some() {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
                         } else {
-                            match self.begin_application_api(
-                                &request.arguments,
-                                request.reply.clone(),
-                                Some(request.prompt_epoch),
-                                request.name == "__mini_gitweb_http_raw",
-                            ) {
+                            match self.application_tool_arguments(&request.name, &request.arguments)
+                                .and_then(|arguments| self.begin_application_api(
+                                    &arguments,
+                                    request.reply.clone(),
+                                    Some(request.prompt_epoch),
+                                    request.name == "__mini_gitweb_http_raw",
+                                )) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {
                                     let _ =
@@ -18981,6 +19010,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
                 registered_shared_applications: vec![],
                 allowed_application_api_routes: vec![],
                 allowed_application_lifetime_routes: vec![],
+                application_services: vec![],
                 agent_api_host_sha256: None,
                 lifetime_api_host_sha256: None,
                 current_birth_host_sha256: None,

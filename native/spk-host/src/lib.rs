@@ -110,6 +110,8 @@ mod rpc_adapter;
 #[cfg(target_os = "linux")]
 pub mod sandbox;
 #[cfg(target_os = "linux")]
+pub mod shared_data;
+#[cfg(target_os = "linux")]
 pub mod seccomp;
 #[cfg(target_os = "linux")]
 mod spawn_gate;

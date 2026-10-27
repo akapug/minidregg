@@ -10,8 +10,8 @@ use crate::launch_descriptor_native::{
 use crate::materialize::{signed_schema_source, InstalledPackage};
 use crate::rpc_adapter::RpcDriver;
 use crate::sandbox::{
-    app_output, bwrap_args, directory_entry, inherited_fd, open_protected_directory,
-    verify_executable, verify_var_volume, AppOutput, SandboxSpec,
+    app_output, bwrap_args_with_public_data, directory_entry, inherited_fd, open_protected_directory,
+    verify_executable, verify_var_volume, AppOutput, AppOutputSummary, SandboxSpec,
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use crate::volume_custody::VolumeWitness;
@@ -358,6 +358,8 @@ pub(crate) struct PreparedResident {
     _image: OwnedFd,
     _persistent_var: OwnedFd,
     _seccomp: OwnedFd,
+    public_data: Option<crate::shared_data::SharedDataHandle>,
+    _public_data_fd: Option<OwnedFd>,
     /// Write end of the app's stdout/stderr pipe; dropped once the gate has
     /// spawned so the pump sees EOF when the app's last writer exits.
     _output_writer: OwnedFd,
@@ -385,10 +387,20 @@ impl PreparedResident {
         app_gid: u32,
         bwrap_sha256: &str,
     ) -> io::Result<Self> {
+        Self::prepare_with_public_data(spec, app_uid, app_gid, bwrap_sha256, None)
+    }
+
+    pub(crate) fn prepare_with_public_data(
+        spec: &SandboxSpec,
+        app_uid: u32,
+        app_gid: u32,
+        bwrap_sha256: &str,
+        public_data: Option<crate::shared_data::SharedDataHandle>,
+    ) -> io::Result<Self> {
         if app_uid == 0 || app_gid == 0 || unsafe { libc::geteuid() } == app_uid {
             return Err(invalid("resident supervisor must be separate from app UID"));
         }
-        let args = bwrap_args(spec)?;
+        let args = bwrap_args_with_public_data(spec, public_data.is_some())?;
         let image = open_protected_directory(&spec.image_root, app_uid, false)?;
         let persistent_var = open_protected_directory(&spec.persistent_var, app_uid, true)?;
         if spec.persistent_var.starts_with(&spec.image_root)
@@ -399,6 +411,11 @@ impl PreparedResident {
         for mountpoint in ["var", "tmp", "proc", "dev"] {
             directory_entry(image.as_raw_fd(), mountpoint)?;
         }
+        let public_data_fd = if let Some(data) = &public_data {
+            directory_entry(image.as_raw_fd(), "opt/oracle-data")?;
+            data.recheck()?;
+            Some(inherited_fd(data.root_fd().as_raw_fd())?)
+        } else { None };
         verify_var_volume(
             &spec.persistent_var,
             persistent_var.as_raw_fd(),
@@ -426,6 +443,7 @@ impl PreparedResident {
                 persistent_var: persistent_var.as_raw_fd(),
                 seccomp: seccomp.as_raw_fd(),
                 output: output_writer.as_raw_fd(),
+                public_data: public_data_fd.as_ref().map(AsRawFd::as_raw_fd),
             }),
         };
         Ok(Self {
@@ -434,6 +452,8 @@ impl PreparedResident {
             _image: image,
             _persistent_var: persistent_var,
             _seccomp: seccomp,
+            public_data,
+            _public_data_fd: public_data_fd,
             _output_writer: output_writer,
             output,
             launch,
@@ -471,6 +491,7 @@ impl PreparedResident {
         journal: &Journal,
         begin: &VerifiedBegin,
     ) -> io::Result<ResidentProcess> {
+        if let Some(data) = &self.public_data { data.recheck()?; }
         let child = journal.enter_and_spawn(begin, &self.launch)?;
         // Saved identities belong to the app, not the generation: apps/<app>/identities.
         let identities = journal
@@ -486,6 +507,7 @@ impl PreparedResident {
     /// lifetimes, for the root-only sandbox audit.
     #[cfg(test)]
     fn spawn_for_audit(self) -> io::Result<(BoundedChild, UnixStream, AppOutput)> {
+        if let Some(data) = &self.public_data { data.recheck()?; }
         let child = crate::spawn_gate::spawn_bounded(&self.launch)?;
         Ok((child, self.host_rpc, self.output))
     }
@@ -581,6 +603,7 @@ mod tests {
     /// Launch the probe as the app; return its wait status and parsed report lines.
     fn run_probe(prepared: PreparedResident, log: &Path) -> (i32, Vec<Value>) {
         let (mut child, _host_rpc, output) = prepared.spawn_for_audit().unwrap();
+        println!("sandbox-app-child-pid={}", child.pid());
         let status = child.wait().unwrap();
         let summary = output.finish().unwrap();
         let text = std::fs::read_to_string(log).unwrap();
@@ -636,6 +659,61 @@ mod tests {
             }
             assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
         });
+    }
+
+    /// Operator fixture: a published `probe.txt` containing `public fixture\n`,
+    /// a Python-bearing image and the same separate /var used by the floor audit.
+    #[test]
+    #[ignore = "root Linux only; SPK_AUDIT_* plus SPK_PUBLIC_DATA_STORE and SPK_PUBLIC_DATA_DECLARATION"]
+    fn root_public_data_mount_is_read_only_and_fd7_is_consumed() {
+        let mut audit = audit_inputs("app-output-public-data.log");
+        // Start the actual unprivileged receiver before prepare creates its output thread.
+        let worker_pid = crate::resident_privilege::initialize_mount_audit_worker(audit.uid, audit.gid).unwrap();
+        println!("mount-audit-worker-pid={worker_pid}");
+        let declaration = std::fs::read(std::env::var("SPK_PUBLIC_DATA_DECLARATION").unwrap()).unwrap();
+        let requirement = crate::shared_data::parse_signed_attachment(&declaration).unwrap();
+        let store = std::path::PathBuf::from(std::env::var("SPK_PUBLIC_DATA_STORE").unwrap());
+        let data = crate::shared_data::open_published(&store, &requirement, audit.uid).unwrap();
+        crate::resident_privilege::check_public_data_access(data.root_fd()).unwrap();
+        audit.spec.argv = vec!["/usr/bin/python3.12".into(), "-B".into(), "-c".into(), r#"
+import os,errno,json
+assert open('/opt/oracle-data/probe.txt','rb').read() == b'public fixture\n'
+assert os.statvfs('/opt/oracle-data').f_flag & os.ST_RDONLY
+write_errnos=[]
+for path in ['/opt/oracle-data/probe.txt','/opt/oracle-data/new-file']:
+    try:
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT,0o600)
+    except OSError as error:
+        assert error.errno in (errno.EACCES, errno.EROFS), error
+        write_errnos.append(error.errno)
+    else:
+        os.close(fd)
+        raise AssertionError('public dataset accepted a write')
+try:
+    os.unlink('/opt/oracle-data/probe.txt')
+except OSError as error:
+    assert error.errno == errno.EROFS, error
+else:
+    raise AssertionError('public dataset accepted an unlink')
+try:
+    os.fstat(7)
+except OSError as error:
+    assert error.errno == errno.EBADF, error
+else:
+    raise AssertionError('raw public-data fd7 escaped bubblewrap')
+with open('/var/public-data-positive','w') as out: out.write('private')
+print(json.dumps({'verdict':'public-data-held','mount_read_only':True,'write_open_errnos':write_errnos,'unlink_errno':errno.EROFS,'fd7_closed':True,'private_var_write':True}))
+"#.into()];
+        let prepared = PreparedResident::prepare_with_public_data(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256, Some(data)).unwrap();
+        let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+        assert_eq!(verdict(&lines), Some("public-data-held"));
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+        // run_probe dropped the Client: its channel closes and its direct worker
+        // must already have been reaped, not merely left to systemd's timeout.
+        assert_eq!(unsafe { libc::waitpid(worker_pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+        assert!(!Path::new(&format!("/proc/{worker_pid}")).exists());
+        println!("mount-audit-worker-reaped=true");
     }
 
     /// Negative control: the same gate and probe with the pre-floor argument
@@ -699,6 +777,7 @@ mod tests {
             signed_manifest_sha256: [0xbb; 32],
             signed_bridge_config_sha256: None,
             signed_bridge_config: None,
+            signed_data_config: None,
             manifest,
         };
         let launch = SourceLaunchDescriptor {

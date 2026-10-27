@@ -2075,6 +2075,21 @@ def dispatchSession (config : NativeHost.Config)
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
   | 151 => fnDispatch operation payload
+  | 155 =>
+      -- The operator socket pins this Host image and complete configuration.
+      -- Refresh the verifier-minted chronology held by op26 rather than
+      -- reopening and replaying genesis in a detached inspection process.
+      -- New suffixes are still authenticated and semantically re-admitted.
+      let (planBytes, committedBytes) ← splitPair payload
+      unless !planBytes.isEmpty && !committedBytes.isEmpty do
+        throw (RequestRefusal.malformed "empty STOP inspection input")
+      let session ← sessionWalked config state
+      let view ← IO.ofExcept <| ApplicationLifecycleStopClaimInspection.inspectVerified
+        session.verified planBytes committedBytes
+      let bytes := view.compress.toUTF8.toList
+      unless bytes.length ≤ 2 * 1024 * 1024 do
+        throw (IO.userError "STOP claim inspection exceeds native JSON budget")
+      return (155, bytes)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))

@@ -1,4 +1,7 @@
 use minidregg_oracle_appliance::{connection, Config, MAX_REPLY, MAX_REQUEST};
+// Exercise the final native HTTP consumer, not only the Cap'n Proto decoder.
+#[path = "../../spk-host/src/http_response.rs"]
+mod host_http_response;
 use minidregg_spk_rpc::{
     dispatch_web, Body, Method, RequestContext, SessionParameters, SupervisorConnection,
     WebRequest, WebResponse, WebResult,
@@ -127,6 +130,11 @@ async fn supervisor_preserves_full_evidence_and_error_status() {
                 .unwrap();
                 assert_eq!(status(&reply), code);
                 assert_eq!(body(&reply), evidence);
+                let http_bytes = host_http_response::serialize(&reply, false).unwrap();
+                let transport_status = if code >= 500 { 500 } else if code == 429 { 400 } else { code };
+                assert!(http_bytes.starts_with(format!("HTTP/1.1 {transport_status} ").as_bytes()));
+                assert!(String::from_utf8_lossy(&http_bytes).contains(&format!("x-sandstorm-app-http-status: {code}\r\n")));
+                assert!(http_bytes.ends_with(evidence));
                 match reply.result {
                     WebResult::Content { status, .. } => assert_eq!((code, status), (200, 200)),
                     WebResult::ClientError { status, .. } => {
@@ -200,6 +208,40 @@ async fn rejects_permissions_routes_context_and_oversize_before_http() {
         })
         .await;
 }
+#[tokio::test(flavor = "current_thread")]
+async fn json_accept_negotiation_preserves_specific_exclusions() {
+    tokio::task::LocalSet::new().run_until(async {
+        for accept in [vec![], vec![("*/*", 1000)], vec![("application/*", 500)],
+            vec![("APPLICATION/JSON", 1000)], vec![("*/*", 0), ("application/json", 100)]] {
+            let evidence = br#"{"ready":true,"busy":false}"#;
+            let (port, http) = fixture(response(200, evidence)).await;
+            let conn = connect(port, Duration::from_secs(1));
+            let session = conn.new_api_session(&params(vec![true])).await.unwrap();
+            let mut req = request(Method::Get, "health", b"");
+            req.context.accept = accept.into_iter().map(|(s,q)| (s.into(), q)).collect();
+            let reply = dispatch_web(&session, &req, MAX_REPLY, Duration::from_secs(2)).await.unwrap();
+            assert_eq!(status(&reply), 200);
+            assert_eq!(body(&reply), evidence);
+            assert!(http.await.unwrap().starts_with(b"GET /health HTTP/1.0\r\n"));
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let conn = connect(listener.local_addr().unwrap().port(), Duration::from_secs(1));
+        let session = conn.new_api_session(&params(vec![true])).await.unwrap();
+        for method in [Method::Get, Method::Post] {
+            for accept in [vec![("text/html", 1000)], vec![("*/*", 0)],
+                vec![("*/*", 1000), ("application/json", 0)],
+                vec![("application/json", 0), ("application/*", 1000)]] {
+                let mut req = request(method, if method == Method::Get { "health" } else { "query" }, b"{}");
+                req.context.accept = accept.into_iter().map(|(s,q)| (s.into(), q)).collect();
+                let reply = dispatch_web(&session, &req, MAX_REPLY, Duration::from_secs(1)).await.unwrap();
+                assert_eq!(status(&reply), 406);
+                assert!(String::from_utf8_lossy(body(&reply)).contains("json_not_acceptable"));
+            }
+        }
+        assert!(tokio::time::timeout(Duration::from_millis(25), listener.accept()).await.is_err());
+    }).await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn transport_failure_never_returns_partial_evidence_or_success() {
     tokio::task::LocalSet::new().run_until(async {

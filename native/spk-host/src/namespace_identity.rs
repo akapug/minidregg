@@ -13,35 +13,151 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::collections::BTreeMap;
-static ROOTS: OnceLock<BTreeMap<PathBuf, (File, Metadata)>>=OnceLock::new();
+// Bootstrap deliberately inspects only the fixed world SPK namespace. No archive
+// or resident JSON is parsed before isolation. Finalized packages contribute their
+// retained metadata, not every executable-image file; public revisions contribute
+// their complete bounded metadata tree. Kernel FD limits can impose a lower bound.
+const MAX_CUSTODY_HANDLES: usize = 131_072;
+const MAX_CUSTODY_PATH_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CUSTODY_DEPTH: usize = 32;
+struct Pin { file: File, original: Metadata }
+struct Provenance {
+    paths: BTreeMap<PathBuf, std::sync::Arc<Pin>>,
+    inodes: BTreeMap<(u64,u64), std::sync::Arc<Pin>>,
+    path_bytes: usize,
+}
+impl Provenance {
+    fn new() -> Self { Self { paths:BTreeMap::new(), inodes:BTreeMap::new(), path_bytes:0 } }
+}
+static ROOTS: OnceLock<Provenance> = OnceLock::new();
 fn refused(s: &str)->io::Error { io::Error::new(io::ErrorKind::PermissionDenied,s) }
+fn stable(meta: &Metadata) -> (u64,u64,u32,u64,u64,i64,i64,i64,i64) {
+    (meta.dev(),meta.ino(),meta.mode(),meta.nlink(),meta.len(),meta.mtime(),meta.mtime_nsec(),meta.ctime(),meta.ctime_nsec())
+}
+fn unchanged(pin: &Pin, observed: &Metadata) -> bool {
+    let Ok(current) = pin.file.metadata() else { return false; };
+    stable(&current) == stable(&pin.original) && stable(observed) == stable(&pin.original)
+        && (current.uid(),current.gid()) == (observed.uid(),observed.gid())
+}
+/// Exact pre-namespace owner/group, only for the same unchanged held inode.
+/// Once bootstrap has captured custody, an unknown inode is never blessed by
+/// its namespace-visible UID (including the ambiguous overflow UID/GID).
+pub(crate) fn original_owner(observed: &Metadata) -> Option<(u32,u32)> {
+    match ROOTS.get() {
+        Some(roots) => roots.inodes.get(&(observed.dev(),observed.ino()))
+            .filter(|pin| unchanged(pin,observed)).map(|pin|(pin.original.uid(),pin.original.gid())),
+        None if observed.uid()==0 || observed.uid()==unsafe{libc::geteuid()} => Some((observed.uid(),observed.gid())),
+        None => None,
+    }
+}
 /// Root in the initial namespace is unmapped inside the resident namespace.
-/// Retained handles carry its verified provenance, never the overflow uid.
+/// Retained handles carry its verified provenance, never the overflow UID.
 pub(crate) fn root_owned(path: &Path, observed: &Metadata) -> bool {
-    if crate::os::root_owner(observed.uid()) { return true; }
-    ROOTS.get().and_then(|roots|roots.get(path)).is_some_and(|(f, held)| {
-        let Ok(current)=f.metadata() else { return false; };
-        if (current.dev(),current.ino(),current.ctime(),current.ctime_nsec())!=(held.dev(),held.ino(),held.ctime(),held.ctime_nsec()) { return false; }
-        (held.dev(),held.ino(),held.mode(),held.nlink(),held.len(),held.mtime(),held.mtime_nsec(),held.ctime(),held.ctime_nsec())
-        ==(observed.dev(),observed.ino(),observed.mode(),observed.nlink(),observed.len(),observed.mtime(),observed.mtime_nsec(),observed.ctime(),observed.ctime_nsec())
+    if ROOTS.get().is_none() && crate::os::root_owner(observed.uid()) { return true; }
+    ROOTS.get().and_then(|roots|roots.paths.get(path)).is_some_and(|pin| {
+        pin.original.uid()==0 && unchanged(pin,observed)
     })
 }
-fn remember(path: &Path, roots: &mut BTreeMap<PathBuf,(File,Metadata)>) -> io::Result<()> {
-    let m=fs::symlink_metadata(path)?;
-    if m.file_type().is_symlink() || m.mode()&0o022!=0 { return Err(refused("namespace bootstrap custody path writable or symlinked")); }
-    if m.uid()==0 {
-        let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC|libc::O_PATH).open(path)?;
-        let held=f.metadata()?;
-        if held.uid()!=0 || (held.dev(),held.ino())!=(m.dev(),m.ino()) { return Err(refused("namespace bootstrap root handle changed")); }
-        roots.insert(path.to_owned(),(f,held));
-    } else if m.uid()!=unsafe{libc::geteuid()} { return Err(refused("namespace bootstrap custody path belongs to another principal")); }
+fn host_trusted(meta: &Metadata) -> bool {
+    !meta.file_type().is_symlink() && meta.mode()&0o022==0
+        && (meta.uid()==0 || meta.uid()==unsafe{libc::geteuid()})
+}
+fn protected_handle(path: &Path) -> io::Result<File> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Component;
+    if !path.is_absolute() { return Err(refused("bootstrap custody path must be absolute")); }
+    let mut current=OpenOptions::new().read(true).custom_flags(libc::O_PATH|libc::O_DIRECTORY|libc::O_CLOEXEC).open("/")?;
+    let components:Vec<_>=path.components().skip(1).collect();
+    for (index,component) in components.iter().enumerate() {
+        if !host_trusted(&current.metadata()?) { return Err(refused("bootstrap custody ancestor belongs to another principal or is writable")); }
+        let Component::Normal(name)=component else { return Err(refused("bootstrap custody path not normalized")); };
+        let name=CString::new(name.as_bytes()).map_err(|_|refused("bootstrap custody path contains NUL"))?;
+        let flags=libc::O_PATH|libc::O_NOFOLLOW|libc::O_CLOEXEC|if index+1<components.len(){libc::O_DIRECTORY}else{0};
+        let fd=unsafe{libc::openat(current.as_raw_fd(),name.as_ptr(),flags)};
+        if fd<0 { return Err(io::Error::last_os_error()); }
+        current=unsafe{File::from_raw_fd(fd)};
+    }
+    let meta=current.metadata()?;
+    if !host_trusted(&meta) || (!meta.is_dir() && !meta.is_file()) {
+        return Err(refused("bootstrap custody entry belongs to another principal, is writable, or is not regular"));
+    }
+    Ok(current)
+}
+fn remember(path: &Path, roots: &mut Provenance) -> io::Result<()> {
+    if roots.paths.contains_key(path) { return Ok(()); }
+    let count=roots.paths.len();
+    let bytes=path.as_os_str().len();
+    if count>=MAX_CUSTODY_HANDLES || bytes>MAX_CUSTODY_PATH_BYTES.saturating_sub(roots.path_bytes) {
+        return Err(refused("bootstrap custody handle/path bound exceeded"));
+    }
+    let file=protected_handle(path)?;
+    let original=file.metadata()?;
+    let pin=std::sync::Arc::new(Pin {file,original});
+    if let Some(previous)=roots.inodes.get(&(pin.original.dev(),pin.original.ino())) {
+        if !unchanged(previous,&pin.original) { return Err(refused("bootstrap custody inode changed")); }
+    }
+    roots.inodes.insert((pin.original.dev(),pin.original.ino()),pin.clone());
+    roots.paths.insert(path.to_owned(),pin);
+    roots.path_bytes+=bytes;
+    Ok(())
+}
+fn finalized_name(name: &str) -> bool {
+    name.strip_prefix("sha256-").is_some_and(|hash| hash.len()==64 && hash.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)))
+}
+fn public_tree(path: &Path, roots: &mut Provenance, depth: usize) -> io::Result<()> {
+    if depth>MAX_CUSTODY_DEPTH { return Err(refused("bootstrap public-data tree depth exceeded")); }
+    remember(path,roots)?;
+    if roots.paths[path].original.is_dir() {
+        for entry in fs::read_dir(path)? {
+            public_tree(&entry?.path(),roots,depth+1)?;
+        }
+    }
+    Ok(())
+}
+fn remember_spk_namespace(world: &Path, roots: &mut Provenance) -> io::Result<()> {
+    let namespace=world.join("spk");
+    match fs::symlink_metadata(&namespace) {
+        Err(error) if error.kind()==io::ErrorKind::NotFound => return Ok(()),
+        result => { result?; }
+    }
+    for ancestor in namespace.ancestors() { remember(ancestor,roots)?; }
+    for kind in ["packages","public-data"] {
+        let store=namespace.join(kind);
+        match fs::symlink_metadata(&store) {
+            Err(error) if error.kind()==io::ErrorKind::NotFound => continue,
+            result => { result?; }
+        }
+        remember(&store,roots)?;
+        let mut seen=0;
+        for entry in fs::read_dir(&store)? {
+            seen+=1;
+            if seen>MAX_CUSTODY_HANDLES { return Err(refused("bootstrap publication listing bound exceeded")); }
+            let entry=entry?;
+            if !entry.file_name().to_str().is_some_and(finalized_name) { continue; }
+            let publication=entry.path();
+            if kind=="public-data" { public_tree(&publication,roots,0)?; }
+            else {
+                remember(&publication,roots)?;
+                for name in ["package.spk","manifest.json","import-policy.json","root"] {
+                    let path=publication.join(name);
+                    match fs::symlink_metadata(&path) {
+                        Err(error) if error.kind()==io::ErrorKind::NotFound => continue,
+                        result => { result?; }
+                    }
+                    remember(&path,roots)?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 pub(crate) fn prepare_root_handles(config: &Path, root: &Path, store: &str, grain: &str) -> io::Result<()> {
-    let mut roots=BTreeMap::new();
+    let mut roots=Provenance::new();
     for path in config.ancestors().skip(1) { remember(path,&mut roots)?; }
     let witness=root.join("attest").join(format!("{store}-{grain}.witness"));
     for path in witness.ancestors() { remember(path,&mut roots)?; }
+    remember_spk_namespace(root,&mut roots)?;
     ROOTS.set(roots).map_err(|_|refused("namespace root provenance initialized twice"))
 }
 /// The physical bubblewrap binaries a host may provide (deploy/grain-host/resolve-bwrap):
