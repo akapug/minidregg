@@ -228,7 +228,8 @@ fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
 {"subject":"30","capability":"4030","enrolCapability":"4032"}
 EOF
-# The one genesis template (genesis.sh) from the example params, with this
+# The one genesis template (genesis.sh) from the example params, without its grain platform (this
+# world hosts no grains; the example's null completionCustodianKey is refused unfilled), with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
 # MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" --argjson balance "$SPONSOR_BALANCE" \
@@ -237,7 +238,8 @@ jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OW
   '.domain = $domain | .sponsor.subject = $subject | .sponsor.initialBalance = $balance | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end
-   | if $objective != "" then .objectiveInvocation = $objective else . end' \
+   | if $objective != "" then .objectiveInvocation = $objective else . end
+   | del(.grainPlatform)' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2
