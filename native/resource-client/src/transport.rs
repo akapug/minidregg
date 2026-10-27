@@ -199,7 +199,12 @@ fn split_envelope<'a>(
     envelope: &'a [u8],
     config: &[u8],
 ) -> Result<(Option<&'a [u8]>, &'a [u8]), &'static str> {
-    if envelope.len() < 5 || !matches!(envelope[0], 1 | 2) {
+    // Version 1 (no Host image pin) is retired: every client sends v2, and an unpinned request is
+    // refused by name before anything is forwarded.
+    if envelope.first() == Some(&1) {
+        return Err("socket envelope v1 is retired: send v2 with the Host image pin");
+    }
+    if envelope.len() < 5 || envelope[0] != 2 {
         return Err("invalid socket envelope");
     }
     let config_length = u32::from_le_bytes(envelope[1..5].try_into().unwrap()) as usize;
@@ -209,17 +214,13 @@ fn split_envelope<'a>(
     if config_length != config.len() || envelope.get(5..config_end) != Some(config) {
         return Err("config pin mismatch");
     }
-    let (pin, request_start) = if envelope[0] == 2 {
-        let sha_end = config_end
-            .checked_add(32)
-            .ok_or("invalid socket envelope")?;
-        (
-            Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
-            sha_end,
-        )
-    } else {
-        (None, config_end)
-    };
+    let sha_end = config_end
+        .checked_add(32)
+        .ok_or("invalid socket envelope")?;
+    let (pin, request_start) = (
+        Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
+        sha_end,
+    );
     let request = envelope
         .get(request_start..)
         .ok_or("invalid socket envelope")?;
@@ -892,17 +893,6 @@ pub(crate) fn durability_barrier() -> Result<(), String> {
     mini_sdk::durable::flush_directory_syncs().map_err(|e| format!("cannot make custody durable before the Host request: {e}"))
 }
 
-/// A failed write or read leaves the request's execution status unknown. Callers
-/// retain the original signed call and use historical lookup before resubmission.
-pub fn invoke(
-    socket: &Path,
-    config: &Path,
-    operation: u8,
-    payload: &[u8],
-) -> Result<Vec<u8>, String> {
-    invoke_inner(Path::new(""), socket, config, None, operation, payload)
-}
-
 /// An upgraded worker requires the executable image actually serving the
 /// socket to match its durable host pin. Version 2 is mandatory on this path:
 /// an older service rejects the envelope before it can forward the request.
@@ -914,7 +904,7 @@ pub fn invoke_pinned(
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
-    invoke_inner(Path::new(""), socket, config, Some(&expected), operation, payload)
+    invoke_inner(Path::new(""), socket, config, &expected, operation, payload)
 }
 
 /// The main caller has an independently selected local Host; direct remote
@@ -924,7 +914,7 @@ pub(crate) fn invoke_pinned_with_local(
     operation: u8, payload: &[u8],
 ) -> Result<Vec<u8>, String> {
     let expected = parse_host_sha256(expected_host_sha256)?;
-    invoke_inner(local_host, socket, config, Some(&expected), operation, payload)
+    invoke_inner(local_host, socket, config, &expected, operation, payload)
 }
 
 fn check_signing_plan_reply(local_host: &Path, config: &Path, operation: u8,
@@ -1136,7 +1126,7 @@ fn invoke_inner(
     local_host: &Path,
     socket: &Path,
     config: &Path,
-    expected_host_sha256: Option<&[u8; 32]>,
+    expected_host_sha256: &[u8; 32],
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>, String> {
@@ -1151,12 +1141,10 @@ fn invoke_inner(
         return Err("host request exceeds frame bound or has malformed carried lookup before transmission".to_owned());
     }
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
-    frame.push(if expected_host_sha256.is_some() { 2 } else { 1 });
+    frame.push(2);
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
     frame.extend_from_slice(&config);
-    if let Some(expected) = expected_host_sha256 {
-        frame.extend_from_slice(expected);
-    }
+    frame.extend_from_slice(expected_host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
     durability_barrier()?;
@@ -2027,6 +2015,16 @@ mod tests {
     }
 
     use super::*;
+
+    /// The test services pin the Host image as zeros (`EnvelopeRules.host_sha256`); every test
+    /// client speaks envelope v2 with that pin (v1 is retired).
+    const TEST_HOST_PIN: [u8; 32] = [0; 32];
+    fn invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>, String> {
+        invoke_inner(Path::new(""), socket, config, &TEST_HOST_PIN, operation, payload)
+    }
+    fn v2_head() -> Vec<u8> {
+        [vec![2, 6, 0, 0, 0], b"config".to_vec(), TEST_HOST_PIN.to_vec()].concat()
+    }
     use std::thread;
 
     fn refusal_for_peer(peers: &OperatorPeers) -> Vec<u8> {
@@ -2406,12 +2404,16 @@ mod tests {
             request_from_envelope(&v2[..v2.len() - 2], b"config", &host),
             Err("invalid socket envelope")
         );
+        // Envelope v1 (no Host image pin) is retired: refused by name, never forwarded.
         let v1 = [vec![1, 6, 0, 0, 0], b"config".to_vec(), request.to_vec()].concat();
         assert_eq!(
             request_from_envelope(&v1, b"config", &host),
-            Ok(request.as_slice())
+            Err("socket envelope v1 is retired: send v2 with the Host image pin")
         );
-        assert_ne!(v2[0], 1); // A prior v1-only service refuses rather than forwarding v2.
+        assert_eq!(
+            public_envelope(&v1, b"config", false),
+            Err("socket envelope v1 is retired: send v2 with the Host image pin")
+        );
     }
 
     #[test]
@@ -2503,7 +2505,7 @@ mod tests {
             let (mut first, _) = listener.accept().unwrap();
             assert_eq!(
                 read_frame(&mut first).unwrap(),
-                Some([vec![1, 6, 0, 0, 0], b"config".to_vec(), vec![2, 42]].concat())
+                Some([v2_head(), vec![2, 42]].concat())
             );
             let mut reply = Vec::new();
             write_frame(&mut reply, &[2, 7, 8]).unwrap();
@@ -2513,7 +2515,7 @@ mod tests {
             let (mut second, _) = listener.accept().unwrap();
             assert_eq!(
                 read_frame(&mut second).unwrap(),
-                Some([vec![1, 6, 0, 0, 0], b"config".to_vec(), vec![2, 42]].concat())
+                Some([v2_head(), vec![2, 42]].concat())
             );
         });
         assert_eq!(invoke(&socket, &config, mini_sdk::host_operations::SUBMIT, &[42]).unwrap(), vec![2, 7, 8]);
@@ -2776,7 +2778,7 @@ done"#;
     fn serve_a_client_that_never_reads_holds_no_one_else() {
         let service = fake_service("noread", SERVE_BOUNDS);
         let mut silent = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut silent, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[3]].concat()).unwrap();
+        write_frame(&mut silent, &[v2_head().as_slice(), &[3]].concat()).unwrap();
         let (answer, waited) = timed_invoke(&service, mini_sdk::host_operations::AUTHORIZED_QUERY);
         assert_eq!(answer.unwrap(), vec![5]);
         assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
@@ -2800,7 +2802,7 @@ done"#;
         let slow = service.invoke_later(mini_sdk::host_operations::INSPECT);
         thread::sleep(Duration::from_millis(200));
         let mut abandoned = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[7]].concat()).unwrap();
+        write_frame(&mut abandoned, &[v2_head().as_slice(), &[7]].concat()).unwrap();
         thread::sleep(Duration::from_millis(200));
         drop(abandoned);
         assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
@@ -2853,7 +2855,7 @@ done"#;
             .map(|operation| (operation, service.invoke_later(operation)))
             .collect();
         let mut abandoned = UnixStream::connect(&service.socket).unwrap();
-        write_frame(&mut abandoned, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[6]].concat()).unwrap();
+        write_frame(&mut abandoned, &[v2_head().as_slice(), &[6]].concat()).unwrap();
         thread::sleep(Duration::from_millis(100));
         drop(abandoned);
         // The slow exchange itself lasts twice the residence deadline.
@@ -2883,9 +2885,10 @@ done"#;
     }
 
     fn envelope_for(request: &[u8]) -> Vec<u8> {
-        let mut envelope = vec![1];
+        let mut envelope = vec![2];
         envelope.extend_from_slice(&6u32.to_le_bytes());
         envelope.extend_from_slice(b"config");
+        envelope.extend_from_slice(&TEST_HOST_PIN);
         envelope.extend_from_slice(request);
         envelope
     }
@@ -3766,9 +3769,10 @@ done"#;
             vec![181, b'{', b'}'], vec![182, b'{', b'}'], vec![183, 1],
             claim_assembly(1, 64), vec![185, 1], vec![186, 1],
         ] {
-            let mut envelope = vec![1];
+            let mut envelope = vec![2];
             envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
             envelope.extend_from_slice(config);
+            envelope.extend_from_slice(&TEST_HOST_PIN);
             envelope.extend_from_slice(&request);
             assert!(public_envelope(&envelope, config, false).is_ok());
             assert!(public_envelope(&envelope, b"other-config", false).is_err());
@@ -3884,6 +3888,16 @@ done"#;
 #[cfg(test)]
 mod bootstrap_deadline_tests {
     use super::*;
+
+    /// The test services pin the Host image as zeros (`EnvelopeRules.host_sha256`); every test
+    /// client speaks envelope v2 with that pin (v1 is retired).
+    const TEST_HOST_PIN: [u8; 32] = [0; 32];
+    fn invoke(socket: &Path, config: &Path, operation: u8, payload: &[u8]) -> Result<Vec<u8>, String> {
+        invoke_inner(Path::new(""), socket, config, &TEST_HOST_PIN, operation, payload)
+    }
+    fn v2_head() -> Vec<u8> {
+        [vec![2, 6, 0, 0, 0], b"config".to_vec(), TEST_HOST_PIN.to_vec()].concat()
+    }
     struct Scratch(std::path::PathBuf);
     impl Scratch {
         fn new() -> Self {
