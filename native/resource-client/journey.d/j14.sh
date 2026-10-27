@@ -350,6 +350,8 @@ checkp hermes "key set names alice's owner public key" test -n "$ALICE_PUB"
 operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
   "$MINI" key --action grant --dir "$WS/alice" --provider friendkey --runner "${SUBJ[hprov]}" \
     --per-call 64 --per-day 200 --until 1000000000 --broker "$KEYS_CLIENT"
+# (The gateway pins a request without max_tokens to the task's maxOutputTokens,
+# 64 below; the broker refuses a call above the grant's per-call cap.)
 # The sandbox: the real launcher, its gate, the runtime root (controller edge,
 # stand-in worker, provider bridge) and the worker's only writable mount.
 mkdir -p -m 700 "$SD/launcher" "$SD/worker-work/.hermes" "$SD/runtime-root"
@@ -390,7 +392,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
      budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
-       maxInputTokens:131072,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
+       maxInputTokens:131072,maxOutputTokens:64,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
    room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
