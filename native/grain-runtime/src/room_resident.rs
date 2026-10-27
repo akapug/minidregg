@@ -131,6 +131,7 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
     let prompt_sha256 = sha256_bytes(instruction.as_bytes())?;
     if instruction.len()+256>16_384 {return Err("resident program/brief exceeds controller prompt bound".into());}
     let resident_prompt_id = resident_preflight::prepare(config,config_path,&prompt_sha256)?;
+    resident_compute::intend(config, state.parent().ok_or("resident state parent absent")?, &resident_prompt_id, &instruction)?;
     let command = format!("terminal hermes-resident {attachment} 2 {resident_prompt_id} {prompt_sha256} {instruction}");
     if command.len() > 16_384 { return Err("resident program/brief exceeds controller prompt bound".into()); }
     let input = assignment_fingerprint(prepared)?;
@@ -344,6 +345,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+    resident_compute::settle(&config, &room, &options.state, journal.last_completion.as_ref())?;
     publish_notices(&room, &options.state);
     while options.max_prompts.is_none_or(|limit| journal.completed < limit) || journal.return_pending {
         let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
@@ -386,6 +388,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
             println!("{}", json!({"type":"resident-completed","completed":journal.completed}));
             resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+            resident_compute::settle(&config, &room, &options.state, journal.last_completion.as_ref())?;
             publish_notices(&room, &options.state);
             // Prompt count and final delivery are separate durable states.
         }

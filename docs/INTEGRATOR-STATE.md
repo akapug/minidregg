@@ -52,6 +52,13 @@ lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this
 demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
 MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
 un-web-front 0da04999 (front-page document; infra's step 9c depends on it).
+After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
+J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
+not compile). The first candidate carrying both bc88a5ab (frame v8)
+and hermes 68394077 (any full build from main >= fb15f121b): send its sha and path to L4 (ac2a5ad7827eb4744) and
+the coordinator at once; L4 runs J14_TOOLS against it (3315a908 refuses the v8 genesis). Unit
+mini-grain-controller@9870001 is free (it was L4's orphan). L1c (lean-audit-c e50c3f155) seeds its dregg-ref tree from the integ8 copy; tell it
+when the copy lands.
 
 Next steps: when phase A3 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
 build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice

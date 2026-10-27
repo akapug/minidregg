@@ -120,6 +120,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        sandbox: None,
         foreground_tool: None,
         dispatch_task: None,
         tool_task: Some(ToolTask {

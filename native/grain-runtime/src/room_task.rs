@@ -54,19 +54,22 @@ pub(crate) fn validate_pins_with_workspace(config: &Config, tool: &ToolTask, pro
 
 /// The patched real ACP adapter reports its final model-visible catalogue.
 /// Check after new/load registration and before the first provider request.
-pub(crate) fn require_acp_catalogue(response: &Value) -> Result<()> {
+/// `sandbox` is the exact upstream tool names the prompt's granted sandbox
+/// toolsets add (sandbox_tools::names); empty for a Mini-only resident.
+pub(crate) fn require_acp_catalogue(response: &Value, sandbox: &[String]) -> Result<()> {
     let report = &response["_meta"]["miniToolCatalogue"];
     if report["type"] != "mini-hermes-tool-catalogue-v1" || report["valid"] != true {
         return Err("restricted resident requires verified ACP tool catalogue metadata".into());
     }
     let mut expected: Vec<String> = resource_tools::room_tool_specs().iter()
         .map(|spec| format!("mcp__mini_grain__{}", spec["name"].as_str().unwrap()))
-        .chain(std::iter::once("mcp__mini_grain__mini_room_attempts".into())).collect();
+        .chain(std::iter::once("mcp__mini_grain__mini_room_attempts".into()))
+        .chain(sandbox.iter().cloned()).collect();
     expected.sort();
     let actual: Vec<String> = report["names"].as_array().ok_or("ACP tool names absent")?.iter()
         .map(|name| name.as_str().map(str::to_owned).ok_or("ACP tool name invalid".to_owned()))
         .collect::<Result<_>>()?;
-    if actual != expected { return Err("restricted resident ACP tools differ from its exact Mini room catalogue".into()); }
+    if actual != expected { return Err("restricted resident ACP tools differ from its exact Mini room catalogue and granted sandbox tools".into()); }
     Ok(())
 }
 
@@ -433,15 +436,31 @@ pub(crate) mod tests {
         names.sort();
         let response = |names: Vec<String>| json!({"_meta":{"miniToolCatalogue":{
             "type":"mini-hermes-tool-catalogue-v1","valid":true,"names":names}}});
-        require_acp_catalogue(&response(names.clone())).unwrap();
-        assert!(require_acp_catalogue(&json!({})).is_err());
-        assert!(require_acp_catalogue(&response(vec![])).is_err());
+        require_acp_catalogue(&response(names.clone()),&[]).unwrap();
+        assert!(require_acp_catalogue(&json!({}),&[]).is_err());
+        assert!(require_acp_catalogue(&response(vec![]),&[]).is_err());
         let mut extra=names.clone();extra.push("terminal".into());
-        assert!(require_acp_catalogue(&response(extra)).is_err());
+        assert!(require_acp_catalogue(&response(extra),&[]).is_err());
         let mut duplicate=names.clone();duplicate.push(names[0].clone());
-        assert!(require_acp_catalogue(&response(duplicate)).is_err());
+        assert!(require_acp_catalogue(&response(duplicate),&[]).is_err());
         let mut invalid=response(names);invalid["_meta"]["miniToolCatalogue"]["valid"]=json!(false);
-        assert!(require_acp_catalogue(&invalid).is_err());
+        assert!(require_acp_catalogue(&invalid,&[]).is_err());
+    }
+
+    #[test]
+    fn acp_catalogue_gate_admits_exactly_the_granted_sandbox_tools() {
+        let mini: Vec<String> = resource_tools::room_tool_specs().iter()
+            .map(|s| format!("mcp__mini_grain__{}",s["name"].as_str().unwrap()))
+            .chain(std::iter::once("mcp__mini_grain__mini_room_attempts".into())).collect();
+        let response = |mut names: Vec<String>| { names.sort(); json!({"_meta":{"miniToolCatalogue":{
+            "type":"mini-hermes-tool-catalogue-v1","valid":true,"names":names}}}) };
+        let granted = crate::sandbox_tools::names(&["file","terminal"]);
+        let with = |extra: &[String]| mini.iter().chain(extra).cloned().collect::<Vec<_>>();
+        require_acp_catalogue(&response(with(&granted)),&granted).unwrap();
+        assert!(require_acp_catalogue(&response(with(&granted)),&[]).is_err(), "sandbox tools without a grant");
+        assert!(require_acp_catalogue(&response(mini.clone()),&granted).is_err(), "a granted tool missing");
+        let mut wider = granted.clone(); wider.push("execute_code".into());
+        assert!(require_acp_catalogue(&response(with(&wider)),&granted).is_err(), "python beyond the grant");
     }
 
 }
