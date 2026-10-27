@@ -59,7 +59,7 @@
 
   async function load(pane, path, options) {
     options = options || {};
-    pane.classList.add("busy");
+    if (!options.quiet) pane.classList.add("busy");
     try {
       const response = await fetch(path, {
         method: options.method || "GET",
@@ -202,9 +202,24 @@
     pane.querySelector(".pane-body").appendChild(note);
   }
 
+  // A section with data-live="MS" (a room's stream) reloads its pane every MS while a form in it is not being typed into.
+  function live(pane) {
+    const section = pane.querySelector("[data-live]");
+    if (pane.liveTimer) { clearInterval(pane.liveTimer); pane.liveTimer = null; }
+    if (!section) return;
+    const ms = Math.max(2000, parseInt(section.dataset.live, 10) || 5000);
+    pane.liveTimer = setInterval(() => {
+      if (!document.body.contains(pane)) { clearInterval(pane.liveTimer); return; }
+      const active = document.activeElement;
+      if (active && pane.contains(active) && (active.tagName === "INPUT" || active.tagName === "TEXTAREA") && active.value) return;
+      load(pane, pane.dataset.path, { quiet: true });
+    }, ms);
+  }
+
   function wire(pane) {
     const host = pane.querySelector(".term[data-ws]");
     if (host) assets(() => boot(pane, host));
+    live(pane);
     const first = pane.querySelector(".pane-body input:not([type=hidden]), .pane-body textarea");
     if (first && pane.dataset.focus !== "no") first.focus({ preventScroll: true });
   }

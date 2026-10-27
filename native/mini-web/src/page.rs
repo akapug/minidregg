@@ -12,6 +12,7 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Rooms", "/room", "Members, streams as chat, residents."),
     ("Apps", "/apps", "The app market: install, open a grain."),
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
+    ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
     ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),

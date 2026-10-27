@@ -186,6 +186,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         }
         ["board"] | ["room"] => place_index(site, parts[0]),
         ["search"] => search::page(site, target),
+        ["purse"] => purse(site),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name),
         ["receipts"] => receipts(site),
@@ -251,7 +252,7 @@ fn room(site: &Site, name: &str) -> Page {
     }
     // The room's streams as chat: the shell's own `tail`, read as this member.
     if let Some(ending) = verb(site, &[format!("tail -n 40 --in {}", quote(name))]) {
-        page.body.push_str("<section class=\"chat\"><h2>Chat</h2>\n");
+        page.body.push_str("<section class=\"chat\" data-live=\"5000\"><h2>Chat</h2>\n");
         if ending.code == 0 {
             page.body.push_str(&format!("<pre class=\"turns\">{}</pre>\n", escape(ending.text().trim())));
         } else {
@@ -317,9 +318,15 @@ fn receipt(site: &Site, id: &str) -> Page {
 }
 
 fn grants(site: &Site) -> Page {
-    let mut body = String::from("<p>What your grants cover, verb by verb, prepared and dry-run against the Host (<code>can --all</code>; nothing is submitted).</p>\n");
+    let mut body = String::from("<p>The grants you hold, as the Host's capability view names them (capability, scope, expiry, ancestors), drawn as a tree; then what they cover, verb by verb, prepared and dry-run against the Host (<code>can --all</code>; nothing is submitted).</p>\n");
+    if let Some(ending) = verb(site, &["inspect caps --json".to_owned()]) {
+        match serde_json::from_str::<Value>(ending.stdout.trim()) {
+            Ok(view) if ending.code == 0 => body.push_str(&format!("<section class=\"grants\"><h2>Capability tree</h2>{}</section>\n", json_tree(&view))),
+            _ => body.push_str(&outcome(&ending, &[])),
+        }
+    }
     if let Some(ending) = verb(site, &["can --all".to_owned()]) {
-        body.push_str(&outcome(&ending, &[]));
+        body.push_str(&format!("<section><h2>What they cover</h2>{}</section>\n", outcome(&ending, &[])));
     }
     if !site.front.read_only {
         body.push_str(
@@ -622,10 +629,71 @@ fn outcome(ending: &Ending, next: &[(&str, &str)]) -> String {
     let detail = ending.text();
     format!(
         "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>\n",
-        escape(&headline),
+        headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
     )
+}
+
+/// A refusal is the clause, highlighted: `refused: law-denied: field 2 monotone (before 2, after 1)`
+/// shows its kind and marks the clause the Host named.
+fn headline_html(headline: &str) -> String {
+    if let Some(rest) = headline.strip_prefix("refused: ") {
+        if let Some((kind, clause)) = rest.split_once(": ") {
+            return format!("refused: <span class=\"reason\">{}</span>: <mark class=\"clause\">{}</mark>", escape(kind), escape(clause));
+        }
+        return format!("refused: <mark class=\"clause\">{}</mark>", escape(rest));
+    }
+    escape(headline)
+}
+
+/// A JSON view drawn as a tree (the grants: capability, scope, expiry, ancestors as the Host's
+/// `cap-tree` view names them), without a hand-written schema.
+fn json_tree(v: &Value) -> String {
+    match v {
+        Value::Object(map) => {
+            let mut out = String::from("<ul class=\"tree\">");
+            for (k, v) in map {
+                out.push_str(&format!("<li><span class=\"key\">{}</span> {}</li>", escape(k), json_tree(v)));
+            }
+            out + "</ul>"
+        }
+        Value::Array(items) => {
+            let mut out = String::from("<ol class=\"tree\">");
+            for v in items {
+                out.push_str(&format!("<li>{}</li>", json_tree(v)));
+            }
+            out + "</ol>"
+        }
+        Value::String(s) if s.len() > 40 && s.bytes().all(|b| b.is_ascii_hexdigit()) => format!("<code class=\"id\" title=\"{}\">{}…</code>", escape(s), escape(&s[..16])),
+        Value::String(s) => format!("<span class=\"val\">{}</span>", escape(s)),
+        other => format!("<span class=\"val\">{}</span>", escape(&other.to_string())),
+    }
+}
+
+/// `/purse`: the member's account as a meter (`credit`), then `pay status`.
+fn purse(site: &Site) -> Page {
+    let mut body = String::new();
+    match verb(site, &["credit".to_owned()]) {
+        Some(ending) if ending.code == 0 => {
+            let line = ending.stdout.lines().find(|l| l.starts_with("credit ")).unwrap_or("").to_owned();
+            let balance: u64 = line.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
+            let scale = balance.max(1000);
+            body.push_str(&format!(
+                "<section class=\"purse\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
+                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
+                 <p class=\"note\">{}</p></section>\n",
+                scale / 10,
+                escape(&line)
+            ));
+        }
+        Some(ending) => body.push_str(&outcome(&ending, &[])),
+        None => body.push_str("<p class=note>no shell paths</p>"),
+    }
+    if let Some(ending) = verb(site, &["pay status".to_owned()]) {
+        body.push_str(&format!("<section><h2>Pay</h2>{}</section>", outcome(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
+    }
+    Page { status: 200, title: "Purse".into(), stamp: Stamp::None, body }
 }
 
 fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> Page {

@@ -26,7 +26,17 @@ search · Log out), a rail of places, and the stage.
 | Receipts | `/receipts`, `/receipts/ID` | every retained attempt with its decoded outcome: **admitted** / **refused** with the clause / **undecided** with the exact retry; `why`; `lookup`; `retry` | `history all`, `inspect receipt`, `why`, `lookup`, `retry` |
 | Grants & laws | `/grants`, `/laws` | what my grants cover (`can`), delegate, revoke; the law on a reference, install a law | `can`, `delegate`, `revoke`, `inspect law`, `law` |
 | Keys & sessions | `/keys`, `/sessions` | the hosted-custody statement (the key lives on the box, world-readable world), key status and rotation; this account's web sessions, revoke any | `whoami`, `key-status`, `rotate-key`; the helper's session list |
-| Terminal | `/term` | `mini shell` as this member, in the page | the shell itself |
+| Purse | `/purse` | the account as a meter (`credit`), pay status, top up, tariffs | `credit`, `pay status`, `topup`, `tariff` |
+| Commands | `/verb`, `/verb/NAME` | **every shell verb as a form, derived from the shell's verb table** (`shell::command_catalog`: shell, chat, hermes, story): one form per usage alternative, reference arguments as pickers over the workspace's refs, text through `@FILE`, a fresh proposal id with "and `submit ID`"; the answer is the one outcome partial | all of them |
+| Terminal | `/term` | `mini shell` as this member, in the page (a convenience, never the parity mechanism) | the shell itself |
+
+**Parity** (ember 2026-10-27, `docs/DEMO-EXPERIENCE-2026-10-27.md` §1a): everything the shell can do,
+the browser can do, visually. The derived forms (`web/verbs.rs`) are the mechanism: a new verb is
+visual the day its row enters the table; the journey's `verb-parity` row checks every verb `help`
+lists against `/verb/NAME` and names any without a face. Bespoke views sit where a place deserves
+one: the document page, history and diff pages, the board, the room as a live stream (the chat
+section refreshes), the receipt, the grants drawn as a tree from the Host's capability view, the
+purse as a meter, and a refusal as its clause highlighted.
 
 **Forms work without JavaScript**: every route is a whole page; every action is a `<form method=post>`
 whose answer is the decoded outcome rendered by one partial (`outcome`), with the next step as a link

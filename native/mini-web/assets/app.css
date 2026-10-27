@@ -119,6 +119,14 @@ body.js .pane.term-pane .pane-body { padding: 0; background: var(--term-bg); }
 .verb-form .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .2rem .8rem; align-items: end; }
 .verb-form .fields textarea { grid-column: 1 / -1; min-height: 5rem; }
 .verb-form label.check { grid-column: 1 / -1; display: flex; gap: .4rem; align-items: center; color: var(--ink); }
+/* the grants tree, the purse meter, the highlighted clause */
+.tree { list-style: none; margin: .2rem 0 .2rem 1rem; padding: 0 0 0 .8rem; border-left: 1px solid var(--rule); }
+.tree .key { color: var(--ink-2); font: 12px var(--mono); margin-right: .3rem; }
+.tree .val { font: 13px var(--mono); }
+.purse .big { font-size: 1.6rem; margin: .2rem 0; } .purse .n { font-weight: 700; }
+.purse meter { width: 100%; max-width: 32rem; height: 1.1rem; }
+.outcome .reason { font-family: var(--mono); color: var(--refused); }
+mark.clause { background: color-mix(in srgb, var(--refused) 18%, transparent); color: inherit; padding: 0 .2rem; border-radius: 2px; }
 /* documents */
 .doc .line { margin: .15rem 0; } .doc .line .n { color: var(--ink-2); font: 11px var(--mono); margin-right: .5rem; }
 .doc .transclusion { border-left: 2px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }
