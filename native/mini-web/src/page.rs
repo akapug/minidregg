@@ -10,7 +10,7 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Documents", "/doc", "The documents you hold: pages, history, diffs, append and edit."),
     ("Boards", "/board", "Tasks on columns: add, move, take."),
     ("Rooms", "/room", "Members, streams as chat, residents."),
-    ("Apps", "/apps", "The app market: install, open a grain."),
+    ("Apps", "/apps", "The app market: claims beside verdicts; install; your grains, opened on their own origins."),
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),

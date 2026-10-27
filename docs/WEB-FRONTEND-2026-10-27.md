@@ -21,7 +21,7 @@ search · Log out), a rail of places, and the stage.
 | Documents | `/doc`, `/doc/N`, `/doc/N/history`, `/doc/N/diff/A/B`, `/at/H/doc/N`, `/doc/N/edit`, `/new-document` | the list, a page (element-tree order, transclusions inline, links and backlinks), history, a page at a height, a diff, append/edit, create | signed reads (`workspace::signed_view`, `rendered_document`), the editor's pinned diff + durable attempt, `doc append`, `doc link` |
 | Boards | `/board/N` | columns and tasks; add / move / take | `board add|move|take` |
 | Rooms | `/room/N` | members, the room's streams as chat, say; the index; a resident's turns | `room ls`, `say`, `tail`, `room members`, `summon` |
-| Apps | `/apps`, `/grain/N` | the Sandstorm app market index; install; a grain opened in a pane (its own origin, L13's per-grain hostnames) | `app status`, L13's install verb (one seam, named in §5) |
+| Apps | `/apps[?q=]`, `/apps/APP`, `/grain`, `/grain/N`, `/grain/N/pane` | the Sandstorm app market (`apps search --json`: the publisher's claims beside the box's verdict), one entry, install; the member's grains, a grain's state / routes / held identities with open, start, stop, share, export, delete, revoke-identity; the one-time bootstrap posted to the grain's own origin, then the grain in a pane | `apps search|show|install|list|status|open|share|…` (L13, `docs/APP-MARKET-2026-10-27.md` §5a) |
 | Residents | `/room/N/resident` | summon a Hermes resident into a room; its turns as they land | `summon`, `tail` |
 | Receipts | `/receipts`, `/receipts/ID` | every retained attempt with its decoded outcome: **admitted** / **refused** with the clause / **undecided** with the exact retry; `why`; `lookup`; `retry` | `history all`, `inspect receipt`, `why`, `lookup`, `retry` |
 | Grants & laws | `/grants`, `/laws` | what my grants cover (`can`), delegate, revoke; the law on a reference, install a law | `can`, `delegate`, `revoke`, `inspect law`, `law` |
@@ -144,8 +144,9 @@ Studio stays routed nowhere in the body (its deletion is L2's, D7).
 
 ## 5. Seams owned elsewhere
 
-L13 names the install verb and the per-grain hostname (`/apps` renders its index and opens a grain
-in a pane; the install form posts to `/apps/install`, which runs L13's verb once it exists). L5 owns
+L13's `apps` verb (lane/app-market 1c7a7f30) is the market: `web/apps.rs` runs it as the member and
+draws its `--json` replies; `MINI_WEB_FRAME_SRC` names the grain origins for the pane; the
+`identityNotice` on its receipts is shown on the receipt and the Grants page. L5 owns
 the door; the patch in `deploy/web-frontend/door.patch` adds the login record and the one status
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).

@@ -128,6 +128,8 @@ body.js .pane.term-pane .pane-body { padding: 0; background: var(--term-bg); }
 .outcome .reason { font-family: var(--mono); color: var(--refused); }
 mark.clause { background: color-mix(in srgb, var(--refused) 18%, transparent); color: inherit; padding: 0 .2rem; border-radius: 2px; }
 table.registry { font-size: 13px; } table.registry tr.reserved { color: var(--ink-2); }
+iframe.grain { width: 100%; height: 70vh; border: 1px solid var(--rule); border-radius: 4px; background: #fff; }
+td.verdict { font-family: var(--mono); font-size: 13px; } td.verdict.verified, td.verdict.ok { color: var(--admitted); } td.verdict.refused { color: var(--refused); }
 /* documents */
 .doc .line { margin: .15rem 0; } .doc .line .n { color: var(--ink-2); font: 11px var(--mono); margin-right: .5rem; }
 .doc .transclusion { border-left: 2px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }

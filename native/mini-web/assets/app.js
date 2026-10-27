@@ -220,6 +220,9 @@
     const host = pane.querySelector(".term[data-ws]");
     if (host) assets(() => boot(pane, host));
     live(pane);
+    // A grain's one-time bootstrap posts itself to the grain's own origin (a new tab: its cookie is its own).
+    const auto = pane.querySelector("form[data-autosubmit]");
+    if (auto && !auto.dataset.done) { auto.dataset.done = "1"; setTimeout(() => auto.submit(), 300); }
     const first = pane.querySelector(".pane-body input:not([type=hidden]), .pane-body textarea");
     if (first && pane.dataset.focus !== "no") first.focus({ preventScroll: true });
   }

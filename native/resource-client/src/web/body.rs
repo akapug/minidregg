@@ -193,6 +193,11 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["board"] | ["room"] => place_index(site, parts[0]),
         ["search"] => search::page(site, target),
         ["purse"] => purse(site),
+        ["apps"] => apps::market(site, target),
+        ["apps", app] => apps::show(site, app),
+        ["grain"] => apps::grains(site),
+        ["grain", n] => apps::grain(site, n),
+        ["grain", n, "pane"] => apps::pane(site, n),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name),
         ["receipts"] => receipts(site),
@@ -236,7 +241,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
             }
             page
         }
-        ["apps", ..] | ["studio", ..] | ["stream", ..] => simple(404, "Not here", "this page is the gateway's, or not a page"),
+        ["studio", ..] | ["stream", ..] => simple(404, "Not here", "not a page"),
         _ => site.route(&parts.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
     }
 }
@@ -336,6 +341,21 @@ fn grants(site: &Site) -> Page {
     }
     if let Some(ending) = verb(site, &["can --all".to_owned()]) {
         body.push_str(&format!("<section><h2>What they cover</h2>{}</section>\n", outcome(&ending, &[])));
+    }
+    // Grains: the identities an app holds for you, and the v1 notice (members of a shared grain look
+    // like one user to the app), said here as L13's receipts say it.
+    if let Some(ending) = verb(site, &["apps list --json".to_owned()]) {
+        if ending.code == 0 {
+            if let Some(start) = ending.stdout.find('{') {
+                if let Ok(value) = serde_json::from_str::<Value>(&ending.stdout[start..]) {
+                    let grains = value["receipt"]["grains"].as_array().map(|g| g.len()).unwrap_or(0);
+                    body.push_str(&format!(
+                        "<section><h2>Grains</h2><p>{grains} grain(s) hold a route for you (<a href=\"/grain\">your grains</a>).</p>{}</section>\n",
+                        value["receipt"]["identityNotice"].as_str().map(|n| format!("<p class=\"outcome undecided\">{}</p>", escape(n))).unwrap_or_default()
+                    ));
+                }
+            }
+        }
     }
     if !site.front.read_only {
         body.push_str(
@@ -492,6 +512,8 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["new-document", id] => create::post(site, id, body, "create"),
         ["new-document", id, op] => create::post(site, id, body, op),
         ["verb", name] => verbs::post(site, name, &form),
+        ["apps", "install"] => apps::install(site, &form),
+        ["grain", n, action] => apps::grain_action(site, n, action, &form),
         ["doc", "new"] => {
             let name = field("name");
             let room = field("room");
@@ -689,6 +711,14 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     })
 }
 
+pub(super) fn outcome_html(ending: &Ending, next: &[(&str, &str)]) -> String {
+    outcome(ending, next)
+}
+
+pub(super) fn json_tree_html(v: &Value) -> String {
+    json_tree(v)
+}
+
 /// The one outcome partial (the gateway's CSS: `.outcome.admitted|refused|undecided`).
 fn outcome(ending: &Ending, next: &[(&str, &str)]) -> String {
     let (class, headline) = ending.class();
@@ -785,7 +815,7 @@ fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[
 }
 
 /// One query value of the request target, form-decoded.
-fn query(target: &str, key: &str) -> Option<String> {
+pub(super) fn query(target: &str, key: &str) -> Option<String> {
     let query = target.split_once('?')?.1.split('#').next()?;
     let pairs = editor::form(query.as_bytes()).ok()?;
     pairs.get(key).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
