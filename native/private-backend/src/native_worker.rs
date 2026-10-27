@@ -15,7 +15,7 @@ use crate::{
 use sha2::{Digest, Sha256, Sha512};
 use std::{
     fs::File,
-    io::{Read, Result, Write},
+    io::{Read, Result},
     path::{Path, PathBuf},
 };
 const DISPATCH: &[u8] = b"DREGG.PRIVATE.WORKER.DISPATCH\x01";
