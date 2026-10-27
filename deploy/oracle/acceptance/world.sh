@@ -109,7 +109,33 @@ world_controller_prepare() {
 }
 
 world_controller_stop() {
-  timeout 120 sudo -n -- "$installer" controller-stop "$store" "$helper" >"$run/agent-lifetime/controller-stop-$1.json"
+  local snapshot_result=0
+  if [[ ${controller_staged:-0} == 1 ]]; then
+    world_consent_snapshot "before-stop-$1" || snapshot_result=$?
+  fi
+  timeout 120 sudo -n -- "$installer" controller-stop "$store" "$helper" >"$run/agent-lifetime/controller-stop-$1.json" || return
+  return "$snapshot_result"
+}
+
+# Observe the system service before stop resets its accounting. These are
+# physical measurements, not a consent/admission result.
+world_consent_snapshot() {
+  local label=$1 consent_unit observed_exit
+  consent_unit=$(jq -er '.consent.serviceUnit' "$run/agent-lifetime/controller-stage-receipt.json") || return
+  [[ $consent_unit == "mini-spk-controller-consent-$store.service" ]] || return 1
+  if systemctl show "$consent_unit" --no-pager \
+    -p LoadState -p ActiveState -p SubState -p MainPID -p InvocationID \
+    -p MemoryCurrent -p MemoryPeak -p MemoryMax -p MemorySwapMax -p Result \
+    >"$run/agent-lifetime/consent-memory-$label.properties" \
+    2>"$run/agent-lifetime/consent-memory-$label.stderr"; then observed_exit=0; else observed_exit=$?; fi
+  python3 - "$run/agent-lifetime/consent-memory-$label" "$consent_unit" "$observed_exit" <<'PYCONSENT'
+import json, pathlib, sys, time
+prefix, unit, exit_code = sys.argv[1:]
+properties = dict(line.split('=', 1) for line in pathlib.Path(prefix + '.properties').read_text().splitlines() if '=' in line)
+value = {'schema': 'mini-oracle-consent-resources-v1', 'unit': unit,
+         'unix_seconds': time.time(), 'observation_exit': int(exit_code), 'properties': properties}
+pathlib.Path(prefix + '.json').write_text(json.dumps(value, indent=2) + '\n')
+PYCONSENT
 }
 
 world_controller_activate() {
@@ -136,6 +162,7 @@ world_controller_probe() {
     "$BIN/grain-runtime" "$run/agent-lifetime/controller-active-$label.json" oracle-app \
     "$repo/deploy/oracle/acceptance/agent-cases.json" "$run/agent-lifetime/$directory" \
     >"$run/agent-lifetime/$directory.stdout" 2>"$run/agent-lifetime/$directory.stderr"
+  world_consent_snapshot "after-$directory"
 }
 
 world_authority_probe() {
