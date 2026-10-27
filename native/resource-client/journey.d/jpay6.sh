@@ -9,8 +9,8 @@
 # last stdout line; the last stdout line is the deciding artifact (rows.tsv).
 #
 # Standalone: HOST=... MINI=... STORE=... VERIFIER=... GRAIN=grain-runtime
-#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (rustc of
-#   deploy/grain-host/launch-gate.rs) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
+#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (the candidate's
+#   bin/launch-gate, native/launch-gate) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
 #
 # The Hermes half runs the real grain-runtime controller (a transient
 # `systemd-run --user` unit with Restart=on-failure) with a metered

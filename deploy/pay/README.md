@@ -152,7 +152,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
 6. **Install the units:**
 
    ```
-   install -m 755 mini-pay-watcher /opt/mini/bin/
+   install -m 755 mini-pay-watcher /usr/local/lib/mini/
    install -m 644 mini-pay-watcher.service mini-pay-watcher.timer /etc/systemd/system/
    systemctl daemon-reload && systemctl enable --now mini-pay-watcher.timer
    ```

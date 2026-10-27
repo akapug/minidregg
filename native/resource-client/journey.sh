@@ -256,7 +256,7 @@ TITLE[K4]="one resource holds 32 fields and reads them back"
 TITLE[JJ]="a law reads another participant by position (joint/index/i)"
 TITLE[M3]="newcomer provisions itself and creates, no sponsor step"
 TITLE[M4]="J1-J8 through the shell over ssh"
-TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves"
+TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves (needs LAUNCH_GATE)"
 TITLE[M6]="a grain: INSTALL -> START -> reachable over http"
 TITLE[M7]="candidate built from portable interfaces reproduces hashes"
 TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refused"
@@ -1004,7 +1004,7 @@ step_J12X() { hook j12x "each malformed request (number for a decimal string, mi
 step_JSERVE() { hook jserve "under each attack (3 bytes then silence; a long Host request; 50 silent connections; the J-PAY-6 route-mismatch intent through op 7) the newcomer signed read is answered (< 2 s where the Host is free), every refusal is named, the same Host answers on, and the malformed table still holds (lane serve-robust)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
-step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
+step_M5() { needs_env LAUNCH_GATE || return; hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
 step_THIN() { hook jthin-consent "thin consent signs a turn without replaying the Store: the post it shows is the post that commits; a plan carrying another command's slots and a view of another state are refused before signing; a member without observe is refused before signing with no bytes served; a moved target is named only to a signer who observes it (P4 PLAN-SCOPED-REPLAY)"; }

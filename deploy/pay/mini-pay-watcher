@@ -41,7 +41,7 @@
 #                            the same Host (`mini serve --operator-socket`); without them an
 #                            enrollment-index record is left undecided (`enrol-unconfigured`)
 #   PAY_ENROL_ROUNDS         extra watcher+observe rounds per tick while enrollments wait (default 8)
-#   MINI PAY_WATCHER         binaries (default /opt/mini/bin/{mini,pay-watcher})
+#   MINI PAY_WATCHER         binaries (default the installed candidate, /var/lib/mini/candidate/current/bin/{mini,pay-watcher})
 #
 # Exit: the watcher's 2 stops before observation; any pending recovery record stays retained;
 # otherwise `mini pay observe`'s status: 0 settled or waiting, 3 a record was quarantined or
@@ -49,8 +49,8 @@
 set -eu
 umask 077
 
-MINI=${MINI:-/opt/mini/bin/mini}
-PAY_WATCHER=${PAY_WATCHER:-/opt/mini/bin/pay-watcher}
+MINI=${MINI:-/var/lib/mini/candidate/current/bin/mini}
+PAY_WATCHER=${PAY_WATCHER:-/var/lib/mini/candidate/current/bin/pay-watcher}
 PAY_STATE=${PAY_STATE:-/var/lib/mini/pay}
 : "${PAY_OBSERVER_WS:?PAY_OBSERVER_WS is required}"
 : "${PAY_OBSERVER_CAPABILITY:?PAY_OBSERVER_CAPABILITY is required}"

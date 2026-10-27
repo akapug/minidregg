@@ -38,9 +38,9 @@ uses a dedicated root-owned bubblewrap executable and AppArmor profile because
 the generic executable cannot create the required namespaces under that
 host's policy. That evidence covers confined ACP startup, not a model prompt.
 
-Compile `launch-gate.rs` on the Linux host with
-`rustc --edition=2021 launch-gate.rs -o launch-gate` and install it beside
-`bwrap`; both must be executable. The launcher verifies the sibling gate's
+`launch-gate` is the candidate's `bin/launch-gate` (role `launchGate`, built only
+through `native/launch-gate` from `launch-gate.rs`, with the target's `libc`
+constants); install it beside `bwrap`; both must be executable. The launcher verifies the sibling gate's
 exact protocol response before advertising its own protocol to the runtime.
 Before spawning, the controller durably arms
 the operation gate and records the exact unit name in its private state. The

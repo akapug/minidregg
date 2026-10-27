@@ -65,8 +65,7 @@ The follow-up URL contains the interaction token, so it reaches `/usr/bin/curl` 
 Steps 1–4 happen on the workhorse. Step 5 is in `dregg-infra`, on the anchor. Step 6 is ember's.
 
 1. **Binary.**
-   - Build `native/discord-entrance` (`cargo +nightly-2026-06-21 build --release --locked`) the way the candidate's `mini` is built, so the glibc matches the workhorse (edge/README.md).
-   - Install `target/release/mini-discord` as `/usr/local/lib/mini/mini-discord`, root:root 0755.
+   - The binary is the installed candidate's `bin/mini-discord` (role `discord`, pinned in its manifest): `/var/lib/mini/candidate/current/bin/mini-discord`, which `mini-discord.service` runs. No separate build.
    - `mini-shell-ssh` is already at `/usr/local/lib/mini/` (deploy-1).
 2. **Env.**
    - Copy `discord.env.example` to `/etc/mini/discord.env`, root:root **0600**.
