@@ -39,28 +39,9 @@ fn control_free(value: &str) -> bool {
         .any(|byte| byte == 0 || byte == b'\r' || byte == b'\n' || byte < 0x20 || byte == 0x7f)
 }
 
+/// Lean's `ordinaryHeaderName`, generated (protocol/host-operations.json `ordinary_headers`).
 fn allowed_header(name: &str) -> bool {
-    matches!(
-        name,
-        "cookie"
-            | "accept"
-            | "accept-encoding"
-            | "content-type"
-            | "user-agent"
-            | "if-match"
-            | "if-none-match"
-            | "x-requested-with"
-            | "x-csrftoken"
-            | "x-csrf-token"
-            | "oc-total-length"
-            | "oc-chunk-size"
-            | "x-oc-mtime"
-            | "oc-fileid"
-            | "oc-chunked"
-            | "oc-checksum"
-            | "oc-chunk-offset"
-            | "oc-lazyops"
-    )
+    crate::host_operations::ordinary_header_name(name)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

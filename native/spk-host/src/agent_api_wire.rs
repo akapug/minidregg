@@ -74,28 +74,9 @@ pub(crate) enum Request {
     },
 }
 
+/// Lean's `ordinaryHeaderName`, generated (protocol/host-operations.json `ordinary_headers`).
 fn allowed_header(name: &str) -> bool {
-    matches!(
-        name,
-        "cookie"
-            | "accept"
-            | "accept-encoding"
-            | "content-type"
-            | "user-agent"
-            | "if-match"
-            | "if-none-match"
-            | "x-requested-with"
-            | "x-csrftoken"
-            | "x-csrf-token"
-            | "oc-total-length"
-            | "oc-chunk-size"
-            | "x-oc-mtime"
-            | "oc-fileid"
-            | "oc-chunked"
-            | "oc-checksum"
-            | "oc-chunk-offset"
-            | "oc-lazyops"
-    )
+    crate::host_operations::ordinary_header_name(name)
 }
 
 impl Request {

@@ -194,9 +194,9 @@ pub(crate) fn submit_once(
     let active_bytes = serde_json::to_vec(&active)?;
     write_new(attempt_dir, "op66-requested.json", &active_bytes)?;
     write_new(parent, "lifecycle-stop-begin-v3-active.json", &active_bytes)?;
-    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 66, STOP_PLAN_TAG)?.to_vec();
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, STOP_PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "stop-plan-v2.bin", &plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -223,9 +223,9 @@ pub(crate) fn submit_once(
     pair.extend_from_slice(&plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
-    let reply = operator.invoke(67, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 67, BEGIN_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, "begin-v3.bin", &ingress)?;
     let base = view
         .get("basePlan")
@@ -241,9 +241,9 @@ pub(crate) fn submit_once(
         "op22-requested.json",
         &serde_json::to_vec(&submit_marker)?,
     )?;
-    let reply = operator.invoke(22, &ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, OUTCOME_TAG)?;
+    let outcome = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let result = operator.tool(
         "inspect",

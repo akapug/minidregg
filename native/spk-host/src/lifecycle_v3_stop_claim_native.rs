@@ -16,7 +16,7 @@ use std::path::Path;
 
 const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
 const MAX_FRAME: usize = 12_102_760;
-const STOP_INSPECT_OPERATION: u8 = 155;
+const STOP_INSPECT_OPERATION: u8 = crate::host_operations::APPLICATION_STOP_INSPECT;
 const MAX_INSPECTION: u64 = 2 * 1024 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -258,11 +258,11 @@ pub(crate) fn submit_once(
         &serde_json::to_vec(&marker)?,
     )?;
 
-    let response = operator.invoke(26, claim_ingress)?;
+    let response = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, claim_ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &response)?;
     // Only the pinned Host's fresh installed CAS-winner path emits this tag;
     // replay and op27 return a distinct receipt-only Outcome. Retain first.
-    let committed = framed_payload(&response, 26, COMMITTED_TAG)?.to_vec();
+    let committed = framed_payload(&response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let committed_json = operator.tool(
         "inspect",
@@ -414,8 +414,8 @@ mod tests {
         reply.extend_from_slice(&(payload.len() as u32 + 1).to_le_bytes());
         reply.push(26);
         reply.extend_from_slice(payload);
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
         reply[4] = 27;
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_err());
+        assert!(framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
     }
 }

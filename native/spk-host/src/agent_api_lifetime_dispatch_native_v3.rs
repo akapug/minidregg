@@ -163,9 +163,9 @@ pub(crate) fn submit_fresh_once(
         // No op76 call has begun. Keep the attempt as terminal for this ID.
         return Err(refused("lifetime caller cancelled before op76"));
     }
-    let outer = operator.invoke(76, &paid.ingress)?;
+    let outer = operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT, &paid.ingress)?;
     write_new(attempt_dir, "op76-frame-v3.bin", &outer)?;
-    let frame = source_payload(&outer, 76)?;
+    let frame = source_payload(&outer, crate::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
     if !frame.starts_with(COMMITTED) || frame.len() <= COMMITTED.len() {
         return Err(refused(
             "op76 did not return fresh lifetime committed permit",
@@ -249,10 +249,10 @@ mod tests {
         outer.push(76);
         outer.extend_from_slice(COMMITTED);
         outer.push(1);
-        assert!(source_payload(&outer, 76).unwrap().starts_with(COMMITTED));
-        assert!(source_payload(&outer, 77).is_err());
+        assert!(source_payload(&outer, crate::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT).unwrap().starts_with(COMMITTED));
+        assert!(source_payload(&outer, crate::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP).is_err());
         outer[4] = 77;
-        assert!(source_payload(&outer, 76).is_err());
+        assert!(source_payload(&outer, crate::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT).is_err());
     }
 
     #[test]
