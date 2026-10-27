@@ -293,10 +293,13 @@ one credit per purse micro-unit):
 `demo/install-hermes STEP...` (run as root) is the sequence J14 runs on the
 ACP room resident, with the box's paths and dregg-infra's registration
 (`mini-controller-register`, `mini-grain-controller@TASK`,
-`mini-grain-resident@TASK`). Every Mini command runs as the service account
-(`SVC`, default `mini-core`). Steps, in order:
+`mini-grain-resident@TASK`). Two accounts act: the operator (`OPERATOR`,
+default `mini-core`) for the sponsor, the founder and the concierge, and the
+resident (`RESIDENT`, default `mini-h-INSTANCE`, made by `preflight`) for
+Hermes's subjects, controller, resident and workers, through its own operator
+route (step `route`). Steps, in order:
 
-    install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
+    install-hermes preflight route subjects room runtime create handoff summon controller dispatch resident
 
 Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
 operator's sealed pool key, the metered tariff quoted from the upstream's
@@ -428,7 +431,7 @@ set`, `--action grant` to their own grain's runner).
 tariffs):
 
     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
-      HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+      HERMES_ROOT=OUT demo/install-hermes preflight route subjects room concierge runtime create handoff summon controller dispatch resident
 
 `concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
 
