@@ -152,27 +152,6 @@ impl FreshStopClaim {
     pub(crate) fn target(&self) -> &StopTarget {
         &self.target
     }
-    pub(crate) fn stop_plan(&self) -> &[u8] {
-        &self.stop_plan
-    }
-    pub(crate) fn original_begin(&self) -> &[u8] {
-        &self.original_begin
-    }
-    pub(crate) fn claim_ingress(&self) -> &[u8] {
-        &self.claim_ingress
-    }
-    pub(crate) fn committed_frame(&self) -> &[u8] {
-        &self.committed_frame
-    }
-    pub(crate) fn inspection(&self) -> &[u8] {
-        &self.inspection
-    }
-    pub(crate) fn begin_receipt(&self) -> &ExactReceipt {
-        &self.begin_receipt
-    }
-    pub(crate) fn claim_receipt(&self) -> &ExactReceipt {
-        &self.claim_receipt
-    }
 }
 
 
