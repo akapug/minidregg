@@ -430,6 +430,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_agent_lifetime_issue_args_v1 : String := "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v3"
 @[persisted_codec_tag] abbrev native_host_genesis_log_v1 : String := "DREGG.NATIVE-HOST.GENESIS-LOG/v1"
 @[persisted_codec_tag] abbrev resource_birth_signed_ingress_byte_v2 : List UInt8 := "DREGG/RESOURCE-BIRTH/SIGNED-INGRESS".toUTF8.toList ++ [2]
+@[persisted_codec_tag] abbrev agent_lifetime_grant_birth_signed_ingress_v1 : String := "DREGG/AGENT-LIFETIME-GRANT-BIRTH/SIGNED-INGRESS/v1"
 @[persisted_codec_tag] abbrev pay_claim_quote_request_v1 : String := "DREGG/PAY/CLAIM-QUOTE/REQUEST/v1"
 @[persisted_codec_tag] abbrev application_agent_dispatch_committed_permit_v2 : String := "DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2"
 @[persisted_codec_tag] abbrev fn_selected_source_publication_effects_v1 : String := "DREGG/FN/SELECTED-SOURCE-PUBLICATION-EFFECTS/v1"

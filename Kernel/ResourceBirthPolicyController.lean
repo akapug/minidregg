@@ -526,6 +526,8 @@ separate canonical signed ingress and requires each owner's current-key consent.
 inductive FactoryMethod where
   | ordinary
   | reserve
+  /-- Source-bound event27 only; never selected by the generic ingress decoder. -/
+  | lifetimeGrant
   deriving DecidableEq, Repr
 
 /-- No room-descendant scope and no ordinary verbs accompany reservation. -/
@@ -560,12 +562,49 @@ instance reserveTemplateBoundDecidable (template : CanonicalRuntimeProfile.Facto
   unfold ReserveTemplateBound
   infer_instance
 
+/-- Event27's additional authority can only observe its one newborn object.
+The special receiver additionally binds its holder and capability id to the
+source-authored lifetime grant. It is not an ordinary birth template. -/
+def LifetimeObserverGrant (grant : AuthorityGrant) (item : BirthItem Registry) : Prop :=
+  match grant with
+  | ⟨.object, capability⟩ =>
+      item.resourceKind = .object ∧
+      capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
+      capability.head.scope.verbs = {.observeObject} ∧
+      capability.head.policyId.value = item.create.cellId ∧
+      capability.head.policyEpoch = 0
+  | _ => False
+
+/-- Exactly one object and exactly its owner, control, and read-only observer.
+All three retain the ordinary root issuer, epoch, window and budget bounds.
+There is no arbitrary extra-grant list or caller-supplied predicate. -/
+def LifetimeGrantTemplateBound (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
+  match descriptor.births, descriptor.grants with
+  | [item], [owner, control, observer] =>
+      (∀ grant ∈ descriptor.grants, RootGrantShape template authority height grant) ∧
+      NativeOwnerGrant owner item ∧ PolicyOwnerGrant control item ∧
+      LifetimeObserverGrant observer item
+  | _, _ => False
+
+instance lifetimeObserverGrantDecidable (grant : AuthorityGrant) (item : BirthItem Registry) :
+    Decidable (LifetimeObserverGrant grant item) := by
+  unfold LifetimeObserverGrant
+  split <;> infer_instance
+
+instance lifetimeGrantTemplateBoundDecidable (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) :
+    Decidable (LifetimeGrantTemplateBound template authority height descriptor) := by
+  unfold LifetimeGrantTemplateBound
+  split <;> infer_instance
+
 def MethodTemplateBound (method : FactoryMethod)
     (template : CanonicalRuntimeProfile.FactoryTemplate)
     (authority : AuthState) (height : Height) (descriptor : Descriptor Registry) : Prop :=
   match method with
   | .ordinary => TemplateBound template authority height descriptor
   | .reserve => ReserveTemplateBound template authority height descriptor
+  | .lifetimeGrant => LifetimeGrantTemplateBound template authority height descriptor
 
 instance methodTemplateBoundDecidable (method : FactoryMethod)
     (template : CanonicalRuntimeProfile.FactoryTemplate)
@@ -1326,6 +1365,8 @@ def preparePending
     | ordinary => exact checkTemplate prepared height
     | reserve => exact require (ReserveTemplateBound profile.template
         (oldAuthority prepared) height descriptor) .grantTemplate
+    | lifetimeGrant => exact require (LifetimeGrantTemplateBound profile.template
+        (oldAuthority prepared) height descriptor) .grantTemplate
   let templateBound ← templateCheck
   let bornLineage ← require (BornLineage (placementLineage prepared.authority.snapshot.cell)
     descriptor) .roomLineage
@@ -1769,6 +1810,14 @@ def reserveIngressStream : StreamCodec (Ingress × List (List UInt8)) :=
 def reserveIngressCodec : LawfulCodec (Ingress × List (List UInt8)) :=
   (Tower256ConcreteBackend.StreamCodec.framed reserveIngressFrame reserveIngressStream).toLawful
 
+/-- This frame is private to the event27 receiving path: `decodeIngress`
+continues to recognize only ordinary and reservation births. -/
+def lifetimeGrantIngressFrame : List UInt8 :=
+  "DREGG/AGENT-LIFETIME-GRANT-BIRTH/SIGNED-INGRESS/v1".toUTF8.toList
+
+def lifetimeGrantIngressCodec : LawfulCodec Ingress :=
+  (Tower256ConcreteBackend.StreamCodec.framed lifetimeGrantIngressFrame ingressStream).toLawful
+
 structure DecodedIngress where
   private mk ::
   ingress : Ingress
@@ -1778,18 +1827,21 @@ structure DecodedIngress where
   descriptorCanonical : CanonicalCellRegistry.sourceEncoding.codec.encode descriptor =
     ingress.descriptorBytes
   ownerConsentEnvelopes : Option (List (List UInt8)) := none
+  private lifetimeGrant : Bool := false
 
 def decodeOrdinaryIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
   match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes with
   | none => none
   | some descriptor => some ⟨ingress, descriptor, decoded,
-      descriptor_decode_canonical Registry decoded, none⟩
+      descriptor_decode_canonical Registry decoded, none, false⟩
 
 def DecodedIngress.method (ingress : DecodedIngress) : FactoryMethod :=
-  if ingress.ownerConsentEnvelopes.isSome then .reserve else .ordinary
+  if ingress.lifetimeGrant then .lifetimeGrant
+  else if ingress.ownerConsentEnvelopes.isSome then .reserve else .ordinary
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
+  if ingress.lifetimeGrant then lifetimeGrantIngressCodec.encode ingress.ingress else
   match ingress.ownerConsentEnvelopes with
   | none => ingressCodec.encode ingress.ingress
   | some owners => reserveIngressCodec.encode (ingress.ingress, owners)
@@ -1801,7 +1853,41 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress :=
       match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode raw.1.descriptorBytes with
       | none => none
       | some descriptor => some ⟨raw.1, descriptor, decoded,
-          descriptor_decode_canonical Registry decoded, some raw.2⟩
+          descriptor_decode_canonical Registry decoded, some raw.2, false⟩
+
+/-- Only the lifetime-grant special receiver calls this decoder. The full
+source descriptor and independent app delegation are checked by that receiver. -/
+def decodeLifetimeGrantIngress (bytes : List UInt8) : Option DecodedIngress := do
+  let ingress ← lifetimeGrantIngressCodec.decode bytes
+  match decoded : CanonicalCellRegistry.sourceEncoding.codec.decode ingress.descriptorBytes with
+  | none => none
+  | some descriptor => some ⟨ingress, descriptor, decoded,
+      descriptor_decode_canonical Registry decoded, none, true⟩
+
+theorem decodeLifetimeGrantIngress_method {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeLifetimeGrantIngress bytes = some ingress) :
+    ingress.method = .lifetimeGrant := by
+  unfold decodeLifetimeGrantIngress at decoded
+  cases parsed : lifetimeGrantIngressCodec.decode bytes with
+  | none => simp [parsed] at decoded
+  | some raw =>
+      simp only [parsed, bind, Option.bind] at decoded
+      split at decoded
+      · contradiction
+      · cases Option.some.inj decoded
+        rfl
+
+theorem decodeLifetimeGrantIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeLifetimeGrantIngress bytes = some ingress) : ingress.bytes = bytes := by
+  unfold decodeLifetimeGrantIngress at decoded
+  cases parsed : lifetimeGrantIngressCodec.decode bytes with
+  | none => simp [parsed] at decoded
+  | some raw =>
+      simp only [parsed, bind, Option.bind] at decoded
+      split at decoded
+      · contradiction
+      · cases Option.some.inj decoded
+        exact (Tower256ConcreteBackend.StreamCodec.framed lifetimeGrantIngressFrame ingressStream).toLawful_canonical _ _ parsed
 
 theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeOrdinaryIngress bytes = some ingress) : ingress.bytes = bytes := by
@@ -1814,6 +1900,26 @@ theorem decodeOrdinaryIngress_canonical {bytes : List UInt8} {ingress : DecodedI
       · contradiction
       · cases Option.some.inj decoded
         exact (Tower256ConcreteBackend.StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
+
+/-- The generic receiver has no path to the event27-only method, for any
+input bytes. Merely wrapping a descriptor cannot enable the extra observer. -/
+theorem decodeIngress_not_lifetimeGrant {bytes : List UInt8} {ingress : DecodedIngress}
+    (decoded : decodeIngress bytes = some ingress) : ingress.method ≠ .lifetimeGrant := by
+  unfold decodeIngress at decoded
+  split at decoded
+  · unfold decodeOrdinaryIngress at decoded
+    cases parsed : ingressCodec.decode bytes with
+    | none => simp [parsed] at decoded
+    | some raw =>
+        simp only [parsed, bind, Option.bind] at decoded
+        split at decoded
+        · contradiction
+        · cases Option.some.inj decoded
+          simp [DecodedIngress.method]
+  · split at decoded
+    · contradiction
+    · cases Option.some.inj decoded
+      simp [DecodedIngress.method]
 
 theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
     (decoded : decodeIngress bytes = some ingress) : ingress.bytes = bytes := by
