@@ -430,7 +430,7 @@ impl<O: BoxOps> Processor<O> {
     /// The stranger's view: root-owned, readable by the form's group, never the secrets.
     fn publish_status(&self, r: &Value) -> Result<(), String> {
         let mut v = json!({"type":door::STATUS_TYPE,"id":r["id"],"phase":r["phase"],"name":r["name"],"route":r["route"]});
-        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly", "funding"] {
+        for k in ["detail", "linkCode", "sign", "payment", "webLogin", "webOnly", "funding", "researchConsent"] {
             if !r[k].is_null() {
                 v[k] = r[k].clone();
             }
@@ -560,12 +560,12 @@ impl<O: BoxOps> Processor<O> {
     fn admit(&mut self, request: Request, file: &Path) -> Result<(), String> {
         let existing = read_json(&self.request_path(request.id()));
         match request {
-            Request::Join { id, at, name, ssh_key, discord, route } => {
+            Request::Join { id, at, name, ssh_key, discord, route, research } => {
                 if existing.is_some() {
                     self.reject_file(file, "a request with this id exists");
                     return Ok(());
                 }
-                let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"phase":"queued"});
+                let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research,"phase":"queued"});
                 std::fs::remove_file(file).map_err(|e| e.to_string())?;
                 let keys = self.roster_keys();
                 let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
@@ -810,6 +810,34 @@ impl<O: BoxOps> Processor<O> {
     }
 
     fn enrolled(&mut self, r: &mut Value) -> Result<(), String> {
+        if r["researchConsent"].is_null() {
+            // The member's research-consent fact, written as the member's own turns (the tenant
+            // path every enrolment step uses): `research-consent` field 1 = 1 (CC0) or 0 (none).
+            // A retried tick resumes: the cell exists, or the attempt was sealed (then `retry` sends
+            // the exact call again and reads its decided outcome, never a second write).
+            let name = r["name"].as_str().unwrap_or("").to_owned();
+            let cc0 = r["research"] == true;
+            let ws = self.p.home(&name).join("workspace");
+            let [create, invoke, submit] = door::research_consent_lines(cc0);
+            let attempted = ws.join("attempts").join(door::RESEARCH_CONSENT_ATTEMPT).exists();
+            let mut steps: Vec<String> = Vec::new();
+            if attempted {
+                steps.push(format!("retry {}", door::RESEARCH_CONSENT_ATTEMPT));
+            } else {
+                if !ws.join("refs").join(format!("{}.json", door::RESEARCH_CONSENT_REF)).exists() {
+                    steps.push(create);
+                }
+                steps.push(invoke);
+                steps.push(submit);
+            }
+            for line in &steps {
+                let ran = self.ops.tenant_line(&name, line);
+                if !ran.ok {
+                    return Err(format!("research consent ({line}): {}", ran.why()));
+                }
+            }
+            r["researchConsent"] = json!(if cc0 { "cc0" } else { "none" });
+        }
         if r["discord"] == true && r["linkCode"].is_null() {
             let code = door::new_link_code()?;
             let mut links = self.links();
@@ -1076,7 +1104,7 @@ mod tests {
     }
 
     fn join(name: &str, key: &str, route: Route, discord: bool) -> Request {
-        Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: key.into(), discord, route }
+        Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: key.into(), discord, route, research: name == "bea" }
     }
 
     fn status(w: &Processor<Fake>, id: &str) -> Value {
@@ -1098,6 +1126,9 @@ mod tests {
         assert_eq!(s["phase"], "enrolled", "{s}");
         assert!(s["login"].is_null(), "no ssh login line: {s}");
         assert_eq!(s["webOnly"], true);
+        assert!(w.ops.calls.borrow().iter().any(|c| c.contains("create research-consent declared open")), "{:?}", w.ops.calls.borrow());
+        assert!(w.ops.calls.borrow().iter().any(|c| c.contains("invoke research-consent-0 research-consent create 1 1")), "bea ticked the box: field 1 = 1 (CC0)");
+        assert!(w.ops.calls.borrow().iter().any(|c| c.contains("submit research-consent-0")));
         assert_eq!(s["funding"], w.cfg.funding.to_string(), "the status names what the box funded");
         let state = read_json(&w.p.status().join("door-state.json")).unwrap();
         assert_eq!(state["funding"], w.cfg.funding.to_string(), "the form reads the configured funding, never a literal");
@@ -1108,7 +1139,7 @@ mod tests {
         // The schema: an empty sshKey round-trips as a free join, never as a paid one.
         let bytes = r.to_json().to_string();
         assert!(matches!(Request::parse(bytes.as_bytes()).unwrap(), Request::Join { ssh_key, .. } if ssh_key.is_empty()));
-        let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid };
+        let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid, research: false };
         assert!(Request::parse(paid.to_json().to_string().as_bytes()).is_err());
     }
 
@@ -1130,13 +1161,17 @@ mod tests {
         let record = read_json(&w.p.web_logins().join(format!("{}.json", sha256_hex(web_code.as_bytes())))).unwrap();
         assert_eq!(record["name"], "alice");
         assert_eq!(record["expires"], json!(w.now + 3600));
-        assert_eq!(*w.ops.calls.borrow(), ["render", "alice: keygen mini.key", "reenroll alice 1000", "alice: init mini.key 4100"]);
+        // Enrolment ends with the member's research-consent fact, as the member: alice did not tick
+        // the box, so field 1 = 0 (none); the status says so.
+        assert_eq!(*w.ops.calls.borrow(), ["render", "alice: keygen mini.key", "reenroll alice 1000", "alice: init mini.key 4100",
+            "alice: create research-consent declared open", "alice: invoke research-consent-0 research-consent create 1 0", "alice: submit research-consent-0"]);
+        assert_eq!(s["researchConsent"], "none");
         let entry = std::fs::read_to_string(w.p.door_friends().join("alice.pub")).unwrap();
         assert!(entry.ends_with(&format!("{KEY} alice\n")), "{entry}");
         assert!(!w.p.queue().join(r.file_name()).exists(), "the queue file is consumed");
         // Idempotent: another tick does nothing more.
         run(&mut w);
-        assert_eq!(w.ops.calls.borrow().len(), 4);
+        assert_eq!(w.ops.calls.borrow().len(), 7);
         // The Discord link: the processor alone writes the roster, once per code.
         let link = Link { interaction: "777".into(), user: "4242".into(), code: code.clone(), at: 1 };
         door::spool_write(&w.p.links(), &link.file_name(), &link.to_json()).unwrap();

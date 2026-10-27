@@ -210,7 +210,8 @@ impl Door {
                 html(network)
             ));
         }
-        body.push_str("</p><p><label><input type=checkbox name=discord value=on> Link a Discord account (you get a one-time code)</label></p>\
+        body.push_str(&format!("</p><p class=policy>{}</p><p><label><input type=checkbox name=research value=cc0> contribute my data for research (CC0; kept private until reviewed)</label></p>", html(door::RETENTION_POLICY)));
+        body.push_str("<p><label><input type=checkbox name=discord value=on> Link a Discord account (you get a one-time code)</label></p>\
             <p><button>Request an account</button></p></form>");
         page("Join the Mini demo", &body)
     }
@@ -345,7 +346,7 @@ impl Door {
                     Ok(id) => id,
                     Err(e) => return refuse(503, &e),
                 };
-                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route }
+                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0" }
             }
             "/join/sign" | "/join/paid" => {
                 let id = field("id");
