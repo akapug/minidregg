@@ -3281,6 +3281,10 @@ structure Delivery {rootBytes : Bytes → Digest} (config : Config) (snapshot : 
   runsPin : object.runs record.pin = true
   book : BookCell
   bookExact : loadBook config snapshot = .ok book
+  /-- Neither the submitter's account nor the collector is the purse: the purse's balance after
+  the delivery's charges is exactly what its own charges leave (`purseCharges`, the funds a yield's
+  effect is judged against). -/
+  purseApart : request.account ≠ heldAccount request.record ∧ config.collector ≠ heldAccount request.record
   segment : Segment
   yielded : Option YieldCommit
   /-- The resumed run and its yield commit; a program fault ends it `faulted`. A yield's effect is
@@ -3348,6 +3352,7 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
   match bookExact : loadBook config snapshot with
   | .error reason => .error reason
   | .ok book =>
+  if purseApart : request.account ≠ heldAccount request.record ∧ config.collector ≠ heldAccount request.record then
   match endExact : resumedSegment config snapshot height (deliveryTransaction await.id) request.record
       record.object (record.generation + 1) envelope.sourceTicks view resumed
       (deliveryFunds config snapshot head.input (logicalBook book.logical) object record request.record settlement.path) with
@@ -3382,11 +3387,12 @@ def deliver {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapsho
     head.inputExact, head.paid, program, head.programExact,
     settlement, tail.settled, view, tail.viewExact, tail.response, tail.state, tail.stateExact, resumed,
     tail.resumeExact, envelope, rfl,
-    covered, heapCovered, extractCovered, object, objectExact, runsPin, book, bookExact, segment, yielded, endExact,
-    next, rfl, batch, batchExact, posted,
+    covered, heapCovered, extractCovered, object, objectExact, runsPin, book, bookExact, purseApart, segment, yielded,
+    endExact, next, rfl, batch, batchExact, posted,
     postedBatch, posts, rfl, rfl, guards, rfl, awaitClaim await.id :: settlement.claims, rfl,
     judged, drained⟩
   else .error .bookRefused
+  else .error .payerInvalid
   else .error (.extractUncovered config.planBudget.ticks envelope.extractTicks)
   else .error (.heapUncovered (tail.needed config) envelope.heap)
   else .error (.uncovered envelope)
@@ -4159,7 +4165,8 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {funds : Funds} {reserve
     (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     (∃ built, stateWrite config snapshot object current viewed plan.write = .ok built ∧
-      ∀ written, committed.written = some written → built = some written) ∧
+      (committed.written = built ∨
+        (∃ reason, committed.await.source = .performed (.refused reason)) ∧ committed.written = none)) ∧
       (∀ written, committed.written = some written → written.post ∈ committed.posts) ∧
       PostsCurrent snapshot committed.posts := by
   unfold commitYield at ok
@@ -4184,7 +4191,7 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {funds : Funds} {reserve
           · cases ok
           · simp only [Except.ok.injEq] at ok
             subst ok
-            refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, ?_⟩
+            refine ⟨⟨_, wrote, .inl rfl⟩, ?_, ?_⟩
             · intro one some; subst some; simp
             · intro post member
               simp only [List.mem_append, List.mem_singleton] at member
@@ -4195,25 +4202,34 @@ theorem commitYield_spec {rootBytes : Bytes → Digest} {funds : Funds} {reserve
           · cases ok
           · simp only [Except.ok.injEq] at ok
             subst ok
-            refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
+            refine ⟨⟨_, wrote, .inl rfl⟩, ?_, stateCurrent⟩
             intro one some; subst some; simp
         · split at ok
           · cases ok
           · split at ok
             · simp only [Except.ok.injEq] at ok
               subst ok
-              refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
+              refine ⟨⟨_, wrote, .inl rfl⟩, ?_, stateCurrent⟩
               intro one some; subst some; simp
             · split at ok
               · simp only [Except.ok.injEq] at ok
                 subst ok
-                refine ⟨⟨_, wrote, fun _ same => same⟩, ?_, stateCurrent⟩
+                refine ⟨⟨_, wrote, .inl rfl⟩, ?_, stateCurrent⟩
                 intro one some; subst some; simp
               · simp only [Except.ok.injEq] at ok
                 subst ok
-                refine ⟨⟨_, wrote, fun _ none_ => (by cases none_)⟩, fun _ none_ => (by cases none_), ?_⟩
+                refine ⟨⟨_, wrote, .inr ⟨⟨_, rfl⟩, rfl⟩⟩, fun _ none_ => (by cases none_), ?_⟩
                 intro post member; cases member
 
+
+/-- The write a yield commits is the one it built, when it writes. -/
+theorem commitYield_built {committed : YieldCommit} {built : Option StateWritten} {written : StateWritten}
+    (same : committed.written = built ∨
+      (∃ reason, committed.await.source = .performed (.refused reason)) ∧ committed.written = none)
+    (writes : committed.written = some written) : built = some written := by
+  rcases same with same | ⟨_, none_⟩
+  · rw [← same, writes]
+  · rw [writes] at none_; cases none_
 
 theorem awaitId_lt (cell : CellId) (generation : Nat) (checkpoint : Digest) :
     (awaitId cell generation checkpoint).value < 256 ^ 32 := tagged_lt _ _
@@ -4462,7 +4478,7 @@ theorem yield_write_from_current_read {rootBytes : Bytes → Digest} {config : C
   have commit := (resumedSegment_committed ended).2
   obtain ⟨state, plan, segmentIs, committedExact⟩ := segmentCommit_spec commit
   obtain ⟨⟨built, wrote, same⟩, inPosts, _⟩ := commitYield_spec committedExact
-  rw [same written writes] at wrote
+  rw [commitYield_built same writes] at wrote
   obtain ⟨edits, value, decoded, applied, exact⟩ := stateWrite_spec wrote
   have member : written.post ∈ delivery.posts := by
     rw [delivery.postsExact, yielded]
