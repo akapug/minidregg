@@ -20,7 +20,7 @@ import activity_world as aw
 from activity_world import World, record, nat, variant
 
 ap = argparse.ArgumentParser()
-for f in ['bin', 'root', 'method', 'entry', 'birth-input', 'deposit', 'state-type', 'seed', 'script', 'ticks']:
+for f in ['scenario','bin', 'root', 'method', 'entry', 'birth-input', 'deposit', 'state-type', 'seed', 'script', 'ticks']:
     ap.add_argument('--' + f)
 a = ap.parse_args()
 repo = HERE.parent.parent
@@ -47,8 +47,33 @@ try:
                 'timeout': aw.cap(ticks), 'deposit': str(a.deposit)}
         tx = w.turn('birth', w.sponsor, body, 'installed').get('transaction')
         v = w.state('obj', 'born', tx)
+        w.born = v
         print(json.dumps({'record': v.get('record'), 'state': v.get('state'), 'purse': v.get('purse'),
                           'height': v.get('height')})[:1500])
+    if a.scenario == 'tally':
+        # Tally law (world/activity/Tally.obend): a reply of `amount` is an ADD to the state the activity was
+        # resumed with; only the named decider may decide the slot; each delivery advances the generation.
+        total = World.total_of
+        rec = v['recordCell']
+        with w.group('tally'):
+            w.check('born-awaiting-total-0', total(v) == 0 and v['record'].get('phase', {}).get('kind') == 'awaiting',
+                    {'state': v.get('state'), 'phase': v['record'].get('phase')})
+            cur = v
+            for rnd, amount in enumerate([5, 7], start=1):
+                slot = World.await_of(cur)['source']['slot']
+                if rnd == 1:
+                    w.turn('stranger-resolve-refused', w.sponsor,
+                           {'kind': 'resolve', 'slot': slot, 'answer': {'reply': record(amount=nat(amount))}},
+                           'refused', 'notDecider')
+                w.turn(f'resolve-{amount}', w.second, {'kind': 'resolve', 'slot': slot,
+                       'answer': {'reply': record(amount=nat(amount))}}, 'installed')
+                w.turn(f'deliver-{amount}', w.sponsor, {'kind': 'deliver', 'record': rec, 'await': World.await_of(cur)['id'],
+                       'account': '0', 'accountCapability': '0'}, 'installed')
+                cur = w.state('obj', f'after-{amount}', tx)
+                print(json.dumps({'round': rnd, 'total': total(cur), 'generation': cur['record'].get('generation'),
+                                  'height': cur.get('height')}))
+            w.check('replies-add-never-overwrite', total(cur) == 12 and cur['record'].get('generation') == '2',
+                    {'total': total(cur), 'generation': cur['record'].get('generation')})
     code = w.finish({'pin': pin, 'height': (w.totals[-1] if w.totals else {}).get('height')})
 finally:
     w.stop()
