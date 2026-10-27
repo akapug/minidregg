@@ -4,21 +4,16 @@ Inputs: docs/review/2026-10-27-untouched-areas/{LEAN,NATIVE}.md, docs/review/202
 Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; the integrator reads lane/* at its cuts.
 
 ## Landed (reviewed against the code)
-- lane/un-verify 9f5a7cf4: scripts/gates/check-generic-simplex (merge-gate row): harness, log-reopen, load run; plants fixed-timer, split-tip, flip-byte each red with its message.
-- lane/un-bend e68c2688: `bend publish|run|show` (bend.rs on activity.rs), grammar leaves (web forms derive), jbend row 20/0 on dregg-build (cut-6 candidate, cherry-picked onto 23861533); scripts/author-objective-policy.sh (91841c4c).
-- lane/un-assurance 51740ec2: census + kernel-subject verdicts + Door 11 trace; gen-storylaw --check merge-gate row; Assurance/StoryHistory.lean: story_history_monotone proved over Realized controller legs, poles real, residuals R1-R3.
-- lane/un-native-rows 6fae5fa4: three decision-test rows; objective-emit fixtures `self`; BSD sed -i fixes (fixture-authority self-test, plant-growth-certify).
-- lane/un-moves e9d0f2c1: terminal deleted, benchmarks/coordination moved, deploy/checkpoint deleted, SDK golden authorities, Contracts verdicts, DeployedCellRegistry twin deleted.
-- lane/un-pred-census f8677835: Pred/Placeholder folded; TokenCensus number; KERNEL-FAMILIES.md; fn sentence.
-- lane/un-fixtures a6a32103 (based on integration cut 9): second recording, a member doc append through the socket (candidate 3315a908), authority checked, flipped byte red; NativeTranscripts imports Fixtures again.
-- lane/un-deputy: this file; docs/review/2026-10-27-untouched-areas/EFFECTS.md (Effects decision).
+- lane/un-verify 9f5a7cf4: Generic Simplex gate (harness, log-reopen, 20-op load; three plants red). The load curve gets published only from the cut's dregg-build run.
+- lane/un-bend 91f8a83c: `bend publish|run|show|lookup|retry`; jbend 29/0 incl. the step-6 lost-reply shape on the committed branch; lose-reply transport fix (poll until readable, then drop); scripts/author-objective-policy.sh (demo genesis seam handed to infra).
+- lane/un-world e279d8ac: Tally, call, send admitted natively (activity route, candidate 203ed84c); dues split; DOMAINS.md: seven domains wait on effect Plans + event Response in the activity kernel.
+- lane/un-pb-codec 470f41e7: private-backend R8 (fixtures built and gated, bit-rot fixed, check-boundary.sh deleted, explicit exclude, sha3 pin); rows green on Linux.
+- lane/un-assurance e9749a75: census, kernel-subject verdicts, Door 11, gen-storylaw row, StoryHistory with R1 proved.
+- lane/un-native-rows 6fae5fa4, lane/un-moves e9d0f2c1, lane/un-pred-census f8677835, lane/un-fixtures a6a32103, lane/un-deputy (this file, EFFECTS.md): as batch 2.
 
 ## In flight
-- un-world: dues on the activity route after splitting app/scenario modules.
-- un-bend: `bend lookup|retry` leaves for the lost reply.
-- un-assurance: StoryHistory R1/R2.
-- un-pred-census: TokenCensus 23 open defects triage + local fixes.
-- un-moves: the four DEAD kernel modules.
+- un-pb-exec (R7, P9, KAT), un-pb-wal (R2, P1-P4, protocol_store delete), un-pb-seal (R3, P7, P13).
+- un-pred-census: TokenCensus 23 defects. un-moves: four DEAD kernel modules. un-assurance: story law generator into Kernel/StoryLaw.lean.
 
 ## Decided
 - fn: out of this demo (ember); the exchange row stays UNCONFIGURED by name; sentence published.
@@ -37,6 +32,6 @@ Lanes live under /Users/ember/dev/minidregg-lanes/un-<area> on lane/un-<area>; t
 - Door 11's sentence (web lane / tour row owner); roomkey.rs:3100 hand-reimplements wrapAtomId (Room lane).
 
 ## Next three
-1. Confirm the gate's 20-op load leg on the Mac run; push the batch report.
-2. Review un-world / un-bend / TokenCensus landings as they arrive.
-3. Keep faeries filled: Assurance R-list, inference-scheduler/grain-host stay pug-later.
+1. Review R7/R2/R3 landings; then the private-backend twin deletions (§5.3 of the review), one faerie, after R2/R7.
+2. Review TokenCensus fixes, DEAD module deletions, the story-law move.
+3. If the coordinator assigns it: the activity kernel's effect Plan + event Response, statement first (DOMAINS.md continuation note).
