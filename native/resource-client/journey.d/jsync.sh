@@ -40,6 +40,10 @@ trap stop EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
 import json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, W = sys.argv[1], sys.argv[2]
 MINI, HOST = os.environ["MINI"], os.environ["HOST"]
 CONFIG = os.path.join(W, "deployment", "pinned-config.json")
@@ -70,9 +74,10 @@ def mini(*args): return subprocess.run([MINI, "workspace", *args], capture_outpu
 def said(r, attempt=None):
     text = r.stdout + r.stderr
     if attempt:
-        for leaf in ("reply.frame", "outcome.json"):
-            f = os.path.join(attempt, leaf)
-            if os.path.exists(f): text += open(f, "rb").read().decode("latin1")
+        f = os.path.join(attempt, "reply.frame")
+        if os.path.exists(f): text += open(f, "rb").read().decode("latin1")
+        f = os.path.join(attempt, "outcome.json")
+        if os.path.exists(f): text += json.dumps(attempt_answer(f))
     for m in re.findall(r"([0-9a-f]{40,})", text):
         try: text += " " + bytes.fromhex(m).decode("latin1")
         except ValueError: pass
