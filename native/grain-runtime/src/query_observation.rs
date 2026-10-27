@@ -52,15 +52,7 @@ fn stale_query_with(
     source: &[u8],
     inspect: impl FnOnce(&[u8]) -> Result<Value>,
 ) -> Result<bool> {
-    stale_query_via_with(config, config.host_socket.as_deref(), attempt, source, inspect)
-}
-fn stale_query_via_with(
-    config: &Config,
-    expected_socket: Option<&Path>,
-    attempt: &Path,
-    source: &[u8],
-    inspect: impl FnOnce(&[u8]) -> Result<Value>,
-) -> Result<bool> {
+    let expected_socket = config.host_socket.as_deref();
     let marker_path = attempt.join("query-refusal.json");
     match fs::symlink_metadata(&marker_path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -125,27 +117,18 @@ fn stale_query_via_with(
 
 impl Runtime {
     pub(super) fn query_observation_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_observation_via(authority, None)
-    }
-    pub(super) fn query_observation_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        fresh_read(|| self.query_observation_once(authority, false, transport))
+        fresh_read(|| self.query_observation_once(authority, false))
     }
     pub(super) fn query_policy_observation(&mut self) -> Result<Value> {
         let authority = self.parent();
-        fresh_read(|| self.query_observation_once(&authority, true, None))
+        fresh_read(|| self.query_observation_once(&authority, true))
     }
     fn query_observation_once(
         &mut self,
         authority: &Authority,
         policy: bool,
-        transport: Option<&quiescence_transport::AuthorizedTransport>,
     ) -> std::result::Result<Value, ReadError> {
-        if let Some(via) = transport {
-            via.assert_bound(&self.config, &self.config_path, &self.journal.binding)?;
-        }
-        let query_socket = transport.map(|via| via.socket().to_owned())
-            .or_else(|| self.config.host_socket.clone());
+        let query_socket = self.config.host_socket.clone();
         let id = self.next_id()?;
         let prefix = if policy { "policy-query" } else { "query" };
         let view_kind = if policy { "policy" } else { "resource" };
@@ -178,7 +161,7 @@ impl Runtime {
             args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
         }
         if let Err(error) = self.command_output(&cfg.mini, &args) {
-            let stale = stale_query_via_with(cfg, query_socket.as_deref(), &attempt, &source, |body| {
+            let stale = stale_query_with(cfg, &attempt, &source, |body| {
                 let binary = attempt.join("query-refusal-inspect.bin");
                 let decoded = attempt.join("query-refusal-inspect.json");
                 write_new(&binary, body)?;
@@ -306,7 +289,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn admitted_query_transport_keeps_refusal_bound_to_actual_socket() {
+    fn query_refusal_is_bound_to_the_pinned_socket() {
         let (root, cfg, attempt) = fixture();
         let management = root.join("management.sock");
         let manifest_path = attempt.join("attempt.json");
@@ -318,7 +301,6 @@ mod tests {
         marker["attemptManifestSha256"] = json!(sha256_file(&manifest_path).unwrap());
         fs::write(marker_path, serde_json::to_vec(&marker).unwrap()).unwrap();
         assert!(stale_query_with(&cfg,&attempt,b"source", |_| panic!("wrong socket must refuse before decoding")).is_err());
-        assert!(stale_query_via_with(&cfg,Some(&management),&attempt,b"source", |_| Ok(json!({"type":"refused","reason":"stale-root"}))).unwrap());
         assert_eq!(cfg.host_socket,Some(root.join("host.sock")));
         fs::remove_dir_all(root).unwrap();
     }

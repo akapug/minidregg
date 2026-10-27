@@ -578,7 +578,12 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
     match held with
     | none => writeSessionFrame output 233 []
     | some session =>
-        match ← ConsentAnchor.recheckStore config.transport session.2.anchor with
+        -- HOT-PATH 2f: O(1) against the tag this provider verified at its height; the
+        -- chain-from-genesis re-check only for an image that never saw its head tag.
+        let rechecked ← match session.1.headTag with
+          | some tag => ConsentAnchor.recheckHeld config.transport session.1.image.accepted.length tag
+          | none => ConsentAnchor.recheckStore config.transport session.2.anchor
+        match rechecked with
         | .ok () => writeSessionFrame output 233 []
         | .error detail =>
             writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList

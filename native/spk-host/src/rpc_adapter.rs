@@ -505,10 +505,22 @@ impl RpcDriver {
         })
     }
 
+    /// Identity tokens live as long as the connection (tests, audits).
     pub(crate) fn from_connected_stream(
         app: u64,
         generation: u64,
         stream: UnixStream,
+    ) -> io::Result<Self> {
+        Self::from_connected_stream_at(app, generation, stream, None)
+    }
+
+    /// The production shape: saved identities persist under `identities`
+    /// (the app's directory, across generations; `identity_custody`).
+    pub(crate) fn from_connected_stream_at(
+        app: u64,
+        generation: u64,
+        stream: UnixStream,
+        identities: Option<std::path::PathBuf>,
     ) -> io::Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Command>(8);
         let (ready_tx, ready_rx) = sync_mpsc::sync_channel(1);
@@ -521,7 +533,13 @@ impl RpcDriver {
                     let (supervisor, rpc) = {
                         let _entered = runtime.enter();
                         let stream = tokio::net::UnixStream::from_std(stream)?;
-                        SupervisorConnection::from_connected_stream(stream)
+                        let custody: std::rc::Rc<dyn minidregg_spk_rpc::IdentityCustody> = match identities {
+                            Some(directory) => std::rc::Rc::new(
+                                crate::identity_custody::FileIdentityCustody::open(directory)?,
+                            ),
+                            None => std::rc::Rc::new(minidregg_spk_rpc::MemoryIdentityCustody::default()),
+                        };
+                        SupervisorConnection::from_connected_stream_with_custody(stream, custody)
                     };
                     Ok((runtime, supervisor, rpc))
                 })();

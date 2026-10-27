@@ -132,13 +132,23 @@ GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \
   sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" "$CLOCK_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$ROOT"
 
+# NEWPARTICIPANT_PROVIDER_SERVICES=FILE: the Host's per-route provider tariffs
+# (a JSON array) pinned from the first event, as a hosted Hermes purse needs.
+if [ -n "${NEWPARTICIPANT_PROVIDER_SERVICES:-}" ]; then
+  jq --slurpfile p "$NEWPARTICIPANT_PROVIDER_SERVICES" '.providerServices = $p[0]' "$ROOT/operator.json" >"$ROOT/operator.json.tmp" &&
+    mv "$ROOT/operator.json.tmp" "$ROOT/operator.json"
+fi
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
   --source "$ROOT/genesis.json" --dir "$ROOT/deployment" \
   >"$ROOT/bootstrap.stdout"
 CONFIG="$ROOT/deployment/pinned-config.json"
 [ -s "$CONFIG" ] || { echo 'bootstrap produced no pinned config' >&2; exit 1; }
 
-nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+# NEWPARTICIPANT_SERVE=serve-operator serves the private operator socket (a
+# hosted resident's preflight requires it); the default is the public serve.
+SERVE=${NEWPARTICIPANT_SERVE:-serve}
+case $SERVE in serve|serve-operator) ;; *) echo 'NEWPARTICIPANT_SERVE must be serve or serve-operator' >&2; exit 2;; esac
+nohup "$MINI" "$SERVE" --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   >"$ROOT/public/serve.log" 2>&1 </dev/null &
 SERVER_PID=$!
 printf '%s\n' "$SERVER_PID" >"$ROOT/public/server.pid"

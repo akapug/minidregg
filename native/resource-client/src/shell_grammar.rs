@@ -373,7 +373,24 @@ pub static NARRATE: Grammar = Grammar { verb: "narrate", leaves: &[
     Leaf { path: &["narrate"], args: &[arg("TEXT", Kind::Rest)], flags: &[], effect: Effect::Transition, about: "append {\"type\":\"say\",\"text\":TEXT} to the story's scenes stream (the GM's)" },
 ] };
 
-pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
+pub static APPS: Grammar = Grammar { verb: "apps", leaves: &[
+    Leaf { path: &["apps", "search"], args: &[opt("TERM", Kind::Word)], flags: &[valued("--category", "C", Kind::Word), switch("--json")], effect: Effect::Read, about: "the Sandstorm app market index: the publisher's claims beside the box's verdict (signature, signed app id, size against the profile)" },
+    Leaf { path: &["apps", "show"], args: &[arg("APP-ID|PACKAGE-ID", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "one entry whole, and the refusals an install can meet" },
+    Leaf { path: &["apps", "install"], args: &[arg("APP-ID|PACKAGE-ID", Kind::Word)], flags: &[valued("--class", "S|M|L", Kind::Choice(&["S", "M", "L"]))], effect: Effect::Transition, about: "one member turn: the app birth under your key, the hosting delegation, the package choice under law.apps, then the worker's install and start; refused by name (unknownApp, sizeOverProfile, unverifiedSignature, unsupportedBridge, funding, classRefused) or undecided with `apps retry REQUEST-ID`" },
+    Leaf { path: &["apps", "retry"], args: &[arg("REQUEST-ID", Kind::Word)], flags: &[], effect: Effect::Transition, about: "the exact retry of an install whose reply was lost; a second install is never issued" },
+    Leaf { path: &["apps", "list"], args: &[], flags: &[switch("--json")], effect: Effect::Read, about: "the grains you own or were shared, with the v1 identity notice" },
+    Leaf { path: &["apps", "status"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "state, generation, origin, the routes you hold, the identities the grain holds" },
+    Leaf { path: &["apps", "open"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "your route's one-time bootstrap token for the grain's own origin (used once)" },
+    Leaf { path: &["apps", "stop"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "STOP through the lifecycle; undecided with `apps status GRAIN` while it runs" },
+    Leaf { path: &["apps", "start"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "START through the lifecycle" },
+    Leaf { path: &["apps", "share"], args: &[arg("GRAIN", Kind::Word), arg("MEMBER", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "a route on your grain for MEMBER (v1: members of a shared grain look like one user to the app)" },
+    Leaf { path: &["apps", "export"], args: &[arg("GRAIN", Kind::Word), arg("FILE", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "the grain's data as a package you keep" },
+    Leaf { path: &["apps", "delete"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "DELETE through the lifecycle" },
+    Leaf { path: &["apps", "identities"], args: &[arg("GRAIN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Read, about: "the saved identities the grain holds (who, since, revoked)" },
+    Leaf { path: &["apps", "revoke-identity"], args: &[arg("GRAIN", Kind::Word), arg("TOKEN", Kind::Word)], flags: &[switch("--json")], effect: Effect::Transition, about: "revoke one saved identity" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&APPS, &DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS,
     &PROPOSE, &SUBMIT, &LOOKUP, &RETRY, &PUBLISH, &HISTORY, &CAN, &INSPECT, &WHY, &REFS, &READ, &DESCRIBE, &IMPORT, &EXPORT, &INBOX, &HOME, &WHOAMI, &HELP, &EXIT,
     &SAY, &TAIL, &TOPIC, &PIN, &UNPIN, &REACT, &CHAT, &SUMMON, &ASK, &HERMES, &DISMISS, &STORY, &LOOK, &GO, &TAKE, &ACT, &NARRATE];
 

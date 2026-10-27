@@ -152,7 +152,7 @@ pub(crate) fn ref_name_of_file(stem: &str) -> String {
     stem.replace('.', "/")
 }
 
-fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
+pub(crate) fn atomic_json(path: &Path, value: &Value, expected: Option<&Value>) -> Result<()> {
     let parent=path.parent().ok_or("retained JSON lacks parent")?;
     private_dir(parent)?;
     let filename=path.file_name().and_then(OsStr::to_str).ok_or("record name is not UTF-8")?;
@@ -823,7 +823,7 @@ fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &s
     Ok(())
 }
 
-fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
+pub(crate) fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
     let value = bounded_json(source)?;
     if member(&value, "type")? != "minidregg-delegated-reference-v1"
         || member(&value, "recipient")? != member(workspace, "subject")?
@@ -4337,7 +4337,7 @@ fn put_fields(target: &mut Value, fields: &Value) {
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
-fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
     let mut numbers = Vec::new();
     for entry in fs::read_dir(base).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -4384,7 +4384,7 @@ fn authoring_released(generation: &Path) -> bool {
 /// assembled an exact call (so nothing was ever submitted), or the newest Host
 /// outcome for its exact call is a final `refused`. A confirmed, uncertain,
 /// unavailable, contended or absent outcome is not definite and keeps custody.
-fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
+pub(crate) fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
     if !attempt.join("call.bin").is_file() {
         return Ok(true);
     }
@@ -4399,7 +4399,7 @@ fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
 /// release the namespace binding, and retire the attempt directory (kept as
 /// `NAME.released-N` with all its evidence). Each step is idempotent and the
 /// retirement, which removes the trigger, is last.
-fn release_unadmitted_attempt(
+pub(crate) fn release_unadmitted_attempt(
     authoring: &Path,
     attempt: &Path,
     reservation: &participant_namespace::Reservation,
@@ -4457,7 +4457,7 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
 /// a generation observed in this call is superseded only when `stale` finds
 /// the Host answering its own `stale-root` to that observation (the timer race
 /// at birth), at most `replan::max()` times (the shared `replan` loop).
-fn author_generations(
+pub(crate) fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
     mut observe: impl FnMut() -> Result<PathBuf>,
@@ -5380,6 +5380,20 @@ fn runs_at_tail(document: &Value) -> Result<Vec<String>> {
         .collect()
 }
 
+/// An append needs the document's root element to join (K-ELEMENT-TREE
+/// `appendLeaf`). A content cell born without `createDocument` has none: the
+/// Host's `view-document` names no root, and a line appended there would stand
+/// in no tree and never be read back. Refuse before anything is signed.
+fn no_document_refusal(name: &str, document: &Value) -> Result<()> {
+    if document.get("root").is_some_and(Value::is_null) {
+        return Err(format!(
+            "{name} has no document (its cell was born without one, so an appended line would stand in no \
+             tree); `doc new` births a cell with its document"
+        ));
+    }
+    Ok(())
+}
+
 /// Lower line-level document actions into the Host's content grammar.
 /// `append {text}` · `edit {line,text}` · `link {to,relation}`.
 fn document_actions(
@@ -5430,7 +5444,9 @@ fn document_actions(
             let atom = random_nonce()?;
             if tail_runs.is_none() {
                 let reference = reference(root, name)?;
-                tail_runs = Some(runs_at_tail(&host_document(root, workspace, &reference)?)?);
+                let document = host_document(root, workspace, &reference)?;
+                no_document_refusal(name, &document)?;
+                tail_runs = Some(runs_at_tail(&document)?);
             }
             lowered.extend(append_actions(&atom, text_argument(action)?, tail_runs.iter().flatten()));
             continue;
@@ -7162,6 +7178,32 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// A summoned program document (and every cell a verb appends lines to)
+    /// must be born with its document: Bob's `doc show` and the resident's
+    /// context read of the J14 room found none (the Host's "context source has
+    /// no document") because `summon` birthed a bare content cell. The append
+    /// refuses such a cell before signing, and no verb births one.
+    #[test]
+    fn document_append_refuses_cell_born_without_document_and_summon_births_one() {
+        let bare = json!({"type":"document","height":null,"state":"live","cellRoot":"9","root":null,
+            "rootRevision":null,"order":[],"runs":[],"transclusions":[]});
+        let error = no_document_refusal("lab-hermes-librarian", &bare).unwrap_err();
+        assert!(error.contains("has no document") && error.contains("doc new"), "{error}");
+        let born = json!({"type":"document","root":"77","rootRevision":"78","order":[],"runs":[],"transclusions":[]});
+        assert!(no_document_refusal("lab-hermes-librarian", &born).is_ok());
+        // Every verb that appends lines to a cell it births uses doc-new.
+        for (file, source) in [("hermes.rs", include_str!("hermes.rs")), ("story.rs", include_str!("story.rs")),
+            ("chat.rs", include_str!("chat.rs"))] {
+            for (n, line) in source.lines().enumerate() {
+                let code = line.trim_start();
+                assert!(code.starts_with("//") || !(code.contains("create_cell(") && code.contains("\"content\"")),
+                    "{file}:{}: a content cell born without its document: {line}", n + 1);
+            }
+        }
+        let summon = include_str!("hermes.rs");
+        assert!(summon.contains("chat::create_document(session, &program_name,"), "summon births the program document");
+    }
+
     #[test]
     fn invocation_family_is_preserved_in_actual_unsigned_command() {
         use serde_json::json;

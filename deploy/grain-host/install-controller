@@ -1,38 +1,77 @@
 #!/usr/bin/env bash
-# Install one pre-provisioned Mini grain controller as an owned systemd user unit.
+# Install one pre-provisioned Mini grain controller as a systemd unit that
+# grain-runtime's own manager checks accept (native/grain-runtime/src/
+# systemd_manager.rs `load`, and `prove_controller_unit` in main.rs).
+#
+# Two shapes, both named exactly mini-grain-controller@TASK.service:
+#   user   (default; run as the grain account): a user unit under that account's
+#          user manager with all three MINI_GRAIN_* variables (controller=user,
+#          worker=user, unit=canonical). No registration is written or read.
+#   system (--system --service-user NAME; run as root): a system unit with
+#          User=NAME, controller=system, worker=user, and the root-owned
+#          registration REGISTRY_DIR/TASK.json (mini-controller-registration-v1)
+#          that `load` requires. Workers stay user units, so NAME needs linger.
+#
 # This is an artifact/path preflight, not a substitute for grain-runtime's
 # journal binding or Mini's signed authority checks.
 set -euo pipefail
 umask 077
 
 usage() {
-  echo 'usage: install-controller --config ABS_JSON --runtime ABS_BIN --unit-dir ABS_DIR --pins ABS_JSON [--render-only]' >&2
+  cat >&2 <<'EOF'
+usage: install-controller --config ABS_JSON --runtime ABS_BIN --unit-dir ABS_DIR --pins ABS_JSON [--render-only]
+       install-controller --system --service-user NAME --config ABS_JSON --runtime ABS_BIN --pins ABS_JSON
+                          [--unit-dir ABS_DIR (default /etc/systemd/system)]
+                          [--registry-dir ABS_DIR (default /etc/mini/controllers)]
+                          [--resident-config ABS_JSON] [--render-only]
+EOF
   exit 64
 }
 
-config='' runtime='' unit_dir='' pins='' render_only=0
+config='' runtime='' unit_dir='' pins='' render_only=0 system=0 service_user='' registry_dir='' resident_config=''
 while (($#)); do
   case $1 in
-    --config|--runtime|--unit-dir|--pins)
+    --config|--runtime|--unit-dir|--pins|--service-user|--registry-dir|--resident-config)
       (($# >= 2)) || usage
       case $1 in
         --config) [[ -z $config ]] || usage; config=$2 ;;
         --runtime) [[ -z $runtime ]] || usage; runtime=$2 ;;
         --unit-dir) [[ -z $unit_dir ]] || usage; unit_dir=$2 ;;
         --pins) [[ -z $pins ]] || usage; pins=$2 ;;
+        --service-user) [[ -z $service_user ]] || usage; service_user=$2 ;;
+        --registry-dir) [[ -z $registry_dir ]] || usage; registry_dir=$2 ;;
+        --resident-config) [[ -z $resident_config ]] || usage; resident_config=$2 ;;
       esac
       shift 2 ;;
     --render-only) [[ $render_only == 0 ]] || usage; render_only=1; shift ;;
+    --system) [[ $system == 0 ]] || usage; system=1; shift ;;
     *) usage ;;
   esac
 done
+if ((system)); then
+  [[ -n $service_user ]] || usage
+  unit_dir=${unit_dir:-/etc/systemd/system}
+  registry_dir=${registry_dir:-/etc/mini/controllers}
+else
+  [[ -z $service_user && -z $registry_dir && -z $resident_config ]] || usage
+fi
 [[ -n $config && -n $runtime && -n $unit_dir && -n $pins ]] || usage
-[[ $(uname -s) == Linux ]] || { echo 'Linux user systemd is required' >&2; exit 69; }
-for tool in jq realpath stat sha256sum systemctl cmp mktemp ln; do
+[[ $(uname -s) == Linux ]] || { echo 'Linux systemd is required' >&2; exit 69; }
+for tool in jq realpath stat sha256sum systemctl cmp mktemp ln id; do
   command -v "$tool" >/dev/null || { echo "missing command: $tool" >&2; exit 69; }
 done
 
 fail() { echo "install-controller: $*" >&2; exit 65; }
+if ((system)); then
+  owner_uid=$(id -u -- "$service_user" 2>/dev/null) || fail "no such service user: $service_user"
+  owner_gid=$(id -g -- "$service_user")
+  [[ $owner_uid != 0 ]] || fail 'the service user must not be root'
+  ((render_only)) || [[ $(id -u) == 0 ]] || fail '--system installs as root (use --render-only to preview)'
+  sysctl=(systemctl)
+else
+  owner_uid=$(id -u)
+  sysctl=(systemctl --user)
+fi
 safe_path() {
   [[ $1 =~ ^/[A-Za-z0-9_./@-]+$ && $1 != *//* &&
      $1 != */../* && $1 != */./* && $1 != */.. && $1 != */. ]] ||
@@ -43,28 +82,45 @@ existing_path() {
   [[ -e $1 && ! -L $1 && $(realpath -e -- "$1") == "$1" ]] ||
     fail "path must exist without symlinks: $1"
 }
-owned_by_current_user() {
-  [[ $(stat -c %u -- "$1") == "$(id -u)" ]] || fail "not owned by this user: $1"
+owned_by_service() {
+  [[ $(stat -c %u -- "$1") == "$owner_uid" ]] || fail "not owned by the grain account (uid $owner_uid): $1"
 }
 private_file() {
   existing_path "$1"
   [[ -f $1 ]] || fail "not a regular file: $1"
-  owned_by_current_user "$1"
+  owned_by_service "$1"
   [[ $(stat -c %a -- "$1") == 600 ]] || fail "file must have mode 0600: $1"
+}
+root_dir_ok() {
+  existing_path "$1"
+  [[ -d $1 && $(stat -c %u -- "$1") == 0 ]] || fail "must be a root-owned directory: $1"
+  (( (8#$(stat -c %a -- "$1") & 8#022) == 0 )) || fail "must not be group- or world-writable: $1"
 }
 
 private_file "$config"
 existing_path "$runtime"
 [[ -f $runtime && -x $runtime ]] || fail "runtime is not executable: $runtime"
-existing_path "$unit_dir"
-[[ -d $unit_dir && -w $unit_dir ]] || fail "unit directory is not writable: $unit_dir"
-owned_by_current_user "$unit_dir"
-[[ $(stat -c %a -- "$unit_dir") =~ ^(700|750|755)$ ]] ||
-  fail "unit directory must be mode 0700, 0750 or 0755"
+if ((system)); then
+  root_dir_ok "$unit_dir"
+  safe_path "$registry_dir"
+  [[ $registry_dir != */ ]] || fail 'registry dir must not end in /'
+  root_dir_ok "$(dirname -- "$registry_dir")"
+  [[ ! -e $registry_dir ]] || root_dir_ok "$registry_dir"
+  if [[ -n $resident_config ]]; then
+    existing_path "$resident_config"
+    [[ -f $resident_config ]] || fail "resident config is not a regular file: $resident_config"
+  fi
+else
+  existing_path "$unit_dir"
+  [[ -d $unit_dir && -w $unit_dir ]] || fail "unit directory is not writable: $unit_dir"
+  owned_by_service "$unit_dir"
+  [[ $(stat -c %a -- "$unit_dir") =~ ^(700|750|755)$ ]] ||
+    fail "unit directory must be mode 0700, 0750 or 0755"
+fi
 existing_path "$pins"
 [[ -f $pins && -r $pins ]] || fail "pins must be a readable regular file"
 pin_owner=$(stat -c %u -- "$pins")
-[[ $pin_owner == 0 || $pin_owner == "$(id -u)" ]] || fail 'pins are owned by another user'
+[[ $pin_owner == 0 || $pin_owner == "$owner_uid" ]] || fail 'pins are owned by another user'
 case $(stat -c %a -- "$pins") in
   400|440|444|600|640|644) ;;
   *) fail 'pins must not be group- or world-writable' ;;
@@ -89,7 +145,7 @@ done
 existing_path "$state_dir"
 [[ -d $state_dir && $(stat -c %a -- "$state_dir") == 700 ]] ||
   fail 'stateDir must be an existing mode-0700 directory'
-owned_by_current_user "$state_dir"
+owned_by_service "$state_dir"
 [[ $(dirname -- "$control_socket") == "$state_dir" ]] ||
   fail 'controlSocket must be directly inside stateDir'
 [[ ! -e $control_socket || -S $control_socket ]] ||
@@ -97,7 +153,7 @@ owned_by_current_user "$state_dir"
 [[ ! -L $control_socket ]] || fail 'controlSocket must not be a symlink'
 existing_path "$cwd"
 [[ -d $cwd ]] || fail 'cwd is not a directory'
-owned_by_current_user "$cwd"
+owned_by_service "$cwd"
 existing_path "$host_config"
 [[ -f $host_config && -r $host_config ]] || fail 'hostConfig is not readable'
 while IFS= read -r key; do
@@ -143,6 +199,11 @@ while IFS= read -r program; do
   require_pin "$gate"
   [[ $($program --launch-gate-protocol) == mini-grain-launch-gate-v1 ]] ||
     fail "launcher/gate protocol mismatch: $program"
+  if ((system)); then
+    # controller=system, worker=user: systemd_manager::require_launcher_protocol.
+    [[ $($program --controller-manager-protocol) == mini-controller-manager-v1 ]] ||
+      fail "cross-manager launcher protocol mismatch: $program"
+  fi
 done < <(jq -r '.commands[].program' "$config" | sort -u)
 if jq -e '(.providerTask != null) and ((.providerTask.localFixtureHostNetwork // false) == false)' "$config" >/dev/null; then
   worker_root=$(jq -er '
@@ -158,8 +219,17 @@ fi
 
 unit="mini-grain-controller@$task.service"
 target=$unit_dir/$unit
-systemctl --user show-environment >/dev/null || fail 'user systemd manager is unavailable'
-if (( !render_only )); then
+if ((system)); then
+  [[ -S /run/user/$owner_uid/bus ]] || ((render_only)) ||
+    fail "the grain account's user manager is not running (/run/user/$owner_uid/bus); enable linger: loginctl enable-linger $service_user"
+  if command -v loginctl >/dev/null && ((!render_only)); then
+    [[ $(loginctl show-user "$service_user" -p Linger --value 2>/dev/null) == yes ]] ||
+      fail "workers are user units; enable linger first: loginctl enable-linger $service_user"
+  fi
+else
+  systemctl --user show-environment >/dev/null || fail 'user systemd manager is unavailable'
+fi
+if (( !system && !render_only )); then
   unit_paths=$(systemctl --user show -p UnitPath --value) ||
     fail 'cannot read the user manager unit load paths'
   found_path=0
@@ -169,15 +239,25 @@ if (( !render_only )); then
   done
   ((found_path)) || fail "unit directory is not in the user manager's unit load paths: $unit_dir"
 fi
-active=$(systemctl --user show "$unit" -p ActiveState --value 2>/dev/null || :)
-pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || :)
+active=$("${sysctl[@]}" show "$unit" -p ActiveState --value 2>/dev/null || :)
+pid=$("${sysctl[@]}" show "$unit" -p MainPID --value 2>/dev/null || :)
 case $active in active|activating|deactivating|reloading) fail "unit is running or changing state: $unit" ;; esac
 [[ -z $pid || $pid == 0 ]] || fail "unit has a MainPID: $unit"
-fragment=$(systemctl --user show "$unit" -p FragmentPath --value 2>/dev/null || :)
+fragment=$("${sysctl[@]}" show "$unit" -p FragmentPath --value 2>/dev/null || :)
 [[ -z $fragment || $fragment == "$target" ]] ||
   fail "unit name already belongs to another fragment: $fragment"
 
-unit_text=$(cat <<EOF
+if ((system)); then
+  registration=$registry_dir/$task.json
+  registration_text=$(jq -n --arg task "$task" --arg config "$config" --argjson uid "$owner_uid" \
+    --arg resident "$resident_config" '
+    {protocol:"mini-controller-registration-v1",task:$task,config:$config,
+     manager:"system",workerManager:"user",serviceUid:$uid,
+     residentConfig:(if $resident == "" then null else $resident end)}')
+  registry_env=''
+  [[ $registry_dir == /etc/mini/controllers ]] ||
+    registry_env="Environment=MINI_GRAIN_CONTROLLER_REGISTRATION=$registration"
+  unit_text=$(cat <<EOF
 [Unit]
 Description=Mini agent grain controller $task
 After=network-online.target
@@ -186,10 +266,43 @@ StartLimitBurst=3
 
 [Service]
 Type=exec
+User=$service_user
+Group=$owner_gid
+Environment=MINI_GRAIN_CONTROLLER_MANAGER=system
+Environment=MINI_GRAIN_WORKER_MANAGER=user
+Environment=MINI_GRAIN_CONTROLLER_UNIT=$unit
+$registry_env
+ExecStart=$runtime serve $config
+Restart=on-failure
+RestartSec=2s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+LimitCORE=0
+TasksMax=64
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
+EOF
+)
+else
+  unit_text=$(cat <<EOF
+[Unit]
+Description=Mini agent grain controller $task
+After=network-online.target
+StartLimitIntervalSec=30s
+StartLimitBurst=3
+
+[Service]
+Type=exec
+Environment=MINI_GRAIN_CONTROLLER_MANAGER=user
+Environment=MINI_GRAIN_WORKER_MANAGER=user
 Environment=MINI_GRAIN_CONTROLLER_UNIT=$unit
 ExecStart=$runtime serve $config
 Restart=on-failure
 RestartSec=2s
+KillMode=control-group
 UMask=0077
 NoNewPrivileges=yes
 LimitCORE=0
@@ -200,27 +313,40 @@ MemoryMax=1G
 WantedBy=default.target
 EOF
 )
+fi
 if ((render_only)); then
   printf '%s\n' "$unit_text"
+  ((system)) && printf '# %s\n%s\n' "$registration" "$registration_text"
   exit 0
 fi
-if [[ -e $target || -L $target ]]; then
-  existing_path "$target"
-  [[ -f $target ]] || fail "unit path is not a regular file: $target"
-  owned_by_current_user "$target"
-  [[ $(stat -c %a -- "$target") == 644 ]] || fail 'existing unit has unexpected mode'
-  if cmp -s "$target" <(printf '%s\n' "$unit_text"); then
-    printf 'already installed: %s\n' "$target"
-    exit 0
+
+# Install FILE_TEXT at PATH (mode 0644) unless an identical file is there.
+install_new() { # PATH TEXT OWNER
+  local path=$1 text=$2 owner=$3
+  if [[ -e $path || -L $path ]]; then
+    existing_path "$path"
+    [[ -f $path ]] || fail "not a regular file: $path"
+    [[ $(stat -c %u -- "$path") == "$owner" ]] || fail "existing file has another owner: $path"
+    [[ $(stat -c %a -- "$path") == 644 ]] || fail "existing file has unexpected mode: $path"
+    cmp -s "$path" <(printf '%s\n' "$text") && { printf 'already installed: %s\n' "$path"; return 0; }
+    fail "conflicting file exists: $path"
   fi
-  fail "conflicting unit exists: $target"
+  local tmp
+  tmp=$(mktemp "$path.tmp.XXXXXX")
+  trap 'rm -f -- "$tmp"' EXIT
+  printf '%s\n' "$text" > "$tmp"
+  chmod 644 "$tmp"
+  ln -T -- "$tmp" "$path" || fail "file appeared during install: $path"
+  rm -f -- "$tmp"
+  trap - EXIT
+  printf 'installed: %s\n' "$path"
+}
+if ((system)); then
+  [[ -d $registry_dir ]] || install -d -m 0755 -o root -g root -- "$registry_dir"
+  install_new "$registration" "$registration_text" 0
+  install_new "$target" "$unit_text" 0
+  systemctl daemon-reload
+else
+  install_new "$target" "$unit_text" "$owner_uid"
+  systemctl --user daemon-reload
 fi
-tmp=$(mktemp "$target.tmp.XXXXXX")
-trap 'rm -f -- "$tmp"' EXIT
-printf '%s\n' "$unit_text" > "$tmp"
-chmod 644 "$tmp"
-ln -T -- "$tmp" "$target" || fail "unit appeared during install: $target"
-rm -f -- "$tmp"
-trap - EXIT
-systemctl --user daemon-reload
-printf 'installed: %s\n' "$target"

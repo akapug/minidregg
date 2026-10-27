@@ -192,11 +192,11 @@ fn return_budget(room: &resource_tools::RoomToolsConfig, assignment: &Value,
     let record = state.parent().ok_or("resident state has no parent")?.join("return-operation.json");
     journal.return_pending = true;
     atomic_json(state, journal)?;
-    let output = Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
+    let output = crate::deadline::output(Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
         .arg(&room.workspace).arg("--account").arg(account).arg("--to").arg(to)
         .arg("--room").arg(&room.room).arg("--operation-record").arg(record)
-        .arg("--socket").arg(&room.socket).stdin(Stdio::null()).output()
-        .map_err(|e| format!("resident budget return: {e}"))?;
+        .arg("--socket").arg(&room.socket), crate::deadline::NATIVE_CALL)
+        .map_err(|e| crate::deadline::describe("resident budget return", e))?;
     let result = resource_tools::last_json(&String::from_utf8_lossy(&output.stdout));
     let confirmed = result.as_ref().is_some_and(|v|
         (v["type"] == "minidregg-hermes-return-v1" && v["returned"].is_string())
@@ -290,7 +290,6 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     let config: crate::Config = serde_json::from_slice(&bounded_regular_file(&options.controller, 262_144)?)
         .map_err(|e| format!("resident controller config after lock: {e}"))?;
     if options.state.parent() != Some(config.state_dir.as_path()) { return Err("resident state/config changed during lock acquisition".into()); }
-    config_migration::ensure_resident_current(&config)?;
     validate(&config)?;
     let room = config.tool_task.as_ref().and_then(|t| t.room.clone()).ok_or("resident needs controller toolTask.room")?;
     let state = options.state.join("resident.json");
@@ -305,7 +304,7 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     publish_notices(&room, &options.state);
-    while (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) || journal.return_pending {
+    while options.max_prompts.is_none_or(|limit| journal.completed < limit) || journal.return_pending {
         let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
         if prepared["dismissed"] == true {
             resident_requests::dismiss(&options.state)?;
@@ -342,12 +341,12 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
-            println!("{}", json!({"type":"resident-completed","completed":resident_outcomes::qualified_count(&options.state,journal.completed)?,"recordedCompletions":journal.completed}));
+            println!("{}", json!({"type":"resident-completed","completed":journal.completed}));
             resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
             publish_notices(&room, &options.state);
             // Prompt count and final delivery are separate durable states.
         }
-        if (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
+        if options.max_prompts.is_none_or(|limit| journal.completed < limit) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
     }
     Ok(())
 }
@@ -398,9 +397,9 @@ mod tests {
         let preparing_config=rt.config.clone();let preparing_path=rt.config_path.clone();
         let preflight=thread::spawn(move||{
             let (mut socket,_)=admin.accept().unwrap();
-            let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();reader.read_line(&mut line).unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();
             let sha=line.trim().strip_prefix("resident prepare ").unwrap();
-            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);writeln!(socket,"{ready}").unwrap();
+            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);control::admin_write_frame(&mut socket,&ready.to_string()).unwrap();
         });
         let listener = std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let journal_path = root.join("resident.json");
@@ -467,8 +466,8 @@ mod tests {
         let proof=rt.resident_admission(&id,&sha).unwrap();
         let thread=thread::spawn(move||{
             for value in [proof_unrecorded,proof] {
-                let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();
-                reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),request_line);writeln!(socket,"{value}").unwrap();
+                let (mut socket,_)=admin.accept().unwrap();
+                let line=control::admin_read_frame(&mut socket).unwrap();assert_eq!(line.trim(),request_line);control::admin_write_frame(&mut socket,&value.to_string()).unwrap();
             }
         });
         assert!(!drain_preadmission_refusal(&rt.config,&rt.config_path,&mut resident,&state).unwrap());
@@ -491,9 +490,9 @@ mod tests {
         let admin=std::os::unix::net::UnixListener::bind(rt.config.state_dir.join("admin.sock")).unwrap();
         let control=std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let preflight=thread::spawn(move||{
-            let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());
-            let mut line=String::new();reader.read_line(&mut line).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
-            writeln!(socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
+            let (mut socket,_)=admin.accept().unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
+            control::admin_write_frame(&mut socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
         });
         let server=thread::spawn(move||{
             let (mut socket,_)=control.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();

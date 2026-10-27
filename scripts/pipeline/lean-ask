@@ -141,7 +141,8 @@ def make_current(tree, mods, log):
     if "out-of-date" not in out:
         raise Infra("lake could not resolve the imports:\n" + out[-3000:])
     log(f"imports out of date; building {' '.join(local)} in a build slot")
-    cmd = ("set -o pipefail; . %s/lib.sh; LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-48G} "
+    # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
+    cmd = ("set -o pipefail; . %s/lib.sh; bash scripts/build-mini-kernels.sh && LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-48G} "
            "pipeline_build_slot %s -- swarm-build lake build %s" % (shlex.quote(HERE), " ".join(map(shlex.quote, local)), " ".join(map(shlex.quote, local))))
     r = subprocess.run(["bash", "-c", cmd], cwd=tree.root, capture_output=True, text=True)
     out = r.stdout + r.stderr

@@ -59,7 +59,7 @@ grain-runtime provider-provision TEMPLATE OPERATOR_POLICY NEW_CONTROLLER
 
 The template comes from the operator's genuinely fresh native source lifecycle, including native member/purse delegation. Provisioning changes only its selected provider/model. It takes the normal controller lock, queries each source task, and requires generation/status/reserved zero; an unused filesystem pathname cannot make a previously attached source fresh. It verifies the native tariff, current member, exact epoch/model grant and usable credential before publishing. An exact completed retry is idempotent; an interrupted query-only attempt resumes its exact intent. It never clones a live controller into an empty journal.
 
-Production registration consumes the resulting exact controller at `/var/lib/mini/controllers/TASK/controller.json` through the canonical operator registration helper; it does not initialize a journal or infer member choice. Existing controllers keep their binding. Owner key rotation requires explicit new-key custody/regrant and the narrowly proven same-subject typed controller migration; editing a public-key field or resetting its journal is not recovery.
+Production registration consumes the resulting exact controller at `/var/lib/mini/controllers/TASK/controller.json` through the canonical operator registration helper; it does not initialize a journal or infer member choice. Existing controllers keep their binding. Owner key rotation requires explicit new-key custody/regrant and a reprovisioned controller (there is no in-place config migration); editing a public-key field or resetting its journal is not recovery.
 
 ## Qualification and remaining integration
 

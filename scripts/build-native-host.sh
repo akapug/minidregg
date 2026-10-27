@@ -1289,6 +1289,14 @@ fi
 # sysroot points every library back at the real immutable toolchain (so the outputs and Lake's traces
 # are the real compiler's: publish-artifacts' --umbrella step replays a tree plain Lake built).
 toolchain=$(lake env lean --print-prefix)
+# HOT-PATH 2d: every lean this build runs loads .lake/native/libmini_kernels_lean.so (the lakefile's
+# --load-dynlib), so the kernel library exists BEFORE the first lake build, on every mode: the Rust
+# kernels, the Lean shim and the seam closure's objects (scripts/build-mini-kernels.sh, two stages).
+scripts/build-mini-kernels.sh > "$output_dir/mini-kernels.log" 2>&1 || {
+  printf 'build-native-host: native/mini-kernels did not build; see %s\n' "$output_dir/mini-kernels.log" >&2
+  exit 65
+}
+cp .lake/native/SHA256SUMS "$output_dir/mini-kernels-sha256.txt"
 wrapper_root="$output_dir/seated-lean-toolchain"
 mkdir -p "$wrapper_root/bin"
 ln -s "$toolchain/include" "$wrapper_root/include"
@@ -1914,6 +1922,13 @@ while IFS= read -r module; do
   printf '%s\n' ".lake/build/ir/$stem.c.o.native" >> "$response"
 done < "$source_modules"
 cat "$output_dir/package-objects.txt" >> "$response"
+# HOT-PATH 2d: the Rust kernels the compiled hashes call through @[extern] (native/mini-kernels)
+# are link inputs of every Lean executable (built above, before the Lean closure).
+[[ -f .lake/native/link-inputs.txt ]] || {
+  printf 'build-native-host: .lake/native/link-inputs.txt missing (scripts/build-mini-kernels.sh did not run)\n' >&2
+  exit 65
+}
+cat .lake/native/link-inputs.txt >> "$response"
 
 # Recheck immediately before linking in case another process created the path.
 if [[ -e "$binary" || -L "$binary" ]]; then

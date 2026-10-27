@@ -1809,6 +1809,26 @@ pub(crate) fn create_cell(session: &Session, name: &str, storage: &str, law: &Va
     create_cell_with_fields(session, name, storage, law, room, owner, None)
 }
 
+/// A content cell born with its document (`workspace --action doc-new`: the
+/// birth, then `createDocument`), the only way a verb makes a cell it will
+/// append lines to. A cell born by `create_cell(.., "content", ..)` holds no
+/// document: lines appended to it stand in no tree, and every signed read of
+/// it (`doc show`, a resident's context read) finds no document.
+pub(crate) fn create_document(session: &Session, name: &str, law: &Value, room: Option<&str>) -> Result<Value, Done> {
+    let predicate = write_request(session, &format!("chat-law-{}", name.replace('/', ".")), law)?;
+    let mut flags = vec![
+        ("action", os("doc-new")),
+        ("dir", os(&session.workspace)),
+        ("name", os(name)),
+        ("predicate", os(&predicate)),
+    ];
+    if let Some(room) = room {
+        flags.push(("in", os(room)));
+    }
+    client("workspace", &flags)?;
+    reference(session, name).map_err(error)
+}
+
 /// A declared cell names its exact field set at birth; content and stream
 /// callers continue to use `create_cell` without an object-field declaration.
 pub(crate) fn create_cell_with_fields(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>, fields: Option<&str>) -> Result<Value, Done> {

@@ -77,6 +77,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "law", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "apps", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "market", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "bid", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "reveal", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -1685,6 +1686,36 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     client("workspace", vec![flag("action", "market-settle"), flag("dir", ws()), flag("name", p.arg(0)), flag("proposal-id", id)])
                 }
             }
+        }
+        "apps" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::APPS, &w)?;
+            let action = p.leaf.path[1];
+            let mut flags = vec![flag("action", if action == "retry" { "install" } else { action }), flag("dir", ws())];
+            if p.has("--json") { flags.push(flag("json", "yes")); }
+            match action {
+                "search" => {
+                    if let Some(category) = p.flag("--category").flatten() { flags.push(flag("category", category)); }
+                    if let Some(term) = p.opt(0) { flags.push(flag("term", term)); }
+                }
+                "show" => flags.push(flag("app", p.arg(0))),
+                "install" => {
+                    flags.push(flag("app", p.arg(0)));
+                    flags.push(flag("home", session.home.clone()));
+                    if let Some(class) = p.flag("--class").flatten() { flags.push(flag("class", class)); }
+                }
+                "retry" => flags.push(flag("retry", p.arg(0))),
+                "list" => {}
+                "share" | "export" | "revoke-identity" => {
+                    if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
+                    flags.push(flag("grain", p.arg(0)));
+                    flags.push(flag(match action { "share" => "to", "export" => "out", _ => "token" }, p.arg(1)));
+                }
+                _ => {
+                    if !crate::apps::valid_grain(p.arg(0)) { return Err(u.to_owned()); }
+                    flags.push(flag("grain", p.arg(0)));
+                }
+            }
+            client("apps", flags)
         }
         "bid" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::BID, &w)?;

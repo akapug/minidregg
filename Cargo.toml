@@ -26,6 +26,7 @@ members = [
   "native/portable-archive",
   "native/mini-web-spawn",
   "native/mini-web",
+  "native/mini-kernels",
   "prover",
 ]
 exclude = [

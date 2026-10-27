@@ -27,7 +27,7 @@ if [ -z "$GL" ]; then
   cd "$GL/src" && git fetch -q github main && [ "$(git rev-parse FETCH_HEAD)" = "$TIP" ] || { echo "advance: github main != $TIP"; exit 3; }
   git checkout -q -B main "$TIP"
   ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
-      "$here/slot-mk.sh" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$GL/logs/advance-umbrella.log" 2>&1 \
+      bash scripts/build-mini-kernels.sh && "$here/slot-mk.sh" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$GL/logs/advance-umbrella.log" 2>&1 \
     && arc=0 || arc=$?
   # Reds are named, never ledgered (docs/COORDINATION-2026-10-27.md §2): a failed umbrella names its modules and the
   # base advances carrying them; a non-zero exit with no failed-target list is a broken build and refuses.

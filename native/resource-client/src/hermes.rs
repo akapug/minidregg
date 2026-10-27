@@ -507,7 +507,7 @@ fn law_of(text: &str) -> Result<Value, Done> {
 /// ROOM` when absent, else installed over its current law by its owner.
 fn ensure_doc(session: &Session, room: &str, name: &str, law: &Value) -> Result<&'static str, Done> {
     if chat::reference(session, name).is_err() {
-        chat::create_cell(session, name, "content", law, Some(room), None)?;
+        chat::create_document(session, name, law, Some(room))?;
         return Ok("born");
     }
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"install-policy","name":name,"predicate":law});
@@ -664,7 +664,7 @@ fn summon(
     );
     if !done(&state, "program") {
         if chat::reference(session, &program_name).is_err() {
-            chat::create_cell(session, &program_name, "content", &law_of(&fill(&role.program_law, &values))?, Some(room), None)?;
+            chat::create_document(session, &program_name, &law_of(&fill(&role.program_law, &values))?, Some(room))?;
         }
         append_doc(session, &program_name, program_text.trim_end())?;
         state["steps"]["program"] = json!(target(session, &program_name)?);

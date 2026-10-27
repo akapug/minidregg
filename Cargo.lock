@@ -790,6 +790,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mini-kernels"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha3",
+]
+
+[[package]]
 name = "minidregg-compatible-upgrade-custody"
 version = "0.1.0"
 dependencies = [

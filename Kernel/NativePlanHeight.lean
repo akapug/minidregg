@@ -126,16 +126,17 @@ theorem pin_only_slots (plan pinned : SigningPlan) (ok : pin plan = .ok pinned) 
       ∀ i (hi : i < plan.slots.length) (hi' : i < pinned.slots.length),
         pinSlot plan.height plan.slots[i] = .ok pinned.slots[i] := by
   unfold pin at ok
-  split at ok <;> try (cases ok)
-  split at ok <;> try (cases ok)
-  split at ok <;> try (cases ok)
   cases m : plan.slots.mapM (pinSlot plan.height) with
-  | error e => simp [m, bind, Except.bind] at ok
+  | error e =>
+    simp only [m, bind, Except.bind] at ok
+    repeat' split at ok
+    all_goals cases ok
   | ok slots =>
-    simp only [m, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at ok
-    subst ok
+    simp only [m, bind, Except.bind, pure, Except.pure] at ok
     obtain ⟨len, point⟩ := mapM_ok_pointwise _ _ _ m
-    exact ⟨rfl, len, point⟩
+    repeat' split at ok
+    all_goals cases ok
+    all_goals exact ⟨rfl, len, point⟩
 
 #assert_axioms pinSlot_only_header
 #assert_axioms pin_only_slots
