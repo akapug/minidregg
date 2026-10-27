@@ -23,6 +23,7 @@ import json
 import tarfile
 import io
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -59,7 +60,7 @@ def run(*args):
     return subprocess.run([sys.executable, str(PACKAGE), *args], capture_output=True, text=True)
 
 
-if subprocess.run(["which", "readelf"], capture_output=True).returncode != 0:
+if shutil.which("readelf") is None:
     sys.exit("test-package: readelf (binutils) is required, as for package.py itself")
 
 
@@ -76,7 +77,7 @@ def roles_manifest(binaries, commit, drop=(), bad_pin=None):
 
 
 with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
-    tmp = Path(tmp)
+    tmp = Path(tmp).resolve()  # package.py resolves --out; macOS /var/folders is a symlink to /private/var
     repo = tmp / "repo"
     for rel in SCRIPTS:
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)

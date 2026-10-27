@@ -37,6 +37,7 @@
 
 use crate::dispatch_native::{write_new, PrivateOperator};
 use crate::lifecycle_receipt_lookup::{retained, OUTCOME_TAG};
+use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
 use crate::lifecycle_v3_native::{framed_payload, hex};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -314,13 +315,23 @@ pub(crate) fn refused_before_submit(
     frame: &[u8],
 ) -> io::Error {
     let _ = write_new(attempt_dir, &format!("op{opcode}-refused-frame.bin"), frame);
-    let lean = framed_payload(frame, 255, OUTCOME_TAG).ok().and_then(|payload| {
-        let directory = attempt_dir.join(format!("op{opcode}-refusal"));
-        fs::DirBuilder::new().mode(0o700).create(&directory).ok()?;
-        inspect_outcome(operator, &directory, payload, Instant::now() + LOOKUP_DEADLINE)
-            .ok()
-            .map(|view| refusal_words(&view))
-    });
+    // Ops 36 and 37 are append-free by the registry (`NO_APPEND_OPERATIONS`),
+    // so a reply under either marker, decided (NO_RECORD) or undecided
+    // (HOST_OUTCOME), left no record: the member is refused and authors a new
+    // request.
+    let lean = framed_payload(frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
+        .or_else(|_| framed_payload(frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG))
+        .ok()
+        .and_then(|payload| {
+            let directory = attempt_dir.join(format!("op{opcode}-refusal"));
+            fs::DirBuilder::new().mode(0o700).create(&directory).ok()?;
+            inspect_outcome(operator, &directory, payload, Instant::now() + LOOKUP_DEADLINE)
+                .inspect_err(|error| {
+                    eprintln!("spk-host: op{operation_id} op{opcode} refusal inspection failed: {error}")
+                })
+                .ok()
+                .map(|view| refusal_words(&view))
+        });
     DispatchOutcome {
         operation: (operation_id != "0").then(|| operation_id.to_owned()),
         status: Status::Refused,
@@ -417,7 +428,8 @@ fn note(directory: &Path, text: &str) -> io::Result<()> {
 
 /// The reply op34/164 gave, as far as the transport saw it.
 pub(crate) enum Reply<'a> {
-    /// A whole frame (any opcode the transport admitted: 34, or 255).
+    /// A whole frame the transport admitted: the operation's own outcome (34),
+    /// NO_RECORD (253, decided no-append) or HOST_OUTCOME (255, undecided).
     Frame(&'a [u8]),
     /// No frame: write/read failure, deadline, EOF, or a refused frame shape.
     Lost,
@@ -441,12 +453,14 @@ pub(crate) fn decide(
         lean,
     };
     let deadline = Instant::now() + LOOKUP_DEADLINE;
-    // Lean's own reading of the original frame, when there was one.
-    let original = match &reply {
+    // Lean's own reading of the original frame, when there was one, and the
+    // marker it came under.
+    let (marker, original) = match &reply {
         Reply::Frame(frame) => {
             let payload = framed_payload(frame, 34, OUTCOME_TAG)
-                .or_else(|_| framed_payload(frame, 255, OUTCOME_TAG));
-            match payload {
+                .or_else(|_| framed_payload(frame, RESPONSE_NO_RECORD, OUTCOME_TAG))
+                .or_else(|_| framed_payload(frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
+            let view = match payload {
                 Ok(payload) => {
                     let directory = attempt_dir.join("submit-outcome");
                     match fs::DirBuilder::new()
@@ -462,12 +476,40 @@ pub(crate) fn decide(
                     }
                 }
                 Err(_) => None,
-            }
+            };
+            (frame.get(4).copied(), view)
         }
-        Reply::Lost => None,
+        Reply::Lost => (None, None),
     };
-    let answered = matches!(reply, Reply::Frame(_));
     let lean = original.as_ref().map(outcome_words);
+    // NO_RECORD is Lean's positive no-append frame (Host/RequestRefusal.lean
+    // `returnedMarker_noRecord_sound`: the payload is a refused, contention or
+    // unavailable outcome decided before any append). The call settles on it
+    // without a lookup. HOST_OUTCOME is the undecided envelope: it says
+    // nothing about the record, so below it counts as no answer at all.
+    if marker == Some(RESPONSE_NO_RECORD) {
+        let status = match original.as_ref().and_then(|view| view.get("type")).and_then(Value::as_str) {
+            Some("contention") => Status::Contention,
+            Some("refused") => Status::Refused,
+            // Unavailable, or a payload this host could not inspect: the marker
+            // alone proves no record; the member authors a new request.
+            _ => Status::Unavailable,
+        };
+        let resolution = json!({"protocol":"mini-spk-dispatch-resolution-v1",
+            "status":"no-record","by":"no-record-marker","original":lean});
+        return match settle(active, expected, &resolution) {
+            Ok(()) => DispatchOutcome {
+                operation: Some(operation_id.to_owned()),
+                status,
+                lean,
+            },
+            Err(error) => {
+                eprintln!("spk-host: op{operation_id} settlement failed: {error}");
+                undecided(lean)
+            }
+        };
+    }
+    let answered = marker == Some(34);
     if let Some(view) = &original {
         if view.get("type").and_then(Value::as_str) == Some("confirmed") {
             let resolution = json!({"protocol":"mini-spk-dispatch-resolution-v1",
@@ -497,9 +539,9 @@ pub(crate) fn decide(
                 "receipt":receipt_fields(view)});
             settle(active, expected, &resolution).map(|()| Status::RecordedUndelivered)
         }
-        // Lost reply, then absent: UNDECIDED until Lean's positive no-append
-        // frame exists (ruling 2026-10-26; switch here, by name, to
-        // "settled by Lean's NO_RECORD frame").
+        // Lost reply or the undecided envelope (255), then absent: UNDECIDED
+        // (ruling 2026-10-26). Lean's positive no-append frame is NO_RECORD,
+        // settled above without this lookup.
         Some(_) if !answered => Ok(Status::Uncertain),
         Some(_) => {
             // The Host answered this submit with an outcome frame and Lean
@@ -761,8 +803,102 @@ mod tests {
         frame
     }
 
-    /// Answered `contention`, then op35 `absent`: Lean holds no record of
-    /// this call, so it settles and the member is told contention.
+    /// Lean's NO_RECORD frame (253) settles the call by itself: no lookup,
+    /// and the member is told the decided class it carries.
+    #[test]
+    fn decide_no_record_marker_settles_without_lookup() {
+        // Lean's words are `type reason`; the fake inspector gives `refused` a reason.
+        for (word, status, words) in [
+            ("contention", Status::Contention, "contention"),
+            ("refused", Status::Refused, "refused operationRejected"),
+            ("unavailable", Status::Unavailable, "unavailable"),
+        ] {
+            let fake = FakeHost::new(&format!("fence-no-record-{word}"));
+            let frame = outcome_frame(RESPONSE_NO_RECORD, word);
+            let (active, marker, ingress) = armed(&fake.root, 1, Some(&frame));
+            // No reply is scripted: a lookup would find the socket refusing.
+            assert!(fake.serve(vec![]).join().unwrap().is_empty());
+            let outcome = decide(&fake.operator, &active, &marker, "1", &ingress, Reply::Frame(&frame));
+            assert_eq!(outcome.status, status, "{word}");
+            assert_eq!(outcome.lean.as_deref(), Some(words));
+            assert!(!active.exists(), "{word}: settled on the frame");
+            assert!(!fake.root.join("dispatch-op-1").read_dir().unwrap().any(|e| {
+                e.unwrap().file_name().to_string_lossy().starts_with("op35-lookup-")
+            }), "{word}: no op35 lookup");
+            let resolution: Value =
+                serde_json::from_slice(&fs::read(fake.root.join("dispatch-op-1").join(RESOLUTION)).unwrap()).unwrap();
+            assert_eq!(resolution["status"], "no-record");
+            assert_eq!(resolution["by"], "no-record-marker");
+            let body = String::from_utf8(outcome.http_response(false)).unwrap();
+            assert!(body.contains(&format!("\"status\":\"{word}\"")), "{body}");
+            assert!(body.contains("\"recorded\":\"no\""), "{body}");
+            assert!(body.contains("\"retry\":\"new-request\""), "{body}");
+        }
+    }
+
+    /// HOST_OUTCOME (255) is the undecided envelope: inspected and followed by
+    /// `absent`, the call stays undecided with the same-call retry.
+    #[test]
+    fn decide_host_outcome_marker_stays_undecided_after_absent() {
+        let fake = FakeHost::new("fence-host-outcome");
+        let frame = outcome_frame(RESPONSE_HOST_OUTCOME, "uncertain");
+        let (active, marker, ingress) = armed(&fake.root, 1, Some(&frame));
+        let served = fake.serve(vec!["absent"]);
+        let outcome = decide(&fake.operator, &active, &marker, "1", &ingress, Reply::Frame(&frame));
+        assert_eq!(outcome.status, Status::Uncertain);
+        assert_eq!(outcome.lean.as_deref(), Some("uncertain"));
+        assert_eq!(served.join().unwrap(), vec![(35, ingress)]);
+        assert!(active.exists());
+        let body = String::from_utf8(outcome.http_response(false)).unwrap();
+        assert!(body.contains("\"status\":\"undecided\""), "{body}");
+        assert!(body.contains("\"retry\":\"same-call\""), "{body}");
+        assert!(body.contains("\"recorded\":\"unknown\""), "{body}");
+    }
+
+    /// Before submit (ops 36/37, append-free by the registry), a reply under
+    /// either marker is the refusal it carries; nothing was recorded.
+    #[test]
+    fn refused_before_submit_reads_both_markers_as_the_refusal() {
+        for op in [36u8, 37] {
+            assert!(crate::host_operations::NO_APPEND_OPERATIONS.contains(&op), "op{op} is append-free");
+        }
+        for marker in [RESPONSE_NO_RECORD, RESPONSE_HOST_OUTCOME] {
+            let fake = FakeHost::new(&format!("fence-before-submit-{marker}"));
+            // The operator's pin is its socket; bind it, serve nothing.
+            assert!(fake.serve(vec![]).join().unwrap().is_empty());
+            let attempt = fake.root.join("dispatch-op-1");
+            DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+            let frame = outcome_frame(marker, "refused");
+            let error = refused_before_submit(&fake.operator, &attempt, "1", 36, &frame);
+            let outcome = DispatchOutcome::of(&error).unwrap();
+            assert_eq!(outcome.status, Status::Refused, "marker {marker}");
+            assert_eq!(outcome.lean.as_deref(), Some("op36 refused operationRejected"));
+        }
+    }
+
+    /// The transport admits the Host's two response markers for any operation
+    /// and still refuses a stray opcode.
+    #[test]
+    fn invoke_admits_both_response_markers_and_refuses_a_stray_opcode() {
+        let fake = FakeHost::new("fence-markers");
+        let served = fake.serve_marked(vec![
+            (Some(RESPONSE_NO_RECORD), "contention"),
+            (Some(RESPONSE_HOST_OUTCOME), "uncertain"),
+            (Some(7), "refused"),
+        ]);
+        let deadline = || Instant::now() + Duration::from_secs(10);
+        let no_record = fake.operator.invoke_until(34, b"submit", deadline()).unwrap();
+        assert_eq!(no_record[4], RESPONSE_NO_RECORD);
+        let undecided = fake.operator.invoke_until(36, b"plan", deadline()).unwrap();
+        assert_eq!(undecided[4], RESPONSE_HOST_OUTCOME);
+        let stray = fake.operator.invoke_until(34, b"submit", deadline()).unwrap_err();
+        assert_eq!(stray.to_string(), "Mini operator reply opcode mismatch");
+        let opcodes: Vec<u8> = served.join().unwrap().into_iter().map(|(op, _)| op).collect();
+        assert_eq!(opcodes, vec![34, 36, 34]);
+    }
+
+    /// Answered `contention` under op 34's own frame, then op35 `absent`: Lean
+    /// holds no record of this call, so it settles and the member is told contention.
     #[test]
     fn decide_answered_contention_then_absent_settles_no_record() {
         let fake = FakeHost::new("fence-contention");
