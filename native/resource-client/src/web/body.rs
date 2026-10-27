@@ -183,6 +183,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
     match parts {
         ["tour"] => tour(site, None),
         ["export"] if !site.front.read_only => export_page(site, None),
+        ["subscribe"] if !site.front.read_only => super::subscribe::page(site, None),
         [] | ["doc"] => {
             if site.front.read_only {
                 import_inbox(site);
@@ -196,6 +197,10 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
                     operations(site),
                     page.body
                 );
+            }
+            if let Some(summary) = super::subscribe::summary() {
+                let next = if site.front.read_only { "<a href=\"/join\">Join</a>, then subscribe from your workspace" } else { "<a href=\"/subscribe\">Subscribe</a>" };
+                page.body.push_str(&format!("<section><h2>Subscribers</h2><p>{summary} {next}.</p></section>\n"));
             }
             if !site.front.read_only && now_secs() >= EXPORT_NOTICE_FROM {
                 page.body.insert_str(0, "<section class=\"notice\"><h2>This demo ends on 11 November</h2><p>Take your world with you: <a href=\"/export\">Export my world</a> hands you one archive of your documents, attempts, rooms and keys' public half, with the world root it was read at.</p></section>\n");
@@ -681,6 +686,8 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
             }
             act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
         }
+        ["subscribe", "pay"] => super::subscribe::pay(site),
+        ["subscribe", "join"] => super::subscribe::join(site),
         ["export"] => {
             let name = format!("world-{}", now_secs());
             // The run's own words land beside the archive (NAME.log), so a failure is said on the page.

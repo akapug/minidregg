@@ -189,6 +189,10 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
+# The subscriber tier's page: what it buys (from the provider table, when the box has the row),
+# the policy line marked for ember, the price and window from the room, the two forms.
+page=$(req GET /subscribe)
+row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'data-owner="ember"' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
 # Export my world (the 11 November shutdown): start, wait until it is ready, read the document page
 # (its stamp carries the read's height and world root), download (streamed through the gateway,
 # then deleted on the box), untar: the document's text and the manifest's root are the live world's.

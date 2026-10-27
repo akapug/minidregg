@@ -14,6 +14,8 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
+    ("Subscribe", "/subscribe", "The subscriber tier: a house Hermes in the subscribers room; your window and its end."),
+    ("Export", "/export", "Your world as one archive, to take with you."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
     ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans; the default laws."),
     ("Tour", "/tour", "Fifteen minutes from a browser: the twelve steps, with the real forms."),
