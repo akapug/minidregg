@@ -5,9 +5,12 @@
 # request the grammar refuses — through the client (`mini author`, the path a
 # friend's draft takes: the client's own pure native Host, which refuses with exit 2
 # and the encoded outcome) or as raw socket frames — and asserts:
-#   * the answer is the named refusal: a Host frame `refused malformed`, phase
-#     `op N`, with the decoder's position; or the socket's own 254 refusal for an
-#     envelope the Host never sees;
+#   * the answer is the named, DECIDED refusal: a Host frame `refused malformed`,
+#     phase `op N`, with the decoder's position, under NO_RECORD (253: a grammar
+#     verdict on the client's own bytes provably left no record,
+#     `Host/RequestRefusal.lean` exceptionAnswer; before lane/lean-critical the
+#     same frame went out under 255, which now carries only undecided outcomes);
+#     or the socket's own 254 refusal for an envelope the Host never sees;
 #   * the Host process that answered is the SAME process that started the row
 #     (a Host exit masked by `mini serve` restarting it is a FAIL here);
 #   * a describe (op 0) is answered afterwards.
@@ -78,12 +81,13 @@ def check(name, act):
     row(name, ok and same and live,
         f"{detail}; host pid {before}->{after}; describe {'answered' if live else 'FAILED'}")
 
-def host_refused(reply, op, needle, answer=255):
+NO_RECORD = 253  # protocol/host-operations.json response_markers: the decided no-append refusal
+def host_refused(reply, op, needle, answer=NO_RECORD):
     if reply is None: return False, "no reply (connection closed)"
-    if reply[0] != answer: return False, f"reply op {reply[0]}"
+    if reply[0] != answer: return False, f"reply op {reply[0]} (expected {answer})"
     body = reply[1:]
     ok = body.startswith(TAG) and f"op {op}".encode() in body and needle.encode() in body
-    return ok, "255 " + body[len(TAG):].decode("utf-8", "replace").replace("\n", " ")[:160]
+    return ok, f"{answer} " + body[len(TAG):].decode("utf-8", "replace").replace("\n", " ")[:160]
 
 def socket_refused(reply, needle):
     if reply is None: return False, "no reply"
