@@ -372,7 +372,7 @@ pub(crate) fn resubmit(ws: &Ws, retained: &Path) -> Result<Value> {
     if let Some(dir) = own_attempt(retained) {
         mark_submitted(dir)?;
     }
-    let outcome = inspect(ws, "outcome", &invoke(ws, 212, &ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::ACTIVITY_SUBMIT, &ingress)?)?;
     retain_decision(retained, &outcome)?;
     Ok(outcome)
 }
@@ -380,7 +380,7 @@ pub(crate) fn resubmit(ws: &Ws, retained: &Path) -> Result<Value> {
 /// The receipt-only lookup (op 213) of the retained ingress; absence never submits.
 pub(crate) fn lookup(ws: &Ws, retained: &Path) -> Result<Value> {
     let ingress = read_ingress(retained)?;
-    let outcome = inspect(ws, "outcome", &invoke(ws, 213, &ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::ACTIVITY_LOOKUP, &ingress)?)?;
     retain_decision(retained, &outcome)?;
     Ok(outcome)
 }
