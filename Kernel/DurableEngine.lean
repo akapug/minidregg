@@ -130,12 +130,15 @@ theorem preflight_light (engine : Engine) (intent : DataIntent rootBytes) :
 
 /-- One accepted record, installed as data: each write replaces its cell (the
 first write of a cell wins, as `lookupPostBytes` reads), each nullifier joins
-the set, the journal and history gain one cons each. -/
+the set, the journal and history gain one cons each. The remaining budget is
+materialized per install (`Charge.materialize`): a layered `fun lane => before lane - charge lane`
+would re-run every installed intent's `exactCharge` (its writes, guards and hashes) at every
+lane query, Θ(installs) per query since the engine's base. -/
 def install (engine : Engine) (intent : DataIntent rootBytes) : Engine where
   absent := engine.absent
   cells := intent.writes.foldr (fun write table => table.insert write.cellId write.canonicalPostBytes)
     engine.cells
-  available := fun lane => engine.available lane - intent.exactCharge lane
+  available := (Charge.materialize fun lane => engine.available lane - intent.exactCharge lane).toCharge
   spentBefore := engine.spentBefore
   spent := intent.nullifiers.foldl (fun spent nullifier => spent.insert nullifier) engine.spent
   journal := Thunk.mk fun _ => (intent.transactionId, intent.erase) :: engine.journal.get
@@ -214,6 +217,7 @@ theorem view_install (engine : Engine) (intent : DataIntent rootBytes) :
            engine.spentBefore nullifier) = _
          rw [contains_foldl]
          by_cases member : nullifier ∈ intent.nullifiers <;> simp [member, view, consumed])
+      | exact Charge.materialize_eq _
       | rfl
   · exact bytesEq
 
