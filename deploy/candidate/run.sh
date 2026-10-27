@@ -6,8 +6,9 @@
 #   run.sh start   --state DIR     background, with DIR/public/server.pid
 #   run.sh stop    --state DIR     stop what `start` started (checks the pid's cmdline)
 #   run.sh upgrade --manifest N1_MANIFEST --state DIR   rebind a stopped Store
-#   run.sh platform --state DIR --management-subject S --management-key K   set a stopped Store's lifecycle
-#                                  management (a Host setting, not a genesis parameter); then start
+#   run.sh platform --state DIR --management-subject S --management-key K   set the Store's lifecycle
+#                                  management (a Host setting, not a genesis parameter); a Store run.sh
+#                                  started is stopped by its PID file and started again
 #   run.sh status  --state DIR
 #   run.sh sponsor --state DIR     create the genesis sponsor's workspace (Store must be serving)
 #   run.sh unit    --state DIR     print a systemd unit that runs `serve`
@@ -186,6 +187,11 @@ platform() {
   [ -f "$CONFIG" ] || candidate_die "no pinned config at $CONFIG"
   [ "$(jq -er '.pinnedConfigSha256' "$STATE/state.json")" = "$(candidate_sha256 "$CONFIG")" ] \
     || candidate_die "pinned config differs from recorded state"
+  # A Store this script started (live server.pid) is stopped by that PID file and started again
+  # after the rewrite; any other process naming the config (a systemd unit) is refused: restart
+  # through the unit instead (stop it, run platform, start it).
+  platform_restart=
+  if server_pid >/dev/null; then platform_restart=1; stop; fi
   candidate_require_stopped
   service_config=$STATE/public/mini.config
   platform_tmp=$(mktemp -d "$STATE/tmp/platform.XXXXXX")
@@ -202,7 +208,8 @@ platform() {
   mv "$platform_tmp/state.json" "$STATE/state.json"
   rm -rf -- "$platform_tmp"
   trap - EXIT
-  printf 'lifecycle management set to subject %s key %s in %s; start the Store (clients re-pin the config)\n' "$management_subject" "$management_key" "$CONFIG"
+  printf 'lifecycle management set to subject %s key %s in %s (clients re-pin the config)\n' "$management_subject" "$management_key" "$CONFIG"
+  if [ -n "$platform_restart" ]; then start; else echo "the Store was not running; start it"; fi
 }
 
 serve_exec() {
