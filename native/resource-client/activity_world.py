@@ -266,11 +266,10 @@ class World:
         (root / 'policy.json').write_text(json.dumps(policy, indent=1))
         self.sh('policy', self.host, '/dev/null', 'author', 'objective-policy', root / 'policy.json',
                 root / 'policy.hex')
-        self.sh('keygen-second', self.mini, 'keygen', '--secret', root / 'second.key', '--public',
-                root / 'second.pub')
-        public = (root / 'second.pub').read_bytes().hex()
+        # The second subject's key is made by the fixture (NEWPARTICIPANT_EXTRA_SUBJECTS -> W/extra/40.key), not
+        # here: a world whose genesis holds no per-run key is the same world every run, so it has a template.
         enrollment = [{'key': {'keyId': '4000', 'keyEpoch': '2', 'algorithm': '1', 'subject': self.SECOND,
-                               'publicKey': public, 'activeFrom': '0', 'activeUntil': '1000000',
+                               'activeFrom': '0', 'activeUntil': '1000000',
                                'nextKeyDigest': None},
                        'accountId': self.SECOND, 'spendCapabilityId': self.SECOND_SPEND, 'controlCapabilityId': '4003',
                        'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
@@ -281,14 +280,14 @@ class World:
         self.sh('genesis', 'sh', self.repo / 'native/resource-client/newparticipant-acceptance.sh', self.host,
                 self.mini, self.store, self.verifier, self.W, self.sock,
                 env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
-                     'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-second.json'),
+                     'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
                      'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance})
         self.config = self.W / 'deployment' / 'pinned-config.json'
         self.sponsor = self.W / 'sponsor'
         self.second = root / 'second'
         self.second.mkdir(mode=0o700)
         second = {'type': 'minidregg-participant-workspace-v1', 'host': str(self.host), 'socket': str(self.sock),
-                  'config': str(self.config), 'key': str(root / 'second.key'), 'subject': self.SECOND}
+                  'config': str(self.config), 'key': str(self.W / 'extra' / f'{self.SECOND}.key'), 'subject': self.SECOND}
         # The second subject names the Host image digest the sponsor's `workspace init` pinned (one hash per run).
         host_sha = json.loads((self.sponsor / 'workspace.json').read_text()).get('hostSha256')
         if host_sha:

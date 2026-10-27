@@ -143,7 +143,7 @@ Studio stays routed nowhere in the body (its deletion is L2's, D7).
 
 | path | what |
 |---|---|
-| `native/mini-web/` | the gateway: `main.rs` (listener, pool, router), `http.rs`, `session.rs` (cookie, CSRF, helper client), `ws.rs` (RFC 6455), `term.rs` (pty bridge, replay ring), `proxy.rs` (the body over the helper's fd), `page.rs` (the page shell and partials), `assets/` (`app.css`, `app.js`, `vendor/xterm*` pinned in `VENDOR.md`); `tests/dev_flow.rs` runs the real helper (`--dev`) and gateway end to end without a Host |
+| `native/mini-web/` | the gateway: `main.rs` (listener, pool, router), `http.rs`, `session.rs` (cookie, CSRF, helper client), `ws.rs` (RFC 6455), `term.rs` (pty bridge, replay ring), `proxy.rs` (the body over the helper's fd), `page.rs` (the page shell and partials), `assets/` (`app.css`, `app.js`, `vendor/xterm*` pinned in `VENDOR.md`); `native/mini-web/tests/dev_flow.rs` runs the real helper (`--dev`) and gateway end to end without a Host |
 | `native/mini-web-spawn/` | the helper: `main.rs` (socket loop, peer check, verbs), `spawn.rs` (pty, setpriv line, scope), `store.rs` (logins, sessions) |
 | `native/resource-client/src/web.rs` + `web/` | the body face |
 | `deploy/web-frontend/` | `mini-web.service`, `mini-web-spawn.{socket,service}`, the 60-demo-confine drop-ins against the demo floor, `Caddyfile.app`, `door.patch`, `INSTALL.md` |

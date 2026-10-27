@@ -748,8 +748,9 @@ mod tests {
     fn unchecked_operator_opcodes_refuse_before_any_frame() {
         let mut consent = Consent(answering(224, ""));
         assert!(consent.operator_plan(1, b"", b"").is_err());
-        assert_eq!(CONSENT_PLANS.len(), 31);
+        // The list is generated from protocol/host-operations.json; pin membership, not a count.
         assert!(CONSENT_PLANS.contains(&210) && CONSENT_PLANS.contains(&215));
+        assert!(CONSENT_PLANS.contains(&187) && CONSENT_PLANS.contains(&194));
     }
 
     #[test]

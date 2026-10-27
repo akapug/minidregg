@@ -38,9 +38,12 @@ uses a dedicated root-owned bubblewrap executable and AppArmor profile because
 the generic executable cannot create the required namespaces under that
 host's policy. That evidence covers confined ACP startup, not a model prompt.
 
-`launch-gate` is the candidate's `bin/launch-gate` (role `launchGate`, built only
-through `native/launch-gate` from `launch-gate.rs`, with the target's `libc`
-constants); install it beside `bwrap`; both must be executable. The launcher verifies the sibling gate's
+`launch-gate` is the candidate's `bin/launch-gate` (role `launchGate`,
+`deploy/candidate/package.py:70`), built only by `cargo build -p launch-gate`
+from `native/launch-gate`, whose binary target is `launch-gate.rs` in this
+directory (`native/launch-gate/Cargo.toml`, `libc` pinned there). Journeys take
+that binary as `LAUNCH_GATE` (`native/grain-runtime/hermes-journey.sh:27`); only
+`probe.sh:40` compiles its small socket helper with a bare `rustc`. Install it beside `bwrap`; both must be executable. The launcher verifies the sibling gate's
 exact protocol response before advertising its own protocol to the runtime.
 Before spawning, the controller durably arms
 the operation gate and records the exact unit name in its private state. The
@@ -60,9 +63,8 @@ entry alone must never trigger an automatic kill of a possibly reused unit.
 `install-controller` writes the one unit shape grain-runtime's own checks
 accept: `mini-grain-controller@TASK.service`, running a persistent
 `grain-runtime serve`, with the exact task, executable and config paths. It
-has two modes (`src/systemd_manager.rs` `load` is the contract); there is no
-template unit to edit (the historical one, which could not satisfy the
-controller, was deleted on 2026-10-26; dregg-infra keeps its own):
+has two modes (`native/grain-runtime/src/systemd_manager.rs` `load` is the contract);
+there is no template unit to edit:
 
 - **user** (default, run as the task account): a user unit under that
   account's user manager with all three of `MINI_GRAIN_CONTROLLER_MANAGER=user`,
@@ -154,8 +156,8 @@ runtime and socket paths and uses OpenSSH's `restrict` option. For example,
 after installing the persistent service and task configuration:
 
 ```text
-restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock" ssh-ed25519 AAAA... hard-key
-restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock soft" ssh-ed25519 AAAA... soft-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/control.sock" ssh-ed25519 AAAA... hard-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/control.sock soft" ssh-ed25519 AAAA... soft-key
 ```
 
 The two-argument entry defaults to **hard**: SSH EOF interrupts an active
@@ -182,13 +184,17 @@ unprivileged user namespaces. The runtime root should contain only the fixed
 worker executable and its nonsecret assets. The workspace is the worker's
 sole host writable mount. The launcher clears inherited environment variables
 and does not mount the controller's key, configuration or state directory.
-`--network none` has no network access. `--network host` permits the worker to
+`--network none` has no network access; the Hermes controller shape uses it
+(`deploy/hermes/grain-create.demo.json:19`, `deploy/hermes/controller.demo.json:68-70`).
+`--network host` permits the worker to
 reach the host network, including loopback services, and is suitable only
 when those services have their own authorization boundary. Provider credentials
 and network policy still need a dedicated deployment decision.
 
-The unit has a 600 second runtime ceiling, 2 GiB memory ceiling and 128 task
-ceiling. Those are physical backstops, not Mini allowance units or provider
+The unit's runtime ceiling is the command's `wallTimeSeconds`, which the
+runtime passes as `MINI_GRAIN_RUNTIME_MAX_SEC` (`native/grain-runtime/src/main.rs:3604-3605`);
+without it the launcher uses 600 seconds and accepts 1 to 1800 (`bwrap:93-101`).
+The memory ceiling is 2 GiB and the task ceiling 128 (`bwrap:161`). Those are physical backstops, not Mini allowance units or provider
 usage measurements. A `--network host` worker cannot be treated as having
 network egress containment. Do not use this script to start a task until its
 Mini host, custody key, task IDs, budget and reconciliation records are

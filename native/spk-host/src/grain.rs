@@ -36,6 +36,8 @@ use std::time::{Duration, Instant};
 mod profile_upgrade;
 #[path = "grain_management.rs"]
 mod management;
+#[path = "grain_agent_route.rs"]
+mod agent_route;
 
 const MAX_JSON: u64 = 64 * 1024;
 /// How long `grain start` waits for the resident's START completion before
@@ -1020,6 +1022,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     profile_upgrade::require_ready_runtime(&host.profile)?;
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
+    let route_lock = agent_route::lock(&app_dir)?;
     let placement = load_placement(&app_dir.join("placement.json"))?;
     let install_dir = app_dir.join("install");
     let install_config = read_json(&install_dir.join("install.json"))?;
@@ -1116,6 +1119,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
+    let agents = agent_route::configs(&app_dir, app, &placement, &journal)?;
     let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
         "journalDir":journal,
@@ -1158,7 +1162,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         "completionManagementCustody":install_config["completionManagementCustody"],
         "completionSemantics":host.profile.completion_semantics,
         "entrances":entrances,
-        "agents":[],
+        "agents":agents,
     });
     resident["brokerSocket"] = json!(broker::socket_path(&host.profile.grains_root, host.profile.broker_socket.as_deref())?);
     if let Some(seconds) = host.profile.ws_authority_lease_seconds {
@@ -1167,6 +1171,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
 
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
     crate::resident_service::validate_config(&config_path)?;
+    drop(route_lock);
     if prepare_only { return Ok(json!({"protocol":"mini-spk-prepared-resident-v1","residentConfig":config_path,"unit":unit})); }
     install_unit(host, app, generation)?;
     let started = Instant::now();
@@ -1185,7 +1190,9 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                 .and_then(Value::as_str)
                 .is_some_and(|dir| Path::new(dir).join("http.sock").exists())
         });
-        if exists(&completed)? && sockets_ready {
+        let agents_ready = agents.iter().all(|agent| agent.get("socket").and_then(Value::as_str)
+            .is_some_and(|socket| Path::new(socket).exists()));
+        if exists(&completed)? && sockets_ready && agents_ready {
             break completed;
         }
         let state = unit_active(&unit)?;
@@ -1422,6 +1429,7 @@ pub fn usage() -> &'static str {
     "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk \
      [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] [--management-selector PATH] | \
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
+     grain agent-route PROFILE APP AGENT_ROUTE_REQUEST.json | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
      grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
@@ -1583,6 +1591,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 ("route", [app, request]) => {
                     crate::grain_route::route(&host_view(&host), app, Path::new(request))
                 }
+                ("agent-route", [app, request]) => agent_route::register(&host, app, Path::new(request)),
                 ("start", [app]) => start(&host, app),
                 ("prepare-resident", [app]) => start_inner(&host,app,true),
                 ("stop", [app]) => stop(&host, app),

@@ -311,3 +311,31 @@ artifacts 173M and logs 54M. The free-space floor (60G) was never approached.
    The world's `public/server.pid` (3209913) is already dead. They need the operator's decision: stop them by
    PID or by `systemctl --user stop run-u59970.scope`.
 5. Nothing was deleted. The lane `pipeline/lanes/cand-20261026`, `C`, `gate`, `proot`, `artifacts` (symlinks) and `journeys` all remain.
+
+## Follow-ups, 2026-10-27 (the coordinator's rulings)
+
+- **m6grain: PASS (1998 s).** `/etc/sudoers.d/mini-operator` now admits `/tank/dregg-build/pipeline/lanes/cand-20261026/src`
+  in both `MINI_TWO_WORLD` and `MINI_WORLD_INSTALL`. The new file was checked with `visudo -cf`, installed root:root 0440,
+  and `visudo -c` passes for the whole config. The change and its undo are in `pipeline/box-changes.md`; the old file is at
+  `claude-candidate-20261026/mini-operator.sudoers.before-cand-20261026`. The row was run from the lane tree
+  (`journey-runner --row m6grain --source-tree <lane>/src`).
+- **Composed scenario, re-run on dregg-infra 5501f4f** (journey/growth skipped; `composed-only.sh` = jdeploy3 steps 0, 2, 3;
+  473 s, world up in 150 s). rooms=pass. churn=pass. documents=stopped:
+  `documents:shared:member-2:submit: rc 3`. The Host refused with "target … moved since the plan was signed (phase stale-target)":
+  concurrent appends to the shared doc are not retried or merged (ruled a real product red; repair assigned to the web/docs lane).
+  apps, connector, residents: not reached; and the spec has none of their inputs (they come from lanes L3/L4/L9). restart: not reached.
+- **jcertify, first real run on the merged frame.** One change to the script: its hard-coded `/tmp` scratch moved to `/tank`.
+  320 records, certified advanced 4 times, certifiedHeight 323. Then `mini-clock-tick` printed nothing and was killed at its
+  120 s timeout, at box load about 30. Write median 9.3 s, max 390 s (HDD, under load; published, not judged).
+- **exchange on lane/fn-fleet 3e2cd5ab: PASS (23 s)** in the row's default 24 GiB scope. An 8 GiB scope fails with
+  "native worker reservation is not held", because the fn node is sized at 8192 MiB. Under a transient root `systemd-run`
+  with the unit's full hardening, the unit's `Environment=SBCL_USER_ARGS=--dynamic-space-size 2048` gets split by systemd
+  and SBCL dies with "--dynamic-space-size argument is not a number". With the value quoted, SBCL starts. Fix: quote that line.
+- **SSD lane space:** `rpool/lanes` at `/othersys/lanes` (lz4; rpool has altroot=/othersys), recorded in box-changes.md.
+- **M7 reference, built cold on dregg-build** (`/build/reference/a0db11f8`). The hbox attempt was stopped at 309/787 modules
+  because box load of 55-87 made its timing meaningless. **Cold build: mathlib 81 s, Lean closure 787 modules 4726 s,
+  native Host 5212 s, consent 436 s, Rust 195 s, total 5926 s (98.8 min); peak 19.3 GiB; lean-rss max 18.5 GiB
+  (Kernel.PayEnrolReceiver).** `package.py` had to be re-run from a repo containing the commit, because it runs
+  `git rev-parse COMMIT^{tree}` in its cwd. **Reproduction vs C:** Lean host and consent are byte-identical across the two
+  boxes. All 19 Rust binaries differ, because the distro GCC crt objects differ (Debian 14.2.0-19 vs Ubuntu 14.2.0-4ubuntu2).
+  The rustc and rust-lld are identical. **M7 would FAIL** with 1 of 4 core hashes reproducing (host), so the row was not run.

@@ -102,21 +102,18 @@ fn retryable_status(status: u16) -> bool {
     status == 429 || (500..=599).contains(&status)
 }
 
-/// The decision for one class on one route. `user` is the user route, whose
-/// quote is the per-operation fee whatever the reply says.
-pub(crate) fn decide(class: FailureClass, route: &str) -> Decision {
-    let user = route == "user";
+/// The decision for one class. A complete reply of any status is quoted by
+/// the Host (`Host/ProviderUsage.lean` `quoteResponse`: the per-operation fee
+/// on the user route, the route fee for a refused reply on a metered route),
+/// so it settles like a 200. `_route` is the attempt's credential route.
+pub(crate) fn decide(class: FailureClass, _route: &str) -> Decision {
     let (state, resend, retry) = match &class {
         FailureClass::NotSent { .. } | FailureClass::TimeoutBeforeSend => {
             (DecidedState::ReleasedNotSent, Resend::SameAttemptBackoff, None)
         }
         FailureClass::CompleteNon200 { status } => {
             let resend = if retryable_status(*status) { Resend::NewReserveBackoff } else { Resend::Never };
-            if user {
-                (DecidedState::SettleByQuote, resend, None)
-            } else {
-                (DecidedState::SettleAwaitingHost, resend, Some(AUDITED_RETRY.to_owned()))
-            }
+            (DecidedState::SettleByQuote, resend, None)
         }
         FailureClass::TimeoutAfterSend | FailureClass::Malformed { .. } | FailureClass::CrashAfterSend => {
             (DecidedState::SettleAwaitingHost, Resend::Never, Some(AUDITED_RETRY.to_owned()))
@@ -253,8 +250,8 @@ mod tests {
     fn provider_failure_classes_land_in_their_decided_states() {
         let pool_429 = decide(classify(true, Some("received:429:application/json"), Some(429)).unwrap(), "pool");
         assert_eq!(pool_429.class, FailureClass::CompleteNon200 { status: 429 });
-        assert_eq!(pool_429.state, DecidedState::SettleAwaitingHost);
-        assert_eq!(pool_429.retry.as_deref(), Some(AUDITED_RETRY));
+        assert_eq!(pool_429.state, DecidedState::SettleByQuote);
+        assert_eq!(pool_429.retry, None);
         assert_eq!(pool_429.resend, Resend::NewReserveBackoff);
 
         let user_429 = decide(FailureClass::CompleteNon200 { status: 429 }, "user");

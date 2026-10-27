@@ -604,6 +604,20 @@ impl Worker {
     }
 }
 
+/// The owner's role basis for one grain: the world's basis (`allAccess` on the
+/// box) when the signed bridge declares no roles, role 0 when it does, as the
+/// journey's `basis()` picks it. A bridge that declares roles (the oracle: role 0
+/// `Researcher`, permission `query`) refuses a session whose permissions are not
+/// exactly its declared one, so `allAccess` would be refused at enrolment.
+fn role_basis(world: &Value, schema: &Value) -> Value {
+    let declares_roles = schema.get("roles").and_then(Value::as_array).is_some_and(|r| !r.is_empty());
+    if declares_roles && world.get("type").and_then(Value::as_str) == Some("allAccess") {
+        json!({"type":"role","id":"0"})
+    } else {
+        world.clone()
+    }
+}
+
 fn route_json(bound: &RouteBound, member: &str) -> Value {
     json!({"member":member,"directory":bound.directory,"socket":bound.socket,
         "browserTokenSha256":bound.browser_token_sha256,"bootstrapTokenSha256":bound.bootstrap_token_sha256,
@@ -1061,7 +1075,7 @@ impl World for ProcessWorld {
                     "schemaRoot":schema["root"],"schemaVersion":schema["version"]},
                 "participant":{"session":session.to_string(),"descriptorResource":(session + 1).to_string(),"kind":"web","subject":m,"origin":{"type":"human"},
                     "sessionCapability":cap.to_string(),"appObserveCapability":appcap,"ticketObserveCapability":(tcap + 2).to_string()},
-                "ceiling":{"basis":self.role_basis,"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
+                "ceiling":{"basis":role_basis(&self.role_basis, &schema),"added":[],"removed":[],"roleSchemaRoot":schema["root"],"roleVersion":schema["version"]},
                 "issueNonce":(base + 500).to_string(),"notAfter":"1000000000"},
                 "issuer":m,"appDelegateCapability":appcap,"ticketOwnerCapability":tcap.to_string(),"ticketControlCapability":(tcap + 1).to_string()},
                 "payer":m,"funding":[],"sourceCapabilities":["42"],
@@ -1149,12 +1163,13 @@ impl World for ProcessWorld {
     }
 }
 
-/// `mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH]
+/// `mini apps-worker --state DIR --world WORLD.json [--member-socket PATH] [--edge-socket PATH]
 /// [--member-group mini-sessions] [--edge-group mini-edge] [--dev-member NAME]`
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let state = absolute(&path(args.required("state")?))?;
     let world_path = absolute(&path(args.required("world")?))?;
-    let socket = args.optional("socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| PathBuf::from("/run/mini-apps/worker.sock"));
+    // `--socket` is the client's Host-socket option, consumed before dispatch: the member socket has its own name.
+    let socket = args.optional("member-socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| PathBuf::from("/run/mini-apps/worker.sock"));
     let edge = args.optional("edge-socket").map(|v| absolute(&path(v))).transpose()?.unwrap_or_else(|| state.join("edge.sock"));
     let dev_member = args.optional("dev-member").map(|v| v.into_string().map_err(|_| "--dev-member must be UTF-8".to_owned())).transpose()?;
     let member_group = args.optional("member-group").map(|v| v.into_string().map_err(|_| "--member-group must be UTF-8".to_owned())).transpose()?;

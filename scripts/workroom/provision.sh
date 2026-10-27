@@ -163,7 +163,8 @@ if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
       key:{keyId:$o.keyId,keyEpoch:"2",algorithm:"1",subject:$o.subject,publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
       accountId:$o.account,spendCapabilityId:$o.spendCapability,controlCapabilityId:$o.controlCapability,
       factoryObserveCapabilityId:$o.factoryObserveCapability,initialBalance:"100",accountPredicate:{type:"all",predicates:[]}}] |
-    .payObserver={subject:$o.subject,capability:$o.capability,controlCapability:$o.payControlCapability,enrolCapability:$o.enrolCapability}
+    .payControlCapability=$o.payControlCapability |
+    .payObserver={subject:$o.subject,capability:$o.capability,enrolCapability:$o.enrolCapability}
   ' "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-observer.json"
   mv "$EVIDENCE/genesis-with-observer.json" "$EVIDENCE/genesis.json"
 fi

@@ -16,7 +16,13 @@ It links the system `libsqlite3` through a hand-written FFI and depends on
 creates a private linker alias in `OUT_DIR`; it does not bundle or modify
 SQLite.
 
-The production binary carries no crash or hold verb. The lifecycle tests
+The production binary `minidregg-link-sqlite-store` (`src/main.rs`) exposes the
+durable, journal, legacy-record, `durable-anchor-enroll`, `database-path` and
+`serve` verbs listed in `docs/DURABLE-STORE.md`, and no crash or hold verb. The
+crash and hold fixtures are a separate binary,
+`minidregg-link-sqlite-store-fixtures`, built only with `--features fixtures`
+for the Lean probe `scripts/durable-receiver.lean`; it is never part of a
+candidate. The lifecycle tests
 (`tests/lifecycle.rs`, `tests/durable_anchor.rs`) run those fixtures from the
 test binary itself (`tests/support`), killed at each publication boundary, and
 reopen, retry and tamper against the real helper.

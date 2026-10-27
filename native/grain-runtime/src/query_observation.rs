@@ -439,4 +439,53 @@ printf '%s' '{"type":"refused","reason":"stale-root"}' > "$5"
         drop(runtime);
         fs::remove_dir_all(root).unwrap();
     }
+
+    /// A failed prompt's note clears exactly once its typed outcome record
+    /// exists: before the record the post-record reconcile leaves it (and
+    /// logs why); after it, the note is derived once; a second pass is a
+    /// no-op.
+    #[test]
+    fn failed_prompt_note_clears_once_its_record_exists() {
+        let (root, cfg, _) = fixture();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let mini = r#"#!/bin/sh
+set -eu
+[ "$1" = query ] || exit 90
+dir=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir "$dir"
+printf '%s' '{"cell":{"root":"r","grain":{"task":"10","generation":"1","status":"1","remaining":"8","reserved":"0"}}}' > "$dir/view.json"
+printf '%s' '{"authorityRoot":"authority","worldRoot":"w","height":"10"}' > "$dir/challenge.json"
+"#;
+        fs::write(&cfg.mini, mini).unwrap();
+        fs::set_permissions(&cfg.mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut runtime = Runtime::open(cfg, root.join("controller-config.json")).unwrap();
+        let note = "Hermes prompt 9: hard disconnect";
+        runtime.journal.connection = Connection::Detached;
+        runtime.journal.unresolved_external.push(note.into());
+        runtime.reconcile_after_prompt_record();
+        assert_eq!(runtime.journal.unresolved_external, vec![note.to_owned()], "no record: the note stays");
+        let derived = |r: &Runtime| r.journal.reconciliation_log.iter()
+            .filter(|e| e["action"] == "derive-no-unaccounted-external-effects").count();
+        assert_eq!(derived(&runtime), 0);
+        prompt_outcome::write(&root, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: 9, resident_prompt_id: None,
+            prompt_sha256: None, session_id: None,
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry {
+                    admin: vec!["reconcile parent audited".into(), "reconcile effects".into()], operation: None },
+                detail: note.into() } }).unwrap();
+        runtime.reconcile_after_prompt_record();
+        assert!(runtime.journal.unresolved_external.is_empty(), "the record proves the note");
+        assert_eq!(derived(&runtime), 1);
+        runtime.reconcile_after_prompt_record();
+        assert_eq!(derived(&runtime), 1, "derived exactly once");
+        drop(runtime);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

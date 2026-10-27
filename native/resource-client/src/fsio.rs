@@ -106,7 +106,7 @@ pub(crate) fn check_private_dir(path: &Path) -> Result<()> {
 
 /// Refuse unless `socket` is an owner-private socket under an owner-private directory.
 pub(crate) fn check_private_socket(socket: &Path) -> Result<()> {
-    mini_sdk::private::check_socket(socket).map_err(String::from)
+    crate::operator_peer::check_socket(socket)
 }
 
 /// Create (0700) or accept an owner-private directory.

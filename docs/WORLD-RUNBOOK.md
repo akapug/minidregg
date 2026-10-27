@@ -45,7 +45,7 @@ manifest and any existing destination refuses. Then
 
 ## 3. Plan and units
 
-`world/make-plan.py` fills `provision-plan.template.json` from the staged candidate. The plan carries
+`make-plan.py [not in tree]` fills `provision-plan.template.json` from the staged candidate. The plan carries
 the member list (`entry` paid or sponsored), rooms, budgets, task ids (parent 7901, tool 7902),
 `paidEntryAdapter` and `payObserver`, and
 
@@ -62,9 +62,9 @@ Units (`User=<service user>`, `UMask=0077`, `Restart=no`, no `[Install]`) are re
 
 ## 4. Construct (the one genesis)
 
-    nohup world/run-construct.sh        # log world/construct.log
+    nohup run-construct.sh [not in tree]        # log world/construct.log
 
-It runs `candidate/source/native/resource-client/platform-provision.py start world/provision-plan.json`:
+It runs `candidate/source/native/resource-client/platform-provision.py start provision-plan.json [not in tree]`:
 genesis, paid synthetic-RPC members, the sponsored connector, forced-SSH `whoami` for every
 member. Last observed: about 50 s. Never re-run against a non-empty Store root. If it fails,
 preserve the Store contents under a renamed directory, understand, then rebuild.
@@ -75,7 +75,7 @@ Outputs under `R`: `runtime.json` (service pids, unit names, invocation ids, man
 (private) and `sock/public.sock`, `ssh/` (`sshd_config`, `known_hosts`, authorized keys, connector key),
 `members/<name>/join/{workspace,id_ed25519,mini.key,...}`.
 
-Deployment binding: write `world/binding-request.json`, run `platform-service-cut.py prepare`
+Deployment binding: write `binding-request.json [not in tree]`, run `platform-service-cut.py prepare`
 (verify-only plus the sshd auxiliary unit), publish the result root 0644 at
 `FRAME/etc/mini/deployment-binding.json` (ROOT), then rerun `mini-service-config.py` with it.
 

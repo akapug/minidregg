@@ -1,0 +1,88 @@
+{
+  "schema": "mini-oracle-u3-acceptance-evidence-v1",
+  "status": "incomplete",
+  "host": "dregg-build",
+  "public_deployment": false,
+  "specialist_panel_scores": null,
+  "runtime": {
+    "app_version": 5,
+    "raw_sha256": "eabd644ffabd7f21ffd9a6e44e6d5d461cb4b1dd2c3db2fcfcdad121de96295d",
+    "raw_bytes": 96985616,
+    "decoded_bytes": 519614440,
+    "candidate_receipt_sha256": "05c15112339540e3d1329babbbd86f231c2a91722b360379090ddf98b61092fa"
+  },
+  "public_data": {
+    "inventory_sha256": "32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a",
+    "files": 26,
+    "bytes": 15046949326,
+    "input_verification_receipt_sha256": "51df8cd4ad1dcfb31ec91c34ffd251f436c71ee332cf028b5db7d164845dc544"
+  },
+  "attempts": [
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3/run-v5",
+      "receipt_sha256": "d2472c21e77664bb3ed540ce19a5c99602086af496002057de367c79f44b59f3",
+      "receipt": {
+        "schema": "mini-oracle-pre-genesis-attempt-v1",
+        "unit": "oracle-u3-v5-20261027.service",
+        "invocation": "95c284d9c38548b9ac745d5bcb77bb62",
+        "run": "/build/lanes/oracle-acceptance-u3/run-v5",
+        "source_manifest_sha256": "19e451b9be3dccb8b6014dde1e16e560073035a4cbd7097e1c17c1299d643c73",
+        "execution_exit": 2,
+        "cleanup_exit": 0,
+        "namespace_created": false,
+        "cause": "fresh-genesis substitution-count guard mismatches one actual baseline config construction",
+        "files": {
+          "exit.json": "0e73b62f189e3b2cca7ea49d69a7391c9ccd6c88b1570f8e541875c2e00e9999",
+          "store-phase.log": "15124c90f626cced92bc510a5d928517b88a3478478aba4743adf09f788d29f8",
+          "world/evidence/store.stderr": "d8dbf9c6e7037b10dbfd61b4e3a0979404148d7e35f27da1250e89badc9a63bd",
+          "world/evidence/store.exit": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+        }
+      }
+    },
+    {
+      "remote_run": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
+      "receipt_sha256": "e5f05948af599901123fa69b52d57719b14777762e90f694eeb607fe9d16eb24",
+      "receipt": {
+        "schema": "mini-oracle-pre-sign-attempt-v1",
+        "unit": "oracle-u3-v5-r2-20261027.service",
+        "invocation": "be2a0b6226784112a9c74b2f2b16f430",
+        "source_manifest_sha256": "073c74088d515cbf610f756611807b45d8ba9fca6aa764ef617f15f20c8ea943",
+        "execution_exit": 1,
+        "cleanup_exit": 0,
+        "logical_genesis_created": true,
+        "physical_namespace_created": false,
+        "cause": "consent provider refuses non-null lifetime authoring target configuration",
+        "files": {
+          "exit.json": "e1c9354d46cd2a77a7459a5feddcab82a5178ac45c650af5142f23682036f68b",
+          "world/store/base/workroom.stderr": "f1229d210ca43301fc81767ce313481c97028b34ea65d53d6312624bd019ff27",
+          "consent-startup.stderr": "d969140f952db7592b6224c8771968b46f14e00b9ebbc448325edaec404da204",
+          "consent-startup.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "world/store/base/workroom/birth-attempt/attempt.json": "9d1065da93a54cc57d54bcea6dee85165ee623faefa95e33554a2c8ccad4b7c8",
+          "world/store/base/workroom/birth-attempt/intent.bin": "fdf84bb5c88974e626861edfb85b71e7770d6e5dec05d3b56c00a1af1380bb1e",
+          "world/store/base/workroom/deployment/pinned-config.json": "e71e7b90bf62f50cf219aeec4cbe8d5e1a5f802625b79e853217a503863827b3",
+          "world/store/base/workroom/store.head-anchor": "6f7197630c8845e6d96afe6fc54b4f42ee874dba9387c2e7c6341b7d38214787"
+        }
+      }
+    }
+  ],
+  "qualification_limits": [
+    "No U3 application installation, START, query, agent lifetime dispatch or STOP has completed.",
+    "The second attempt created a logical genesis Store; it has no signed or submitted birth call and no physical Store namespace.",
+    "Controller consent transport remains unqualified; existing source configuration parsing refuses its lifetime authoring target field.",
+    "Old U2 partial results remain separate."
+  ],
+  "next_work": [
+    "Qualify exact-config consent parser and actual distinct-UID controller consent transport.",
+    "Create new isolated R3 with new genesis provenance after both consent fixes qualify; preserve R2 logical Store and pre-sign attempt.",
+    "Complete genuine two-grain receiving, lifetime-tool, authority, restart, data-refusal and STOP/reconciliation journey."
+  ],
+  "continuation_decision": {
+    "retained_attempt": "/build/lanes/oracle-acceptance-u3-r2/run-v5",
+    "definite_pre_sign_refusal": true,
+    "signed_call_present": false,
+    "supported_retry_available": false,
+    "reason": "native retry requires call.bin; submit uses exclusive creates; provisioning has no post-genesis resume",
+    "selected_next_attempt": "fresh isolated R3 only after parser and distinct-UID consent transport qualification",
+    "retained_store_mutated": false
+  }
+}

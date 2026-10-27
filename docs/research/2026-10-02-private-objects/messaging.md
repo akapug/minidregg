@@ -20,7 +20,7 @@ An exact signed resource command is admitted and its intent settled. Historical 
 
 The custody operation is a normal content-cell atom creation with a stable domain/semantics/application/Message-ID-derived nonce. Same identity plus changed exact content is refused. `originalPrepared` selects the complete historical signed command, including target, capability and original root. `selectUniqueParent` joins Q's verified In-Reply-To to exactly one admitted prepared R. These are useful identity, retention and retry patterns for CHANNELS; fn article syntax, megabyte package disclosure and gateway trust are not requirements of private messaging.
 
-**READ:** `native/resource-client/src/publisher.rs`, `accepted_outbox` (101–150), retains `call.bin`, looks up uncertain results, and resubmits the same call only following an explicit absent result. `publish` retains exact carrier bytes, requests historical export, and records transport attempt/results. This avoids reconstructing a different carrier on restart. It is source evidence, not a fresh fsync/crash demonstration.
+**READ:** `publisher.rs [deleted 61449290]`, `accepted_outbox` (101–150), retains `call.bin`, looks up uncertain results, and resubmits the same call only following an explicit absent result. `publish` retains exact carrier bytes, requests historical export, and records transport attempt/results. This avoids reconstructing a different carrier on restart. It is source evidence, not a fresh fsync/crash demonstration.
 
 **DERIVED:** this outbox is a later accepted custody transaction after origin acceptance. A crash between origin commit and custody creation needs recovery from origin history or retained input. It is not already a theorem that origin state and its custody atom commit together.
 

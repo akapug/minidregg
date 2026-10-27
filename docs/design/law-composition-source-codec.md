@@ -1,7 +1,7 @@
 # Law component source/codec integration sketch
 
 2026-10-02, Codex. Companion to the pure module, now `Pred/LawComposition.lean` (it was
-`Theory/LawComposition.lean` on the independent `codex/law-composition` snapshot).
+`Pred/LawComposition.lean` on the independent `codex/law-composition` snapshot).
 
 **Status at main 5216e02f (READ, import closure computed over the `import` lines of the
 tree).** The modules this sketch names are in the closure of `Minidregg.lean` and of

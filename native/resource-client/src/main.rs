@@ -26,6 +26,8 @@ mod key_adoption;
 #[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
+mod operator_peer;
+#[cfg(unix)]
 mod agent_reserve;
 #[cfg(unix)]
 mod current_birth;
@@ -144,6 +146,8 @@ mod web;
 mod receipt_continuity;
 #[cfg(unix)]
 mod client_consent;
+#[cfg(unix)]
+mod consent_proxy;
 mod workspace;
 #[cfg(unix)]
 #[path="protected_object/object_keys.rs"]
@@ -761,8 +765,9 @@ usage:
   mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
   mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
   mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
+  mini apps bootstrap --dir OPERATOR-WORKSPACE [--budget N] [--tool-ref tool] [--parent-ref parent]   operator, once per world: the metered tasks
   mini apps-front --listen 127.0.0.1:8797 --origins DIR [--domain demo.dregg.online]   the grain entrance behind Caddy
-  mini apps-worker --state DIR --world WORLD.json [--socket PATH] [--edge-socket PATH] [--member-group G] [--edge-group G]   the operator custodian
+  mini apps-worker --state DIR --world WORLD.json [--member-socket PATH] [--edge-socket PATH] [--member-group G] [--edge-group G]   the operator custodian
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
@@ -779,7 +784,18 @@ usage:
     one attempt chain per request: a rerun reports the retained attempt and authors nothing new
   mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
-  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
+  mini fleet-sign join|send|transfer|receipt|incoming|retry [--profile P] ...   (dregg-client-sign's verbs on Mini, plus `incoming` for the helm adapter; `mini fleet-sign --help`)
+  mini member --dir WORKSPACE [--name REF] [--home H] [--json true|false] [--action workspace|app-status]   (what `home` prints: your resources and exact recovery actions)
+  mini clock --action init ... | view|tick --workspace WORKSPACE [--capability CAP]
+  mini checkpoint --action view|certify --workspace WORKSPACE [--control CAP --min-tail N]
+  mini activity --action submit|quote|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini seat --action submit|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini hermes-handoff --action registration|activation|registry|dispatch [action options]   (Hermes's task registrations and dispatch bundles)
+  mini story-law --table TABLE.txt [--player SUBJECT]   (the story law a table of rooms and ways compiles to, printed; installs nothing)
+  mini mix --action registrar-key|native-key|key|seal|batch|scan --state DIR [action options]   (the post-quantum mailbox mix)
+  mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
+  mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
+  mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
   mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -831,6 +847,8 @@ usage:
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
+  mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
+                         requires one systemd-activated listener; controller clients pin --operator-peer-uid
   mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
@@ -883,17 +901,22 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Self> {
-        let mut raw = env::args_os().skip(1);
+        Self::parse_from(env::args_os().skip(1))
+    }
+
+    fn parse_from(raw: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let mut raw = raw.into_iter();
         let mut values = Vec::new();
-        let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        let no_command = || format!("no command given\n\n{USAGE}");
+        let mut command = raw.next().ok_or_else(no_command)?;
         if command == OsStr::new("--verify-host") {
             VERIFY_HOST.store(true, Ordering::Relaxed);
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());
@@ -2573,6 +2596,16 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
 }
 
 fn run(mut args: Args) -> Result<()> {
+    #[cfg(unix)]
+    if let Some(uid) = args.optional("operator-peer-uid") {
+        let command = args.command.to_string_lossy();
+        if !(command.starts_with("agent-reserve-") || command.starts_with("agent-lifetime-reserve-")
+            || command.starts_with("agent-lifetime-paid-") || command == "agent-payer-sign") {
+            return Err("--operator-peer-uid is restricted to agent reserve/payer commands".into());
+        }
+        let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
+        operator_peer::configure(uid)?;
+    }
     replan::configure(args.optional("replan-max"))?;
     if let Some(identity) = args.optional("ssh-identity") { pin_ssh_identity(&path(identity))?; }
     let mut socket_argument = args.optional("socket");
@@ -2753,6 +2786,28 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
             public_proxy::serve(socket, &upstream, &config, group)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-agent-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("controller-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("controller UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-agent-operator-proxy requires --socket")?;
+            public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-controller-consent" => {
+            let consent = path(args.required("consent")?);
+            let config = path(args.required("config")?);
+            let anchors = path(args.required("anchors")?);
+            let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
+            let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
+            let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors)
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -3649,6 +3704,37 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mini_with_no_command_ends_non_zero_and_help_still_ends_zero() {
+        let no_command = Args::parse_from(Vec::<OsString>::new()).err().expect("no command is an error");
+        assert_ne!(no_command, USAGE);
+        assert!(no_command.starts_with("no command given"));
+        assert_ne!(main_ending(Err(no_command), 0).code, 0);
+        let help = Args::parse_from([OsString::from("--help")]).err().expect("--help prints usage");
+        assert_eq!(main_ending(Err(help), 0).code, 0);
+    }
+
+    #[test]
+    fn every_command_the_dispatcher_runs_is_named_in_usage() {
+        let source = include_str!("main.rs");
+        let body = &source[source.find("\nfn run(").expect("fn run")..source.find("\nfn main()").expect("fn main")];
+        let mut hidden = Vec::new();
+        for line in body.lines() {
+            let Some(rest) = line.strip_prefix("        \"") else { continue };
+            let Some((names, _)) = rest.split_once(" =>") else { continue };
+            let names = names.split_once(" if ").map_or(names, |(names, _)| names);
+            for name in names.split(" | ").map(|n| n.trim_matches('"')) {
+                if !name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+                    && !USAGE.contains(&format!("mini {name} ")) && !USAGE.contains(&format!("mini {name}|"))
+                    && !USAGE.contains(&format!("mini --verify-host {name} "))
+                {
+                    hidden.push(name.to_owned());
+                }
+            }
+        }
+        assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
 
     #[test]
     fn store_audit_argv_is_the_host_arm_and_optional_receipts() {

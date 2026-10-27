@@ -54,6 +54,7 @@ fn inventory(package: &VerifiedPackage, profile: ImportProfile) -> io::Result<Va
         "profile": profile.as_str(), "raw_sha256": hex(&package.raw_sha256),
         "raw_bytes": package.raw_length, "public_key_hex": hex(&package.public_key),
         "app_id": package.manifest.app_id, "app_version": package.manifest.app_version,
+        "signed_data_config_sha256": package.data_config_bytes.as_ref().map(|bytes| hex(&Sha256::digest(bytes))),
         "entries": entries}),
     )
 }

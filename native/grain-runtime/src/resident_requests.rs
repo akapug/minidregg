@@ -416,6 +416,18 @@ pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)-
         if frame["outcome"]=="completed" && frame["residentOrigin"]["residentPromptId"]==pending["residentPromptId"] {
             q.maintenance_revision=Some(pending["revision"].as_str().ok_or("maintenance revision absent")?.to_owned());
             q.maintenance_pending=None;atomic_json(&path(state),&q)?;
+        } else if frame["outcome"]!="completed" && frame["residentOrigin"]["residentPromptId"]==pending["residentPromptId"] {
+            // A maintenance prompt the controller decided as refused is closed:
+            // the revision stays unsatisfied (so maintenance is retried) but the
+            // pending marker must not outlive the decision. Undecided and
+            // admitted prompts keep it.
+            let op=frame["residentOrigin"]["promptOperationId"].as_u64().ok_or("maintenance completion origin absent")?;
+            let id=pending["residentPromptId"].as_str().ok_or("maintenance prompt identity absent")?;
+            let sha=frame["residentOrigin"]["promptSha256"].as_str().ok_or("maintenance completion origin has no prompt digest")?;
+            let decided=prompt_outcome::read_bound(controller,op,id,sha)?;
+            if matches!(decided.outcome,prompt_outcome::Outcome::Refused{..}) {
+                q.maintenance_pending=None;atomic_json(&path(state),&q)?;
+            }
         }
     }
     let Some(r)=q.selected.as_ref() else{return Ok(())};
@@ -713,6 +725,21 @@ mod tests {
         publish_notices(&state,|op|{again.push(op.to_owned());Published::Done(json!({}))},|_,_|Published::Done(json!({}))).unwrap();
         assert_eq!(again,["rs3"],"only the undecided notice re-enters, with its retained operation");
         assert_eq!(fs::read(path(&state)).unwrap(),before,"publication never changes request custody");
+        fs::remove_dir_all(state).unwrap();
+    }
+    #[test]fn decided_maintenance_failure_clears_pending_and_keeps_revision_unsatisfied() {
+        let state=fixture("maintenance-failed");let controller=state.join("controller");fs::create_dir(&controller).unwrap();fs::set_permissions(&controller,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let id="d".repeat(64);
+        maintenance_started(&state,&id,"maintenance-revision").unwrap();
+        let frame=json!({"outcome":"failed","residentOrigin":{"residentPromptId":id,"promptSha256":"b".repeat(64),"promptOperationId":1}});
+        outcome(&controller,1,&id,prompt_outcome::Outcome::Undecided{retry:prompt_outcome::Retry{admin:vec!["recover".into()],operation:Some(1)},detail:"held".into()});
+        reconcile(&state,&controller,Some(&frame)).unwrap();
+        assert!(open(&state).unwrap().maintenance_pending.is_some(),"undecided keeps the marker");
+        fs::remove_file(prompt_outcome::path(&controller,1)).unwrap();
+        outcome(&controller,1,&id,prompt_outcome::Outcome::Refused{stage:prompt_outcome::RefusalStage::TurnFailure,reason:"turn failed".into()});
+        reconcile(&state,&controller,Some(&frame)).unwrap();
+        let q=open(&state).unwrap();assert!(q.maintenance_pending.is_none(),"decided failure clears the marker");
+        assert!(maintenance_needed(&state,"maintenance-revision").unwrap(),"failed maintenance is not satisfied");
         fs::remove_dir_all(state).unwrap();
     }
 }

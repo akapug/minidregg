@@ -44,7 +44,7 @@ use crate::lifecycle_v4_retry_completion_native::{
 use crate::lifecycle_v4_retry_native::{
     select_retry, submit_once as submit_v4_begin, FixedRetryBeginSigners, RetrySelection,
 };
-use crate::materialize::verify_installed_spk;
+use crate::materialize::{verify_installed_spk, open_signed_public_data};
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
 use crate::resident_route_control::{
@@ -1390,6 +1390,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let bound = ResidentBound::from_unit_environment()?;
     let mut config = ResidentConfig::load(config_path)?;
     bound.validate(&config)?;
+    for agent in &config.agents {
+        crate::namespace_identity::require_registered_controller(agent.controller_uid)?;
+    }
     crate::checkpoint_control::refuse_retained_pause(&config.journal_dir)?;
     resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
     let journal = Journal::open(&config.journal_dir)?
@@ -1460,6 +1463,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     }
     if package.raw_sha256 != config.expected_raw_sha256 {
         return Err(invalid("resident signed package pin drift"));
+    }
+    // Checked before BEGIN/CLAIM: the current signed archive alone selects the
+    // immutable public revision. Continue/restart takes the identical path.
+    let public_data = open_signed_public_data(&package, config.app_uid)?;
+    if let Some(data) = &public_data {
+        crate::resident_privilege::check_public_data_access(data.root_fd())?;
     }
     preflight_custodian(
         &operator,
@@ -1662,7 +1671,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         )),
     };
     let prepared =
-        PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
+        PreparedResident::prepare_with_public_data(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256, public_data)?;
     let claim = match (&retry, &retry_signers) {
         (Some(selection), Some((_, fixed, _))) => {
             let assembled = assemble_v4_claim(

@@ -68,8 +68,13 @@ enrolled identity and the stranger's ssh key is the login. Because the box never
 stranger's ssh secret, the memo's ssh possession is signed **detached**: the status page shows the
 exact statement and one `ssh-keygen -Y sign -n dregg-enrol@v2` command; the stranger pastes the
 signature back; the processor finishes the memo (`--ssh-signature`) and the page shows recipient,
-amount, memo and the quote's expiry hour. After paying, the stranger pastes the transaction
-signature; the processor runs `join --wait --signature TX`, which creates `HOME/workspace` from the
+amount, memo and the quote's expiry hour, and two ways to pay: **Pay with your wallet** (the page's
+vendored `@solana/web3.js` and sol-misc's wallet adapter, `native/discord-entrance/assets/`; the
+browser builds the TransferChecked from the stranger's associated token account to the recipient's
+plus one Memo instruction with the exact memo bytes, the wallet signs, the browser sends it to the
+public RPC `pay.rpc` names and posts the signature itself; the recipient's token account must exist,
+the page never creates it) or pasting the transaction signature. Either way the stranger's transaction
+signature reaches `/join/paid`; the processor runs `join --wait --signature TX`, which creates `HOME/workspace` from the
 kernel's own enrolment (op 181). The receiving address is the deployment's fresh key (custody table
 above), signed into the book by `mini pay book` and shown from the rendered pin; mainnet or devnet is
 `pay.network` in `door.json`, and the RPC endpoints (Helius plus the public cluster endpoint, from the

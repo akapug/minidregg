@@ -17,7 +17,7 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | `japps.sh --dry` (Mac) and `--box` (`dregg-build`, 2026-10-27) | **green**: `--dry` 18/18 (catalogue, the two real packages verified, a tampered copy and an unknown appId refused by name, the front over real sockets); `--box` 22/22 with the four `spk-host qualify` exhibits proven on Linux (Hacker Slides, Simple Todos, Etherpad and TT-RSS all accepted once §3a landed); the scratch-world lifecycle rows are UNCONFIGURED on the build box until a broker world (`two-world-journey.sh`'s setup) exists there |
 | Member verbs `mini apps install/list/open/stop/start/share/export/delete` over the worker socket | verbs **built** against the socket protocol of §4; the worker itself is the next increment |
 | `mini apps-worker` (the operator-side custodian that drives `spk-host grain`) | **designed** (§4); the `--box` journey drives the same steps through `grain-journey.sh` meanwhile |
-| The request law `law.apps` rendered from Lean (`scripts/AppsLawTemplate.lean`) | **designed** (§3); until it lands, the member's package choice is carried by the worker socket and the signed state is the birth + delegation |
+| The request law `law.apps` rendered from Lean (`scripts.AppsLawTemplate [not in tree]`) | **designed** (§3); until it lands, the member's package choice is carried by the worker socket and the signed state is the birth + delegation |
 | Per-grain origin via the wildcard certificate and `*.demo.dregg.online` | infra lane applies DNS (live) and Caddy; the routing rule is §5 and `deploy/market/INSTALL.md` |
 | `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
@@ -280,6 +280,27 @@ edge phase, stop one, export it). The two installs: **Hacker Slides 0.4.0**
 RSS** (`expectAppHooks=true`, it ships `ttrss-apphooks`); both were refused by name before
 2026-10-27 and are accepted now that the facilities are served (§3a), which the row checks from
 `qualify`'s `bridgeFacilities` field.
+
+### 6a. The lane box's tooling and what it found
+
+- `scripts/spk-platform/world-up.sh BASE_BIN OWN_BIN RUN` / `world-down.sh RUN`: one standing grain
+  world on a lane box (the same ROOT SETUP, operator broker and Store phases `two-world-journey.sh`
+  performs, without its teardown trap), `RUN/WORLD.env` for `japps.sh --box` (`JAPPS_WORLD_ENV`) and
+  for `scripts/spk-platform/apps-e2e.sh WORLD.env OUT APP-ID…`, the first real `mini apps install`
+  end to end: the workroom's subject 8 as manager, subject 9 as member, the metered references
+  delegated and left in `HOME/inbox` as the frame does, the worker on its PID file, the install with
+  exact retries, the origin check through the route socket.
+- `scripts/spk-platform/composed-inputs.sh WORLD-IDENTITY.json CANDIDATE OUT`: the composed
+  scenario's apps, connector and resident inputs derived from a jworld-scratch world through the real
+  installers; it refuses `operatorPolicyRequired` while the world's genesis lacks the grain
+  platform's operator policy, which is now a genesis field (`grainPlatform`, `deploy/market/INSTALL.md`
+  §0; `params.sh require-platform`): rehearsal #3 is the re-genesis that carries it.
+- Found on the first START on Debian 13 (2026-10-27): the stream reader's scratch-parent custody walk,
+  run by the resident inside its user namespace, saw the world's root-owned ancestors as the unmapped
+  overflow uid and refused every START (`resident bootstrap refused: scratch parent custody refused`).
+  The wake verification now relies on the image store's own descriptor-walked custody
+  (`open_protected_directory`) and calls the reader without the ancestor walk (`materialize.rs`); the
+  ingest path, which runs outside the namespace, keeps the walk.
 
 ## 7. Compost
 

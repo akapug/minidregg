@@ -76,6 +76,7 @@
       setTitle(pane, response.headers.get("X-Mini-Title") || landed);
       wire(pane);
       sync();
+      fill(pane);
     } catch (e) {
       pane.querySelector(".pane-body").innerHTML = '<div class="outcome refused"><p class="headline">The page did not load</p><pre></pre></div>';
       pane.querySelector("pre").textContent = String(e);
@@ -83,6 +84,23 @@
       pane.classList.remove("busy");
     }
   }
+
+  // Sections that fill in as their answers land (`data-load`: the grants page judges one grant
+  // per request): loaded one after another, since the body answers one request at a time; each
+  // keeps its no-JS link until its answer replaces it.
+  async function fill(root) {
+    for (const el of root.querySelectorAll("[data-load]:not([data-loaded])")) {
+      el.dataset.loaded = "1";
+      const slot = el.querySelector(".fill") || el;
+      try {
+        const response = await fetch(el.dataset.load, { headers: { "X-Mini-Fragment": "1" }, credentials: "same-origin" });
+        slot.innerHTML = await response.text();
+      } catch (e) {
+        slot.insertAdjacentHTML("beforeend", '<p class="note">did not load: ' + String(e).replace(/[<&]/g, "") + "</p>");
+      }
+    }
+  }
+  fill(document);
 
   function open(path, from) {
     const existing = paneFor(path);

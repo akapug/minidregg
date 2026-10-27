@@ -77,6 +77,9 @@ struct PayConfig {
     enrol_pin: PathBuf,
     birth_context: Option<PathBuf>,
     network: String,
+    /// The public RPC endpoint the stranger's BROWSER sends the payment to (the box has no egress
+    /// and names it only); `pay.rpc`, by default the cluster's public endpoint for the network.
+    rpc: String,
 }
 
 impl DoorConfig {
@@ -104,6 +107,12 @@ impl DoorConfig {
                 network: match p["network"].as_str() {
                     Some(n @ ("mainnet" | "devnet")) => n.to_owned(),
                     _ => return Err("pay.network is mainnet or devnet".into()),
+                },
+                rpc: match (p["rpc"].as_str(), p["network"].as_str()) {
+                    (Some(url), _) if url.starts_with("https://") => url.to_owned(),
+                    (Some(_), _) => return Err("pay.rpc is an https URL".into()),
+                    (None, Some("devnet")) => "https://api.devnet.solana.com".to_owned(),
+                    (None, _) => "https://solana-rpc.publicnode.com".to_owned(),
                 },
             }),
         };
@@ -718,8 +727,15 @@ impl<O: BoxOps> Processor<O> {
                 }
                 let payment = read_json(&home.join("latest-payment.json")).ok_or("join left no payment record")?;
                 let recipient = payment["enrolAddress"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its recipient")?;
+                // The wallet page builds the transfer from these: the mint and token program the pin
+                // names (base58, as the cluster spells them), the token's decimals, and the RPC the
+                // browser sends to. The paste path reads the same recipient, amount and memo.
+                let mint = payment["mint"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its mint")?;
+                let token_program = payment["tokenProgram"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its token program")?;
+                let decimals = match &payment["quote"]["decimals"] { Value::String(s) => s.clone(), Value::Number(n) => n.to_string(), _ => return Err("payment record lacks the token's decimals".into()) };
                 r["payment"] = json!({"recipient":recipient,"amountAtomic":payment["amountAtomic"],"memo":payment["memo"],
-                    "expiryHour":r["sign"]["expiryHour"],"network":pay.network});
+                    "expiryHour":r["sign"]["expiryHour"],"network":pay.network,
+                    "mint":mint,"tokenProgram":token_program,"decimals":decimals,"rpc":pay.rpc});
                 r["phase"] = json!("awaiting-payment");
                 r["detail"] = Value::Null;
                 self.save(r)
@@ -989,7 +1005,8 @@ mod tests {
                 if !sig.contains("GOOD") {
                     return Ran { ok: false, stdout: String::new(), stderr: "error: sshSigInvalid".into() };
                 }
-                std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA"}).to_string()).unwrap();
+                std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA",
+                    "mint":"08".repeat(32),"tokenProgram":"06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9","quote":{"decimals":"6"}}).to_string()).unwrap();
                 return ok;
             }
             std::fs::write(home.join("detached-quote.json"), r#"{"expiryHour":"1001"}"#).unwrap();
@@ -1025,7 +1042,7 @@ mod tests {
         std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
         let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
         let cfg = DoorConfig { funding: 1000, free_cap: 2, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
-            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into() }) };
+            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), rpc: "https://api.devnet.solana.com".into() }) };
         Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
             p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
     }
@@ -1179,6 +1196,10 @@ mod tests {
         assert_eq!(s["phase"], "awaiting-payment", "{s}");
         assert_eq!(s["payment"]["recipient"], b58(&[10u8; 32]));
         assert_eq!(s["payment"]["memo"], "enrol:v2:AAAA");
+        assert_eq!(s["payment"]["mint"], b58(&[8u8; 32]));
+        assert_eq!(s["payment"]["tokenProgram"], "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        assert_eq!(s["payment"]["decimals"], "6");
+        assert_eq!(s["payment"]["rpc"], "https://api.devnet.solana.com");
         let tx = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
         submit(&w, &Request::Paid { id: a.id().into(), at: 3, transaction: tx.into() });
         run(&mut w);

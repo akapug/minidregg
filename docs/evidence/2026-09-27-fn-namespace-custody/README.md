@@ -1,6 +1,6 @@
 # Event20 operator custody checkpoint
 
-`native/resource-client/src/fn_namespace.rs` is a private client for the
+`fn_namespace.rs [deleted fe0ea680]` is a private client for the
 source-authored fn consumer namespace route. It obtains op42's zero-position
 plan from an owner-private operator socket, retains and inspects the exact
 canonical plan, and signs only the Host-selected credential header with an
@@ -22,7 +22,7 @@ Source SHA-256 at this checkpoint:
 
 | Source | SHA-256 |
 | --- | --- |
-| `native/resource-client/src/fn_namespace.rs` | `63b530e868bd1c8a6dcb1e7784bcc51208f2d28f690097a9f4cdb048b8a787be` |
+| `fn_namespace.rs [deleted fe0ea680]` | `63b530e868bd1c8a6dcb1e7784bcc51208f2d28f690097a9f4cdb048b8a787be` |
 | `native/resource-client/src/main.rs` | `9169d22616a19331fd6ab3f7f7273adf2d4f04d38d07f56293a69ad157e29e7a` |
 | `native/resource-client/src/transport.rs` | `101e6d71713fcb5253941244a2b544d94e20c6d244d92aaaa25d5e920150ce09` |
 

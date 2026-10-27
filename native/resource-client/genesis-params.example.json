@@ -17,6 +17,7 @@
   "genesisHeight": 10,
   "issuerEpoch": 2,
   "factoryControllerCapability": 53,
+  "payControlCapability": 4031,
   "sponsor": {
     "subject": 7,
     "keyId": 7007,
@@ -57,5 +58,16 @@
     "sideEffectCount": 10000000,
     "feeDebit": 10000000,
     "leaseByteBlocks": 10000000
+  },
+  "grainPlatform": {
+    "lifecycleManagement": {
+      "managementSubject": 7,
+      "managementKeyId": 7007
+    },
+    "grainBirthTariff": {
+      "base": 2,
+      "perBirth": 1
+    },
+    "completionCustodianKey": null
   }
 }

@@ -141,14 +141,17 @@ for name, data, needle in cases:
 # ------------------------------------------------------------- raw rows
 def kind_frame(kind, body):
     return struct.pack("<H", len(kind)) + kind + body
+# A grammar verdict on the client's own bytes (`RequestRefusal.malformed`, raised by the Host's decoders before
+# any receiver runs) provably left no record, so it is answered NO_RECORD (253) with the refusal named, never the
+# undecided envelope 255 (Host/RequestRefusal.lean, the L1 ruling: 253 is the refusal class, 255 is undecided).
 check("raw op 7 kind frame shorter than its width",
-      lambda: host_refused(raw(bytes([7, 9])), 7, "short native host kind frame"))
+      lambda: host_refused(raw(bytes([7, 9])), 7, "short native host kind frame", answer=253))
 check("raw op 7 kind width past the payload",
-      lambda: host_refused(raw(bytes([7]) + struct.pack("<H", 500) + b"intent"), 7, "invalid native host kind length"))
+      lambda: host_refused(raw(bytes([7]) + struct.pack("<H", 500) + b"intent"), 7, "invalid native host kind length", answer=253))
 check("raw op 10 pair width past the payload",
-      lambda: host_refused(raw(bytes([10]) + struct.pack("<I", 1 << 20) + b"xx"), 10, "invalid native host pair length"))
+      lambda: host_refused(raw(bytes([10]) + struct.pack("<I", 1 << 20) + b"xx"), 10, "invalid native host pair length", answer=253))
 check("raw op 11 noncanonical plan",
-      lambda: host_refused(raw(bytes([11]) + struct.pack("<I", 3) + b"abc" + b"\x00"), 11, "noncanonical signing plan"))
+      lambda: host_refused(raw(bytes([11]) + struct.pack("<I", 3) + b"abc" + b"\x00"), 11, "noncanonical signing plan", answer=253))
 # Ops 0 and 6 take no body: the service refuses one (254, never forwarded; 8ac769d7) before the
 # Host would answer 255 `describe does not accept a payload`. Both are definite and named.
 check("raw op 0 describe with a payload (service refusal, never forwarded)",

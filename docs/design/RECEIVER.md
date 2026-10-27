@@ -236,7 +236,7 @@ def dispatch (ctx) (op : HostOp) (payload) : IO (UInt8 × List UInt8) :=
 
 `Host.Main` decodes the byte with `HostOp.ofCode?`, checks the route, and
 calls `dispatch`; the 167 arms become table rows.  A `lake exe
-emit-host-operations` (in `Host/EmitOperations.lean`) writes
+emit-host-operations` (in `Host.EmitOperations [not in tree]`) writes
 `native/host-operations.rs`: the `pub const` per op, `pub fn
 public_route(op: u8) -> bool` and `operator_route`, and the response markers;
 `transport.rs` calls the two functions instead of hand-matching byte slices,
@@ -253,7 +253,7 @@ dispatcher" stops being true.
 
 ## 3. `Turn.ofAdmission` and `host_submit_is_step`
 
-Today (`Kernel/HostRefinesWorld.lean:1006`, read):
+Today (`Kernel/HostRefinesWorld.lean:47-53`, read):
 `Turn.ofAdmission B H w (_admitted : NativeAdmission config opened intent) :=
 Turn.ofIntent B H w intent` -- the admission is ignored; the turn is
 recovered by diffing the intent's bytes against the world.

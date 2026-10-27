@@ -1,6 +1,6 @@
 # Offer a fresh hosted Hermes pair
 
-> **Cannot be run as written (2026-10-26).** Its per-UID frontend, `host-frontend.rs`, was deleted: a
+> **Cannot be run as written.** Its per-UID frontend, `host-frontend.rs`, was deleted: a
 > hand-written public-operation allowlist (`0..=11, 17, 19` with hand payload limits) twinning
 > `protocol/host-operations.json` and `mini serve-public-proxy` (RUST-TRIAGE 2.1 row 37). The frontend role
 > is `mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json --socket-gid GID`;
@@ -67,7 +67,7 @@ Transfer only A's controller/tool custody bytes to task account A and only B's b
 {
   "profile":"mini-offer-task-v1", "peer":"a",
   "baseConfig":"/ABS/task-a/base.json", "baseConfigSha256":"64-lowercase-hex",
-  "frontConfig":"/ABS/operator-front-a/host.config", "frontConfigSha256":"64-lowercase-hex",
+  "frontConfig":"/ABS/operator-front-a/host.json", "frontConfigSha256":"64-lowercase-hex",
   "provisionConfigSha256":"64-lowercase-hex",
   "frontSocket":"/ABS/operator-front-a/host.sock",
   "mini":"/ABS/mini", "miniSha256":"64-lowercase-hex",

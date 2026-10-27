@@ -121,7 +121,7 @@ function of `k` (`Gate.lean:313-316`), a refused `k` accepts later requests; and
 "rejected ⇒ post = pre" is stated four times (`Theory/CanonicalTransition.lean:182-186`
 `Decision.logicalPost`; `Theory/CellState.lean:355-358` `ApplyOutcome.post`;
 `Kernel/MultiCellHyperedge.lean:369-375` `Admission.rejected_atomic`;
-`Kernel/DeclaredHyperedge.lean:529-536` `execute_rejected_unchanged`, quoted in
+`Kernel.DeclaredHyperedge [deleted fcb02f57]:529-536` `execute_rejected_unchanged`, quoted in
 `KERNEL-TWIN-AUDIT.md:213-221`). **The `Option` in `admit` is the partiality of a MAP, not the
 termination of a BEHAVIOUR.** The behaviour functor is total.
 
@@ -284,9 +284,9 @@ one λ ⇒ two agreeing readings ⇒ composability of turns under behavioural eq
 `Theory/` may import only Mathlib + Theory (`scripts/check-import-boundary.sh:4-9,
 37-38`) and the N3 engine (`fold`, `fold_unique`) lives in `Compiler/Signature.lean`, which imports
 Mathlib only (`Signature.lean:34-35`). Re-deriving `fold_unique` in Theory would be a twin. Two
-honest options: (α) relocate `Compiler/Signature.lean` → `Theory/Signature.lean` verbatim (legal by
+honest options: (α) relocate `Compiler/Signature.lean` → `Theory.Signature [not in tree]` verbatim (legal by
 its imports; one import line changes in `Effects/EffectSpec.lean:67`), then author
-`Theory/Bialgebra.lean`; or (β) author `Compiler/Bialgebra.lean` next to `Signature.lean` now and
+`Theory.Bialgebra [not in tree]`; or (β) author `Compiler.Bialgebra [not in tree]` next to `Signature.lean` now and
 move both later. Owner decision; (α) is the ATLAS-faithful one.
 
 **Mathlib reused:** `PFunctor`, `PFunctor.Obj/map/comp/W/W.mk/W.dest`, `WType.elim`; `PFunctor.M`,
@@ -296,7 +296,7 @@ move both later. Owner decision; (α) is the ATLAS-faithful one.
 all land in `Type u` and `Σ (B X)` typechecks without `ULift`.
 
 ```lean
--- Theory/Bialgebra.lean (N4). Over abstract polynomial Σ, B — no kernel imports.
+-- Theory.Bialgebra [not in tree] (N4). Over abstract polynomial Σ, B — no kernel imports.
 /-- A distributive law of the syntax functor over the behaviour functor: the component
 family plus NATURALITY, which is its only axiom. (Absent from mathlib at 1c2b90b.) -/
 structure DistLaw (Σ B : PFunctor.{u, u}) where
@@ -411,8 +411,8 @@ a reason to skip the abstract file.
    `EffectSpec.sig`'s prefix nodes, and that `Balanced` is computed from observations. This is
    the only design input the abstract file needs and the only place it can go wrong.
 3. **The twin collapse** gates the INSTANCE file only. The abstract N4 file imports no kernel.
-4. **Smallest Lean file worth writing:** `Theory/Bialgebra.lean` (after relocating
-   `Compiler/Signature.lean` → `Theory/`, §5 option α; else `Compiler/Bialgebra.lean`) —
+4. **Smallest Lean file worth writing:** `Theory.Bialgebra [not in tree]` (after relocating
+   `Compiler/Signature.lean` → `Theory/`, §5 option α; else `Compiler.Bialgebra [not in tree]`) —
    `DistLaw`, `Bialgebra`, `opModel`/`denModel`, `N4_adequacy`, `N4_congruence`, `FailClosed`, with
    the keystones of §5 built at the leaf-plus-binary-join toy over `optionP` and at the 2-op
    sequential toy, `λ_strict` and `λ_open` both exhibited. Statement-first: land the `def`s and the

@@ -58,6 +58,7 @@ impl Drop for Signals {
 
 #[derive(Clone, Copy)]
 struct Bounds {
+    controller_uid: Option<u32>,
     connections: usize,
     read: Duration,
     connect: Duration,
@@ -65,6 +66,7 @@ struct Bounds {
     response: Duration,
 }
 const BOUNDS: Bounds = Bounds {
+    controller_uid: None,
     connections: 64,
     read: Duration::from_secs(10),
     connect: Duration::from_secs(10),
@@ -315,6 +317,9 @@ fn connection(
     if public.set_nonblocking(true).is_err() {
         return;
     }
+    if bounds.controller_uid.is_some_and(|uid| transport::peer_uid(&public).ok() != Some(uid)) {
+        return refusal(&mut public, stop, bounds, "controller peer UID mismatch");
+    }
     let frame = match transport::read_frame(&mut BoundedStream {
         stream: &mut public,
         stop,
@@ -331,7 +336,10 @@ fn connection(
             )
         }
     };
-    if let Err(reason) = transport::public_envelope(&frame, config, catalog) {
+    let envelope = if bounds.controller_uid.is_some() {
+        transport::agent_operator_envelope(&frame, config)
+    } else { transport::public_envelope(&frame, config, catalog) };
+    if let Err(reason) = envelope {
         return refusal(&mut public, stop, bounds, reason);
     }
     // Recheck retained config/mode on every request: a restarted backend must
@@ -539,6 +547,54 @@ pub(crate) fn serve(socket: &Path, upstream: &Path, config: &Path, group: Option
     )
 }
 
+/// Systemd supplies one already-bound controller-owned private listener. This
+/// process runs as the Store operator and never owns controller custody keys.
+/// The kernel reports the listener creator's credentials to connecting clients;
+/// clients explicitly pin those credentials, independently of our service UID.
+#[cfg(target_os = "linux")]
+pub(crate) fn serve_agent_activated(socket: &Path, upstream: &Path, config: &Path, controller_uid: u32) -> Result<(), String> {
+    if controller_uid == 0 || controller_uid == mini_sdk::private::euid() {
+        return Err("agent proxy requires a distinct non-root controller UID".into());
+    }
+    if std::env::var("LISTEN_PID").ok().as_deref() != Some(std::process::id().to_string().as_str())
+        || std::env::var("LISTEN_FDS").ok().as_deref() != Some("1") {
+        return Err("agent proxy requires exactly one systemd-activated listener for this process".into());
+    }
+    // SAFETY: ownership of activation fd3 transfers to this process exactly once.
+    let listener = unsafe { UnixListener::from_raw_fd(3) };
+    validate_activated_listener(&listener, socket)?;
+    private_directory(upstream)?;
+    let config_bytes = transport::read_config(config)?;
+    check_upstream(upstream, &config_bytes)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let probe = connect(upstream, &stop, Instant::now() + BOUNDS.connect)
+        .map_err(|error| format!("agent proxy upstream unavailable: {error}"))?;
+    if transport::peer_uid(&probe)? != mini_sdk::private::euid() {
+        return Err("agent proxy upstream peer UID mismatch".into());
+    }
+    drop(probe);
+    let _signals = Signals::install()?;
+    run(listener, upstream.to_path_buf(), config_bytes, stop,
+        Bounds { controller_uid: Some(controller_uid), ..BOUNDS }, true)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn validate_activated_listener(listener: &UnixListener, socket: &Path) -> Result<(), String> {
+    if !socket.is_absolute() || listener.local_addr().map_err(|e| e.to_string())?.as_pathname() != Some(socket) {
+        return Err("activated listener path differs from configured controller socket".into());
+    }
+    let mut accepting: libc::c_int = 0;
+    let mut length = std::mem::size_of_val(&accepting) as libc::socklen_t;
+    if unsafe { libc::getsockopt(listener.as_raw_fd(), libc::SOL_SOCKET, libc::SO_ACCEPTCONN,
+            (&mut accepting as *mut libc::c_int).cast(), &mut length) } != 0 || accepting != 1 {
+        return Err("activated descriptor is not a listening Unix socket".into());
+    }
+    if unsafe { libc::fcntl(listener.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err("cannot protect activated listener descriptor".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +633,7 @@ mod tests {
     }
     fn bounds() -> Bounds {
         Bounds {
+            controller_uid: None,
             connections: 3,
             read: Duration::from_millis(150),
             connect: Duration::from_millis(150),
@@ -675,6 +732,55 @@ mod tests {
                 Err(e) => panic!("accept: {e}"),
             }
         }
+    }
+    #[test]
+    fn agent_operator_proxy_preserves_only_bounded_source_plans() {
+        let (fixture, backend) = Fixture::new(Bounds { controller_uid: Some(mini_sdk::private::euid()), ..bounds() });
+        let pair = [1u32.to_le_bytes().as_slice(), &[1, 2]].concat();
+        for operation in [48, 58, 59, 78, 80, 81] {
+            let request = [vec![operation], if matches!(operation, 59 | 81) { pair.clone() } else { vec![1] }].concat();
+            let frame = envelope(CONFIG, &request);
+            let mut client = fixture.client();
+            transport::write_frame(&mut client, &frame).unwrap();
+            let mut private = accept(&backend);
+            assert_eq!(transport::read_frame(&mut private).unwrap(), Some(frame));
+            transport::write_frame(&mut private, &[operation, 9]).unwrap();
+            assert_eq!(transport::read_frame(&mut client).unwrap(), Some(vec![operation, 9]));
+        }
+        for operation in [0, 2, 3, 22, 26, 27, 48, 59, 76, 77, 79, 81, 82, 155] {
+            // Even allowed opcodes refuse an empty body; submit/lifecycle/grant
+            // opcodes refuse irrespective of their payload.
+            let frame = envelope(CONFIG, &[operation]);
+            let mut client = fixture.client();
+            transport::write_frame(&mut client, &frame).unwrap();
+            assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);
+            assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        }
+        let mut unpinned = vec![1];
+        unpinned.extend_from_slice(&(CONFIG.len() as u32).to_le_bytes());
+        unpinned.extend_from_slice(CONFIG);
+        unpinned.extend_from_slice(&[80, 1]);
+        for frame in [unpinned, envelope(b"changed", &[80, 1]), envelope(CONFIG, &[76, 1]), envelope(CONFIG, &[81, 1])] {
+            let mut client = fixture.client();
+            transport::write_frame(&mut client, &frame).unwrap();
+            assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);
+            assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        }
+    }
+    #[test]
+    fn agent_operator_proxy_refuses_other_uid_before_reading_a_frame() {
+        let (fixture, backend) = Fixture::new(Bounds { controller_uid: Some(mini_sdk::private::euid().wrapping_add(1)), ..bounds() });
+        let mut client = fixture.client();
+        assert_eq!(transport::read_frame(&mut client).unwrap().unwrap()[0], 254);
+        assert_eq!(backend.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn agent_operator_activated_listener_requires_exact_named_socket() {
+        let (fixture, backend) = Fixture::new(bounds());
+        validate_activated_listener(&backend, &fixture.private).unwrap();
+        assert!(validate_activated_listener(&backend, &fixture.public).is_err());
+        assert!(validate_activated_listener(&backend, Path::new("relative.sock")).is_err());
     }
     #[test]
     fn exact_frames_and_replies_pass_without_rewriting_host_pin() {

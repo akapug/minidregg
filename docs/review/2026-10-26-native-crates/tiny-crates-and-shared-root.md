@@ -15,22 +15,22 @@
 | 3 | `native/portable-archive/src/lib.rs` | 175 | |
 | 3 | `native/portable-archive/src/durable_file.rs` | 111 | |
 | 4 | `native/signed-api-path/src/lib.rs` | 152 | `Cargo.toml` (6), `.gitignore` |
-| 5 | `native/bend-proof-entropy/src/lib.rs` | 92 | `Cargo.toml` (11), `Cargo.lock` (111) |
+| 5 | `lib.rs [deleted 4f563ac5]` | 92 | `Cargo.toml` (11), `Cargo.lock` (111) |
 | 6 | `native/launch-gate/` | 0 | `Cargo.toml` (18), `Cargo.lock` (7); its only source is `deploy/grain-host/launch-gate.rs` (450 lines), read in full |
-| 7 | `native/bend-ir2-proof/src/main.rs` | 96 | `Cargo.toml` (31), `.config/nextest.toml` (6), `README.md` (36), `OBJECTIVE-ONLY-MIGRATION.txt` (57), `QUALIFICATION-R32.txt` (101), `QUALIFICATION-R33.txt` (71), `provision.py` (46), `dependencies.lock.json` (380, summarised), `tests/test_provision.py` (30) |
-| 7 | `native/bend-ir2-proof/src/config.rs` | 104 | |
-| 7 | `native/bend-ir2-proof/src/legacy_config.rs` | 64 | |
-| 7 | `native/bend-ir2-proof/src/full_degree_challenger.rs` | 146 | |
-| 7 | `native/bend-ir2-proof/src/masking_budget.rs` | 32 | (the brief left this file out; it is a `mod` of `main.rs`) |
-| 7 | `native/bend-ir2-proof/tests/artifact_binding.rs` | 36 | |
-| 7 | `native/bend-ir2-proof/tests/bounded_commitment.rs` | 55 | |
-| 7 | `native/bend-ir2-proof/tests/masking_observations.rs` | 88 | |
-| 7 | `native/bend-ir2-proof/tests/quotient_masking.rs` | 46 | |
-| 7 | `native/bend-ir2-proof/tests/short_trace_disclosure.rs` | 115 | |
-| 8 | `native/hyperdocument-link-store/src/lib.rs` | 222 | `Cargo.toml` (20), `Cargo.lock` (7), `README.md` (31), `fixtures/hyperdocument-link-recovery-v1.bin` (14 bytes) |
-| 8 | `native/hyperdocument-link-store/src/main.rs` | 71 | |
-| 8 | `native/hyperdocument-link-store/src/bin/forward_link_e2e_bench.rs` | 314 | |
-| 8 | `native/hyperdocument-link-store/tests/lifecycle.rs` | 106 | |
+| 7 | `main.rs [deleted 4f563ac5]` | 96 | `Cargo.toml` (31), `.config/nextest.toml` (6), `README.md` (36), `OBJECTIVE-ONLY-MIGRATION.txt` (57), `QUALIFICATION-R32.txt` (101), `QUALIFICATION-R33.txt` (71), `provision.py` (46), `dependencies.lock.json` (380, summarised), `test_provision.py [not in tree]` (30) |
+| 7 | `config.rs [deleted 4f563ac5]` | 104 | |
+| 7 | `legacy_config.rs [deleted 4f563ac5]` | 64 | |
+| 7 | `full_degree_challenger.rs [deleted 4f563ac5]` | 146 | |
+| 7 | `masking_budget.rs [deleted 4f563ac5]` | 32 | (the brief left this file out; it is a `mod` of `main.rs`) |
+| 7 | `artifact_binding.rs [deleted 4f563ac5]` | 36 | |
+| 7 | `bounded_commitment.rs [deleted 4f563ac5]` | 55 | |
+| 7 | `masking_observations.rs [deleted 4f563ac5]` | 88 | |
+| 7 | `quotient_masking.rs [deleted 4f563ac5]` | 46 | |
+| 7 | `short_trace_disclosure.rs [deleted 4f563ac5]` | 115 | |
+| 8 | `lib.rs [deleted 52c252e3]` | 222 | `Cargo.toml` (20), `Cargo.lock` (7), `README.md` (31), `fixtures/hyperdocument-link-recovery-v1.bin` (14 bytes) |
+| 8 | `main.rs [deleted 52c252e3]` | 71 | |
+| 8 | `forward_link_e2e_bench.rs [deleted 52c252e3]` | 314 | |
+| 8 | `lifecycle.rs [deleted 52c252e3]` | 106 | |
 | 9 | `native/crypto_transit.rs` | 380 | |
 | 9 | `native/host-operations.rs` | 376 | `scripts/host-operations.py` (318) |
 | 9 | `native/hybrid_kem.rs` | 471 | |
@@ -42,7 +42,7 @@ Lean and cross-reference reading done to judge the seams: `Compiler/GenericSimpl
 ## Executive summary (15 lines)
 
 1. Of the eight crates, only three ship in a candidate. `compatible-upgrade-custody` and `signed-api-path` are linked into `mini`, `grain-runtime` and `spk-host`. `launch-gate` is a test-fixture role (`deploy/candidate/package.py:78,90`). The shared root files `hybrid_kem.rs`, `crypto_transit.rs` and `host-operations.rs` are compiled into `mini`.
-2. `native/hyperdocument-link-store` **does not build in this tree**. Its manifest has no `[workspace]` table and the root workspace (added `295cab11`, 2026-10-08) does not list it, so `cargo metadata` refuses it. Both scripts that drive it (`scripts/test-hyperdocument-link-local-store.sh:15`, `scripts/run-forward-link-e2e-benchmark.sh:49`) are therefore broken. It is the superseded twin of the workspace member `hyperdocument-link-sqlite-store`.
+2. `native/hyperdocument-link-store` **does not build in this tree**. Its manifest has no `[workspace]` table and the root workspace (added `295cab11`, 2026-10-08) does not list it, so `cargo metadata` refuses it. Both scripts that drive it (`test-hyperdocument-link-local-store.sh [deleted 52c252e3]:15`, `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]:49`) are therefore broken. It is the superseded twin of the workspace member `hyperdocument-link-sqlite-store`.
 3. `native/bend-ir2-proof` cannot build in a clean checkout either. `dregg-circuit` is a path dependency on `../bend-proof-deps/bread/circuit`, which does not exist; it is a symlink that `provision.py:34-40` would create to an external breadstuffs slice of 374 pinned files. It survives the 2026-10-04 upstream-Bend deletion only as an offline conformance harness fed by synthetic Lean fixtures. No Objective Bend producer feeds it (`README.md:36`, `OBJECTIVE-ONLY-MIGRATION.txt:53-55`).
 4. `native/pinned_execution.rs` is unwired. Its one includer, `private-backend`, uses it only in `SealedNative::new` (`native_worker.rs:356`) and `receive_sealed` (`:398`), and neither has a caller anywhere in the tree. Its live twin is `resource-client/src/transport.rs:1368-1393` (`sealed_snapshot`), the same memfd-seal mechanism without the size bound.
 5. `native/portable-archive` is reached only from Lean modules imported by `ResearchWip.lean:77-85`. It has no `lean_exe`, no systemd unit and no journey. It is research.
@@ -581,7 +581,7 @@ Package `bend-ir2-proof`, edition 2024. It is not a workspace member: `[workspac
 - `fresh_checked` (`:47-90`) observes, in order: the profile string (V4 `PROFILE` or V5 `ARTIFACT_PROFILE`, `:31-33`), every FRI parameter plus 4, 8, the masking constants and the capacity rows; then, for V5, the length bytes and 32 digest bytes, one field element per byte.
 - `for_capacity` is V4 (`:94-96`); `for_artifact` is V5 (`:100-103`).
 
-**`src/legacy_config.rs` (64 lines).** The "Retained v2 profile for raw negative regression only; not selected by the CLI" (`:1`). It uses the plain `DuplexChallenger`, no transcript binding, and `raw_for_regression` under `#[cfg(test)]` (`:63-64`). **It is not a `mod` of `main.rs`** (`main.rs:3-5` declares `config`, `masking_budget`, `full_degree_challenger` only). It is compiled only by `tests/short_trace_disclosure.rs:7-8` through `#[path]`.
+**`src/legacy_config.rs` (64 lines).** The "Retained v2 profile for raw negative regression only; not selected by the CLI" (`:1`). It uses the plain `DuplexChallenger`, no transcript binding, and `raw_for_regression` under `#[cfg(test)]` (`:63-64`). **It is not a `mod` of `main.rs`** (`main.rs:3-5` declares `config`, `masking_budget`, `full_degree_challenger` only). It is compiled only by `short_trace_disclosure.rs [not in tree]:7-8` through `#[path]`.
 
 **`src/full_degree_challenger.rs` (146 lines).**
 - `powers_span_extension` (`:14-34`): Gaussian rank of `{1, x, x², x³}` over BabyBear.
@@ -594,15 +594,15 @@ Package `bend-ir2-proof`, edition 2024. It is not a workspace member: `[workspac
 - `TraceCapacity::checked` (`:17-29`) enforces a power of two, at least 27 rows, the two-adicity limit and no overflow.
 
 **Tests:**
-- `tests/artifact_binding.rs` (36): V5 rejects a whitespace-changed descriptor under the recomputed seed and rejects a V4 config. Needs `BEND_IR2_FIXTURE`.
-- `tests/bounded_commitment.rs` (55): runs the binary against `BEND_COMMITMENT_FIXTURE`; checks correct and wrong publics, and an inconsistent private wire. Heavy; excluded by `.config/nextest.toml:3`.
-- `tests/masking_observations.rs` (88): linear-algebra falsifiers of the mask budget.
-- `tests/quotient_masking.rs` (46): calls the real `get_quotient_ldes` and recomposition.
-- `tests/short_trace_disclosure.rs` (115): the raw one-row proof leaks the private trace (an adversarial regression), the capacity refusals, and the relation preserved at 32 and 256 rows.
+- `artifact_binding.rs [not in tree]` (36): V5 rejects a whitespace-changed descriptor under the recomputed seed and rejects a V4 config. Needs `BEND_IR2_FIXTURE`.
+- `bounded_commitment.rs [not in tree]` (55): runs the binary against `BEND_COMMITMENT_FIXTURE`; checks correct and wrong publics, and an inconsistent private wire. Heavy; excluded by `.config/nextest.toml:3`.
+- `masking_observations.rs [not in tree]` (88): linear-algebra falsifiers of the mask budget.
+- `quotient_masking.rs [not in tree]` (46): calls the real `get_quotient_ldes` and recomposition.
+- `short_trace_disclosure.rs [not in tree]` (115): the raw one-row proof leaks the private trace (an adversarial regression), the capacity refusals, and the relation preserved at 32 and 256 rows.
 
 **Non-Rust files:**
 - `provision.py` (46): verifies 374 pinned file hashes of an external breadstuffs slice (`dependencies.lock.json` covers 341 files under `circuit/`, 16 under `vendor/`, 10 under `dregg-dsl/`, 6 under `dregg-codec/` and the root `Cargo.toml`), then symlinks it at `native/bend-proof-deps/bread` (`:34-40`).
-- `tests/test_provision.py` (30) tests the pin checker only.
+- `test_provision.py [not in tree]` (30) tests the pin checker only.
 - `OBJECTIVE-ONLY-MIGRATION.txt` (57) lists retired paths.
 - `QUALIFICATION-R32.txt` (101) and `QUALIFICATION-R33.txt` (71) are dated qualification narratives.
 - `README.md` (36).
@@ -631,7 +631,7 @@ No world decision. `require_subset` (`main.rs:35-53`) is a grammar gate for the 
 ## 7.5 Unwired / undone
 
 - **Survivor status.** The repo README says the BFV and upstream-Bend consumers were deleted on 2026-10-04, and the Honest state row says "the generic oblivious/arithmetic circuit stack has no Objective producer yet". The crate's own README (`:36`) and the migration note (`:53-55`) confirm that no Objective controller producer exists and the old source-controller fixtures are retired. **Verdict: it is a survivor with only synthetic fixtures left to prove against** (the range gadget in `Host/BendTraceIR2Emit.lean` and the commitment fixtures). It has no consumer in Host, no journey and no unit.
-- **Stale qualification text.** `QUALIFICATION-R32.txt:5-24,89-96` describes `Verify/BendControllerCommitmentEmit.lean` and `tests/controller_commitment.rs`; both are deleted (checked with `ls`). Several paths listed in `OBJECTIVE-ONLY-MIGRATION.txt:34-44` are gone (`Theory/BendExecutionTrace.lean`, `Assurance/BendUnrolledSource.lean`, `Compiler/BendProofProjection.lean`), as is `Assurance/BendObliviousMinimal.lean`, which R32 cites. The text documents a world that no longer exists.
+- **Stale qualification text.** `QUALIFICATION-R32.txt:5-24,89-96` describes `Verify.BendControllerCommitmentEmit [deleted 008fd5e7]` and `controller_commitment.rs [not in tree]`; both are deleted (checked with `ls`). Several paths listed in `OBJECTIVE-ONLY-MIGRATION.txt:34-44` are gone (`Theory.BendExecutionTrace [deleted 212c79af]`, `Assurance.BendUnrolledSource [deleted 008fd5e7]`, `Compiler.BendProofProjection [deleted 008fd5e7]`), as is `Assurance.BendObliviousMinimal [deleted 212c79af]`, which R32 cites. The text documents a world that no longer exists.
 - **Versioned siblings:** V2 (`legacy_config.rs`), V4 (`config::for_capacity`, `PROFILE`) and V5 (`for_artifact`, `ARTIFACT_PROFILE`) all coexist. V2 and V4 are reachable only from tests.
 - **Test-only file under `src/`:** `legacy_config.rs` (7.1).
 
@@ -678,14 +678,14 @@ Package `minidregg-hyperdocument-link-store`. It is **neither a workspace member
 
 **`src/bin/forward_link_e2e_bench.rs` (314 lines).** It runs the stage, install, read, retry and read lifecycle in a fresh child process per stage (`:186-216`), with 31 samples and 3 warmups by default (`:21-22`, env `MINIDREGG_LINK_BENCH_SAMPLES`/`_WARMUPS`). It prints nearest-rank p50, p95 and p99 (`:218-284`).
 
-**`tests/lifecycle.rs` (106 lines).** In-process tests: fixture pin, staged crash not visible, lost response then exact retry, different retry conflicts, oversize.
+**`native/hyperdocument-link-sqlite-store/tests/lifecycle.rs` (106 lines).** In-process tests: fixture pin, staged crash not visible, lost response then exact retry, different retry conflicts, oversize.
 
 **Fixture.** `fixtures/hyperdocument-link-recovery-v1.bin`, 14 bytes: `a24a1ed8 01 HYPERLNK n`. Lean (`scripts/EmitHyperdocumentLinkRecoveryFixture.lean`, `Assurance.HyperdocumentLinkLocalFileStore`) authors it.
 
 ## 8.2 What it assumes of its surroundings
 
 - POSIX hard links and directory fsync.
-- Drivers: `scripts/test-hyperdocument-link-local-store.sh` (lake build, fixture regeneration with `cmp`, `cargo test`, process-level CLI checks) and `scripts/run-forward-link-e2e-benchmark.sh:44-56`. Neither is wired into any gate (`git grep` finds no caller).
+- Drivers: `test-hyperdocument-link-local-store.sh [deleted 52c252e3]` (lake build, fixture regeneration with `cmp`, `cargo test`, process-level CLI checks) and `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]:44-56`. Neither is wired into any gate (`git grep` finds no caller).
 - Lean: `Assurance/HyperdocumentLinkLocalFileStore.lean` (imported by `Assurance.lean:69`), `Assurance/HyperdocumentLinkClientLocalFileCutover.lean:16-20`, and `Assurance/HyperdocumentLinkSqliteTransactionalStore.lean:16-21`, which builds on the local-file module.
 - **Fixture dependency:** the workspace crate `native/hyperdocument-link-sqlite-store/tests/lifecycle.rs:12` does `include_bytes!("../../hyperdocument-link-store/fixtures/hyperdocument-link-recovery-v1.bin")`.
 
@@ -695,10 +695,10 @@ No. "This crate has no Hyperdocument, WAL, authorization, replay, or acceptance 
 
 ## 8.4 Flaws noticed
 
-1. **It does not build in the tree.** `cargo metadata --manifest-path native/hyperdocument-link-store/Cargo.toml` fails with "current package believes it's in a workspace when it's not … add an empty `[workspace]` table". The root workspace was added in `295cab11` (2026-10-08); this crate was last touched 2026-08-11 (`2dfcf06f`). So `scripts/test-hyperdocument-link-local-store.sh:15-16` and `scripts/run-forward-link-e2e-benchmark.sh:49-50` have been broken since 2026-10-08, and nothing noticed: law 8, gate the gates.
-2. **A crash mid-stage blocks the store until an operator acts** (`lib.rs:152-157`, `:175-176`). A crash inside `write_all` leaves a truncated staged file. The next `publish(bytes)` compares and finds a mismatch, so it returns `Conflict`, forever, until someone runs `discard-stage`. This fails closed, but liveness requires a manual step. The test `staged_crash_is_not_visible_and_can_be_discarded_after_restart` (`tests/lifecycle.rs:46-60`) only covers a complete stage.
+1. **It does not build in the tree.** `cargo metadata --manifest-path Cargo.toml [deleted 52c252e3]` fails with "current package believes it's in a workspace when it's not … add an empty `[workspace]` table". The root workspace was added in `295cab11` (2026-10-08); this crate was last touched 2026-08-11 (`2dfcf06f`). So `test-hyperdocument-link-local-store.sh [deleted 52c252e3]:15-16` and `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]:49-50` have been broken since 2026-10-08, and nothing noticed: law 8, gate the gates.
+2. **A crash mid-stage blocks the store until an operator acts** (`lib.rs:152-157`, `:175-176`). A crash inside `write_all` leaves a truncated staged file. The next `publish(bytes)` compares and finds a mismatch, so it returns `Conflict`, forever, until someone runs `discard-stage`. This fails closed, but liveness requires a manual step. The test `staged_crash_is_not_visible_and_can_be_discarded_after_restart` (`native/hyperdocument-link-sqlite-store/tests/lifecycle.rs:46-60`) only covers a complete stage.
 3. **`read_bounded` follows symlinks** (`File::open`, `:109`). Only the root directory is checked for symlinks (`:82-85`). Same-user threat model only.
-4. **README overstates the tests** (`README.md:15-17`). It claims "Tests exercise separate process invocations for stage/crash, publish/lost-response, restart/read, exact retry, conflict, corruption transport". `tests/lifecycle.rs` is in-process (it drops and reopens the struct). The process-level checks live in the unwired shell script, and the "corruption" case there (`test-hyperdocument-link-local-store.sh:42-52`) is a different-bytes retry, not corrupt-read transport.
+4. **README overstates the tests** (`README.md:15-17`). It claims "Tests exercise separate process invocations for stage/crash, publish/lost-response, restart/read, exact retry, conflict, corruption transport". `native/hyperdocument-link-sqlite-store/tests/lifecycle.rs` is in-process (it drops and reopens the struct). The process-level checks live in the unwired shell script, and the "corruption" case there (`test-hyperdocument-link-local-store.sh:42-52`) is a different-bytes retry, not corrupt-read transport.
 5. **The bench's "lost response" is just an ignored stdout** (`forward_link_e2e_bench.rs:192-196`). It measures process spawn plus filesystem calls, not loss.
 6. **License mismatch.** `MIT OR Apache-2.0` (`Cargo.toml:6`), against `AGPL-3.0-or-later` across the rest of `native/`.
 
@@ -723,7 +723,7 @@ Deleting this crate requires moving the 14-byte fixture (sqlite tests include it
 | `src/lib.rs` | 222 | 0 | 222 |
 | `src/main.rs` | 71 | 0 | 71 |
 | `src/bin/forward_link_e2e_bench.rs` | 314 | 0 | 314 (benchmark) |
-| `tests/lifecycle.rs` | 106 | 106 | 0 |
+| `native/hyperdocument-link-sqlite-store/tests/lifecycle.rs` | 106 | 106 | 0 |
 | **Total** | **713** | **106** | **607** |
 
 Minimal: drop all 713 lines, plus `README.md` (31), `Cargo.lock` (7) and the two scripts. Move the fixture to the SQLite crate.
@@ -895,7 +895,7 @@ Local `const NAME: u8 = N;` request constants:
 
 ## 9.4 Flaws noticed
 
-1. **A false architecture claim in `hybrid_kem.rs`.** Lines 3-6 and 14-15 say "Every key exchange in `native/` goes through here … There is no pure-X25519 and no pure-ML-KEM path". `native/resource-client/src/channel.rs:22-24` documents "Sealing (X25519 mode; ML-KEM pairwise keys are lane CH-KEM-EPOCH)", and the code does pure X25519 at `channel.rs:207` (`esk.diffie_hellman`) and `:236`. Either channel goes through `hybrid_kem`, or the claim must name the exception (law 14: state covered scope).
+1. **A false architecture claim in `hybrid_kem.rs`.** Lines 3-6 and 14-15 say "Every key exchange in `native/` goes through here … There is no pure-X25519 and no pure-ML-KEM path". `channel.rs [deleted 17d61469]:22-24` documents "Sealing (X25519 mode; ML-KEM pairwise keys are lane CH-KEM-EPOCH)", and the code does pure X25519 at `channel.rs:207` (`esk.diffie_hellman`) and `:236`. Either channel goes through `hybrid_kem`, or the claim must name the exception (law 14: state covered scope).
 2. **The seed-layout known-answer test does not travel with the code.** `hybrid_kem.rs:236-238` claims "The known-answer test checks the derived encapsulation key against an independent pure-Python FIPS 203 implementation". That test is `resource-client/src/private.rs:1220-1235` (`the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation`), not in `hybrid_kem.rs`. It therefore never runs in the `private-backend` tree, which compiles the same FFI declaration against its own lock. Both locks pin 0.45.0 today, so they agree; the pattern is fragile. `crypto_transit` carries its own combiner known answer (`:357-379`); `hybrid_kem.rs` itself has none.
 3. **Zeroization gaps.**
    - `crypto_transit::KeyPair.secret` is a plain `Vec<u8>` (`:41`): `key.to_bytes().to_vec()` turns a `Zeroizing<Vec>` into an unprotected copy (`:72`).
@@ -986,7 +986,7 @@ Only one place is a Rust-owned rule with no Lean counterpart: `compatible-upgrad
 1. **Durable byte CAS is implemented four times.** `joint-agreement-crypto` `Journal` (`session.rs:135-263`), `portable-archive` `compare_replace` (`durable_file.rs:42-73`), `hyperdocument-link-store` (`lib.rs:142-213`) and `hyperdocument-link-sqlite-store`. Each has its own lock naming, fsync discipline and lost-reply story. Only the SQLite one is deployed.
 2. **Memfd sealed execution is implemented three times:** `pinned_execution.rs:21-55`, `resource-client/src/transport.rs:1368-1393` and `spk-host/src/seccomp.rs:365-390`. Only the first is bounded, and it is the one that is unused.
 3. **Hand-coded platform constants:** `launch-gate.rs:13` (`O_NOFOLLOW`), `:14-15` (flock), `:226` (syscall 434), `:287` (`prctl` 1/9). The libc crate is available elsewhere in the tree.
-4. **Gates that silently stopped running:** `scripts/test-hyperdocument-link-local-store.sh` and `scripts/run-forward-link-e2e-benchmark.sh`, since 2026-10-08. The `bend-ir2-proof` README commands do not work on a clean checkout.
+4. **Gates that silently stopped running:** `test-hyperdocument-link-local-store.sh [deleted 52c252e3]` and `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]`, since 2026-10-08. The `bend-ir2-proof` README commands do not work on a clean checkout.
 5. **Docs that outlived their code:** `QUALIFICATION-R32.txt`, the migration note's retired list, the hyperdocument-link-store README's test claims and the `hybrid_kem.rs` "ONE implementation" claim.
 
 ## 10.5 Unwired / twins summary
@@ -1026,7 +1026,7 @@ Non-Rust weight that leaves with the dropped crates:
 - `Cargo.lock` files: 357 + 343 + 111 + 1,178 + 7 = 1,996 lines
 - bend-ir2-proof text and Python: 380 + 265 + 76 + 6 = 727 lines
 - hyperdocument-link-store `README.md`: 31 lines
-- two scripts: `scripts/test-hyperdocument-link-local-store.sh` (60) and `scripts/run-forward-link-e2e-benchmark.sh`
+- two scripts: `test-hyperdocument-link-local-store.sh [deleted 52c252e3]` (60) and `run-forward-link-e2e-benchmark.sh [deleted 52c252e3]`
 
 ## 10.7 Deployability of the bundle on the Hetzner VM
 

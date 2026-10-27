@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-27",
+  "focused_checks": {
+    "custody_units": 3,
+    "independent_custody_cases": 7,
+    "large_file_bytes": 537919488,
+    "large_file_passed": true,
+    "large_file_peak_rss_kib": 22012,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-checks-final.log",
+    "native_filters": [
+      "public_data",
+      "materialized_profile_survives_wake_and_archive_cannot_choose_it",
+      "bootstrap_descriptor_transport_requires_exact_command_bindings"
+    ],
+    "passed_marker": "ORACLE_SHARED_NATIVE_CHECKS_PASS",
+    "stream_library_tests": 9,
+    "inspection_example_tests": 2
+  },
+  "host": "hbox",
+  "mount_audit": {
+    "fd7_closed": true,
+    "new_file_errno": "EROFS",
+    "passed": true,
+    "private_var_writable": true,
+    "read_only_mount": true,
+    "remote_log": "/othersys/oracle-data-audit-20261027/evidence/test.log",
+    "test_log_sha256": "746cdd4fc2d2eff95c5f54fe821e8d2354869f99438806ad0d72222252a3dc5b",
+    "unlink_errno": "EROFS",
+    "worker_reaped": true
+  },
+  "release_binary_sha256": {
+    "mini-spk-broker": "40dea815822d8ce85f7b22c9b5306d338fdd510aa2dbcfdeefb2d5613778bf30",
+    "mini-spk-volume-helper": "7a850779b5666e8a17b040b58313da1c945af09244262fe60abe38d53661aa4f",
+    "spk-data-publish": "eb03748c905258578b023da1d25f7c7bb49619fe8dd399bfcb5a8d687cc49297",
+    "spk-host": "3ea8e1be9c7110a1949cefe5144a729fa575c27e2e3aedd53e0fbfd0b5f3d674"
+  },
+  "release_build": {
+    "command": "SWARM_MEM_MAX=4G swarm-build cargo build --offline --locked --release -j2 -p minidregg-spk-host --bin spk-host --bin mini-spk-broker --bin mini-spk-volume-helper --bin spk-data-publish",
+    "exit": 0,
+    "jobs": 2,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-release-final.log",
+    "memory_max": "4G"
+  },
+  "schema": "mini-public-data-native-checks-v1",
+  "scope": "Native physical custody and mount checks. Actual signed Mini admission/two-grain journey is recorded separately; no new Lean authority theorem.",
+  "snapshot": "/othersys/lanes/oracle-u2-20261027",
+  "source_sha256": {
+    "Cargo.lock": "cbec57c29ce0b1d45421e90d959546c5d737ba5dd931823d9022fc38f19da419",
+    "Cargo.toml": "1ea3be9bfb212371364703248612a582fb7d36427da06d3678b6352a8eea0a9b",
+    "native/spk-host/src/bin/spk-data-publish.rs": "a289a0a92fb95513d093213e35e9953064ea55c85a888202ea72beda46ecf19c",
+    "native/spk-host/src/materialize.rs": "54e9c014eb18f4838e99329ab8d0a95891ec87cb06e08fdfa299ad37a3a8cff9",
+    "native/spk-host/src/resident_launch.rs": "7227f6eb888bd55b454296790632a09cbc24c4d8e3d81513190eead196c2f3bf",
+    "native/spk-host/src/resident_privilege.rs": "11a163561ecd44d0c7544d4ff64fe7a4491423ab801878a2e7355d1a0a0dece6",
+    "native/spk-host/src/resident_service.rs": "0cd7904a953b98baa8419fb9bd379c7c0af903afe90b40c7907223b8a1b63c3a",
+    "native/spk-host/src/sandbox.rs": "d5e52dab21358866068c74180573d76da09ee6594932c6b0006cdcce007ac07a",
+    "native/spk-host/src/shared_data.rs": "32b2e7babf6fdd1e85f8eab208361c12313ab13ef1d0ae070bae82f263a60108",
+    "native/spk-host/src/spawn_gate.rs": "c380f9c72728fe0f54cb159235c70c9ea69549c0f5ed794071e69addc94d2236",
+    "native/spk-package-stream/src/lib.rs": "532eb5e06e2e16403fedb65a6ffe99f175804f3f938c6a4c8280a33dbdb0ed50"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "app_id": "ephaf4h4cx8f9s36hmukm4yzkznyhqjhvj8efp3at9cru2zn10mh",
+  "app_version": 4,
+  "appliance_receipt_sha256": "e3bfe7fc7fa22e8d4641f0314dfb8d1a3cd50ba442b2f656c86617e0ee9e7392",
+  "artifact": "oracle-runtime-v4.spk",
+  "bridge_source_files": {
+    "native/oracle-appliance/Cargo.toml": "3af88acc67120c6924722eead06e10a4dafb3f8c17863739b98bd7af23e6b6bf",
+    "native/oracle-appliance/src/lib.rs": "84c792f226c5f75ec6bd648de092af797bb0a172114de1b3aca3967119c436e6",
+    "native/oracle-appliance/src/main.rs": "e8ad389c09415592c78de576053ed7e3b02b6e4cbb6f19e032b3831521e23ca6",
+    "native/oracle-appliance/tests/bridge.rs": "d3bbbf2693f23df72edc90b0725a42cf5bb88d89f71349dc27be95e41f761f72",
+    "native/spk-host/src/http_response.rs": "1158fb8e2bc82922d56732b5b6a3e952a5b47082ec2d88426e9041ec806ca2da"
+  },
+  "changes_from_v3": [
+    "JSON Accept negotiation supports wildcards and explicit exclusions.",
+    "Both signed launch commands set NLTK_DATA to the fixed shared public corpus directory."
+  ],
+  "date": "2026-10-27",
+  "decoded_bytes": 501347632,
+  "empty_files_preserved": 234,
+  "exact_inventory_verified": true,
+  "inspector_sha256": "4768ac187a3e5a4a58ae8f59a497b3f706306d13c7616efc8e228bd925644795",
+  "integrated_source_commit": "43948a29dd4d93e40243c87f99086cb91b482386",
+  "kernel_overlay_binaries": {
+    "earth": "61646341c4baa7b68eef779baa1c67e9faa6f27f9ec2ac233bd5fca00d87674e",
+    "space": "63f5248b8f8beac41fb791d791f6a7038e0fd7c0ae141dced5e6d450d2a9c667"
+  },
+  "linux_bridge_cargo_lock_sha256": "5af000d835e7d93cd2ee678612475edd0332ab1d54ae5ff5c244423c15948f78",
+  "linux_bridge_sha256": "1d34b4f27ea050393f50829ef17af35dc312060a6fb0952c00a2dac0e401f28e",
+  "members": 15155,
+  "oracle_runtime_source_bytes": 89636654,
+  "package_inventory_sha256": "8b27c9998fa27df94e5586c4b8748fceed7aeae2b3e89a8bc3bcc68a0e901c5f",
+  "packer_sha256": "5455f7cdbeac38e3887408f411c27f6d6614ad45b9cb2fdf641d4ccb60c762f7",
+  "patches": [
+    {
+      "name": "oracle7-slim-4.9-correctness.patch",
+      "sha256": "feb44d407634699545634350281e530b1bcc0ecf7bd951bdfc01655dbf99ecd6"
+    },
+    {
+      "name": "oracle7-slim-4.9-usage.patch",
+      "sha256": "1a2f69d0bdfe112f67ac01557ddb1c923e5e6c6a1fbaab1097852ade20e3e625"
+    },
+    {
+      "name": "oracle7-slim-4.9-dates-mars.patch",
+      "sha256": "963b1f91ba8330b2cd1a099ddf72df05813c94a0156931ed40b257b13e93a57c"
+    }
+  ],
+  "post_pack_profile": "standard-v1",
+  "public_key_hex": "6d60a712045f50e4e06684f52993df97e9e85a30dc50d7546aca577d0bf40827",
+  "raw_bytes": 91944584,
+  "raw_sha256": "bded240f916b93d51ad5e90ffc12d8a8cc9985e35306105eff69f926b3333ed0",
+  "recipe_files": {
+    "deploy/oracle/launch.py": "d0c6eb6b3521d93a1fe2ed2980603e70edd852c63da87b5bf255ab590cbdfac5",
+    "deploy/oracle/pack/Cargo.lock": "73686a4d35eafe784d583e218ca46c401e23e8917a01a6894c53c73e5a93a209",
+    "deploy/oracle/pack/Cargo.toml": "fe7027dd63d04a756d9f33b6dd20f18c16b621a2f419359ab55f7b49a9e36e01",
+    "deploy/oracle/pack/src/main.rs": "34e785be889e2a9315a74d09c1497864407b71d5ed950c84ae61583903d01d1f",
+    "deploy/oracle/stage.py": "9d2eb413daf7131d8afcfd7e99b0e7f5aa5423954146cea974ec2b13365ead06"
+  },
+  "required_host_fix": "Native HTTP serializer must preserve validated x-sandstorm-app-http-status; bridge source tests include actual host serialization.",
+  "rootfs_archive_sha256": "9dddc0036417eb990f955d6f93a9e7026deeddaabd43d526dee7d2958d0e2eb6",
+  "rootfs_inventory_sha256": "546fbf49e1e43162917267b643b47505d346398b4940bc4b3803dad9a7925753",
+  "schema": "oracle-shared-runtime-receipt-v1",
+  "scope": "Signed runtime package byte identity and composition. Shared data publication and Mini admission/receiving acceptance have separate receipts; no specialist panel or public-deployment claim.",
+  "shared_data_bytes": 15046949326,
+  "shared_data_files": 26,
+  "shared_data_inventory_sha256": "32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a",
+  "signature_verified": true,
+  "source_revision": "2dabc2bd4121a75298ca96dc297fc300d4ad26bd",
+  "source_revision_semantics": "Base checkout recorded during staging; exact working source overrides are pinned in bridge_source_files and recipe_files.",
+  "stage_sha256": "2c90b427d214aa3c14c5f8b3e9ebca4ab11526669b43965de2e1d79bfaaaf319",
+  "tests": {
+    "python_stage_lifecycle": 10,
+    "rust_bridge_linux": 7,
+    "rust_host_http_response_included_linux": 8,
+    "rust_packer": 3
+  }
+}

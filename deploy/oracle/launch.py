@@ -3,6 +3,7 @@
 import ctypes
 import http.client
 import os
+from pathlib import Path
 import signal
 import socket
 import subprocess
@@ -94,10 +95,17 @@ def main():
             raise SystemExit("fd3 must be a Unix socket")
     os.chdir("/var")
     os.umask(0o077)
+    # Mini binds the signed inventory and mounts it; this is only a useful
+    # application startup check. The adapter also checks every required store.
+    if Path("/minidregg-data.json").exists():
+        data = Path("/opt/oracle-data")
+        if data.is_symlink() or not data.is_dir():
+            raise SystemExit("shared Oracle data directory is unavailable")
     return supervise(
         ["/usr/bin/python3.12", "-B", "/opt/oracle/adapter/serve.py",
          "--runtime", "/opt/oracle", "--data-root", "/opt/oracle/root",
-         "--workspace", "/var/oracle-workspace", "--port", "7070"],
+         "--workspace", "/var/oracle-workspace", "--port", "7070",
+         "--max-request-bytes", "65536"],
         ["/opt/oracle-bin/minidregg-oracle-appliance", "--port", "7070"],
     )
 

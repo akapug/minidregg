@@ -518,7 +518,7 @@ with the log through hashing, though not through re-admission. `store audit` re-
 | Hermes paid write | about 11 processes, 5 submits, about 8 reads, about 110 Host round trips | — | `PERFORMANCE-REVIEW-2026-10-03.md:294-301` |
 | SPK share / STOP | 4–15 min / **7–51 min** | — | §1.11 |
 | SPK WebSocket open | 13.6–15.8 s | — | `2026-10-02-spk-browser-tls` |
-| waste ratio (instructions done / necessary), after STORE-ROOT | update 1,647×, birth 1,933×, current read 385×, past read 6,656×, cold open 11× | — | `docs/WASTE-MODEL.md:23-38` |
+| waste ratio (instructions done / necessary), after STORE-ROOT | update 1,647×, birth 1,933×, current read 385×, past read 6,656×, cold open 11× | — | `WASTE-MODEL.md [deleted 3b2aa109]:23-38` |
 | growth to 1000 records, wall time | 2,436–5,401 s | — | `PIPELINE-HBOX.md:149` |
 
 **What landed after those numbers, all ancestors of main and none re-measured in the tree:**
@@ -542,7 +542,7 @@ So the honest current state: the largest named wastes were attacked in the week 
 ### Known remaining causes, as the docs and code name them
 
 1. **One Host thread per world.** `mini serve` serialises every Host exchange (`transport.rs:1752`). The
-   HP-DESIGN resident batched loop (`docs/HP-DESIGN.md:17-23`) is not built: `Host/Resident.lean` does
+   HP-DESIGN resident batched loop (`docs/HP-DESIGN.md:17-23`) is not built: `Host.Resident [not in tree]` does
    not exist, and `batchTurnsMax` appears only in `Kernel/Bounds.lean`. Concurrency shows up as queueing
    and as stale-root re-plans (up to 5, `main.rs` usage).
 2. **Global staleness.** Preconditions are checked against a world-level root, so concurrent writers

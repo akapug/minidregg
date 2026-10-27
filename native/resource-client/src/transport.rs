@@ -33,7 +33,7 @@ fn request_within_bound(request: &[u8]) -> bool {
 
 /// The largest JSON source an author request (op 7) may carry. Measured
 /// against the clients: the biggest legitimate sources are 4 MiB
-/// (`current_birth::MAX_SOURCE` and `MAX_INTENT`, `workspace::studio::MAX_SOURCE`,
+/// (`current_birth::MAX_SOURCE` and `MAX_INTENT`,
 /// `hermes_handoff::LIMIT`); a 12 MB array of 5M elements cost the Host ~11 s and
 /// 775 MB, so the 12 MB frame bound was the wrong bound for this operation.
 pub(crate) const AUTHOR_JSON_MAX: usize = 4 * 1024 * 1024;
@@ -262,6 +262,18 @@ pub(crate) fn public_envelope(
     }
     if !allowed_operation(request, catalog_enabled) {
         return Err("operation unavailable on selected socket");
+    }
+    Ok(())
+}
+
+/// Dedicated controller custody endpoint. It cannot submit, grant, start, stop,
+/// or fetch arbitrary private state. Source plan/assembly checks stay unchanged.
+pub(crate) fn agent_operator_envelope(envelope: &[u8], config: &[u8]) -> Result<(), &'static str> {
+    let (pin, request) = split_envelope(envelope, config)?;
+    if pin.is_none() { return Err("agent operator proxy requires pinned v2 envelope"); }
+    if !matches!(request.first(), Some(48 | 58 | 59 | 78 | 80 | 81))
+        || !request_within_bound(request) || !allowed_operator_operation(request) {
+        return Err("operation unavailable on agent operator proxy");
     }
     Ok(())
 }
@@ -554,6 +566,8 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
+        // STOP inspection only joins retained bytes to current verified history.
+        [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
         [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // Route-bound164 uses the same mutating dispatch receiver with an extra immutable restriction.
@@ -1192,8 +1206,15 @@ const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (
 
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
     durability_barrier()?;
+    let expected_peer = crate::operator_peer::before_connect(socket)?;
     let mut stream = UnixStream::connect(socket)
         .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
+    if let Some(uid) = expected_peer {
+        if peer_uid(&stream)? != uid {
+            return Err("operator endpoint peer UID mismatch before transmission".into());
+        }
+        crate::operator_peer::check_socket(socket)?;
+    }
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
@@ -1373,7 +1394,7 @@ impl PinnedLocalInvocation {
 }
 
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
-struct HostProcess {
+pub(crate) struct HostProcess {
     child: std::process::Child,
     input: std::process::ChildStdin,
     output: std::process::ChildStdout,
@@ -1385,7 +1406,7 @@ struct HostProcess {
 
 impl HostProcess {
     /// Each restart must execute the advertised image and exact original settings.
-    fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
+    pub(crate) fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
         let config_image = Self::checked_config(config, expected_config)?;
         let image = Self::checked_image(host, expected)?;
         Self::start_checked_images(host, config, image, config_image)
@@ -1532,7 +1553,7 @@ impl HostProcess {
     }
 
     /// `exchange` with the Host-time budget named by the caller.
-    fn exchange_within(&mut self, request: &[u8], budget: Duration) -> Result<Vec<u8>, String> {
+    pub(crate) fn exchange_within(&mut self, request: &[u8], budget: Duration) -> Result<Vec<u8>, String> {
         write_frame(
             &mut DeadlinePipeWrite {
                 writer: &mut self.input,
@@ -3367,6 +3388,27 @@ done"#;
         assert!(!response_operation_matches(34, &[164]));
         assert!(!response_operation_matches(154, &[34, 1]));
         assert!(!response_operation_matches(34, &[]));
+    }
+
+    #[test]
+    fn stop_inspection_is_private_and_requires_two_nonempty_inputs() {
+        let mut request = vec![155];
+        request.extend_from_slice(&1u32.to_le_bytes());
+        request.extend_from_slice(b"PC");
+        assert!(allowed_operator_operation(&request));
+        assert!(!allowed_operation(&request, false));
+        assert!(!allowed_operation(&request, true));
+        for malformed in [
+            vec![155],
+            vec![155, 1, 0, 0],
+            vec![155, 0, 0, 0, 0, b'C'],
+            vec![155, 1, 0, 0, 0, b'P'],
+            vec![155, 255, 255, 255, 255, b'P', b'C'],
+        ] {
+            assert!(!allowed_operator_operation(&malformed));
+        }
+        request.resize(HOST_MAX_FRAME + 1, 1);
+        assert!(!allowed_operator_operation(&request));
     }
 
     #[test]

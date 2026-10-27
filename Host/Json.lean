@@ -1571,18 +1571,16 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound", "clockGenesisNow", "clockMaxStepSeconds", "issuanceCap", "payControlCapability"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
       let observerPath := path ++ ".payObserver"
       let observer ← exactObject observerPath
-        ["subject", "capability", "controlCapability", "enrolCapability"]
+        ["subject", "capability", "enrolCapability"]
         (← field path "payObserver" obj)
       pure (some (⟨⟨← nat (observerPath ++ ".subject") (← field observerPath "subject" observer)⟩,
         ⟨← nat (observerPath ++ ".capability") (← field observerPath "capability" observer)⟩,
-        ⟨← nat (observerPath ++ ".controlCapability")
-          (← field observerPath "controlCapability" observer)⟩,
         ⟨← nat (observerPath ++ ".enrolCapability")
           (← field observerPath "enrolCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
@@ -1616,6 +1614,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
       ⟨← nat (path ++ ".factoryControllerCapability")
       (← field path "factoryControllerCapability" obj)⟩⟩
     meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
+    payControlCapabilityId :=
+      ⟨← nat (path ++ ".payControlCapability") (← field path "payControlCapability" obj)⟩
     payObserver := payObserver
     clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
     tailBound := tailBound

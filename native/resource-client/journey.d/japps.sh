@@ -166,15 +166,30 @@ c=$(code /pad -H 'Host: a4501.demo.dregg.online' -H "Cookie: __Host-mini_spk_ses
 c=$(code /pad -H 'Host: demo.dregg.online'); row "front: the bare domain is not a grain origin" "$([ "$c" = 404 ] && echo 1 || echo 0)" "$c"
 
 # ---- the lifecycle on a grain world (box only) -----------------------------------------------
+# JAPPS_WORLD_ENV names a standing world's WORLD.env (scripts/spk-platform/world-up.sh): its
+# Store, broker and profile are reused, so the rows run against a world that outlives them.
+if [ "$mode" = --box ] && [ -n "${JAPPS_WORLD_ENV:-}" ] && [ -f "$JAPPS_WORLD_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$JAPPS_WORLD_ENV"
+  export GRAINS_ROOT BROKER_SOCKET
+  WORLD_RUN=$RUN
+fi
 if [ "$mode" = --box ]; then
   if [ -n "${GRAINS_ROOT:-}" ] && [ -n "${BROKER_SOCKET:-}" ] && [ -x "$BIN/spk-host" ] && [ -x "$BIN/minidregg-host" ]; then
-    run=$W/world
+    run=${WORLD_RUN:-$W/world}
     ok=0
+    # The owner's role basis: role 0 when the signed bridge declares roles, allAccess otherwise.
+    basis() { if "$BIN/spk-host" qualify --import-profile standard-v1 "$1" 2>/dev/null | jq -e '.signedSchema.roles | length > 0' >/dev/null; then echo '{"type":"role","id":"0"}'; else echo '{"type":"allAccess"}'; fi; }
+    Q2=${JAPPS_QUALIFY_ROOT:-$HOME}/.mini-japps-basis.$$; mkdir -m 0700 "$Q2"
+    cp "$W/state/quarantine/$SLIDES_PKG.spk" "$Q2/a.spk"; cp "$W/state/quarantine/$TODOS_PKG.spk" "$Q2/b.spk"
+    BASIS_A=$(basis "$Q2/a.spk"); BASIS_B=$(basis "$Q2/b.spk"); rm -rf "$Q2"
+    phases="birth-a install-a share-a start-a enroll-a get-a birth-b install-b share-b start-b enroll-b get-b stop-a"
+    [ -n "${WORLD_RUN:-}" ] || phases="store services workroom profile $phases"
+    # shellcheck disable=SC2086
     if BIN=$BIN SPK_A=$W/state/quarantine/$SLIDES_PKG.spk SPK_B=$W/state/quarantine/$TODOS_PKG.spk \
         KIND_A=web KIND_B=web GET_PATH_A=/ GET_PATH_B=/ CLASS_A=S CLASS_B=S \
-        ROLE_BASIS_B='{"type":"allAccess"}' GRAINS_ROOT=$GRAINS_ROOT BROKER_SOCKET=$BROKER_SOCKET \
-        sh "$REPO/scripts/spk-platform/grain-journey.sh" phase "$run" store services workroom profile \
-          birth-a install-a share-a start-a enroll-a get-a birth-b install-b share-b start-b enroll-b get-b stop-a \
+        ROLE_BASIS_A=$BASIS_A ROLE_BASIS_B=$BASIS_B GRAINS_ROOT=$GRAINS_ROOT BROKER_SOCKET=$BROKER_SOCKET \
+        sh "$REPO/scripts/spk-platform/grain-journey.sh" phase "$run" $phases \
           >"$W/world.out" 2>"$W/world.err"; then ok=1; fi
     row "two market apps on a scratch world: install, share, start, enroll, GET, stop one (grain-journey.sh)" "$ok" "$(tail -1 "$W/world.err" | cut -c1-160)"
     if [ "$ok" = 1 ]; then
@@ -182,9 +197,9 @@ if [ "$mode" = --box ]; then
       exp=$("$BIN/spk-host" grain export "$(jq -er .profilePath "$run/evidence/profile-result.json")" "${app_a:-7101}" "$W/export-a" 2>&1); rc=$?
       row "export of the stopped app writes var.ext4, manifest.json and manifest.sig" "$([ "$rc" = 0 ] && [ -f "$W/export-a/manifest.sig" ] && echo 1 || echo 0)" "$(tail -1 <<<"$exp" | cut -c1-120)"
     fi
-    sh "$REPO/scripts/spk-platform/grain-journey.sh" stop-services "$run" >/dev/null 2>&1 || true
+    [ -n "${WORLD_RUN:-}" ] || sh "$REPO/scripts/spk-platform/grain-journey.sh" stop-services "$run" >/dev/null 2>&1 || true
   else
-    echo "UNCONFIGURED lifecycle rows: need GRAINS_ROOT, BROKER_SOCKET (a broker for a scratch world; scripts/spk-platform/two-world-journey.sh sets one up), $BIN/spk-host and $BIN/minidregg-host" >&2
+    echo "UNCONFIGURED lifecycle rows: need JAPPS_WORLD_ENV=RUN/WORLD.env from scripts/spk-platform/world-up.sh (or GRAINS_ROOT and BROKER_SOCKET), $BIN/spk-host and $BIN/minidregg-host" >&2
   fi
 fi
 

@@ -74,7 +74,6 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
     let operator_socket = absolute(operator_socket)?;
     let reserve_attempt = absolute(reserve_attempt)?;
     let directory = absolute(directory)?;
-    private_socket(&operator_socket)?;
     let plan = private_bytes(paid_plan, transport::HOST_MAX_FRAME - 1)?;
     let approval_bytes = private_bytes(approval_path, JSON_LIMIT)?;
     let approval: Value = serde_json::from_slice(&approval_bytes)
@@ -85,6 +84,7 @@ pub(super) fn sign(inputs: Inputs<'_>) -> Result<()> {
     crate::fsio::create_private_dir(&directory)?;
     sync_directory_ancestors(&directory)?;
     let original = payer_anchor(&reserve_attempt, &directory)?;
+    private_socket(&operator_socket)?;
     if host != original.host
         || config != original.config
         || operator_socket != original.operator_socket

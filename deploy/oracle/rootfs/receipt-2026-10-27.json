@@ -1,0 +1,102 @@
+{
+  "artifact_directory": "/othersys/lanes/oracle-rootfs-20261027",
+  "build_host": "hbox",
+  "date": "2026-10-27",
+  "elf_check": {
+    "bridge_max_glibc": "2.34",
+    "bridge_sha256": "45ad0b6cb55f1bddc7a7c4296143b2f2a110d8ed7e2a7d6cafd1987e6528b4eb",
+    "failures": 0,
+    "files": 985,
+    "wheel_helper_context": "adjacent .libs directory, matching importing extension search context"
+  },
+  "inputs": {
+    "assemble.py": {
+      "bytes": 5566,
+      "sha256": "900e8e031e83dfff9f97792e7aa06839b2c1e997ed128eddd763ad8335c496f4"
+    },
+    "check-elf.py": {
+      "bytes": 2501,
+      "sha256": "eaa3fecd6a136724eb4a949ab47c16e30fb044c2351a76d79e47b8556484b64f"
+    },
+    "check-math.py": {
+      "bytes": 850,
+      "sha256": "04f6336ad31a26c3389007de7b2ba1dac0855b743c0eecb4d32766912e456e4a"
+    },
+    "evidence/bridge-versions.txt": {
+      "bytes": 3191,
+      "sha256": "862ac1457845d0725f9219d864d1db48dd147e33b47a591584fa6712d8d9da1f"
+    },
+    "evidence/elf-closure-final.json": {
+      "bytes": 463229,
+      "sha256": "80de1b761e76968a9eda2472e40d014b9d75167fbf4afab8b4c04200fc5870a8"
+    },
+    "evidence/importcheck.json": {
+      "bytes": 346,
+      "sha256": "50a1bc4220a5e04de8f3a7a410c45c8d2da7a9e5dbed23886d1d80944a822b2a"
+    },
+    "evidence/importcheck.stderr": {
+      "bytes": 231,
+      "sha256": "86339da15db8a0e7aef67753c2b7357ded43a3cd3523e8779e0ead8dccef1ba0"
+    },
+    "evidence/mathcheck.json": {
+      "bytes": 194,
+      "sha256": "c52069f7c8fa5c1dc8469c84931bd03416a90ecf6ebdb998906f90972f1a5fc3"
+    },
+    "evidence/mathcheck.stderr": {
+      "bytes": 231,
+      "sha256": "86339da15db8a0e7aef67753c2b7357ded43a3cd3523e8779e0ead8dccef1ba0"
+    },
+    "evidence/removed-links.json": {
+      "bytes": 5352,
+      "sha256": "3665837a16717bfbe990de6e64792b5b3f5687e4b5192828271da90ae70224c4"
+    },
+    "inputs/inputs.lock.json": {
+      "bytes": 11731,
+      "sha256": "620040d4c8d4064625af554aafbc9743cd2d3c39937e36f0562eeb5cb4b05cc6"
+    },
+    "rootfs.inventory.json": {
+      "bytes": 2191223,
+      "sha256": "546fbf49e1e43162917267b643b47505d346398b4940bc4b3803dad9a7925753"
+    },
+    "rootfs.tar.xz": {
+      "bytes": 77045396,
+      "sha256": "9dddc0036417eb990f955d6f93a9e7026deeddaabd43d526dee7d2958d0e2eb6"
+    },
+    "stage.py": {
+      "bytes": 27845,
+      "sha256": "2a6342a5b92ed34c9d6b6362be8c71656df96ecf26cc9b2add8734de19822cd4"
+    }
+  },
+  "inventory_entries": 10409,
+  "largest_member_bytes": 25409073,
+  "logical_bytes": 369380718,
+  "math_checks": {
+    "numpy_solve": "pass",
+    "scipy_linalg_det": "pass",
+    "scope": "Compiled dependency execution only; not Oracle answer qualification.",
+    "sklearn_linear_regression": "pass",
+    "sympy_factor": "pass"
+  },
+  "regular_files": 8904,
+  "removed_dangling_links": 50,
+  "runtime": {
+    "dependencies": {
+      "mpmath": "1.3.0",
+      "nltk": "3.9.4",
+      "numpy": "2.4.6",
+      "regex": "2026.5.9",
+      "scikit-learn": "1.8.0",
+      "scipy": "1.17.1",
+      "sympy": "1.14.0",
+      "zstandard": "0.25.0"
+    },
+    "glibc": "2.39",
+    "platform": "linux-x86_64",
+    "python": "3.12.3",
+    "scope": "Runtime imports only; no Oracle queries or specialist qualification.",
+    "sqlite": "3.45.1"
+  },
+  "schema": 1,
+  "scope": "Linux runtime imports, calculation probes, dependency closure, and stager inventory. No Oracle query, signed SPK, Mini admission or deployment claim.",
+  "warning": "Joblib uses serial mode with the packaging rootfs empty /dev; imports and measured calculations pass."
+}

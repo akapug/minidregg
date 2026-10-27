@@ -38,20 +38,35 @@ synthetic identity used by the probe establish isolated user identities. Use
 separate grains/workspaces for separate tenants.
 
 The signed API path is `/`. Sandstorm operation paths are relative and map only
-as follows; query suffixes and alternative spellings are refused:
+as follows:
 
 | Sandstorm operation | Private HTTP request |
 | --- | --- |
 | `GET health` | `GET /health` |
 | `GET capabilities` | `GET /capabilities` |
 | `POST query` | `POST /query` |
+| `GET operations` | `GET /operations` |
+| `GET operations/<id>` | `GET /operations/<id>` |
+| `POST invoke` | `POST /invoke` |
 
-Query content must have MIME type `application/json`, empty content encoding,
-and at most 16 KiB. The bridge forwards the exact JSON bytes, including the
+Only the operation listing accepts a query string: `q` (at most 256 decoded
+UTF-8 bytes), `availability` (`live_direct`, `text_only`, `unavailable`),
+`offset` (0–999999999), and `limit` (1–50). Fields cannot repeat. Operation IDs
+match `[A-Za-z0-9][A-Za-z0-9._-]{0,159}`; detail requests have no query string.
+Malformed percent escapes, controls and alternative routes are refused before
+HTTP delivery. Valid request targets are forwarded without rewriting.
+
+Query and invoke content must have MIME type `application/json`, empty content encoding,
+and at most 64 KiB. The v5 launcher selects the matching adapter request limit.
+The bridge forwards the exact JSON bytes, including the
 adapter's `request_id`, `conversation_id` and `text`, without rewriting or
-interpreting them. Request cookies, additional headers, Accept/Accept-Encoding
-lists and ETag preconditions are refused: the narrow API does not implement
-these semantics. HEAD is refused. Other WebSession methods use the schema's
+interpreting them; `/invoke` uses the adapter's structured operation envelope.
+Accept permits JSON through `application/json`,
+`application/*` or `*/*`, using the most specific matching range and its quality.
+An explicit JSON exclusion overrides a wildcard; no acceptable JSON range
+returns 406 before HTTP delivery. An absent Accept list permits JSON. Request
+cookies, additional headers, Accept-Encoding lists and ETag preconditions remain
+refused: the narrow API does not implement these semantics. HEAD is refused. Other WebSession methods use the schema's
 unimplemented failure. The app is an API, with no browser UI at its root.
 
 Eight HTTP exchanges may be in flight per app process, shared across sessions.
@@ -151,3 +166,78 @@ this inventory check does not re-attest the large deployment stores. The script
 uses Python only as an operator test harness and does not implement platform
 semantics. These five examples are transport/conversation checks, not specialist
 panel scores or evidence that Mini admission ran.
+
+## Custody across the resident user namespace
+
+The resident maps only its operator and app identities into its user namespace.
+Host-root files and files belonging to unrelated unmapped users can therefore
+show the same overflow UID there; unmapped groups have the same ambiguity. That
+number is never accepted as evidence of root ownership.
+
+Before entering the namespace, the existing bootstrap opens protected custody
+paths without following symlinks and checks their real host owners. It retains
+handles and original UID/GID metadata for root/operator-owned entries under the
+fixed world's `spk` namespace: finalized packages contribute their retained SPK,
+manifest, import policy and image-root metadata; finalized public datasets
+contribute their complete metadata trees. Executable image contents and archive
+bytes are not parsed at this stage. Foreign/app ownership, writable ancestry and
+symlinks are refused.
+
+After entry, the signature verifier uses that retained root provenance for its
+scratch ancestors. Public-data receipt checks recover the original UID and GID
+only when a captured handle and the observed inode still agree on device, inode,
+mode, link count, length, modification time and change time, with the handle's
+current namespace-visible ownership also matching the observation. Unknown or
+replaced inodes do not inherit trust. The signed archive and public inventory
+checks still run normally; this does not add a new admission route.
+
+Current operator cost: bootstrap scans finalized package metadata and public
+catalogs for that world, not just the requested revision, because selecting the
+package would otherwise require parsing resident inputs before isolation. The
+capture is bounded to 131,072 paths/handles, 32 MiB of retained path bytes and
+32 levels of public-data traversal; the process's descriptor limit may be lower.
+Exceeding a bound refuses startup. It does not hash the large public payloads
+again. Future narrower selection should use a trusted bootstrap input, not an
+app-supplied host pathname.
+
+Normal publication adds a new hash-addressed revision and leaves existing ones
+unchanged. Renaming an already-held catalog administratively can change its
+ctime; a later in-process custody recheck then refuses. Once IDs are unmapped,
+treating that change as harmless would also hide an ownership change. The
+already-mounted data remains pinned, and a fresh START can capture a restored
+publication again. No collector or update operation removes old revisions.
+
+The publisher explicitly sets a newly created public-data registry to `0755`,
+even under a restrictive umask. It does not change an existing registry or any
+ancestor. Bubblewrap resolves its passed directory FD through the backing
+pathname, so that ancestry must be searchable by the app. Before BEGIN, the
+existing worker checks that exact pinned FD under its actual app UID/GID and
+zero capabilities, resolves its pathname and confirms the same device/inode.
+This catches mode and ACL access failures without widening private directories.
+The bounded check accepts no caller-selected pathname and does not launch an app;
+the later one-shot launch still requires the admitted claim. Filesystem, LSM or
+I/O failures after this check can still leave a launch uncertain; there is no
+automatic resend.
+
+After the one-shot spawn succeeds, the app worker closes both its received app
+descriptors and their temporary duplicates before becoming the reaper. The
+reaper therefore cannot keep the app's RPC endpoint or output writers alive;
+once the app and its descendants close them, EOF can arrive while the reaper
+control channel remains open. This makes a
+failed startup observable promptly; it does not authorize replay or turn an
+uncertain RPC result into permission to launch again.
+
+The final native HTTP serializer preserves the original-status header as well
+as the RPC decoder. It accepts exactly one canonical three-digit value from
+200 through 599; the Sandstorm response union still determines the HTTP status
+line. Other app-supplied authority and framing headers remain refused. The
+bridge regression checks full response bytes and this header through both
+receiving layers, including 429 and server errors that lack exact union variants.
+Multiplexed entrances also retain dispatch failure details in the operator log,
+while clients receive the existing bounded error response.
+
+Launcher ACL reads are bounded by Linux's 64 KiB extended-attribute value limit,
+so provisioning more than 64 app identities does not exhaust an artificial ACL
+entry cap. The existing named-user, group and mask checks remain unchanged;
+oversized attributes still refuse explicitly. Existing launcher ACLs and old
+Store records are not rewritten by this reader.
