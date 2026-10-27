@@ -653,6 +653,10 @@ pub(crate) fn status(root: &Path, workspace: &Value, id: &str) -> Result<Value> 
                     state["outcome"] = out;
                     state["status"] = json!("saved");
                 }
+                AttemptOutcome::Charged(value) => {
+                    state["outcome"] = value;
+                    state["status"] = json!("charged");
+                }
                 AttemptOutcome::Refused => state["status"] = json!("refused"),
                 AttemptOutcome::Pending if attempt.join("call.bin").exists() => {
                     // A newer undecided reply supersedes any earlier refusal.

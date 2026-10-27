@@ -8,7 +8,7 @@ read from source at `main` (every file and line below was read, not inferred).
 
 `native/mini-sdk/src/signer.rs` is the signer abstraction. Everything that signs takes a
 `&dyn Signer` (`sign.rs`: `sign_intent`, `sign_observation_headers`, `sign_transaction`;
-`flow::Client.key`; `consent::Consent` takes the public key as bytes). TS mirrors it
+`flow::Flow.signer`; `consent::Consent` takes the public key as bytes). TS mirrors it
 (`Profile.signer(generation, scheme)`, `verify(scheme, ...)`, `signTransaction(signer, ...)`).
 
 | scheme | algorithm code | public key | signature |

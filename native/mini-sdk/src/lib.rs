@@ -28,8 +28,8 @@
 //! With default features the crate is the OFFLINE CORE and builds on `wasm32-unknown-unknown`:
 //! no Lean link, no processes, no filesystem, no sockets. Feature `native` adds the member's
 //! local processes (the storeless codec, [`local`], and the consent provider with its retained
-//! anchors and resident provider, [`consent`]), the operator-socket client and the filesystem
-//! custody store.
+//! anchors and resident provider, [`consent`]), the operator-socket client, the filesystem
+//! custody store, and the signing path itself ([`flow`]), which the `mini` CLI signs with.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 pub mod confirm;
@@ -50,6 +50,8 @@ pub mod signer;
 pub mod consent;
 #[cfg(feature = "native")]
 pub mod durable;
+#[cfg(feature = "native")]
+pub mod flow;
 #[cfg(feature = "native")]
 pub mod fsread;
 #[cfg(feature = "native")]
