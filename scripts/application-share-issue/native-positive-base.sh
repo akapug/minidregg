@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fresh two-subject app/session base with a positive, operator-pinned initial
-# payload byte tariff. All edits happen in a private temporary source copy;
-# the reviewed upstream fixtures and any prior Store remain unchanged.
+# payload byte tariff. Configuration is supplied explicitly; private source
+# copies preserve the reviewed inputs byte for byte.
 set -eu
 umask 077
 
@@ -35,23 +35,8 @@ sha256sum "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
 sha256sum -c "$STAGE/input-sha256.txt" >"$STAGE/input-precheck.txt"
 mkdir -p "$STAGE/scripts/workroom" "$STAGE/scripts/grain-birth" \
   "$STAGE/scripts/application-current-birth"
-sed -e 's/"tariffPerInitialPayloadByte":0/"tariffPerInitialPayloadByte":1/' \
-  -e 's/"tariffPerInitialPayloadByte":"0"/"tariffPerInitialPayloadByte":"1"/' \
-  -e 's/^WORKROOM_SPONSOR_BALANCE=\${WORKROOM_SPONSOR_BALANCE-100}$/WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-1000000}/' \
-  -e 's/^WORKROOM_TOOL_BALANCE=\${WORKROOM_TOOL_BALANCE-100}$/WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-1000000}/' \
-  "$PROVISION_SOURCE" >"$STAGE/scripts/workroom/provision.sh"
-[ "$(rg -c 'tariffPerInitialPayloadByte.*1' \
-    "$STAGE/scripts/workroom/provision.sh")" = 2 ] || exit 2
-[ "$(rg -c '^WORKROOM_(SPONSOR|TOOL)_BALANCE=\$\{WORKROOM_(SPONSOR|TOOL)_BALANCE-1000000\}$' \
-    "$STAGE/scripts/workroom/provision.sh")" = 2 ] || exit 2
-PROVISION_SHA=$(sha256sum "$STAGE/scripts/workroom/provision.sh" | cut -d ' ' -f 1)
-sed -e "s/^SOURCE_SHA=[0-9a-f]*$/SOURCE_SHA=$PROVISION_SHA/" \
-  -e 's/initialBalance:"100"/initialBalance:"1"/' \
-  "$MEMBER_SOURCE" >"$STAGE/scripts/grain-birth/native-share-member.sh"
-rg -q "^SOURCE_SHA=$PROVISION_SHA$" \
-  "$STAGE/scripts/grain-birth/native-share-member.sh" || exit 2
-rg -q 'initialBalance:"1"' \
-  "$STAGE/scripts/grain-birth/native-share-member.sh" || exit 2
+cp "$PROVISION_SOURCE" "$STAGE/scripts/workroom/provision.sh"
+cp "$MEMBER_SOURCE" "$STAGE/scripts/grain-birth/native-share-member.sh"
 cp "$APP_SOURCE" "$STAGE/scripts/application-current-birth/native-share-base.sh"
 chmod 700 "$STAGE/scripts/workroom/provision.sh" \
   "$STAGE/scripts/grain-birth/native-share-member.sh" \
@@ -62,6 +47,14 @@ sha256sum "$STAGE/scripts/workroom/provision.sh" \
   >"$STAGE/private-source-sha256.txt"
 sha256sum -c "$STAGE/private-source-sha256.txt" \
   >"$STAGE/private-source-precheck.txt"
+# Fund the positive-byte fixture generously unless its caller chose balances.
+# The member starts at one so the subsequent funding journey remains observable.
+WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-1000000}
+WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-1000000}
+WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE=1
+MEMBER_INITIAL_BALANCE=1
+export WORKROOM_SPONSOR_BALANCE WORKROOM_TOOL_BALANCE
+export WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE MEMBER_INITIAL_BALANCE
 MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
   /bin/sh "$STAGE/scripts/application-current-birth/native-share-base.sh" \
     "$HOST" "$EVIDENCE" \

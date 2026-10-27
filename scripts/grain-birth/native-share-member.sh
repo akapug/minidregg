@@ -18,10 +18,9 @@ MINI=${MINI:-"$REPO/native/resource-client/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
 SOURCE="$REPO/scripts/workroom/provision.sh"
-SOURCE_SHA=9abee2b9f84cd0ab3b4dc228684bceba7b8134f41609b6ab857698dfbba76509
-test "$(sha256sum "$SOURCE" | cut -d ' ' -f 1)" = "$SOURCE_SHA" || {
-  echo "workroom source changed; review overlay before use" >&2; exit 2;
-}
+MEMBER_INITIAL_BALANCE=${MEMBER_INITIAL_BALANCE-100}
+case "$MEMBER_INITIAL_BALANCE" in ''|0?*|*[!0-9]*) echo "member balance must be canonical decimal" >&2; exit 2;; esac
+export MEMBER_INITIAL_BALANCE
 test ! -e "$EVIDENCE" || { echo "evidence directory exists" >&2; exit 2; }
 test ! -e "$EVIDENCE.source-stage" || {
   echo "private source stage already exists" >&2; exit 2;
@@ -77,23 +76,29 @@ if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
   ' "$SPK_AGENT_ALLOCATION")
 fi
 printf '%s\n' "$FACTORY_PREDICATE" >"$STAGE/factory-predicate.json"
-# shellcheck disable=SC2016 # Match the provisioner's literal shell variable.
-sed \
-  -e 's|"signatureBinary":"$SIGNATURE_BINARY"}|"signatureBinary":"$SIGNATURE_BINARY","grainBirthTariff":{"base":2,"perBirth":1}}|' \
-  -e 's|"birth":{"genesis":|"birth":{"grainBirthTariff":{"base":"2","perBirth":"1"},"genesis":|' \
-  -e "s|\"factoryPredicate\":{\"type\":\"all\",\"predicates\":\[\]}|\"factoryPredicate\":$FACTORY_PREDICATE|" \
-  "$SOURCE" > "$STAGE/provision.sh"
-test "$(rg -c 'grainBirthTariff' "$STAGE/provision.sh")" = 6
-test "$(rg -c 'birth/mode/grain-backed' "$STAGE/provision.sh")" = 1
+# Configuration inputs for the workroom provisioner. Keep actual source hashes
+# as run evidence; no baked-in source digest or keyword count is an interface.
+if [ -n "${WORKROOM_OPERATOR_POLICY:-}" ]; then
+  case "$WORKROOM_OPERATOR_POLICY" in /*) ;; *) echo "operator policy must be absolute" >&2; exit 2;; esac
+  jq -se 'length == 1 and (.[0] | type == "object" and
+    ((has("grainBirthTariff") | not) or .grainBirthTariff == {base:2,perBirth:1}))' \
+    "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "conflicting grain birth tariff" >&2; exit 2; }
+  jq '. + {grainBirthTariff:{base:2,perBirth:1}}' "$WORKROOM_OPERATOR_POLICY" \
+    >"$STAGE/operator-policy.json"
+else
+  printf '%s\n' '{"grainBirthTariff":{"base":2,"perBirth":1}}' >"$STAGE/operator-policy.json"
+fi
+cp "$SOURCE" "$STAGE/provision.sh"
+sha256sum "$SOURCE" "$STAGE/operator-policy.json" "$STAGE/factory-predicate.json" >"$STAGE/configuration-inputs.sha256"
 chmod 700 "$STAGE/provision.sh"
 cat >"$STAGE/member-preboot" <<'EOF'
 "$MINI" keygen --secret "$EVIDENCE/member.key" --public "$EVIDENCE/member.pub" >"$EVIDENCE/member-public.txt"
 MEMBER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/member.pub" | tr -d ' \n')
-jq --arg public "$MEMBER_PUBLIC" '.enrollments += [{
+jq --arg public "$MEMBER_PUBLIC" --arg balance "$MEMBER_INITIAL_BALANCE" '.enrollments += [{
   key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
     publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
   accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
-  factoryObserveCapabilityId:"57",initialBalance:"100",
+  factoryObserveCapabilityId:"57",initialBalance:$balance,
   accountPredicate:{type:"all",predicates:[]}}]' \
   "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-member.json"
 mv "$EVIDENCE/genesis-with-member.json" "$EVIDENCE/genesis.json"
@@ -120,10 +125,13 @@ awk -v preboot="$STAGE/member-preboot" -v prebirth="$STAGE/member-prebirth" '
 chmod 700 "$STAGE/provision-member.sh"
 sha256sum "$STAGE/provision-member.sh" > "$STAGE/provision.sha256"
 WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902 \
+  WORKROOM_OPERATOR_POLICY="$STAGE/operator-policy.json" \
+  WORKROOM_FACTORY_PREDICATE="$STAGE/factory-predicate.json" \
   MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
   "$STAGE/provision-member.sh" "$HOST" "$EVIDENCE"
 cp "$STAGE/provision.sha256" "$EVIDENCE/overlay.sha256"
 cp "$STAGE/provision-member.sh" "$EVIDENCE/overlay-provision.sh"
+sha256sum -c "$STAGE/configuration-inputs.sha256" >"$STAGE/configuration-inputs-recheck.txt"
 jq -e '.grainBirthTariff == {base:2,perBirth:1}' "$EVIDENCE/operator.json" >/dev/null
 jq -e --argjson expected "$FACTORY_PREDICATE" '.factoryPredicate == $expected' \
   "$EVIDENCE/genesis.json" >/dev/null
