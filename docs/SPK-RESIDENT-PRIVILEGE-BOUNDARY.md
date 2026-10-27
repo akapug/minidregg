@@ -77,7 +77,7 @@ joins afterwards, so the credential floor stays in the bootstrap's code.
 | No unit-level ambient capabilities | `AmbientCapabilities=` in the rendered unit |
 | The operator parser cannot create or enter namespaces | the parser seccomp filter (unshare, setns, namespace clone flags, clone3) |
 | One launch over the private channel; no identity selector in packets | the bootstrap channel wire (`deny_unknown_fields`, bounded frames, tags 1/2/3/4, and 6 after the launch) |
-| The operator reads only what the app published | tag 6 carries no descriptor and no path: the worker opens `www` under the grain's own `/var` as the app (`O_DIRECTORY | O_NOFOLLOW`) and returns that one descriptor; the resident opens every file beneath it as the operator (`www_publish.rs`, `O_NOFOLLOW` per component), so the kernel admits only world-readable files and directories; nothing is written |
+| The operator reads only what the app published | tag 6 carries checked path components and no descriptor: the worker, as the app, opens `www` under the grain's own `/var` and each component beneath it with `O_NOFOLLOW` (`www_publish::valid_components`, `open_beneath`), and returns one read-only descriptor of a regular file of at most 64 MiB, or a named refusal; the resident only reads it; nothing is written, no directory or path outside `www` is reachable |
 | The app sandbox runs the same bwrap build | `ResidentBound::validate` (resident config `bwrapSha256` must equal the broker-rendered one) and the spawn gate's name/inode/SHA pin and its mode/ACL execute decision for the app identity |
 
 ## Source admission still selects the work

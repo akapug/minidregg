@@ -16,6 +16,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 static LAUNCH: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
 /// The launch worker's answer when the app has no `/var/www` yet.
 const WWW_ABSENT: &str = "noPublishedSite";
+const WWW_NO_FILE: &str = "noSuchPublishedFile";
+const WWW_TOO_LARGE: &str = "publishedFileTooLarge";
 fn refused(s: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, s)
 }
@@ -117,6 +119,19 @@ struct Launch {
     program: std::path::PathBuf,
     sha256: String,
     args: Vec<String>,
+}
+/// Tag 6: one published file, named by checked path components below `/var/www`.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WwwOpen {
+    components: Vec<String>,
+}
+/// What the app-identity worker found for a publishing request.
+pub(crate) enum WwwFile {
+    File(OwnedFd),
+    NoSite,
+    NoSuchFile,
+    TooLarge,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -278,27 +293,30 @@ impl Client {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
-    /// The grain's published tree `/var/www`, opened by the app-identity
-    /// worker; `None` while the app has published nothing.
-    pub(crate) fn open_www(&mut self, pid: u32) -> io::Result<Option<OwnedFd>> {
+    /// One file of the grain's published tree `/var/www`, opened by the
+    /// app-identity worker from checked path components.
+    pub(crate) fn open_www_file(&mut self, pid: u32, components: &[String]) -> io::Result<WwwFile> {
         if self.pid != pid || self.start.is_empty() {
             return Err(refused("launch reaper identity differs"));
         }
         send_rights(&self.stream, 6, &[])?;
+        send_frame(&mut self.stream, &WwwOpen { components: components.to_vec() })?;
         let r: Reply = receive_frame(&mut self.stream)?;
         if r.pid != pid || r.start != self.start || r.reaped || r.status.is_some() {
-            return Err(refused("published tree reply binding differs"));
+            return Err(refused("published file reply binding differs"));
         }
         match r.error.as_deref() {
-            Some(WWW_ABSENT) => return Ok(None),
+            Some(WWW_ABSENT) => return Ok(WwwFile::NoSite),
+            Some(WWW_NO_FILE) => return Ok(WwwFile::NoSuchFile),
+            Some(WWW_TOO_LARGE) => return Ok(WwwFile::TooLarge),
             Some(error) => return Err(io::Error::other(error.to_owned())),
             None => {}
         }
         let (tag, mut fds) = receive_rights(&self.stream)?;
         if tag != 6 || fds.len() != 1 {
-            return Err(refused("published tree descriptor absent"));
+            return Err(refused("published file descriptor absent"));
         }
-        Ok(fds.pop())
+        Ok(WwwFile::File(fds.pop().expect("one descriptor")))
     }
     pub(crate) fn kill_and_reap(&mut self, pid: u32) -> io::Result<bool> {
         Ok(self.command(3, pid)?.reaped)
@@ -507,21 +525,35 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(refused("launch worker command refused"));
         }
         if tag == 6 {
-            // The published tree, opened as the app: the resident reads under it
-            // with its own (operator) credentials, so only world-readable files
-            // are served. Never a path from the resident, never a write.
-            let opened = unsafe {
-                libc::openat(var_keep.as_raw_fd(), c"www".as_ptr(),
-                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            // One published file, opened as the app (Sandstorm publishes all of
+            // /var/www whatever its modes): checked components, O_NOFOLLOW on
+            // each, a regular file at the end, read-only. The resident receives
+            // only that descriptor; no write, no directory, no path outside www.
+            stream.set_read_timeout(Some(TIMEOUT))?;
+            let request: WwwOpen = receive_frame(&mut stream)?;
+            stream.set_read_timeout(None)?;
+            let opened = if !crate::www_publish::valid_components(&request.components) {
+                Err(WWW_NO_FILE)
+            } else {
+                let tree = unsafe {
+                    libc::openat(var_keep.as_raw_fd(), c"www".as_ptr(),
+                        libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                };
+                if tree < 0 {
+                    Err(WWW_ABSENT)
+                } else {
+                    let tree = unsafe { OwnedFd::from_raw_fd(tree) };
+                    match crate::www_publish::open_beneath(&tree, &request.components) {
+                        Ok((file, _, _)) => Ok(OwnedFd::from(file)),
+                        Err((status, _)) if status.starts_with("413") => Err(WWW_TOO_LARGE),
+                        Err(_) => Err(WWW_NO_FILE),
+                    }
+                }
             };
-            let error = (opened < 0).then(|| {
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() == Some(libc::ENOENT) { WWW_ABSENT.to_owned() } else { format!("published tree unavailable: {error}") }
-            });
+            let error = opened.as_ref().err().map(|e| (*e).to_owned());
             send_frame(&mut stream, &Reply { pid, start: start.clone(), reaped: false, status: None, error })?;
-            if opened >= 0 {
-                let tree = unsafe { OwnedFd::from_raw_fd(opened) };
-                send_rights(&stream, 6, &[tree.as_raw_fd()])?;
+            if let Ok(file) = opened {
+                send_rights(&stream, 6, &[file.as_raw_fd()])?;
             }
             continue;
         }

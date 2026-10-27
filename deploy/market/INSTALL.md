@@ -208,18 +208,19 @@ port, no new certificate name, no egress).
 | `GET`/`HEAD` `https://a<n>-www.…/<path>`, grain `a<n>` in the origin table | the file `<path>` under the grain's `/var/www` (`/`, a trailing `/` and a directory read `index.html`), anonymous: the front forwards only the method and the path, never a cookie or a credential; `Content-Type` by extension, `X-Content-Type-Options: nosniff`, `Cache-Control: no-cache`, `Referrer-Policy: no-referrer`; an SVG also carries `Content-Security-Policy: sandbox` (shown, never run). HTML runs as published: the `-www` origin is its own origin with no cookies, so a published deck's scripts reach nothing private |
 | any other method | `405`, `Allow: GET, HEAD` |
 | a path with `..`, `.`, a dotfile segment, NUL, a backslash, an encoded `/`, or a symlink anywhere on it | `404 no such published file` (each component opened with `O_NOFOLLOW` beneath the tree's descriptor) |
-| a file the app did not make world-readable | `404 no such published file` (the resident opens files as the operator; publishing means world-readable, as for any web server) |
 | a file above 64 MiB | `413` |
 | an unknown grain, or a grain whose app has no `/var/www` | `404 no such published site` |
 | the grain stopped (no resident listening) | `503 grain a<n> is stopped; its owner starts it with mini apps start --grain a<n>`, `Retry-After: 30` |
 | more than 16 concurrent publishing connections on one grain | `503`, `Retry-After: 5` |
 
-The files come from the grain's resident. The grain's `/var` is the app's 0700 mount, so the tree is
-opened by the app-identity launch worker (`resident_privilege.rs`, tag 6: no path, no descriptor in;
-one directory descriptor out) and every file beneath it by the resident as the operator
-(`native/spk-host/src/www_publish.rs`). The resident binds `apps/<app>/www.sock` (0600, the
-operator's) beside the generations; the worker's edge connector answers `{"verb":"www","grain":…}`
-with a connected stream, as it does `connect` for `http.sock`, or refuses `grainStopped` /
+The files come from the grain's resident. The grain's `/var` is the app's 0700 mount and Sandstorm
+publishes all of `/var/www` whatever its files' modes, so each file is opened by the app-identity
+launch worker (`resident_privilege.rs`, tag 6: checked path components in, one read-only regular-file
+descriptor out) and only read by the resident (`native/spk-host/src/www_publish.rs`); a connection
+thread parses the request and the resident's loop, which owns the worker channel, answers it. The
+resident binds `apps/<app>/www.sock` (0600, the operator's) beside the generations; the worker's edge
+connector answers `{"verb":"www","grain":…}` with a connected stream, as it does `connect` for
+`http.sock`, or refuses `grainStopped` /
 `unknownGrain` by name. Publishing is the app's own act (it writes `/var/www`); the grain's private
 origin and its cookies are never reachable from the `-www` origin (different host, `__Host-`
 cookies are origin-bound).
