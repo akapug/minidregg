@@ -4,7 +4,7 @@ The requested index names a BEGIN-v2 in the same verified replay history.
 The request never supplies an app state, resource root, grant, or header.
 -/
 import Host.ApplicationLifecycleBeginOperator
-import Kernel.ApplicationLifecycleClaimV2Receiver
+import Kernel.ApplicationLifecycleClaimProjection
 
 namespace Minidregg.Host.ApplicationLifecycleClaimOperator
 
