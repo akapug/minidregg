@@ -1211,9 +1211,10 @@ fn invoke_inner(
 /// outcome whose reply was not read (DEMO-EXPERIENCE step 6).
 fn await_unread_reply(stream: &UnixStream, deadline: Instant) {
     let remaining = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
-    if stream.set_read_timeout(Some(remaining)).is_ok() {
-        let _ = stream.peek(&mut [0u8; 1]);
-    }
+    let mut descriptor = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    let millis = remaining.as_millis().min(i32::MAX as u128) as libc::c_int;
+    // Readable (the answer arrived) or hung up (the Host closed): either way nothing is read.
+    let _ = unsafe { libc::poll(&mut descriptor, 1, millis) };
 }
 
 const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
