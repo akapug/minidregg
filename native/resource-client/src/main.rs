@@ -177,6 +177,8 @@ mod object_epoch_cli;
 mod object_epoch_packages;
 #[cfg(unix)]
 mod well;
+#[cfg(test)]
+mod signing_wire_tests;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
