@@ -3,7 +3,6 @@
 //! Rust supplies exact signed bytes and decoded bridge roles. Mini owns the
 //! canonical schema, fixed web/API mapping and package root; the returned
 //! bytes are compared to the physical parse before any BEGIN plan uses them.
-#![allow(dead_code)] // Joined INSTALL/START resident caller follows native link.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::materialize::{signed_schema_source, InstalledPackage};

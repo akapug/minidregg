@@ -1,7 +1,6 @@
 //! Resident-supervisor human dispatch. This function runs only in the process
 //! that owns the actual app fd3 and its RpcDriver; a separate command must not
 //! reopen fd3 or construct a new app-side WebSession from a historical reply.
-#![allow(dead_code)] // Lifecycle-v2/SPK binding and resident service not enabled yet.
 
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::HttpProjection;

@@ -1,7 +1,6 @@
 //! One-way controller reserve bridge for lifetime dispatch. The controller
 //! owns the purse key; the resident re-inspects its exact source plan before
 //! accepting per-operation current claims. No reply is a delivery permit.
-#![allow(dead_code)] // The shared v3 listener is enabled in a later cut.
 
 use crate::agent_api_lifetime_v3::{
     match_reserve_plan, operation_fingerprint, CurrentClaims, LifetimeBinding, ReceiptPin,
@@ -208,6 +207,7 @@ pub(crate) struct RetainedReserveV3 {
     pub plan_bytes: Vec<u8>,
     pub context_bytes: Vec<u8>,
     pub request_sha256: String,
+    #[allow(dead_code)] // Agent API v3 is parked (ruling R7); the worker wall bound is not yet enforced from it.
     pub effective_worker_wall_seconds: String,
 }
 

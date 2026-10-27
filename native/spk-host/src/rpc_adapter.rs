@@ -3,7 +3,6 @@
 //! A future native adapter must recheck current app generation, session,
 //! subject-derived identity and effective bits for every request. Pending
 //! lifecycle receipts and caller HTTP headers cannot authorize calls here.
-#![allow(dead_code)] // Staged until Mini exposes a checked current-session projection.
 
 use crate::hostd::DispatchIdentity;
 use crate::web_socket::{pump, switching_protocols, Limits, Slot, StreamLease, WeakStreamLease};
@@ -317,6 +316,8 @@ pub(crate) struct RpcStats {
 /// successful commands may retain it for another separately admitted request.
 pub(crate) struct DispatchFence {
     identity: DispatchIdentity,
+    /// Which proof the fence carries; read by the tests that assert it.
+    #[cfg_attr(not(test), allow(dead_code))]
     worker_released: bool,
 }
 
@@ -325,6 +326,7 @@ impl DispatchFence {
         self.identity == *expected
     }
 
+    #[cfg(test)]
     pub(crate) fn worker_released(&self) -> bool {
         self.worker_released
     }

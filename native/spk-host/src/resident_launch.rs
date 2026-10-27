@@ -1,7 +1,6 @@
 //! One resident operator supervisor starts the app child and retains fd3.
 //! The source-owned lifecycle-v2 claim/descriptor adapter must construct the
 //! exact `VerifiedBegin` and package command before calling this module.
-#![allow(dead_code)] // Native lifecycle-v2 Host route is not linked yet.
 
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::hostd::{Journal, VerifiedBegin};
@@ -12,7 +11,7 @@ use crate::materialize::{signed_schema_source, InstalledPackage};
 use crate::rpc_adapter::RpcDriver;
 use crate::sandbox::{
     app_output, bwrap_args, directory_entry, inherited_fd, open_protected_directory,
-    verify_executable, verify_var_volume, AppOutput, AppOutputSummary, SandboxSpec,
+    verify_executable, verify_var_volume, AppOutput, SandboxSpec,
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use crate::volume_custody::VolumeWitness;
@@ -369,19 +368,13 @@ pub(crate) struct PreparedResident {
 pub(crate) struct ResidentProcess {
     pub rpc: RpcDriver,
     child: BoundedChild,
-    output: AppOutput,
+    /// Held for the generation: the pump ends when the app's writers close.
+    _output: AppOutput,
 }
 
 impl ResidentProcess {
     pub(crate) fn child_pid(&self) -> u32 {
         self.child.pid()
-    }
-
-    /// A normal service shutdown drops the gate child, while systemd's exact
-    /// unit cgroup closes any descendants. No HTTP request owns this process.
-    pub(crate) fn wait(mut self) -> io::Result<(i32, AppOutputSummary)> {
-        let status = self.child.wait()?;
-        Ok((status, self.output.finish()?))
     }
 }
 
@@ -450,6 +443,7 @@ impl PreparedResident {
     /// Compare the root-owned custody handoff with the exact directory held
     /// open for fd5. This is a physical observation; the caller must also
     /// compare the witness bytes and volume ID to the source-owned v3 claim.
+    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
     pub(crate) fn compare_attested_volume(&self, witness: &VolumeWitness) -> io::Result<()> {
         witness.compare_open_mount(self._persistent_var.as_raw_fd())?;
         witness.recheck_handoff()
@@ -458,6 +452,7 @@ impl PreparedResident {
     /// Repeat the fixed handoff/FD5 check at the last physical boundary before
     /// consuming the journal's one-shot spawn. This does not mint Mini launch
     /// authority or promise cancellation of a later operator mount change.
+    #[allow(dead_code)] // RUST-TRIAGE §4 R15: written, not yet wired before `start`.
     pub(crate) fn start_attested(
         self,
         journal: &Journal,
@@ -478,7 +473,7 @@ impl PreparedResident {
     ) -> io::Result<ResidentProcess> {
         let child = journal.enter_and_spawn(begin, &self.launch)?;
         let rpc = RpcDriver::from_connected_stream(begin.app, begin.generation, self.host_rpc)?;
-        Ok(ResidentProcess { rpc, child, output: self.output })
+        Ok(ResidentProcess { rpc, child, _output: self.output })
     }
 
     /// `start` without the journal: the identical gate call and descriptor

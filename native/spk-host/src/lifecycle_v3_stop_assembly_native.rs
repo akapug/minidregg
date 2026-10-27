@@ -1,5 +1,4 @@
 //! Current-image STOP claim plan and detached assembly, before fresh op26.
-#![allow(dead_code)] // Awaiting the callable STOP supervisor cut.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -73,15 +72,6 @@ impl FixedStopClaimSigners {
 pub(crate) struct AssembledStopClaim {
     begin: AcceptedStopBegin,
     ingress: Vec<u8>,
-}
-
-impl AssembledStopClaim {
-    pub(crate) fn ingress(&self) -> &[u8] {
-        &self.ingress
-    }
-    pub(crate) fn begin(&self) -> &AcceptedStopBegin {
-        &self.begin
-    }
 }
 
 struct ClaimPlanEvidence<'a> {

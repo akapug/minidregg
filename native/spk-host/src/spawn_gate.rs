@@ -4,7 +4,6 @@
 //! native-admitted lifecycle adapter may choose its SPK image, app UID/GID,
 //! exact bubblewrap image and fd3/4/5 bindings. The caller must hold the
 //! operation journal's flock throughout `spawn_bounded` and its Running fsync.
-#![allow(dead_code)] // Staged until the native BEGIN adapter can call it; no public launch path.
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
@@ -154,14 +153,6 @@ fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
     }
     buffer.truncate(n as usize);
     Ok(Some(buffer))
-}
-
-/// Refuse an unexecutable pinned launcher before consuming a native START
-/// claim. Repeat the same check at the actual one-shot spawn boundary.
-pub(crate) fn preflight(spec: &SpawnSpec) -> io::Result<()> {
-    validate(spec, false)?;
-    let _executable = pinned_executable(spec)?;
-    Ok(())
 }
 
 fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
@@ -348,6 +339,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     fail(write_fd)
 }
 
+#[cfg(test)]
 fn wait_reap(pid: libc::pid_t) -> io::Result<i32> {
     let mut status = 0;
     loop {
@@ -423,6 +415,7 @@ impl BoundedChild {
         }
         self.reaped
     }
+    #[cfg(test)]
     pub fn wait(&mut self) -> io::Result<i32> {
         if !self.reaped {
             let status = if let Some(client)=&mut self.remote {client.wait(self.pid as u32)?} else {wait_reap(self.pid)?};

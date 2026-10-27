@@ -1,5 +1,4 @@
 //! Source-authored STOP Plan-v2, detached BEGIN, and one-shot event23 receipt.
-#![allow(dead_code)] // Awaiting the callable STOP supervisor cut.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -54,7 +53,6 @@ pub(crate) struct AcceptedStopBegin {
     receipt: ExactReceipt,
     client_operation_id: String,
     authorization_operation_id: String,
-    process_generation: String,
     volume_id_hex: String,
 }
 
@@ -73,9 +71,6 @@ impl AcceptedStopBegin {
     }
     pub(crate) fn authorization_operation_id(&self) -> &str {
         &self.authorization_operation_id
-    }
-    pub(crate) fn process_generation(&self) -> &str {
-        &self.process_generation
     }
     pub(crate) fn volume_id_hex(&self) -> &str {
         &self.volume_id_hex
@@ -108,7 +103,6 @@ impl AcceptedStopBegin {
             receipt,
             client_operation_id: text(&requested, "clientOperationId")?.to_owned(),
             authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
-            process_generation: text(base, "processGeneration")?.to_owned(),
             volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
         })
     }
@@ -273,7 +267,6 @@ pub(crate) fn submit_once(
         receipt,
         client_operation_id,
         authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
-        process_generation: text(base, "processGeneration")?.to_owned(),
         volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
     })
 }

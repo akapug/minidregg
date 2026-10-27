@@ -1,7 +1,6 @@
 //! Exact physical STOP target selected by Mini's current verified history.
 //! A sealed fresh op26 claim may fence the running incarnation. Recovery can
 //! only resume its exact retained attempt from an already-Fenced journal row.
-#![allow(dead_code)]
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::{Journal, Phase, Record, StopIdentity, UnitStopAudit};

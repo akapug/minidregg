@@ -1,6 +1,5 @@
 //! Protected stable lifetime route and the exact first GitWeb HTTP projection.
 //! Current generations and physical roots come only from the op80 source plan.
-#![allow(dead_code)] // Resident v3 listener is enabled in a later cut.
 
 use crate::agent_api_lifetime_v3::{LifetimeBinding, LifetimeLineage};
 use crate::agent_api_lifetime_wire_v3::Request;

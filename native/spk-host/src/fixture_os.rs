@@ -56,18 +56,6 @@ pub(crate) fn root() -> io::Result<PathBuf> {
     Ok(root)
 }
 
-pub(crate) fn root_uid() -> u32 {
-    euid()
-}
-
-pub(crate) fn root_group(gid: u32) -> bool {
-    gid == 0 || gid == unsafe { libc::getegid() }
-}
-
-pub(crate) fn privileged() -> bool {
-    true
-}
-
 pub(crate) fn app_owner(uid: u32, app_uid: u32) -> bool {
     uid == app_uid || uid == euid()
 }
@@ -76,12 +64,6 @@ pub(crate) fn runtime_units() -> PathBuf {
     root()
         .map(|root| root.join("units"))
         .unwrap_or_else(|_| PathBuf::from("/nonexistent/fixture-os/units"))
-}
-
-pub(crate) fn host_identity_path() -> PathBuf {
-    root()
-        .map(|root| root.join("host-identity"))
-        .unwrap_or_else(|_| PathBuf::from("/nonexistent/fixture-os/host-identity"))
 }
 
 /// The model's unit manager client, `$MINI_FIXTURE_OS/systemctl` (the fixture
@@ -94,16 +76,6 @@ pub(crate) fn systemctl() -> Command {
     )
 }
 
-/// The modeled identity switch keeps the principal's credentials, so the process
-/// that executes the launcher is the principal: judge the execute bit for it.
-pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, _app_uid: u32, _app_gid: u32) -> bool {
-    crate::spawn_gate::execute_mode_permits(owner, group, mode, euid(), unsafe { libc::getegid() })
-}
-
-/// Every pool UID names an account whose primary group has the same number.
-pub(crate) fn account_gid(uid: u32) -> Option<u32> {
-    (uid != 0 && uid != euid()).then_some(uid)
-}
 
 pub(crate) fn self_cgroup() -> io::Result<String> {
     Ok(match std::env::var(CGROUP_ENV) {

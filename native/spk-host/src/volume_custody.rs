@@ -1,7 +1,6 @@
 //! Root-observed persistent /var identity for the resident START profile.
 //! These bytes are physical evidence, never Mini launch authority by themselves.
 
-#![allow(dead_code)] // Connected only after source-qualified v3 START routes.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
@@ -120,9 +119,6 @@ pub(crate) struct VolumeWitness {
     pub(crate) volume_id: String,
     pub(crate) app_uid: u32,
     pub(crate) quota_bytes: u64,
-    pub(crate) backing_inode: u64,
-    pub(crate) backing_fs: String,
-    pub(crate) image_ext4_uuid: String,
     pub(crate) mount: PathBuf,
     site: VolumeSite,
     file_dev: u64,
@@ -167,7 +163,8 @@ impl VolumeWitness {
             return Err(invalid("volume witness backing path refused"));
         }
         let backing_fs = value(lines[8], "backing_fs=")?.to_owned();
-        let backing_inode = decimal(value(lines[9], "backing_inode=")?)
+        // Validated here; the retained witness bytes are what later checks compare.
+        decimal(value(lines[9], "backing_inode=")?)
             .filter(|n| *n > 0)
             .ok_or_else(|| invalid("volume witness backing inode refused"))?;
         let backing_size = decimal(value(lines[10], "backing_size=")?)
@@ -189,9 +186,6 @@ impl VolumeWitness {
             volume_id,
             app_uid,
             quota_bytes,
-            backing_inode,
-            backing_fs,
-            image_ext4_uuid,
             mount: PathBuf::from(mount),
             site: site.clone(),
             file_dev: 0,
@@ -199,6 +193,7 @@ impl VolumeWitness {
         })
     }
 
+    #[allow(dead_code)] // RUST-TRIAGE §4 R15: reached only from the unwired `start_attested`.
     pub(crate) fn compare_open_mount(&self, persistent_var_fd: RawFd) -> io::Result<()> {
         let path_meta = fs::symlink_metadata(&self.mount)?;
         if !path_meta.is_dir()
@@ -352,7 +347,6 @@ mod tests {
         let parsed = VolumeWitness::parse(example(), &site()).unwrap();
         assert_eq!(parsed.resource, 8401);
         assert_eq!(parsed.volume_id, "c".repeat(64));
-        assert_eq!(parsed.backing_inode, 7654);
         assert_eq!(parsed.bytes, example());
     }
 

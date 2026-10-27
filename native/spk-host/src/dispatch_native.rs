@@ -1,7 +1,6 @@
 //! One private, no-retry Mini author/submit operation for the resident SPK
 //! supervisor. Op34's callback bytes are retained before source inspection;
 //! an uncertain write/read leaves a durable marker and cannot be repeated.
-#![allow(dead_code)] // Resident authorized supervisor is not enabled yet.
 
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::{

@@ -2,7 +2,6 @@
 //! START consumes current-image BEGIN/claim plans once, launches the one fd3
 //! owner, and opens HTTP only after fresh native physical completion. INSTALL
 //! materialization and stopped wake remain separate lifecycle operations.
-#![allow(dead_code)] // Enabled only after root reviews the exact native cut.
 
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;

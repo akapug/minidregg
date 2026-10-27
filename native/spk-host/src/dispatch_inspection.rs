@@ -1,7 +1,6 @@
 //! Compare Mini's read-only op34 inspection to the exact private Host payload
 //! and the authenticated, canonical HTTP request. This is not admission:
 //! source JSON from a caller cannot replace the captured Host response.
-#![allow(dead_code)] // The private signer/op34 invocation is not linked yet.
 
 use serde_json::Value;
 use std::io;
@@ -143,6 +142,7 @@ pub(crate) struct MatchedInspection {
     pub dispatch_event: String,
     pub session_fingerprint: [u8; 32],
     pub principal: [u8; 32],
+    #[allow(dead_code)] // Projected for agent v1, which council rulings keep untouched.
     pub before_world_root: String,
     pub after_world_root: String,
     pub accepted_count: String,

@@ -1,6 +1,5 @@
 //! Fresh event26 lifetime permit. A retained op77 receipt cannot construct
 //! this type and can never authorize fd3 delivery.
-#![allow(dead_code)] // The resident v3 entrance is wired separately.
 
 use crate::agent_api_lifetime_paid_native_v3::AssembledLifetimePaidV3;
 use crate::agent_api_lifetime_reverse_v3::RetainedReserveV3;

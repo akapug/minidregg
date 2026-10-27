@@ -10,23 +10,16 @@ pub(crate) use crate::fixture_os::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
     pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
-    executes_as_app,
 };
 #[cfg(not(feature = "fixture-os"))]
 pub(crate) use real::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
     pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
-    executes_as_app,
 };
 
 #[cfg(not(feature = "fixture-os"))]
 mod real {
-    /// Whether a file (owner, group, mode) is executable by the app identity the
-    /// spawn switches to: its owner, group or other execute bit.
-    pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, app_uid: u32, app_gid: u32) -> bool {
-        crate::spawn_gate::execute_mode_permits(owner, group, mode, app_uid, app_gid)
-    }
     #[repr(C)]
     struct CapHeader {
         version: u32,

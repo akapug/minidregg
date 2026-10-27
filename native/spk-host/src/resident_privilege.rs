@@ -263,6 +263,7 @@ impl Drop for Client {
     }
 }
 impl Client {
+    #[cfg(test)]
     pub(crate) fn wait(&mut self, pid: u32) -> io::Result<i32> {
         loop {
             let r = self.command(2, pid)?;

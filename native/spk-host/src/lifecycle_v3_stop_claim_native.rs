@@ -3,7 +3,6 @@
 //! This module does not fence or stop a unit. The physical path must join this
 //! sealed claim to the retained Running journal and volume witness, durably
 //! mark the attempt, and perform the checked manager action under that lock.
-#![allow(dead_code)] // The callable STOP supervisor is a later, separate cut.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex};
@@ -98,39 +97,11 @@ impl ExactReceipt {
 /// the exact retained STOP plan, original BEGIN, both receipts and claim.
 pub(crate) struct FreshStopClaim {
     target: StopTarget,
-    stop_plan: Vec<u8>,
-    original_begin: Vec<u8>,
-    claim_ingress: Vec<u8>,
-    committed_frame: Vec<u8>,
-    inspection: Vec<u8>,
-    begin_receipt: ExactReceipt,
-    claim_receipt: ExactReceipt,
 }
 
 impl FreshStopClaim {
     pub(crate) fn target(&self) -> &StopTarget {
         &self.target
-    }
-    pub(crate) fn stop_plan(&self) -> &[u8] {
-        &self.stop_plan
-    }
-    pub(crate) fn original_begin(&self) -> &[u8] {
-        &self.original_begin
-    }
-    pub(crate) fn claim_ingress(&self) -> &[u8] {
-        &self.claim_ingress
-    }
-    pub(crate) fn committed_frame(&self) -> &[u8] {
-        &self.committed_frame
-    }
-    pub(crate) fn inspection(&self) -> &[u8] {
-        &self.inspection
-    }
-    pub(crate) fn begin_receipt(&self) -> &ExactReceipt {
-        &self.begin_receipt
-    }
-    pub(crate) fn claim_receipt(&self) -> &ExactReceipt {
-        &self.claim_receipt
     }
 }
 
@@ -266,16 +237,7 @@ pub(crate) fn submit_once(
         begin_receipt.borrowed(),
         claim_receipt.borrowed(),
     )?;
-    Ok(FreshStopClaim {
-        target,
-        stop_plan: retained_stop_plan.to_vec(),
-        original_begin: original_begin.to_vec(),
-        claim_ingress: claim_ingress.to_vec(),
-        committed_frame: committed,
-        inspection,
-        begin_receipt,
-        claim_receipt,
-    })
+    Ok(FreshStopClaim { target })
 }
 
 #[cfg(test)]
