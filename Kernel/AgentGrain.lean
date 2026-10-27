@@ -566,12 +566,14 @@ inductive GrainWitness where
   | holders (generation : Int)
   deriving DecidableEq, Repr
 
-/-- The holder form: the owner's managed law, and for any other subject the observe and
-delegate verbs, the refill edge, or the witness no-op at `generation`. -/
+/-- The holder form: the owner's managed law, and for any other subject observation, the
+refill edge, or the witness no-op at `generation`. Delegation of the parent is the
+owner's (fourth audit pass, ruled): a holder cannot re-delegate its grant and spread the
+witness authority, so verb 3 is the owner's alone. -/
 def holderPolicy (owner : Nat) (generation : Int) : Pred :=
   .all [policy (.eq "request/subject" (Int.ofNat owner)), .any [
     .eq "request/subject" (Int.ofNat owner),
-    .memberOf "request/verb" [1, 3],
+    .memberOf "request/verb" [1],
     refillPolicy,
     witnessCaveat generation]]
 
@@ -623,6 +625,17 @@ theorem holderPolicy_nonowner_management_refused (owner caller : Nat) (generatio
     simp [holderPolicy, policy, witnessCaveat, eval_all, eval_any, eval, evalWith,
       requestSubject, verb, Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
 
+/-- Teeth of the ruling: a non-owner holder cannot delegate the parent (verb 3). -/
+theorem holderPolicy_nonowner_delegate_refused (owner caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 3)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get refillSlot ≠ some 1) :
+    eval (holderPolicy owner generation) old new = false := by
+  simp [holderPolicy, policy, witnessCaveat, eval_all, eval_any, eval, evalWith,
+    requestSubject, verb, Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+
 /-- A witness touch of a parent task in status 3 (reserved, hard) at generation 1. -/
 def witnessTouchState (caller : Nat) : Minidregg.Pred.State :=
   ⟨[("request/verb", 2), ("request/subject", Int.ofNat caller),
@@ -661,6 +674,7 @@ theorem holderPolicy_owner_settlement_admitted :
 #assert_axioms holderPolicy_nonowner_only_witness
 #assert_axioms holderPolicy_stale_refused
 #assert_axioms holderPolicy_nonowner_management_refused
+#assert_axioms holderPolicy_nonowner_delegate_refused
 #assert_axioms holderPolicy_member_witness_admitted
 #assert_axioms holderPolicy_member_settlement_refused
 #assert_axioms holderPolicy_owner_settlement_admitted
