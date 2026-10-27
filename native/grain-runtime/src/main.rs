@@ -2479,6 +2479,28 @@ fn bounded_regular_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 /// retained its exact op-255 reply before any call existed. The marker binds
 /// the attempt-local request, config, and manifest; Lean decodes the Outcome.
 /// Missing or inconsistent custody evidence is uncertainty, not a refusal.
+/// The author of the request a resident prompt serves, read from the
+/// assignment the controller was handed (digest-checked against the
+/// resident's preparation before the session starts).
+fn resident_prompt_member(prompt: &str) -> Option<String> {
+    let assignment: Value = serde_json::from_str(prompt.strip_prefix(room_resident::ASSIGNMENT_PREFIX)?).ok()?;
+    let author = assignment.get("selectedRequest")?.get("author")?.as_str()?;
+    (!author.is_empty() && author.len() <= 20 && author.bytes().all(|b| b.is_ascii_digit())).then(|| author.to_owned())
+}
+
+#[cfg(test)]
+mod prompt_member_tests {
+    use super::*;
+    #[test]
+    fn the_pool_member_is_the_selected_request_author() {
+        let p = |a: Value| format!("{}{}", room_resident::ASSIGNMENT_PREFIX, a);
+        assert_eq!(resident_prompt_member(&p(json!({"selectedRequest":{"author":"21","cell":"7"}}))).as_deref(), Some("21"));
+        assert_eq!(resident_prompt_member(&p(json!({"recentMemberEntries":[]}))), None);
+        assert_eq!(resident_prompt_member(&p(json!({"selectedRequest":{"author":"2x"}}))), None);
+        assert_eq!(resident_prompt_member("Assignment: {\"selectedRequest\":{\"author\":\"21\"}}"), None);
+    }
+}
+
 fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Option<Value>> {
     let frame_path = attempt.join("pre-submit-refusal.frame");
     let marker_path = attempt.join("pre-submit-refusal.json");
@@ -3439,6 +3461,10 @@ struct Runtime {
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
     provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
+    /// The room member the current resident prompt serves (its selected
+    /// request's author); the key broker charges that member's share of a
+    /// pool row's spend ceiling. None for maintenance and operator prompts.
+    prompt_member: Option<String>,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -6561,6 +6587,7 @@ impl Runtime {
             provider_control: Arc::new(Mutex::new(None)),
             provider_lease: None,
             prompt_active: false,
+            prompt_member: None,
             prompt_decision: None,
             foreground_operation: None,
             output: None,
@@ -9249,8 +9276,12 @@ impl Runtime {
                 if max_tokens.is_none_or(|tokens| tokens > u64::from(task.max_output_tokens)) {
                     return Err(credentials::refused("per-call-cap"));
                 }
-                let t = authorize(json!({"op":"provider-authorize","kind":"pool","provider":row.name,
-                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256}))?;
+                let mut request = json!({"op":"provider-authorize","kind":"pool","provider":row.name,
+                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256});
+                if let Some(member) = &self.prompt_member {
+                    request["member"] = json!(member);
+                }
+                let t = authorize(request)?;
                 (t["ticket"].as_str().map(str::to_owned), "pool".to_owned())
             }
             credentials::CredentialSource::User => {
@@ -14525,6 +14556,7 @@ impl Runtime {
         }
         let id = self.next_id()?;
         if invocation.is_prompt() {
+            self.prompt_member = invocation.resident_identity().and(invocation.prompt()).and_then(resident_prompt_member);
             self.prompt_decision = Some((id, None));
             self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
                 resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),

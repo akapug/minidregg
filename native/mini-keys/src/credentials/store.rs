@@ -6,6 +6,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::io::AsRawFd;
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 const SEALED_TYPE: &str = "mini-provider-credential-v1";
@@ -13,6 +14,16 @@ const GRANTS_TYPE: &str = "mini-provider-grants-v1";
 const SCOPED_GRANTS_TYPE: &str = "mini-provider-grants-v2";
 const USAGE_TYPE: &str = "mini-provider-usage-v1";
 const SPEND_TYPE: &str = "mini-provider-pool-spend-v1";
+const MEMBERS_TYPE: &str = "mini-provider-pool-members-v1";
+
+/// One member's charged share of a pool row's spend (micro-USD, worst case
+/// per call): `day` is the charge on UTC day `dayIndex`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MemberSpend {
+    day: u64,
+    day_index: u64,
+    total: u64,
+}
 const MAX_RECORD: u64 = 65_536;
 const MAX_GRANTS: usize = 64;
 
@@ -644,16 +655,20 @@ impl CredentialStore {
         caps: Caps,
         day: u64,
     ) -> Result<Secret, String> {
-        self.pool_grant(provider, runner, max_tokens, caps, day, &mut || Ok(()))?;
+        self.pool_grant(provider, runner, runner, max_tokens, caps, day, &mut || Ok(()))?;
         self.unseal(Namespace::Pool, provider)
     }
 
     /// Reserve-time authorization of one pool call: the per-call cap is checked
     /// and the secret must open, then `mint` runs, then the call is counted.
+    /// `member` is the subject the call serves (the runner when none is named);
+    /// its share of the spend ceiling is checked with the ceiling and charged
+    /// with it.
     pub fn pool_grant(
         &self,
         provider: &str,
         runner: &str,
+        member: &str,
         max_tokens: Option<u64>,
         caps: Caps,
         day: u64,
@@ -672,9 +687,15 @@ impl CredentialStore {
             return Err(refused("per-call-cap"));
         }
         drop(self.unseal(Namespace::Pool, provider)?);
+        if !member.bytes().all(|b| b.is_ascii_digit()) || member.is_empty() || member.len() > 20 {
+            return Err("pool member must be a decimal subject".into());
+        }
         if let Some((ceiling, call)) = caps.spend {
             if self.pool_spend(provider)?.saturating_add(call) > ceiling {
                 return Err(refused("spend-ceiling"));
+            }
+            if let Some(limits) = caps.member {
+                self.member_room(provider, member, call, limits, day)?;
             }
         }
         mint()?;
@@ -682,12 +703,86 @@ impl CredentialStore {
         // between over-charges the ceiling, never under-charges it.
         if let Some((ceiling, call)) = caps.spend {
             self.charge_spend(&dir, provider, call as i64, ceiling)?;
+            if let Some(limits) = caps.member {
+                if let Err(e) = self.charge_member(&dir, provider, member, call as i64, limits, day) {
+                    self.charge_spend(&dir, provider, -(call as i64), ceiling)?;
+                    return Err(e);
+                }
+            }
         }
         let counted = self.count_call(&dir, provider, runner, caps.per_day, day);
         if let (Err(_), Some((ceiling, call))) = (&counted, caps.spend) {
             self.charge_spend(&dir, provider, -(call as i64), ceiling)?;
+            if let Some(limits) = caps.member {
+                self.charge_member(&dir, provider, member, -(call as i64), limits, day)?;
+            }
         }
         counted
+    }
+
+    /// One member's charged pool spend: (spent today, spent in total).
+    pub fn pool_member_spend(&self, provider: &str, member: &str, day: u64) -> Result<(u64, u64), String> {
+        provider_name(provider)?;
+        let dir = self.directory(Namespace::Pool, false)?;
+        let members = self.pool_members(&dir, provider)?;
+        Ok(match members.get(member) {
+            None => (0, 0),
+            Some(m) => (if m.day_index == day { m.day } else { 0 }, m.total),
+        })
+    }
+
+    fn pool_members(&self, dir: &Path, provider: &str) -> Result<BTreeMap<String, MemberSpend>, String> {
+        let Some(r) = read_record(&dir.join(format!("{provider}.members.json")), "pool members")? else {
+            return Ok(BTreeMap::new());
+        };
+        object_keys(&r, &["type", "provider", "members"], "pool members")?;
+        if r.get("type").and_then(Value::as_str) != Some(MEMBERS_TYPE) || r.get("provider").and_then(Value::as_str) != Some(provider) {
+            return Err("pool members record names another provider or version".into());
+        }
+        let mut members = BTreeMap::new();
+        for (subject, m) in r["members"].as_object().ok_or("pool members must be an object")? {
+            object_keys(m, &["day", "dayIndex", "total"], "pool member")?;
+            let n = |k: &str| m.get(k).and_then(Value::as_u64).ok_or_else(|| format!("pool member {k} must be a natural number"));
+            members.insert(subject.clone(), MemberSpend { day: n("day")?, day_index: n("dayIndex")?, total: n("total")? });
+        }
+        Ok(members)
+    }
+
+    fn member_room(&self, provider: &str, member: &str, call: u64, (day_cap, total_cap): (u64, u64), day: u64) -> Result<(), String> {
+        let (today, total) = self.pool_member_spend(provider, member, day)?;
+        if total.saturating_add(call) > total_cap {
+            return Err(refused("member-total-ceiling"));
+        }
+        if today.saturating_add(call) > day_cap {
+            return Err(refused("member-day-ceiling"));
+        }
+        Ok(())
+    }
+
+    fn charge_member(&self, dir: &Path, provider: &str, member: &str, delta: i64, (day_cap, total_cap): (u64, u64), day: u64) -> Result<(), String> {
+        let mut members = self.pool_members(dir, provider)?;
+        let entry = members.entry(member.to_owned()).or_insert(MemberSpend { day: 0, day_index: day, total: 0 });
+        if entry.day_index != day {
+            *entry = MemberSpend { day: 0, day_index: day, total: entry.total };
+        }
+        let apply = |v: u64| if delta >= 0 { v.saturating_add(delta as u64) } else { v.saturating_sub(delta.unsigned_abs()) };
+        let (today, total) = (apply(entry.day), apply(entry.total));
+        if delta > 0 && total > total_cap {
+            return Err(refused("member-total-ceiling"));
+        }
+        if delta > 0 && today > day_cap {
+            return Err(refused("member-day-ceiling"));
+        }
+        entry.day = today;
+        entry.total = total;
+        let members: serde_json::Map<String, Value> = members
+            .iter()
+            .map(|(k, m)| (k.clone(), json!({"day":m.day,"dayIndex":m.day_index,"total":m.total})))
+            .collect();
+        let mut bytes = serde_json::to_vec(&json!({"type":MEMBERS_TYPE,"provider":provider,"members":members}))
+            .map_err(|e| e.to_string())?;
+        bytes.push(b'\n');
+        replace_private(&dir.join(format!("{provider}.members.json")), &bytes)
     }
 
     /// The pool key's charged spend (micro-USD, worst case per call), all time
@@ -1145,6 +1240,7 @@ mod credential_tests {
             per_call: 64,
             per_day: 1,
             spend: None,
+            member: None,
         };
         assert_eq!(
             store.pool("pool", "9", Some(65), caps, 1).unwrap_err(),
@@ -1480,6 +1576,7 @@ mod credential_tests {
                 per_call: 1024,
                 per_day: 50,
                 spend: None,
+                member: None,
             })
         );
         assert_eq!(
@@ -1525,18 +1622,53 @@ mod credential_tests {
     fn the_pool_spend_ceiling_refuses_before_the_provider_cap_is_reached() {
         let (_dir, store) = store();
         store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();
-        let caps = Caps { per_call: 64, per_day: 100, spend: Some((25, 10)) };
+        let caps = Caps { per_call: 64, per_day: 100, spend: Some((25, 10)), member: None };
         let mut minted = 0;
         for _ in 0..2 {
-            store.pool_grant("pool", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap();
+            store.pool_grant("pool", "9", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap();
         }
         assert_eq!(store.pool_spend("pool").unwrap(), 20);
         // A third call would pass the ceiling: refused before anything is minted.
-        assert_eq!(store.pool_grant("pool", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap_err(), refused("spend-ceiling"));
+        assert_eq!(store.pool_grant("pool", "9", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap_err(), refused("spend-ceiling"));
         assert_eq!(minted, 2);
         assert_eq!(store.reset_pool_spend("pool").unwrap(), 20);
-        store.pool_grant("pool", "9", Some(64), caps, 1, &mut || Ok(())).unwrap();
+        store.pool_grant("pool", "9", "9", Some(64), caps, 1, &mut || Ok(())).unwrap();
         assert_eq!(store.pool_spend("pool").unwrap(), 10);
+    }
+
+    #[test]
+    fn one_member_cannot_spend_past_its_share_of_the_pool() {
+        let (_dir, store) = store();
+        store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();
+        // Ceiling 100, 10 a call; a member may spend 20 a day and 30 in all.
+        let caps = Caps { per_call: 64, per_day: 100, spend: Some((100, 10)), member: Some((20, 30)) };
+        let mut minted = 0;
+        let mut grant = |member: &str, day: u64, minted: &mut u32| {
+            store.pool_grant("pool", "9", member, Some(64), caps, day, &mut || { *minted += 1; Ok(()) })
+        };
+        grant("21", 1, &mut minted).unwrap();
+        grant("21", 1, &mut minted).unwrap();
+        assert_eq!(grant("21", 1, &mut minted).unwrap_err(), refused("member-day-ceiling"));
+        // Another member is untouched by 21's day.
+        grant("22", 1, &mut minted).unwrap();
+        // The next UTC day opens 21's day again, up to its total.
+        grant("21", 2, &mut minted).unwrap();
+        assert_eq!(grant("21", 2, &mut minted).unwrap_err(), refused("member-total-ceiling"));
+        assert_eq!(minted, 4);
+        assert_eq!(store.pool_member_spend("pool", "21", 2).unwrap(), (10, 30));
+        assert_eq!(store.pool_member_spend("pool", "22", 2).unwrap(), (0, 10));
+        assert_eq!(store.pool_spend("pool").unwrap(), 40);
+        assert!(grant("2x", 2, &mut minted).is_err());
+    }
+
+    #[test]
+    fn a_ceiling_without_member_caps_gets_the_default_share() {
+        let table = ProviderTable::parse(&json!({"type":"mini-provider-table-v2","providers":[
+            {"name":"shared","endpoint":"https://openrouter.ai/api/v1/chat/completions","kind":"openai-compatible",
+             "models":["m"],"credential":"pool",
+             "caps":{"perCall":"1024","perDay":"50","ceilingMicroUsd":"40000000","callMicroUsd":"100000"}}]}).to_string().as_bytes()).unwrap();
+        // 1/40 a day and 1/10 in all: $1 a day, $4 in all of a $40 ceiling.
+        assert_eq!(table.rows[0].caps.unwrap().member, Some((1_000_000, 4_000_000)));
     }
 
     #[test]

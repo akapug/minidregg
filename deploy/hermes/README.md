@@ -121,6 +121,18 @@ Example table (`type` and every field are required; `caps` exactly on a
   ceiling of at most `40000000`), so that cap is never the first line.
   `mini-keys pool --action ls` shows the charged total; `--action spend-reset
   --provider pool` resets it after the operator re-checks the provider side.
+- **Each member's share** of that ceiling: `memberDayMicroUsd` and
+  `memberTotalMicroUsd`, charged at the same `callMicroUsd` against the member
+  a call serves. For a room resident that is the author of the request the
+  prompt answers (the controller reads it from the assignment and names it to
+  the broker); for anything else, the runner. A call past either refuses
+  `member-day-ceiling` or `member-total-ceiling`. A row with a ceiling and no
+  member caps gets **1/40 of the ceiling a day and 1/10 in all**: on the demo's
+  `40000000` / `100000`, $1 a day (10 worst-case calls) and $4 in all (40
+  calls) per member, so no ten members can drain the key and no one can drain
+  it in a day. The numbers are the row's, so they are published with the
+  table (`/etc/mini/providers.json`, world-readable). Both caps need
+  `callMicroUsd <= day <= total <= ceiling`.
 
 **The pool is optional.** Set it only if you want to fund Hermes for friends
 who bring no key:
@@ -242,7 +254,9 @@ ssh mini@BOX key revoke openrouter        # delete the key and every grant
 | `no-credential` | your row needs your key, and there is no key or no grant for this runner |
 | `grant-expired` | the signed height is past your `--until` |
 | `per-call-cap` | the request's `max_tokens` is absent or above your `--per-call` |
-| `per-day-cap` | today's calls reached your `--per-day` |
+| `per-day-cap` | today's calls reached your `--per-day` (or the pool row's `perDay`) |
+| `member-day-ceiling` | the member this call serves spent its share of the pool row for this UTC day |
+| `member-total-ceiling` | the member this call serves spent its whole share of the pool row |
 | `no-credit` | the purse refused the reserve (402) |
 
 ## Charges: the Host's per-route tariff
