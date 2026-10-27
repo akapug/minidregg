@@ -104,19 +104,21 @@ on a different application (1554678232631091200). The entrance now has a **gatew
 receives `INTERACTION_CREATE` there, answers through the REST callback; token as a systemd credential;
 outbound 443 only, no inbound route. The box side is staged for rehearsal #2.
 
-**Integration round 2** (`integration/2026-10-26`, integrator lane): merged so far L3 fence 1fe14837,
-L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market 6ceadaca (on top of round 1: custody, web,
-build, fn-fleet, keys-store, perf, hot-path, coordination). Waiting on **L1** (`lane/lean-critical`,
-tip d21123eb: JPAY6 driver, the 253/255 registry, the provider settle for every failed leg, Lean-emitted
-default laws for accounts and rooms, `checkPlan` accepting the height-pinned plan; its two Lean reds in
-`Host/RequestRefusal.lean` and `Kernel/NativePlanHeight.lean` are the critical path of the whole-tree
-rebuild). Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
+**Integration round 2** (`integration/2026-10-26`, integrator lane): at 68092f8a with L3 fence,
+L4 hermes a9e0dd70, L5 door bce88a74, L13 app-market, coordination 179a21c2 (on top of round 1: custody,
+web, build, fn-fleet, keys-store, perf, hot-path); the two L1 Lean reds repaired by tactic only. Still to
+take: **L1** 556346d3 (`checkPlan` accepts the height-pinned plan, so Hermes settles sign again; the
+four-class provider settle; Lean-emitted default account and room laws; the NO_RECORD effect class; one
+registry-docstring push to follow), **L3** 5aaf1a32, **L13** dfc696de, **L12** 34b15057. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
 `scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
 ACP resident, the rehearsal #2 candidate → infra ships #2 (door on 8796, mini-keys split shape,
 Hermes controller via `grain create`, frame grain units without `RestrictSUIDSGID`, gateway Discord).
 
 **Lanes.** Done on branches: L2 custody-as-records 554667d9 (39 → 13 fsyncs, wire bytes identical,
-the 253/255 classifier by generated constants, 8,236 lines gone); L3 1fe14837; L4 a9e0dd70 (units that
+the 253/255 classifier by generated constants, 8,236 lines gone); L3 5aaf1a32 (the setns red explained
+to the kernel line: libtest threads, production unaffected; the **sandbox floor audit PASSED on Debian
+13** for the first time, evidence in `docs/evidence/2026-10-27-sandbox-floor-dregg-build/`; the audit
+root is `/var/lib/spk-floor-audit` because `/run` is noexec and `/var/tmp` world-writable); L4 a9e0dd70 (units that
 open, `grain create`, the outcome record, provider classes; J14 blocked only by L7's summon fix and
 L1's `checkPlan`); L5 bce88a74 (door: unprivileged `/join`, root processor the only writer of
 accounts/keys/roster, hosted keygen, pay-to-enrol onto a hosted account, Discord link codes; gateway
@@ -124,15 +126,19 @@ mode); L6 43ede087 (WAL store, grant caps against the body, op-144 pinned); L7 7
 repairs; the summon fix: one document-creation path, loud refusal); L8 6e9ea3bb; L9 d74947d2
 (workspace gate, journey split, 9,348 lines gone); L11 ed73009c/bef88d32 (the breakdown; the fsync
 fix); hot-path 58bfb7e3 (Rust kernels under `@[extern]` with `_eq_native` theorems, O(1) consent,
-codec resident, image hashed once); coordination 571f304b (`docs/COORDINATION-2026-10-27.md`,
-−116,631 lines of gate bookkeeping). Working: **L1** (above); **L12 web front end**
-(`lane/web-frontend` 9f7de524: the gateway + root helper + body, xterm.js vendored, forms derived from
-the shell verb table per the parity law, refusal clause highlighted, purse meter, grants tree, live
-room stream; headless-Chromium end-to-end green without a Host; `jwebparity` next); **L13 app market**
-(increment 2 at 6ceadaca: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify
-from the real store, `japps --box` 22/22; now the apps worker, the apps law from Lean, birth +
-delegation inside `mini apps install`; v1 = per-member routes over one grain guest subject, v2 =
-per-member subjects after L1b); the M7 reference build on `dregg-build`; L11's 10k soak on the box.
+codec resident, image hashed once); coordination 179a21c2 (`docs/COORDINATION-2026-10-27.md`,
+−116,631 lines of gate bookkeeping; the per-module Lean RSS table; a nightly on `dregg-build` at 00:00 UTC;
+the Lake artifact cache verified: an unchanged worktree rebuilds in 14 s). Working: **L1** (above); **L12 web front end**
+(`lane/web-frontend` 34b15057: the gateway + root helper + body, xterm.js vendored, 68 verbs each with a
+form from the usage strings (the interim; the structured command registry is A0), refusal clause
+highlighted, purse meter, grants tree, live room stream; against the live Host on the build box 12/15
+rows, the terminal over the WebSocket printing the subject; next: browser-only join, the public
+receipts stream and operations room, the lost-reply switch, `delegate --until`, `/tour`); **L13 app market**
+(dfc696de: `saveIdentityCaps`/`expectAppHooks` served, so Etherpad and TT-RSS qualify from the real
+store, `japps --box` 22/22; the apps worker with every reply decided or carrying its exact retry; the
+request law `Kernel/AppsRequest.lean`; units and ports staged on the box; v1 = one guest subject per
+grain, v2 after L1b; blocked only on the round-2 broker world for its lifecycle rows; the member
+application birth (op 30) is a Host question on L1's queue); the M7 reference build on `dregg-build`; L11's 10k soak on the box.
 
 **Ember's codex session** is landing the veri7vn oracle appliance in the main worktree (uncommitted
 `deploy/oracle/`, `native/oracle-appliance`, `native/spk-package-stream`): the split recipe keeps the
