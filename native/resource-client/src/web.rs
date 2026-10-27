@@ -1,4 +1,4 @@
-//! `mini web`: a workspace's view of the node as plain hypertext, in three faces.
+//! `mini web`: a workspace's view of the node as plain hypertext, in two faces.
 //!
 //! Every page that shows kernel state is one or more signed reads under the
 //! workspace's own key, through `workspace::signed_view` /
@@ -29,7 +29,6 @@ mod inspect;
 mod resident;
 #[path = "web/world.rs"]
 mod world;
-mod studio;
 #[path = "web/search.rs"]
 mod search;
 #[path = "web/body.rs"]
@@ -294,7 +293,7 @@ pub(crate) fn gate(request: &Request, front: &Front, token: &str) -> Gate {
     }
     let parts: Vec<_> = segments.iter().map(String::as_str).collect();
     if request.method == "POST" {
-        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"] | ["studio","new"] | ["studio",_,"manifest" | "snapshot" | "compose" | "fork" | "preview"]) {
+        if !matches!(parts.as_slice(), ["doc",_,"edit",_] | ["doc",_,"edit",_,"lookup"] | ["doc",_,"edit",_,"action"] | ["new-document",_] | ["new-document",_,"lookup"] | ["new-document",_,"finish"]) {
             return Gate::Refuse(405,"this address accepts reads only".into());
         }
     }
@@ -676,8 +675,6 @@ impl Site {
                     ["doc",name,"edit",id] => editor::post(self,name,id,&body,false),
                     ["doc",name,"edit",id,"lookup"] => editor::post(self,name,id,&body,true),
                     ["doc",name,"edit",id,"action"] => editor::action(self,name,id,&body),
-                    ["studio","new"] => studio::post(self,None,"new",&body),
-                    ["studio",id,action @ ("manifest" | "snapshot" | "compose" | "fork" | "preview")] => studio::post(self,Some(id),action,&body),
                     ["new-document",id] => create::post(self,id,&body,"create"),
                     ["new-document",id,op] => create::post(self,id,&body,op),
                     _ => simple(405,"Cannot save","this address accepts reads only"),
@@ -686,9 +683,7 @@ impl Site {
             Gate::Route(segments) if segments == ["search"] => search::page(self, &request.target),
             Gate::Route(segments) => {
                 let draft = matches!(segments.first().map(String::as_str), Some("new-document"))
-                    || segments.get(2).is_some_and(|part| part == "edit" || part == "new-document")
-                    || segments.first().is_some_and(|part| part == "studio")
-                        && segments.get(2).is_some_and(|part| part == "module");
+                    || segments.get(2).is_some_and(|part| part == "edit" || part == "new-document");
                 let _mutation = if draft {
                     Some(self.mutations.lock().map_err(|_| "browser custody lock poisoned")?)
                 } else { None };
@@ -702,15 +697,6 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
-            ["studio"] => studio::index(self),
-            ["studio","new"] => studio::new(self),
-            ["studio",id] => studio::package(self,id),
-            ["studio",id,"module",index] => studio::module(self,id,index,false),
-            ["studio",id,"module",index,"fresh"] => studio::module(self,id,index,true),
-            ["studio",id,"draft",submission] => studio::retained_draft(self,id,submission),
-            ["studio",id,"snapshot",snapshot] => studio::captured(self,id,snapshot),
-            ["studio",id,"snapshot",snapshot,"preview",run] => studio::preview(self,id,snapshot,run),
-            ["studio",id,"history",revision] => studio::history(self,id,revision),
             ["new-document"] => create::open(self,None,None),
             ["new-document",id] => create::open(self,Some(id),None),
             ["room",name,"new-document"] => create::open(self,None,Some(name)),
@@ -821,7 +807,7 @@ impl Site {
                  <tr><th>name</th><th>kind</th><th>cell</th><th>views</th></tr>\n{rows}</table>\n",
                 names.len()
             ) + &if self.front.read_only { String::new() } else {
-                format!("<p><a href=\"{base}/studio\">Source studio</a> | <a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
+                format!("<p><a href=\"{base}/new-document\">Create a document</a></p>") + &create::recent(self)
             },
         }
     }

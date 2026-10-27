@@ -33,7 +33,7 @@ fn request_within_bound(request: &[u8]) -> bool {
 
 /// The largest JSON source an author request (op 7) may carry. Measured
 /// against the clients: the biggest legitimate sources are 4 MiB
-/// (`current_birth::MAX_SOURCE` and `MAX_INTENT`, `workspace::studio::MAX_SOURCE`,
+/// (`current_birth::MAX_SOURCE` and `MAX_INTENT`,
 /// `hermes_handoff::LIMIT`); a 12 MB array of 5M elements cost the Host ~11 s and
 /// 775 MB, so the 12 MB frame bound was the wrong bound for this operation.
 pub(crate) const AUTHOR_JSON_MAX: usize = 4 * 1024 * 1024;
