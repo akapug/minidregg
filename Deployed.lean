@@ -7,7 +7,7 @@ predicate algebra (`Pred`), the effect registry (`Effects`) and the native host
 the proof-system research: the `Selvage` modules and the proof-system `Assurance`
 apex theorems, which `Minidregg` (the research umbrella) still builds. Mini admits
 by re-execution, not by proof (decision 10-01), so the admission path needs none of
-that research; the one exception is the digest backend named under Residual.
+that research, and the closure carries no module of it (see the Selvage paragraph below).
 
 `AxiomCensus` checks this umbrella; `AxiomCensusResearch` checks `Minidregg`.
 `scripts/lane/ub.sh` builds this; `scripts/lane/rb.sh` builds the research set.
