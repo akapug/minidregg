@@ -46,13 +46,14 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 14 | aa9366f8 | phase A: host stage rc=1 at 21:14 (integ8/COMMANDS.log) |
 | 14 A2 | 36f719cc5 | host stage rc=1 at 21:37 (903 s, peak 16.1 GB): only Kernel.ResourceBirthPolicyController, lean-audit-c's three proofs that never elaborated; fixed on main 61bf01e1d (verified by `lake env lean` in integ8, seconds per try); no regen ran |
 | 14 A3 | 8103b29a4 | host stage rc=1 at 21:53 (566 s, peak 16.2 GB): only Kernel.PlatformCell (c0b2d6ab1's seventh Admits conjunct unpropagated to four proofs); fixed 26fcdd889 |
-| 14 A4 | 26fcdd889 | running since 21:54: `integ4/cut14d.sh` (pid file cut14d.pid): host closure + regen (logs host-A4.log, regen-A4.log); carries hermes, fb15f121b, e7958d3b9 (its first elaboration) |
+| 14 A4 | 26fcdd889 | host rc=1 at 21:55 (38 s): only Kernel.PlatformInstallReceiver (admitsObserved_decides, decide instances after c0b2d6ab1); fixed cacefcba8 |
+| 14 A5 | cacefcba8 | host rc=1 at 21:58 (41 s): only Kernel.NativeHostReplay:3823 (extendExact: exactCandidate sets headTag since e0916a53f, advance does not; #guard_msgs 4827/4829 follow). Design call with the deputy (a308118209b4a48ea); host closure and regen wait on it. `integ4/cut14e.sh` is the A5 chain; next is a copy with the fix's tip |
 
 A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
 lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
 demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
 MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
-un-web-front 0da04999 (front-page document; infra's step 9c depends on it).
+un-web-front 0da04999 (front-page document; infra's step 9c depends on it). Also since: app-market db312c6f (30e24095f; b2.sh resolved per function against app-recipes, L13 told).
 After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
 J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
 not compile). The first candidate carrying both bc88a5ab (frame v8)
@@ -64,10 +65,10 @@ elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e5
 constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
 elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when phase A4 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
+Next steps: when the deputy's NativeHostReplay fix lands, rerun the host stage (copy cut14e.sh with the new tip); then carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
 build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
 for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly (A4's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
+stage ends cleanly (the rerun's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
 (aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
 batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
 
