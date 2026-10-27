@@ -39,11 +39,15 @@ def intentLoadedAuthorized (config : NativeHost.Config)
       config.federation config.genesisHeight signed with
   | .error _ => return .error refused
   | .ok _ =>
+      let some current := NativeHost.platformRecordIn config.deployment
+          opened.durable.snapshot.canonicalBytes
+        | return .error "platform cell unavailable: the image holds no platform record to price a birth from"
       match Json.birthIntentFrom "$" json (fun path source =>
           Json.birthCurrent path source config
             (NativeHost.logicalHeight config opened.durable)
             opened.authority.snapshot.authState
-            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)) with
+            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)
+            current) with
       | .error reason => return .error reason
       | .ok intent =>
           if intent.subject != signed.challenge.intent.subject then
