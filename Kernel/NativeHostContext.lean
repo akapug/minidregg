@@ -487,7 +487,7 @@ theorem platformRecordIn_load (deployment : CanonicalCellRegistry.Deployment)
 /-- The creation tariff an opened state's factory pins carry: the platform record's. Where
 the image holds no platform record, the config's genesis tariff stands in, and every
 ordinary birth on that image is refused `platformUnavailable`
-(`ResourceBirthReceiver.pricedAt`), so the stand-in prices nothing. -/
+(`ResourceBirthPolicyController.Concrete.preparePending`), so the stand-in prices nothing. -/
 def pinnedTariff (config : Config) (platform? : Option PlatformCellLayout.Platform) :
     CreationTariff :=
   match platform? with

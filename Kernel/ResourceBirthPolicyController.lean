@@ -83,6 +83,9 @@ inductive Reject where
   /-- The image the birth is prepared against holds no decodable platform cell or record,
   so the birth has no factory template (`birthTemplate`). -/
   | platformUnavailable
+  /-- The factory pins carry a creation tariff other than that record's: the birth would be
+  priced from a tariff the platform cell does not hold. -/
+  | platformStale
   deriving DecidableEq, Repr
 
 /-- The checkable part of the existing factory authorization. All fields
@@ -1399,21 +1402,55 @@ structure Pending
     (height : Height) : Type where
   checked : Checked pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
   method : FactoryMethod
-  /-- The template of the prepared image's platform record (`birthTemplate`). -/
-  template : CanonicalRuntimeProfile.FactoryTemplate
-  templateExact : birthTemplate profile deployment durable = some template
-  templateBound : MethodTemplateBound method template (oldAuthority prepared) height descriptor
+  /-- The platform record of the image the birth is prepared against. -/
+  record : PlatformCellLayout.Platform
+  recordExact : platformRecordAt deployment durable = some record
+  /-- The factory pins carry the record's creation tariff: the birth is priced from it. -/
+  priced : pins.tariff = record.creation
+  templateBound : MethodTemplateBound method (templateAt profile.template record)
+    (oldAuthority prepared) height descriptor
   bornLineage : BornLineage (placementLineage prepared.authority.snapshot.cell) descriptor
   cellIdsDistinct : Function.Injective (layout prepared).cellId
   requestsDistinct : Function.Injective (branchIdentity prepared height)
+
+/-- The factory template a pending birth is bound by: `templateAt` of its record. -/
+def Pending.template
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    CanonicalRuntimeProfile.FactoryTemplate :=
+  templateAt profile.template pending.record
+
+theorem Pending.templateExact
+    {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}
+    {height : Height} (pending : Pending prepared height) :
+    birthTemplate profile deployment durable = some pending.template := by
+  unfold birthTemplate
+  rw [pending.recordExact]
+  rfl
+
+/-- Teeth: no birth is pending against a record whose creation tariff its pins do not carry.
+`preparePending` refuses it as `platformStale`. -/
+theorem pending_stale_empty
+    (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (height : Height) (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
+    (stale : pins.tariff ≠ record.creation) : IsEmpty (Pending prepared height) :=
+  ⟨fun pending => by
+    have same := pending.recordExact
+    rw [recorded] at same
+    have exact := Option.some.inj same
+    subst exact
+    exact stale pending.priced⟩
 
 def preparePending
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (method : FactoryMethod := .ordinary) : Except Reject (Pending prepared height) := do
   let checked ← check pins CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) descriptor
-  match templated : birthTemplate profile deployment durable with
+  match recorded : platformRecordAt deployment durable with
   | none => .error .platformUnavailable
-  | some template =>
+  | some record =>
+    let priced ← require (pins.tariff = record.creation) .platformStale
+    let template := templateAt profile.template record
     let templateCheck : Except Reject (PLift (MethodTemplateBound method template
         (oldAuthority prepared) height descriptor)) := by
       cases method with
@@ -1432,8 +1469,8 @@ def preparePending
         (mapped_policyBranches_nodup_iff (branchIdentity prepared height))
     if cells : Function.Injective (layout prepared).cellId then
       if requests : Function.Injective (branchIdentity prepared height) then
-        .ok ⟨checked.down, method, template, templated, templateBound.down, bornLineage.down,
-          cells, requests⟩
+        .ok ⟨checked.down, method, record, recorded, priced.down, templateBound.down,
+          bornLineage.down, cells, requests⟩
       else .error .ambiguousRequests
     else .error .duplicateCell
 

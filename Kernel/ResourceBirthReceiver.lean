@@ -155,7 +155,7 @@ def sourceReadGuards {height : Height}
   accepted.sourceReadGuards.map guardOfPair
 
 /-- The platform cell as a read dependency of every ordinary birth: the birth is priced from
-the platform record of the image it commits against (`pricedAt`), so an install landing in
+the platform record of the image it commits against (`Pending.priced`), so an install landing in
 between makes the birth's commit stale instead of letting it land at the old price. -/
 def platformGuards (deployment : CanonicalCellRegistry.Deployment)
     (durable : ResourceBirthController.Concrete.Durable) : List ReadGuard :=
@@ -529,11 +529,6 @@ structure Receipt where
 inductive Reject where
   | malformedIngress
   | transactionConflict
-  /-- The image holds no decodable platform cell or record: an ordinary birth has no price. -/
-  | platformUnavailable
-  /-- The factory pins' creation tariff is not the platform record's on this image: the
-  birth would be priced from a stale tariff (`pricedAt`). -/
-  | platformStale
   | admission (reason : ResourceBirthPolicyController.Reject)
   | durable (reason : DurableDataIntent.RejectReason)
 
@@ -596,49 +591,63 @@ theorem replay_wrong_event_refused (domain : Digest)
     replay domain durable ingress = some (.error .transactionConflict) := by
   simp [replay, found, different]
 
-/-- **Ordinary births are priced from the platform cell** of the image they commit against:
-the record loads, and the factory pins carry its creation tariff exactly. Missing:
-`platformUnavailable`; different: `platformStale`. Never priced from a tariff the cell does
-not hold. -/
-def pricedAt (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable) : Except Reject Unit :=
-  match PlatformCellDomain.load deployment durable.snapshot with
-  | none => .error .platformUnavailable
+#assert_axioms platformGuards_exact platform_unwritten readGuards_platform
+
+/-! ## Births read the current platform record (deployed keystone)
+
+Scope: births admitted by this receiver (ordinary, reserve and lifetime-grant methods). The
+share issue, lifetime-grant source, grain births, provisioning, PayEnrolV2 and the completion
+keys are owed families (`scripts/platform-field-readers.json`). -/
+
+/-- **Births through the resource-birth receiver read the current platform record**: every
+admitted birth is priced from the record of the image it commits against (the factory pins
+carry its creation tariff and the fee is bounded by it), is bound by that record's owner
+budget and lifetime (`templateAt`, enforced through `RootGrantShape`/`BirthWindow`), and
+read-guards the platform cell at that image's exact root. -/
+def ReceiverReadsCurrent (profile : CanonicalRuntimeProfile.Profile F)
+    (deployment : CanonicalCellRegistry.Deployment) : Prop :=
+  ∀ (pins : FactoryPins) (durable : ResourceBirthController.Concrete.Durable) (height : Height)
+    (accepted : AcceptedBirth profile deployment pins durable height),
+    ∃ record, platformRecordAt deployment durable = some record ∧
+      pins.tariff = record.creation ∧
+      accepted.descriptor.FeeBound record.creation ∧
+      accepted.pending.template = templateAt profile.template record ∧
+      ({ cellId := PlatformCellDomain.cellIdOf deployment
+         expectedRoot := durable.snapshot.model.roots (PlatformCellDomain.cellIdOf deployment) } :
+          ReadGuard) ∈ (intent accepted).readGuards
+
+theorem receiverReadsCurrent : ReceiverReadsCurrent profile deployment := by
+  intro pins durable height accepted
+  cases found : PlatformCellDomain.load deployment durable.snapshot with
+  | none =>
+      have recorded := accepted.pending.recordExact
+      simp [platformRecordAt, found] at recorded
   | some loaded =>
-      match PlatformCellLayout.recordOf loaded.cell.logical with
-      | none => .error .platformUnavailable
-      | some record => if pins.tariff = record.creation then .ok () else .error .platformStale
+      refine ⟨accepted.pending.record, accepted.pending.recordExact, accepted.pending.priced,
+        ?_, rfl, readGuards_platform accepted loaded found⟩
+      rw [← accepted.pending.priced]
+      exact accepted.pending.checked.feeBound
 
-theorem pricedAt_ok (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable)
-    (priced : pricedAt deployment pins durable = .ok ()) :
-    ∃ loaded record, PlatformCellDomain.load deployment durable.snapshot = some loaded ∧
-      PlatformCellLayout.recordOf loaded.cell.logical = some record ∧
-      pins.tariff = record.creation := by
-  unfold pricedAt at priced
-  split at priced
-  · cases priced
-  · rename_i loaded found
-    split at priced
-    · cases priced
-    · rename_i record recorded
-      split at priced
-      · rename_i same
-        exact ⟨loaded, record, found, recorded, same⟩
-      · cases priced
+/-- No record, no birth: an image whose platform cell or record is missing admits none. -/
+theorem unpriced_empty {height : Height}
+    (missing : platformRecordAt deployment durable = none) :
+    IsEmpty (AcceptedBirth profile deployment pins durable height) :=
+  ⟨fun accepted => by
+    have recorded := accepted.pending.recordExact
+    rw [missing] at recorded
+    cases recorded⟩
 
-/-- Teeth: a tariff other than the record's is refused, whatever else the birth carries. -/
-theorem pricedAt_stale (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
-    (durable : ResourceBirthController.Concrete.Durable)
-    (loaded : PlatformCellDomain.Loaded deployment durable.snapshot)
-    (found : PlatformCellDomain.load deployment durable.snapshot = some loaded)
-    (record : PlatformCellLayout.Platform)
-    (recorded : PlatformCellLayout.recordOf loaded.cell.logical = some record)
+/-- Teeth: pins carrying any tariff other than the record's admit no birth. In particular,
+pins built from the genesis `config.tariff` admit nothing once an install changed the
+creation tariff. -/
+theorem stale_unadmitted {height : Height} (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
     (stale : pins.tariff ≠ record.creation) :
-    pricedAt deployment pins durable = .error .platformStale := by
-  simp [pricedAt, found, recorded, stale]
+    IsEmpty (AcceptedBirth profile deployment pins durable height) :=
+  ⟨fun accepted => (pending_stale_empty accepted.prepared height record recorded stale).false
+    accepted.pending⟩
 
-#assert_axioms platformGuards_exact platform_unwritten readGuards_platform pricedAt_ok pricedAt_stale
+#assert_axioms receiverReadsCurrent unpriced_empty stale_unadmitted
 
 /-- Admit against the exact snapshot already validated by the host. The native
 receiver performs one compare-and-swap against this image and returns contention
@@ -656,8 +665,6 @@ def receiveLoaded
       | some (.ok recorded) => return .confirmed .replayed recorded
       | some (.error reason) => return .rejected reason
       | none =>
-          if let .error reason := pricedAt deployment pins durable then
-            return .rejected reason
           match ← admitDecodedNative profile deployment pins native durable height ingress with
           | .error reason => return .rejected (.admission reason)
           | .ok accepted =>

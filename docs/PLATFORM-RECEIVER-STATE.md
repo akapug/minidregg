@@ -77,7 +77,29 @@ grant, the grain births, participant provisioning, PayEnrolV2, and the four comp
 `pins.tariff = config.tariff`, so after a tariff-changing install they refuse. They never
 stay silently stale.
 
-### Item 3: the deployed keystone (accepted, auditor pass 18; nothing coded)
+### Item 3: the deployed keystone (accepted, auditor pass 18; coded, not yet elaborated)
+
+**Coded.**
+- `Kernel/ResourceBirthPolicyController.lean`:
+  - `Pending` carries `record`, `recordExact` and `priced`. `Pending.template` is a def
+    (`templateAt profile.template record`) and `Pending.templateExact` a theorem, so
+    `AcceptedBirth.indexed` and `reserve_shape` keep their statements.
+  - `preparePending` refuses a missing record (`platformUnavailable`) and a different
+    tariff (new birth `Reject.platformStale`).
+  - Teeth `pending_stale_empty`: with the record present and `pins.tariff ≠
+    record.creation`, `Pending` is empty. This is stronger than the planned
+    `preparePending_stale`; the refusal's name is a disclosure detail.
+- `Kernel/ResourceBirthReceiver.lean`:
+  - `ReceiverReadsCurrent` and `receiverReadsCurrent`, `unpriced_empty`, and
+    `stale_unadmitted` (`IsEmpty (AcceptedBirth …)` for stale pins).
+  - Deleted: `pricedAt`, `pricedAt_ok`, `pricedAt_stale`, the call in `receiveLoaded`, and the
+    receiver's `platformUnavailable`/`platformStale`. Those constructors had left
+    `NativeHost.birthRejection`/`birthReason` non-exhaustive since f2010f574, a red that had
+    not surfaced yet. Deleting them closes it.
+- `Kernel/PlatformCell.lean` (pass 18 change): `Terms`, `termsAt`, `BirthView`,
+  `BirthsReadCurrent`, `BirthQuoteCurrent` and their poles are deleted, and a comment
+  points to `ReceiverReadsCurrent`.
+- The satisfiable Lean witness stays owed (item 7).
 
 **Pass 18 (af7a93e7b8ba729d4, lane/audit-platform) accepts the statement as written,
 with one change and one condition.**
@@ -182,9 +204,7 @@ but no `build/` yet; no cold build was run.
 
 ### Next, in order
 
-3. Pricing into `Pending`, then `receiverReadsCurrent`, `unpriced_empty` and
-   `preparePending_stale`; delete `pricedAt` and the vacuous `BirthsReadCurrent` /
-   `BirthQuoteCurrent` (pass 18).
+3. Coded (above); elaborate it in the warm tree with item 6.
 4. The owed families, one per commit, each deleting its census rows.
 5. `Intent.credit` with ops 244–247.
 6. Coded (above); elaborate it in the warm tree.

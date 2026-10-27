@@ -34,9 +34,9 @@ Realizer slots (law 1):
   record, subject and capability or form a `PinCollision` of the two compared source byte
   strings (`Context.binds`). A relay cannot swap a field under a valid signature short of
   that collision.
-* `BirthView.platformAt` decodes the platform cell in the store the birth commits against
-  (`none`: missing or undecodable, and the birth is refused); the quote is
-  `ResourceBirth.Descriptor.quotedFee` (`Host/Json.lean:2341`).
+* Births read the platform record of the image they commit against at the deployed receiver
+  (`ResourceBirthReceiver.ReceiverReadsCurrent`); the client quote is
+  `ResourceBirth.Descriptor.quotedFee` over that record's creation tariff (`Json.birthCurrent`).
 * The meter is `DurableCommitProtocol.Snapshot.available` under the EXTENDED install
   (`installAvailable`: the proof phase adds `Intent.credit`, default zero, which only the
   refill family sets); `Meter.consumed` is `Snapshot.consumed`, and every nullifier carries
@@ -333,39 +333,13 @@ theorem decides_authenticated (ctx : Context) (decide : History → Install → 
   have := (decides h i).mp admitted
   exact ⟨this.2.1, this.2.2.1⟩
 
-/-! ### L1-d: births read the platform of the store they commit against -/
+/-! ### L1-d and L1-e: births read the platform of the store they commit against
 
-structure Terms where
-  creation : CreationTariff
-  grainBirth : Option NativeHost.GrainBirthTariffPin
-  completionCustodianKey : Option (List UInt8)
-  ownerBudget : Nat
-  windowFrom : Nat
-  windowUntil : Nat
-  deriving DecidableEq, Repr
-
-def termsAt (p : Platform) (height : Nat) : Terms :=
-  ⟨p.creation, p.grainBirth, p.completionCustodianKey, p.ownerBudget, height, height + p.lifetime⟩
-
-structure BirthView (Store : Type) where
-  platformAt : Store → Option Platform
-  heightOf : Store → Nat
-  platformCell : Nat
-
-/-- **L1-d.** A birth reads the platform of the very store it commits against, at that
-store's height, every field and the window; it read-guards the platform cell; and a store
-whose platform cell is missing or undecodable yields no terms (the birth is refused). -/
-def BirthsReadCurrent {Store : Type} (view : BirthView Store) (terms : Store → Option Terms)
-    (guards : Store → List Nat) : Prop :=
-  ∀ store, match view.platformAt store with
-    | some p => terms store = some (termsAt p (view.heightOf store)) ∧ view.platformCell ∈ guards store
-    | none => terms store = none
-
-/-- **L1-e.** The birth fee is the deployed quote over the current creation tariff; no
-platform, no quote. -/
-def BirthQuoteCurrent {Store : Type} {registry : TypeRegistry Digest} (view : BirthView Store)
-    (quote : Store → Descriptor registry → Option Nat) : Prop :=
-  ∀ store d, quote store d = (view.platformAt store).map fun p => d.quotedFee p.creation
+Stated at the deployed receiver, where the birth is admitted:
+`ResourceBirthReceiver.ReceiverReadsCurrent` (the record of the committed image prices the
+birth, bounds its fee, binds its owner budget and lifetime, and is read-guarded), with
+`unpriced_empty` and `stale_unadmitted`. A store-only `terms` function here would hold by
+`rfl` and constrain no deployed reader, so none is stated. -/
 
 /-! ### Poles of L1 -/
 
@@ -577,63 +551,6 @@ theorem sorted_load_bearing (host : NativeHost.Config) (genesis : Config) (key :
   intro above
   have := above { base with version := 5 } (by simp [h, History.records])
   simp [next, h, History.current, History.records] at this
-
-/-- Births, satisfiable: the reader of the store's own platform reads current. -/
-def currentReader {Store : Type} (view : BirthView Store) (store : Store) : Option Terms :=
-  (view.platformAt store).map (termsAt · (view.heightOf store))
-
-theorem currentReader_reads_current {Store : Type} (view : BirthView Store) :
-    BirthsReadCurrent view (currentReader view) (fun _ => [view.platformCell]) := by
-  intro store
-  unfold currentReader
-  cases view.platformAt store <;> simp
-
-def historyView : BirthView (History × Nat) := ⟨fun s => some s.1.current, (·.2), 0⟩
-
-def paidRecord : Platform := ⟨1, ⟨1, 0, 0, 0, 0, 0⟩, none, none, 0, 1⟩
-def freeRecord : Platform := ⟨0, ⟨0, 0, 0, 0, 0, 0⟩, none, none, 0, 1⟩
-
-/-- Births, teeth: a reader of the GENESIS record does not read current once an install
-changed the creation tariff. -/
-def genesisReader (s : History × Nat) : Option Terms := some (termsAt s.1.genesis s.2)
-
-theorem genesisReader_stale :
-    ¬ BirthsReadCurrent historyView genesisReader (fun _ => [0]) := by
-  intro reads
-  have := (reads (⟨freeRecord, [paidRecord]⟩, 0)).1
-  simp [genesisReader, historyView, termsAt, History.current, History.records, paidRecord,
-    freeRecord] at this
-
-/-- Births, teeth: a reader that prices without a platform cell is refused by the statement. -/
-theorem pricing_without_platform_refused {Store : Type} (view : BirthView Store) (store : Store)
-    (missing : view.platformAt store = none) (t : Terms)
-    (guards : Store → List Nat) (terms : Store → Option Terms) (priced : terms store = some t) :
-    ¬ BirthsReadCurrent view terms guards := by
-  intro reads
-  have := reads store
-  rw [missing] at this
-  rw [priced] at this
-  cases this
-
-/-- Quote, satisfiable: the deployed quote over the store's own platform. -/
-def currentQuote {Store : Type} {registry : TypeRegistry Digest} (view : BirthView Store)
-    (store : Store) (d : Descriptor registry) : Option Nat :=
-  (view.platformAt store).map fun p => d.quotedFee p.creation
-
-theorem currentQuote_current {Store : Type} {registry : TypeRegistry Digest}
-    (view : BirthView Store) : BirthQuoteCurrent (registry := registry) view (currentQuote view) :=
-  fun _ _ => rfl
-
-/-- Quote, teeth: a quote over the genesis tariff is stale once an install raised the base. -/
-def genesisQuote {registry : TypeRegistry Digest} (s : History × Nat) (d : Descriptor registry) :
-    Option Nat := some (d.quotedFee s.1.genesis.creation)
-
-theorem genesisQuote_stale {registry : TypeRegistry Digest} (d : Descriptor registry) :
-    ¬ BirthQuoteCurrent historyView (genesisQuote (registry := registry)) := by
-  intro current
-  have := current (⟨freeRecord, [paidRecord]⟩, 0) d
-  simp [genesisQuote, historyView, History.current, History.records, paidRecord, freeRecord,
-    Descriptor.quotedFee] at this
 
 /-! ## M2: the seed-meter refill
 
@@ -922,8 +839,7 @@ theorem refilled_is_protocol_install {TxId CellId Event : Type} [DecidableEq Cel
 #assert_axioms lawful_injective installWire_covers wireEncode_covers toy_admits premises_inhabited
   forged_refused relay_swap_refused trustsSubjectField_not_decides stale_version_refused
   invalid_refused zero_lifetime_invalid custodian_drop_refused uncosigned_rotation_refused
-  cosigned_rotation_admitted sorted_load_bearing currentReader_reads_current genesisReader_stale
-  pricing_without_platform_refused currentQuote_current genesisQuote_stale
+  cosigned_rotation_admitted sorted_load_bearing
   install_conserves_with_credit installToday_loses_credit admitted_refills_confined tagged_mint_refused
   installAvailable_refill refillReference_lawful refill_funded_at_exhaustion
   charged_refill_refused_at_exhaustion lawful_monotone replay_refused family_tag_separates
