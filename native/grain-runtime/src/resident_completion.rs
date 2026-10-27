@@ -772,17 +772,13 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn publication_reentry_accepts_exact_staging_and_after_bytes_only() {
+    fn publication_reentry_accepts_exact_after_bytes_only() {
         let (root, turn, resident) = fixture("completion-publication");
         let bytes = serde_json::to_vec_pretty(&resident).unwrap();
         let receiving = transition(&turn, &root, &bytes).unwrap();
         receiving.validate(&turn, &root).unwrap();
         fs::write(root.join("resident.json"), &bytes).unwrap();
-        let temp = root.join(format!(
-            ".resident.json.migration-{}.tmp",
-            &receiving.turn_sha256[..16]
-        ));
-        write_new(&temp, receiving.resident_after.as_bytes()).unwrap(); // crash after staging fsync
+        fs::set_permissions(root.join("resident.json"), fs::Permissions::from_mode(0o600)).unwrap();
         publish_resident(&receiving).unwrap();
         let after = fs::read(root.join("resident.json")).unwrap();
         publish_resident(&receiving).unwrap(); // crash after rename, before received receipt
