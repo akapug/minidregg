@@ -492,3 +492,36 @@ tag, but the IO append that wrote the entry computed it under the key. The clean
 `appended_headTag : (append …).headTag = some (DurableHistory.trailer key height …)`. That makes the
 re-read unnecessary on the Host's own path. Keep (a) for robustness only. Pin the append lemma in this
 statement module too, so the fix cannot regress to `none` silently.
+
+## 2026-10-27, eleventh pass: `Kernel/ObjectiveActivityEffect.lean` (lane/un-effects 60cd8f64)
+
+**Verdict: proofs may start on Performed, Refused, Verdict, TransferMoves and Resumed. Three
+statement additions come before the Delivery\* and CommitJudged proofs.**
+
+**On the deployed path.** Yes. `commitYield`, `transferVerdict` and `settle` are the kernel's own
+functions, and the Delivery\* statements quantify over `Delivery`, whose `batchExact` (`ObjectiveActivity.lean:3296`)
+is the deployed batch. The ordering is right: `settlePurse` checks `pair + deposit` on the purse after the
+delivery's charges AND the effect transfer (`:2456-2461`), so a transfer can never leave the purse
+underfunded. Safety holds even where the verdict errs.
+
+**`VerdictStatement` is complete over `transferVerdict`'s four outcomes** (reserved, closed, unfunded, settled).
+But it judges against `funds.book`, which for a delivery is `applyOperations book (purseCharges …)`
+(`deliveryFunds`, `:3119-3123`). The batch applies `deliveryCharges …`, and nothing states that these
+agree on the purse balance and the open-account set. If they disagree, a transfer judged `settled` is
+refused at `settlePurse` as `awaitsFunding`, which refuses the whole turn under the wrong name, or a
+covered one is recorded `unfunded`. **Add `FundsAgree`:** the purse balance and the `accounts` of
+`funds.book written` equal those after `deliveryCharges` (and likewise for the birth's funds, `:2722`).
+
+**Storage-deposit independence is asserted, not stated.** The verdict is judged with the reserve of a
+`settled` await (`commitYield`), while `settlePurse` charges the deposit of the record actually committed,
+whose await may be `refused r`. They agree only because `VerdictWire` is two octets for every verdict (a
+comment at `:255`). **Add** `storageDeposit config (nextRecord … ⟨…, .performed v, …⟩)` independent of `v`.
+
+**`CommitJudgedStatement` binds to the same `admitWrite`** that `Delivery.judged` (`:3318`) uses, with the same
+`factsOf payer height object 2 (some pin)`, so a commit and an await are judged by one law. But (i) it is an
+instance of the existing `judgeWritten_ok delivery.judged` (`:5207`), so it adds no content beyond the
+`Delivery` field. (ii) Births (`:2781`, other facts) are not covered, though a first segment can yield
+`commit`. (iii) Its "a law-refused commit admits no turn" has no pole. **Add** a birth clause and a teeth
+pole: an object whose law refuses the write makes `deliver` return `.error (.objectWrite _)`. Also
+inhabit the premise `committed.written = some _`: `SatisfiablePole`'s `commit {write: {}}` may build
+`none`.
