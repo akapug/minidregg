@@ -14188,7 +14188,26 @@ impl Runtime {
         };
         // The record is written whatever the result; a write failure is
         // reported with the prompt's own outcome and never replaces it.
-        match (result, self.record_prompt_outcome(invocation)) {
+        let recorded = self.record_prompt_outcome(invocation);
+        // A failed prompt pushes its note and trips the breaker, whose
+        // automatic reconcile runs before this record exists (R11 derives the
+        // note only from the record), so the note would stay for an operator.
+        // Now that the record is durable, derive what it proves.
+        if recorded.is_ok()
+            && !self.journal.unresolved_external.is_empty()
+            && self.child.is_none()
+            && self.journal.child.is_none()
+            && self.journal.connection == Connection::Detached
+        {
+            if let Err(error) = self.automatic_reconcile() {
+                let decision = self.journal.next_operation_id;
+                self.journal.reconciliation_log.push(json!({
+                    "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                    "automatic":true,"result":error}));
+                let _ = self.save();
+            }
+        }
+        match (result, recorded) {
             (result, Ok(())) => result,
             (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
             (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
