@@ -463,3 +463,32 @@ One note for the prover. The first lemma `exact` needs is that replaying the suf
 builds (roots by `rootTable`, consumed, journal, history). If that equation fails at some corner (a
 retired cell, absent bytes), suspect the `State.snapshot` shape before the prover. The `representsCheck` of
 earlier passes is replaced by `representsFromDerived`; no change is needed.
+
+## 2026-10-27, tenth pass: `Kernel/ApplicationStreamContinuityFresh.lean` (lane/un-stream-continuity 351dab72)
+
+**Verdict: not yet; two changes before proofs.**
+
+**The left side is weaker than "a fresh opening read".** `Held.verifiedRead : Option (List UInt8)` is a bare
+option, and `decide` verifies no MAC. Admission reduces to "some tag equals the tip's tag, and the record and
+height equal the tip's". A re-read that copies the tip entry's tag into `verifiedRead` without running
+`DurableHistory.Head.verify` satisfies the iff, so the authentication the docstring promises is absent from
+the statement. Fix: make `verifiedRead : Option {tag // Head.verify key height record tag = true}` (the
+verifier `readerWith` uses), or add that conjunct to the iff. `headTag`'s authentication is `Loaded`'s
+invariant; name it as a hypothesis in the same shape.
+
+**Deployed path.** `decide` is called "the pure core of `withOpenedFreshTip`"
+(`ApplicationStreamContinuity.lean:208`), but nothing ties them, and today's `withOpenedFreshTip` does not
+call it. Add `withOpenedFreshTip_refuses : … = .ok _ → decide … = .admitted`, or define the IO by `decide`,
+in the same commit.
+
+**Teeth.** These are named refusals, but as closed `decide +kernel` instances (law 9). The general content
+is the iff plus `noRead_noAdmission`, which is adequate. Stale and forked tips share `.tipChanged`; that is
+acceptable.
+
+**`Loaded.extend` dropping the tag.** It is a defect against `Loaded.headTag`'s own docstring ("read from
+(or appended to) the Store"). `extend` (`DurableReceiverCore.lean:1434-1480`) is pure and cannot know the
+tag, but the IO append that wrote the entry computed it under the key. The cleaner fix is
+`Loaded.withHeadTag` set by the append path, with
+`appended_headTag : (append …).headTag = some (DurableHistory.trailer key height …)`. That makes the
+re-read unnecessary on the Host's own path. Keep (a) for robustness only. Pin the append lemma in this
+statement module too, so the fix cannot regress to `none` silently.
