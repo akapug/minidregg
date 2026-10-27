@@ -75,7 +75,7 @@ fn is_digest(value: &str) -> bool {
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
-fn failed_identity(bytes: &[u8], expected: &str) -> Result<(ResidentState, String, String)> {
+fn failed_identity(bytes: &[u8], expected: &str, state_dir: &Path) -> Result<(ResidentState, String, String)> {
     if !is_digest(expected) || sha256_bytes(bytes)? != expected {
         return Err("resident prior-state digest changed; inspect the exact retained state".into());
     }
@@ -116,26 +116,32 @@ fn failed_identity(bytes: &[u8], expected: &str) -> Result<(ResidentState, Strin
     {
         return Err("resident completion does not bind this exact pending prompt".into());
     }
-    if let Some(origin) = &completion.resident_origin {
-        if Some(&origin.resident_prompt_id) != identity.resident_prompt_id.as_ref()
-            || origin.prompt_sha256 != identity.prompt_sha256 || origin.prompt_operation_id == 0
-            || origin.session_id.as_ref().is_some_and(|id|id.is_empty() || id.len()>128) {
-            return Err("resident completion source origin differs from exact pending prompt".into());
-        }
+    let origin = completion.resident_origin.as_ref()
+        .ok_or("resident completion has no source origin; only a typed outcome record decides a prompt")?;
+    if Some(&origin.resident_prompt_id) != identity.resident_prompt_id.as_ref()
+        || origin.prompt_sha256 != identity.prompt_sha256 || origin.prompt_operation_id == 0
+        || origin.session_id.as_ref().is_some_and(|id|id.is_empty() || id.len()>128) {
+        return Err("resident completion source origin differs from exact pending prompt".into());
     }
-    if !matches!(completion.outcome.as_str(), "failed" | "review-needed")
-        || (completion.outcome == "review-needed") != completion.review_needed
-        || !matches!(
-            completion.activity.as_str(),
-            "ready" | "busy" | "review-needed"
-        )
-    {
-        return Err(
-            "only an authoritative failed or review-needed completion can be reconciled".into(),
-        );
+    // R18: the controller's typed record is the only input. The frame's
+    // outcome/activity/review labels are presentation and are not consulted.
+    let record = prompt_outcome::read_bound(state_dir, origin.prompt_operation_id,
+        &origin.resident_prompt_id, &origin.prompt_sha256)?;
+    match &record.outcome {
+        prompt_outcome::Outcome::Refused { .. } => {}
+        prompt_outcome::Outcome::Undecided { retry, .. } => {
+            return Err(format!("resident prompt {} is undecided; resolve it with admin {:?} (operation {:?}) first",
+                origin.prompt_operation_id, retry.admin, retry.operation));
+        }
+        prompt_outcome::Outcome::Admitted { .. } => {
+            return Err("resident prompt was admitted; its completion receiver closes it, not failed reconciliation".into());
+        }
     }
     // Keep source-only presentation fields in the strict accepted frame schema.
     let _ = (
+        &completion.outcome,
+        &completion.activity,
+        completion.review_needed,
         completion.retained_session,
         completion.registered_shared_application_count,
     );
@@ -144,15 +150,8 @@ fn failed_identity(bytes: &[u8], expected: &str) -> Result<(ResidentState, Strin
     Ok((before, pending_sha256, completion_sha256))
 }
 
-/// Reuse the exact authoritative failed-completion identity check for the
-/// separate session-marker recovery; this grants no state mutation by itself.
-pub(crate) fn bound_failed_pending(bytes: &[u8], expected: &str) -> Result<Value> {
-    let (before, _, _) = failed_identity(bytes, expected)?;
-    before.pending.ok_or_else(|| "resident pending disappeared".into())
-}
-
-fn plan(bytes: &[u8], expected: &str, status: &Status) -> Result<Plan> {
-    let (before, pending_sha256, completion_sha256) = failed_identity(bytes, expected)?;
+fn plan(bytes: &[u8], expected: &str, status: &Status, state_dir: &Path) -> Result<Plan> {
+    let (before, pending_sha256, completion_sha256) = failed_identity(bytes, expected, state_dir)?;
     if before.return_pending
         || !status.can_restart_retaining_state
         || !status.active.is_empty()
@@ -283,7 +282,7 @@ impl Runtime {
             return Err("resident prior-state digest changed".into());
         }
         let status = self.inspect_quiescence_locked(&guard)?;
-        let plan = plan(guard.bytes()?, expected, &status)?;
+        let plan = plan(guard.bytes()?, expected, &status, &self.config.state_dir)?;
         let controller = serde_json::to_vec(&self.journal).map_err(|e| e.to_string())?;
         // Allocate an audit identity only; no worker, provider or native effect.
         let decision_id = self.next_id()?;
@@ -318,10 +317,13 @@ mod tests {
     fn fixture() -> (PathBuf, Runtime, Value, Status) {
         let (root, rt) = crate::tests::restart_resolution_fixture("failed-resident");
         let pending = json!({"inputSha256":"a".repeat(64),"promptSha256":"b".repeat(64),
-            "attachmentId":7,"requestId":2,"residentPromptId":"c".repeat(32)});
+            "attachmentId":7,"requestId":2,"residentPromptId":"c".repeat(64)});
         let frame = json!({"v":1,"type":"prompt-complete","attachmentId":7,"requestId":2,
             "outcome":"review-needed","activity":"review-needed","retainedSession":true,
-            "reviewNeeded":true,"registeredSharedApplicationCount":0,"residentPendingSha256":hash(&pending).unwrap()});
+            "reviewNeeded":true,"registeredSharedApplicationCount":0,"residentPendingSha256":hash(&pending).unwrap(),
+            "residentOrigin":{"residentPromptId":"c".repeat(64),"promptSha256":"b".repeat(64),"promptOperationId":9,"sessionId":null}});
+        record(&rt, 9, prompt_outcome::Outcome::Refused {
+            stage: prompt_outcome::RefusalStage::TurnFailure, reason: "format_error".into() });
         let state = json!({"completed":3,"pending":pending,"lastInput":"old-input","lastCompletion":frame,
             "returnPending":false,"returned":null});
         let mut status = rt.quiescence_status().unwrap();
@@ -335,16 +337,22 @@ mod tests {
             vec![json!({"slot":"parent","state":{"grain":{"status":"0","reserved":"0"}}})];
         (root, rt, state, status)
     }
-    fn planned(state: &Value, status: &Status) -> Result<Plan> {
+    fn record(rt: &Runtime, op: u64, outcome: prompt_outcome::Outcome) {
+        prompt_outcome::write(&rt.config.state_dir, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: op,
+            resident_prompt_id: Some("c".repeat(64)), prompt_sha256: Some("b".repeat(64)),
+            session_id: None, outcome }).unwrap();
+    }
+    fn planned(state: &Value, status: &Status, rt: &Runtime) -> Result<Plan> {
         let bytes = serde_json::to_vec(state).unwrap();
-        plan(&bytes, &sha256_bytes(&bytes).unwrap(), status)
+        plan(&bytes, &sha256_bytes(&bytes).unwrap(), status, &rt.config.state_dir)
     }
     #[test]
     fn failed_completion_requires_exact_pending_hash_not_reused_request_ids() {
         let (root, rt, mut state, status) = fixture();
-        assert!(planned(&state, &status).is_ok());
+        assert!(planned(&state, &status, &rt).is_ok());
         state["pending"]["residentPromptId"] = json!("d".repeat(32));
-        assert!(planned(&state, &status).is_err());
+        assert!(planned(&state, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
@@ -353,27 +361,45 @@ mod tests {
         let (root, rt, state, status) = fixture();
         let mut missing = state.clone();
         missing["lastCompletion"] = Value::Null;
-        assert!(planned(&missing, &status).is_err());
+        assert!(planned(&missing, &status, &rt).is_err());
         let mut legacy = state;
         legacy["lastCompletion"]
             .as_object_mut()
             .unwrap()
             .remove("residentPendingSha256");
-        assert!(planned(&legacy, &status).is_err());
+        assert!(planned(&legacy, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn successful_or_unknown_completion_is_not_a_failed_decision() {
         let (root, rt, state, status) = fixture();
-        for outcome in ["completed", "model says failed"] {
-            let mut altered = state.clone();
-            altered["lastCompletion"]["outcome"] = json!(outcome);
-            assert!(planned(&altered, &status).is_err());
+        // R18: labels are not consulted. A "completed" label over a refused
+        // record still reconciles; the record alone decides.
+        let mut relabelled = state.clone();
+        relabelled["lastCompletion"]["outcome"] = json!("completed");
+        assert!(planned(&relabelled, &status, &rt).is_ok());
+        // An admitted or undecided record never reconciles as failed, and a
+        // frame naming a prompt with no record is undecided, never refused.
+        for (op, outcome) in [(10, prompt_outcome::Outcome::Admitted { stop_reason: "end_turn".into(),
+                settled_charge: "1".into(), provider_response_sha256: None, provider_metered_charge: None }),
+            (11, prompt_outcome::Outcome::Undecided { retry: prompt_outcome::Retry {
+                admin: vec!["reconcile provider audited".into()], operation: None }, detail: "send crossed".into() })] {
+            record(&rt, op, outcome);
+            let mut other = state.clone();
+            other["lastCompletion"]["residentOrigin"]["promptOperationId"] = json!(op);
+            let error = planned(&other, &status, &rt).err().unwrap();
+            if op == 11 { assert!(error.contains("reconcile provider audited"), "{error}"); }
         }
+        let mut absent = state.clone();
+        absent["lastCompletion"]["residentOrigin"]["promptOperationId"] = json!(12);
+        assert!(planned(&absent, &status, &rt).is_err());
+        let mut no_origin = state.clone();
+        no_origin["lastCompletion"].as_object_mut().unwrap().remove("residentOrigin");
+        assert!(planned(&no_origin, &status, &rt).is_err());
         let mut altered = state;
         altered["lastCompletion"]["newPendingSend"] = json!(true);
-        assert!(planned(&altered, &status).is_err());
+        assert!(planned(&altered, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
@@ -388,11 +414,11 @@ mod tests {
             "workspace_attempt",
         ] {
             status.retained.push(marker);
-            assert!(planned(&state, &status).is_err());
+            assert!(planned(&state, &status, &rt).is_err());
             status.retained.pop();
         }
         status.observations[0]["state"]["grain"]["reserved"] = json!("7");
-        assert!(planned(&state, &status).is_err());
+        assert!(planned(&state, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
@@ -400,9 +426,9 @@ mod tests {
     fn settled_soft_running_parent_accepts_failed_resident_reconciliation() {
         let (root, rt, state, mut status) = fixture();
         status.observations[0]["state"]["grain"]["status"] = json!("2");
-        assert!(planned(&state, &status).is_ok());
+        assert!(planned(&state, &status, &rt).is_ok());
         status.active.push("owned_worker");
-        assert!(planned(&state, &status).is_err());
+        assert!(planned(&state, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
@@ -412,11 +438,11 @@ mod tests {
         status
             .resume_evidence_required
             .push("retained session requires fresh session/load".into());
-        assert!(planned(&state, &status).is_ok());
+        assert!(planned(&state, &status, &rt).is_ok());
         status
             .session_integrity_errors
             .push("fingerprint changed".into());
-        assert!(planned(&state, &status).is_err());
+        assert!(planned(&state, &status, &rt).is_err());
         drop(rt);
         fs::remove_dir_all(root).unwrap();
     }
@@ -429,7 +455,7 @@ mod tests {
         let before = serde_json::to_vec(&state).unwrap();
         write_new(&dir.join("resident.json"), &before).unwrap();
         let guard = ResidentGuard::acquire(&rt.config, Some(&dir)).unwrap();
-        let plan = plan(&before, &sha256_bytes(&before).unwrap(), &status).unwrap();
+        let plan = plan(&before, &sha256_bytes(&before).unwrap(), &status, &rt.config.state_dir).unwrap();
         let result = commit(
             &guard,
             &plan,
@@ -469,7 +495,7 @@ mod tests {
         let bytes = serde_json::to_vec(&state).unwrap();
         write_new(&dir.join("resident.json"), &bytes).unwrap();
         let guard = ResidentGuard::acquire(&rt.config, Some(&dir)).unwrap();
-        let plan = planned(&state, &status).unwrap();
+        let plan = planned(&state, &status, &rt).unwrap();
         write_new(&dir.join("failed-reconciliations"), b"wrong file type").unwrap();
         assert!(commit(
             &guard,

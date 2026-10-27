@@ -3,15 +3,6 @@
 //! started/unknown request or authorize a model, payment, or native effect.
 use crate::*;
 
-#[derive(Deserialize)]
-#[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Ready {
-    #[serde(rename="type")]
-    kind:String,
-    task:String,
-    config_sha256:String,
-    binding_sha256:String,
-}
 fn config_digest(config:&Config)->Result<String> {
     sha256_bytes(&serde_json::to_vec(config).map_err(|e|e.to_string())?)
 }
@@ -22,15 +13,6 @@ fn response(config:&Config,path:&Path)->Result<Value> {
     Ok(json!({"type":"mini-resident-preflight-ready-v1","task":config.task,
         "configSha256":config_digest(config)?,"bindingSha256":binding_digest(config,path)?}))
 }
-fn checked(config:&Config,path:&Path,text:&str)->Result<()> {
-    let ready:Ready=serde_json::from_str(text).map_err(|_|format!("resident preflight refused before prompt dispatch: {text}"))?;
-    if ready.kind!="mini-resident-preflight-ready-v1" || ready.task!=config.task
-        || ready.config_sha256!=config_digest(config)? || ready.binding_sha256!=binding_digest(config,path)? {
-        return Err("resident preflight differs from exact controller configuration".into());
-    }
-    Ok(())
-}
-
 fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
     let value:Value=serde_json::from_slice(text).map_err(|_|"private operator preflight did not return one JSON response")?;
     if value["format"]!="mini-operator-drain-v1" || value["phase"]!="serving"
@@ -48,9 +30,9 @@ fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
 /// role and response nonce. An operator path or stale mode file cannot do so.
 pub(crate) fn require_private_operator(config:&Config)->Result<Value> {
     let socket=config.host_socket.as_deref().ok_or("resident controller requires private native operator socket")?;
-    let result=Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
-        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config)
-        .stdin(Stdio::null()).output().map_err(|e|format!("private operator preflight: {e}"))?;
+    let result=crate::deadline::output(Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
+        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config),crate::deadline::NATIVE_CALL)
+        .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
     if !result.status.success() || result.stdout.len()>65_536 {
         return Err(format!("private operator preflight refused: {}",String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>()));
     }
@@ -126,7 +108,6 @@ impl Runtime {
         Ok(value)
     }
     pub(crate) fn retained_preparation(&self,id:&str,sha:&str)->Result<(Value,String)> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident preparation lookup identity".into());}
         let bytes=bounded_regular_file(&preparation_path(&self.config,id),65_536)
             .map_err(|_|"prompt has no exact source-issued preparation; old unknown work cannot be classified as unadmitted")?;
@@ -166,7 +147,6 @@ impl Runtime {
         File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
     }
     pub(crate) fn resident_admission(&self,id:&str,sha:&str)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident admission identity".into());}
         let file=refusal_path(&self.config,id);
         if !file.try_exists().map_err(|e|e.to_string())? {
@@ -182,7 +162,6 @@ impl Runtime {
         check_refusal(&self.config,&self.config_path,id,sha,value)
     }
     pub(crate) fn preflight_resident_prompt(&self)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         let status=self.quiescence_status()?;
         if !status.active.is_empty() || !status.retained.is_empty() {
             return Err("resident preflight requires recovery of retained or active service work".into());
@@ -211,22 +190,8 @@ pub(crate) fn fixture_retain_preparation(rt:&Runtime,id:&str,sha:&str) {
     write_new(&preparation_path(&rt.config,id),&serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }
 #[cfg(test)]
-pub(crate) fn fixture_response(config:&Config,path:&Path)->Value {response(config,path).unwrap()}
-#[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn preflight_refusal_and_substitution_do_not_grant_prompt_admission() {
-        let (root,rt)=crate::tests::restart_resolution_fixture("preflight-identity");
-        let good=fixture_response(&rt.config,&rt.config_path);
-        checked(&rt.config,&rt.config_path,&good.to_string()).unwrap();
-        for key in ["task","configSha256","bindingSha256","type"] {
-            let mut v=good.clone();v[key]=json!("different");
-            assert!(checked(&rt.config,&rt.config_path,&v.to_string()).is_err());
-        }
-        assert!(checked(&rt.config,&rt.config_path,"error: launcher protocol absent").is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
     #[test]
     fn private_operator_preflight_refuses_public_dead_closed_or_substituted_source() {
         let (root,mut rt)=crate::tests::restart_resolution_fixture("private-operator-preflight");

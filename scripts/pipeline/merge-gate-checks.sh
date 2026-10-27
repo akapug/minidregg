@@ -72,6 +72,8 @@ newt=$(comm -13 <(tnames "$FROM") <(tnames "$TO") | grep -v '^ResearchWip$' | tr
 exes=$(git show "$TO:lakefile.toml" | sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' | tr '\n' ' ')
 
 builders() {
+  # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
+  run mini-kernels bash scripts/build-mini-kernels.sh
   if [ -n "$newt" ]; then run new-targets env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $newt; fi
   run exe-roots env LEAN_NUM_THREADS=${THREADS:-6} $LAKE_WRAP lake build $exes
   # HP-6 SIM (HP-DESIGN section 4): seeded Host-path vs follower simulation with crash-restart, and its

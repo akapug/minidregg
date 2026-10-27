@@ -176,7 +176,7 @@ echo "mk-lane: OK $DEST at $TIP"
 
 if [ "$verify" = 1 ]; then
   log=$DEST/logs/verify-replay.log
-  ( LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
+  ( bash scripts/build-mini-kernels.sh && LEAN_NUM_THREADS=$threads SWARM_MEM_MAX=${SWARM_MEM_MAX:-48G} SWARM_BUILD_TAG="mk-verify-$lane" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$log" 2>&1 && vrc=0 || vrc=$?   # set -e: the status is judged below, not here
   # Reds are NAMED in the run's output, never kept in a ledger (docs/COORDINATION-2026-10-27.md §2): a failed umbrella
   # names its modules here and the base carries them as its reds; the base is READY iff it is a warm replay
   # (0 modules compiled, below). A non-zero exit WITHOUT Lake's failed-target list is a broken build.

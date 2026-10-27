@@ -24,6 +24,7 @@ members = [
   "native/hermes-test-provider",
   "native/joint-agreement-crypto",
   "native/portable-archive",
+  "native/mini-kernels",
   "prover",
 ]
 exclude = [

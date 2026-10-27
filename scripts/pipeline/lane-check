@@ -23,6 +23,8 @@ log=$(mktemp "${TMPDIR:-/tmp}/lane-check.XXXXXX"); trap 'rm -f "$log"' EXIT
 mods=$(for f in "$@"; do sed -n 's/^import[[:space:]]\{1,\}//p' "$f"; done | tr ' ' '\n' | grep -v '^$' |
   while read -r m; do f=${m//.//}.lean; [ -f "$f" ] && echo "$m"; done | sort -u)
 if [ -n "$mods" ]; then
+  # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
+  bash scripts/build-mini-kernels.sh >"$log" 2>&1 || { cat "$log" >&2; pipeline_die "native/mini-kernels did not build (scripts/build-mini-kernels.sh)"; }
   if ! lake build --no-build $mods >"$log" 2>&1; then
     grep -q 'out-of-date' "$log" || { cat "$log" >&2; pipeline_die "lake could not resolve the imports"; }
     stale=$(grep -oE 'Building [A-Za-z0-9_.]+' "$log" | awk '{print $2}' | sort -u | paste -sd' ')

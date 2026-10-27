@@ -274,7 +274,7 @@ theorem exceptionAnswer_noRecord_sound (operation : UInt8) (error : IO.Error)
   split at marked
   · rename_i condition
     simpa [Bool.or_eq_true] using condition
-  · exact absurd marked (by decide)
+  · exact absurd marked (by dsimp only; decide)
 
 /-- The undecided envelope for a thrown handler means neither held. -/
 theorem exceptionAnswer_undecided_sound (operation : UInt8) (error : IO.Error)
@@ -282,7 +282,7 @@ theorem exceptionAnswer_undecided_sound (operation : UInt8) (error : IO.Error)
     grammarVerdict error = false ∧ noAppend operation = false := by
   unfold exceptionAnswer at marked
   split at marked
-  · exact absurd marked (by decide)
+  · exact absurd marked (by dsimp only; decide)
   · rename_i condition
     simp only [Bool.or_eq_true, not_or, Bool.not_eq_true] at condition
     exact condition
