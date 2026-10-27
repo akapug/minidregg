@@ -131,6 +131,16 @@ for tool in jq curl python3 sha256sum timeout; do command -v "$tool" >/dev/null 
 inventory_sha=$(sha256sum "$inventory" | cut -d ' ' -f1)
 export SPK=$spk CLASS_A=L CLASS_B=L GET_PATH_A=/health GET_PATH_B=/health
 export KIND_A=api KIND_B=api ROLE_BASIS_A='{"type":"role","id":"0"}' ROLE_BASIS_B='{"type":"role","id":"0"}'
+if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then
+  [[ $mode == new ]] || fail 'browser-B is only supported for a fresh qualification'
+  [[ ${ORACLE_BROWSER_PORT:-} =~ ^[1-9][0-9]{3,4}$ ]] && ((ORACLE_BROWSER_PORT>=1024 && ORACLE_BROWSER_PORT<=65535)) || fail 'explicit browser port required'
+  [[ ${ORACLE_CADDY_BIN:-} == /* && -x $ORACLE_CADDY_BIN && ! -L $ORACLE_CADDY_BIN
+      && ${ORACLE_CADDY_SHA256:-} =~ ^[0-9a-f]{64}$ ]] || fail 'pinned Caddy executable required'
+  [[ $(sha256sum "$ORACLE_CADDY_BIN" | cut -d ' ' -f1) == "$ORACLE_CADDY_SHA256" ]] || fail 'Caddy pin differs'
+  export KIND_B=web GRAIN_EXPECTED_HOST_B=localhost:$ORACLE_BROWSER_PORT
+elif [[ ${ORACLE_BROWSER_B:-0} != 0 ]]; then
+  fail 'ORACLE_BROWSER_B must be 0 or 1'
+fi
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
@@ -215,6 +225,7 @@ request a 12 oracle-order-salinger oracle-order-salinger 'Who is older, J. D. Sa
 request a 13 oracle-order-shakespeare oracle-order-shakespeare 'Who is older, William Shakespeare or Isaac Newton?'
 request a 14 oracle-order-uncertain oracle-order-uncertain 'Who is older, Hildegard of Bingen or William Shakespeare?'
 phase share-b start-b floor-b enroll-b get-b
+if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then world_browser_probe; fi
 # Reusing both IDs with a different body would conflict in a shared journal.
 request b 1 oracle-isolation oracle-acceptance 'Who wrote Emma?'
 request a 6 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'

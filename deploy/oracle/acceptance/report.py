@@ -726,6 +726,16 @@ def main():
             and authority.get('configSha256') == op155['a']['config_sha256']
             and authority.get('applicationAttemptSha256') == sha(
                 first_agent / 'discover-core-query.lifetime-attempt.json'))
+    browser = None
+    if (run / 'browser').exists():
+        from browser_edge import validate as validate_browser
+        ready = read(run / 'browser/ready.json')
+        browser = read(run / 'browser/result.json')
+        passed = read(run / 'browser/passed.json')
+        validate_browser(browser, ready)
+        require('browser_native_owner_web_journey', passed.get('admission') == 'native owner-web route'
+                and passed.get('result_sha256') == sha(run / 'browser/result.json')
+                and passed.get('ready_sha256') == sha(run / 'browser/ready.json'))
     report = {'schema': 'mini-oracle-shared-data-acceptance-v1', 'passed': True,
               'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch, agent lifetime tools, '
                        'source STOP/restart/reconciliation and sandbox. '
@@ -744,7 +754,7 @@ def main():
                   'sha256': sha(run / 'copied-store-stop-benchmark.json'),
                   'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
-              'controller_consent': consent,
+              'controller_consent': consent, 'browser': browser,
               'controller_continuation': continuation,
               'session_continuation': resumed_session, 'checkpoint_continuation': checkpoint_result,
               'controller_enrollment': enrollments, 'foreground_recovery': recovered_foreground,
