@@ -358,8 +358,14 @@ impl Door {
             }
             _ => return (404, page("Not found", "")),
         };
-        if let Err((status, why)) = self.admit_post(key, now) {
-            return refuse(status, &why);
+        // The per-source budget counts new requests only: a later step (`/join/sign`, `/join/paid`)
+        // names a request the budget already admitted, is refused twice before the processor
+        // consumes it, and so cannot be spammed; counting it let one stranger's happy path spend a
+        // shared address's whole hour.
+        if path == "/join" {
+            if let Err((status, why)) = self.admit_post(key, now) {
+                return refuse(status, &why);
+            }
         }
         // A later step of the same request is a new file each time it is retried after the
         // processor consumed the previous one; the same step twice before that is refused.
@@ -568,6 +574,23 @@ mod tests {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+    }
+
+    #[test]
+    fn a_requests_later_steps_do_not_spend_the_sources_hourly_budget() {
+        let d = door("budget");
+        let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), r#"{"phase":"awaiting-payment","name":"alice"}"#).unwrap();
+        let tx = "5".repeat(87);
+        for _ in 0..3 {
+            let (status, _) = d.post("/join", b"name=bob&route=free", "1.2.3.4", 1000);
+            assert_ne!(status, 429);
+            for f in std::fs::read_dir(&d.queue).unwrap().flatten() { let _ = std::fs::remove_file(f.path()); }
+        }
+        let (status, _) = d.post("/join/paid", format!("id={id}&transaction={tx}").as_bytes(), "1.2.3.4", 1001);
+        assert_eq!(status, 200, "the paid step of an admitted request is not counted against the address");
+        let (status, _) = d.post("/join", b"name=carol&route=free", "1.2.3.4", 1002);
+        assert_eq!(status, 429, "a fourth new request from the address is still refused");
     }
 
     #[test]
