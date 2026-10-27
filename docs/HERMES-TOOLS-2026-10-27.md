@@ -142,9 +142,12 @@ shell or a Python script from writing there. What bounds it:
   `hermes-agent/mini-tool-catalogue.patch`). The terminal runs in `/scratch` by default.
 - **Terminal and Python:** they are not confined in process. Their writes to `/workspace` are
   bounded by `LimitFSIZE` (one file ≤ the scratch size) and by the controller's refusal of a prompt
-  while `/workspace` holds more than the scratch size (`workspace-over-class-volume`).
-- **Hard bound:** a per-uid ext4 user quota (about 32 MiB) over everything the resident's uid owns
-  under its install directory. This needs each resident to have its own system uid (owed: install
+  while `/workspace` holds more than `sandbox.workspaceMib` (S 64, M 128, L 256 MiB;
+  `workspace-over-class-volume`). That is its own figure: Hermes's own state grows about 80 KiB
+  per prompt (J14: 0.9 MiB after three prompts).
+- **Hard bound:** a per-uid ext4 user quota over everything the resident's uid owns under its
+  install directory. 32 MiB is too small: the controller's journal alone is about 41 MiB and
+  8,600 inodes after one J14 session (deploy/hermes/README.md State). This needs each resident to have its own system uid (owed: install
   as `mini-h-INSTANCE`, not the operator's `mini-core`).
 
 Anything durable leaves through a Mini tool (a doc line, a say, a publication), never by sitting
@@ -153,7 +156,7 @@ in `/workspace`.
 ## 3. The grant: who decides which tools
 
 - **Operator ceiling:** `controller.json` → `"sandbox": {"tools": ["file",
-  "terminal", "code_execution"], "scratchMib": 64, "memoryMax": "1G",
+  "terminal", "code_execution"], "scratchMib": 64, "workspaceMib": 128, "memoryMax": "1G",
   "tasksMax": 512, "cpuWeight": 100, "cpuQuotaPercent": 100,
   "toolCallSeconds": 120, "computeSecondsPerTurn": 10}`. It is absent by
   default, which means no sandbox tools. `grain-runtime create` fills it from

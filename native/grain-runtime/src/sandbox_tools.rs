@@ -22,6 +22,13 @@ pub(crate) struct Sandbox {
     pub tools: Vec<String>,
     /// The per-worker /scratch tmpfs (S 16, M 64, L 128 MiB).
     pub scratch_mib: u64,
+    /// The persistent `/workspace` (Hermes's own home: `.hermes`, `state.db`,
+    /// caches) above which a prompt with sandbox tools is refused (S 64, M 128,
+    /// L 256 MiB). Its own figure, not the scratch size: Hermes's state grows
+    /// with every prompt (measured on J14: 0.9 MiB after three prompts, about
+    /// 80 KiB more per prompt), and a scratch-sized threshold would refuse the
+    /// resident's tools after some hundreds of ordinary prompts.
+    pub workspace_mib: u64,
     /// The worker unit's MemoryMax (`512M`, `1G`, `2G`...).
     pub memory_max: String,
     pub tasks_max: u64,
@@ -38,13 +45,13 @@ impl Sandbox {
     /// The class bounds: memory, tasks and CPU weight of `spk-host`'s size classes; scratch
     /// much smaller than an app volume (a resident's working area, not its storage).
     pub(crate) fn for_class(class: &str) -> Result<Self> {
-        let (scratch_mib, memory_max, tasks_max, cpu_weight) = match class {
-            "S" => (16, "512M", 256, 50),
-            "M" => (64, "1G", 512, 100),
-            "L" => (128, "2G", 1024, 200),
+        let (scratch_mib, workspace_mib, memory_max, tasks_max, cpu_weight) = match class {
+            "S" => (16, 64, "512M", 256, 50),
+            "M" => (64, 128, "1G", 512, 100),
+            "L" => (128, 256, "2G", 1024, 200),
             _ => return Err("grain class must be S, M or L".into()),
         };
-        Ok(Self { tools: TOOLSETS.iter().map(|(n, ..)| (*n).to_owned()).collect(), scratch_mib,
+        Ok(Self { tools: TOOLSETS.iter().map(|(n, ..)| (*n).to_owned()).collect(), scratch_mib, workspace_mib,
             memory_max: memory_max.into(), tasks_max, cpu_weight, cpu_quota_percent: 100,
             tool_call_seconds: 120, compute_seconds_per_turn: 10 })
     }
@@ -61,10 +68,10 @@ impl Sandbox {
             (n, "G") => n.parse::<u64>().is_ok_and(|n| (1..=8).contains(&n)),
             _ => false,
         };
-        if !(1..=4096).contains(&self.scratch_mib) || !memory_ok || !(16..=1024).contains(&self.tasks_max)
+        if !(1..=4096).contains(&self.scratch_mib) || !(1..=4096).contains(&self.workspace_mib) || !memory_ok || !(16..=1024).contains(&self.tasks_max)
             || !(1..=1000).contains(&self.cpu_weight) || !(1..=800).contains(&self.cpu_quota_percent)
             || !(1..=1800).contains(&self.tool_call_seconds) || !(1..=3600).contains(&self.compute_seconds_per_turn) {
-            return Err("sandbox bounds outside scratchMib 1..4096, memoryMax 64M..8G, tasksMax 16..1024, cpuWeight 1..1000, cpuQuotaPercent 1..800, toolCallSeconds 1..1800, computeSecondsPerTurn 1..3600".into());
+            return Err("sandbox bounds outside scratchMib 1..4096, workspaceMib 1..4096, memoryMax 64M..8G, tasksMax 16..1024, cpuWeight 1..1000, cpuQuotaPercent 1..800, toolCallSeconds 1..1800, computeSecondsPerTurn 1..3600".into());
         }
         Ok(())
     }
@@ -172,6 +179,10 @@ mod tests {
         s.memory_max = "16G".into();
         assert!(s.validate().is_err());
         assert!(Sandbox::for_class("XL").is_err());
+        let mut s = Sandbox::for_class("S").unwrap();
+        assert_eq!((s.scratch_mib, s.workspace_mib), (16, 64), "the workspace threshold is its own figure");
+        s.workspace_mib = 0;
+        assert!(s.validate().is_err());
     }
 
     #[test]
@@ -185,12 +196,13 @@ mod tests {
 
 /// The worker's persistent `/workspace` (Hermes's home) has no total quota of
 /// its own; a prompt with sandbox tools is refused while it holds more than
-/// the class volume, so one run can overshoot by at most its own bounded
-/// writes and never compounds (docs/HERMES-TOOLS-2026-10-27.md §2).
+/// `workspaceMib`, so one run can overshoot by at most its own bounded writes
+/// and never compounds (docs/HERMES-TOOLS-2026-10-27.md §2). The hard bound is
+/// the resident uid's disk quota.
 pub(crate) fn require_workspace_volume(workspace: &Path, volume_mib: u64) -> Result<()> {
     let used = allocated_bytes(workspace, &mut 0)?;
     if used > volume_mib.saturating_mul(1 << 20) {
-        return Err(format!("workspace-over-class-volume: {} holds {used} bytes, over the {volume_mib} MiB class volume; \
+        return Err(format!("workspace-over-class-volume: {} holds {used} bytes, over the {volume_mib} MiB workspace volume; \
             nothing from the scratch persists there by design", workspace.display()));
     }
     Ok(())
