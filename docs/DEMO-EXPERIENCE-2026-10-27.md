@@ -15,6 +15,12 @@ the *judgement*: admitted, refused with the clause, or undecided with the exact 
 succeeds when a stranger can say, unprompted, "the agent couldn't do that because it only held a
 grant for my one document, and I can see the receipt where it tried."
 
+In the literature's terms (SYNTHESIS §E): an object-capability world (a reference is not ownership;
+authority only by designation; revocation by interposition) whose reference monitor is a Lean
+function with theorems, where every effect a computation may propose is a typed request the
+authority admits, and where the history is an authenticated append-only log a stranger can check.
+Nobody has shipped that as a product a stranger can log into.
+
 So the demo is not a list of surfaces. It is one tour in which the kernel's judgement is visible at
 every step, and every surface (browser, ssh, Discord, an app on its own origin, a resident, the
 oracle, the box's own operations) is a different door into the *same* world with the *same* rules.
@@ -105,6 +111,7 @@ Mini coordinates in Mini, which is the north star in `CLAUDE.md`.
 | A6 | **The oracle grain** on the admitted grain path | step 8 | M–L | codex session |
 | A7 | **Story and markets rows** in the demo journey (`story`, `market/bid/reveal`, `job`) | steps 11 and the "programmable" claim | S each | L9 |
 | A8 | **Member-defined kinds** (`kind`, `program`, `instance`) shown once in the tour: a member authors a kind and a law and instantiates it | "programmable shared world" demonstrated, not claimed | M | needs an owner after opening |
+| A10 | **Receipts a stranger can verify**: op 151's inclusion opening on every receipt (SYNTHESIS E.10, plan C7), shown on `/receipts/ID`, and a one-line offline check with the SDK against the published world root; today a confirmation is anchored to a point, not to the call | the receipt stops being a claim the box makes about itself; the one feature no hosting product has | M (Lean) + S | L1 after (a)–(c) |
 | A9 | **The second node**: fn exchange from the demo box to nano's or pug's node across machines | the "re-genesis on the homelab" story begins before shutdown | M | L8 after opening |
 
 The order of landing is the plan's (Lean first, the integration build, rehearsal #2); A1–A3 are
