@@ -25,8 +25,11 @@ landmine fixed (explicit per-box roster, `BOX` file).
 
 ## 1. The bar and the public-opening contract
 
-The bar: a stranger with the URL exercises every surface for a week without the operator
-babysitting.
+The bar: a stranger with the URL exercises every surface, for as long as the demo stands (to 11 Nov
+2026), without the operator babysitting, and finds a coherent product, not a set of prototypes. There
+is no "week-1" scope and no degraded first edition (ember, 2026-10-27: "we've let week-1 become a
+hobgoblin of our minds and we must kill it and raise our ambitions"); half-built prototypes are compost
+for the one design, never exposed as a hodgepodge.
 
 Rehearsal ships (operator-only, re-genesis allowed) happen on the day planned with every red
 named: that is how DelveTalk shipped seventeen editions in a week and how DEPLOY-3 died when
@@ -34,7 +37,8 @@ it was batched behind a composed gate (HISTORY §8). **Public opening** needs on
 four parts, measured on the demo box itself:
 
 1. **Advertised surfaces work**: the demo journey's rows for every surface that is on pass
-   on the candidate that ships (ssh shell J0–J8+J12, docuverse static render, EtherCalc
+   on the candidate that ships (ssh shell J0–J8+J12, the browser front end (terminal, documents, boards, rooms, apps, receipts),
+   the app market (any Sandstorm SPK installed by a member and opened on its own origin), EtherCalc
    two-browser co-edit + restart, Hermes room resident with a real pool/homelab call, one
    mainnet pay-to-enrol, Discord slash entrance, fn consumer worker, fleet row, oracle grain).
 2. **Tenancy holds**: split tenancy on the box (`jsplit-tenancy.sh` green), no member can read
@@ -54,9 +58,7 @@ four parts, measured on the demo box itself:
 The composed gate `jdeploy3` runs on every rehearsal candidate and its reds are named; for the
 candidate that opens, its composed phases and its non-performance journey rows must be green
 (growth/perf/births rows are non-blocking by the ruling above; `ship.sh` encodes this as a named,
-tested rule). "Every surface in ~two weeks" is a target the
-council unanimously called not yet evidence-backed; the date is re-estimated after Phase 0's
-evidence spike (§3), not promised now.
+tested rule). The date is re-estimated from each rehearsal's evidence, never promised.
 
 ## 2. Where we stand (2026-10-27, early)
 
@@ -138,7 +140,7 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 
 | lane | rescue / repair (critical-path items ★) | deletions at merge |
 |---|---|---|
-| **L1 Lean** (hbox lane, Fable) | ★(a) JPAY6: the driver's 70-byte socket row AND the consent allowlist fields; ★(b) a no-effect class on `Outcome` + the positive `NO_RECORD` frame, stated as a theorem first (NO_RECORD ⇒ the durable log is unchanged by that request); ★(c) a settle that leaves the purse decided for all four provider failure classes (non-200, timeout, malformed, crash-after-send); ★(g) Lean-emitted default `Pred` policies replacing permit-all on member accounts, tills, room cells (R11, moved into Phase 1 by all three reviewers); (h) the clock-law bypass on the PAY path (`Compiler/CanonicalCellRegistry.lean:108-112`: PayObservation/PayEnrol advance the clock without judging the law); (e) consent op list and response-marker table emitted from the registry; (d) op 35 receiver confirmed; (f) the 33 vacuous `∨ Collision` rewrites, demoted to last/optional | three uncalled V1/V2 submit receivers (383); census-only V1 lifecycle modules (347); orphan battery files (3,188) |
+| **L1 Lean** (hbox lane, Fable) | ★(a) JPAY6: the driver's 70-byte socket row AND the consent allowlist fields; ★(b) a no-effect class on `Outcome` + the positive `NO_RECORD` frame, stated as a theorem first (NO_RECORD ⇒ the durable log is unchanged by that request); ★(c) a settle that leaves the purse decided for all four provider failure classes (non-200, timeout, malformed, crash-after-send); ★(g) Lean-emitted default `Pred` policies replacing permit-all on member accounts, tills, room cells (R11); (h) the clock-law bypass on the PAY path (`Compiler/CanonicalCellRegistry.lean:108-112`: PayObservation/PayEnrol advance the clock without judging the law); (e) consent op list and response-marker table emitted from the registry; (d) op 35 receiver confirmed; (f) the 33 vacuous `∨ Collision` rewrites, demoted to last/optional | three uncalled V1/V2 submit receivers (383); census-only V1 lifecycle modules (347); orphan battery files (3,188) |
 | **L1b Lean economy** (after L1 pushes (a)–(c)) | ★ a minimal Lean-owned grain work tariff and ceiling, with the provider route bound to an operator table digest, before paid grain operations are exposed (R12: the council rejected "after the demo" as a containment shipped ahead of the fix, ATLAS law 15); the full economy (C6) stays Phase 3 | — |
 | **L2 custody** | ★ the refusal-semantics core first (the four 255 sites by decoded type; `fleet-sign` `uncertain`; record-less reruns refused for `credit`/`well`/`activity`/`workspace submit`; chat's outer retry loop); THEN `flow::Client` as the one signing path (the client's working path moved into the SDK) | traffic stacks 1 and 3 (3,774), `session_reenroll.rs` (1,150), `bend_session.rs`, `web/surface.rs` + `world_surface.rs`, unreached arms, Studio (D7) |
 | **L3 fence + sandbox** | ★ per-signed-call dispatch fence (today one `contention` locks every member out for 19–51 min); STOP lookups and deadlines; `broker_home::render` renders real hardening; seccomp gaps; the floor audit runnable on the production spawn path; bounded dispatch directories; the route socket accepts the edge gid (W6); v4 failed-START recovery, Rust half | `spk-hostd`/`endpoint.rs`/`serve_resident`, five harness binaries (2,168), `claim_descriptor.rs`, `setid_bound.rs`, stale `allow(dead_code)` headers; agent API v1 only after v3 demonstrably supersedes it (R7) |
@@ -147,6 +149,7 @@ is L2's; `credentials.rs` moves in L6 (L4 consumes); spk-host's `broker.rs`/`mat
 | **L6 keys + store** | ★ mini-keys in the split shape (NOT `singleAccount`: it bypasses the broker's identity checks, `server/mod.rs:340-354`); grant caps enforced against the parsed body or a Lean reserve; op-144 answer pinned to the socket owner's uid and key-compared; per-uid slots and frame caps; image hashed once per candidate; tickets durable before the quota count; audit failure refuses; SQ: bound violations refuse loudly, typed full-disk read errors, crash/hold verbs out of the production binary, DURABLE-STORE.md rewritten to schema 5 | `verify-mldsa` + `fips204`, `Broker::default_box` |
 | **L7 web** | ★ the two render repairs (a malformed shared-name link breaks every reader; raw terminal escapes in history/diff); `mini web --read-only`; `--render-static` with `--public-origin`; the `public` reader subject + snapshot timer as `mini-pubread` with no network; Caddy snippet; join page with the D8 sentence | templates move into the crate |
 | **L12 web front end** | ★ the browser front end a stranger uses (ember: "at minimum some high quality lightweight embedded terminal plus nice reasonably minimal html forms"): one gateway uid `mini-web` on loopback behind Caddy (`/app/*`, `/ws/*`) holding no key and no Store access; a tiny root helper `mini-web-spawn` that, given a session the door's root processor issued at enrolment, spawns `mini shell` (or a `mini` verb for a form action) as the member's own uid under a pty in the same per-member scope ssh uses and hands back the fd (sshd-style privilege separation); xterm.js vendored (no CDN; the box has no egress); per-member `mini web` proxied under `/app/doc/*` for documents/boards/history (reusing L7's code); minimal no-JS forms for append/edit, boards, explain-refusal, receipts, delegate, law, retry, each showing the decoded outcome; a `jweb-frontend` journey row | the loopback-only assumptions in `web.rs` as the gateway replaces them |
+| **L13 app market** | ★ any Sandstorm SPK from app.sandstorm.io: a cached index read by `mini apps search/show`; `mini apps install` as a MEMBER turn (admission + funding) with the download as uid `mini-market` (the one egress to app.sandstorm.io) into quarantine, signature/appId verified by `sandstorm-package`, streamed through `spk-package-stream` into the broker's ingest under the standard import profile, the grain created and started by lifecycle v3 with L3's per-call fence, a receipt with the grain's URL; every grain on its own origin `https://<grain>.demo.dregg.online` (wildcard DNS as code + Caddy DNS-01/on-demand TLS, hybrid with fallback) routed to the custodian via `edgeGid`; member lifecycle verbs with decoded outcomes; `japps.sh` installs two real apps from the index | the GitWeb-specific chain and hand-copied `.spk` paths as the market lands |
 | **L8 fn + fleet** | ★ ops 13/15 (fn ACK) operator-only until Lean answers who may ACK a public delivery; the consumer worker as a hardened unit + a journey row on a recorded fixture; fn-r route; one NNTP repost rule | `publisher.rs` (552); the fn-e path; one of the `fn_namespace`/`fn_frontier` twins |
 | **L9 build + deploy + gate** | ★ 0.5 first; optional roles optional; `--capsule` deleted or fixed; the journey split into a demo journey inside the 3 h gate + a nightly kernel journey; `m6.sh` runnable | `hyperdocument-link-store`, the bend pair (R10), GitWeb root chain, `probe_control.rs`, `host-frontend.rs`, MUD `sim.py`, `gm/*`, the controller template, objective-emit dead bits |
 | **L11 performance** | ★ where the write seconds go, by phase, with A/B on the same box within minutes (the 57 s MAX outlier is the target, not the median); the biggest Rust-side fix (consent replay growth, Host spawns, STOP's five re-hashes); the 10k-record soak designed and, hbox time allowing, run; Lean asks specified file:function | — |
@@ -216,7 +219,7 @@ a $50 hard cap set at OpenRouter (the broker's pool ceiling is $40, $0.10 worst-
 BYOK on); the Dragon's Egg bot (application 1507638321877090374) is in guild 1507637841235017768;
 the demo's **shutdown date is 2026-11-11**, written on the join page and in the teardown plan;
 backup retention defaults to 7 days after shutdown. Still open, with the engineering default that
-applies meanwhile: **mainnet vs devnet for week-1 pay-to-enrol** (default: devnet, two providers,
+applies meanwhile: **mainnet vs devnet for pay-to-enrol** (default: devnet, two providers,
 until ember says mainnet; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page).
 
