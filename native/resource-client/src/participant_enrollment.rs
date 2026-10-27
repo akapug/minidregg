@@ -944,7 +944,7 @@ fn plan(mut args: Args) -> Result<()> {
             return Err("the next key must differ from the key being enrolled".into());
         }
         let cosign = next_cosign.ok_or("a next key without its co-signature")?;
-        let enrolled: [u8; 32] = decode_hex(&public_key)?
+        let enrolled: [u8; 32] = mini_sdk::hex::decode(&public_key).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "enrolled public key is not 32 bytes")?;
         crate::key_rotation::verify_cosign(&enrolled, next, &cosign)?;
@@ -1044,7 +1044,7 @@ fn plan(mut args: Args) -> Result<()> {
             let factory_root = factory_root.as_str();
             let authority_root = authority_root.as_str();
             if let Some(next) = &next_public {
-                let enrolled: [u8; 32] = decode_hex(&public_key)?
+                let enrolled: [u8; 32] = mini_sdk::hex::decode(&public_key).map_err(|e| e.0)?
                     .try_into().map_err(|_| "enrolled public key is not 32 bytes")?;
                 crate::key_rotation::host_next_possession_frame(
                     &host, &public_socket, &retained_config, &enrolled, next)?;
