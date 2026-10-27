@@ -72,11 +72,27 @@ struct DoorConfig {
     pay: Option<PayConfig>,
 }
 
+/// An atomic amount as a decimal token amount ("50000007", 6 -> "50.000007"; trailing zeros kept
+/// off, a whole amount without a point).
+fn decimal_tokens(atomic: &str, decimals: usize) -> Option<String> {
+    if atomic.is_empty() || !atomic.bytes().all(|b| b.is_ascii_digit()) || decimals > 38 {
+        return None;
+    }
+    let padded = format!("{atomic:0>width$}", width = decimals + 1);
+    let (whole, frac) = padded.split_at(padded.len() - decimals);
+    let whole = whole.trim_start_matches('0');
+    let whole = if whole.is_empty() { "0" } else { whole };
+    let frac = frac.trim_end_matches('0');
+    Some(if frac.is_empty() { whole.to_owned() } else { format!("{whole}.{frac}") })
+}
+
 #[derive(Clone, Debug)]
 struct PayConfig {
     enrol_pin: PathBuf,
     birth_context: Option<PathBuf>,
     network: String,
+    /// The token's symbol on the page ("50.000007 DREGG"); `pay.symbol`, DREGG by default.
+    symbol: String,
     /// The public RPC endpoint the stranger's BROWSER sends the payment to (the box has no egress
     /// and names it only); `pay.rpc`, by default the cluster's public endpoint for the network.
     rpc: String,
@@ -108,6 +124,7 @@ impl DoorConfig {
                     Some(n @ ("mainnet" | "devnet")) => n.to_owned(),
                     _ => return Err("pay.network is mainnet or devnet".into()),
                 },
+                symbol: p["symbol"].as_str().filter(|s| !s.is_empty() && s.len() <= 12 && s.bytes().all(|b| b.is_ascii_alphanumeric())).unwrap_or("DREGG").to_owned(),
                 rpc: match (p["rpc"].as_str(), p["network"].as_str()) {
                     (Some(url), _) if url.starts_with("https://") => url.to_owned(),
                     (Some(_), _) => return Err("pay.rpc is an https URL".into()),
@@ -735,8 +752,12 @@ impl<O: BoxOps> Processor<O> {
                 let mint = payment["mint"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its mint")?;
                 let token_program = payment["tokenProgram"].as_str().and_then(unhex).map(|b| b58(&b)).ok_or("payment record lacks its token program")?;
                 let decimals = match &payment["quote"]["decimals"] { Value::String(s) => s.clone(), Value::Number(n) => n.to_string(), _ => return Err("payment record lacks the token's decimals".into()) };
-                r["payment"] = json!({"recipient":recipient,"amountAtomic":payment["amountAtomic"],"memo":payment["memo"],
-                    "expiryHour":r["sign"]["expiryHour"],"network":pay.network,
+                let tokens = payment["amountAtomic"].as_str().and_then(|a| decimal_tokens(a, decimals.parse().ok()?)).map(|t| format!("{t} {}", pay.symbol));
+                // The quote's processing-chain hour when `mini join` checked it, and when that was:
+                // the page refuses to send once the expiry hour has passed (a late memo is a pending
+                // claim, not an enrolment).
+                r["payment"] = json!({"recipient":recipient,"amountAtomic":payment["amountAtomic"],"amountTokens":tokens,"memo":payment["memo"],
+                    "expiryHour":r["sign"]["expiryHour"],"asOfHour":payment["asOfHour"],"quotedAt":self.now,"network":pay.network,
                     "mint":mint,"tokenProgram":token_program,"decimals":decimals,"rpc":pay.rpc});
                 r["phase"] = json!("awaiting-payment");
                 r["detail"] = Value::Null;
@@ -1008,7 +1029,7 @@ mod tests {
                 if !sig.contains("GOOD") {
                     return Ran { ok: false, stdout: String::new(), stderr: "error: sshSigInvalid".into() };
                 }
-                std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA",
+                std::fs::write(home.join("latest-payment.json"), json!({"enrolAddress":"0a".repeat(32),"amountAtomic":"50000007","memo":"enrol:v2:AAAA","asOfHour":"1000",
                     "mint":"08".repeat(32),"tokenProgram":"06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9","quote":{"decimals":"6"}}).to_string()).unwrap();
                 return ok;
             }
@@ -1045,7 +1066,7 @@ mod tests {
         std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
         let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
         let cfg = DoorConfig { funding: 1000, free_cap: 2, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
-            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), rpc: "https://api.devnet.solana.com".into() }) };
+            login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
         Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
             p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
     }
@@ -1161,6 +1182,15 @@ mod tests {
     }
 
     #[test]
+    fn atomic_amounts_read_as_tokens() {
+        assert_eq!(decimal_tokens("50000007", 6).as_deref(), Some("50.000007"));
+        assert_eq!(decimal_tokens("50000000", 6).as_deref(), Some("50"));
+        assert_eq!(decimal_tokens("7", 6).as_deref(), Some("0.000007"));
+        assert_eq!(decimal_tokens("12", 0).as_deref(), Some("12"));
+        assert_eq!(decimal_tokens("x", 6), None);
+    }
+
+    #[test]
     fn a_failed_step_is_retried_next_tick_and_never_redone_before_it() {
         let mut w = world("retry", false);
         *w.ops.fail_reenroll.borrow_mut() = true;
@@ -1205,6 +1235,9 @@ mod tests {
         assert_eq!(s["payment"]["mint"], b58(&[8u8; 32]));
         assert_eq!(s["payment"]["tokenProgram"], "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
         assert_eq!(s["payment"]["decimals"], "6");
+        assert_eq!(s["payment"]["amountTokens"], "50.000007 DREGG");
+        assert_eq!(s["payment"]["asOfHour"], "1000");
+        assert!(s["payment"]["quotedAt"].is_u64());
         assert_eq!(s["payment"]["rpc"], "https://api.devnet.solana.com");
         let tx = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
         submit(&w, &Request::Paid { id: a.id().into(), at: 3, transaction: tx.into() });
