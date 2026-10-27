@@ -687,6 +687,8 @@ pub(crate) mod tests {
         done\n\
         if grep -q absent \"$3\"; then printf '{\"type\":\"absent\"}' >\"$4\"; exit 0; fi\n\
         if grep -q contention \"$3\"; then printf '{\"type\":\"contention\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q unavailable \"$3\"; then printf '{\"type\":\"unavailable\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q uncertain \"$3\"; then printf '{\"type\":\"uncertain\"}' >\"$4\"; exit 0; fi\n\
         printf '{\"type\":\"refused\",\"reason\":\"operationRejected\"}' >\"$4\"\n";
 
     impl FakeHost {
@@ -713,11 +715,21 @@ pub(crate) mod tests {
         /// Serve one connection per scripted reply; each reply is OUTCOME/v4
         /// followed by the word the inspector maps to a JSON view.
         pub(crate) fn serve(&self, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
+            self.serve_marked(replies.into_iter().map(|word| (None, word)).collect())
+        }
+
+        /// `serve` with each reply's first byte chosen: `None` echoes the
+        /// request's opcode, `Some(marker)` answers under a response marker
+        /// (NO_RECORD 253, HOST_OUTCOME 255) or a stray byte.
+        pub(crate) fn serve_marked(
+            &self,
+            replies: Vec<(Option<u8>, &'static str)>,
+        ) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
             let listener = std::os::unix::net::UnixListener::bind(&self.operator.socket).unwrap();
             fs::set_permissions(&self.operator.socket, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
             std::thread::spawn(move || {
                 let mut seen = Vec::new();
-                for word in replies {
+                for (marker, word) in replies {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut prefix = [0u8; 4];
                     stream.read_exact(&mut prefix).unwrap();
@@ -727,7 +739,7 @@ pub(crate) mod tests {
                     let at = 5 + config_len + 32;
                     let opcode = request[at];
                     seen.push((opcode, request[at + 1..].to_vec()));
-                    let mut body = vec![opcode];
+                    let mut body = vec![marker.unwrap_or(opcode)];
                     body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v6");
                     body.extend_from_slice(word.as_bytes());
                     let mut frame = (body.len() as u32).to_le_bytes().to_vec();
