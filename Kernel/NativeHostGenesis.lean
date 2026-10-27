@@ -69,7 +69,6 @@ the confined factory law (`factoryLaw`, `observer_control_confined`). -/
 structure PayObserver where
   subject : SubjectId
   capabilityId : CapabilityId
-  controlCapabilityId : CapabilityId
   enrolCapabilityId : CapabilityId
 /-- A subject that advances the deployment's one clock cell, and the
 identifier of its `C_tick`: a root capability on the clock cell
@@ -96,9 +95,16 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
-  /-- The payment observer.  When present, genesis installs the pay cell's law
-  (`payPredicate`) and the observer's capability on the pay cell; when absent,
-  no report is admissible (the pay law is not installed). -/
+  /-- The factory controller's control capability on the pay cell (delegate, install
+  the law, revoke): installed at EVERY genesis, observer or not, so that an observer is
+  an admitted runtime transition on any world (`observer_replaceable`,
+  `pay_control_present`; GENESIS-COUPLING S1, 2026-10-27). -/
+  payControlCapabilityId : CapabilityId
+  /-- The payment observer.  The pay cell's law (`payPredicate`) is installed at every
+  genesis; when an observer is named it also admits that observer's reports and
+  self-enrollment and genesis installs the observer's capabilities; when absent, the
+  law admits only the controller's management, so no report is admissible until the
+  controller installs a law naming one. -/
   payObserver : Option PayObserver := none
   /-- Every subject that may tick the clock.  Empty means the clock stays at
   genesis for the life of the deployment: the clock law admits no one. -/
@@ -187,11 +193,11 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
     config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds,
-    config.issuanceCap] ++
+    config.issuanceCap, config.payControlCapabilityId.value] ++
     (match config.payObserver with
      | none => []
      | some observer => [observer.subject.value, observer.capabilityId.value,
-         observer.controlCapabilityId.value, observer.enrolCapabilityId.value]),
+         observer.enrolCapabilityId.value]),
    PolicyRecordCodec.encodePred config.factoryPredicate,
    config.enrollments, config.meterAllowance, config.clockTickers.map tickerWire)
 
@@ -199,21 +205,21 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
   let (coordinates, payObserver) ← match wire.1 with
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap), none)
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl), none)
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, observer, observerCapability, payControl, enrolCapability] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl, observer, observerCapability, enrolCapability] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap),
-          some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl),
+          some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨enrolCapability⟩⟩ : PayObserver))
     | _ => none
   let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap) := coordinates
+      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -226,6 +232,7 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
       meterAllowance := wire.2.2.2.1
+      payControlCapabilityId := ⟨payControl⟩
       payObserver := payObserver
       clockTickers := wire.2.2.2.2.map tickerOfWire
       tailBound := tailBound
@@ -235,7 +242,7 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _, _, _, _⟩
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, _, observer, _, _, _, _, _⟩
   cases observer <;> simp [Config.ofWire, Config.toWire]
 
 /-- Version 6 (FLOORS) adds the mandatory issuance cap `C` after the clock
@@ -247,7 +254,7 @@ each ticker's `C_tick` are derived, beside the optional payment observer) and C1
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v6".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v7".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -334,8 +341,8 @@ def Config.Valid {F : Type} [Field F]
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
        enrollment.factoryObserveCapabilityId]) ++
+    config.payControlCapabilityId ::
     (config.payObserver.map (·.capabilityId)).toList ++
-    (config.payObserver.map (·.controlCapabilityId)).toList ++
     (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
   config.factoryController.subject.value ∈ config.enrollments.map (·.key.subject) ∧
   (∀ observer ∈ config.payObserver,
@@ -357,8 +364,8 @@ def Config.Valid {F : Type} [Field F]
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
        enrollment.factoryObserveCapabilityId]) ++
+    config.payControlCapabilityId ::
     (config.payObserver.map (·.capabilityId)).toList ++
-    (config.payObserver.map (·.controlCapabilityId)).toList ++
     (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
   (config.enrollments.map (·.initialBalance)).sum ≤ config.issuanceCap
 
@@ -614,27 +621,35 @@ def payControlVerbTags : List Int :=
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.installPolicy : Verb .program)),
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
 
-/-- The pay cell's law: the configured observer may `observePayment`, and may
-record a SELF-ENROLLMENT (its `installPolicy` request on the factory, with
-`ClockLaw.paySelfEnrolSlot = 1`, the slot only the pay-enrol receivers project);
-the factory controller may only manage (delegate, install the law, revoke).
-Neither can do the other's part. -/
-def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.Pred.Pred :=
-  .any [
-    .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+/-- The pay cell's law: the configured observer (when one is named) may `observePayment`,
+and may record a SELF-ENROLLMENT (its `installPolicy` request on the factory, with
+`ClockLaw.paySelfEnrolSlot = 1`, the slot only the pay-enrol receivers project); the
+factory controller may only manage (delegate, install the law, revoke). Neither can do
+the other's part. The controller's clause is the one every pay law carries. -/
+def payControlClause (controller : SubjectId) : Minidregg.Pred.Pred :=
+  .all [.eq "request/subject" (Int.ofNat controller.value),
+    .memberOf "request/verb" payControlVerbTags]
+
+/-- The observer's two clauses: its reports and its self-enrollment. -/
+def payObserverClauses (observer : PayObserver) : List Minidregg.Pred.Pred :=
+  [.all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
         (Verb.observePayment : Verb .program))),
       .eq "request/subject" (Int.ofNat observer.subject.value)],
     .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
         (Verb.installPolicy : Verb .program))),
       .eq "request/subject" (Int.ofNat observer.subject.value),
-      .eq ClockLaw.paySelfEnrolSlot 1],
-    .all [.eq "request/subject" (Int.ofNat controller.value),
-      .memberOf "request/verb" payControlVerbTags]]
+      .eq ClockLaw.paySelfEnrolSlot 1]]
+
+/-- The pay cell's genesis law. With an observer: its reports, its self-enrollment and
+the controller's management; without one: the controller's management alone, so no
+report is admissible until the controller installs a law naming an observer. -/
+def payPredicate (controller : SubjectId) (observer : Option PayObserver) : Minidregg.Pred.Pred :=
+  .any ((observer.map payObserverClauses).getD [] ++ [payControlClause controller])
 
 def payPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
-    (config : Config) (observer : PayObserver) : PolicyRecord :=
+    (config : Config) : PolicyRecord :=
   policy profile config (Kernel.PayCell.physicalId config.deployment.domain)
-    (payPredicate config.factoryController.subject observer)
+    (payPredicate config.factoryController.subject config.payObserver)
 
 /-- The observer's capability: target and policy the pay cell, verb
 `observePayment` only. -/
@@ -652,9 +667,9 @@ parent lacks, and `observeProgram`, because every management plan reads the
 target's root under an observation grant.  The pay law (`payPredicate`)
 refuses the controller's own reports. -/
 def payControlCapability {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     Capability .program :=
-  rootCapability profile config .program observer.controlCapabilityId
+  rootCapability profile config .program config.payControlCapabilityId
     config.factoryController.subject (Kernel.PayCell.physicalId config.deployment.domain)
     {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram, .observePayment}
 
@@ -677,8 +692,7 @@ def tickCapability {F : Type} [Field F]
 def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
   factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config) ++
-    (config.payObserver.map (payPolicy profile config)).toList ++
-    [clockPolicy profile config]
+    [payPolicy profile config, clockPolicy profile config]
 
 def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
@@ -718,8 +732,7 @@ def entries {F : Type} [Field F]
     capabilityEntries (factoryObserveCapability profile config enrollment)) ++
   config.payObserver.toList.flatMap (fun observer =>
     capabilityEntries (observerCapability profile config observer)) ++
-  config.payObserver.toList.flatMap (fun observer =>
-    capabilityEntries (payControlCapability profile config observer)) ++
+  capabilityEntries (payControlCapability profile config) ++
   config.payObserver.toList.flatMap (fun observer =>
     capabilityEntries (enrolCapability profile config observer)) ++
   config.clockTickers.flatMap (fun ticker => capabilityEntries (tickCapability profile config ticker))
@@ -1074,17 +1087,78 @@ theorem payLaw_eval (controller : SubjectId) (observer : PayObserver)
     (old new : Minidregg.Pred.State) (subject verb : Nat)
     (named : new.get "request/subject" = some (Int.ofNat subject))
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = true ↔
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = true ↔
       (verb = 6 ∧ subject = observer.subject.value) ∨
         (verb = 4 ∧ subject = observer.subject.value ∧ new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
         (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
-  simp only [Minidregg.Pred.eval, payPredicate, Minidregg.Pred.evalWith_any,
+  simp only [Minidregg.Pred.eval, payPredicate, payObserverClauses, payControlClause,
+    Option.map_some, Option.getD_some, List.cons_append, List.nil_append,
+    Minidregg.Pred.evalWith_any,
     Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
     Minidregg.Pred.evalWith, named, verbed, payControlVerbTags,
     CredentialAuthorityEntryCodec.verbTag, Bool.and_true, Bool.or_false, Bool.or_eq_true,
     Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq, List.contains_cons,
     List.contains_nil, beq_iff_eq]
   simp only [Int.ofNat.injEq]
+
+/-- The pay law of a world born without an observer admits exactly the controller's
+management: no subject's report (verb 6) and no self-enrollment. -/
+theorem payLaw_eval_none (controller : SubjectId)
+    (old new : Minidregg.Pred.State) (subject verb : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = true ↔
+      (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
+  simp only [Minidregg.Pred.eval, payPredicate, payControlClause, Option.map_none,
+    Option.getD_none, List.nil_append, Minidregg.Pred.evalWith_any,
+    Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
+    Minidregg.Pred.evalWith, named, verbed, payControlVerbTags,
+    CredentialAuthorityEntryCodec.verbTag, Bool.and_true, Bool.or_false, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq, List.contains_cons,
+    List.contains_nil, beq_iff_eq]
+  simp only [Int.ofNat.injEq]
+
+/-- **The pay law and the controller's pay control are present at every genesis**
+(GENESIS-COUPLING S1): no `present` hypothesis. The controller holds delegate, install
+the law and revoke on the pay cell whether or not an observer was named, so naming a
+first observer on a world born without one is the `observer_replaceable` runtime
+sequence, not a re-genesis. -/
+theorem pay_control_present {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) :
+    capabilityEntry (payControlCapability profile config) ∈ entries profile config ∧
+      payPolicy profile config ∈ policies profile config ∧
+      (payControlCapability profile config).holder = .subject config.factoryController.subject ∧
+      (payControlCapability profile config).scope.targets =
+        .explicit {⟨Kernel.PayCell.physicalId config.deployment.domain⟩} ∧
+      Verb.installPolicy ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.revokeCapability ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.delegateProgram ∈ (payControlCapability profile config).scope.verbs := by
+  refine ⟨?_, ?_, rfl, rfl, by simp [payControlCapability, rootCapability],
+    by simp [payControlCapability, rootCapability], by simp [payControlCapability, rootCapability]⟩
+  · simp [entries, capabilityEntries]
+  · simp [policies]
+
+/-- Teeth: on a world born without an observer, every report is refused, whoever asks,
+the controller included. -/
+theorem pole_observe_without_observer_refused (controller : SubjectId) (old new : Minidregg.Pred.State)
+    (subject : Nat) (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat 6)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = false := by
+  have := (payLaw_eval_none controller old new subject 6 named verbed).not
+  simp only [Bool.not_eq_true] at this
+  refine this.mpr ?_
+  rintro ⟨-, management⟩
+  omega
+
+/-- Satisfiable pole: on a world born WITHOUT an observer the controller's `installPolicy`
+on the pay cell is admitted by the genesis pay law, so the first observer is installed at
+runtime (the J-PAY-E2 sequence: enroll, delegate to and name the observer), never by a
+re-genesis. -/
+theorem first_observer_installable (controller : SubjectId) (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat controller.value))
+    (verbed : new.get "request/verb" = some (Int.ofNat 4)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = true :=
+  (payLaw_eval_none controller old new controller.value 4 named verbed).mpr ⟨rfl, by simp⟩
 
 /-- **The observer is replaceable at runtime** (ember, 2026-09-30 20:45): every
 genesis with an observer also holds the factory controller's control
@@ -1094,18 +1168,18 @@ The runtime sequence (revoke the old grant; enroll, delegate to and name the
 new observer) is the J-PAY-E2 probe's. -/
 theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (observer : PayObserver) (present : config.payObserver = some observer) :
-    capabilityEntry (payControlCapability profile config observer) ∈ entries profile config ∧
-      (payControlCapability profile config observer).holder =
+    capabilityEntry (payControlCapability profile config) ∈ entries profile config ∧
+      (payControlCapability profile config).holder =
         .subject config.factoryController.subject ∧
-      (payControlCapability profile config observer).scope.targets =
+      (payControlCapability profile config).scope.targets =
         .explicit {⟨Kernel.PayCell.physicalId config.deployment.domain⟩} ∧
-      Verb.installPolicy ∈ (payControlCapability profile config observer).scope.verbs ∧
-      Verb.revokeCapability ∈ (payControlCapability profile config observer).scope.verbs ∧
-      Verb.delegateProgram ∈ (payControlCapability profile config observer).scope.verbs ∧
+      Verb.installPolicy ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.revokeCapability ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.delegateProgram ∈ (payControlCapability profile config).scope.verbs ∧
       (∀ old new subject verb,
         new.get "request/subject" = some (Int.ofNat subject) →
         new.get "request/verb" = some (Int.ofNat verb) →
-        (Minidregg.Pred.eval (payPredicate config.factoryController.subject observer) old new = true ↔
+        (Minidregg.Pred.eval (payPredicate config.factoryController.subject config.payObserver) old new = true ↔
           (verb = 6 ∧ subject = observer.subject.value) ∨
             (verb = 4 ∧ subject = observer.subject.value ∧
               new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
@@ -1113,8 +1187,9 @@ theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimePro
               (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)))) := by
   refine ⟨?_, rfl, rfl, by simp [payControlCapability, rootCapability],
     by simp [payControlCapability, rootCapability], by simp [payControlCapability, rootCapability],
-    fun old new subject verb named verbed => payLaw_eval _ _ old new subject verb named verbed⟩
-  simp [entries, present, capabilityEntries]
+    fun old new subject verb named verbed => by
+      rw [present]; exact payLaw_eval _ _ old new subject verb named verbed⟩
+  simp [entries, capabilityEntries]
 
 /-- Refuting pole: the controller's own report is refused by the law when it
 is not the observer. -/
@@ -1122,7 +1197,7 @@ theorem controller_cannot_report (controller : SubjectId) (observer : PayObserve
     (other : controller.value ≠ observer.subject.value) (old new : Minidregg.Pred.State)
     (named : new.get "request/subject" = some (Int.ofNat controller.value))
     (verbed : new.get "request/verb" = some (Int.ofNat 6)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = false := by
   have := (payLaw_eval controller observer old new controller.value 6 named verbed).not
   simp only [Bool.not_eq_true] at this
   refine this.mpr ?_
@@ -1140,7 +1215,7 @@ theorem observer_cannot_manage (controller : SubjectId) (observer : PayObserver)
     (notEnrol : new.get ClockLaw.paySelfEnrolSlot ≠ some 1)
     (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = false := by
   have := (payLaw_eval controller observer old new observer.subject.value verb named verbed).not
   simp only [Bool.not_eq_true] at this
   refine this.mpr ?_
@@ -1157,7 +1232,7 @@ theorem observer_self_enrol (controller : SubjectId) (observer : PayObserver)
     (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
     (verbed : new.get "request/verb" = some 4)
     (enrol : new.get ClockLaw.paySelfEnrolSlot = some 1) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = true :=
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = true :=
   (payLaw_eval controller observer old new observer.subject.value 4 named verbed).mpr
     (Or.inr (Or.inl ⟨rfl, rfl, enrol⟩))
 
@@ -1320,6 +1395,10 @@ theorem factory_ordinary_preserved (config : Config) (old new : Minidregg.Pred.S
 #assert_axioms controller_self_enrol_refused
 #assert_axioms genesis_confines_observer
 #assert_axioms payLaw_eval
+#assert_axioms payLaw_eval_none
+#assert_axioms pay_control_present
+#assert_axioms pole_observe_without_observer_refused
+#assert_axioms first_observer_installable
 #assert_axioms observer_replaceable
 #assert_axioms controller_cannot_report
 #assert_axioms observer_cannot_manage

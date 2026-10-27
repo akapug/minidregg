@@ -457,7 +457,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev application_failed_start_signature_v1 : String := "DREGG/APPLICATION/FAILED-START-SIGNATURE/v1"
 @[persisted_codec_tag] abbrev pay_book : String := "DREGG/PAY/BOOK/"
 @[persisted_codec_tag] abbrev stream_payload_v1 : String := "DREGG.STREAM.PAYLOAD/v1"
-@[persisted_codec_tag] abbrev native_host_genesis_source_v6 : String := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v6"
+@[persisted_codec_tag] abbrev native_host_genesis_source_v7 : String := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v7"
 @[persisted_codec_tag] abbrev pay_enrolment_v1 : String := "DREGG/PAY/ENROLMENT/v2"
 @[persisted_codec_tag] abbrev participant_factory_observe_args_v1 : String := "DREGG.PARTICIPANT.FACTORY-OBSERVE.ARGS/v1"
 @[persisted_codec_tag] abbrev policy_compiler_profile_v1 : String := "DREGG.POLICY.COMPILER.PROFILE/v1"
