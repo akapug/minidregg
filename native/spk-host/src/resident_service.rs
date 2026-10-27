@@ -2021,7 +2021,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             } else if let Some((listener, _, _)) = agent_routes.get(index) {
                 // No agent frame is read or admitted while paused. EOF cannot
                 // certify a no-record outcome; its client retains exact recovery.
-                drop(listener.accept_authenticated()?);
+                if let Err(error) = listener.accept_authenticated() {
+                    eprintln!("spk-host: paused agent connection refused at accept: {error}");
+                }
             }
             return Ok(None);
         }

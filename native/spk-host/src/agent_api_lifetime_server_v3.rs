@@ -99,8 +99,16 @@ pub(crate) fn poll_once(
     listener: &AgentApiListener,
     resident: &mut ResidentLifetimeAgent<'_>,
 ) -> io::Result<bool> {
-    let Some(mut stream) = listener.accept_authenticated()? else {
-        return Ok(false);
+    // An accept that fails (socket identity or ACL drift, a getfacl that
+    // cannot run, EMFILE) refuses that one connection, loudly; no frame was
+    // read, so nothing is uncertain, and the generation keeps serving.
+    let mut stream = match listener.accept_authenticated() {
+        Ok(Some(stream)) => stream,
+        Ok(None) => return Ok(false),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 connection refused at accept: {error}");
+            return Ok(true);
+        }
     };
     let frame = match agent_api_wire::read_frame(&mut stream) {
         Ok(frame) => frame,
