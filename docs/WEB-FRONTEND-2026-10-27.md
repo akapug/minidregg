@@ -158,7 +158,7 @@ the door; the patch in `deploy/web-frontend/door.patch` adds the login record an
 line. The infra lane installs `deploy/web-frontend/INSTALL.md` and retargets Caddy's `handle` to the
 gateway (the fallback `handle` and the `/` snapshot route go).
 
-## 6. State (2026-10-27, lane tip `abf33668`)
+## 6. State (2026-10-27)
 
 **The grammar (A0) is done.** Every verb of the four tables is data in `shell_grammar.rs` (69
 verbs, 203 leaves); the shell parses through `parse`/`parse_line`; `help`, `usage_of` and Tab
@@ -181,6 +181,25 @@ decoded outcomes.
 | The door's pay-page audit fixes: only new requests spend the per-source budget (4); amount in tokens and the quote's chain hour (5, 3); the adapter asks for the quote's cluster (7); a door refusal is said with the signature, the signature shown before the POST, a stale quote refused, a signed transaction that differs from the built one refused (1, 2, 3, 6) | `861fe953`, `b4a1a9d6`, `3710db83`, `37f23dfc` |
 | Export my world: `export world [NAME]` → `mini export-world` (reads only: every reference; each document as rendered and its signed view; every attempt with its standing; room state; public key and custody statement; a manifest with the world root and a sha256 per file); `/export` starts it in the background, Download streams it through the gateway and deletes it; a notice on the front page from 10 November; the read stamp carries the world root | `370d606e`, `071aaf95` |
 | Subscribe: what the tier buys from the `zai-glm` provider row (model, member calls a day and until the weekly reset), ember's policy line as a marked placeholder, price and period, purse meter, the window end as a UTC date, `pay subscribers week`, the join from the inbox invitation; front page and rail | `0ac2e8df` |
+
+**Research consent** (ember's policy ruling): the fact is the reference `research-consent` in the
+member's own workspace, a declared cell under the open law, **field 1 = 1 for CC0** (contributed
+for research) **and 0 for none**. The door's form carries the sentence (`deploy/policy/RETENTION.txt`,
+the one copy the door and the body read) and an unchecked "contribute my data for research (CC0;
+kept private until reviewed)"; the processor writes the fact at enrolment as the member's own turns
+(`create research-consent declared open`, `invoke research-consent-0 research-consent create 1 V`,
+`submit research-consent-0`; a retried tick resumes) and the status carries `researchConsent`
+(`0bf68599`). `/export` shows the value by a signed read, with the sentence, and records a change as
+a compare-and-write on field 1; `/subscribe` carries the sentence; the export manifest carries
+`researchConsent` cc0 | none | unrecorded (`33c13554`). Rows: consent-enrol, consent-flip,
+export-consent.
+
+**Abuse limits** (infra's review, edge/demo/ABUSE-LIMITS.md): beside the gateway's 64 connections,
+a member holds at most 4 body requests at once; a fifth is refused with a 429 page that says so
+(`90f7f959`, `limits.rs`, tested: the fifth refused while another member proceeds). One export
+per member per 10 minutes: inside the window `/export` names when the next is allowed and the
+last archive's sha256 (written beside it by `mini export-world` and kept after the download), and
+a second POST is a 429 (`54ec93a3`, tested).
 
 **Box verification** (dregg-build, the round-2 candidate, the long-lived world `wf-jrun3`, at
 `a0f9c246`): door tests 9 + 8 green under node; JWF 43/48 with export end to end (start, ready,
