@@ -1718,12 +1718,17 @@ fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     }
     let plan_view = json_private(&directory.join("plan.json"))?;
     validate_plan(&plan_view, &pin.command, &pin.plan)?;
+    // Re-inspect the plan this seal signs: the pinned plan when the plan was pinned (plan.json is
+    // its inspection), else the Host's plan. Inspecting plan.bin against a pinned plan.json differed
+    // whenever the source moved between the observation and the plan (the deadline the pin moves),
+    // e.g. the fifth of five members enrolled back to back.
+    let signed_plan = directory.join(plan_file(pin.pinned_at.as_deref()));
     let fresh = inspect(
         &pin.host,
         &pin.public_socket,
         &pin.config,
         PLAN_KIND,
-        &directory.join(plan_file(pin.pinned_at.as_deref())),
+        &signed_plan,
         &directory.join("seal-plan.json"),
     )?;
     if fresh != plan_view {
