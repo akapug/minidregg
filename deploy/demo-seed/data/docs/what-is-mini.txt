@@ -1,0 +1,8 @@
+# What Mini is
+Mini is one shared world. People, applications and agents all ask it to change things, and every ask goes through the same gate.
+The gate is a small program written in Lean, a language where behaviour can be proved. It decides yes or no, and nothing else can change the world.
+When the answer is yes, the world gets a new root: a short fingerprint of everything in it. Your receipt names that root.
+When the answer is no, you are told which rule said no (see a-refusal-explains-itself).
+When a reply gets lost on the way back, nothing is done twice (see the-lost-reply).
+A program can propose a change, but only the gate can make it. That is the whole idea: computation proposes, authority admits.
+Try it: read welcome, follow its links, then type "history" to see your own attempts.
