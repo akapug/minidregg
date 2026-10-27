@@ -7,9 +7,10 @@ use std::collections::BTreeMap;
 
 pub(super) const MAX_FORM: usize = 3 * 64 * 1024 + 64;
 
-/// POST has a stricter boundary than browsing: an exact same-origin Origin,
-/// one bounded Content-Length, one form content type, no transfer coding.
-pub(super) fn body_length(request: &Request) -> Result<usize> {
+/// POST has a stricter boundary than browsing: an exact same-origin Origin
+/// (one of the front's origins, whose authority is this request's Host), one
+/// bounded Content-Length, one form content type, no transfer coding.
+pub(super) fn body_length(request: &Request, front: &Front) -> Result<usize> {
     let one = |key: &str| -> Result<&str> {
         let values: Vec<_> = request.headers.iter().filter(|(k, _)| k == key).collect();
         if values.len() != 1 {
@@ -25,7 +26,12 @@ pub(super) fn body_length(request: &Request) -> Result<usize> {
         return Err("transfer encoding is not supported".into());
     }
     let host = one("host")?;
-    if one("origin")? != format!("http://{host}") {
+    let origin = one("origin")?;
+    if !front
+        .origins
+        .iter()
+        .any(|allowed| allowed == origin && allowed.split_once("://").is_some_and(|(_, authority)| authority == host))
+    {
         return Err("saving requires this page's exact origin".into());
     }
     if one("content-type")? != "application/x-www-form-urlencoded" {
@@ -460,6 +466,8 @@ mod tests {
             ("content-type", "application/x-www-form-urlencoded"),
             ("content-length", "9"),
         ];
+        let front = Front::loopback(3, false);
+        let body_length = |request: &Request| super::body_length(request, &front);
         assert_eq!(body_length(&post(&good)).unwrap(), 9);
         for key in ["origin", "host", "content-length", "content-type"] {
             let missing: Vec<_> = good.iter().copied().filter(|(k, _)| *k != key).collect();
