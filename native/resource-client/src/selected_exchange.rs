@@ -772,6 +772,12 @@ fn status(state: &Path) -> Result<()> {
     }))
 }
 
+/// The schema-1 `fn-e` route (accepted-article event, event17 coverage, fn
+/// cursor ACK) is not served: fn's NNTP POST stores a legacy `fn-r` article,
+/// which the Host's fn-e poll refuses, and the one native run of that route
+/// was refused. `receive-transport` and `verify-transport` are the route.
+pub(super) const FN_E_REFUSED: &str = "the fn-e route (receive, cover-plan, cover-advance, ack, verify) is retired: fn stores fn-r articles, which only receive-transport and verify-transport accept";
+
 pub(super) fn run(
     phase: &str,
     contract: &Path,
@@ -805,6 +811,9 @@ pub(super) fn run(
         return Err(
             "expected prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport".into(),
         );
+    }
+    if matches!(phase, "receive" | "cover-plan" | "cover-advance" | "ack" | "verify") {
+        return Err(FN_E_REFUSED.into());
     }
     if approval.is_some() && phase != "cover-advance" {
         return Err("approval applies only to cover-advance".into());
@@ -973,6 +982,24 @@ mod tests {
             .unwrap_err()
             .contains("expected"));
         assert!(!output.exists());
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn selected_fn_e_phases_refuse_by_name_before_touching_state() {
+        let state = scratch();
+        let contract = state.join("contract.json");
+        put_json(
+            &contract,
+            &json!({"type":FORMAT,"releaseProfile":"public-peerable-v2"}),
+        )
+        .unwrap();
+        let output = state.join("exchange");
+        fs::DirBuilder::new().mode(0o700).create(&output).unwrap();
+        for phase in ["receive", "cover-plan", "cover-advance", "ack", "verify"] {
+            assert_eq!(run(phase, &contract, &output, None).unwrap_err(), FN_E_REFUSED, "{phase}");
+        }
+        assert_eq!(fs::read_dir(&output).unwrap().count(), 0, "no lock or attempt state");
         fs::remove_dir_all(state).unwrap();
     }
 }
