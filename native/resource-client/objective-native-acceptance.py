@@ -7,6 +7,8 @@ the Host's own Lean front end, which the receiver re-runs on every published
 package). Never a live or common world.
 
   world    --bin DIR --root NEW_DIR [--tariff-base N --tariff-tick N] [--disable EVALUATOR-NAMES]
+           [--maximum KEY=N,KEY=N] [--sponsor-balance N] [--tariff-replay N --tariff-core N]   (a larger method needs a larger policy
+           maximum, e.g. proofWork, and a sponsor balance that covers its measured price)
            policy authoring, genesis, `mini serve`, two content documents
            (`source` holds the published method, `notes` is its input and
            its effect/result target).
@@ -45,7 +47,7 @@ HERE=pathlib.Path(__file__).resolve().parent
 REPO=HERE.parent.parent
 ap=argparse.ArgumentParser()
 ap.add_argument('verb',choices=['all','summary','world','publish','publish-variant','invoke','refuse','retry-submit','readback','lookup','reopen','stop'])
-for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable','expect-detail']:
+for f in ['bin','root','method','entry','label','byte','tariff-base','tariff-tick','request-edit','mutation','argument','expect','prepare-only','move-source','disable','expect-detail','maximum','sponsor-balance','tariff-replay','tariff-core']:
     ap.add_argument('--'+f)
 a=ap.parse_args()
 root=pathlib.Path(a.root).resolve()
@@ -171,9 +173,14 @@ elif a.verb=='world':
     tariff={'version':'4','base':a.tariff_base or '1','typeFuel':'0','sourceTicks':a.tariff_tick or '1','heap':'0',
         'stack':'0','outputNodes':'0','outputBytes':'0', 'extractTicks': '0','inputBytes':'0',
         # Edition 4 (as edition 3) refuses a zero front-end rate; the measured rates (activity_world.TARIFF).
-        'replayBytes':'61','coreBytes':'16','domainWork':'0'}
+        'replayBytes':a.tariff_replay or '61','coreBytes':a.tariff_core or '16','domainWork':'0'}
+    maxima=dict(MAXIMUM)
+    for kv in filter(None,(a.maximum or '').split(',')):
+        k,v=kv.split('=');
+        if k not in maxima:raise SystemExit(f'unknown maximum {k}')
+        maxima[k]=int(v)
     policy={'schema':'dregg.objective-bend.policy.v1','sourceBytes':'4194304',
-        'maximum':{k:str(v) for k,v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),'outputs':[constants['genericCodec']],
+        'maximum':{k:str(v) for k,v in maxima.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),'outputs':[constants['genericCodec']],
         'clearAudience':digest_hex(1),'frontEnd':constants['frontEnd'],'tariff':tariff}
     (root/'policy.json').write_text(json.dumps(policy,indent=1))
     sh('policy',host,'/dev/null','author','objective-policy',root/'policy.json',root/'policy.hex')
@@ -181,6 +188,7 @@ elif a.verb=='world':
     w=root/'w';sock=w/'public'/'mini.sock'
     genesis_env={'OBJECTIVE_INVOCATION_POLICY':policy_hex}
     if a.disable:genesis_env['NEWPARTICIPANT_DISABLED_EVALUATORS']=a.disable
+    if a.sponsor_balance:genesis_env['NEWPARTICIPANT_SPONSOR_BALANCE']=a.sponsor_balance
     sh('genesis','sh',HERE/'newparticipant-acceptance.sh',host,mini,store,verifier,w,sock,env=genesis_env)
     s={'type':'minidregg-objective-native-acceptance-v1','root':str(root),'bin':str(bin_),'host':str(host),
        'mini':str(mini),'config':str(w/'deployment'/'pinned-config.json'),'socket':str(sock),
