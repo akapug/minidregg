@@ -112,7 +112,8 @@ consent 323 s, rust 220 s; the host-closure ceiling held); its standing rows and
 are running there. **M7 PASS** for this candidate: a cold build of the same commit on the second Debian 13
 box `dregg-ref` reproduces all 26 outputs byte for byte (the first reproducible-build verdict across two
 machines this project has had; the earlier hbox reference differed only by Ubuntu's GCC startup objects).
-Cold build on `dregg-ref`: 790 Lean modules in 35.8 min with the weighted RSS table, 53 min total. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
+Cold build on `dregg-ref`: 790 Lean modules in 35.8 min, 53 min total, on an idle box (the earlier 78.8 min
+shared `dregg-build` with another lane's builds; not isolated). Evidence: `lane/m7` f5ed535b. Round 1's full journey on hbox (candidate 55e483e0, load 88–118): PASS 118 / FAIL
 23 / UNCONFIGURED 4; the new reds are journey drivers still speaking the pre-L2 wire (an L2 successor
 lane is on them), JPAY4's fixture tariff, and hbox's tmpfs/load. Round 3 already has L12 3bb0a248 and L2's driver successor 2c15e48c. Then: the whole Lean tree once per box (the cSHAKE/KMAC kernels change a Core olean;
 `scripts/build-mini-kernels.sh` first), Linux tests on `dregg-build`, the demo journey rows, J14 on the
