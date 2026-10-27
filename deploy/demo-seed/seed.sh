@@ -195,21 +195,27 @@ if install_app EtherCalc; then
 fi
 if install_app Etherpad; then
   if open_grain "$G"; then
-    # UNVERIFIED against the package (README, owed): the pad API. A non-OK answer is a skip, never a failure.
-    c=$(web "$G" GET /api/1/createPad -G --data-urlencode padID=welcome --data-urlencode "text=$(cat "$D/apps/pad-welcome.txt")")
-    if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then ok_ "Etherpad pad welcome created"
-    else skip_ "Etherpad installed; its pad write is not verified on this package (HTTP $c); open the grain and type"; fi
+    # The Sandstorm package disables /api completely. Its pad UI imports a multipart `file` here;
+    # a .txt upload becomes the pad's text, and the matching export proves the write.
+    c=$(web "$G" POST /p/welcome/import -F "file=@$D/apps/pad-welcome.txt;filename=welcome.txt;type=text/plain")
+    if [ "$c" = 200 ] && jq -e '.code == 0' "$T/body" >/dev/null 2>&1; then
+      c=$(web "$G" GET /p/welcome/export/txt)
+      if [ "$c" = 200 ] && grep -Fq 'Welcome to the pad. Type here' "$T/body"; then ok_ "Etherpad pad welcome imported and read back"
+      else fail_ "Etherpad import readback: HTTP $c"; fi
+    else fail_ "Etherpad pad import: HTTP $c $(head -c 160 "$T/body")"; fi
   else fail_ "Etherpad: could not open $G"; fi
 fi
 if install_app "Hacker Slides"; then
   if open_grain "$G"; then
     www=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$ORIGIN")
-    # UNVERIFIED against the package (README, owed): the save and publish endpoints. Verified by GET on the -www origin.
-    web "$G" PUT /slides.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md" >/dev/null
-    web "$G" POST /publish -d '' >/dev/null
-    c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/")
-    if [ "$c" = 200 ] && grep -qi 'four slides\|Mini, in' "$T/deck"; then DECK_URL=$www; ok_ "Hacker Slides deck published at $www"
-    else skip_ "Hacker Slides installed as $G; the deck is not published (-www answered $c); the welcome page will not claim it"; fi
+    # The editor's PUT saves /var/slides.md and republishes it as /var/www/slides.md.
+    # There is no separate publish endpoint; the static deck loads this public markdown.
+    c=$(web "$G" PUT /slides.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
+    if [ "$c" = 200 ]; then
+      c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/slides.md")
+      if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/deck"; then DECK_URL=$www; ok_ "Hacker Slides deck saved and published at $www"
+      else fail_ "Hacker Slides public slides.md: HTTP $c"; fi
+    else fail_ "Hacker Slides save: HTTP $c"; fi
   else fail_ "Hacker Slides: could not open $G"; fi
 fi
 # a deck already published by an earlier run
