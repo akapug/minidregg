@@ -48,6 +48,14 @@ which is not committed.
 - build8: PID file `scratch/build8.pid`, log `scratch/build8.log`.
 - The codec pins (`Compiler/PersistedCodecShapes.lean`) are NOT re-emitted. Run `scripts/codec-shapes-regen.py` on a box. Until then the census line for ACTIVITY-RECORD v9 is red.
 
+## build8 result (arrived after the handoff): ObjectiveActivityEffect.lean RED, by name
+- :235-244 `addCapacity` unknown in DeliverLawRefusesStatement: open `Minidregg.Kernel.ObjectiveTariff (addCapacity)`.
+- :587-604 `applyOperations`, `registerAccounts`, `deregisterAccounts`, `deregisterAccounts_accounts` unknown: add
+  them to the `open Minidregg.Theory.CanonicalResourceKernel (...)` line; then recheck `fundsAgree`'s `omega` goals.
+- :660 `deliverLawRefuses`: a `dsimp only` made no progress (drop it, then re-read the next goal).
+- Everything else in the file elaborated (no other errors named; the pass-11 statements, commitWrites,
+  commitLawRefused, depositIndependent, birthCommitJudged passed). Importers beyond the file were not reached.
+
 ## Owed
 1. Read build8's result and fix forward any red in the Effect file. Its proofs have not been elaborated yet; the riskiest are `fundsAgree`, `deliverLawRefuses`, `commitWrites` (`rfl`) and `encodeRecord_length_verdict`.
 2. `payerInvalid`'s docstring (`Kernel/ObjectiveActivity.lean`, Refusal) must name "a delivery's submitter account, or the collector, is the activity's purse". The auditor would prefer a distinct constructor; the deputy says only if the shared name is ambiguous.
