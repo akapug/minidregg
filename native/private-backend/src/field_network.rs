@@ -720,7 +720,7 @@ pub(crate) mod tests {
         y: Field,
     ) -> (
         Vec<Engine>,
-        Vec<super::super::triple_king::tests::AnchorFixture>,
+        Vec<super::super::custody::AnchorHandle>,
     ) {
         let checked = triple_king::tests::checked_for_consumer(3);
         let input = inputs(x, y);

@@ -638,7 +638,8 @@ mod tests {
     use super::*;
     use crate::{
         reconstruction::Field,
-        triple_king::tests::{test_generation, AnchorFixture},
+        triple_king::tests::test_generation,
+        custody::AnchorHandle,
     };
     use std::{
         collections::VecDeque,
@@ -685,7 +686,7 @@ mod tests {
     }
     struct Cluster {
         stores: Vec<KingStore>,
-        anchors: Vec<AnchorFixture>,
+        anchors: Vec<AnchorHandle>,
         roots: Vec<PathBuf>,
         queue: VecDeque<(u16, Out)>,
     }
@@ -701,7 +702,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let anchors = roots
                 .iter()
-                .map(|r| AnchorFixture::new(r))
+                .map(|r| AnchorHandle::new(r))
                 .collect::<Vec<_>>();
             let stores = (0..N)
                 .map(|i| {

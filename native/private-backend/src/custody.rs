@@ -4,7 +4,8 @@ use crate::codec::*;
 use crate::transition_journal as wal;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Error, Read, Result, Write};
+use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::os::unix::{
     fs::{OpenOptionsExt, PermissionsExt},
     io::AsRawFd,
@@ -139,12 +140,20 @@ impl Anchor {
         }
     }
 }
-pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
-    let mut a = Anchor::open(root)?;
-    let listener = UnixListener::bind(socket)?;
-    fs::set_permissions(socket, fs::Permissions::from_mode(0o600))?;
-    for incoming in listener.incoming() {
-        let mut s = incoming?;
+/// The one anchor loop. Polls the (nonblocking) listener until `stop` is set,
+/// then returns, dropping the Anchor and with it the authority lock.
+pub fn serve(mut a: Anchor, listener: UnixListener, stop: &AtomicBool) -> Result<()> {
+    listener.set_nonblocking(true)?;
+    while !stop.load(Ordering::SeqCst) {
+        let mut s = match listener.accept() {
+            Ok((s, _)) => s,
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        s.set_nonblocking(false)?;
         s.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
         s.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
         let answer = (|| {
@@ -166,6 +175,12 @@ pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
     }
     Ok(())
 }
+pub fn run_anchor(root: &Path, socket: &Path) -> Result<()> {
+    let a = Anchor::open(root)?;
+    let listener = UnixListener::bind(socket)?;
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o600))?;
+    serve(a, listener, &AtomicBool::new(false))
+}
 pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
     let mut s = UnixStream::connect(socket)?;
     s.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
@@ -176,6 +191,43 @@ pub(crate) fn rpc(socket: &Path, b: &[u8]) -> Result<Vec<u8>> {
         Some((0, b)) => Ok(b.to_vec()),
         Some((1, b)) => Err(Error::other(String::from_utf8_lossy(b).to_string())),
         _ => Err(bad("anchor reply")),
+    }
+}
+/// In-process anchor for tests: the real `serve` loop on a thread, stopped and
+/// joined on drop so the authority lock frees for a reopen.
+#[cfg(test)]
+pub(crate) struct AnchorHandle {
+    sock: std::path::PathBuf,
+    stop: std::sync::Arc<AtomicBool>,
+    task: Option<std::thread::JoinHandle<()>>,
+}
+#[cfg(test)]
+impl AnchorHandle {
+    /// Serve the authority kept under `root`/authority on `root`/anchor.sock. A
+    /// socket file left by a killed predecessor is removed first.
+    pub(crate) fn new(root: &Path) -> Self {
+        let sock = root.join("anchor.sock");
+        let _ = fs::remove_file(&sock);
+        let a = Anchor::open(&root.join("authority")).unwrap();
+        let listener = UnixListener::bind(&sock).unwrap();
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let halt = stop.clone();
+        let task = std::thread::spawn(move || serve(a, listener, &halt).unwrap());
+        Self {
+            sock,
+            stop,
+            task: Some(task),
+        }
+    }
+    pub(crate) fn socket(&self) -> &Path {
+        &self.sock
+    }
+}
+#[cfg(test)]
+impl Drop for AnchorHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.task.take().unwrap().join().unwrap();
     }
 }
 #[cfg(test)]

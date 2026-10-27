@@ -444,7 +444,7 @@ pub(crate) mod tests {
     }
     pub(crate) fn nodes() -> (
         Vec<LayerEngine>,
-        Vec<crate::triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
     ) {
         let (engines, anchors) = crate::field_network::tests::engine_nodes(Field(1), Field(1));
         (
