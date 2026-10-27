@@ -52,6 +52,7 @@ mod meter;
 #[cfg(unix)]
 mod market;
 mod checkpoint;
+mod world_export;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
@@ -2671,6 +2672,7 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
+        "export-world" => world_export::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),

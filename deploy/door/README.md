@@ -104,8 +104,10 @@ socket.
 ## Rate limits and abuse
 
 - **Per IP**: nftables meters new connections on 443 (`edge/demo/host/nftables.conf`, the infra
-  lane's); Caddy forwards `X-Real-IP`, and the form allows 3 POSTs per IPv4 address or IPv6 /64 per
-  hour (an in-memory table of 1,024 entries). Only Caddy (loopback) is trusted for `X-Real-IP`.
+  lane's); Caddy forwards `X-Real-IP`, and the form allows 3 new requests (`POST /join`) per IPv4 address or
+  IPv6 /64 per hour (an in-memory table of 1,024 entries); a request's later steps (`/join/sign`,
+  `/join/paid`) name a request already admitted and are not counted, so one stranger's paid route
+  does not spend a shared address's hour. Only Caddy (loopback) is trusted for `X-Real-IP`.
 - **Per queue**: the form refuses a POST while 32 requests are queued (503, "try later"). Bodies
   are at most 4 KiB, one request per connection, a 5 s read deadline, 16 concurrent connections.
 - **Per key and name**: one account per ssh key (the processor refuses a key already in the

@@ -624,13 +624,14 @@ fn finish_detached(common: &Common, pin: &Pin, signing: &ed25519_dalek::SigningK
         "memo":memo,"enrolAddress":hex(&pin.context.recipient),"mint":hex(&pin.context.mint),"tokenProgram":hex(&pin.context.token_program),"login":pin.login,
         "enrolPin":pin.value,"quote":state["quote"].clone(),"sourceContext":state["sourceContext"].clone(),"amountAtomic":quote.split().amount_atomic.to_string(),
         "bootstrapUrl":common.bootstrap,"bootstrapMetadata":state["bootstrapMetadata"].clone(),
-        "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin,"sshSignature":"detached"});
+        "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin,"sshSignature":"detached",
+        "asOfHour":hour.to_string()});
     check_pins(common)?;
     save_payment(common, &record, initial)?;
     let _ = fs::remove_file(&state_path);
     println!("recipient {}", bs58::encode(pin.context.recipient).into_string());
     println!("amount {} atomic", quote.split().amount_atomic);
-    println!("expires at processing-chain hour {}", expected.expiry_hour);
+    println!("expires at processing-chain hour {} (now {hour})", expected.expiry_hour);
     println!("memo {memo}");
     println!("pay from your wallet; preflight the whole signed transaction, including wallet wrappers. No payment was submitted.");
     println!("then mini join --memo-version v2 --wait --dir {} --signature TX (with the same --host and --config)",common.directory.display());

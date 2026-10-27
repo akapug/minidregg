@@ -1627,6 +1627,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "export" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::EXPORT, &w)?;
+            if p.leaf.path == ["export", "world"] {
+                let name = p.opt(0).unwrap_or("world.tar");
+                if !crate::shell_grammar::is_session_file(name) {
+                    return Err("export world NAME: a plain file name (letters, digits, '-', '_', '.'; no leading dot), written under HOME/exports".into());
+                }
+                return Ok(client("export-world", vec![flag("workspace", ws()), flag("home", session.home.clone()), flag("out", session.home.join("exports").join(name))]));
+            }
             Plan::Export(ws().join("proposals").join(p.arg(0)).join("recipient-reference.json"))
         }
         other => return Err(format!("unknown verb {other}; type help")),
