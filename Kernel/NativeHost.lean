@@ -1318,14 +1318,14 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     (derived : NativeHostReplay.Derived config old.opened)
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
-      old.opened.durable.snapshot derived.intent)
+      old.opened.durable.snapshot derived.intent) (tag : List UInt8)
     (fresh : old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) = none) :
-    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready)
+    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready tag)
       derived.intent.transactionId derived.intent.event.eventId =
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
+        (NativeHostReplay.exactCandidate old derived ready tag).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]

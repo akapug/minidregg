@@ -1380,6 +1380,10 @@ structure Appended (rootBytes : List UInt8 → Digest) (loaded : Loaded rootByte
   image : next.image = loaded.image.append intent
   entry : Entry
   entryExact : entry.record = recordFrame.encode (IntentRecord.ofIntent intent)
+  /-- The image after an append carries the tag the append wrote: its MAC is the
+  one the append computed under the key, so the head's authentication is not
+  lost (`Loaded.headTag`). -/
+  headTagExact : next.headTag = some entry.tag
 
 /-- Only the read-back-equal branch constructs `exact`. -/
 inductive DetailedResult (rootBytes : List UInt8 → Digest)
@@ -2031,6 +2035,11 @@ def afterCheckpoint {rootBytes : List UInt8 → Digest} (loaded : Loaded rootByt
     (stored : Bool) : Loaded rootBytes :=
   if stored then loaded.rebase else loaded
 
+theorem afterCheckpoint_headTag {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (stored : Bool) : (afterCheckpoint loaded stored).headTag = loaded.headTag := by
+  unfold afterCheckpoint
+  split <;> rfl
+
 theorem afterCheckpoint_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : (afterCheckpoint loaded stored).image = loaded.image := by
   unfold afterCheckpoint
@@ -2085,6 +2094,23 @@ def checkpointDifferential (transport : Transport) (rootBytes : List UInt8 → D
       return .ok (cached, full, atHeight)
 
 
+/-- The head entry's tag: the one the image was read with, else the Store's
+entry at the head height. Unverified bytes: every caller checks them with
+`DurableHistory.Head.verify` before relying on them. An image the session
+extended by its own append carries no tag (`Loaded.extend`). -/
+def Loaded.headTagOrRead {rootBytes : List UInt8 → Digest} (transport : Transport)
+    (loaded : Loaded rootBytes) : IO (Except String (List UInt8)) := do
+  match loaded.headTag with
+  | some tag => return .ok tag
+  | none =>
+      match ← transport.read loaded.image.accepted.length false with
+      | .ok (some stored) =>
+          match stored.entries.head? with
+          | some entry => return .ok entry.tag
+          | none => return .error "durable head entry missing"
+      | .ok none => return .error "durable store is not initialized"
+      | .error message => return .error message
+
 /-- The index root after this image's head: carried by the head entry's tag,
 whose MAC is verified for the head's height, chain and accumulator frontier
 (`DurableHistory.Head.verify`). The empty log's is the empty map's. -/
@@ -2094,16 +2120,9 @@ def Loaded.headIndexRoot {rootBytes : List UInt8 → Digest} (transport : Transp
   if height = 0 then return .ok DurableIndex.emptyDigest
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
-  let tag ← match loaded.headTag with
-    | some tag => pure tag
-    | none =>
-        match ← transport.read height false with
-        | .ok (some stored) =>
-            match stored.entries.head? with
-            | some entry => pure entry.tag
-            | none => return .error "durable head entry missing"
-        | .ok none => return .error "durable store is not initialized"
-        | .error message => return .error message
+  let tag ← match ← loaded.headTagOrRead transport with
+    | .ok tag => pure tag
+    | .error message => return .error message
   match DurableHistory.Head.verify (DurableHistory.StoreIdentity.ofOpen key loaded.logStart) height tag
       loaded.chain frontier with
   | .ok head => return .ok head.indexRoot

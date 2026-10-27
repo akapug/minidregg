@@ -222,7 +222,8 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
           return (installed, .exact kind
             ⟨afterCheckpoint tagged checkpointStored,
               (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,
-              prepared.entryExact⟩)
+              prepared.entryExact,
+              (afterCheckpoint_headTag tagged checkpointStored).trans rfl⟩)
         else return (false, .ordinary .contention)
   match observation with
   | .installed => confirm true .installed
@@ -327,6 +328,16 @@ def tipIs (transport : Transport) (height : Nat) (entry : Entry) : IO (Except St
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) => return .ok (stored.head = height && stored.entries == [entry])
+
+/-- The opened Store's identity for authenticating this image's head
+(`DurableHistory.StoreIdentity.ofOpen`, minted only here): `none` when the
+Store's key is unreadable. -/
+def headStore {rootBytes : List UInt8 → Digest} (transport : Transport)
+    (loaded : Loaded rootBytes) :
+    IO (Option DurableHistory.StoreIdentity) := do
+  match ← transport.key with
+  | .error _ => return none
+  | .ok key => return some (DurableHistory.StoreIdentity.ofOpen key loaded.logStart)
 
 /-- Bounded contention retry for an internal intent whose admission does not
 depend on a journal-wide clock. Each retry reloads. -/
