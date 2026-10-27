@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# JFEEDBACK (PLACE §2.3, §5 item 4, client half): friends talk in a room through
-# `mini shell` on this journey's live Store.
+# JFEEDBACK (PLACE §2.3, §5 item 4, client half): a member reports a problem
+# into its own feedback room through `mini shell` on this journey's live Store;
+# the operator reads it with its context; no other member can read it.
 #
-# Five friends are enrolled and provisioned the way OPERATOR.md does it (as in
-# j12): alice founds `commons`; bob, carol and the Discord bridge are invited;
-# dave is an outsider until alice invites him late. Every chat line is typed
-# into a friend's own `mini shell --line` session.
+# Three friends are enrolled and provisioned the way OPERATOR.md does it (as in
+# j12; the enrollment names are prefixed `jchat-`, see the body). alice is the
+# operator: she founds `feedback-NAME` and invites the member, who joins it as
+# `feedback` -- the exact lines infra adds at enrolment. Every chat line is
+# typed into a friend's own `mini shell --line` session.
 #
-# Rows print `name<TAB>expect=…<TAB>got=…<TAB>detail`. Both poles of every verb:
-# say/tail in order; an outsider's join and tail refused; carol cannot append
-# to bob's stream (the author law, at the Host); concurrent says by three
-# friends with no re-plan and one merge order for every reader and across a
-# restart; --re and --to; topic/pin by a member shown ignored, by the founder
-# effective; reactions; a late joiner sees all of it; a tampered held payload
-# prints [payload unavailable]; --follow; the Discord mirror both ways with no
-# loop; a cold audit re-admits every record. Latency of `say` and of a
-# 200-entry `tail` is measured beside the box's load.
+# Rows print `name<TAB>expect=…<TAB>got=…<TAB>detail`. bob reports from a
+# refusal context (`feedback --from w-refused1 --clause … --page /doc/paper …`);
+# the operator's `reports` shows the text with its client, attempt, clause and
+# page; `reports --digest` is the one relay line; `tail --in feedback-bob`
+# renders the report kind; carol's own room shows her report and never bob's;
+# carol importing bob's room grant and crafting a room record for it is still
+# refused `no-grant` at her first signed read (a capability is held by its
+# grantee: RefusalReason.capabilityChecks' holder check answers `noGrant`).
 #
-# Needs: JFEEDBACK_DISCORD_DIR = a directory holding `mini-discord-mirror` and
-# `fake-discord` built from native/discord-entrance (the mirror rows FAIL
-# without it). Hook contract: journey.sh. Last stdout line: the row table.
+# Not claimed here: `feedback --via discord` (the mirror is JCHAT's surface) and
+# the day limit (10/day), which no law shape counts posts per day yet (owed).
+# Hook contract: journey.sh. Last stdout line: the row table.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/../journey-private.sh"
 umask 077

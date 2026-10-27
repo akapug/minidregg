@@ -2718,7 +2718,7 @@ mod tests {
 
     #[test]
     fn the_roster_reads_founder_and_member_rows() {
-        let declaration: Vec<String> = (1001..=1013).map(|f| f.to_string()).collect();
+        let declaration: Vec<String> = (1001..=1015).map(|f| f.to_string()).collect();
         let view = json!({"type":"resource","cell":{"root":"1","declaration":declaration,"declaredFrom":"2000","entries":[
             {"key":{"type":"object","resource":"9","field":"1008"},"value":"0"},
             {"key":{"type":"object","resource":"9","field":"2000"},"value":"100"},
@@ -2733,7 +2733,7 @@ mod tests {
             Roster { founder: Some("100".into()), members: vec![("100".into(), "500".into()), ("200".into(), "600".into()), ("300".into(), "700".into())] }
         );
         // A room born under room schema v1 is refused by name, not misread.
-        let mut v1: Vec<String> = (2..=1013).map(|f| f.to_string()).collect();
+        let mut v1: Vec<String> = (2..=1015).map(|f| f.to_string()).collect();
         v1.sort();
         let old = json!({"type":"resource","cell":{"root":"1","declaration":v1,"entries":[
             {"key":{"type":"object","resource":"9","field":"2"},"value":"100"}]}});

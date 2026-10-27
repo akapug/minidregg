@@ -44,16 +44,30 @@ the newest built main that passed the gate; each is reported in one line, and in
 | 13 | a75d89d6 | host stage OOM-killed by co-tenant memory on swarm.slice |
 | main a7b5afec | — | stopped by PID on the coordinator's word (integ8/stop-main.list) |
 | 14 | aa9366f8 | phase A: host stage rc=1 at 21:14 (integ8/COMMANDS.log) |
-| 14 A2 | 36f719cc5 | running since 21:22: `integ4/cut14b.sh` (pid files cut14b.pid, cut14b-inner.pid): host closure + codec regen in integ8; the regen diff lands in `integ8/regen.patch` |
+| 14 A2 | 36f719cc5 | host stage rc=1 at 21:37 (903 s, peak 16.1 GB): only Kernel.ResourceBirthPolicyController, lean-audit-c's three proofs that never elaborated; fixed on main 61bf01e1d (verified by `lake env lean` in integ8, seconds per try); no regen ran |
+| 14 A3 | 8103b29a4 | host stage rc=1 at 21:53 (566 s, peak 16.2 GB): only Kernel.PlatformCell (c0b2d6ab1's seventh Admits conjunct unpropagated to four proofs); fixed 26fcdd889 |
+| 14 A4 | 26fcdd889 | running since 21:54: `integ4/cut14d.sh` (pid file cut14d.pid): host closure + regen (logs host-A4.log, regen-A4.log); carries hermes, fb15f121b, e7958d3b9 (its first elaboration) |
 
-Main since aa9366f8 (also to build): pd-host-rate 9f9bac79 (its test-host-operations reds fixed), oracle-lifetime-grant
-44d55995, oracle-grant-factory 671e614f, lean-audit-c 86f15d3c (main = bca2cc59). The oracle branches add Lean
-fixtures, so the census may want the regen again over the newer tree.
+A3's tree (main 8103b29a4) holds everything since aa9366f8: pd-host-rate, oracle-lifetime-grant, oracle-grant-factory,
+lean-audit-c, un-effects 2acd8acf (effect Plan; its codec pins re-emit with this regen), un-pb-twins 134535c2,
+demo-seed, app-recipes (rows validator aeee8349c191e8506 runs them on the candidate; Wekan/WordPress/IPython need
+MINI_IMPORT_PROFILE=market-large-v1), snipe-rate-row (its report at docs/evidence/snipe-rate-row-2026-10-27.md) and
+un-web-front 0da04999 (front-page document; infra's step 9c depends on it).
+After A3's tip (Rust only, in the full build): hermes 68394077 (6f4251c21; contained tools, room fields 1014/1015,
+J14_TOOLS row) and fb15f121b (redteam test initializer for un-web-front's Shell.front_doc; the mini bin's tests did
+not compile). The first candidate carrying both bc88a5ab (frame v8)
+and hermes 68394077 (any full build from main >= fb15f121b): send its sha and path to L4 (ac2a5ad7827eb4744) and
+the coordinator at once; L4 runs J14_TOOLS against it (3315a908 refuses the v8 genesis). Unit
+mini-grain-controller@9870001 is free (it was L4's orphan). Also after A3's tip: e7958d3b9 (NativeHost.birthRejection/birthReason arms for
+f2010f574's platformUnavailable/platformStale; A3 is expected to red at Kernel.NativeHost and its dependents,
+elaboration of the fix pending NativeHostReplay.olean). L1c (lean-audit-c a281e53b8, e59846239; deletes those two
+constructors with pricedAt, drops e7958d3b9's arms on merge; unbuilt, not to merge until its warm-tree build
+elaborates) seeds its dregg-ref tree from the integ8 copy; tell it when the copy lands.
 
-Next steps: when phase A2 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
+Next steps: when phase A4 ends, carry on as planned: commit regen.patch onto main (from the Mac: scp the patch, `git apply`, commit, push); start the full
 build at that sha in integ8 (a copy of main-next.sh with the tip fixed; seats 4 on a clear slice; check swarm.slice
 for co-tenants first); if the census still reds (oracle fixtures), rerun the regen there once more. When a host
-stage ends cleanly (A2's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
+stage ends cleanly (A4's, if it does), name that clean host-stage tree, `/build/lanes/integ8/src`, to infra
 (aed5ecf506cf840af) and the coordinator so dregg-ref gets its warm tree. Report each candidate in one line; the coordinator spawns a rows validator for it (featured-qualify,
 batch tables, Hermes/tier, japps co-edit, codex's Oracle v7 world).
 
@@ -80,8 +94,9 @@ only `.lake/packages`; Lake's artifact cache restores the build dir as fresh ino
 
 ## Named reds outstanding
 
-- un-pb-twins d8cc7d72: not merged; redoes un-pb-wal's dealer commit/emit in native/private-backend (dzk_store.rs,
-  sh2t_id_store.rs, scripts/check-rust-tests.sh). Waits for the lane to merge main and keep one design.
+- None open on main beyond A3's outcome (un-pb-twins landed at 134535c2 via 36ce6bd3d).
+- A lane's "proved" is a claim until the integrator's build elaborates it: lean-audit-c's three proofs never
+  had (fixed 61bf01e1d).
 - Cut 13 carries three flag days (lean-critical, un-effects, hot-path-v4): codec-shapes-regen.py runs once on the
   box if the census reds on moved fingerprints.
 

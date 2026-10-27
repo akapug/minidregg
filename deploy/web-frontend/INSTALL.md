@@ -80,6 +80,14 @@ The unit passes `--registry /var/lib/mini/candidate/current/protocol/host-operat
 from the candidate's own file, read-only. `MINI_WEB_FRAME_SRC` is the CSP `frame-src` for grains
 opened in a pane (L13's per-grain origins, e.g. `https://*.demo.dregg.online`); empty means `'none'`.
 
+**The public front page's document** is one name in `/etc/mini/front-doc` (the demo seed's
+`welcome`: `printf 'welcome\n' >/etc/mini/front-doc`). `mini-web-spawn` reads it, like
+`/etc/mini/public-subject`, and passes `--front-doc NAME` to the public reader's body only. `/` then
+renders that published document through the ordinary page path, with a link to `/doc`, the index
+of everything published. If the file is absent, empty or not a reference name (`[A-Za-z0-9-]`, at
+most 64), or the document is not published to the public reader, `/` is the index as before.
+Members' front pages are unchanged.
+
 **What the helper does on its own**, besides spawning: every 60 s it sweeps every member home's
 `workspace/proposals/*/recipient-reference.json` for references addressed to the public subject and
 copies each into `/var/lib/mini/sessions/public/inbox/NAME.TARGET.json` (owned by `mini-s-public`,

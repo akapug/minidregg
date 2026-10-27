@@ -73,7 +73,7 @@ journey, demo, rooms, m3, m4, m8, fleetsign, jserve. No full run exists on cuts 
 `market-writes/*.sh`). Class L apps need the world brought up with `MINI_IMPORT_PROFILE=market-large-v1`
 (Wekan, WordPress), the oracle with `operator-appliance-v1`. Each app is two rows: lifecycle (create,
 install, share, start, enrol, page) and one write beneath the HTML. All recipes are reasoned, none
-proven live. Owner: L13 app market (successor of lane/app-market; batch lanes app-batch-*). Last runs:
+proven live (lane/app-recipes rewrote the 2026-10-27 reds: HedgeDoc over socket.io, DokuWiki with the session cookie and every hidden form field, Hledger over `PUT /add`, Datasette a recorded read that PASSES, Hugo/Hakyll/OrgTodo/YetAnotherTODO/SandCal from their package sources; HakyllCMS's START exit and HackerCMS's missing bridge config are named in `market-writes/b4.sh`). Owner: L13 app market (successor of lane/app-market; batch lanes app-batch-*). Last runs:
 dregg-build 2026-10-27 20:36-21:13Z on w11 / `app-batch-*-runs`.
 
 | row (app) | table, letter | command extra | lifecycle | write |
@@ -93,6 +93,7 @@ dregg-build 2026-10-27 20:36-21:13Z on w11 / `app-batch-*-runs`.
 | Hugo, WordPress, HackerCMS, HakyllCMS | b4 j..m | WordPress: `MINI_IMPORT_PROFILE=market-large-v1` | FAIL (ingest timeout 436 s), PASS 1009 s, FAIL (`bridge-only SPK lacks signed config`), FAIL (resident exited before START) | WordPress FAIL "recipe pending" |
 | SandForms, OwnTracks, Badgepack, Hummingbird | b6 j..m | | PASS 850 s, FAIL (bridge, install), PASS 1045 s, FAIL (bridge, install) | FAIL "recipe pending" x2 |
 | WBO, HedgeDocRT, Wekan, Gogs | rt j..m | Wekan: `MINI_IMPORT_PROFILE=market-large-v1` (refused `SPK exceeds decoded bound` under standard) | PASS 936 s, FAIL 525 s, FAIL 167 s, PASS 999 s | FAIL "recipe pending" x2 |
+| IPython Notebook | b8 j | `QUALIFY_TABLE=scripts/spk-platform/market-batches/b8.tsv`; world with `MINI_IMPORT_PROFILE=market-large-v1` (186 MB spk, 668 MB unpacked); write = kernel started over REST, one cell executed over the kernel websocket (`jupyter-exec.py`), `featured.ipynb` saved and read back | not run | not run (recipe written, lane/app-recipes) |
 | DAV rows (Davros WebDAV tree, SandCal CalDAV probe) | `market-writes/dav.sh` | a candidate carrying `dfdecbbac` (on main) | not run | not run |
 | member install debit (`apps-e2e.sh`) | | `MEMBER_FUNDING=10000 APPS_MAX=50000 apps-e2e.sh $RUN/WORLD.env OUT <appIds>` after `mini apps bootstrap` | not run (needs lean-l13-laws in the candidate) | debit into INSTALL.md §4 |
 
@@ -131,7 +132,7 @@ Run on a worktree at the candidate's commit, one `swarm-build`, PID file. Eviden
 | grain-runtime acceptance (plain, `PROVIDER_BOOTSTRAP=1`, profiled) | grain runtime through the shared genesis | `bash $T/native/grain-runtime/acceptance.sh` x3 | genesis | custody-drivers | not run |
 | jpay6 extractors: bootstrap-native-controller, journeys/byok-native (+`--ssh`), inference-scheduler native-journey and native-two-member | jpay6's genesis seam | each driver with the candidate's binaries | genesis | custody-drivers | not run |
 | fn-e1e2 setup-mini | fn setup through the shared writer | `bash $T/scripts/fn-e1e2/setup-mini.sh` | genesis | custody-drivers | not run (fn out of the demo: low priority) |
-| per-subject request rate | `requestRate.limit 3` refuses the 4th by `rateLimited` | row to write (pd-host-rate) | genesis with `requestRate` | product deputy | row not written |
+| per-subject request rate | `requestRate.limit 3`: the 4th signed read in the window refused `rate-limited` with its retry; another subject and the exempt sponsor admitted at that moment; after the window admitted | `JR rate` (driver `native/resource-client/rate-journey.sh`) | genesis with `requestRate` | product deputy | row written (lane/snipe-rate-row); never run |
 | mainnet pay-to-enrol | one real 50 DREGG enrolment | demo box only | the demo | ember / infra | not the validator's (never the demo box) |
 
 ## 7. Oracle (codex; `docs/ORACLE-GRAIN-2026-10-27.md`, `docs/evidence/oracle-*-2026-10-27.md`)
@@ -205,7 +206,7 @@ the Oracle journey uses `grain-store.sh`.
 
 | row | proves | command | world | owner | last known |
 |---|---|---|---|---|---|
-| JFEEDBACK | a member reports into its own `feedback-NAME` room; the operator reads it; no member reads another's | `JFEEDBACK_DISCORD_DIR=<mini-discord-mirror + fake-discord> JS "JFEEDBACK"` (`--only JFEEDBACK`) | template (J0) | product deputy (pd-feedback) | not run on any candidate; day limit (10/day) not built |
+| JFEEDBACK | a member reports into its own `feedback-NAME` room; the operator reads it; no member reads another's | `JS "JFEEDBACK"` (`--only JFEEDBACK`) | template (J0) | product deputy (pd-feedback) | not run on any candidate; day limit (10/day) not built; `--via discord` not in the row (header corrected against the code, lane/snipe-rate-row) |
 
 ## 10. FOUC
 

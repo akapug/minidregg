@@ -179,6 +179,7 @@ esac
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        sandbox: None,
         foreground_tool: None,
         tool_task: None,
         dispatch_task: Some(DispatchTask {

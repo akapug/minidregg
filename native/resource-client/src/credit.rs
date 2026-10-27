@@ -28,7 +28,7 @@ pub(crate) const HERMES_TOPIC: &str = "hermes";
 
 /// Fields a founder sets by `tariff ROOM set FIELD N`; the rest are written
 /// by `room concierge` (install) and name accounts and subjects.
-const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period", "open", "hermes/provider"];
+const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period", "open", "hermes/provider", "hermes/tools", "hermes/compute"];
 
 /// The topic a concierge's refund publishes on the till.
 pub(crate) const REFUND_TOPIC: &str = "refund";

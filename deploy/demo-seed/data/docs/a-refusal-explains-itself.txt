@@ -1,0 +1,7 @@
+# A refusal explains itself
+Most systems say "permission denied" and stop. Mini tells you which rule refused you and with what values.
+Try it on house-rules: you may read it, but you were never given the right to change it. Type: doc append mine house-rules "hello"  and then: submit mine
+The answer is a refusal. Type: why   to see the rule that said no, with the request it judged.
+Now type: can --any   and Mini prints the one request the law would have admitted from where you stand, as a line you can paste.
+Compare what-is-mini for the idea, and field-notes for a document you MAY write to.
+Every refusal is a receipt too. It sits in your history next to the things that worked.
