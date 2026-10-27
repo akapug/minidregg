@@ -454,3 +454,18 @@ once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
 
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.
+
+## State (lane L4, 2026-10-27)
+
+- **J14 on the room resident** passes whole on lane/hermes: run 24, 153/153 rows, upstream Hermes
+  Agent 6d8a8beb in the gated worker, pool route, `--network none` + bridge, every lane binary
+  including the shell (dregg-build `/build/lanes/hermes-live-run/tip-j14-24.log`). Runs live under
+  `/build/lanes/hermes-live-run/` (the sudo rule for the root-owned provider table names that
+  root); scripts in `/build/lanes/hermes-tier-run/` (`run-j14-tip.sh`: `J14_ROUTE`, `J14_TIER`).
+  J14 uses the user unit `mini-grain-controller@9870001`: one J14 at a time per account.
+- **Subscriber tier row** (`J14_ROUTE=zai J14_TIER=1`): subscribe, concierge window, roster row,
+  join-file drop and `chat join` pass; the member cap and expiry rows were last in flight (tier-7).
+- **Open:** the join flow must hand each enrolled member an observe reference to `subscribers`
+  before the Subscribe form; a pool row's default member cap on the OpenRouter row is 10 worst-case
+  calls a day (about two asks); a settle that outlives the 300 s native-call deadline is re-prepared
+  only when no call.bin exists.
