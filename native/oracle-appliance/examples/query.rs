@@ -79,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         encoding: String::new(),
                         bytes: input,
                     }),
+                    dav: Default::default(),
                 },
                 minidregg_oracle_appliance::MAX_REPLY,
                 Duration::from_secs(140),
