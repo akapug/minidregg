@@ -94,6 +94,15 @@ G=$JOURNEY_D/g
 J14_ROUTE=${J14_ROUTE:-user}
 case $J14_ROUTE in user|pool|zai) ;; *) echo "J14_ROUTE must be user, pool or zai" >&2; exit 2 ;; esac
 J14_TIER=${J14_TIER:-}
+# J14_TOOLS=1: Hermes's grain is created with sandbox class M; alice grants
+# lab's resident the file, terminal and Python tools (hermes/tools 7,
+# hermes/compute 10); bob asks for sandbox work; Hermes writes and runs a
+# Python script in /scratch, the planted escapes fail inside the sandbox, the
+# result leaves as one digest line, the CPU is paid as turns, and no scratch
+# survives (docs/HERMES-TOOLS-2026-10-27.md §7). Needs J14_HERMES_ROOT (a
+# root built from this tree's patch).
+J14_TOOLS=${J14_TOOLS:-}
+[ -z "$J14_TOOLS" ] || [ -n "${J14_HERMES_ROOT:-}" ] || { echo "J14_TOOLS needs J14_HERMES_ROOT (upstream Hermes)" >&2; exit 5; }
 POOL_ROW=pool; [ "$J14_ROUTE" = zai ] && POOL_ROW=zai-glm
 WEEK=40 PERIOD=${J14_PERIOD:-260}
 PURSE_T=9870003 USER_FEE=5 POOL_FEE=7 POOL_IN=100000 POOL_OUT=200000 MODEL=mini-hermes-protocol-fixture
@@ -468,6 +477,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
   --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
   --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" --arg pass "$J14_PASS_SECONDS" --arg pool "$POOL_ROW" \
+  --arg tools "$J14_TOOLS" \
   --arg ws "$G/state/resource-workspace" --arg home "$G/state/room-home" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
   {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
@@ -486,7 +496,8 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}
        + (if $route != "user" then {provider:$pool}
           else {onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey"} end))},
-   room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
+   room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}
+   + (if $tools != "" then {sandbox:"M"} else {} end)' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
   "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
 cp "$OUT" "$SD/grain-created.json"
@@ -662,6 +673,44 @@ if [ -n "$J14_TIER" ] && [ "$J14_ROUTE" != user ]; then
     jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("member-day-ceiling")))' "$SD/tail-cap.jsonl"
   provider_table 40000000
   operator cap "TABLE: the member day cap restored" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
+fi
+
+if [ -n "$J14_TOOLS" ]; then
+  # -------------------------------------------- sandbox tools: files, a terminal and Python inside the worker
+  named tools bob "tariff lab set hermes/tools 7" "founder|capability|refused|grant"
+  ok tools alice "tariff lab set hermes/tools 7"
+  ok tools alice "tariff lab set hermes/compute 10"
+  # A stand-in for another resident's state: a host path holding a marker.
+  OTHER=$SD/other-resident/state; mkdir -p -m 700 "$OTHER/scratch"; echo other >"$OTHER/scratch/marker"
+  TT0=$(paid_turns)
+  ok tools bob "ask lab please compute the sum of squares 1..100 in the sandbox and append it to the digest paths: $H/hermes/keys $G/state $OTHER"
+  hermes tools "runs a Python script in the sandbox, the planted escapes fail, the result leaves as a digest line"
+  SHOWN=$(tail -1 "$PLOG.shown.jsonl" 2>/dev/null || tail -1 "${PLOG%.log}.shown.jsonl")
+  checkp tools "the session offers exactly the seven granted sandbox tools beside Mini's" \
+    sh -c "printf '%s' '$SHOWN' | jq -e '[.tools[] | select(startswith(\"mcp__\") | not)] | sort == [\"execute_code\",\"patch\",\"process_manage\",\"read_file\",\"search_files\",\"terminal\",\"write_file\"]'"
+  SBLOG=${PLOG%.log}.sandbox.jsonl
+  sb() { jq -r --arg id "$1" 'select(.id == $id) | .content | tostring' "$SBLOG" 2>/dev/null | tail -1; }
+  checkp tools "the script ran in /scratch: 338350" sh -c "printf '%s' \"\$1\" | grep -q 338350" _ "$(sb sb-run)"
+  checkp tools "ESCAPE /etc: no passwd, no shadow" sh -c "printf '%s' \"\$1\" | grep -q 'No such file'" _ "$(sb sb-etc)"
+  checkp tools "ESCAPE the controller's keys dir ($H/hermes/keys): absent" sh -c "printf '%s' \"\$1\" | grep -q 'No such file'" _ "$(sb sb-keys)"
+  checkp tools "ESCAPE the controller's state dir: absent" sh -c "printf '%s' \"\$1\" | grep -q 'No such file'" _ "$(sb sb-state)"
+  checkp tools "ESCAPE another resident's scratch: absent" sh -c "printf '%s' \"\$1\" | grep -q 'No such file'" _ "$(sb sb-other)"
+  checkp tools "ESCAPE a socket to 1.1.1.1: network unreachable" sh -c "printf '%s' \"\$1\" | grep -qi 'unreachable'" _ "$(sb sb-net)"
+  checkp tools "ESCAPE a nested user namespace: refused" sh -c "! printf '%s' \"\$1\" | grep -q 'rc=0'" _ "$(sb sb-userns)"
+  checkp tools "ESCAPE /proc: no MINI_ variable in pid 1's environment" sh -c "printf '%s' \"\$1\" | grep -qE '(^|[^0-9])0([^0-9]|\$)'" _ "$(sb sb-proc)"
+  checkp tools "the result left through Mini: one digest line, by Hermes's paid append" \
+    sh -c "cd '$WS/alice' && '$SHELL_BIN' shell --socket '$SOCKET' --host '$HOST' --config '$CONFIG' --workspace '$WS/alice' --home '$H/alice' --line 'doc show lab-digest' 2>/dev/null | grep -c 'sandbox: sum of squares 1..100 = 338350' | grep -qx 1"
+  CPU=$(ls -t "$G/state"/mini-grain-t"$PARENT_T"-o*.cpu 2>/dev/null | head -1)
+  USEC=$(sed -n 's/^mini-grain-cpu-v1 \([0-9]*\)$/\1/p' "$CPU" 2>/dev/null)
+  require_nat tools "the gate's CPU record for the sandbox worker ($CPU)" "$USEC"
+  LEDGER=$(ls -t "$RSTATE"/compute-*.json 2>/dev/null | head -1)
+  K=$(jq -r '.turns // empty' "$LEDGER" 2>/dev/null)
+  require_nat tools "the compute ledger's turn count" "$K"
+  check tools "compute turns = ceil(CPU / 10 s)" "$(( (USEC + 9999999) / 10000000 ))" "$K"
+  check tools "every compute turn is paid" "$K" "$(jq -r '.paid' "$LEDGER" 2>/dev/null)"
+  checkp tools "the till took the append and the $K compute turns (at least)" sh -c "[ $(( $(paid_turns) - TT0 )) -ge $(( K + 1 )) ]"
+  checkp tools "no sandbox worker unit is left" sh -c "! systemctl --user list-units --no-legend --state=active 'mini-grain-t$PARENT_T-*' | grep -q ."
+  checkp tools "nothing from the scratch persists on the host" sh -c "[ -z \"\$(find '$G' '$SD/worker-work' -name sum.py 2>/dev/null)\" ]"
 fi
 
 # ------------------------------------------------ topup

@@ -128,6 +128,10 @@ pub(crate) struct Spec {
     provider: Option<ProviderPurse>,
     #[serde(default)]
     room: Option<Value>,
+    /// `S`, `M` or `L`: grant upstream Hermes's sandbox toolsets up to the
+    /// class bounds (docs/HERMES-TOOLS-2026-10-27.md); absent, none.
+    #[serde(default)]
+    sandbox: Option<String>,
 }
 
 const SPEC_TYPE: &str = "mini-grain-create-v1";
@@ -254,6 +258,12 @@ impl Spec {
         if self.owner.key == self.worker_key.key || self.owner.subject == self.worker_key.subject {
             return Err("owner and worker must be distinct subjects with distinct keys".into());
         }
+        if let Some(class) = &self.sandbox {
+            crate::sandbox_tools::Sandbox::for_class(class)?;
+            if self.worker.network != "none" || self.room.is_none() {
+                return Err("sandbox tools need worker.network none and a room".into());
+            }
+        }
         Ok(())
     }
 
@@ -363,6 +373,10 @@ impl Spec {
                 task.insert(key.into(), value);
             }
             config["providerTask"] = Value::Object(task);
+        }
+        if let Some(class) = &self.sandbox {
+            let sandbox = crate::sandbox_tools::Sandbox::for_class(class).expect("sandbox class checked in validate");
+            config["sandbox"] = serde_json::to_value(sandbox).expect("sandbox serializes");
         }
         config
     }

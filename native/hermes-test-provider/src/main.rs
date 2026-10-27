@@ -887,6 +887,72 @@ fn digest_covered(text: &str) -> u64 {
 /// for each unanswered "since H" question; round 3 writes (index links for
 /// unlinked documents, a digest section every N entries, answers, an edit a
 /// member asked for); round 4 reports each refused edit in the stream.
+/// The sandbox tools (docs/HERMES-TOOLS-2026-10-27.md §7): when the selected
+/// request asks for sandbox work and the session offers the terminal and the
+/// file tools, write and run a small Python script in /scratch, run the
+/// planted escapes, then append the computed line to the digest; afterwards
+/// the ordinary librarian rounds answer. Every sandbox tool result is kept in
+/// `LOG.sandbox.jsonl` for the journey. None: not a sandbox request.
+fn sandbox_reply_for(request: &Value, log: &Path) -> Option<Result<(Value, &'static str, String), String>> {
+    let messages = request.get("messages")?.as_array()?;
+    let user = messages.iter().rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))?;
+    let text: String = match &messages[user]["content"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect(),
+        _ => return None,
+    };
+    let brief: Value = serde_json::from_str(text.rsplit_once("Assignment: ").map_or(text.as_str(), |(_, r)| r).trim()).ok()?;
+    if !brief["selectedRequest"]["text"].as_str().unwrap_or("").contains("sandbox") { return None; }
+    let terminal = room_tool(request, "terminal")?;
+    let write_file = room_tool(request, "write_file")?;
+    let current = &messages[user..];
+    let issued: Vec<String> = current.iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .flat_map(|m| m.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default())
+        .filter_map(|c| c.get("id").and_then(Value::as_str).map(str::to_owned)).collect();
+    let calls = |list: Vec<Value>, stage: &str| Some(Ok((json!({"role":"assistant","content":null,"tool_calls":list}), "tool_calls", stage.to_owned())));
+    if !issued.iter().any(|id| id == "sb-write") {
+        return calls(vec![call(write_file, "sb-write", json!({"path":"/scratch/sum.py",
+            "content":"print(sum(i * i for i in range(1, 101)))\n"}))], "sandbox-write");
+    }
+    // The script and the planted escapes; each must fail inside the sandbox.
+    const PROBES: &[(&str, &str)] = &[
+        ("sb-run", "python3 /scratch/sum.py"),
+        ("sb-etc", "cat /etc/passwd /etc/shadow; echo rc=$?"),
+        ("sb-keys", "ls -la \"$MINI_J14_HOST_KEYS\" 2>&1; echo rc=$?"),
+        ("sb-state", "ls -la \"$MINI_J14_HOST_STATE\" 2>&1; echo rc=$?"),
+        ("sb-other", "ls -la \"$MINI_J14_OTHER\" 2>&1; echo rc=$?"),
+        ("sb-proc", "ls /proc | grep -c '^[0-9]'; cat /proc/1/environ | tr '\\0' '\\n' | grep -c '^MINI_'"),
+        ("sb-net", "python3 -c \"import socket; socket.create_connection(('1.1.1.1', 443), 3)\" 2>&1 | tail -1; echo rc=$?"),
+        ("sb-userns", "unshare -U true 2>&1; echo rc=$?"),
+        ("sb-scratch", "ls /scratch; df -k /scratch | tail -1"),
+    ];
+    if !issued.iter().any(|id| id == "sb-run") {
+        // Host paths are filled in by the journey from what it names in the brief
+        // request text after `paths:`; absent, the probe names a fixed host path.
+        let paths: Vec<&str> = brief["selectedRequest"]["text"].as_str().unwrap_or("")
+            .split_once("paths:").map(|(_, p)| p.split_whitespace().collect()).unwrap_or_default();
+        let fill = |command: &str| command.replace("$MINI_J14_HOST_KEYS", paths.first().copied().unwrap_or("/var/lib/mini"))
+            .replace("$MINI_J14_HOST_STATE", paths.get(1).copied().unwrap_or("/var/lib/mini"))
+            .replace("$MINI_J14_OTHER", paths.get(2).copied().unwrap_or("/home"));
+        return calls(PROBES.iter().map(|(id, command)| call(terminal.clone(), id, json!({"command":fill(command)}))).collect(), "sandbox-run");
+    }
+    if !issued.iter().any(|id| id == "sb-append") {
+        for (id, _) in PROBES {
+            let content = tool_result(current, id).and_then(|m| m.get("content")).cloned().unwrap_or(Value::Null);
+            let _ = log_event(&log.with_extension("sandbox.jsonl"), &json!({"id":id,"content":content}).to_string());
+        }
+        let run = tool_result(current, "sb-run").and_then(|m| m.get("content")).map(|c| c.to_string()).unwrap_or_default();
+        let result = if run.contains("338350") { "338350" } else { "unavailable" };
+        let digest = brief["docs"].as_array().into_iter().flatten()
+            .filter_map(|d| d.as_str().or_else(|| d.get("name").and_then(Value::as_str)))
+            .find(|d| d.ends_with("-digest"))?.to_owned();
+        let append = room_tool(request, "mini_doc_append")?;
+        return calls(vec![call(append, "sb-append", json!({"doc":digest,"text":format!("sandbox: sum of squares 1..100 = {result}")}))], "sandbox-export");
+    }
+    None
+}
+
 fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), String> {
     let model = request.get("model").and_then(Value::as_str).ok_or("model absent")?;
     if model != MODEL {
@@ -1309,7 +1375,10 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             let shown = json!({"brief":request.pointer("/messages/0/content"),
                 "tools":request["tools"].as_array().into_iter().flatten().filter_map(|t| t.pointer("/function/name").cloned()).collect::<Vec<_>>()});
             let _ = log_event(&log.with_extension("shown.jsonl"), &shown.to_string());
-            room_reply_for(&request)
+            match sandbox_reply_for(&request, log) {
+                Some(reply) => reply,
+                None => room_reply_for(&request),
+            }
         }
     } {
         Ok(reply) => reply,
@@ -1431,7 +1500,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
-        write_stream(&mut server, "fixture-id", &json!({"content":"ok"}), "stop", true)
+        write_stream(&mut server, "fixture-id", &json!({"content":"ok"}), "stop", StreamUsage::Terminal)
             .unwrap();
         drop(server);
         let mut reader = BufReader::new(client);
