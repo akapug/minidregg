@@ -15,7 +15,7 @@ def noRecordMarker : UInt8 := 253
 def neverForwardedMarker : UInt8 := 254
 
 /-- Host outcome envelope for an outcome the Host has NOT proven to be no-append: uncertain, unavailable, contention, and a handler that threw after dispatch on an append operation (answered uncertain). Since lane/lean-critical never a proven refusal: those answer under NO_RECORD (253) -/
-def hostRefusalMarker : UInt8 := 255
+def hostOutcomeMarker : UInt8 := 255
 
 /-- Active request operations whose receiver never appends to the durable log
 (registry `effect: none`). A handler of one of these that throws is answered a
