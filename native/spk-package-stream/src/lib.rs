@@ -38,18 +38,57 @@ pub struct Limits {
     pub raw_bytes: u64,
     pub decoded_bytes: u64,
     pub decoder_memory_bytes: u64,
+    /// The intake's wall-clock cap, the most `wall_seconds` can grant.
+    pub wall_cap_seconds: u64,
 }
+
+/// The intake's wall clock grows with the work: a fixed floor for the process and the
+/// signature, then a per-MiB allowance for decoding and writing the archive. The ingest unit runs
+/// at one CPU (`CPUQuota=100%`), where xz decoding, hashing and writing the up-to-3x decoded tree
+/// take about 1 s per raw MiB. The allowance is three times that, so a shared, loaded build or
+/// demo box still finishes. The bound stays proportional to the bytes the profile already
+/// admitted, so a package cannot buy more time than its own size, and the profile's cap still
+/// holds.
+pub const WALL_FLOOR_SECONDS: u64 = 60;
+pub const WALL_SECONDS_PER_MIB: u64 = 3;
+
 impl Limits {
     pub const DEFAULT: Self = Self {
         raw_bytes: 256 * 1024 * 1024,
         decoded_bytes: 768 * 1024 * 1024,
         decoder_memory_bytes: 128 * 1024 * 1024,
+        wall_cap_seconds: 900,
+    };
+    /// `market-large-v1`, for the market's class L apps (a bundled database or runtime: Wekan's
+    /// mongod and Meteor bundle decode past 768 MiB). It raises only the raw and decoded byte bounds:
+    /// raw 512 MiB, decoded 2 GiB. The parser is the same streaming verifier with the same
+    /// 128 MiB decoder memory, so its memory use does not grow. The decoded bound is enforced
+    /// twice: here, as the sum of extracted member lengths (so aliased members cannot amplify
+    /// it), and as the ingest unit's `LimitFSIZE`. One image is kept per package hash per
+    /// store, so a store's image disk is at most 2 GiB times the number of distinct large
+    /// packages its operator's market admits. The operator selects the profile; package
+    /// metadata never does.
+    pub const MARKET_LARGE: Self = Self {
+        raw_bytes: 512 * 1024 * 1024,
+        decoded_bytes: 2 * 1024 * 1024 * 1024,
+        decoder_memory_bytes: 128 * 1024 * 1024,
+        wall_cap_seconds: 1800,
     };
     pub const OPERATOR_APPLIANCE: Self = Self {
         raw_bytes: 8 * 1024 * 1024 * 1024,
         decoded_bytes: 20 * 1024 * 1024 * 1024,
         decoder_memory_bytes: 128 * 1024 * 1024,
+        wall_cap_seconds: 1800,
     };
+
+    /// The intake wall clock for a raw package of `raw_len` bytes: the floor plus the per-MiB
+    /// allowance, at most the profile's cap.
+    pub fn wall_seconds(&self, raw_len: u64) -> u64 {
+        let mib = raw_len.div_ceil(1024 * 1024);
+        WALL_FLOOR_SECONDS
+            .saturating_add(mib.saturating_mul(WALL_SECONDS_PER_MIB))
+            .min(self.wall_cap_seconds)
+    }
 }
 
 /// Operator policy names are stable and never read from the signed archive.
@@ -57,18 +96,21 @@ impl Limits {
 pub enum ImportProfile {
     #[default]
     Standard,
+    MarketLarge,
     OperatorAppliance,
 }
 impl ImportProfile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Standard => "standard-v1",
+            Self::MarketLarge => "market-large-v1",
             Self::OperatorAppliance => "operator-appliance-v1",
         }
     }
     pub fn limits(self) -> Limits {
         match self {
             Self::Standard => Limits::DEFAULT,
+            Self::MarketLarge => Limits::MARKET_LARGE,
             Self::OperatorAppliance => Limits::OPERATOR_APPLIANCE,
         }
     }
@@ -78,6 +120,7 @@ impl std::str::FromStr for ImportProfile {
     fn from_str(name: &str) -> io::Result<Self> {
         match name {
             "standard-v1" => Ok(Self::Standard),
+            "market-large-v1" => Ok(Self::MarketLarge),
             "operator-appliance-v1" => Ok(Self::OperatorAppliance),
             _ => Err(invalid("unknown SPK import profile")),
         }
@@ -649,6 +692,24 @@ mod tests {
             EntryKind::Regular { executable: true }
         ));
     }
+    #[test]
+    fn wall_clock_scales_with_the_package_and_each_profile_keeps_its_cap() {
+        let mib = 1024 * 1024;
+        assert_eq!(Limits::DEFAULT.wall_seconds(0), WALL_FLOOR_SECONDS);
+        // Hugo's ~75 MiB package timed out at the old fixed 120 s on a loaded box.
+        assert_eq!(Limits::DEFAULT.wall_seconds(75 * mib), 60 + 75 * 3);
+        assert_eq!(Limits::DEFAULT.wall_seconds(75 * mib + 1), 60 + 76 * 3);
+        assert_eq!(Limits::DEFAULT.wall_seconds(Limits::DEFAULT.raw_bytes), 828);
+        assert_eq!(Limits::MARKET_LARGE.wall_seconds(Limits::MARKET_LARGE.raw_bytes), 1596);
+        assert_eq!(Limits::OPERATOR_APPLIANCE.wall_seconds(Limits::OPERATOR_APPLIANCE.raw_bytes), 1800);
+        assert_eq!(Limits::DEFAULT.wall_seconds(u64::MAX), 900);
+        let large: ImportProfile = "market-large-v1".parse().unwrap();
+        assert_eq!(large.as_str(), "market-large-v1");
+        assert_eq!(large.limits().decoded_bytes, 2 * 1024 * mib);
+        assert_eq!(large.limits().decoder_memory_bytes, Limits::DEFAULT.decoder_memory_bytes);
+        assert!("market-large".parse::<ImportProfile>().is_err());
+    }
+
     #[test]
     fn raw_decoded_and_decoder_memory_limits_are_independent() {
         let bytes = fixture(Member::regular("data", vec![0; 128 * 1024]));

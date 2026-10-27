@@ -100,8 +100,10 @@ The app's own seccomp policy allows `openat2` (`seccomp/resident-web.policy:72`)
 `deploy/spk-host/spk-ingest` (its usage line names the arguments: `--root SPK_ROOT [--import-profile PROFILE] HOST HOST_SHA256 INBOX_SPK APP_UID`) parses and materializes a
 signed SPK as the Store operator (never root) in a short-lived **user** unit
 with a 2 GiB memory cap (no swap), one CPU, a 16-task cap (`spk-ingest:44-48`), the import
-profile's runtime cap (`standard-v1`: 120 s; `operator-appliance-v1`, selected
-only by the operator broker's config: 1800 s) and a SHA-pinned host
+profile's bounds from the pinned host (`spk-host import-limits PROFILE RAW_BYTES`: the raw and
+decoded caps, and a wall clock of 60 s plus 3 s per raw MiB, at most 900 s for `standard-v1`
+and 1800 s for `market-large-v1` and `operator-appliance-v1`; the profile is selected only by
+the operator broker's config) and a SHA-pinned host
 executable. The unit sets `NoNewPrivileges` and those caps only: it is not
 network- or filesystem-confined. A killed unit is not an installed package. The
 parser verifies the signature, archive hash and manifest, refuses escaping
