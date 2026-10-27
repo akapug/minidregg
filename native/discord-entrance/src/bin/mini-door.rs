@@ -198,6 +198,13 @@ impl Door {
                 None => "Free: the box funds a starting balance (the amount is published once the door's processor has run)".to_owned(),
             };
             body.push_str(&format!("<p><label><input type=radio name=route value=free checked> {funded}</label><br>"));
+            // Only when the door holds seats for invite codes; with no reserve the page says nothing of codes.
+            if state["inviteReserve"].as_u64().unwrap_or(0) > 0 {
+                let open = state["openSeats"].as_u64().unwrap_or(0);
+                let held = state["reservedSeats"].as_u64().unwrap_or(0);
+                body.push_str(&format!("{open} open free seats remain; {held} more are held for people with an invite code (a code is single-use and issued by the operator).<br>\
+                    <label>Invite code, <em>optional</em> (free route only)<br><input type=text name=invite maxlength=64 pattern=\"[A-Za-z0-9-]{{8,64}}\" autocomplete=off></label><br>"));
+            }
         } else {
             let why = state["freeReason"].as_str().unwrap_or("closed");
             body.push_str(&format!("<p>The free route is closed ({}).<br>", html(why)));
@@ -342,11 +349,23 @@ impl Door {
                     "paid" if state["paid"] == true => Route::Paid,
                     _ => return refuse(400, "choose a route the door offers"),
                 };
+                let invite = field("invite").trim();
+                if !invite.is_empty() && (route != Route::Free || state["inviteReserve"].as_u64().unwrap_or(0) == 0) {
+                    return refuse(400, "invite-unknown: this door takes an invite code only on the free route, and only while it holds seats for them");
+                }
+                if !invite.is_empty() && !door::is_invite_code(invite) {
+                    return refuse(400, "invite-unknown: that is not the shape of an invite code");
+                }
+                if invite.is_empty() && route == Route::Free && state["inviteReserve"].as_u64().unwrap_or(0) > 0 && state["openSeats"].as_u64() == Some(0) {
+                    let held = state["reservedSeats"].as_u64().unwrap_or(0);
+                    return refuse(409, &format!("open-seats-gone: the open free seats are taken; {held} remain for people with an invite code"));
+                }
                 let id = match door::new_request_id() {
                     Ok(id) => id,
                     Err(e) => return refuse(503, &e),
                 };
-                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0" }
+                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0",
+                    invite: (!invite.is_empty()).then(|| invite.to_owned()) }
             }
             "/join/sign" | "/join/paid" => {
                 let id = field("id");
@@ -636,5 +655,27 @@ mod tests {
         let out = std::process::Command::new("node").arg(test).output().expect("node is on PATH (the wallet page test needs it)");
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(String::from_utf8_lossy(&out.stdout).starts_with("ok: transfer 50000007 atomic"));
+    }
+
+    #[test]
+    fn the_page_and_the_post_speak_of_invite_codes_only_when_the_door_holds_a_reserve() {
+        let d = door("invite");
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(!page.to_lowercase().contains("invite"), "no reserve, no mention of codes");
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"funding":"10000","inviteReserve":20,"openSeats":12,"reservedSeats":20}"#).unwrap();
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(page.contains("12 open free seats remain; 20 more are held for people with an invite code (a code is single-use and issued by the operator)"), "{page}");
+        assert!(page.contains("name=invite"));
+        // A code rides in the queued request; open seats gone and no code is refused by name.
+        let (status, _) = d.post("/join", b"name=alice&route=free&invite=INVITE001-abcdef", "203.0.113.9", 100);
+        assert_eq!(status, 200);
+        let files = door::spool_list(&d.queue).unwrap();
+        assert!(matches!(Request::parse(&std::fs::read(&files[0]).unwrap()).unwrap(), Request::Join { invite: Some(c), .. } if c == "INVITE001-abcdef"));
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"inviteReserve":20,"openSeats":0,"reservedSeats":20}"#).unwrap();
+        let (status, body) = d.post("/join", b"name=bob&route=free", "203.0.113.10", 101);
+        assert_eq!(status, 409);
+        assert!(String::from_utf8(body).unwrap().contains("open-seats-gone: the open free seats are taken; 20 remain for people with an invite code"));
+        let (status, _) = d.post("/join", b"name=bob&route=free&invite=short", "203.0.113.10", 102);
+        assert_eq!(status, 400);
     }
 }

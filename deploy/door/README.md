@@ -94,6 +94,26 @@ socket.
   `mini-reenroll` has always used).
 - `freeCap`: the total number of free door accounts (default 50). `dailyCap`: free plus paid
   accounts created per UTC day (default 20). `perRun`: requests decided per tick (default 4).
+- `inviteReserve` (default 0, which is a door without invite codes; at most `freeCap`, refused at load
+  otherwise) and `inviteCodes` (an absolute path, required when `inviteReserve` > 0): of the `freeCap`
+  seats, the last `inviteReserve` need an operator-issued invite code. An uncoded free request is
+  admitted only while fewer than `freeCap - inviteReserve` free accounts exist (a coded member counts
+  as a free account, so the reserve is never eaten by uncoded strangers); a coded one while fewer than
+  `freeCap` exist. `dailyCap` and the form's per-/64 limits are unchanged. Refusals are named on the
+  stranger's page: `open-seats-gone` (says how many remain for codes), `invite-unknown`, `invite-spent`.
+  The join page then states the open and the reserved seats, and offers an optional code field; with
+  `inviteReserve` 0 it mentions no codes.
+- **The codes file** (`inviteCodes`; install it root:root, mode 0600; the processor refuses a symlink, a
+  non-regular file, any group/other access, or a non-root owner). One code per line, `SERIAL CODE`: SERIAL
+  a unique decimal of 1 or more, CODE a unique 8 to 64 of `A-Z a-z 0-9 -` (make them with
+  `openssl rand -hex 16`); `#` comments and blank lines are kept. The processor strikes a code by rewriting
+  the whole file atomically (temp, fsync, rename) to `SERIAL CODE used NAME REQUEST-ID AT`, BEFORE the
+  request's first world effect; a crash then finds the request's own strike and carries on, never a second
+  person. A request refused after its strike (the sponsor floor, at the funding step) returns the code.
+  Add codes by appending lines (not while a tick runs: the processor holds its lock, so edit with
+  `flock /var/lib/mini-door-process/.lock`). A coded member's world gets `invite` field 1 = the SERIAL
+  (never the code; the world is world-readable) written as the member's own turns like `research-consent`;
+  an uncoded member has no `invite` reference.
 - `sponsorFloor`: before every free enrolment the processor reads the sponsor's balance with a
   signed `credit` read. Below `sponsorFloor + funding` the free route **closes**: the request is
   refused with `sponsorBelowFloor`, `door-state.json` says closed, and the form stops offering the
