@@ -34,7 +34,7 @@ the one-grain EtherCalc design (WEB-SPK-PUBLIC §4) already has it.
 | **market fetcher** `mini-market-fetch` (`mini-market.timer`, every 6 h and on demand) | `mini-market` | refreshes `/var/lib/mini-market/index.json` from `https://app-index.sandstorm.io/apps/index.json` (bounded 4 MiB, parsed and re-serialised by `mini apps index-check`: unknown shape refused, the file replaced atomically); fetches packages named in `/var/lib/mini-market/wanted/` into the quarantine `/var/lib/mini-market/quarantine/<packageId>.spk` (0640 `mini-market:mini-apps`), refusing a download whose SHA-256 does not start with its `packageId` or exceeds the standard profile's 256 MiB; writes `meta/<packageId>.json` (sha256, bytes, fetchedAt) | **the only uid with egress to `app-index.sandstorm.io:443`** (nftables `cg_market`/`dst_market`, resolved from `/etc/mini/market.json` like every other egress row); nothing else, no Mini socket, no key |
 | **member verbs** `mini apps …` | `mini-s-NAME` | read the index and the verdict table (world-readable data); author the member's own Mini turns (§3); talk to the worker over `/run/mini-apps/worker.sock` | the public socket, as every member verb does; the worker socket |
 | **worker** `mini apps-worker` | `mini-core` (user manager, beside the broker) | acts on admitted install requests through `spk-host grain` (install, share, start, enroll, route, stop, export); writes receipts, verdicts and the origin table; serves the worker socket | the operator socket (it is the operator), the broker, the quarantine (read), `/var/lib/mini-apps` (write) |
-| **front** `mini apps-front` | `mini-apps-edge` (group `mini-edge`) | one loopback listener `127.0.0.1:8797` that Caddy proxies every `*.demo.dregg.online` request to; selects the grain by `Host`, the participant route by the token presented, and pumps the request (and a WebSocket after 101) to that route's `http.sock` | the route sockets (0660, group `mini-edge`, the W6 `edgeGid`), the origin table (read); no key, no Mini socket, no network but loopback |
+| **front** `mini apps-front` | `mini-apps-edge` (group `mini-edge`) | one loopback listener `127.0.0.1:8799` that Caddy proxies every `*.demo.dregg.online` request to; selects the grain by `Host`, the participant route by the token presented, and pumps the request (and a WebSocket after 101) to that route's `http.sock` | the route sockets (0660, group `mini-edge`, the W6 `edgeGid`), the origin table (read); no key, no Mini socket, no network but loopback |
 | **Caddy** | `caddy` | terminates TLS for `*.demo.dregg.online` with the one wildcard certificate (ember's ruling 2026-10-27; hybrid X25519MLKEM768 then X25519), proxies to the front | loopback; `/var/lib/mini` stays hidden from it |
 | **residents / apps** | `mini-core` → app uid in bwrap | unchanged (`deploy/spk-host/README.md`) | fd 3, loopback in their own netns; no egress ever |
 
@@ -173,7 +173,11 @@ cannot reach a socket directly without widening that custody. The worker therefo
 connector** (`STATE/edge.sock`, 0660 `mini-core:mini-edge`): the front asks `connect {grain, route}`
 and receives the connected custodian socket over `SCM_RIGHTS`; the worker adds no authority (the
 custodian still checks the token the browser presents) and the front still parses HTTP as
-`mini-apps-edge` with `/var/lib/mini` hidden. The origin table names the connector.
+`mini-apps-edge` with `/var/lib/mini` hidden. The origin table names the connector. Groups (ruling
+2026-10-27): `mini-core` is not a member of `mini-edge`; the worker's user unit carries
+`SupplementaryGroups=mini-edge` (membership inside that process only, never the account) and the
+worker itself creates `edge.sock` 0660 with that group and `worker.sock` 0660 with
+`mini-sessions`; a group it cannot resolve is a refusal at start, never a silently private socket.
 
 **The worker socket** (`/run/mini-apps/worker.sock`, 0660 `mini-core:mini-sessions`, peer named by
 `SO_PEERCRED` exactly as `mini-keys`'s broker does): one JSON line per request, bounded 64 KiB,
@@ -199,7 +203,7 @@ a browser origin (EtherCalc and the oracle appliance ride the same rule). DNS: `
 A/AAAA are live (infra). TLS: the one wildcard certificate (ember's ruling; hybrid then classical),
 so hostnames are unbounded and there is no per-name issuance and no `ask` endpoint.
 
-**Routing rule for Caddy: one entrance that dispatches by `Host`**, `reverse_proxy 127.0.0.1:8797`
+**Routing rule for Caddy: one entrance that dispatches by `Host`**, `reverse_proxy 127.0.0.1:8799`
 for the whole `*.demo.dregg.online` block (`deploy/market/INSTALL.md` has the filled block). Why
 not one upstream per grain: a custodian socket is per *participant* (one fixed subject, session,
 ticket and token set per `custodian.json`), so a grain with two members has two sockets and the

@@ -10,7 +10,7 @@ What the infra lane applies (dregg-infra `demo-vm`, `edge/demo/`) and what the c
 | user `mini-market` (nologin, primary group `mini-apps`) | the fetcher; the one uid with egress to the app index |
 | user `mini-apps-edge` (nologin, primary group `mini-edge`) | the grain front; connects to route sockets, nothing else |
 | group `mini-apps` | readers of the quarantine: `mini-market` writes it, `mini-core` (the worker) reads it |
-| group `mini-edge` | the W6 `edgeGid`: route directories are `0750 mini-core:mini-edge`, sockets `0660`; `mini-apps-edge` is its only member (not `caddy`: Caddy never reaches a socket) |
+| group `mini-edge` | the edge: `mini-apps-edge` is a member; the worker's unit carries `SupplementaryGroups=mini-edge` (membership inside that process only, never the account), so the worker can create `edge.sock` with that group |
 | `mini-core` | unchanged; the worker runs in its user manager beside `mini-spk-broker@` |
 
 ## 2. Directories
@@ -21,18 +21,18 @@ What the infra lane applies (dregg-infra `demo-vm`, `edge/demo/`) and what the c
   quarantine/                        0750   ID.spk 0640 (sha256 prefix == ID, <= 256 MiB)
   meta/ refused/                     0755   ID.json 0644
   wanted/                            0730   flags dropped by the worker (mini-core, via group mini-apps)
-/var/lib/mini-apps                   root:root 0711       (NOT under /var/lib/mini: Caddy and the front must traverse it)
-  origins/                           mini-core:mini-edge 0750   a<app>.json 0644, read by the front
-  routes/                            mini-core:mini-edge 0750   a<app>/<member>/ 0750 with http.sock 0660 and the 0600 custodian files
+/var/lib/mini-apps                   root:root 0711       (NOT under /var/lib/mini: the front must traverse it)
+  origins/                           mini-core 0755             a<app>.json 0644, read by the front
+  edge.sock                          mini-core:mini-edge 0660   the edge connector: the front asks `connect {grain, route}` and receives the custodian socket (SCM_RIGHTS); created by the worker
   verdicts/                          mini-core 0755             ID.json 0644, the ingest's verdict the catalogue shows
-  requests/ guests/ receipts/        mini-core 0700             the worker's private state (guest keys live in guests/)
-/run/mini-apps                       mini-core:mini-sessions 0750  worker.sock 0660 (members connect; SO_PEERCRED names them)
+  requests/ grains/ work/ exports/   mini-core 0700             the worker's private state
+/run/mini-apps                       mini-core:mini-sessions 0750  worker.sock 0660 mini-core:mini-sessions (members connect; SO_PEERCRED names them); tmpfiles.d: `d /run/mini-apps 0750 mini-core mini-sessions -`
 /etc/mini/market.json                root 0644  {"index":"https://app-index.sandstorm.io/apps/index.json"} (the egress resolver's input)
 ```
 
-`/var/lib/mini-apps/routes` is the broker's route directory for market grains: the worker passes
-`directory=/var/lib/mini-apps/routes/a<app>/<member>` in each route request; the resident's
-`custodian.json` carries `edgeGid` = the gid of `mini-edge`.
+Route sockets stay where `spk-host grain route` puts them, under the operator's 0700 state root;
+no `routes/` directory under `/var/lib/mini-apps` is needed: the front reaches a grain through the
+worker's edge connector (design doc §4), which adds no authority.
 
 ## 3. nftables: one egress row
 
@@ -51,20 +51,27 @@ deny. The index host resolves to a CDN; the caveat is the same as for `openroute
 ```
 install -m 0755 deploy/market/mini-market-fetch /usr/local/lib/mini/market/mini-market-fetch
 install -m 0644 deploy/market/mini-market.{service,timer,path} deploy/market/mini-apps-front.service /etc/systemd/system/
+install -m 0644 deploy/market/mini-apps-worker@.service ~mini-core/.config/systemd/user/     # the operator's user manager, beside mini-spk-broker@
+echo 'd /run/mini-apps 0750 mini-core mini-sessions -' >/etc/tmpfiles.d/mini-apps.conf && systemd-tmpfiles --create
+install -d -m 0711 -o root /var/lib/mini-apps
 systemctl enable --now mini-market.timer mini-market.path mini-apps-front.service
 systemctl start mini-market.service          # the first index refresh, so the catalogue is there before a member asks
+sudo -u mini-core XDG_RUNTIME_DIR=/run/user/$(id -u mini-core) systemctl --user enable --now mini-apps-worker@STORE.service
 ```
 
-The worker's user unit (`mini-apps-worker@STORE.service`, `systemctl --user` of `mini-core`) ships
-with the worker (the next increment of this lane); until then `scripts/spk-platform/grain-journey.sh`
-performs the same steps for the journey.
+`mini-apps-worker@STORE.service` reads `/var/lib/mini-spk-worlds/STORE/apps-world.json` (the
+operator writes it, 0600: `mini-apps-world-v1`, naming the grain-host profile, `mini`, the public
+socket, the metered tool/parent tasks, the genesis, the quarantine, the market's `wanted/`, the
+verdict directory, the domain and a nonce file). The worker creates `edge.sock` with group
+`mini-edge` and `worker.sock` with group `mini-sessions` itself, under the unit's
+`SupplementaryGroups`; a missing group is reported and refused, never silently 0600.
 
 ## 5. Caddy: the wildcard origin block
 
 DNS: `*.demo.dregg.online` A/AAAA (live). TLS: the one `*.demo.dregg.online` certificate the infra
 lane issues (Caddy built with the Gandi DNS module, DNS-01 off the box's own token policy as ember
 ruled; hybrid key exchange first, classical fallback). **Routing rule: one entrance that dispatches by
-`Host`.** Caddy proxies the whole wildcard to the front on `127.0.0.1:8797`; the front picks the
+`Host`.** Caddy proxies the whole wildcard to the front on `127.0.0.1:8799`; the front picks the
 grain from `Host` and the participant route from the credential. Why not one upstream per grain: a
 custodian socket is per participant, so a shared grain has several sockets and the choice is the
 token's, which Caddy cannot look up (and token hashes do not belong in a Caddyfile that restarts per
@@ -83,7 +90,7 @@ share). Why not Caddy to the sockets: `/var/lib/mini` and the route files stay h
 	}
 	# The grain entrance (deploy/market/mini-apps-front.service). It needs the exact Host (the
 	# custodian pins expectedHost) and no X-Forwarded-* rewriting of the request it forwards.
-	reverse_proxy 127.0.0.1:8797 {
+	reverse_proxy 127.0.0.1:8799 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		transport http {
