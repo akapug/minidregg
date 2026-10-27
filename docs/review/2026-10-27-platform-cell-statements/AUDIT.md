@@ -709,3 +709,12 @@ The remaining statements read correctly:
   platform cell is in `baseCells`, and its store is `Reachable` under the controller. The loader bridge
   (`load d snap = some L → Reachable …`) for snapshots after genesis is still to be composed from it and
   `platform_written_only_by_install`.
+
+**Addendum, lean-critical 2b521b2b (not built): accepted.** Management is now a separate top-level
+disjunct that requires `clock/now` and `clock/slot` *absent*. `controlClause_clock_false` proves it is
+false on every step that carries the clock, and every clock write projects the clock. So the controller
+can never move the clock, by the law's own text, with no premise about the writers. This also fixes the
+second bug L1 found: in bc88a5ab an install was refused because `.monotone` fails closed on its slotless
+step. The one remaining premise (management steps project no `clock/*`) fails safe. Breaking it narrows
+management and never widens it. That direction needs no theorem, only a note on the clause.
+`pole_controller_advance_refused` is the requested teeth.
