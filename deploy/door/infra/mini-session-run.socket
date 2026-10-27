@@ -1,0 +1,15 @@
+# /etc/systemd/system/mini-session-run.socket — split tenancy only. The Discord entrance's one
+# way to run a line as a member: root:mini-discord 0660, so only root and the entrance open it.
+# One mini-session-run@.service per connection (deploy/door/infra/INSTALL.md).
+[Unit]
+Description=Mini session runner socket (Discord entrance -> member account)
+[Socket]
+ListenStream=/run/mini-session-run.sock
+SocketUser=root
+SocketGroup=mini-discord
+SocketMode=0660
+Accept=yes
+MaxConnections=8
+MaxConnectionsPerSource=8
+[Install]
+WantedBy=sockets.target

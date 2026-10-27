@@ -21,11 +21,14 @@
 //! * [`curl`]: outbound webhook calls through `/usr/bin/curl`; the URL (which carries the
 //!   interaction token or the channel webhook secret) reaches curl on stdin, never argv.
 //! * [`server`]: the endpoint itself: verify, answer PING, refuse early, defer, run, PATCH.
+//! * [`door`]: the self-serve door's queue schema, shared by the `/join` form (`mini-door`),
+//!   the entrance's `/mini line:link CODE`, and the root processor (`mini-door-process`).
 //!
 //! Durable custody (leased owner-private records, delivery custody) is `mini_sdk::store` and
 //! `mini_sdk::custody`, the one implementation Mini clients share.
 
 pub mod curl;
+pub mod door;
 pub mod navigation;
 pub mod http;
 pub mod interaction;

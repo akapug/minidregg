@@ -2514,7 +2514,28 @@ fn decode_refusal(session: &Session, command: &str, encoded: &[u8]) -> (Option<P
     if let Err(e) = write_once(&bin, encoded) {
         return (None, Err(e));
     }
+    prune_refusals(&dir, KEPT_REFUSALS);
     (Some(bin.clone()), super::inspect(&session.host, &session.config, "outcome", &bin, &json))
+}
+
+/// Retained refusals a session keeps (each a `.bin` and its decoded `.json`).
+const KEPT_REFUSALS: usize = 256;
+
+/// Keep the newest `keep` refusals in `dir`. Names start with the unix second, so name order is
+/// age order; the oldest pairs are removed. A long-lived session's refusals no longer grow
+/// without bound (HCLOUD-GAP #17). Best effort: a failure here never hides the refusal itself.
+fn prune_refusals(dir: &Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut stems: Vec<String> = entries
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".bin").map(str::to_owned))
+        .collect();
+    stems.sort();
+    let over = stems.len().saturating_sub(keep);
+    for stem in &stems[..over] {
+        let _ = fs::remove_file(dir.join(format!("{stem}.bin")));
+        let _ = fs::remove_file(dir.join(format!("{stem}.json")));
+    }
 }
 
 /// The session's own folders, then the confinement of every path a line hands
@@ -3161,6 +3182,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refusals_keep_only_the_newest() {
+        let dir = std::env::temp_dir().join(format!("refusals-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for n in 0..5 {
+            fs::write(dir.join(format!("100{n}-x-ab.bin")), b"x").unwrap();
+            fs::write(dir.join(format!("100{n}-x-ab.json")), b"{}").unwrap();
+        }
+        super::prune_refusals(&dir, 2);
+        let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["1003-x-ab.bin", "1003-x-ab.json", "1004-x-ab.bin", "1004-x-ab.json"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 

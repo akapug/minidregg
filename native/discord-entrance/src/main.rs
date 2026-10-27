@@ -16,8 +16,11 @@
 //! | `MINI_SHELL_WRAPPER` `MINI_CLIENT` `MINI_HOST` `MINI_CONFIG` `MINI_SOCKET` | the ssh entrance's forced command and its first four arguments |
 //! | `MINI_SESSIONS` `MINI_SPONSOR` `MINI_SPONSOR_WORKSPACE` | the session layout (`render-authorized-keys.sh`'s) |
 //! | `MINI_LINE_TIMEOUT_S` | a line is stopped after this long (default 120) |
-//! | `MINI_SESSION_RUNNER` | split tenancy: the root runner; each line runs as `sudo -n -- RUNNER NAME`, the line on stdin, as the session's own account |
+//! | `MINI_SESSION_RUNNER` | split tenancy: the root runner's socket (`/run/mini-session-run.sock`); each line runs there as the session's own account, with no setuid program in the entrance |
 //! | `MINI_DISCORD_STATE` | split tenancy: this account's own directory for interaction custody and the per-session line log (required with the runner, refused without it) |
+//! | `MINI_DISCORD_DOOR_LINKS` | the door's link spool for `/mini line:link CODE` (default `STATE/door-links` under split tenancy; unset otherwise: no door) |
+//! | `MINI_DISCORD_DOOR_URL` | the door's https URL, named in the answer to an unlinked Discord user |
+//! | `MINI_DISCORD_CUSTODY_DAYS` `MINI_DISCORD_CUSTODY_MAX` | completed interaction custody kept (default 7 days, 2000 records) |
 
 use std::net::TcpListener;
 
