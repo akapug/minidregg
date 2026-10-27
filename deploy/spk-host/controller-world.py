@@ -1255,14 +1255,14 @@ def export_state(store, helper):
     root = Path(r['home']) / 'state'; files = {}; total = 0; directories = 0
     for directory, dirs, entries in os.walk(root, followlinks=False):
         directories += 1
-        require(directories <= 512 and len(Path(directory).relative_to(root).parts) <= 16, 'controller evidence directory bound exceeded')
+        require(directories <= 1024 and len(Path(directory).relative_to(root).parts) <= 16, 'controller evidence directory bound exceeded')
         for name in dirs:
             metadata(Path(directory) / name, r['uid'])
         for name in entries:
             path = Path(directory) / name
             if stat.S_ISSOCK(path.lstat().st_mode):
                 continue
-            require(len(files) < 512, 'controller evidence file bound exceeded')
+            require(len(files) < 4096, 'controller evidence file bound exceeded')
             data = read_file(path, r['uid'], 8 * 1024 * 1024, allow_empty=True)
             total += len(data); require(total <= 32 * 1024 * 1024, 'controller evidence byte bound exceeded')
             files[str(path.relative_to(root))] = {'sha256': sha(data), 'base64': base64.b64encode(data).decode()}
