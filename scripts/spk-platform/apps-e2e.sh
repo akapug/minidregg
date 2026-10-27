@@ -69,6 +69,37 @@ init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller 
 init_ws member 9 "$WR/member.key" "$(context 9 57 43)"; row "member workspace (subject 9) over the workroom's member key" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
 WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-member
 
+# ---- the factory admits the member's grain-backed birth, as the demo's genesis does -------------
+# The workroom pins grain-backed births to its worker (subject 8); the candidate genesis pins
+# factoryPredicate `all []` (every subject). The controller (7, whom the law admits for every verb)
+# installs the next version with only that worker pin dropped: any subject may read or birth in
+# grain-backed mode. A signed policy read, then install-source under the read's exact root.
+widen_factory() {
+  local d=$out/factory-law key n1 n2 n3
+  mkdir -m 700 -p "$d"; key=$(jq -r .key "$WSC/workspace.json")
+  n1=$(od -An -N4 -tu4 /dev/urandom | tr -d ' '); n2=$(od -An -N4 -tu4 /dev/urandom | tr -d ' '); n3=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')
+  jq -n --arg n "$n1" '{subject:"7",nonce:$n,purpose:{type:"query",kind:"object",target:"10",view:"policy"},grants:[{kind:"object",target:"10",capability:"54"}]}' >"$d/query-intent.json"
+  mini query --host "$HOST" --config "$CONFIG" --intent "$d/query-intent.json" --key "$key" --view policy --dir "$d/query" >"$d/query.out" 2>"$d/query.err" || return 1
+  jq -n --slurpfile p "$d/query/view.json" --slurpfile c "$d/query/challenge.json" --arg n "$n2" --arg dn "$n3" '
+    def eq($s;$v): {slot:$s,type:"eq",value:$v};
+    def pinned: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/subject";"8"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"all"}],type:"any"};
+    def widened: {predicates:[eq("request/subject";"7"),{predicates:[eq("request/verb";"1"),eq("birth/mode/grain-backed";"1")],type:"any"}],type:"any"};
+    def count($x): [.. | select(. == $x)] | length;
+    $p[0] as $p | $c[0] as $c |
+    if ($p.predicate | count(widened)) == 1 and ($p.predicate | count(pinned)) == 0 then {already:true}
+    elif ($p.predicate | count(pinned)) != 1 then error("factoryLawUnrecognized: the worker-pinned birth clause is not present exactly once")
+    else {subject:"7",nonce:$n,purpose:{type:"prepare",draft:{type:"install-source",subject:"7",control:"54",
+      declaration:{expectedPreRoot:$c.authorityRoot,expected:{version:$p.version,address:$p.address},nonce:$dn,
+        source:{policyId:$p.policyId,version:(($p.version|tonumber)+1|tostring),domain:$p.domain,semantics:$p.semantics,
+          previous:$p.address,predicate:($p.predicate | walk(if . == pinned then widened else . end))}}}},
+      grants:[{kind:"object",target:"10",capability:"54"}]} end' >"$d/intent.json" 2>"$d/intent.err" || return 1
+  jq -e '.already == true' "$d/intent.json" >/dev/null && { echo already; return 0; }
+  mini submit --host "$HOST" --config "$CONFIG" --intent "$d/intent.json" --key "$key" --dir "$d/submit" >"$d/submit.out" 2>"$d/submit.err" || return 1
+  echo "version $(jq -r .purpose.draft.declaration.source.version "$d/intent.json")"
+}
+fl=$(widen_factory) && ok=1 || ok=0
+row "the controller widens the scratch factory to the demo's member births (grain-backed, any subject)" $ok "${fl:-$(tail -1 "$out/factory-law/"*.err 2>/dev/null | cut -c1-160)}"
+
 # ---- the metered tasks' owners delegate observe+mutate to the member -------------------------------
 # The workroom's tool (7902) is owned by subject 8 (capability 81), its parent (7901) by the
 # controller 7 (capability 71; 8 holds only the management capability 73, which cannot delegate).
@@ -110,7 +141,8 @@ install_app() { # APP-ID
   outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --class "$CLASS" --json 2>"$out/install-$app.err")
   rid=$(grep -oE 'request [0-9a-f]{32}' <<<"$outcome" | head -1 | cut -d' ' -f2)
   [ -n "$rid" ] || rid=$(ls "$WS9/apps/requests/" 2>/dev/null | grep -E '^[0-9a-f]{32}\.json$' | tail -1 | cut -d. -f1)
-  while [ $attempt -le "$ATTEMPTS" ] && ! grep -q '"decided": true' <<<"$outcome"; do
+  # A first attempt refused before the worker (no request id) is decided; only an undecided request is retried.
+  while [ -n "$rid" ] && [ $attempt -le "$ATTEMPTS" ] && ! grep -q '"decided": true' <<<"$outcome"; do
     attempt=$((attempt + 1)); sleep 15
     outcome=$(mini apps install --dir "$WS9" --home "$HOME9" --app "$app" --retry "$rid" --json 2>>"$out/install-$app.err")
   done
