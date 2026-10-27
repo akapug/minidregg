@@ -13,7 +13,6 @@ import Assurance.ObjectiveZkRefinementAudit
 import Assurance.ObjectiveZkStepTariff
 import Assurance.ObjectiveZkTraceDisclosure
 import Assurance.ResourceMoneyOperationDomainAudit
-import Assurance.ResourceMoneyReceiverAudit
 import Compiler.BendCommitmentFrame
 import Compiler.BendCommitmentFrameChecks
 import Compiler.BendCommittedNetwork
