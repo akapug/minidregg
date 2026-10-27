@@ -41,8 +41,8 @@ public listener, or external send occurred. The fn registration/cursor is a
 transport scope, not a Mini event20 receipt.
 
 The exact native operator and consumer command forms were checked against
-the qualified fn source's `AGENTS.md`, `docs/operator.md`, and
-`tests/test_native_consumer_e2.py`. The initial one-shot setup script is
+the qualified fn source's `AGENTS.md`, `operator.md [not in tree]`, and
+`test_native_consumer_e2.py [not in tree]`. The initial one-shot setup script is
 [provision-hbox.sh](provision-hbox.sh); its current version includes the
 parent-directory and system-OpenSSL corrections but was not rerun end-to-end
 after the partial setup. Its first attempt refused before

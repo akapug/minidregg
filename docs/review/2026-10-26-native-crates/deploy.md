@@ -238,7 +238,7 @@ exit kills/reaps the sandbox **before** taking the gate lock to write `fenced` (
 `rustc -O --edition 2021` in `native/grain-runtime/hermes-journey.sh:185` and
 `docs/evidence/2026-09-30-hermes-keys/run.sh:158`, and by `rustc --edition=2021 launch-gate.rs -o
 launch-gate` (no `-O`) per `grain-host/README.md:41-42` and `GATE-INTEGRATION-2026-09-26.md:11`. A
-prototype twin lives in `scripts/overnight-tests/launch-gate.rs` (`scripts/overnight-tests/LAUNCH-GATE.md:3-4`).
+prototype twin lives in `launch-gate.rs [deleted a9a68a7f]` (`scripts/overnight-tests/LAUNCH-GATE.md:3-4`).
 
 **`resolve-bwrap` (40), `materialize-bwrap.py` (28).** `resolve-bwrap` picks the physical bubblewrap: the
 AppArmor-profiled root copy `/usr/local/libexec/mini-grain-bwrap` if it can create a user namespace, else
@@ -335,7 +335,7 @@ grain-runtime serve /var/lib/mini/hermes/controller.json`, `Restart=on-failure`,
 /var/lib/mini/store/node/public`, `ProtectKernelTunables/Modules`, `RestrictSUIDSGID`, `LockPersonality`; no
 `NoNewPrivileges` (`hermes/mini-hermes.service:15-48`). `README.md` documents the provider table
 (`mini-provider-table-v2`, routes `user`/`pool`/`homelab`), the key broker custody, the friend's `key set/
-grant/ls/revoke`, and the per-route tariff. Note `native/grain-runtime/src/hermes_catalogue_probe.rs:31`
+grant/ls/revoke`, and the per-route tariff. Note `hermes_catalogue_probe.rs [deleted 708a07fd]:31`
 references `deploy/hermes/runtime-inputs/probe-catalogue.py`, which does not exist (the test is `#[ignore]`).
 
 ### 1.7 `deploy/hermes-dispatch/` (4 files, 339 lines)
@@ -451,7 +451,7 @@ serve /var/lib/mini-spk-worlds/%i/broker/config.json`, `Restart=on-failure`, `UM
   lines as success evidence (`spk-qualify:78-91`, `spk-install-phase:80-104`, `spk-ingest-prepared:87-99`).
   None is referenced by code (`git grep` finds only docs).
 - `tests/` (3 scripts, 88 lines): `eval` the exact production function out of the script with `sed` and test it
-  (`tests/ingest-prepared-custody.sh:7`, `stage-inbox-recovery.sh:7`, `var-volume-import-untrusted.sh:14`);
+  (`deploy/spk-host/tests/ingest-prepared-custody.sh:7`, `stage-inbox-recovery.sh:7`, `var-volume-import-untrusted.sh:14`);
   gated by `scripts/check-spk-shell-tests.sh`.
 
 **Docs.** Contracts: `README.md` (244), `USER-TENANCY.md` (53), `BROKER-RUNTIME-UPGRADE.md` (117),
@@ -635,7 +635,7 @@ refuses EUID 0 (`:17`). Result: the root ingest always fails at usage; the scrip
 `ingest-requested.json` marker first (`spk-ingest-prepared:124-135`), so a single attempt permanently blocks
 re-ingest of that image ("earlier physical ingest was requested but image absent", `:125-127`). Combined with
 the hard-coded GitWeb SHA, the chain is dead and should be deleted with its tests
-(`tests/ingest-prepared-custody.sh`, `tests/stage-inbox-recovery.sh`).
+(`deploy/spk-host/tests/ingest-prepared-custody.sh`, `deploy/spk-host/tests/stage-inbox-recovery.sh`).
 
 **4.3 `probe_control.rs`/`probe-shell.sh` do not compile.** `probe-shell.sh:18-20` copies
 `native/grain-runtime/src/control.rs` beside `probe_control.rs` and runs `rustc --edition=2021`. `control.rs`
@@ -721,7 +721,7 @@ operator inputs and holds a sudo rule to a root helper (`install-user-world:159`
 JSON verbs (`USER-TENANCY.md:31-35`), and the rule names one binary, but the sudoers line allows **any
 arguments** to that helper (`install-user-world:159`); the helper's own argument checks are the boundary.
 
-**4.17 `test-*` that do not test their fixture.** `tests/var-volume-import-untrusted.sh` creates a setuid file
+**4.17 `test-*` that do not test their fixture.** `deploy/spk-host/tests/var-volume-import-untrusted.sh` creates a setuid file
 in the source image (`:21`) and never asserts anything about it (the destination is a plain directory here,
 not a `nosuid` mount, so a preserved setuid bit would go unnoticed). `spk-host/tests/*.sh` test functions
 `eval`'d out of the scripts with `sed -n '/^name() {/,/^}/p'` (`ingest-prepared-custody.sh:7`): a renamed or
@@ -755,7 +755,7 @@ finds only docs or nothing):
 - `shell/templates/job/programs/*.jam` — absent; the journeys need `JOB_PROGRAMS` supplied externally
   (`journey.d/jjob.sh:11-13`).
 - `deploy/hermes/runtime-inputs/probe-catalogue.py` — referenced by
-  `native/grain-runtime/src/hermes_catalogue_probe.rs:31`, does not exist.
+  `hermes_catalogue_probe.rs [deleted 708a07fd]:31`, does not exist.
 
 **Units with no service in the repo:** `mini-store.service` (`Requires=` in clock, discord, hermes units),
 `mini-keys.service` (`hermes/mini-hermes.service:5`, `hermes/README.md:51`), `mini-spk-broker.service` (root,
@@ -768,7 +768,7 @@ Hermes dispatch service, `mini-discord-mirror`. These live in `dregg-infra` or a
 | one | twin | reachable | delete |
 |---|---|---|---|
 | `host-frontend.rs` op allowlist (`:295-332`) | `protocol/host-operations.json` routes + `transport::public_envelope` (`transport.rs:223-239`, used by `mini socket-proxy`) | registry path is reachable from `mini`; frontend only by hand-built binary | the frontend (or make it call the generated route table) |
-| `deploy/grain-host/launch-gate.rs` | `scripts/overnight-tests/launch-gate.rs` (prototype) | deploy copy | the overnight copy |
+| `deploy/grain-host/launch-gate.rs` | `launch-gate.rs [deleted a9a68a7f]` (prototype) | deploy copy | the overnight copy |
 | `deploy/spk-host/spk-ingest`, `spk-var-volume` | `native/spk-host/tests/fixture-os/{spk-ingest,spk-var-volume}` | both (fixture-os journeys) | keep only if the fixture journeys stay |
 | `mud/sim.py` `ev` | `Pred/Core.lean` `eval` | neither at runtime | `sim.py` |
 | `mini-grain-controller@.service` | the unit text in `install-controller:180-202` | installer | the template (README calls it historical) |

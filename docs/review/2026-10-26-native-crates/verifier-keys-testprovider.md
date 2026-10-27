@@ -15,10 +15,10 @@
 | credential-signature-verifier | `Cargo.toml` | 18 | 0 |
 | | `src/main.rs` | 231 | 0 |
 | | `examples/sign-probe.rs` | 41 | 41 (test helper) |
-| | `tests/protocol.rs` | 237 | 237 |
-| | `tests/sshsig.rs` | 226 | 226 |
-| | `tests/serve.rs` | 82 | 82 |
-| | `tests/mldsa.rs` | 81 | 81 |
+| | `native/credential-signature-verifier/tests/protocol.rs` | 237 | 237 |
+| | `native/credential-signature-verifier/tests/sshsig.rs` | 226 | 226 |
+| | `native/credential-signature-verifier/tests/serve.rs` | 82 | 82 |
+| | `mldsa.rs [not in tree]` | 81 | 81 |
 | | `README.md` (context) | 93 | n/a |
 | | **Rust total** | **898** | **667 (74%)** |
 | mini-keys | `Cargo.toml` | 30 | 0 |
@@ -32,7 +32,7 @@
 | | `src/server/native.rs` | 112 | 25 (88-112) |
 | | `src/server/provider.rs` | 433 | 0 |
 | | `src/server/discord.rs` | 171 | 0 |
-| | `tests/broker.rs` | 485 | 485 |
+| | `native/mini-keys/tests/broker.rs` | 485 | 485 |
 | | `journey_broker.py` (Python, journey helper) | 78 | 78 (fixture) |
 | | **Rust total** | **2,863** | **665 (23%)** |
 | hermes-test-provider | `Cargo.toml` | 13 | 0 |
@@ -42,15 +42,15 @@
 | | **Rust total** | **1,777** | **479 (27%)**; the remaining 1,298 lines are themselves a test fixture |
 | **shard** | | **5,538 Rust lines** | |
 
-Context read, not owned: `Compiler/CredentialSignatureIO.lean` (248, whole), `Compiler/NativeCoprocess.lean` (205, whole), `Compiler/CredentialSignatureAdmission.lean:300-380`, `Kernel/PayEnrolReceiver.lean:1205-1222, 1660-1672`, `Host/Main.lean:600-610, 660-668, 2610-2680, 3140-3215, 3575-3610, 7015-7041`, `Host/Json.lean:205-216, 275, 4333-4350`, `protocol/host-operations.json` entry 144, `scripts/check-native-transcripts.sh:1-60`, `scripts/check-rust-tests.sh:125-175, 540-552`, `native/grain-runtime/src/credentials.rs:1-115, 200-240, 370-800, 985-1200` (the `#[path]` module mini-keys compiles), `native/resource-client/src/keys.rs:25-60`, `native/resource-client/src/key_service.rs:136-160`, `native/resource-client/src/transport.rs:173-239`, `native/mini-sdk/src/signer.rs:155-172`, `deploy/candidate/package.py:50-110, 370-400`, `deploy/candidate/INTERFACES.md:350-362`, `deploy/shell/mini-shell-ssh-credentials` (whole), `deploy/shell/mini-socket-proxy` (grep), `deploy/hermes/README.md:20-75`, `deploy/hermes/mini-hermes.service:1-40`, `deploy/grain-host/install-operator-stack:185-230`, `README.md:87`, the gr-B report (executive summary; credentials and mini-keys paragraphs) and rc-D report sections 1.1, 1.2, S-5, F-8.
+Context read, not owned: `Compiler/CredentialSignatureIO.lean` (248, whole), `Compiler/NativeCoprocess.lean` (205, whole), `Compiler/CredentialSignatureAdmission.lean:300-380`, `Kernel/PayEnrolReceiver.lean:1205-1222, 1660-1672`, `Host/Main.lean:600-610, 660-668, 2610-2680, 3140-3215, 3575-3610, 7015-7041`, `Host/Json.lean:205-216, 275, 4333-4350`, `protocol/host-operations.json` entry 144, `scripts/check-native-transcripts.sh:1-60`, `scripts/check-rust-tests.sh:125-175, 540-552`, `native/mini-keys/src/credentials/store.rs:1-115, 200-240, 370-800, 985-1200` (the `#[path]` module mini-keys compiles), `native/resource-client/src/keys.rs:25-60`, `native/resource-client/src/key_service.rs:136-160`, `native/resource-client/src/transport.rs:173-239`, `native/mini-sdk/src/signer.rs:155-172`, `deploy/candidate/package.py:50-110, 370-400`, `deploy/candidate/INTERFACES.md:350-362`, `deploy/shell/mini-shell-ssh-credentials` (whole), `deploy/shell/mini-socket-proxy` (grep), `deploy/hermes/README.md:20-75`, `deploy/hermes/mini-hermes.service:1-40`, `deploy/grain-host/install-operator-stack:185-230`, `README.md:87`, the gr-B report (executive summary; credentials and mini-keys paragraphs) and rc-D report sections 1.1, 1.2, S-5, F-8.
 
 ## Executive summary (15 lines)
 
 1. **The verifier is in the TCB by design, and Lean says so.** Lean accepts exactly `exit 0`, empty stderr, stdout `verified\n` as "signature valid" (`Compiler/CredentialSignatureIO.lean:42-51`, theorem `positive_response_exact` :221-235); nothing at runtime can detect a binary that lies. Soundness of `verify-sshsig` is a *stated, uninhabited* hypothesis (`Kernel/PayEnrolReceiver.lean:1209-1219`). The only cross-check is an offline gate that replays recorded transcripts (`scripts/check-native-transcripts.sh:1-21`). The binary is pinned by SHA-256 only in deploy scripts (`deploy/candidate/package.py:379-380`), not by the Host.
 2. The verifier is small and correct: `verify` = ed25519-dalek 2.2.0 `verify_strict` over opaque bytes (`native/credential-signature-verifier/src/main.rs:28-43`); `verify-sshsig` adds the one SHA-512 Lean lacks (`:85-118`); `serve` is a framed coprocess whose wire agrees byte-for-byte with `Compiler/NativeCoprocess.lean:19-20, 107-145`.
-3. **`verify-mldsa` is unwired, and its comment cites a Lean declaration that does not exist.** `main.rs:45-71` and `tests/mldsa.rs` name `CredentialSignatureIO.combineHalves`; no such name exists anywhere in the tree, and no Lean code invokes `verify-mldsa`. The real hybrid conjunction is done in Rust (`native/mini-sdk/src/signer.rs:155-172`). Delete the verb (27 lines plus the `fips204` dependency plus 81 test lines) or wire it.
+3. **`verify-mldsa` is unwired, and its comment cites a Lean declaration that does not exist.** `main.rs:45-71` and `mldsa.rs [not in tree]` name `CredentialSignatureIO.combineHalves`; no such name exists anywhere in the tree, and no Lean code invokes `verify-mldsa`. The real hybrid conjunction is done in Rust (`native/mini-sdk/src/signer.rs:155-172`). Delete the verb (27 lines plus the `fips204` dependency plus 81 test lines) or wire it.
 4. Lean calls `verify` through the long-lived `serve` helper but calls `verify-sshsig` with a fresh `IO.Process.output` fork per check (`Compiler/CredentialSignatureIO.lean:114-115` vs `:137-140`), the exact cost `NativeCoprocess` was written to remove (`Compiler/NativeCoprocess.lean:4-11`).
-5. **mini-keys is a second, Rust-only authority domain** (rc-D S-5, confirmed): it verifies member Ed25519 signatures itself (`native/mini-keys/src/server/member.rs:59-82`), keeps per-runner per-UTC-day call counters, per-call token caps and until-height grants (`native/grain-runtime/src/credentials.rs:1024-1190`), and mints single-use bearer tickets (`server/provider.rs:100-149`). Lean is consulted only for "is this key the subject's current, unrevoked key" via op 144 (`server/native.rs:53-86`).
+5. **mini-keys is a second, Rust-only authority domain** (rc-D S-5, confirmed): it verifies member Ed25519 signatures itself (`native/mini-keys/src/server/member.rs:59-82`), keeps per-runner per-UTC-day call counters, per-call token caps and until-height grants (`native/mini-keys/src/credentials/store.rs:1024-1190`), and mints single-use bearer tickets (`server/provider.rs:100-149`). Lean is consulted only for "is this key the subject's current, unrevoked key" via op 144 (`server/native.rs:53-86`).
 6. **The grant caps are enforced against the controller's claims, not the request.** `provider-authorize` checks `maxTokens`, `model` and `height` as supplied by the provider-role caller (`server/provider.rs:105-136`), while the ticket binds only the body digest (`:147, 337`); the broker never parses the body, so a buggy or compromised controller can exceed a member's per-call cap, change the model, and ignore `notAfter`.
 7. Op 144 is answered by whatever process sits at the configured public socket path; the broker checks no peer uid there (`server/native.rs:60`, contrast `client.rs:116-131`) and the reply is unsigned. Its bytes agree with the Lean arm (`Host/Main.lean:7027-7039`, `Host/Json.lean:4333-4350`), but the Lean reply carries no `publicKey`, so the broker's key-equality check (`native.rs:78`) never fires against the real Host.
 8. Member signing bytes are `"mini/member-provider-action/v1\0" ‖ serde_json::to_vec(request)` on both sides (`member.rs:34-38`; `native/resource-client/src/key_service.rs:141-147`). Today's workspace unifies serde_json with `arbitrary_precision` only (no `preserve_order`, checked with `cargo tree`), so keys are sorted and it works; it remains a Rust-to-Rust canonicalization twin (rc-D F-8).
@@ -84,7 +84,7 @@ It is a workspace member (root `Cargo.toml` `members`), so its lock file is the 
 
 **`verify` (`main.rs:28-43`).** Reads a 32-byte key (`PUBLIC_KEY_LENGTH`) and a 64-byte signature, then decodes the key point. A decoding failure is an *input error* (`:31-32`), not `invalid`. It reads the frame unbounded (`fs::read`, `:33`), builds a `Signature` from bytes (`:34`, infallible in dalek 2.x), and answers `b"verified\n"` iff `verify_strict` succeeds, else `b"invalid\n"` (`:38-42`). The comment at `:36-37` states the boundary: "Domain separation, key selection, request binding, revocation, and authority are the Lean caller's responsibility."
 
-**`verify_mldsa` (`main.rs:45-71`).** FIPS 204 ML-DSA-65 over `(public key 1952 bytes, context ≤255 bytes, frame, signature 3309 bytes)` using `fips204::ml_dsa_65::PublicKey::try_from_bytes` and `Verifier::verify(&frame, &signature, &context)` (`:55-70`). The doc comment (`:45-48`) claims "the conjunction is decided by the Lean caller (`CredentialSignatureIO.combineHalves`)". **That declaration does not exist** (grep over the tree finds `combineHalves` only in this file and `tests/mldsa.rs:2`), and no Lean code passes `verify-mldsa`. See A5.
+**`verify_mldsa` (`main.rs:45-71`).** FIPS 204 ML-DSA-65 over `(public key 1952 bytes, context ≤255 bytes, frame, signature 3309 bytes)` using `fips204::ml_dsa_65::PublicKey::try_from_bytes` and `Verifier::verify(&frame, &signature, &context)` (`:55-70`). The doc comment (`:45-48`) claims "the conjunction is decided by the Lean caller (`CredentialSignatureIO.combineHalves`)". **That declaration does not exist** (grep over the tree finds `combineHalves` only in this file and `mldsa.rs [not in tree]:2`), and no Lean code passes `verify-mldsa`. See A5.
 
 **`ssh_string` / `sshsig_signed_data` (`main.rs:73-93`).** Builds OpenSSH PROTOCOL.sshsig signed data: `"SSHSIG" ‖ string(namespace) ‖ string("") ‖ string("sha512") ‖ string(SHA-512(message))`, with big-endian u32 length prefixes (`:74-78, 85-92`). The hash algorithm is hard-wired to `sha512`. A signature made with `-O hashalg=sha256` therefore verifies `invalid` (fail-closed). The doc says "Lean fixes every other byte (`Kernel.PayEnrolMemo.sshsigSignedData`)" (`:83-84`).
 
@@ -108,7 +108,7 @@ It is a workspace member (root `Cargo.toml` `members`), so its lock file is the 
 ### A1.3 `examples/sign-probe.rs` (41)
 A test-only signer: `SigningKey::from_bytes(&[seed_byte; 32])` (`sign-probe.rs:24`) signs a frame and writes the public key and signature files (`:26-29`). It announces on stderr that the key is public (`:22`). Reachability: no current script calls it. It is referenced only by `README.md:83-93` and by historical evidence manifests (`docs/evidence/2026-09-27-application-birth/...`, `docs/evidence/2026-09-28-participant-key-enrollment/README.md`). It is an example target, so it is never shipped.
 
-### A1.4 `tests/protocol.rs` (237)
+### A1.4 `native/credential-signature-verifier/tests/protocol.rs` (237)
 The CLI contract for `verify`, run against the built binary (`env!("CARGO_BIN_EXE_...")`, `:8`):
 * RFC 8032 §7.1 TEST 1 and TEST 2 (`:90-116`).
 * An opaque binary frame, and the same frame with one bit flipped (`:118-127`).
@@ -121,7 +121,7 @@ The CLI contract for `verify`, run against the built binary (`env!("CARGO_BIN_EX
 
 These are real tests: they exercise the shipped binary and include a control (the non-strict path accepting the forgery).
 
-### A1.5 `tests/sshsig.rs` (226)
+### A1.5 `native/credential-signature-verifier/tests/sshsig.rs` (226)
 A real vector produced by `ssh-keygen` on persvati (`:1-7`):
 * It parses the armoured body independently (`:43-70`) and recomputes the signed data, which must equal `SIGNED_DATA`, the same bytes `Kernel.PayEnrolMemo.sshsig_signed_data_fixture` pins (`:25-26, 117-134`).
 * Positive case (`:136-140`). Other message, other namespace, other signature and other key are all `invalid` (`:142-168`).
@@ -131,10 +131,10 @@ A real vector produced by `ssh-keygen` on persvati (`:1-7`):
 
 Note that `:133` uses non-strict `verify` as a fixture cross-check only; the binary path is strict.
 
-### A1.6 `tests/serve.rs` (82)
+### A1.6 `native/credential-signature-verifier/tests/serve.rs` (82)
 Runs five requests through one `serve` process and asserts each reply equals the one-shot run's `(code, stdout, stderr)` (`:41-76`). A `["serve"]` request ends the server non-zero (`:77-80`). The fixture directory name uses only the pid (`:43`), so two concurrent runs of this test in one process would collide (cosmetic).
 
-### A1.7 `tests/mldsa.rs` (81)
+### A1.7 `mldsa.rs [not in tree]` (81)
 A good signature verifies. A changed frame, changed context, flipped bit or other key gives `invalid` (`:49-66`). Wrong widths and a context over 255 bytes are input errors (`:68-81`). These tests test the verb, but the verb has no caller (A5).
 
 ## A2. What it assumes of its surroundings
@@ -182,7 +182,7 @@ This is the correct allocation under ATLAS §7 (Rust owns signing and verificati
 * (b) `scripts/check-native-transcripts.sh`, an offline gate that re-submits every recorded transcript triple and requires `verified`, plus `invalid` for a one-byte-flipped control, with a self-test that must go red (`check-native-transcripts.sh:1-21`).
 * (c) The Rust tests above.
 
-**`verify_strict` vs non-strict.** dalek's `verify` is RFC 8032 verification that tolerates small-order ("weak") public keys and small-order R. `tests/protocol.rs:193-211` shows a universal forgery under the identity key that `verify` accepts. `verify_strict` additionally refuses weak public keys and small-order R and requires canonical encodings, as the README summarises (`README.md:26-30`). So the Host refuses signatures some clients would accept. rc-D F-10 notes that client pre-checks use non-strict `verify`, which is fail-closed but inconsistent.
+**`verify_strict` vs non-strict.** dalek's `verify` is RFC 8032 verification that tolerates small-order ("weak") public keys and small-order R. `native/credential-signature-verifier/tests/protocol.rs:193-211` shows a universal forgery under the identity key that `verify` accepts. `verify_strict` additionally refuses weak public keys and small-order R and requires canonical encodings, as the README summarises (`README.md:26-30`). So the Host refuses signatures some clients would accept. rc-D F-10 notes that client pre-checks use non-strict `verify`, which is fail-closed but inconsistent.
 
 **The SHA-512 in `verify-sshsig`** is a computation, not a decision: Lean fixes every other byte of the signed data (`main.rs:81-84`; `Compiler/CredentialSignatureIO.lean:10-17`). The hard-wired `"sha512"` is a protocol restriction, and its failure mode is `invalid`.
 
@@ -190,7 +190,7 @@ This is the correct allocation under ATLAS §7 (Rust owns signing and verificati
 
 ## A4. Flaws noticed
 
-* **A-F1 (low, doc and code mismatch): `verify-mldsa` claims a Lean caller that does not exist** (`main.rs:45-48`; `tests/mldsa.rs:1-2`). A reader auditing the hybrid scheme would conclude Lean decides the conjunction. It does not.
+* **A-F1 (low, doc and code mismatch): `verify-mldsa` claims a Lean caller that does not exist** (`main.rs:45-48`; `mldsa.rs [not in tree]:1-2`). A reader auditing the hybrid scheme would conclude Lean decides the conjunction. It does not.
 * **A-F2 (low, performance and DoS): `verify-sshsig` forks per call** (`Compiler/CredentialSignatureIO.lean:137-140`) while `verify` uses the coprocess. `NativeCoprocess.lean:4-9` measured one fork of a loaded Host at 6.4 ms plus a 7.4 ms exec, growing with Host memory. Whether a stranger can drive this depends on PayEnrol's routes (question Q-A3).
 * **A-F3 (informational): unbounded frame and message reads** (`main.rs:33, 65, 110`). The caller owns the size, as `README.md:37-39` says. Through the Host the frame is already bounded by the Host's request bound. Not a problem as deployed.
 * **A-F4 (informational): serve exits without a reply on malformed framing** (`main.rs:188-206`). Lean handles that as `Failure.closed` and restarts the helper (`NativeCoprocess.lean:189-196`). This fails closed.
@@ -202,9 +202,9 @@ This is the correct allocation under ATLAS §7 (Rust owns signing and verificati
 
 | item | evidence | verdict |
 |---|---|---|
-| `verify-mldsa` verb (`main.rs:45-71`, `invoke` arm `:129-131`) and `tests/mldsa.rs` (81) | no Lean caller; `combineHalves` absent tree-wide; `scripts/check-rust-tests.sh:135` runs only `--test protocol` | **unwired**: delete it, with the `fips204` dependency (`Cargo.toml:17-18`), or wire it with a real Lean `combineHalves` |
+| `verify-mldsa` verb (`main.rs:45-71`, `invoke` arm `:129-131`) and `mldsa.rs [not in tree]` (81) | no Lean caller; `combineHalves` absent tree-wide; `scripts/check-rust-tests.sh:135` runs only `--test protocol` | **unwired**: delete it, with the `fips204` dependency (`Cargo.toml:17-18`), or wire it with a real Lean `combineHalves` |
 | `examples/sign-probe.rs` | no current script references it; only old evidence manifests | dead test helper; keep it only if the transcript-recording workflow needs it |
-| `tests/sshsig.rs`, `tests/serve.rs` | not in `scripts/check-rust-tests.sh` (only `verifier-protocol`, `:135`) | real tests, but never run by the gate; add rows |
+| `native/credential-signature-verifier/tests/sshsig.rs`, `native/credential-signature-verifier/tests/serve.rs` | not in `scripts/check-rust-tests.sh` (only `verifier-protocol`, `:135`) | real tests, but never run by the gate; add rows |
 | TODO/FIXME/`unimplemented!`/`allow(dead_code)` | none in `src/main.rs` | clean |
 
 No twins inside the crate. The Ed25519-verify twins elsewhere (mini-keys `member.rs:73-75`, mini-sdk `signer.rs:161`, resource-client) are recorded in B5.
@@ -218,7 +218,7 @@ No twins inside the crate. The Ed25519-verify twins elsewhere (mini-keys `member
 | tests (4 files) | 626 | protocol 237, sshsig 226, serve 82, mldsa 81 |
 | **total** | **898** | code 231 (26%), tests and helpers 667 (74%) |
 
-Minimal demo version: keep `verify`, `verify-sshsig` (only if PayEnrol self-enrollment is in the demo) and `serve`. Drop `verify_mldsa` and its `invoke` arm (about 31 lines), `tests/mldsa.rs` (81) and the `fips204` dependency. Optionally drop `examples/sign-probe.rs` (41). **About 112 to 153 lines removed, leaving 745 to 786.** If PayEnrol is not in the demo, `verify-sshsig` (about 46 lines) and `tests/sshsig.rs` (226) can also go, but Lean's `receiverVerify` `.sshsig` arm would then need deleting too.
+Minimal demo version: keep `verify`, `verify-sshsig` (only if PayEnrol self-enrollment is in the demo) and `serve`. Drop `verify_mldsa` and its `invoke` arm (about 31 lines), `mldsa.rs [not in tree]` (81) and the `fips204` dependency. Optionally drop `examples/sign-probe.rs` (41). **About 112 to 153 lines removed, leaving 745 to 786.** If PayEnrol is not in the demo, `verify-sshsig` (about 46 lines) and `native/credential-signature-verifier/tests/sshsig.rs` (226) can also go, but Lean's `receiverVerify` `.sshsig` arm would then need deleting too.
 
 ## A7. Deployability on a small public Linux VM
 
@@ -420,7 +420,7 @@ One test, which checks that the signature binds secret, provider, action, nonce 
 * **`read {"before": snowflake|null, "limit": 1..50}`** GETs the channel with `Authorization: Bot TOKEN` (`:149-171`).
 * Responses that echo the bot token are withheld (`:137-139, 166-168`).
 
-### B1.12 `tests/broker.rs` (485)
+### B1.12 `native/mini-keys/tests/broker.rs` (485)
 A real broker on real Unix sockets with a single uid and `singleAccount` (`:1-8`). Fixtures: a fake HTTP upstream (`:58-75`), a fake Store answering op 144 (`:77-92`) and a full broker config (`:165-176`). Tests:
 * `start_refuses_every_unsafe_custody_by_name` (`:229-261`)
 * `a_peer_without_a_role_and_an_op_outside_its_role_are_refused_by_name` (`:263-284`)
@@ -568,7 +568,7 @@ These matter only against memory disclosure of the broker process.
 | `discord` role | used by `discord-entrance/src/bin/mini-discord-mirror.rs:380`; no recorded run | built, unproven on a box |
 | broker evidence | `docs/evidence` contains only `traffic-v13/build-mini.log` mentioning mini-keys (grep); `2026-09-30-hermes-keys` predates the broker (controller curl at `9e706986`) | **no recorded end-to-end broker run**; journeys that would exercise it single-account: byok-native.py, jpay6, inference-scheduler native journeys |
 | `native.rs` test `other_key` (`:105-107`) | the Host never sends `publicKey` (`Host/Json.lean:4333-4342`) | tests a fixture-only shape |
-| two-uid test | `#[ignore]` (`tests/broker.rs:447-448`), armed only with sudo (`scripts/check-rust-tests.sh:540-548`) | the split-tenancy property is tested only where sudo exists |
+| two-uid test | `#[ignore]` (`native/mini-keys/tests/broker.rs:447-448`), armed only with sudo (`scripts/check-rust-tests.sh:540-548`) | the split-tenancy property is tested only where sudo exists |
 
 **Twins.**
 * **Member signing frame:** `member.rs:34-38` and `resource-client/src/key_service.rs:141-147`. Both are reachable (broker and `mini key`). Move one copy into `mini_keys::wire` and use it from both.
@@ -593,7 +593,7 @@ No TODO, FIXME, `todo!` or `unimplemented!` in the crate.
 | src/server/native.rs | 112 | 25 | 87 |
 | src/server/provider.rs | 433 | 0 | 433 |
 | src/server/discord.rs | 171 | 0 | 171 |
-| tests/broker.rs | 485 | 485 | 0 |
+| native/mini-keys/tests/broker.rs | 485 | 485 | 0 |
 | **total** | **2,863** | **665 (23%)** | **2,198** |
 
 Plus about 1,206 code lines and 682 test lines of `credentials.rs` (gr-B's count) compiled in by `#[path]`. The broker's real compile surface is about 3,400 code lines.
@@ -629,7 +629,7 @@ Plus about 1,206 code lines and 682 test lines of `credentials.rs` (gr-B's count
 * Their own namespace: set, grant, revoke, choose. A grant can name any runner id (`member.rs:125-138`), which affects only their own key.
 * The DoS of B-F3: 32 slots, 20 MiB frames, and about 700 MB of hashing per action.
 * Probing: `hello` reveals roles, the config sha and whether credentials and Discord are configured (`mod.rs:514-517`).
-* A member cannot read any secret, cannot act for another owner without that owner's signing key (K-1), and cannot reach provider or pool operations (`op-not-granted`, test `tests/broker.rs:275-279`).
+* A member cannot read any secret, cannot act for another owner without that owner's signing key (K-1), and cannot reach provider or pool operations (`op-not-granted`, test `native/mini-keys/tests/broker.rs:275-279`).
 * A member who also controls the public socket path (B-F4) could resurrect revoked keys.
 
 ## B8. Questions for the Lean side
@@ -747,7 +747,7 @@ Nothing in Mini's sense. It is a scripted stand-in for a model. Its "decisions" 
 * **The test provider** should leave the candidate and live with the journeys.
 
 **Deletion and rewire list from this shard (lines removed in parentheses):**
-1. Verifier: delete `verify-mldsa` and `tests/mldsa.rs`, and drop `fips204` (about 112). Add gate rows for `tests/sshsig.rs` and `tests/serve.rs`. Lean: `verifySshsig` via `NativeCoprocess.output`. Fix the `NativeCoprocess.lean:12-14` and `INTERFACES.md:358` docs.
+1. Verifier: delete `verify-mldsa` and `mldsa.rs [not in tree]`, and drop `fips204` (about 112). Add gate rows for `native/credential-signature-verifier/tests/sshsig.rs` and `native/credential-signature-verifier/tests/serve.rs`. Lean: `verifySshsig` via `NativeCoprocess.output`. Fix the `NativeCoprocess.lean:12-14` and `INTERFACES.md:358` docs.
 2. Broker: delete `Broker::default_box` (3) or use it. Fix the comments at `mod.rs:108-109`, `lib.rs:19` and `main.rs:65`. Add a uid pin for `publicSocket`. Add per-uid connection caps and read the first frame at a small bound before the op is known. Hash the Host image once per exchange and compare by (dev, inode, mtime, size) for the `still` re-checks. Make audit failure a refusal. Sweep the spool at start. Add a drop guard for `active`. Merge the two curl wrappers. Move `signing_bytes` and `current_epoch` into `mini_keys::wire` for resource-client to share.
 3. Move `CredentialStore` from `grain-runtime/src/credentials.rs` into mini-keys (gr-B §6.3), and keep the table, owner, grant and choice parsers in a shared non-crypto module.
 4. Test provider: drop `testProvider` from `deploy/candidate/package.py:74-78, 90`; build it in `scripts/pipeline/journey-runner`; move `evidence/2026-09-26` under `docs/evidence`; drop the four orphan modes (about 400).

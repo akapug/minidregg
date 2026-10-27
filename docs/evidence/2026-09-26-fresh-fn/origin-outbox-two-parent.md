@@ -1,6 +1,6 @@
 # Two prepared R parents in one accepted Mini catalog
 
-The pure `scripts/probe-fn-origin-outbox.lean` check constructed two distinct
+The pure `scripts.probe-fn-origin-outbox [deleted 1e68f88d]` check constructed two distinct
 prepared R records with different original signed calls and Message-IDs. With
 both records in one accepted-history list, `selectUniqueParent` returned the
 matching record for either parent ID. The same run checked exact historical

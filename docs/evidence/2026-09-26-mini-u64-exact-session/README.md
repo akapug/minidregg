@@ -5,7 +5,7 @@ with the five committed exact-readback source modules recorded in the
 [changed-source manifest](linux-changed-source-sha256.txt). `Host.Main` includes
 the grain-origin CLI permission repair. The combined full source manifest
 differs from the separately certified [pre-UInt64 exact image](../2026-09-26-mini-exact-session/README.md)
-only at `Compiler/Sp800185Cshake256Core.lean`: pre-UInt64 SHA-256 `c4c8aa4b…`
+only at `Theory/Sp800185Cshake256Core.lean`: pre-UInt64 SHA-256 `c4c8aa4b…`
 becomes proved UInt64 SHA-256
 `aa4e9294eab4243590a51b3ecfbb54c7e613f6807a37b055800cc649437949c0`.
 The Mac and Linux 169-module manifests are byte-identical. All source files

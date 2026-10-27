@@ -9,7 +9,7 @@ a witness for ORDERING, never for AUTHORIZATION; header, `:1-27`).
 
 **Evidence class: compiled, in the opt-in `ResearchWip` library**
 (`ResearchWip.lean:99`, `:138`; surface `authored-research`,
-`protocol/lean-build-surfaces.json:4067-4070`). Nothing in the default build or the Host
+`lean-build-surfaces.json [deleted f6a31352]:4067-4070`). Nothing in the default build or the Host
 imports either module, so no install is gated by them today; they say how an install
 claim must be badged once a deployment renders one.
 

@@ -4,17 +4,19 @@
 Everything the deployed system is: the core (`Theory`), the kernel (`Kernel`), the
 predicate algebra (`Pred`), the effect registry (`Effects`) and the native host
 (`Host`, with every `Host.*` module the exe target does not root). It leaves out
-the proof-system research: `Selvage` and the proof-system `Assurance` apex
-theorems, which `Minidregg` (the research umbrella) still builds. Mini admits
-by re-execution, not by proof (decision 10-01), so no deployed module needs them.
+the proof-system research: the `Selvage` modules and the proof-system `Assurance`
+apex theorems, which `Minidregg` (the research umbrella) still builds. Mini admits
+by re-execution, not by proof (decision 10-01), so the admission path needs none of
+that research; the one exception is the digest backend named under Residual.
 
 `AxiomCensus` checks this umbrella; `AxiomCensusResearch` checks `Minidregg`.
 `scripts/lane/ub.sh` builds this; `scripts/lane/rb.sh` builds the research set.
 
-Residual: the Host still imports 12 `Selvage` modules through the Tower256
-digest backend (`Compiler.Tower256ConcreteBackend` -> `BinaryTower256Profile` ->
-`Tower256CshakeMerkleController` -> `Selvage.BinaryLookup`); see the task opened
-with this split.
+Residual: the `Host.Main` import closure holds 12 `Selvage` modules (7,488 lines,
+measured 2026-10-26), so the Deployed set is not Selvage-free. The chain is
+`Host.Main` -> `Kernel.ObjectiveBendNativeAdmission` -> `Compiler.Evaluator` ->
+`Compiler.Sp800185Cshake256` -> `Compiler.Tower256CshakeMerkleController` ->
+`Selvage.BinaryLookup` and `Compiler.AuthenticatedColumnPlan` -> `Selvage.Commitment`.
 -/
 import Theory
 import Kernel

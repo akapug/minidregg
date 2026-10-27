@@ -57,7 +57,7 @@ reopening still took a 26.65-second median; a future optimization must
 preserve fresh native admission of every durable prefix.
 
 The changed `Kernel/DeclaredResourceController.lean` and its 25-module
-dependent native closure compiled. `scripts/probe-declared-resource.lean`
+dependent native closure compiled. `scripts.probe-declared-resource [deleted b8651eef]`
 passed with actual native signatures, exact page/authority tuple, durable
 replay and refusals for tampering, an unrelated signer, stale root, overbroad
 edit and object-to-program edit; its retained log SHA-256 is
@@ -81,7 +81,7 @@ candidate's compiled modules:
 ```sh
 MINI_B3_FORGE_CONFIG=/tmp/mini-fn-e2-native-20260923/live-deployment/pinned-config.json \
 MINI_B3_FORGE_OUTPUT=/tmp/mini-b3-forged-history.bin \
-lake env lean scripts/fn-b3/forge_history.lean
+lake env lean scripts.fn-b3.forge_history [deleted 1e68f88d]
 ```
 
 The script itself checked physical restorable state and reproduced the scratch

@@ -476,7 +476,7 @@ Nobody has written down which tree the demo runs, and the two kernels are explic
 The hbox standing run on Oct 14 had PASS 125 / FAIL 3 (hermes userns, fleetsign race, growth write p99 10 s at 1,000 records) / UNCONFIGURED 8 (`docs/PIPELINE-HBOX.md:231-240`). NANO-VS-MINI-20261022 adds:
 - the vacuous `∨ Collision` class is still on main, with its fix unlanded (CX-MINI-COLL series: 7 patches, 61 files, sitting in an hbox lane);
 - the Host closure is 788 modules;
-- there are 4,258 `#guard` lines.
+- there are 0 `#guard` lines; the 4,257 `#guard_msgs` lines are axiom pins (`#print axioms`).
 
 **Lanes left unfinished.**
 - minidregg cwd: all 33 unfinished lanes are fn (rate-limited or stranded since Oct 11–17).

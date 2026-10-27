@@ -64,6 +64,6 @@ Source: `native/objective-emit/fastmachine/DIAGNOSIS.md:76-78`. `step` called al
 
 ### Regression rows
 
-- `scripts/check-objective-machine-perf.sh`: StressWork through the compiled `runBounded` and `forceWith` must take at most 2,000 ms each (`MINI_OBJECTIVE_MACHINE_MS`). The row refuses if the workload changed (heap 49,163, ticks 524,293). Its control, `--side reference`, runs the specification's own code and must FAIL.
+- `check-objective-machine-perf.sh [deleted 3b2aa109]`: StressWork through the compiled `runBounded` and `forceWith` must take at most 2,000 ms each (`MINI_OBJECTIVE_MACHINE_MS`). The row refuses if the workload changed (heap 49,163, ticks 524,293). Its control, `--side reference`, runs the specification's own code and must FAIL.
 - `native/objective-emit/fastmachine/differential.py`: the specification code against the csimp code on every packet, 15–17 cases each. Its control: a mutant `allocateFieldsFast`, with the field address fixed at 0, gives 65 FAIL over 5 packets.
 

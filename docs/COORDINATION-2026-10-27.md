@@ -53,7 +53,7 @@ FOLD rows marked ✓ are executed in this document's commit series; the Lean axi
 | the known-red ceremony (`known-red-verdict`, `known-red-modules`, `known-red ROW CV-TASK` lines, landing.sh's cv-task demand) | a red is owned | **10 commits** to required-rows/known-red since Oct 1; a base refused when a listed module *builds* | **DELETE ✓**: reds are named in the run's output; a pre-existing red prints PRE-RED and blocks nothing; the lane brief names the owner |
 | the Objective contract manifests (`scripts/gates/objective-manifest/` 610 files, 42,711 rows, 32 MB; `objective-contract-decisions.txt` 9,011 lines; `objective-manifest.py`; two scanner scripts; `Verify/ObjectiveManifest*.lean`) | a restated theorem is noticed | **33 commits since Oct 1** ("531 events, each with its reason"; "1334 events"); two full scanner elaborations + six planted copies per gate run | **DELETE ✓**: the axiom pins and the build keep what mattered; a restated top-level theorem is caught by its adversarial audit (statement-first) |
 | `guard-discipline` (655-line checker + baseline) | `#guard` counts only fall | ~2 s, a self-test, a ledger | **DELETE ✓**: the count is 0 |
-| waste-model (`check-waste-model` 439 lines, fixture, decisions, `docs/WASTE-MODEL.md`) | instruction-count ceilings per journey step | a decisions line per raise | **DELETE ✓**: performance is published |
+| waste-model (`check-waste-model` 439 lines, fixture, decisions, `WASTE-MODEL.md [deleted 3b2aa109]`) | instruction-count ceilings per journey step | a decisions line per raise | **DELETE ✓**: performance is published |
 | hypothesis ledger as a gate row (`check-hypothesis-ledger.sh`, empty baseline, the `ledger` job) | no vacuous / toothless statement families | builds `AxiomCensusResearch` + a ledger run per landing | **FOLD ✓** → on demand before a research move (C2); only a lane's top-level theorem must be non-vacuous (plan rule 3) |
 | `TokenCensus` (+ fixtures, plants, defects ratchet), `scripts-elab`, `char2-vacuity` | private tokens minted at home; every script elaborates; no empty-carrier quantification | elaborates the research umbrella per landing | **FOLD ✓** → the nightly on `dregg-build` (§6) |
 | carrier census + `check-repository-trust.sh` | "521 unwitnessed carriers is today's honest number" | a census that gated only itself | **DELETE ✓** |
@@ -197,7 +197,7 @@ never a delete.
 ## 7. What this replaces
 
 Superseded and deleted in this commit series (git keeps them): `GOAL.md` (the September standing
-goal, 1,314 lines), `REORIENTATION.md` (August), `FORCODEX.md` (August), `docs/WASTE-MODEL.md`,
+goal, 1,314 lines), `REORIENTATION.md` (August), `FORCODEX.md` (August), `WASTE-MODEL.md [deleted 3b2aa109]`,
 `scripts/gates/objective-manifest/` and its decisions ledger, `host-closure.pin`, the known-red
 scripts and lines, `guard-discipline`, `check-waste-model`, the carrier census.
 
