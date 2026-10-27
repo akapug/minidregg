@@ -1,6 +1,7 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
 mod journal_io;
+mod deadline;
 mod controller_digest;
 mod public_status;
 mod application_api_tools;
@@ -2478,16 +2479,14 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     let body = inspect_dir.join("outcome.bin");
     let result = inspect_dir.join("outcome.json");
     write_new(&body, &frame[1..])?;
-    let status = Command::new(&config.host)
+    let status = deadline::output(Command::new(&config.host)
         .arg(&config.host_config)
         .arg("inspect")
         .arg("outcome")
         .arg(&body)
-        .arg(&result)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("native prepare refusal inspection: {e}"))?;
+        .arg(&result), deadline::NATIVE_CALL)
+        .map_err(|e| deadline::describe("native prepare refusal inspection", e))?
+        .status;
     if !status.success() {
         return Err("native Host did not decode prepare refusal Outcome".into());
     }
@@ -3435,10 +3434,9 @@ impl Runtime {
         launch_gate(&self.config.state_dir, program, unit, action)
     }
     fn prove_launcher_gate(program: &Path) -> Result<()> {
-        let output = Command::new(program)
-            .arg("--launch-gate-protocol")
-            .output()
-            .map_err(|e| format!("grain launcher protocol: {e}"))?;
+        let output = deadline::output(Command::new(program)
+            .arg("--launch-gate-protocol"), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("grain launcher protocol", e))?;
         if !output.status.success() || output.stdout != b"mini-grain-launch-gate-v1\n" {
             return Err("configured grain launcher lacks launch-gate v1 protocol".into());
         }
@@ -7568,10 +7566,8 @@ impl Runtime {
         Ok(id)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
-        let output = Command::new(program)
-            .args(args)
-            .output()
-            .map_err(|e| format!("{}: {e}", program.display()))?;
+        let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL)
+            .map_err(|e| deadline::describe(&program.display().to_string(), e))?;
         if !output.status.success() {
             return Err(format!(
                 "{} exited {}: {}",
@@ -9628,14 +9624,13 @@ impl Runtime {
     /// admission remains authoritative; this check rejects incompatible bundles
     /// before a fresh request can reserve funds or reach a provider.
     fn provider_native_profile(&self) -> Result<Value> {
-        let output = Command::new(&self.config.mini)
+        let output = deadline::output(Command::new(&self.config.mini)
             .arg("profile")
             .arg("--host")
             .arg(&self.config.host)
             .arg("--config")
-            .arg(&self.config.host_config)
-            .output()
-            .map_err(|e| format!("provider metering profile: {e}"))?;
+            .arg(&self.config.host_config), deadline::NATIVE_CALL)
+            .map_err(|e| deadline::describe("provider metering profile", e))?;
         if !output.status.success() || output.stdout.len() > 16_384 {
             return Err("pinned Host provider metering profile unavailable".into());
         }
@@ -17212,7 +17207,7 @@ fn signal_group(pgid: i32, signal: i32) -> Result<()> {
 
 fn prove_controller_unit(task: &str) -> Result<()> {
     let unit = format!("mini-grain-controller@{task}.service");
-    let output = systemd_manager::controller_command(task)?
+    let output = deadline::output(systemd_manager::controller_command(task)?
         .args([
             "show",
             "-p",
@@ -17220,9 +17215,8 @@ fn prove_controller_unit(task: &str) -> Result<()> {
             "-p",
             "ActiveState",
             &unit,
-        ])
-        .output()
-        .map_err(|e| format!("controller service proof: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("controller service proof", e))?;
     if !output.status.success() {
         return Err("controller service is unavailable".into());
     }
@@ -17242,15 +17236,14 @@ fn prove_controller_unit(task: &str) -> Result<()> {
 
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
+    let output = deadline::output(systemd_manager::worker_command(unit)?
         .args([
             "kill",
             "--signal=SIGKILL",
             "--kill-whom=all",
             &name,
-        ])
-        .output()
-        .map_err(|e| format!("systemd worker kill: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd worker kill", e))?;
     if output.status.success() {
         return Ok(());
     }
@@ -17270,8 +17263,8 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
     let mut command = Command::new(&helper);
     command.arg(action).arg(state_dir).arg(unit);
     systemd_manager::gate_environment(unit, action, &mut command)?;
-    let output = command.output()
-        .map_err(|e| format!("launch gate {}: {e}", helper.display()))?;
+    let output = deadline::output(&mut command, deadline::LAUNCH_GATE)
+        .map_err(|e| deadline::describe(&format!("launch gate {}", helper.display()), e))?;
     if !output.status.success() {
         return Err(format!(
             "launch gate {action} refused for {unit}: {}",
@@ -17283,10 +17276,9 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
 
 fn unit_inactive(unit: &str) -> Result<bool> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
-        .args(["show", "-p", "ActiveState", "--value", &name])
-        .output()
-        .map_err(|e| format!("systemd unit observation: {e}"))?;
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ActiveState", "--value", &name]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd unit observation", e))?;
     if !output.status.success() {
         return Err("systemd unit observation failed".into());
     }
@@ -17301,9 +17293,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
     let name = format!("{unit}.service");
     let observe = || -> Result<String> {
         prove_controller_unit(task)?;
-        let output = systemd_manager::worker_command(unit)?
-            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name])
-            .output().map_err(|e| format!("worker cgroup observation: {e}"))?;
+        let output = deadline::output(systemd_manager::worker_command(unit)?
+            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name]), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("worker cgroup observation", e))?;
         if !output.status.success() || output.stdout.len() > 16384 {
             return Err("worker cgroup observation failed".into());
         }
@@ -17347,10 +17339,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
 /// unreaped until this count reaches zero, keeping its PGID unavailable for
 /// reuse while the controller signals it.
 fn group_has_live_member(pgid: i32) -> Result<bool> {
-    let output = Command::new("/bin/ps")
-        .args(["-axo", "pgid=,stat="])
-        .output()
-        .map_err(|e| format!("process table unavailable: {e}"))?;
+    let output = deadline::output(Command::new("/bin/ps")
+        .args(["-axo", "pgid=,stat="]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("process table unavailable", e))?;
     if !output.status.success() {
         return Err("process table inspection failed".into());
     }

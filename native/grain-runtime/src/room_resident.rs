@@ -192,11 +192,11 @@ fn return_budget(room: &resource_tools::RoomToolsConfig, assignment: &Value,
     let record = state.parent().ok_or("resident state has no parent")?.join("return-operation.json");
     journal.return_pending = true;
     atomic_json(state, journal)?;
-    let output = Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
+    let output = crate::deadline::output(Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
         .arg(&room.workspace).arg("--account").arg(account).arg("--to").arg(to)
         .arg("--room").arg(&room.room).arg("--operation-record").arg(record)
-        .arg("--socket").arg(&room.socket).stdin(Stdio::null()).output()
-        .map_err(|e| format!("resident budget return: {e}"))?;
+        .arg("--socket").arg(&room.socket), crate::deadline::NATIVE_CALL)
+        .map_err(|e| crate::deadline::describe("resident budget return", e))?;
     let result = resource_tools::last_json(&String::from_utf8_lossy(&output.stdout));
     let confirmed = result.as_ref().is_some_and(|v|
         (v["type"] == "minidregg-hermes-return-v1" && v["returned"].is_string())
