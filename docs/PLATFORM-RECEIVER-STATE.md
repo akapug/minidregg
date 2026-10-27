@@ -193,4 +193,39 @@ scope, on two conditions.**
    `issuer`/`birthSlack`. A census row gates this: it refuses readers of those fields
    outside the cell path. The census row is part of the ordinary-birth commit.
 
-- Then `Intent.credit` with ops 244–247, as in "Then, in order" item 3.
+**Landed (ordinary births, creation tariff; pushed unbuilt):**
+- `Kernel/ResourceBirthReceiver.lean`:
+  - `pricedAt deployment pins durable` checks that the platform record loads from the
+    image the birth commits against and that `pins.tariff = record.creation`. Otherwise it
+    refuses with new `Reject.platformUnavailable` or `Reject.platformStale`.
+    `receiveLoaded` runs it before admission.
+  - `platformGuards` puts the platform cell's root into every ordinary birth's
+    `readGuards`. The replay recomputes the same `intent`, so it agrees.
+  - Theorems: `pricedAt_ok`, `pricedAt_stale` (teeth), `platformGuards_exact`,
+    `readGuards_platform`.
+- `scripts/check-platform-field-readers.py` with `scripts/platform-field-readers.json`:
+  - It refuses any new reader of `template.ownerBudget`/`lifetime`, `config.tariff`,
+    `grainBirthTariffValue` or `config.completionCustodianKey` outside the cell path.
+  - `--ship` refuses while any `owed` row remains (73 today). The seed is `genesis` and the
+    template encoding is `encoding`.
+  - It is wired into `scripts/pipeline/merge-gate-checks.sh`.
+- **Liveness until the next step:** `opened.pins` still carries `config.tariff`. That equals
+  the genesis record's creation tariff (`NativeHostGenesis.genesisRecord`), so births pass
+  until the first install that changes it, then refuse `platformStale`. Loud, never stale.
+
+**Next, in order (the ordinary-birth claim is incomplete until 1–3 land):**
+1. `opened.pins.tariff` from the cell: `NativeHostContext.validateChecks` reads the record
+   through `PlatformCellDomain.load` on the opened image, in both the full and the served
+   shape (`validateCore_map` in NativeHostServed must keep agreeing). Then `pricedAt`
+   passes after installs.
+2. The template's owner budget and lifetime from the record:
+   - `templateAt profile.template record` replaces `profile.template` in
+     `checkTemplate`/`preparePending`/`Pending.templateBound` (RBPC :520–533, :1328–1341);
+   - the `AcceptedBirth.indexed` text and the TokenCensus row change with it;
+   - the Host plan (`prepareLoaded`) and the client quote (`Host/Json.lean`) read the same
+     record.
+3. The deployed keystone `ReceiverReadsCurrent` for ordinary births, from `pricedAt_ok` and
+   `readGuards_platform` plus item 2, instantiating `PlatformCell.BirthsReadCurrent`
+   and `BirthQuoteCurrent`.
+4. The owed families, one per commit, each deleting its census rows.
+5. `Intent.credit` with ops 244–247.
