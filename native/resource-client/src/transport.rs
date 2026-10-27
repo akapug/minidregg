@@ -532,6 +532,8 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [208 | 209, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [151, payload @ ..] => continuity_request(payload),
         [153, payload @ ..] => carried_lookup_request(payload),
+        // STOP inspection only joins retained bytes to current verified history.
+        [155, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         // Read-only signed stream authority checks remain operator-private.
         [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         // Route-bound164 uses the same mutating dispatch receiver with an extra immutable restriction.
@@ -3339,6 +3341,27 @@ done"#;
         assert!(!response_operation_matches(34, &[164]));
         assert!(!response_operation_matches(154, &[34, 1]));
         assert!(!response_operation_matches(34, &[]));
+    }
+
+    #[test]
+    fn stop_inspection_is_private_and_requires_two_nonempty_inputs() {
+        let mut request = vec![155];
+        request.extend_from_slice(&1u32.to_le_bytes());
+        request.extend_from_slice(b"PC");
+        assert!(allowed_operator_operation(&request));
+        assert!(!allowed_operation(&request, false));
+        assert!(!allowed_operation(&request, true));
+        for malformed in [
+            vec![155],
+            vec![155, 1, 0, 0],
+            vec![155, 0, 0, 0, 0, b'C'],
+            vec![155, 1, 0, 0, 0, b'P'],
+            vec![155, 255, 255, 255, 255, b'P', b'C'],
+        ] {
+            assert!(!allowed_operator_operation(&malformed));
+        }
+        request.resize(HOST_MAX_FRAME + 1, 1);
+        assert!(!allowed_operator_operation(&request));
     }
 
     #[test]

@@ -14,7 +14,6 @@ use std::fs::{DirBuilder, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 const MAX_INSPECTION: usize = 2 * 1024 * 1024;
 const MAX_FRAME: usize = 12_102_760;
@@ -517,25 +516,12 @@ pub(crate) fn resume_fenced_exact(
         .ok_or_else(|| invalid("STOP recovery probe parent absent"))?;
     private_dir(probe_parent)?;
     DirBuilder::new().mode(0o700).create(fresh_probe_dir)?;
-    let plan_path = write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
-    let committed_path = write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
+    write_new(fresh_probe_dir, "stop-plan-v2.bin", &retained_plan)?;
+    write_new(fresh_probe_dir, "committed-v3.bin", &retained_committed)?;
     let output = fresh_probe_dir.join("stop-claim-current.json");
-    let _ = operator.pinned_config()?;
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&output)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned Mini Host STOP recovery inspection refused"));
-    }
-    let inspection = read_private_artifact(&output, MAX_INSPECTION)?;
-    let _ = operator.pinned_config()?;
+    let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
+        operator, &retained_plan, &retained_committed, &output,
+    )?;
     let target = StopTarget::from_verified_inspection(
         &retained_plan,
         &retained_committed,

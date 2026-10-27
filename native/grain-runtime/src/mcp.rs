@@ -68,6 +68,7 @@ pub struct ToolCatalog {
     pub session_families: Vec<String>,
     pub applications: Vec<String>,
     pub api_applications: Vec<String>,
+    pub oracle_applications: Vec<String>,
     pub resource_workspace: bool,
     pub resource_workspace_create: bool,
     /// The grain's Hermes was summoned into a room: the room tools.
@@ -187,6 +188,7 @@ fn serve_broker_connection(
                 "sessionFamilies":snapshot.session_families,
                 "applications":snapshot.applications,
                 "apiApplications":snapshot.api_applications,
+                "oracleApplications":snapshot.oracle_applications,
                 "resourceWorkspace":snapshot.resource_workspace,
                 "resourceWorkspaceCreate":snapshot.resource_workspace_create,
                 "roomTools":snapshot.room_tools})
@@ -256,6 +258,9 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         session_families: catalog_names(reply, "sessionFamilies", 8)?,
         applications: catalog_names(reply, "applications", 64)?,
         api_applications: catalog_names(reply, "apiApplications", 16)?,
+        oracle_applications: if reply.get("oracleApplications").is_some() {
+            catalog_names(reply, "oracleApplications", 16)?
+        } else { Vec::new() },
         resource_workspace: reply
             .get("resourceWorkspace")
             .and_then(Value::as_bool)
@@ -276,6 +281,9 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         .any(|name| !name.ends_with("-app"))
     {
         return Err("controller MCP application selector is not a named app".into());
+    }
+    if catalog.oracle_applications.iter().any(|name| !catalog.api_applications.contains(name)) {
+        return Err("controller Oracle application is not an API route".into());
     }
     Ok(catalog)
 }
@@ -398,6 +406,7 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "required":["application","method","path","query","headers","bodyHex"],
                 "additionalProperties":false}}));
     }
+    tools.extend(crate::oracle_tools::tool_specs(&catalog.oracle_applications));
     json!({"tools":tools})
 }
 
@@ -677,6 +686,26 @@ mod tests {
     }
 
     #[test]
+    fn oracle_catalog_is_explicit_and_must_be_a_subset_of_api_routes() {
+        let mut reply = json!({"type":"mini-grain-tool-catalog-v2",
+            "birthFamilies":[],"applicationFamilies":[],"sessionFamilies":[],
+            "applications":[],"apiApplications":["oracle-app","git-app"],
+            "resourceWorkspace":false,"resourceWorkspaceCreate":false,"roomTools":false});
+        let legacy = catalog_from_reply(&reply).unwrap();
+        assert!(legacy.oracle_applications.is_empty());
+        reply["oracleApplications"] = json!(["oracle-app"]);
+        let catalog = catalog_from_reply(&reply).unwrap();
+        let listed = tools_for_catalog(&catalog);
+        for name in ["mini_oracle_discover", "mini_oracle_call"] {
+            let spec = listed["tools"].as_array().unwrap().iter().find(|t| t["name"] == name).unwrap();
+            assert_eq!(spec["inputSchema"]["properties"]["application"]["enum"], json!(["oracle-app"]));
+            assert_eq!(spec["inputSchema"]["additionalProperties"], false);
+        }
+        reply["oracleApplications"] = json!(["unregistered-app"]);
+        assert!(catalog_from_reply(&reply).is_err());
+    }
+
+    #[test]
     fn birth_catalog_lists_only_named_confirmed_routes_before_prompt() {
         let (mut client, broker) = UnixStream::pair().unwrap();
         let (tx, rx) = mpsc::sync_channel(1);
@@ -693,6 +722,7 @@ mod tests {
                     session_families: vec!["office-web".into()],
                     applications: vec!["office-0-app".into()],
                     api_applications: vec![],
+                    oracle_applications: vec![],
                     resource_workspace: false,
                     resource_workspace_create: false,
                     room_tools: false,

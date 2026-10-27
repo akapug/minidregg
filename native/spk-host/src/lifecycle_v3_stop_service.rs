@@ -26,7 +26,6 @@ use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 const MAX_CONFIG: u64 = 65_536;
 const MAX_FRAME: u64 = 12_102_760;
@@ -363,28 +362,12 @@ fn inspect_original(
             .ok_or_else(|| invalid("STOP probe parent absent"))?,
     )?;
     DirBuilder::new().mode(0o700).create(probe_dir)?;
-    let plan_path = write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
-    let committed_path = write_new(probe_dir, "committed-v3.bin", &committed)?;
+    write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
+    write_new(probe_dir, "committed-v3.bin", &committed)?;
     let output_path = probe_dir.join("current.json");
-    let _ = operator.pinned_config()?;
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&output_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned STOP current source inspection refused"));
-    }
-    let _ = operator.pinned_config()?;
-    let inspection = fs::read(&output_path)?;
-    if inspection.is_empty() || inspection.len() as u64 > MAX_INSPECTION {
-        return Err(invalid("STOP current source inspection bound refused"));
-    }
+    let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
+        operator, &plan, &committed, &output_path,
+    )?;
     let target = StopTarget::from_verified_inspection(
         &plan,
         &committed,

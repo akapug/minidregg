@@ -1684,6 +1684,17 @@
       "receiver": "serveFrame"
     },
     {
+      "code": 155,
+      "symbol": "APPLICATION_STOP_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only STOP custody join against the refreshed verified session",
+      "receiver": "dispatchSession"
+    },
+    {
       "code": 160,
       "symbol": "JOB_MONEY_PLAN",
       "status": "active",
@@ -2276,6 +2287,11 @@
       "path": "native/resource-client/src/member_app.rs",
       "constant": "READY_OP",
       "operation": "APPLICATION_DISPATCH_READY"
+    },
+    {
+      "path": "native/spk-host/src/lifecycle_v3_stop_claim_native.rs",
+      "constant": "STOP_INSPECT_OPERATION",
+      "operation": "APPLICATION_STOP_INSPECT"
     }
   ]
 }

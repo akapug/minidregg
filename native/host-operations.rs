@@ -294,6 +294,8 @@ pub const APPLICATION_STREAM_RENEW: u8 = 152;
 pub const CARRY_RECEIPT_LOOKUP: u8 = 153;
 // active; operator; owner: spk
 pub const APPLICATION_ROUTE_INSPECT: u8 = 154;
+// active; operator; owner: spk
+pub const APPLICATION_STOP_INSPECT: u8 = 155;
 // active; public,operator; owner: job-money
 pub const JOB_MONEY_PLAN: u8 = 160;
 // active; public,operator; owner: job-money
