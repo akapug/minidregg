@@ -184,12 +184,52 @@ class ControllerWorldTests(unittest.TestCase):
     def test_v2_readiness_does_not_claim_native_admission(self):
         r = self.consent_record()
         pins = {'providerSha256':'12'*32,'configSha256':'34'*32}
-        record = c.consent_record(self.root, r, {'consent':pins})
+        record = c.consent_record(self.root, r, {'consent':pins, 'binaries':{'mini':'56'*32}})
         self.assertEqual(record['serviceUid'], r['operatorUid'])
         self.assertEqual(record['controllerUid'], r['uid'])
         self.assertEqual(record['activationPeerUid'], 0)
         with patch.object(c, 'manager_properties', return_value={'ActiveState':'failed','MainPID':'0'}):
-            with self.assertRaises(ValueError): c.consent_readiness(self.root, r, {'consent':pins})
+            with self.assertRaises(ValueError): c.consent_readiness(self.root, r, {'consent':pins, 'binaries':{'mini':'56'*32}})
+
+    def test_consent_readiness_binds_process_identity_and_actual_socket_mode(self):
+        r = self.consent_record(); pins = {'providerSha256':'12'*32,'configSha256':'34'*32}
+        (self.root/'bin').mkdir(); executable = self.file('bin/mini', b'fixed-mini', 0o700)
+        (self.root/'consent').mkdir(mode=0o700)
+        listener = c.socket.socket(c.socket.AF_UNIX, c.socket.SOCK_STREAM)
+        listener.bind(str(self.root/'consent/peer.sock')); self.addCleanup(listener.close)
+        (self.root/'consent/peer.sock').chmod(0o600)
+        process = Path('/proc/12345')
+        identity = {'uid':self.uid}
+        observed = {'ActiveState':'active','MainPID':'12345','InvocationID':'ab'*16}
+        original_stat, original_text = Path.stat, Path.read_text
+        def stat_path(path, *args, **kwargs):
+            if path == process: return SimpleNamespace(st_uid=identity['uid'])
+            if path == process/'exe': return original_stat(executable)
+            return original_stat(path, *args, **kwargs)
+        def text_path(path, *args, **kwargs):
+            if path == process/'stat': return '12345 (mini) ' + ' '.join(['S'] + ['0']*18 + ['789'])
+            return original_text(path, *args, **kwargs)
+        with patch.object(c, 'manager_properties', return_value=observed), \
+                patch.object(Path, 'stat', stat_path), patch.object(Path, 'read_text', text_path):
+            ready = c.consent_readiness(self.root, r, {'consent':pins, 'binaries':{'mini':'56'*32}})
+            self.assertEqual(ready['processStartTicks'], 789)
+            self.assertEqual(ready['readiness'], 'process-and-socket-only')
+            self.assertFalse(ready['independentAdmissionObserved'])
+            identity['uid'] = self.uid + 1000
+            with self.assertRaises(ValueError): c.consent_readiness(self.root, r, {'consent':pins, 'binaries':{'mini':'56'*32}})
+            identity['uid'] = self.uid
+            (self.root/'consent/peer.sock').chmod(0o666)
+            with self.assertRaises(ValueError): c.consent_readiness(self.root, r, {'consent':pins, 'binaries':{'mini':'56'*32}})
+
+    def test_v2_config_update_cannot_retarget_consent_settings(self):
+        r = self.consent_record()
+        data = {'commands':[], 'stateDir':str(self.root/'state'),
+                'controlSocket':str(self.root/'state/control.sock'), 'cwd':str(self.root/'workspace'),
+                'hostConfig':'/unrelated/settings.json'}
+        source = self.file('next.json', c.encoded(data))
+        with patch.object(c, 'load', return_value=({},self.root,r)), patch.object(c, 'checked_units'), patch.object(c, 'no_processes'):
+            with self.assertRaisesRegex(ValueError, 'consent-bound'):
+                c.config_update(r['store'], '/unused', str(source))
 
     def test_consent_archive_preserves_partial_initialization_and_refuses_drift(self):
         r = self.consent_record()
