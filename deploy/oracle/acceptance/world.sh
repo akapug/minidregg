@@ -332,7 +332,7 @@ world_continue_controller() {
   [[ $continuation == "$run/continuations/controller-create-1" ]] || fail 'continuation evidence path differs'
   preserve_existing_exit=0
   sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
-    "$repo/deploy/oracle/acceptance/continue_controller.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
     >"$continuation/recovery-input-sha256.txt"
   configured=1
   systemctl --user start "mini-spk-broker@$store.service"
@@ -353,9 +353,12 @@ world_continue_controller() {
 world_cleanup_volumes() {
   local preserve=$1 evidence=$2 request action status_request
   mkdir -m 700 "$evidence" || return
-  status_request=$(jq -cer --arg root "$GRAINS_ROOT"     '{verb:"volumes-status",store:.store,deploymentId:.deploymentId,volumesRoot:($root+"/volumes")}'     "/etc/mini-spk-volumes/$store.json") || return
+  status_request=$(jq -cer --arg root "$GRAINS_ROOT" \
+    '{verb:"volumes-status",store:.store,deploymentId:.deploymentId,volumesRoot:($root+"/volumes")}' \
+    "/etc/mini-spk-volumes/$store.json") || return
   timeout 120 sudo -n -- "$helper" "$status_request" >"$evidence/status.json" || return
-  python3 -B "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$GRAINS_ROOT"     "$evidence/status.json" >"$evidence/plan.json" || return
+  python3 -B "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$GRAINS_ROOT" \
+    "$evidence/status.json" >"$evidence/plan.json" || return
   while IFS= read -r request; do
     action=$(jq -er .action <<<"$request") || return
     if [[ $action == unmount ]]; then
@@ -402,9 +405,13 @@ world_cleanup() {
     # diagnosis/recovery. Never erase an uncertain admitted operation's journal.
     [[ $result == 0 ]] || preserve_namespace=true
     if [[ $cleanup_result == 0 ]]; then
-      volume_evidence=$(mktemp -d "${continuation:-$run}/volume-cleanup.XXXXXXXX")
-      # The helper owns this new child; mktemp protects the unique parent.
-      world_cleanup_volumes "$preserve_namespace" "$volume_evidence/observations"         >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+      if volume_evidence=$(mktemp -d "${continuation:-$run}/volume-cleanup.XXXXXXXX"); then
+        # The helper owns this new child; mktemp protects the unique parent.
+        world_cleanup_volumes "$preserve_namespace" "$volume_evidence/observations" \
+          >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+      else
+        cleanup_result=1
+      fi
     fi
     [[ $cleanup_result == 0 ]] || preserve_namespace=true
     # This registry is uniquely created by this run. A failed unmount prevents

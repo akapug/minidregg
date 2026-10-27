@@ -164,7 +164,7 @@ successor lane/fence (the Debian 13 floor audit PASS; now the SPK resident readi
 lane/hermes 0b8cc8bb (the real upstream Hermes agent through bwrap → bridge → gateway → broker → provider
 → v4 settle on the build box, 105 rows PASS; the v4 `leg` frame; reconcile after the record; the demo-box
 install sequence and worker root; the ask pass's completion boundary and the librarian fixture are its
-last reds). L12 web lane lane/web-frontend db61a971+ (parity 203/203 leaves with 0 refusals; JWF 35/35;
+last reds). L12 web lane lane/web-frontend 43533e6d (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
 the tour's doors 11 and 12; progressive `can`; "Pay with your wallet" on the paid route; the door's
 funding figure). L13 lane/app-market f68de59f+ (Hacker Slides and Simple Todos through create, install,
 share, start, enrol and page load on a live world; `HackSessionContext` served; the member's own install
@@ -195,6 +195,11 @@ PASS; `objective-c` 1,218 of 1,219 packet differentials with one Lean timeout un
 steps take ~15 min each; the nightly gets the full 10,800 s and measures rather than truncates);
 `m6grain` on Debian 13 rerunning after the test-SPK cache path was provided. None of these gates a
 rehearsal: the gate is the tour plus the composed scenario.
+
+**Consent mode, decided** (2026-10-27 afternoon): the box stays on full consent; with the O(1) recheck
+(`ConsentAnchor.recheckHeld`, in every candidate since round 2) the propose cost is flat, so thin consent buys
+nothing the demo needs and lacks a birth arm (JP2 refuses a thin birth by name until a thin-birth design
+exists: Phase 3). The soak's propose slope was the pre-recheck binaries.
 
 **The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
 replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
@@ -330,7 +335,14 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+(ember, same morning). **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
+through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
+resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the
+GLM provider-route capability for 30 days on `pay subscribers 4000`; L4 builds the Anthropic-messages
+adapter and the row; infra seals the key; the web lane the Subscribe form). Whether the coding plan's
+terms permit serving third parties' agents is ember's call, flagged; the join page carries the sentence
+ember supplies. The 1Password state bundle is re-saved in a few days when the state stabilises.
 Main advances after every integration round; other sessions' work in the shared worktree is committed
 as found and fixed forward.
 

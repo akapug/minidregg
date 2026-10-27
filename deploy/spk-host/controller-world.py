@@ -386,8 +386,47 @@ def consent_environment(r, base, pins):
 
 
 
+def consent_storage(config_bytes, operator):
+    config = strict_json(config_bytes)
+    root = canonical(config.get('storageRoot'))
+    require(len(str(root)) <= 4096 and len(root.parts) <= 64, 'consent Store path exceeds bound')
+    parent = root.parent
+    ancestry(root, {0, operator})
+    metadata(parent, operator, 0o700); metadata(root, operator, 0o700)
+    require(root.resolve(strict=True) == root, 'consent Store path is not canonical')
+    def pin(path):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            m = os.fstat(fd)
+            require(stat.S_ISREG(m.st_mode) and m.st_nlink == 1 and m.st_uid == operator
+                    and stat.S_IMODE(m.st_mode) == 0o600, 'consent Store object custody differs')
+            require((m.st_dev, m.st_ino) == (path.lstat().st_dev, path.lstat().st_ino), 'consent Store path changed')
+            return {'path': str(path), 'dev': m.st_dev, 'ino': m.st_ino, 'uid': m.st_uid,
+                    'gid': m.st_gid, 'mode': 0o600}
+        finally:
+            os.close(fd)
+    directories = []
+    for path in reversed((root, *root.parents)):
+        m = path.lstat()
+        require(stat.S_ISDIR(m.st_mode) and m.st_uid in (0, operator) and not m.st_mode & 0o022,
+                'consent Store ancestor changed while pinning')
+        directories.append({'path': str(path), 'dev': m.st_dev, 'ino': m.st_ino,
+                            'uid': m.st_uid, 'gid': m.st_gid, 'mode': stat.S_IMODE(m.st_mode)})
+    database = pin(root / 'forward-link.sqlite3')
+    lock_path = Path(str(root) + '.head-anchor.lock')
+    lock = pin(lock_path)
+    require(lock_path.stat().st_size == 0, 'consent Store anchor lock is not empty')
+    anchor = read_file(Path(str(root) + '.head-anchor'), operator, 120, required_mode=0o600)
+    require(len(anchor) == 120 and anchor.startswith(b'MINIANC2'), 'consent Store anchor format differs')
+    # Source reads legitimately replace this inode when the retained head
+    # advances. Pin its private parent and validate its custody/format each use.
+    return {'protocol': 'mini-spk-consent-storage-v1', 'root': str(root),
+            'writableParent': str(parent), 'directories': directories,
+            'database': database, 'lock': lock, 'replaceableAnchor': str(root) + '.head-anchor'}
+
+
 def manager_properties(name):
-    output = run(['/usr/bin/systemctl', 'show', name, '--property=LoadState,FragmentPath,Transient,User,ActiveState,MainPID,InvocationID'],
+    output = run(['/usr/bin/systemctl', 'show', name, '--property=LoadState,FragmentPath,Transient,User,ActiveState,MainPID,ControlPID,InvocationID'],
                  stdout=subprocess.PIPE).stdout.decode()
     return dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
 
@@ -591,7 +630,8 @@ def unit_bytes(r, base, upstream, consent=None):
                       f'--consent {base}/bin/{CONSENT_BIN} --config {base}/consent/config.json '
                       f'--consent-sha256 {consent["providerSha256"]} --config-sha256 {consent["configSha256"]} '
                       f'--controller-uid {r["uid"]} --anchors {base}/consent/anchors\n'
-                      f'Environment=HOME={base}/consent\nReadWritePaths={base}/consent/anchors\n' + common)
+                      f'Environment=HOME={base}/consent\nReadWritePaths={base}/consent/anchors'
+                      f' {consent["storage"]["writableParent"]}\n' + common)
     require(len(values) == len(r['units']), 'controller service layout differs')
     return dict(zip(r['units'], (value.encode() for value in values)))
 
@@ -650,7 +690,8 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     require(stat.S_ISSOCK(um.st_mode), 'primary operator endpoint is not a socket')
     ancestry(public.parent, {0, op}); pm = metadata(public, op)
     require(stat.S_ISSOCK(pm.st_mode), 'public endpoint is not a socket')
-    consent = {'providerSha256': sha(binaries[CONSENT_BIN]), 'configSha256': sha(data['host-config.json'])} if has_consent(r) else None
+    consent = {'providerSha256': sha(binaries[CONSENT_BIN]), 'configSha256': sha(data['host-config.json']),
+               'storage': consent_storage(data['host-config.json'], op)} if has_consent(r) else None
     units = unit_bytes(r, base, upstream, consent)
     require(all(not (UNITS / n).exists() and not (UNITS / n).is_symlink() for n in units), 'controller unit already exists')
     require(all(manager_properties(n).get('LoadState') == 'not-found' for n in units),
@@ -684,6 +725,10 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     paths = [p for p in reversed((public.parent, *public.parent.parents)) if not metadata(p).st_mode & 0o001]
     for p, perm in [(p, '--x') for p in paths] + [(public, '-w-')]:
         pending['acl'].append(grant_acl(p, r['uid'], perm, op, base / f'acl-{len(pending["acl"]) + 1:03}.json'))
+    if has_consent(r):
+        # The authorized public-listener traversal ACL may change mode-mask
+        # bits on a shared ancestor. Retain the completed setup's path custody.
+        pending['consent']['storage'] = consent_storage(data['host-config.json'], op)
     for n, value in units.items():
         write_new(UNITS / n, value, mode=0o644)
     pending['units'] = {n: sha(value) for n, value in units.items()}
@@ -692,7 +737,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
-def checked_units(base, r, partial=False):
+def checked_units(base, r, partial=False, consent_upgrade_hashes=()):
     stage_path = base / 'stage.json'
     if partial and not stage_path.exists():
         stage_path = base / 'stage-pending.json'
@@ -703,7 +748,9 @@ def checked_units(base, r, partial=False):
     for n in r['units']:
         if partial and not (UNITS / n).exists() and not (UNITS / n).is_symlink():
             continue
-        require(sha(read_file(UNITS / n, 0, 16384)) == stage['units'][n], 'controller unit changed')
+        actual = sha(read_file(UNITS / n, 0, 16384))
+        require(actual == stage['units'][n] or (has_consent(r) and n == r['units'][4]
+                and actual in consent_upgrade_hashes), 'controller unit changed')
     for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
@@ -716,6 +763,10 @@ def checked_units(base, r, partial=False):
             require(sha(read_file(path, owner, 1048576, required_mode=0o600)) == pins['configSha256'],
                     'consent configuration bytes differ')
         metadata(base / 'consent/anchors', r['operatorUid'], 0o700)
+        if 'storage' in pins:
+            require(consent_storage(read_file(base / 'consent/config.json', r['operatorUid'], 1048576,
+                                             required_mode=0o600), r['operatorUid']) == pins['storage'],
+                    'consent Store directory or persistent inode pins differ')
     return stage
 
 
@@ -755,6 +806,102 @@ def consent_readiness(base, r, stage):
             'readiness': 'process-and-socket-only', 'independentAdmissionObserved': False}
 
 
+def stopped_controller_units(r):
+    no_processes(r['uid'])
+    for unit in r['units']:
+        value = manager_properties(unit)
+        require(value.get('LoadState') == 'loaded' and value.get('Transient') == 'no'
+                and value.get('FragmentPath') == str(UNITS / unit), 'stopped controller unit identity differs')
+        require(value.get('ActiveState') == 'inactive' and value.get('MainPID', '0') == '0'
+                and value.get('ControlPID', '0') == '0', 'controller units must be stopped before storage upgrade')
+        if unit.endswith('.service'):
+            require(value.get('User') == str(r['uid'] if unit == r['units'][0] else r['operatorUid']),
+                    'stopped controller unit user differs')
+
+
+def replace_root_record(path, data, mode):
+    temporary = path.with_name('.' + path.name + '-storage-next')
+    if temporary.exists() or temporary.is_symlink():
+        require(read_file(temporary, 0, 65536, required_mode=mode) == data, 'storage upgrade temporary differs')
+    else:
+        write_new(temporary, data, mode=mode)
+    os.replace(temporary, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def consent_storage_upgrade(store, helper):
+    _, base, r = load(store, helper)
+    require(has_consent(r), 'storage upgrade requires a version-2 controller')
+    stopped_controller_units(r)
+    intent_path = base / 'consent-storage-upgrade.json'
+    unit_path, stage_path = UNITS / r['units'][4], base / 'stage.json'
+    def archive(digest, kind):
+        require(isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest), 'storage upgrade digest malformed')
+        return base / 'configs' / ('consent-storage-' + digest + '.' + kind)
+    if not intent_path.exists() and not intent_path.is_symlink():
+        old_stage = checked_units(base, r)
+        if 'storage' in old_stage['consent']:
+            return {'store': store, 'alreadyConfigured': True, 'consent': consent_record(base, r, old_stage)}
+        old_stage_raw = read_file(stage_path, 0, 65536, required_mode=0o600)
+        require(strict_json(old_stage_raw) == old_stage, 'stage changed before storage upgrade')
+        old_unit = read_file(unit_path, 0, 16384, required_mode=0o644)
+        old_line = f'ReadWritePaths={base}/consent/anchors\n'.encode()
+        require(old_unit.count(old_line) == 1, 'original consent writable paths differ')
+        settings = read_file(base / 'consent/config.json', r['operatorUid'], 1048576, required_mode=0o600)
+        storage = consent_storage(settings, r['operatorUid'])
+        new_unit = old_unit.replace(old_line, old_line[:-1] + b' ' + storage['writableParent'].encode() + b'\n')
+        new_stage = strict_json(old_stage_raw)
+        new_stage['consent']['storage'] = storage
+        new_stage['units'][r['units'][4]] = sha(new_unit)
+        new_stage_raw = encoded(new_stage)
+        intent = {'protocol': 'mini-spk-consent-storage-upgrade-v1', 'store': store,
+                  'oldStageSha256': sha(old_stage_raw), 'newStageSha256': sha(new_stage_raw),
+                  'oldUnitSha256': sha(old_unit), 'newUnitSha256': sha(new_unit)}
+        for raw, kind in ((old_stage_raw, 'stage'), (new_stage_raw, 'stage'), (old_unit, 'service'), (new_unit, 'service')):
+            path = archive(sha(raw), kind)
+            if path.exists() or path.is_symlink():
+                require(read_file(path, 0, 65536, required_mode=0o600) == raw, 'storage upgrade archive differs')
+            else:
+                write_new(path, raw)
+        write_new(intent_path, encoded(intent))
+    intent = strict_json(read_file(intent_path, 0, 4096, required_mode=0o600))
+    require(set(intent) == {'protocol', 'store', 'oldStageSha256', 'newStageSha256', 'oldUnitSha256', 'newUnitSha256'}
+            and intent['protocol'] == 'mini-spk-consent-storage-upgrade-v1' and intent['store'] == store,
+            'storage upgrade intent differs')
+    archives = {}
+    for key, kind in (('oldStage', 'stage'), ('newStage', 'stage'), ('oldUnit', 'service'), ('newUnit', 'service')):
+        digest = intent[key + 'Sha256']
+        archives[key] = read_file(archive(digest, kind), 0, 65536, required_mode=0o600)
+        require(sha(archives[key]) == digest, 'storage upgrade archived hash differs')
+    old_stage, new_stage = (strict_json(archives[key]) for key in ('oldStage', 'newStage'))
+    settings = read_file(base / 'consent/config.json', r['operatorUid'], 1048576, required_mode=0o600)
+    require(sha(settings) == old_stage['consent']['configSha256'], 'storage upgrade config changed')
+    storage = consent_storage(settings, r['operatorUid'])
+    expected = strict_json(archives['oldStage'])
+    expected['consent']['storage'] = storage
+    expected['units'][r['units'][4]] = intent['newUnitSha256']
+    old_line = f'ReadWritePaths={base}/consent/anchors\n'.encode()
+    require(archives['oldUnit'].count(old_line) == 1 and archives['newUnit'] == archives['oldUnit'].replace(
+            old_line, old_line[:-1] + b' ' + storage['writableParent'].encode() + b'\n')
+            and expected == new_stage, 'storage upgrade exceeds exact filesystem change')
+    require(sha(read_file(stage_path, 0, 65536, required_mode=0o600)) in
+            (intent['oldStageSha256'], intent['newStageSha256']), 'current stage is outside storage upgrade')
+    checked_units(base, r, consent_upgrade_hashes=(intent['oldUnitSha256'], intent['newUnitSha256']))
+    # Either exact old/new byte state is recoverable after interruption; no
+    # unrelated unit or pin is overwritten. Old bytes and intent stay retained.
+    replace_root_record(unit_path, archives['newUnit'], 0o644)
+    replace_root_record(stage_path, archives['newStage'], 0o600)
+    run(['/usr/bin/systemctl', 'daemon-reload'])
+    checked_units(base, r)
+    return {'store': store, 'storageUpgrade': str(intent_path),
+            'previousStageSha256': intent['oldStageSha256'], 'stageSha256': intent['newStageSha256'],
+            'consent': consent_record(base, r, new_stage)}
+
+
 def service(store, helper, action):
     _, base, r = load(store, helper)
     stage = checked_units(base, r, partial=(action == 'stop'))
@@ -769,6 +916,7 @@ def service(store, helper, action):
             require(observed.get('User') == str(expected), 'controller manager unit user differs')
     if action == 'start':
         if has_consent(r):
+            require('storage' in stage['consent'], 'consent Store sandbox needs explicit stopped storage upgrade')
             run(['/usr/bin/systemctl', 'start', r['units'][3], r['units'][4]])
         run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][0]])
         ready = Path(r['home']) / 'state/control.sock'
@@ -1105,6 +1253,7 @@ def main(args):
         elif action == 'controller-export' and not extra: result = export_state(store, helper)
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
+        elif action == 'controller-consent-storage' and not extra: result = consent_storage_upgrade(store, helper)
         elif action == 'controller-journal' and not extra:
             _, base, r = load(store, helper)
             result = json.loads(read_file(Path(r['home']) / 'state/journal.json', r['uid'], 8 * 1024 * 1024))

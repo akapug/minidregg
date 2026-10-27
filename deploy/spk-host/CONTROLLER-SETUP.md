@@ -20,6 +20,7 @@ controller-tool-result STORE HELPER REQUEST_ID
 controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
 controller-service-logs STORE HELPER
+controller-consent-storage STORE HELPER
 controller-export STORE HELPER
 controller-reserve-export STORE HELPER DISPATCH_ATTEMPT_ID
 controller-remove STORE HELPER
@@ -148,9 +149,25 @@ in its per-attempt pins; the transport checks the exact config/provider binding
 and controller peer, with no local or thin fallback. A controller config update
 keeps the fixed host-config path; it does not change the service settings.
 
-Only the operator-private anchor directory is writable through the consent
-service's systemd filesystem view; the Store stays read-only. The verifier may
-use its private temporary directory. Stop/start and controller configuration
+The consent service keeps `ProtectSystem=strict`, with two write exceptions:
+its own operator-private consent anchor directory and the exact private parent
+of the configured `storageRoot`. The existing SQLite helper opens the database
+read/write, takes a write-capable lock, and may atomically replace the sibling
+`storageRoot.head-anchor`; the parent must therefore permit creation and rename.
+This grants the trusted operator-side provider write access to that **entire
+private parent**, including other entries there, not just SQLite or the anchor.
+It grants the controller no filesystem access. The provider/configuration remain
+exactly pinned, and native Lean consent remains the authority for requests.
+
+Setup requires a canonical path with no symlink ancestors, a real operator-owned
+0700 Store and parent, and private regular single-link database/anchor/lock
+files. It pins ancestor/Store directory identities and persistent database/lock
+inodes. Each use revalidates owners, modes and those identities. The source
+helper legitimately replaces a well-formed private `MINIANC2` anchor, so its
+inode may change; its private parent and current file custody/format are checked
+and the native helper still checks its continuity. The writable path comes only
+from the exact pinned host configuration, with control characters, aliases and
+systemd specifiers refused. The verifier may use its private temporary directory. Stop/start and controller configuration
 updates preserve the `binding`, `frontier` and `lock` files. Missing/corrupt
 retained state is a native refusal, not permission to replay from an empty
 frontier. Removal first copies these exact bounded files, including an
@@ -158,7 +175,17 @@ incomplete initialization, to a root-private
 `/var/lib/mini-spk-controller-history/STORE-consent` archive and records their
 hashes. A changed archive refuses removal.
 
-Stage returns the consent service/socket/provider/config/identity pins. Start
+Existing version-2 stages need the explicit `controller-consent-storage` verb
+while all recorded units are inactive, both manager PIDs are zero and no
+controller process remains. It derives the Store path from the unchanged pinned
+configuration and changes only the consent unit's `ReadWritePaths` plus the
+stage's filesystem pins. Exact old/new unit and stage bytes and an immutable
+intent are retained under root custody. Interruptions after any archive,
+intent, unit, stage or manager-reload step can resume only those same byte
+states; unrelated edits or changed Store identities refuse. No restart, source
+request or config rewrite occurs. New stages include these checks directly.
+
+Stage returns the consent service/socket/provider/config/identity and storage pins. Start
 adds its observed systemd invocation, MainPID, process start ticks, exact
 executable inode and socket owner/mode. This is labeled **process and socket
 readiness only**; independent source admission is established by the actual
@@ -235,7 +262,7 @@ copies, legacy layout compatibility, and retained partial anchor state. Actual a
 journey remain separate receiving tests.
 
 The entrypoint executes only its SHA-256-pinned Python companion bytes, read once
-through a bounded no-follow descriptor. Deploy both files together. The existing
+through a bounded (96 KiB) no-follow descriptor. Deploy both files together. The existing
 operator-writable source entrypoint remains explicitly trusted root setup; this
 pin prevents ambient sibling substitution and read/execute races, rather than
 pretending to isolate root from an operator authorized to replace that entrypoint.

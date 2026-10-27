@@ -4,7 +4,9 @@
 Preserve the definite pre-START account-creation failure before the installer
 performs its separately checked pending-account recovery. Never submit a call.
 """
+import base64
 import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -41,6 +43,65 @@ def manifest(path):
         require(sha(item) == digest, 'retained bytes changed: ' + name)
         values[name] = digest
     return values
+
+
+def session_refusal(request_id, result, final_journal, exported, store):
+    """Check a definite pre-tool refusal; this never authorizes replay or ACK.
+
+    The caller must separately obtain a fresh fixed-installer export and prove
+    stopped services and unchanged installed/native state before continuation.
+    """
+    require(isinstance(request_id, str) and re.fullmatch('[0-9a-f]{32}', request_id),
+            'session request identity malformed')
+    require(result == {'isError': True, 'operationId': None, 'requestId': request_id,
+                       'result': 'foreground tool requires an attached, reconciled idle task',
+                       'type': 'tool-complete', 'v': 1}, 'not the exact definite pre-tool refusal')
+    require(exported.get('protocol') == 'mini-spk-controller-evidence-v1'
+            and exported.get('store') == store, 'controller export identity differs')
+    expected = {'controller.lock', 'journal.json',
+                'query-0000000000000001/attempt/attempt.json',
+                'query-0000000000000001/attempt/config.json',
+                'query-0000000000000001/attempt/intent.bin',
+                'query-0000000000000001/attempt/intent.json',
+                'query-0000000000000001/intent-source.json',
+                'shared-app-refs/app-birth.bin', 'shared-app-refs/bootstrap-ticket.bin'}
+    require(isinstance(exported.get('files'), dict) and set(exported['files']) == expected,
+            'controller state contains another operation or sealed request')
+    decoded = {}
+    for name, entry in exported['files'].items():
+        raw = base64.b64decode(entry['base64'], validate=True)
+        require(len(raw) <= 1024 * 1024 and hashlib.sha256(raw).hexdigest() == entry['sha256'],
+                'controller export bytes differ')
+        decoded[name] = raw
+    journal = json.loads(decoded['journal.json'])
+    require(journal == final_journal and journal.get('format') == 'minidregg-grain-runtime-v1'
+            and journal.get('connection') == 'fenced' and journal.get('nextOperationId') == 2,
+            'controller journal or attach boundary differs')
+    nulls = ('pending', 'toolPending', 'providerPending', 'child', 'settlementDue', 'parentHold',
+             'toolHold', 'dispatchPending', 'dispatchHold', 'dispatchAttempt', 'applicationApiAttempt',
+             'providerHold', 'providerAttempt', 'providerSettlement', 'foregroundAttempt',
+             'birthOperation', 'birthPending', 'workspaceAttempt', 'roomAttempt', 'workspaceBirth',
+             'managedLawGeneration', 'hermesSession', 'promptWitness')
+    lists = ('applicationApiHistory', 'providerReplays', 'foregroundHistory', 'publicationReceipts',
+             'bornResources', 'workspaceProposals', 'roomResolutions', 'workspaceResolutions',
+             'reconciliationLog', 'priorHermesSessions', 'unresolvedExternal')
+    require(all(name in journal and journal[name] is None for name in nulls)
+            and all(journal.get(name) == [] for name in lists)
+            and journal.get('birthNextOrdinal') == {} and journal.get('hardReconnectPending') is False
+            and journal.get('providerPromptRequests') == 0,
+            'controller has pending or completed work beyond the refused attach')
+    attempt = json.loads(decoded['query-0000000000000001/attempt/attempt.json'])
+    require(attempt.get('format') == 'minidregg-resource-client-attempt-v1'
+            and attempt.get('operation') == 'query', 'first operation is not the unsealed parent query')
+    return {'boundary': 'definite-pre-tool-session-refusal', 'request_id': request_id,
+            'store': store, 'journal_sha256': exported['files']['journal.json']['sha256'],
+            'controller_files': {name: entry['sha256'] for name, entry in exported['files'].items()},
+            'birth_or_application_attempt': False, 'permits_resend': False,
+            'requires': ['fresh fixed-installer export with stopped-service identities',
+                         'exact retained-result retrieval before source-owned acknowledgment',
+                         'separately admitted owner-policy repair',
+                         'qualified native config transition',
+                         'new tool-id only after supported attach/reconciliation']}
 
 
 def prepare(run, spk, inventory, benchmark, repo, check_only=False):
