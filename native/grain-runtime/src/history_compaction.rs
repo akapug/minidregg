@@ -52,11 +52,48 @@ fn remove(path: &Path) -> Result<()> {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub(crate) struct Summary { pub operations: usize, pub workspace_attempts: usize, pub entries: usize }
+pub(crate) struct Summary { pub operations: usize, pub workspace_attempts: usize, pub transient: usize, pub entries: usize }
+
+/// Superseded signed reads: `HOME/chat/reads/ROOM/LABEL.NONCE` keeps only the
+/// newest entry per label (the room as last read, which `chat` renders
+/// offline); one-shot query sources `WORKSPACE/sources/q-NONCE.json` are named
+/// by a random nonce no later command asks for.
+fn transient(homes: &[&Path], workspaces: &[&Path]) -> Result<Vec<PathBuf>> {
+    let mut doomed = Vec::new();
+    for home in homes {
+        let Ok(rooms) = fs::read_dir(home.join("chat/reads")) else { continue };
+        for room in rooms {
+            let room = room.map_err(|e| e.to_string())?.path();
+            if !room.is_dir() { continue; }
+            let mut by_label: BTreeMap<String, Vec<(std::time::SystemTime, PathBuf)>> = BTreeMap::new();
+            for entry in fs::read_dir(&room).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Some((label, _)) = name.split_once('.') else { continue };
+                let modified = fs::symlink_metadata(entry.path()).and_then(|m| m.modified()).map_err(|e| e.to_string())?;
+                by_label.entry(label.to_owned()).or_default().push((modified, entry.path()));
+            }
+            for (_, mut reads) in by_label {
+                reads.sort();
+                reads.pop();
+                doomed.extend(reads.into_iter().map(|(_, p)| p));
+            }
+        }
+    }
+    for workspace in workspaces {
+        let Ok(sources) = fs::read_dir(workspace.join("sources")) else { continue };
+        for entry in sources {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("q-") && name.ends_with(".json") { doomed.push(entry.path()); }
+        }
+    }
+    Ok(doomed)
+}
 
 /// Compact the decided history of `state` (and of each room workspace's
 /// `attempts/`). A no-op unless the journal is quiescent.
-pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path]) -> Result<Option<Summary>> {
+pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], homes: &[&Path]) -> Result<Option<Summary>> {
     if !quiescent(journal) { return Ok(None); }
     let end = journal.next_operation_id;
     let mut groups: BTreeMap<u64, Vec<String>> = BTreeMap::new();
@@ -96,6 +133,10 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path]) -> 
             doomed.push(path);
         }
     }
+    let reads = transient(homes, workspaces)?;
+    summary.transient = reads.len();
+    summary.entries += reads.len();
+    for path in reads { remove(&path)?; }
     if lines.is_empty() { return Ok(Some(summary)); }
     let mut bytes = Vec::new();
     for line in &lines {
@@ -159,7 +200,21 @@ mod tests {
         let mut journal = Journal::fresh(json!({}));
         journal.next_operation_id = 4;
         let before: Vec<_> = (1..=3).map(|id| retained_outcome(&state, id).unwrap().unwrap()).collect();
-        let summary = compact(&journal, &state, &[ws.as_path()]).unwrap().unwrap();
+        let home = state.join("room-home");
+        for name in ["feed.old", "feed.new", "roster.only"] {
+            let p = home.join("chat/reads/lab").join(name);
+            fs::create_dir_all(&p).unwrap();
+            fs::write(p.join("view.bin"), b"v").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        fs::create_dir_all(ws.join("sources")).unwrap();
+        fs::write(ws.join("sources/q-123.json"), b"{}").unwrap();
+        fs::write(ws.join("sources/apps-bootstrap.json"), b"{}").unwrap();
+        let summary = compact(&journal, &state, &[ws.as_path()], &[home.as_path()]).unwrap().unwrap();
+        assert_eq!(summary.transient, 2, "the superseded read and the query source");
+        assert!(!home.join("chat/reads/lab/feed.old").exists() && home.join("chat/reads/lab/feed.new").exists()
+            && home.join("chat/reads/lab/roster.only").exists());
+        assert!(!ws.join("sources/q-123.json").exists() && ws.join("sources/apps-bootstrap.json").exists());
         assert_eq!((summary.operations, summary.workspace_attempts), (3, 1));
         for id in 1..=3u64 {
             assert!(!state.join(format!("attempt-{id:016}")).exists() && !state.join(format!("query-{id:016}")).exists());
@@ -171,7 +226,7 @@ mod tests {
         let history = fs::read_to_string(state.join(HISTORY)).unwrap();
         assert_eq!(history.lines().count(), 4);
         // A second pass finds nothing more and changes nothing.
-        assert_eq!(compact(&journal, &state, &[ws.as_path()]).unwrap().unwrap(), Summary::default());
+        assert_eq!(compact(&journal, &state, &[ws.as_path()], &[home.as_path()]).unwrap().unwrap(), Summary::default());
         assert_eq!(fs::read_to_string(state.join(HISTORY)).unwrap(), history);
         fs::remove_dir_all(state).unwrap();
     }
@@ -184,15 +239,15 @@ mod tests {
         journal.next_operation_id = 3;
         journal.pending = Some(Pending { operation_id: 2, operation: "submit".into(),
             attempt: state.join("attempt-0000000000000002"), uncertain: true, publication: None });
-        assert_eq!(compact(&journal, &state, &[]).unwrap(), None, "a pending operation blocks compaction");
+        assert_eq!(compact(&journal, &state, &[], &[]).unwrap(), None, "a pending operation blocks compaction");
         assert!(state.join("attempt-0000000000000001").exists() && state.join("attempt-0000000000000002/outcome.json").exists());
         journal.pending = None;
         journal.unresolved_external.push("note".into());
-        assert_eq!(compact(&journal, &state, &[]).unwrap(), None, "an unresolved note blocks compaction");
+        assert_eq!(compact(&journal, &state, &[], &[]).unwrap(), None, "an unresolved note blocks compaction");
         // Ids at or above nextOperationId are never touched.
         journal.unresolved_external.clear();
         journal.next_operation_id = 2;
-        compact(&journal, &state, &[]).unwrap().unwrap();
+        compact(&journal, &state, &[], &[]).unwrap().unwrap();
         assert!(!state.join("attempt-0000000000000001").exists() && state.join("attempt-0000000000000002").exists());
         fs::remove_dir_all(state).unwrap();
     }
