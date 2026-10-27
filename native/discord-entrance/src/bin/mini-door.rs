@@ -107,6 +107,44 @@ code,pre,textarea{font:14px ui-monospace,monospace}pre{white-space:pre-wrap;word
 textarea,input[type=text]{width:100%;box-sizing:border-box}.warn{border-left:4px solid #b5651d;padding-left:.8rem}\
 @media (prefers-color-scheme:dark){body{color:#e8e6e0;background:#161614}pre{background:#24231f}}";
 
+/// The vendored scripts the wallet page loads (assets/vendor/VENDOR.md pins them) and the page's
+/// own payment script; nothing is fetched from anywhere else.
+fn asset(path: &str) -> Option<(&'static [u8], &'static str)> {
+    Some(match path {
+        "/join/assets/web3.js" => (include_bytes!("../../assets/vendor/web3.js"), "application/javascript; charset=utf-8"),
+        "/join/assets/wallet.js" => (include_bytes!("../../assets/vendor/wallet.js"), "application/javascript; charset=utf-8"),
+        "/join/assets/pay.js" => (include_bytes!("../../assets/pay.js"), "application/javascript; charset=utf-8"),
+        _ => return None,
+    })
+}
+
+/// The status page's wallet wiring: list the wallets the browser has (sol-misc's adapter), one
+/// button each; a press runs pay.js's `pay` and says each step; the door's answer is the status
+/// page itself, reloaded once the signature is posted.
+const WALLET_PAGE: &str = r#"(async () => {
+  const out = document.getElementById("wallet-pay"); if (!out) return;
+  const say = (t) => { out.querySelector(".status").textContent = t; };
+  try {
+    const quote = JSON.parse(document.getElementById("quote").textContent);
+    const web3 = solanaWeb3;
+    const conn = new web3.Connection(quote.rpc, "confirmed");
+    const wallets = await passwapWallets.list(web3);
+    if (!wallets.length) { say("No Solana wallet extension was found in this browser (Phantom, Solflare, Backpack, Talisman, ...); the paste path below works with any wallet."); return; }
+    for (const w of wallets) {
+      const b = document.createElement("button"); b.textContent = "Pay with " + w.name;
+      b.onclick = async () => {
+        for (const x of out.querySelectorAll("button")) x.disabled = true;
+        try {
+          const r = await makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) }).pay(w, say);
+          say("Sent and posted: " + r.signature + ". The door decides within a minute; this page reloads to show it.");
+          setTimeout(() => location.reload(), 65000);
+        } catch (e) { say(String(e && e.message || e)); for (const x of out.querySelectorAll("button")) x.disabled = false; }
+      };
+      out.querySelector(".wallets").append(b, " ");
+    }
+  } catch (e) { say("The wallet page could not start: " + String(e && e.message || e) + ". The paste path below still works."); }
+})();"#;
+
 fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
@@ -152,7 +190,7 @@ impl Door {
         if paid {
             let network = state["network"].as_str().unwrap_or("?");
             body.push_str(&format!(
-                "<label><input type=radio name=route value=paid{}> Pay: 50 DREGG a week on Solana {} (your wallet, ssh key and account are then publicly linked on-chain)</label>",
+                "<label><input type=radio name=route value=paid{}> Pay: 50 DREGG a week on Solana, from your wallet in the browser or by pasting a signature {} (your wallet, ssh key and account are then publicly linked on-chain)</label>",
                 if free { "" } else { " checked" },
                 html(network)
             ));
@@ -205,16 +243,30 @@ impl Door {
         }
         if phase == "awaiting-payment" {
             let p = &v["payment"];
+            // The quote, once, as data: the wallet script reads it from here (the same recipient,
+            // amount, mint and memo the paste path shows), and the request id it posts with.
+            let mut quote = p.clone();
+            quote["id"] = Value::String(id.to_owned());
+            let quote_json = serde_json::to_string(&quote).unwrap_or_default().replace("</", "<\\/");
             body.push_str(&format!(
                 "<p>Pay exactly <strong>{} atomic units</strong> ({}) to</p><pre>{}</pre><p>with this memo (one SPL Memo instruction):</p><pre>{}</pre>\
-                 <p>before chain hour {}. Then paste the transaction signature:</p>\
+                 <p>before chain hour {}.</p>\
+                 <script type=\"application/json\" id=\"quote\">{quote_json}</script>\
+                 <section id=\"wallet-pay\"><h2>Pay with your wallet</h2>\
+                 <p>Your browser builds the transfer (your token account to the recipient's, with the memo above, byte for byte), your wallet signs it, \
+                 your browser sends it to <code>{}</code> and posts the signature here. The box never sees your wallet. <noscript>This needs JavaScript; the paste path below does not.</noscript></p>\
+                 <p class=wallets></p><p class=status role=status></p></section>\
+                 <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
-                 <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form>",
+                 <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
+                 <script src=/join/assets/web3.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
+                 <script>{WALLET_PAGE}</script>",
                 html(p["amountAtomic"].as_str().unwrap_or("?")),
                 html(p["amountTokens"].as_str().unwrap_or("")),
                 html(p["recipient"].as_str().unwrap_or("?")),
                 html(p["memo"].as_str().unwrap_or("?")),
                 html(&p["expiryHour"].to_string()),
+                html(p["rpc"].as_str().unwrap_or("the cluster")),
                 html(id)
             ));
         }
@@ -327,6 +379,13 @@ impl Door {
             }
         };
         let now = now_s();
+        // The wallet page's scripts: vendored, pinned (assets/vendor/VENDOR.md), served by the door itself.
+        if req.method == "GET" {
+            if let Some((bytes, kind)) = asset(&req.path) {
+                let _ = write_response(&mut stream, 200, "OK", kind, bytes);
+                return;
+            }
+        }
         let (status, body) = match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/join") | ("GET", "/join/") => (200, self.join_page()),
             ("GET", p) if p.starts_with("/join/status/") => {
@@ -476,5 +535,49 @@ mod tests {
         assert!(body.contains("ssh-keygen -Y sign -n dregg-enrol@v2"));
         assert!(body.contains("action=/join/sign"));
         assert_eq!(d.status_page(&door::new_request_id().unwrap()).0, 404);
+    }
+
+    #[test]
+    fn the_paid_status_page_carries_the_quote_as_data_the_wallet_button_and_the_paste_path() {
+        let d = door("paid-status");
+        let id = door::new_request_id().unwrap();
+        std::fs::write(d.status.join(format!("{id}.json")), serde_json::json!({"phase":"awaiting-payment","name":"alice",
+            "payment":{"recipient":"7f","amountAtomic":"50000007","memo":"enrol:v2:AAAA</script>","expiryHour":1001,"network":"mainnet",
+                       "mint":"8k","tokenProgram":"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","decimals":"6","rpc":"https://solana-rpc.publicnode.com"}}).to_string()).unwrap();
+        let (status, body) = d.status_page(&id);
+        let body = String::from_utf8(body).unwrap();
+        assert_eq!(status, 200);
+        let quote_start = body.find("<script type=\"application/json\" id=\"quote\">").unwrap();
+        let quote = &body[quote_start..];
+        let quote = &quote[quote.find('>').unwrap() + 1..quote.find("</script>").unwrap()];
+        let quote: serde_json::Value = serde_json::from_str(quote).unwrap();
+        assert_eq!(quote["id"], id);
+        assert_eq!(quote["memo"], "enrol:v2:AAAA</script>", "the memo survives, byte for byte, with the closing tag escaped in transit");
+        assert_eq!(quote["decimals"], "6");
+        assert!(body.contains("Pay with your wallet") && body.contains("/join/assets/pay.js") && body.contains("action=/join/paid"));
+        assert!(body.contains("solana-rpc.publicnode.com"));
+        for a in ["/join/assets/web3.js", "/join/assets/wallet.js", "/join/assets/pay.js"] {
+            assert!(asset(a).is_some(), "{a}");
+        }
+        assert!(asset("/join/assets/other.js").is_none());
+    }
+
+    #[test]
+    fn vendored_assets_match_their_pins() {
+        use sha2::Digest;
+        let table = include_str!("../../assets/vendor/VENDOR.md");
+        for (file, bytes) in [("web3.js", &include_bytes!("../../assets/vendor/web3.js")[..]), ("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..])] {
+            let digest = format!("{:x}", sha2::Sha256::digest(bytes));
+            assert!(table.contains(&digest), "{file}: sha256 {digest} is not in VENDOR.md");
+        }
+    }
+
+    #[test]
+    fn the_wallet_page_builds_the_quoted_transfer_and_posts_its_signature() {
+        // The page test runs under node against a fake wallet and a fake cluster (tests/pay-page.test.mjs).
+        let test = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/pay-page.test.mjs");
+        let out = std::process::Command::new("node").arg(test).output().expect("node is on PATH (the wallet page test needs it)");
+        assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(String::from_utf8_lossy(&out.stdout).starts_with("ok: transfer 50000007 atomic"));
     }
 }

@@ -335,6 +335,17 @@ page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go
 row story-move "$(grep -q 'outcome admitted' <<<"$page" && grep -q 'anteroom' <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page") $(pre_of <<<"$page" | head -1 | cut -c1-100)"
 page=$(req POST /tour/11 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=go" --data-urlencode "alt=0" --data-urlencode "a1=north")
 row story-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q 'sealed_story_scene_monotone' <<<"$page" && grep -q "proved for the built-in tale" <<<"$page" && echo 1 || echo 0)" "$(st) $(headline "$page")"
+# A used workspace: ~40 more grants (one document each). The Grants page answers at once and
+# judges one grant per request (never a 504); one judge answers; a bare `can` through the form
+# ends within the body's deadline, as the whole answer or as the named notice, never a 504.
+for i in $(seq -w 1 40); do req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=zz-grant-$i" --data-urlencode "law=note" >/dev/null; done
+page=$(req GET /grants)
+n_load=$(grep -o 'data-load="/grants/judge/' <<<"$page" | wc -l | tr -d ' ')
+row grants-many "$([ "$(st)" = 200 ] && [ "$n_load" -ge 40 ] && echo 1 || echo 0)" "$(st) $n_load grants listed, each judged on its own"
+page=$(req GET "/grants/judge/$DOC")
+row grants-judge "$([ "$(st)" = 200 ] && grep -q 'held:' <<<"$page" && echo 1 || echo 0)" "$(st) $(pre_of <<<"$page" | head -1 | cut -c1-100)"
+page=$(req POST /verb/can --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
+row can-bare "$([ "$(st)" != 504 ] && [ "$(st)" != 502 ] && { grep -q 'outcome answered' <<<"$page" || grep -q 'grants judged within' <<<"$page"; } && echo 1 || echo 0)" "$(st) $(headline "$page") $(grep -o '[0-9]* of [0-9]* grants judged[^<]*' <<<"$page" | head -1)"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then

@@ -218,6 +218,12 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         },
         ["receipts", id] => receipt(site, id),
         ["grants"] => grants(site),
+        // One grant judged (`can REF --all`): the grants page fills in one of these per reference
+        // as each answer lands; without JavaScript each is a page of its own.
+        ["grants", "judge", name] => {
+            let ending = verb(site, &[format!("can {} --all", quote(name))]);
+            Page { status: 200, title: format!("What my grants cover on {name}"), stamp: Stamp::None, body: ending.map(|e| answered(&e, &[])).unwrap_or_else(|| "<p>this body has no shell paths</p>".into()) }
+        }
         ["laws"] => laws(site),
         ["keys"] => keys(site),
         ["room", name] => room(site, name),
@@ -386,9 +392,19 @@ fn grants(site: &Site) -> Page {
             _ => body.push_str(&answered(&ending, &[])),
         }
     }
-    if let Some(ending) = verb(site, &["can --all".to_owned()]) {
-        body.push_str(&format!("<section><h2>What they cover</h2>{}</section>\n", answered(&ending, &[])));
+    // What the grants cover, one reference at a time: each is its own dry run (op 130 per verb),
+    // so the page is whole at once and fills in as each answer lands (app.js loads `data-load`
+    // sections in turn; without JavaScript each section is a link to its own page). One bare
+    // `can` over every grant would outlast a browser on a used workspace.
+    let names = site.names();
+    body.push_str(&format!("<section><h2>What they cover</h2><p class=\"note\">{} reference(s), each judged by its own dry run as the page fills; <code>can REF</code> in the shell is the same question for one.</p>\n", names.len()));
+    for name in &names {
+        body.push_str(&format!(
+            "<section class=\"grant\" data-load=\"/grants/judge/{0}\"><h3><code>{0}</code></h3><div class=\"fill\"><p class=\"note\"><a href=\"/grants/judge/{0}\">judge what my grants cover on {0}</a></p></div></section>\n",
+            escape(name)
+        ));
     }
+    body.push_str("</section>\n");
     // Grains: the identities an app holds for you, and the v1 notice (members of a shared grain look
     // like one user to the app), said here as L13's receipts say it.
     if let Some(ending) = verb(site, &["apps list --json".to_owned()]) {
@@ -861,14 +877,21 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     }
     let mut out = child.stdout.take()?;
     let mut err = child.stderr.take()?;
+    // Both pipes are drained on their own threads: a read on this thread would block until the
+    // shell exits, and the deadline below could never fire while a long `can` runs.
     let reader = std::thread::spawn(move || {
         let mut s = Vec::new();
         let _ = out.read_to_end(&mut s);
         s
     });
-    let mut stderr = Vec::new();
-    let _ = err.read_to_end(&mut stderr);
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let err_reader = std::thread::spawn(move || {
+        let mut s = Vec::new();
+        let _ = err.read_to_end(&mut s);
+        s
+    });
+    // Under the gateway's two minutes, so a run that cannot finish still ends as a page the
+    // member can read (what was decided so far, and a named notice), never as the gateway's 504.
+    let deadline = Instant::now() + Duration::from_secs(100);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
@@ -881,6 +904,7 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
         }
     };
     let stdout = reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
     let cap = |v: Vec<u8>| {
         let mut s = String::from_utf8_lossy(&v).into_owned();
         if s.len() > 64 * 1024 {
@@ -891,7 +915,20 @@ pub(super) fn verb(site: &Site, lines: &[String]) -> Option<Ending> {
     };
     Some(match status {
         Some(status) => Ending { code: status.code().unwrap_or(1), stdout: cap(stdout), stderr: cap(stderr) },
-        None => Ending { code: 4, stdout: cap(stdout), stderr: "undecided: the shell did not finish within 120 s; the attempt, if any, is retained under Receipts\n".into() },
+        None => {
+            let stdout = cap(stdout);
+            // A bare `can` judges every reference held, printing each as it is decided: the notice
+            // counts them. Any other line that ran out of time says so and keeps what it printed.
+            let first = lines.first().map(String::as_str).unwrap_or("");
+            let bare_can = first == "can" || first == "can --all";
+            let notice = if bare_can {
+                let judged = stdout.lines().filter(|l| !l.is_empty() && !l.starts_with(' ') && !l.starts_with("mini> ")).count();
+                format!("error: {judged} of {} grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)\n", site.names().len())
+            } else {
+                "error: the shell did not finish within 100 s; what it printed stands above, and an attempt, if any, is retained under Receipts\n".to_owned()
+            };
+            Ending { code: 1, stdout, stderr: notice }
+        }
     })
 }
 
