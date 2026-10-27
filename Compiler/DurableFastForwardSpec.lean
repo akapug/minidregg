@@ -360,7 +360,7 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
   suffixGate : ∀ key seed bytes suffix head state,
     impl.ffState key seed (some bytes) suffix head = .ok state →
     ∃ body, impl.open4 key bytes = .ok body ∧
-      impl.stateBase state = (body.height, body.chain) ∧
+      impl.stateBase state = (body.height, body.chain) ∧ impl.stateCheckpoint state = body.state ∧
       verifyTags key body.height
         (chainPrefixesStored body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
       (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
@@ -368,7 +368,7 @@ structure Spec (impl : Impl rootBytes) (ofOpened : Opened impl → Except String
   /-- From genesis the executing part starts at the seed's chain and verifies every entry's tag. -/
   genesisGate : ∀ key seed suffix head state,
     impl.ffState key seed none suffix head = .ok state →
-    impl.stateBase state = (0, logStart seed) ∧
+    impl.stateBase state = (0, logStart seed) ∧ impl.stateCheckpoint state = State.ofSeed seed ∧
       verifyTags key 0 (chainPrefixesStored (logStart seed) (suffix.map (·.record)))
         (suffix.map (·.tag)) = .ok () ∧ suffix.length = head
   -- ### 3. Exactness over the pair (executed part, non-executing rebuild), and the session shape
