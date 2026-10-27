@@ -20,6 +20,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const MAX_HEADER: usize = 16_384;
+/// The key broker retains up to 64 KiB of response headers
+/// (mini-keys `server::provider::MAX_HEADERS`); the gateway accepts the same
+/// bound so a reply the broker kept whole is never re-labelled uncertain here.
+const MAX_RESPONSE_HEADER: usize = 65_536;
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: usize = 8_388_608;
 const MAX_TOKEN: usize = 128;
@@ -115,12 +119,65 @@ pub enum ProviderOutcome {
         exact_body: Vec<u8>,
     },
     /// No network send was started after the permit was issued.
-    NotSent { reason: String },
+    NotSent { kind: NotSentKind, reason: String },
     /// The upstream may have received the request. Never resend it here.
     Uncertain {
         partial_body: Vec<u8>,
+        kind: UncertainKind,
         reason: String,
     },
+}
+
+/// Why nothing was sent: a deterministic refusal, or a timeout reaching the
+/// key broker before it held the whole frame (the only retryable kind).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotSentKind {
+    Refused,
+    TimeoutBeforeSend,
+}
+
+/// Why a possibly-sent call has no exact outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UncertainKind {
+    /// No complete reply before the deadline, or the lease/connection ended
+    /// while waiting.
+    TimeoutAfterSend,
+    /// A reply came back that cannot be retained or read as one exact response.
+    Malformed,
+}
+
+impl NotSentKind {
+    pub fn tag(self) -> &'static str {
+        match self { Self::Refused => "refused", Self::TimeoutBeforeSend => "timeout-before-send" }
+    }
+}
+impl UncertainKind {
+    pub fn tag(self) -> &'static str {
+        match self { Self::TimeoutAfterSend => "timeout-after-send", Self::Malformed => "malformed" }
+    }
+}
+
+impl ProviderOutcome {
+    fn refused(reason: impl Into<String>) -> Self {
+        Self::NotSent { kind: NotSentKind::Refused, reason: reason.into() }
+    }
+    fn timed_out_before_send(reason: impl Into<String>) -> Self {
+        Self::NotSent { kind: NotSentKind::TimeoutBeforeSend, reason: reason.into() }
+    }
+    fn uncertain(kind: UncertainKind, partial_body: Vec<u8>, reason: impl Into<String>) -> Self {
+        Self::Uncertain { partial_body, kind, reason: reason.into() }
+    }
+    /// The decided failure class this outcome falls in, if any.
+    pub(crate) fn failure_class(&self) -> Option<crate::provider_failure::FailureClass> {
+        use crate::provider_failure::FailureClass;
+        match self {
+            Self::Received { status, .. } => (*status != 200).then_some(FailureClass::CompleteNon200 { status: *status }),
+            Self::NotSent { kind: NotSentKind::TimeoutBeforeSend, .. } => Some(FailureClass::TimeoutBeforeSend),
+            Self::NotSent { reason, .. } => Some(FailureClass::NotSent { reason: reason.clone() }),
+            Self::Uncertain { kind: UncertainKind::TimeoutAfterSend, .. } => Some(FailureClass::TimeoutAfterSend),
+            Self::Uncertain { reason, .. } => Some(FailureClass::Malformed { reason: reason.clone() }),
+        }
+    }
 }
 
 pub enum ProviderCommand {
@@ -1049,6 +1106,17 @@ fn serve_client(
         error_reply(stream, 503, "provider permit was already consumed");
         return;
     }
+    // H5: an endpoint that differs from the exact homelab placement is refused
+    // before the send boundary, so the controller never holds a crossed
+    // boundary with no outcome for a call that was never sent.
+    if let Some(guard) = &placement_guard {
+        if guard.placement.endpoint != route.endpoint {
+            report_outcome(commands, attempt_id,
+                ProviderOutcome::refused("provider route differs from exact homelab placement"), None);
+            error_reply(stream, 503, "provider route differs from exact homelab placement");
+            return;
+        }
+    }
     let (tx, rx) = mpsc::channel();
     if commands
         .try_send(ProviderCommand::BeforeSend {
@@ -1062,18 +1130,13 @@ fn serve_client(
         report_outcome(
             commands,
             attempt_id,
-            ProviderOutcome::NotSent {
-                reason: "send boundary not acknowledged".into(),
-            },
+            ProviderOutcome::refused("send boundary not acknowledged"),
             None,
         );
         error_reply(stream, 503, "provider send boundary was not acknowledged");
         return;
     }
     if let Some(guard) = &mut placement_guard {
-        if guard.placement.endpoint != route.endpoint {
-            error_reply(stream, 503, "provider route differs from exact homelab placement"); return;
-        }
         guard.outcome = minidregg_inference_scheduler::core::Outcome::Uncertain;
     }
     let outcome = forward(
@@ -1103,12 +1166,16 @@ fn serve_client(
         } => Some((*status, content_type.clone(), exact_body.clone())),
         _ => None,
     };
-    let wait_for_live_lease = matches!(outcome, ProviderOutcome::Received { .. });
-    if !report_outcome(
+    // A Received outcome waits only while the lease is live (hard revoke
+    // interrupts it). Every other outcome also waits while the lease is live,
+    // and at least 30 s after it ends (H6).
+    let received = matches!(outcome, ProviderOutcome::Received { .. });
+    if !report_outcome_waiting(
         commands,
         attempt_id,
         outcome,
-        wait_for_live_lease.then_some((&control, &lease)),
+        Some((&control, &lease)),
+        !received || !control.still_active(&lease),
     ) {
         error_reply(
             stream,
@@ -1194,6 +1261,17 @@ fn report_outcome(
     outcome: ProviderOutcome,
     live_lease: Option<(&GatewayControl, &LeaseId)>,
 ) -> bool {
+    let floor = live_lease.is_none();
+    report_outcome_waiting(commands, attempt_id, outcome, live_lease, floor)
+}
+
+fn report_outcome_waiting(
+    commands: &SyncSender<ProviderCommand>,
+    attempt_id: u64,
+    outcome: ProviderOutcome,
+    live_lease: Option<(&GatewayControl, &LeaseId)>,
+    thirty_second_floor: bool,
+) -> bool {
     let (tx, rx) = mpsc::channel();
     let mut command = ProviderCommand::Outcome {
         attempt_id,
@@ -1201,13 +1279,16 @@ fn report_outcome(
         reply: tx,
     };
     let started = Instant::now();
-    let waiting = || match live_lease {
-        // A complete response must wait for the source-owned quote and
-        // durable Outcome ack, potentially longer than the old fixed 30s.
-        // The active worker deadline (at most 1800s after activation) bounds
-        // this wait and hard revoke interrupts it without waiting for Mini.
-        Some((control, lease)) => control.still_active(lease),
-        None => started.elapsed() < Duration::from_secs(30),
+    // A complete response must wait for the source-owned quote and durable
+    // Outcome ack, potentially longer than 30 s; the active worker deadline
+    // (at most 1800 s after activation) bounds that wait and hard revoke
+    // interrupts it. Other outcomes wait while the lease is live and at least
+    // 30 s (H6), so a controller briefly blocked on a subprocess still
+    // journals them. If even that fails, restart recovery classifies the
+    // attempt crash-after-send and names the audited settle.
+    let waiting = || {
+        live_lease.is_some_and(|(control, lease)| control.still_active(lease))
+            || (thirty_second_floor && started.elapsed() < Duration::from_secs(30))
     };
     loop {
         match commands.try_send(command) {
@@ -1405,38 +1486,44 @@ fn broker_reply(
     control: &GatewayControl,
     lease: &LeaseId,
     deadline: Instant,
-) -> Result<Value, String> {
+) -> Result<Value, (UncertainKind, String)> {
+    use UncertainKind::{Malformed, TimeoutAfterSend};
     stream
         .set_read_timeout(Some(Duration::from_millis(50)))
-        .map_err(|_| "key broker socket unavailable".to_owned())?;
+        .map_err(|_| (TimeoutAfterSend, "key broker socket unavailable".to_owned()))?;
     let mut buffer = Vec::new();
     let mut chunk = vec![0u8; 65_536];
     loop {
         if !control.still_active(lease) {
             let _ = stream.shutdown(Shutdown::Both);
-            return Err("prompt lease revoked during provider send".into());
+            return Err((TimeoutAfterSend, "prompt lease revoked during provider send".into()));
         }
         if Instant::now() >= deadline {
             let _ = stream.shutdown(Shutdown::Both);
-            return Err("provider transport outcome uncertain: the key broker did not answer in time".into());
+            return Err((TimeoutAfterSend, "the key broker did not answer in time".into()));
         }
         match stream.read(&mut chunk) {
-            Ok(0) => return Err("provider transport outcome uncertain: the key broker closed".into()),
+            Ok(0) => return Err((TimeoutAfterSend, "the key broker closed before answering".into())),
             Ok(n) => buffer.extend_from_slice(&chunk[..n]),
             Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted) => continue,
-            Err(_) => return Err("provider transport outcome uncertain: key broker read failed".into()),
+            Err(_) => return Err((TimeoutAfterSend, "key broker read failed".into())),
         }
         if buffer.len() >= 4 {
             let size = u32::from_le_bytes(buffer[..4].try_into().unwrap()) as usize;
             if size == 0 || size > mini_keys::wire::MAX_FRAME {
-                return Err("provider transport outcome uncertain: key broker frame exceeds bound".into());
+                return Err((Malformed, "key broker frame exceeds bound".into()));
             }
             if buffer.len() >= 4 + size {
                 return serde_json::from_slice(&buffer[4..4 + size])
-                    .map_err(|_| "provider transport outcome uncertain: key broker reply is not JSON".into());
+                    .map_err(|_| (Malformed, "key broker reply is not JSON".into()));
             }
         }
     }
+}
+
+struct Spool {
+    body: PathBuf,
+    headers: PathBuf,
 }
 
 fn forward(
@@ -1449,25 +1536,59 @@ fn forward(
     exact_body: &[u8],
 ) -> ProviderOutcome {
     if !control.still_active(lease) {
-        return ProviderOutcome::NotSent {
-            reason: "prompt lease revoked before dispatch".into(),
-        };
+        return ProviderOutcome::refused("prompt lease revoked before dispatch");
     }
     let prefix = format!("provider-{attempt_id:016}");
     let request_path = config.private_dir.join(format!("{prefix}.request"));
-    let body_path = config.private_dir.join(format!("{prefix}.response"));
-    let header_path = config.private_dir.join(format!("{prefix}.headers"));
+    let spool = Spool {
+        body: config.private_dir.join(format!("{prefix}.response")),
+        headers: config.private_dir.join(format!("{prefix}.headers")),
+    };
     if let Err(reason) = write_private(&request_path, exact_body)
-        .and_then(|_| create_private(&body_path))
-        .and_then(|_| create_private(&header_path))
+        .and_then(|_| create_private(&spool.body))
+        .and_then(|_| create_private(&spool.headers))
         .and_then(|_| {
             File::open(&config.private_dir)
                 .and_then(|f| f.sync_all())
                 .map_err(|e| e.to_string())
         })
     {
-        return ProviderOutcome::NotSent { reason };
+        return ProviderOutcome::refused(reason);
     }
+    // Only a frame the key broker never held whole is retried, on this same
+    // attempt and lease, with bounded backoff: nothing has left the process.
+    // Every after-send outcome returns at once and is never resent.
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0)
+        ^ attempt_id;
+    let (outcome, tries) = crate::provider_failure::send_with_retry(
+        || {
+            let outcome = forward_once(config, route, shared, control, lease, &spool, exact_body);
+            let class = outcome.failure_class();
+            (outcome, class)
+        },
+        thread::sleep,
+        || control.still_active(lease),
+        seed,
+    );
+    if tries > 1 {
+        eprintln!("provider attempt {attempt_id}: {tries} tries to reach the key broker before an outcome");
+    }
+    outcome
+}
+
+fn forward_once(
+    config: &GatewayConfig,
+    route: &Route,
+    shared: &Arc<Shared>,
+    control: &GatewayControl,
+    lease: &LeaseId,
+    spool: &Spool,
+    exact_body: &[u8],
+) -> ProviderOutcome {
+    use UncertainKind::{Malformed, TimeoutAfterSend};
     // The key broker performs the send: it holds any bearer, checks that the
     // ticket names exactly these bytes, and returns the provider's headers and
     // body. A complete request frame handed to it is the external-send
@@ -1484,22 +1605,21 @@ fn forward(
     // section wins, the request crossed the external-send boundary and revoke
     // shuts the registered connection while retaining outcome uncertainty.
     let mut stream = match control.with_send_gate(lease, || {
-        let mut stream = route.broker.connect(deadline).map_err(|e| ProviderOutcome::NotSent {
-            reason: format!("key broker: {e}"),
-        })?;
-        let registered = stream.try_clone().map_err(|_| ProviderOutcome::NotSent {
-            reason: "key broker socket unavailable".into(),
-        })?;
+        let mut stream = route
+            .broker
+            .connect(deadline)
+            .map_err(|e| ProviderOutcome::timed_out_before_send(format!("key broker: {e}")))?;
+        let registered = stream
+            .try_clone()
+            .map_err(|_| ProviderOutcome::refused("key broker socket unavailable"))?;
         match shared.upstream.lock() {
             Ok(mut slot) => *slot = Some(registered),
-            Err(_) => {
-                return Err(ProviderOutcome::NotSent {
-                    reason: "transport custody lock poisoned".into(),
-                })
-            }
+            Err(_) => return Err(ProviderOutcome::refused("transport custody lock poisoned")),
         }
-        mini_keys::wire::send(&mut stream, &request, deadline).map_err(|e| ProviderOutcome::NotSent {
-            reason: format!("the key broker did not receive the request: {e}"),
+        mini_keys::wire::send(&mut stream, &request, deadline).map_err(|e| {
+            ProviderOutcome::timed_out_before_send(format!(
+                "the key broker did not receive the request: {e}"
+            ))
         })?;
         Ok(stream)
     }) {
@@ -1510,11 +1630,7 @@ fn forward(
             }
             return outcome;
         }
-        Err(reason) => {
-            return ProviderOutcome::NotSent {
-                reason: reason.into(),
-            }
-        }
+        Err(reason) => return ProviderOutcome::refused(reason),
     };
     let reply = broker_reply(&mut stream, control, lease, deadline);
     if let Ok(mut slot) = shared.upstream.lock() {
@@ -1522,29 +1638,21 @@ fn forward(
     }
     let reply = match reply {
         Ok(reply) => reply,
-        Err(reason) => {
-            return ProviderOutcome::Uncertain {
-                partial_body: Vec::new(),
-                reason,
-            }
-        }
+        Err((kind, reason)) => return ProviderOutcome::uncertain(kind, Vec::new(), reason),
     };
     let reply = match mini_keys::client::answer(reply) {
         Ok(reply) => reply,
         // The broker refuses only before it sends (ticket, row, body, spawn).
-        Err(refused) => {
-            return ProviderOutcome::NotSent {
-                reason: refused.to_string(),
-            }
-        }
+        Err(refused) => return ProviderOutcome::refused(refused.to_string()),
     };
     if reply["withheld"] == true {
-        return ProviderOutcome::Uncertain {
-            partial_body: Vec::new(),
-            reason: "upstream response contained a custody secret and was withheld".into(),
-        };
+        return ProviderOutcome::uncertain(
+            Malformed,
+            Vec::new(),
+            "upstream response contained a custody secret and was withheld",
+        );
     }
-    let spooled = (|| -> Result<bool, String> {
+    let spooled = (|| -> Result<(bool, bool), String> {
         let decode = |key: &str| {
             reply[key]
                 .as_str()
@@ -1552,10 +1660,10 @@ fn forward(
                 .and_then(|text| mini_keys::wire::unhex(text))
         };
         let (headers, body) = (decode("headers")?, decode("body")?);
-        if headers.len() > MAX_HEADER * 2 || body.len() > config.max_response_bytes {
+        if headers.len() > MAX_RESPONSE_HEADER || body.len() > config.max_response_bytes {
             return Err("key broker reply exceeds the response bounds".into());
         }
-        for (path, bytes) in [(&header_path, &headers), (&body_path, &body)] {
+        for (path, bytes) in [(&spool.headers, &headers), (&spool.body, &body)] {
             OpenOptions::new()
                 .write(true)
                 .truncate(true)
@@ -1564,63 +1672,48 @@ fn forward(
                 .and_then(|mut f| f.write_all(bytes))
                 .map_err(|e| format!("provider response spool: {e}"))?;
         }
-        Ok(reply["complete"] == true)
+        Ok((reply["complete"] == true, !headers.is_empty()))
     })();
-    let complete = match spooled {
-        Ok(complete) => complete,
-        Err(reason) => {
-            return ProviderOutcome::Uncertain {
-                partial_body: Vec::new(),
-                reason,
-            }
-        }
+    let (complete, any_headers) = match spooled {
+        Ok(spooled) => spooled,
+        Err(reason) => return ProviderOutcome::uncertain(Malformed, Vec::new(), reason),
     };
-    let partial_body = match read_bounded(&body_path, config.max_response_bytes) {
+    let partial_body = match read_bounded(&spool.body, config.max_response_bytes) {
         Ok(body) => body,
-        Err(reason) => {
-            return ProviderOutcome::Uncertain {
-                partial_body: Vec::new(),
-                reason,
-            }
-        }
+        Err(reason) => return ProviderOutcome::uncertain(Malformed, Vec::new(), reason),
     };
-    for path in [&body_path, &header_path, &config.private_dir] {
+    for path in [&spool.body, &spool.headers, &config.private_dir] {
         if let Err(error) = File::open(path).and_then(|file| file.sync_all()) {
-            return ProviderOutcome::Uncertain {
+            return ProviderOutcome::uncertain(
+                Malformed,
                 partial_body,
-                reason: format!("provider response spool sync: {error}"),
-            };
+                format!("provider response spool sync: {error}"),
+            );
         }
-    }
-    if !control.still_active(lease) {
-        return ProviderOutcome::Uncertain {
-            partial_body,
-            reason: "prompt lease revoked during provider send".into(),
-        };
     }
     if !complete {
-        return ProviderOutcome::Uncertain {
-            partial_body,
-            reason: "provider transport outcome uncertain".into(),
+        // No headers: upstream never answered within the broker's deadline
+        // (or the connection dropped). Headers but incomplete: a truncated reply.
+        return if !any_headers {
+            let reason = if control.still_active(lease) {
+                "provider transport outcome uncertain: no complete reply"
+            } else {
+                "prompt lease revoked during provider send"
+            };
+            ProviderOutcome::uncertain(TimeoutAfterSend, partial_body, reason)
+        } else {
+            ProviderOutcome::uncertain(Malformed, partial_body, "truncated provider reply")
         };
     }
-    let headers = match read_bounded(&header_path, MAX_HEADER * 2) {
+    // A complete, fsynced reply stays Received even when the prompt lease
+    // ended meanwhile (H3): the controller quotes it from the retained bytes.
+    let headers = match read_bounded(&spool.headers, MAX_RESPONSE_HEADER) {
         Ok(headers) => headers,
-        Err(reason) => {
-            return ProviderOutcome::Uncertain {
-                partial_body,
-                reason,
-            }
-        }
+        Err(reason) => return ProviderOutcome::uncertain(Malformed, partial_body, reason),
     };
     let (status, content_type) = match response_headers(&headers) {
         Ok(response) => response,
-        Err(reason) => {
-            return ProviderOutcome::Uncertain {
-                partial_body,
-                reason,
-            }
-        }
+        Err(reason) => return ProviderOutcome::uncertain(Malformed, partial_body, reason),
     };
     ProviderOutcome::Received {
         status,
