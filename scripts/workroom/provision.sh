@@ -26,16 +26,23 @@ WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-100}
 WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-100}
 WORKROOM_PARENT_BUDGET=${WORKROOM_PARENT_BUDGET-100}
 WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET-50}
+WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE=${WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE-0}
 # Optional deployment policy is applied before profile/genesis identity. It
 # cannot replace Store coordinates or add old single-application lifecycle pins.
 WORKROOM_OPERATOR_POLICY=${WORKROOM_OPERATOR_POLICY-}
+WORKROOM_FACTORY_PREDICATE=${WORKROOM_FACTORY_PREDICATE-}
 WORKROOM_PAY_OBSERVER=${WORKROOM_PAY_OBSERVER-}
-for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET"; do
+for value in "$WORKROOM_SPONSOR_BALANCE" "$WORKROOM_TOOL_BALANCE" "$WORKROOM_PARENT_BUDGET" "$WORKROOM_TOOL_BUDGET" "$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE"; do
   case "$value" in ''|0?*|*[!0-9]*) echo "allocation must be canonical decimal" >&2; exit 2;; esac
 done
 if [ -n "$WORKROOM_OPERATOR_POLICY" ]; then
   case "$WORKROOM_OPERATOR_POLICY" in /*) ;; *) echo "operator policy must be absolute" >&2; exit 2;; esac
-  jq -e 'type == "object" and (keys - ["completionCustodianKey","lifecycleManagement","grainBirthTariff","providerServices","disabledEvaluators"] | length == 0)' "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "unsupported operator policy field" >&2; exit 2; }
+  jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["completionCustodianKey","lifecycleManagement","grainBirthTariff","providerServices","disabledEvaluators","agentLifetimeDispatchTargets"] | length == 0))' "$WORKROOM_OPERATOR_POLICY" >/dev/null || { echo "unsupported operator policy field or document" >&2; exit 2; }
+fi
+if [ -n "$WORKROOM_FACTORY_PREDICATE" ]; then
+  case "$WORKROOM_FACTORY_PREDICATE" in /*) ;; *) echo "factory predicate must be absolute" >&2; exit 2;; esac
+  [ -f "$WORKROOM_FACTORY_PREDICATE" ] && [ ! -L "$WORKROOM_FACTORY_PREDICATE" ] || exit 2
+  jq -se 'length == 1 and (.[0] | type == "object")' "$WORKROOM_FACTORY_PREDICATE" >/dev/null || exit 2
 fi
 
 canonical_task() {
@@ -119,7 +126,7 @@ cat >"$EVIDENCE/operator.json" <<EOF
 {"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
  "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
+ "tariffPerInitialPayloadByte":$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE,"collector":99,"asset":0,
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
  "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
 EOF
@@ -132,7 +139,7 @@ SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
 cat >"$EVIDENCE/genesis.json" <<EOF
 {"domain":"8501","factoryId":"10","resourceBookId":"11",
  "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
+ "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE",
  "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
  "issuerEpoch":"2","genesisHeight":"10",
  "factoryPredicate":{"type":"all","predicates":[]},
@@ -157,6 +164,23 @@ cat >"$EVIDENCE/genesis.json" <<EOF
    "networkBytes":"10000000","sideEffectCount":"10000000",
    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
 EOF
+# Derive the platform's initial policy from the final operator configuration,
+# including caller-supplied lifecycle settings. Native bootstrap validates it.
+jq --slurpfile operator "$EVIDENCE/operator.json" '
+  $operator[0] as $o |
+  .platform = {
+    ownerBudget:($o.ownerBudget|tostring), lifetime:($o.lifetime|tostring),
+    grainBirthTariff:(if $o.grainBirthTariff == null then null
+      else ($o.grainBirthTariff | map_values(tostring)) end),
+    completionCustodianKey:($o.completionCustodianKey // null)}
+' "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-with-platform.json"
+mv "$EVIDENCE/genesis-with-platform.json" "$EVIDENCE/genesis.json"
+if [ -n "$WORKROOM_FACTORY_PREDICATE" ]; then
+  jq --slurpfile predicate "$WORKROOM_FACTORY_PREDICATE" \
+    '.factoryPredicate = $predicate[0]' "$EVIDENCE/genesis.json" \
+    >"$EVIDENCE/genesis-with-factory.json"
+  mv "$EVIDENCE/genesis-with-factory.json" "$EVIDENCE/genesis.json"
+fi
 if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
   "$MINI" keygen --secret "$EVIDENCE/pay-observer.key" --public "$EVIDENCE/pay-observer.pub" --no-prerotation >"$EVIDENCE/pay-observer-public.txt"
   OBSERVER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/pay-observer.pub" | tr -d ' \n')

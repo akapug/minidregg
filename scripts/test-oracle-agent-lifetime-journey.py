@@ -119,14 +119,16 @@ class HarnessTests(unittest.TestCase):
 
     def test_complete_grain_store_overlay_before_bootstrap(self):
         # Run the real grain-store -> positive-base -> native-share-member
-        # transformations. Stub only native executables, stopping exactly at
-        # bootstrap before a Store exists. This is a source composition test.
+        # configuration and enrollment composition. Stub native executables,
+        # stopping at bootstrap before a Store exists.
         inputs = ["scripts/workroom/provision.sh",
                   "scripts/application-share-issue/native-positive-base.sh",
                   "scripts/grain-birth/native-share-member.sh",
                   "native/resource-client/journey.d/lib/genesis-params.sh",
                   "deploy/candidate/params.sh"]
-        for mode in ("legacy", "agents", "unrelated-keywords", "missing-config", "duplicate-config"):
+        for mode in ("legacy", "agents", "unrelated-keywords", "reformatted", "custom-balances",
+                     "extra-policy", "custody-conflict", "targets-conflict",
+                     "multiple-policy", "unknown-policy"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 repo = root / "repo"
@@ -142,12 +144,12 @@ class HarnessTests(unittest.TestCase):
                 provision = repo / "scripts/workroom/provision.sh"
                 original = provision.read_text()
                 line = ' "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}'
-                if mode == "missing-config":
-                    provision.write_text(original.replace(line, line.replace("signatureBinary", "changedSignatureBinary")))
-                elif mode == "duplicate-config":
-                    provision.write_text(original.replace(line, line + "\n" + line))
+                if mode == "reformatted":
+                    reformatted = original.replace(line, line.replace(",", ",\n  ").replace(":", ": "))
+                    self.assertNotEqual(reformatted, original)
+                    provision.write_text(reformatted)
                 elif mode == "unrelated-keywords":
-                    provision.write_text(original + "\n# lifecycleManagement agentLifetimeDispatchTargets\n")
+                    provision.write_text(original + "\n# lifecycleManagement agentLifetimeDispatchTargets grainBirthTariff\n")
                 native = root / "native"
                 native.write_text('''#!/usr/bin/env python3
 import hashlib,json,os,pathlib,sys
@@ -167,17 +169,29 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 capture = root / "capture"
                 capture.mkdir()
                 env = {key: value for key, value in os.environ.items()
-                       if key not in ("CANDIDATE", "SPK_AGENT_ALLOCATION", "GENESIS_PARAMS_TREE")
+                       if key not in ("CANDIDATE", "SPK_AGENT_ALLOCATION", "GENESIS_PARAMS_TREE", "MEMBER_INITIAL_BALANCE")
                        and not key.startswith("WORKROOM_")}
                 env.update(OVERLAY_CAPTURE=str(capture), GENESIS_PARAMS_TREE=str(repo))
                 if mode != "legacy":
                     env["SPK_AGENT_ALLOCATION"] = str(ROOT / "deploy/oracle/acceptance/agent-allocation.json")
+                if mode == "custom-balances":
+                    env.update(WORKROOM_SPONSOR_BALANCE="12345", WORKROOM_TOOL_BALANCE="23456")
+                policies = {
+                    "extra-policy": {"providerServices": []},
+                    "custody-conflict": {"completionCustodianKey": "00" * 32},
+                    "targets-conflict": {"agentLifetimeDispatchTargets": []},
+                    "multiple-policy": {},
+                    "unknown-policy": {"storageRoot": "/not-the-fixture-store"},
+                }
+                if mode in policies:
+                    policy = root / "operator-policy.json"
+                    policy.write_text(json.dumps(policies[mode]) + ("\n{}" if mode == "multiple-policy" else ""))
+                    env["WORKROOM_OPERATOR_POLICY"] = str(policy)
                 result = subprocess.run(["sh", str(repo / "scripts/spk-platform/grain-store.sh"),
                                          str(root / "new-world"), *([str(native)] * 4)],
                                         env=env, capture_output=True, text=True)
-                if mode in ("missing-config", "duplicate-config"):
+                if mode in ("custody-conflict", "targets-conflict", "multiple-policy", "unknown-policy"):
                     self.assertEqual(result.returncode, 2)
-                    self.assertIn("configuration shape changed", result.stderr)
                     self.assertFalse((capture / "config.json").exists())
                     continue
                 diagnostics = result.stderr + "\n".join(p.read_text() for p in root.rglob("*.stderr"))
@@ -188,6 +202,20 @@ else: raise SystemExit('unexpected native command: '+repr(args))
                 self.assertEqual(config["grainBirthTariff"], {"base": 2, "perBirth": 1})
                 self.assertEqual(config["tariffPerInitialPayloadByte"], 1)
                 self.assertEqual(genesis["tariffPerInitialPayloadByte"], "1")
+                balances = {entry["key"]["subject"]: entry["initialBalance"] for entry in genesis["enrollments"]}
+                expected_balances = {"7": "12345", "8": "23456", "9": "1"} if mode == "custom-balances" else {
+                    "7": "1000000", "8": "1000000", "9": "1"}
+                self.assertEqual({subject: balances[subject] for subject in ("7", "8", "9")},
+                                 expected_balances)
+                if mode == "extra-policy":
+                    self.assertEqual(config["providerServices"], [])
+                self.assertEqual(genesis["clockControlCapability"], "4093")
+                self.assertEqual(genesis["platform"], {
+                    "ownerBudget": str(config["ownerBudget"]),
+                    "lifetime": str(config["lifetime"]),
+                    "grainBirthTariff": {"base": "2", "perBirth": "1"},
+                    "completionCustodianKey": config["completionCustodianKey"],
+                })
                 self.assertFalse((root / "new-world/base/workroom/deployment").exists())
                 # This is the actual predicate emitted by all production source
                 # transforms, not a separately generated test policy.
@@ -238,7 +266,7 @@ else: raise SystemExit('unexpected native command: '+repr(args))
     def test_actual_factory_allocation_guard(self):
         source = (ROOT / "scripts/grain-birth/native-share-member.sh").read_text()
         start = source.index("FACTORY_PREDICATE=")
-        end = source.index("# shellcheck",start)
+        end = source.index("# Configuration inputs",start)
         for fault in (None,"empty","relative","missing","symlink","duplicate","other-role","owner","nonnumeric",
                       "missing-grant","grant-nonnumeric","grant-leading-zero","grant-session","grant-task","grant-app",
                       "duplicate-grant","relocated-grant"):
