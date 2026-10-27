@@ -71,8 +71,23 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       "$MINI" shell --socket "$SOCKET" --workspace "$1" --home "$2" --host "$HOST" --config "$CONFIG" --line "$3" 2>"$M/last.err"
     }
     pinned=$(jq -r '.socket // empty' "$SPONSOR_WS/workspace.json" 2>/dev/null); [ -z "$pinned" ] || SOCKET=$pinned
-    mline "$WS" "$M/home" "keygen mini.key" >/dev/null         && install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/jwf.key"         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan jwf jwf.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal jwf" >/dev/null         && mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit jwf" >"$M/submit.out"         && rm -f "$M/sponsor-home/keys/jwf.key"         && JSUBJ=$(jq -r '.subject // empty' "$M/submit.out") && [ -n "$JSUBJ" ]         && printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"         && "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name jwf --holder "$JSUBJ" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err"         && install -m 0600 "$SPONSOR_WS/provisions/jwf/birth-context.json" "$M/home/provision/birth-context.json"         && mline "$M/home/workspace" "$M/home" "init mini.key $JSUBJ" >/dev/null 2>&1 || true
+    provision_jwf() {
+      mline "$WS" "$M/home" "keygen mini.key" >/dev/null || return 1
+      install -m 0600 "$M/home/keys/mini.key" "$M/sponsor-home/keys/jwf.key" || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll plan jwf jwf.key $(xxd -p -c 256 "$M/home/keys/mini.key.next.pub") $(xxd -p -c 256 "$M/home/keys/mini.key.next.cosign")" >/dev/null || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll seal jwf" >/dev/null || return 1
+      mline "$SPONSOR_WS" "$M/sponsor-home" "enroll submit jwf" >"$M/submit.out" || return 1
+      rm -f "$M/sponsor-home/keys/jwf.key"
+      local subject; subject=$(jq -r '.subject // empty' "$M/submit.out"); [ -n "$subject" ] || return 1
+      printf '%s\n' '{"type":"all","predicates":[]}' >"$M/permit-all.json"
+      "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name jwf --holder "$subject" --funding 1000 --account-predicate "$M/permit-all.json" --factory-ref factory >"$M/provision.out" 2>"$M/provision.err" || return 1
+      install -m 0600 "$SPONSOR_WS/provisions/jwf/birth-context.json" "$M/home/provision/birth-context.json" || return 1
+      mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null
+    }
+    # A member an earlier run of this step provisioned (the box keeps its world) is reused.
+    [ -f "$M/home/workspace/workspace.json" ] || provision_jwf || true
     if [ -f "$M/home/workspace/workspace.json" ] && [ "$(jq -r '.birthContext != null' "$M/home/workspace/workspace.json")" = true ]; then
+      JSUBJ=$(jq -r .subject "$M/home/workspace/workspace.json")
       WS=$M/home/workspace; SUBJECT=$JSUBJ; JWF_HOME=$M/home
       echo "jwf: provisioned member jwf as subject $JSUBJ" >&2
     else
