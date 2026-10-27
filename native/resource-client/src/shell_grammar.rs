@@ -176,7 +176,72 @@ pub static ROOM: Grammar = Grammar {
     ],
 };
 
-pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM];
+const PROPOSAL: &str = "minidregg-workspace-proposal-v1";
+const _: &str = PROPOSAL;
+
+pub static DELEGATE: Grammar = Grammar { verb: "delegate", leaves: &[
+    Leaf { path: &["delegate"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject), arg("VERB[,VERB...]", Kind::Word), arg("MAX-COST", Kind::Number)], flags: &[valued("--until", "H", Kind::Number)], effect: Effect::Propose, about: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height)" },
+] };
+pub static REVOKE: Grammar = Grammar { verb: "revoke", leaves: &[
+    Leaf { path: &["revoke"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("RECIPIENT", Kind::Subject)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
+] };
+pub static RENOUNCE: Grammar = Grammar { verb: "renounce", leaves: &[
+    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref)], flags: &[], effect: Effect::Propose, about: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
+    Leaf { path: &["renounce"], args: &[arg("ID", Kind::Id), arg("CAPABILITY", Kind::Subject), opt("object|account|program", Kind::Choice(&["object", "account", "program"]))], flags: &[], effect: Effect::Propose, about: "propose (action renounce, by capability id and kind)" },
+] };
+pub static LAW: Grammar = Grammar { verb: "law", leaves: &[
+    Leaf { path: &["law", "show"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "the installed law from the signed policy view, as the Host prints it" },
+    Leaf { path: &["law", "export", "show"], args: &[arg("REF", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini workspace --action law-export-show" },
+    Leaf { path: &["law", "export"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("COMPONENT-JSON|@FILE|none", Kind::Word)], flags: &[], effect: Effect::Propose, about: "propose (action install-export: the law component descendants inherit)" },
+    Leaf { path: &["law", "check"], args: &[arg("\"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", Kind::Law)], flags: &[], effect: Effect::Read, about: "mini workspace --action law-check: whether the law can ever pass (Host op 150), nothing installed" },
+    Leaf { path: &["law"], args: &[arg("ID", Kind::Id), arg("REF", Kind::Ref), arg("\"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE", Kind::Law)], flags: &[dangerous("--allow-unsatisfiable"), dangerous("--i-lock-myself-out"), dangerous("--freeze-roster")], effect: Effect::Propose, about: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150); the three switches are explicit consent to an unsatisfiable law, to locking yourself out, to freezing a room's roster" },
+] };
+pub static PAY: Grammar = Grammar { verb: "pay", leaves: &[
+    Leaf { path: &["pay", "address"], args: &[opt("ACCOUNT-REF", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini pay --action address" },
+    Leaf { path: &["pay", "status"], args: &[opt("ACCOUNT-REF", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini pay --action status" },
+    Leaf { path: &["pay", "audit"], args: &[], flags: &[], effect: Effect::Read, about: "mini pay --action audit" },
+    Leaf { path: &["pay"], args: &[arg("ROOM", Kind::Ref), arg("week|N", Kind::Word), opt("again", Kind::Choice(&["again"]))], flags: &[valued("--account", "REF", Kind::Id)], effect: Effect::Transition, about: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox; `again` pays once more)" },
+] };
+pub static CREDIT: Grammar = Grammar { verb: "credit", leaves: &[
+    Leaf { path: &["credit"], args: &[opt("ACCOUNT-REF", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini credit --action balance (a signed read of my account)" },
+] };
+pub static TARIFF: Grammar = Grammar { verb: "tariff", leaves: &[
+    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref)], flags: &[], effect: Effect::Read, about: "mini credit --action tariff --room ROOM (a signed read of the room cell's tariff fields)" },
+    Leaf { path: &["tariff"], args: &[arg("ROOM", Kind::Ref), arg("set", Kind::Choice(&["set"])), arg("week|birth|hermes/turn|period|open", Kind::Choice(&["week", "birth", "hermes/turn", "period", "open"])), arg("N", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini credit --action tariff --set FIELD --value N (one scalar turn on the room cell: only its founder holds write)" },
+] };
+pub static TOPUP: Grammar = Grammar { verb: "topup", leaves: &[
+    Leaf { path: &["topup"], args: &[arg("ROOM", Kind::Ref), arg("N", Kind::Number), opt("hermes|concierge", Kind::Choice(&["hermes", "concierge"])), opt("again", Kind::Choice(&["again"]))], flags: &[valued("--account", "REF", Kind::Id)], effect: Effect::Transition, about: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
+] };
+pub static MARKET: Grammar = Grammar { verb: "market", leaves: &[
+    Leaf { path: &["market", "open"], args: &[arg("NAME", Kind::Id), arg("CLOSE", Kind::Number), arg("REVEAL-END", Kind::Number), arg("SUPPLY", Kind::Number)], flags: &[], effect: Effect::Transition, about: "mini workspace --action market-open" },
+    Leaf { path: &["market", "settle"], args: &[arg("MARKET", Kind::Id), opt("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action market-settle" },
+] };
+pub static BID: Grammar = Grammar { verb: "bid", leaves: &[
+    Leaf { path: &["bid"], args: &[arg("MARKET", Kind::Id), arg("PRICE", Kind::Number), arg("QTY", Kind::Number), opt("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action market-bid (a sealed bid)" },
+] };
+pub static REVEAL: Grammar = Grammar { verb: "reveal", leaves: &[
+    Leaf { path: &["reveal"], args: &[arg("MARKET", Kind::Id), opt("ID", Kind::Id)], flags: &[], effect: Effect::Transition, about: "mini workspace --action market-reveal" },
+] };
+pub static BIDS: Grammar = Grammar { verb: "bids", leaves: &[
+    Leaf { path: &["bids"], args: &[arg("MARKET", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini workspace --action market-bids: a signed read, sealed bids shown as commitments" },
+] };
+const JOB_ACCOUNT: Flag = valued("--account", "REF", Kind::Word);
+const JOB_NAME: Flag = valued("--name", "NAME", Kind::Word);
+pub static JOB: Grammar = Grammar { verb: "job", leaves: &[
+    Leaf { path: &["job", "post"], args: &[arg("ROOM", Kind::Word), arg("PROGRAM", Kind::Word)], flags: &[valued("--input", "N", Kind::Number), valued("--price", "P", Kind::Number), valued("--deadline", "SECONDS", Kind::Number), JOB_ACCOUNT, valued("--window", "SECONDS", Kind::Number), JOB_NAME], effect: Effect::Transition, about: "mini job --action post" },
+    Leaf { path: &["job", "claim"], args: &[arg("JOB", Kind::Word)], flags: &[valued("--room", "ROOM", Kind::Word), valued("--bond", "B", Kind::Number), JOB_ACCOUNT, JOB_NAME], effect: Effect::Transition, about: "mini job --action claim" },
+    Leaf { path: &["job", "answer"], args: &[arg("NAME", Kind::Word), opt("OUTPUT", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mini job --action answer" },
+    Leaf { path: &["job", "check"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini job --action check" },
+    Leaf { path: &["job", "settle"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Transition, about: "mini job --action settle" },
+    Leaf { path: &["job", "show"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini job --action show" },
+    Leaf { path: &["job", "fund"], args: &[arg("NAME", Kind::Word)], flags: &[JOB_ACCOUNT], effect: Effect::Transition, about: "mini job --action fund" },
+    Leaf { path: &["job", "truth"], args: &[arg("NAME", Kind::Word)], flags: &[], effect: Effect::Read, about: "mini job --action truth" },
+] };
+pub static JOBS: Grammar = Grammar { verb: "jobs", leaves: &[
+    Leaf { path: &["jobs"], args: &[arg("ROOM", Kind::Id)], flags: &[], effect: Effect::Read, about: "mini job --action list --dir WS --room ROOM" },
+] };
+
+pub static GRAMMARS: &[&Grammar] = &[&DOC, &ROOM, &DELEGATE, &REVOKE, &RENOUNCE, &LAW, &PAY, &CREDIT, &TARIFF, &TOPUP, &MARKET, &BID, &REVEAL, &BIDS, &JOB, &JOBS];
 
 pub fn grammar(verb: &str) -> Option<&'static Grammar> {
     GRAMMARS.iter().copied().find(|g| g.verb == verb)
@@ -209,25 +274,32 @@ pub fn operation(g: &Grammar) -> String {
 /// A leaf's words, typed: positional values by argument index (None when an optional one was
 /// not given), and the flags that were present with their values.
 #[derive(Debug)]
-pub struct Parsed<'a> {
+pub struct Parsed {
     pub leaf: &'static Leaf,
-    pub args: Vec<Option<&'a str>>,
-    pub flags: Vec<(&'static str, Option<&'a str>)>,
+    pub args: Vec<Option<String>>,
+    pub flags: Vec<(&'static str, Option<String>)>,
 }
 
-impl<'a> Parsed<'a> {
-    pub fn arg(&self, i: usize) -> &'a str {
-        self.args.get(i).copied().flatten().unwrap_or("")
+impl Parsed {
+    pub fn arg(&self, i: usize) -> &str {
+        self.args.get(i).and_then(|a| a.as_deref()).unwrap_or("")
     }
-    pub fn flag(&self, name: &str) -> Option<Option<&'a str>> {
-        self.flags.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
+    pub fn opt(&self, i: usize) -> Option<&str> {
+        self.args.get(i).and_then(|a| a.as_deref())
+    }
+    pub fn flag(&self, name: &str) -> Option<Option<&str>> {
+        self.flags.iter().find(|(n, _)| *n == name).map(|(_, v)| v.as_deref())
     }
     pub fn has(&self, name: &str) -> bool {
         self.flag(name).is_some()
     }
     /// Every value a repeatable valued flag was given (`--referee 9 --referee 12`).
-    pub fn values(&self, name: &str) -> Vec<&'a str> {
-        self.flags.iter().filter(|(n, _)| *n == name).filter_map(|(_, v)| *v).collect()
+    pub fn values(&self, name: &str) -> Vec<&str> {
+        self.flags.iter().filter(|(n, _)| *n == name).filter_map(|(_, v)| v.as_deref()).collect()
+    }
+    /// How many leaves of the verb share this leaf's path (an arity- or kind-chosen shape).
+    pub fn index_in(&self, g: &Grammar) -> usize {
+        g.leaves.iter().position(|l| std::ptr::eq(l, self.leaf)).unwrap_or(0)
     }
 }
 
@@ -235,16 +307,35 @@ impl<'a> Parsed<'a> {
 /// kind and count, its flags recognized. A wrong shape (no leaf, a missing or extra word, an
 /// unknown flag) answers the verb's whole usage, as the shell's `usage:` ending has always
 /// done; a word of the wrong kind answers the typed message that names the argument.
-pub fn parse<'a>(g: &'static Grammar, words: &'a [String]) -> Result<Parsed<'a>, String> {
-    let leaf = g
+pub fn parse(g: &'static Grammar, words: &[String]) -> Result<Parsed, String> {
+    // The longest literal path first; when none of its shapes accepts the words, a shorter path
+    // may (`law show fish open` is the proposal `show` on `fish`, not `law show` with a stray
+    // word). Leaves that share a path are the shapes of one subcommand (an arity, a kind): the
+    // first that accepts the words wins; the longest path's first error stands when none does.
+    let mut candidates: Vec<&'static Leaf> = g
         .leaves
         .iter()
         .filter(|l| l.path.len() <= words.len() && l.path.iter().zip(words).all(|(p, w)| p == w))
-        .max_by_key(|l| l.path.len())
-        .ok_or_else(|| usage(g))?;
-    let rest = &words[leaf.path.len()..];
-    let mut args: Vec<Option<&'a str>> = Vec::new();
-    let mut flags: Vec<(&'static str, Option<&'a str>)> = Vec::new();
+        .collect();
+    if candidates.is_empty() {
+        return Err(usage(g));
+    }
+    candidates.sort_by_key(|l| std::cmp::Reverse(l.path.len()));
+    let mut first_error = None;
+    for leaf in candidates {
+        match parse_leaf(g, leaf, &words[leaf.path.len()..]) {
+            Ok(parsed) => return Ok(parsed),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| usage(g)))
+}
+
+fn parse_leaf(g: &Grammar, leaf: &'static Leaf, rest: &[String]) -> Result<Parsed, String> {
+    let mut args: Vec<Option<String>> = Vec::new();
+    let mut flags: Vec<(&'static str, Option<String>)> = Vec::new();
     let mut i = 0;
     while i < rest.len() {
         let w = rest[i].as_str();
@@ -253,7 +344,7 @@ pub fn parse<'a>(g: &'static Grammar, words: &'a [String]) -> Result<Parsed<'a>,
                 Some((placeholder, kind)) => {
                     let v = rest.get(i + 1).map(String::as_str).ok_or_else(|| usage(g))?;
                     check(kind, v, placeholder)?;
-                    flags.push((f.name, Some(v)));
+                    flags.push((f.name, Some(v.to_owned())));
                     i += 2;
                 }
                 None => {
@@ -270,13 +361,26 @@ pub fn parse<'a>(g: &'static Grammar, words: &'a [String]) -> Result<Parsed<'a>,
         let Some(a) = leaf.args.get(position) else {
             return Err(usage(g));
         };
+        // A law is written as words (`any [ field 2 monotone ]`): it takes every remaining word
+        // that is not one of the leaf's flags.
+        if a.kind == Kind::Law {
+            let mut taken = Vec::new();
+            while i < rest.len() && !leaf.flags.iter().any(|f| f.name == rest[i]) {
+                taken.push(rest[i].as_str());
+                i += 1;
+            }
+            let value = taken.join(" ");
+            check(a.kind, &value, a.name)?;
+            args.push(Some(value));
+            continue;
+        }
         // An optional literal choice (`at`) that does not match lets the next argument take the word.
         if a.optional && matches!(a.kind, Kind::Choice(_)) && check(a.kind, w, a.name).is_err() {
             args.push(None);
             continue;
         }
         check(a.kind, w, a.name)?;
-        args.push(Some(w));
+        args.push(Some(w.to_owned()));
         i += 1;
     }
     for a in &leaf.args[args.len()..] {
@@ -341,6 +445,7 @@ mod tests {
         let p = parse(&DOC, &w).unwrap();
         assert_eq!(p.leaf.path, ["doc", "append"]);
         assert_eq!((p.arg(0), p.arg(1), p.arg(2)), ("w-1", "paper", "hello"));
+        let _ = &words;
         assert_eq!(p.leaf.effect, Effect::Propose);
         let w = words("doc show paper --at 7 --json");
         let p = parse(&DOC, &w).unwrap();
@@ -379,5 +484,36 @@ mod tests {
         let p = parse(&ROOM, &w).unwrap();
         assert_eq!((p.leaf.path, p.arg(0), p.arg(1)), (&["room", "template", "show"][..], "workroom", "member"));
         assert_eq!(parse(&ROOM, &words("room leave lab")).unwrap_err(), usage(&ROOM));
+        // Shapes that share a path: the first that accepts the words wins.
+        let w = words("renounce r1 77 account");
+        let p = parse(&RENOUNCE, &w).unwrap();
+        assert_eq!((p.index_in(&RENOUNCE), p.arg(1), p.arg(2)), (1, "77", "account"));
+        let w = words("renounce r2 lab");
+        assert_eq!(parse(&RENOUNCE, &w).unwrap().index_in(&RENOUNCE), 0);
+        assert_eq!(parse(&RENOUNCE, &words("renounce r3 lab object")).unwrap_err(), usage(&RENOUNCE));
+        let w = words("tariff lab set week 7");
+        assert_eq!(parse(&TARIFF, &w).unwrap().index_in(&TARIFF), 1);
+        let w = words("tariff lab");
+        assert_eq!(parse(&TARIFF, &w).unwrap().index_in(&TARIFF), 0);
+        // A law takes the remaining words; its switches still parse.
+        let w = words("law l2 shared any [ field 2 monotone, not (verb == write) ] --freeze-roster");
+        let p = parse(&LAW, &w).unwrap();
+        assert_eq!(p.arg(2), "any [ field 2 monotone, not (verb == write) ]");
+        assert!(p.has("--freeze-roster"));
+        let w = words("law show fish open");
+        assert_eq!(parse(&LAW, &w).unwrap().leaf.path, ["law"]);
+        let w = words("law check -");
+        assert_eq!(parse(&LAW, &w).unwrap().arg(0), "-");
+        let w = words("pay lab week --account acc again");
+        let p = parse(&PAY, &w).unwrap();
+        assert_eq!((p.arg(0), p.arg(1), p.arg(2), p.flag("--account")), ("lab", "week", "again", Some(Some("acc"))));
+        let w = words("pay status");
+        assert_eq!(parse(&PAY, &w).unwrap().leaf.path, ["pay", "status"]);
+        let w = words("job post lab prog --input 3 --price 5 --deadline 60 --account acc");
+        let p = parse(&JOB, &w).unwrap();
+        assert_eq!((p.arg(0), p.flag("--price")), ("lab", Some(Some("5"))));
+        let w = words("topup lab 5 again");
+        let p = parse(&TOPUP, &w).unwrap();
+        assert_eq!((p.opt(2), p.opt(3)), (None, Some("again")));
     }
 }

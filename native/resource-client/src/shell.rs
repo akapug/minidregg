@@ -75,18 +75,18 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [FIELDS|open] [--in ROOM] [--owner SUBJECT] | create NAME --from KIND LAW [--in ROOM]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold) [--in ROOM] [--owner SUBJECT]" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
-    Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST [--until H]", operation: "mini workspace --action propose (action delegate; --until H: the grant's notAfter height)" },
-    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] [--i-lock-myself-out] [--freeze-roster] | law show REF | law export ID REF COMPONENT-JSON|@FILE|none | law export show REF | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no request BY YOU can pass is not proposed either (--i-lock-myself-out installs it anyway); sealing a room also requires --freeze-roster; a law no write can pass, or one you can never change again, is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
-    Verb { name: "market", usage: "market open NAME CLOSE REVEAL-END SUPPLY | market settle MARKET [ID]", operation: "mini workspace --action market-open (create under the sealed-market law + the setup write, submitted) | market-settle --proposal-id ID (default settle-MARKET)" },
-    Verb { name: "bid", usage: "bid MARKET PRICE QTY [ID]", operation: "mini workspace --action market-bid --proposal-id ID (default bid-MARKET): commit to (PRICE, QTY) in a free slot; the opening stays in WORKSPACE/market/MARKET/" },
-    Verb { name: "reveal", usage: "reveal MARKET [ID]", operation: "mini workspace --action market-reveal --proposal-id ID (default reveal-MARKET): write the kept opening" },
-    Verb { name: "bids", usage: "bids MARKET", operation: "mini workspace --action market-bids: a signed read, sealed bids shown as commitments" },
+    Verb { name: "delegate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "law", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "market", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "bid", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "reveal", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "bids", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "submit", usage: "submit ID [--lose-reply-once]", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID (--lose-reply-once: a client-side fault that writes the exact call and never reads the answer; the attempt is retained undecided and `lookup`/`retry` ask for the same decided outcome)" },
     Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
-    Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
-    Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
+    Verb { name: "revoke", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "renounce", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     // `doc` is the first verb whose grammar is data (shell_grammar::DOC): its usage and operation
     // are rendered from it by `command_catalog`; this row only holds its place in the order.
     Verb { name: "doc", usage: "", operation: "" },
@@ -94,14 +94,14 @@ pub(crate) const VERBS: &[Verb] = &[
     // `room` is grammar data (shell_grammar::ROOM); the row holds its place, see `rendered_row`.
     Verb { name: "room", usage: "", operation: "" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
-    Verb { name: "job", usage: "job post ROOM PROGRAM --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME] | job claim JOB --room ROOM --bond B --account REF [--name NAME] | job answer NAME [OUTPUT] | job check NAME | job settle NAME | job show NAME | job fund NAME --account REF | job truth NAME", operation: "mini job --action post|claim|answer|check|settle|show|fund|truth --dir WS (the job law, the job-money ops 160-163, the kernel's ran truth turn)" },
-    Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
+    Verb { name: "job", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "jobs", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
-    Verb { name: "pay", usage: "pay ROOM week|N [--account REF] [again] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
-    Verb { name: "credit", usage: "credit [ACCOUNT-REF]", operation: "mini credit --action balance (a signed read of my account)" },
-    Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period|open N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
-    Verb { name: "topup", usage: "topup ROOM N [hermes|concierge] [--account REF] [again]", operation: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
+    Verb { name: "pay", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "credit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "tariff", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "topup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
@@ -270,7 +270,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
             if *action == "index" { out.push(flag("to", p.arg(2))); }
             else {
                 out.push(flag("name", p.arg(2)));
-                if let Some(Some(to)) = p.args.get(3) { out.push(flag("to", *to)); }
+                if let Some(to) = p.opt(3) { out.push(flag("to", to)); }
             }
             Plan::Client { command: "workspace".into(), flags: out, writes: vec![] }
         }
@@ -361,7 +361,7 @@ fn room_plan(session: &Session, w: &[String], _u: &str) -> std::result::Result<P
         ["room", "invite"] => {
             let (name, invitee) = (p.arg(1), p.arg(2));
             let private = room_is_private(session, name);
-            let enc = p.args.get(3).copied().flatten();
+            let enc = p.opt(3);
             let past = p.has("--past");
             let i_know = p.has("--i-know");
             if !private && (enc.is_some() || past || i_know) {
@@ -986,33 +986,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::Inbox
         }
         "revoke" => {
-            arity(&w, 3, 3, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            ref_name(&w[2], "reference name")?;
-            decimal(&w[3], "recipient")?;
-            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
-                "name":w[2],"recipient":w[3]});
-            proposal(session, &w[1], &request)
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::REVOKE, &w)?;
+            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke","name":p.arg(1),"recipient":p.arg(2)});
+            proposal(session, p.arg(0), &request)
         }
         "renounce" => {
-            arity(&w, 2, 3, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            let request = if w[2].bytes().all(|b| b.is_ascii_digit()) {
-                decimal(&w[2], "capability")?;
-                let kind = w.get(3).map(String::as_str).unwrap_or("object");
-                if !matches!(kind, "object" | "account" | "program") {
-                    return Err(u.to_owned());
-                }
-                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
-                    "capability":w[2],"kind":kind})
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::RENOUNCE, &w)?;
+            let request = if p.index_in(&crate::shell_grammar::RENOUNCE) == 1 {
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","capability":p.arg(1),"kind":p.opt(2).unwrap_or("object")})
             } else {
-                if w.len() != 3 {
-                    return Err(u.to_owned());
-                }
-                workspace_name(&w[2], "reference name")?;
-                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","name":w[2]})
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","name":p.arg(1)})
             };
-            proposal(session, &w[1], &request)
+            proposal(session, p.arg(0), &request)
         }
         "room" => room_plan(session, &w, u)?,
         "forget" => {
@@ -1049,7 +1034,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 ["doc", "revoke"] => client("workspace", vec![flag("action", "doc-revoke"), flag("dir", ws()), flag("change", p.arg(0)), flag("name", p.arg(1)), flag("subject", p.arg(2))]),
                 ["doc", "membership-recover"] => {
                     let mut flags = vec![flag("action", "doc-membership-recover"), flag("dir", ws()), flag("change", p.arg(0)), flag("name", p.arg(1))];
-                    if let Some(Some(invitation)) = p.args.get(2) {
+                    if let Some(invitation) = p.opt(2) {
                         flags.push(flag("output", session_file_of(invitation, "invitation")?));
                     }
                     client("workspace", flags)
@@ -1060,7 +1045,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 ["doc", "epoch-import"] => client("workspace", vec![flag("action", "doc-epoch-import"), flag("dir", ws()), flag("name", p.arg(0)), flag("catalog", p.arg(1)), flag("bundle", session_file_of(p.arg(2), "epoch bundle")?)]),
                 ["doc", "context"] => {
                     let mut flags = vec![flag("action", "doc-context"), flag("dir", ws()), flag("name", p.arg(0))];
-                    match (p.args.get(1).copied().flatten(), p.args.get(2).copied().flatten()) {
+                    match (p.opt(1), p.opt(2)) {
                         (None, None) => {}
                         (Some(rows), Some(bytes)) => { flags.push(flag("max-rows", rows)); flags.push(flag("max-bytes", bytes)); }
                         _ => return Err("doc context NAME [MAX-ROWS MAX-BYTES]".into()),
@@ -1071,7 +1056,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     flag("context", session_file_of(p.arg(1), "review context")?), flag("request", session_file_of(p.arg(2), "review request")?)]),
                 ["doc", "search"] => {
                     let mut flags = vec![flag("action", "doc-search"), flag("dir", ws()), flag("text", p.arg(0)), flag("scope", p.arg(1))];
-                    match (p.args.get(2).copied().flatten(), p.args.get(3).copied().flatten()) {
+                    match (p.opt(2), p.opt(3)) {
                         (None, None) => {}
                         (Some(offset), Some(cursor)) => { flags.push(flag("offset", offset)); flags.push(flag("cursor", cursor)); }
                         _ => return Err("doc search QUERY NAME[,NAME...]|@held [OFFSET CURSOR]".into()),
@@ -1082,7 +1067,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 ["doc", "new"] => {
                     // `draft`, `note`, `index`, or the document's own law in the law grammar (one
                     // word: quote it), JSON, or `@FILE`.
-                    let law = match p.args.get(1).copied().flatten().unwrap_or("draft") {
+                    let law = match p.opt(1).unwrap_or("draft") {
                         stock @ ("draft" | "note" | "index") => document_law(stock).expect("stock document law"),
                         other => law_argument(session, &[other.to_owned()])?,
                     };
@@ -1126,7 +1111,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     document_proposal(session, p.arg(0), p.arg(1), json!({"type":"annotate","line":p.arg(2),"text":text}))
                 }
                 ["doc", "link"] => {
-                    let relation = p.args.get(3).copied().flatten().unwrap_or("0");
+                    let relation = p.opt(3).unwrap_or("0");
                     document_proposal(session, p.arg(0), p.arg(1), json!({"type":"link","to":p.arg(2),"relation":relation}))
                 }
                 _ => return Err(u.to_owned()),
@@ -1212,39 +1197,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         }
         "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
         "job" => {
-            let Some(action) = w.get(1) else {
-                return Err(u.to_owned());
-            };
-            let positional: &[&str] = match action.as_str() {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::JOB, &w)?;
+            let action = p.leaf.path[1];
+            let positional: &[&str] = match action {
                 "post" => &["room", "program"],
                 "claim" => &["job"],
                 "answer" => &["name", "output"],
-                "fund" | "truth" | "check" | "settle" | "show" => &["name"],
-                _ => return Err(u.to_owned()),
+                _ => &["name"],
             };
-            let mut flags = vec![flag("action", action.clone()), flag("dir", ws())];
-            let mut rest = w[2..].iter();
-            let mut taken = 0;
-            while let Some(word) = rest.next() {
-                if let Some(name) = word.strip_prefix("--") {
-                    if !matches!(name, "input" | "price" | "deadline" | "account" | "window" | "name" | "room" | "bond") {
-                        return Err(u.to_owned());
-                    }
-                    let value = rest.next().ok_or_else(|| u.to_owned())?;
-                    flags.push(flag(name, value.clone()));
-                } else if taken < positional.len() {
-                    flags.push(flag(positional[taken], word.clone()));
-                    taken += 1;
-                } else {
-                    return Err(u.to_owned());
-                }
+            let mut flags = vec![flag("action", action), flag("dir", ws())];
+            for (i, key) in positional.iter().enumerate() {
+                if let Some(value) = p.opt(i) { flags.push(flag(*key, value)); }
+            }
+            for (name, value) in &p.flags {
+                if let Some(value) = value { flags.push(flag(&name[2..], value.clone())); }
             }
             client("job", flags)
         }
         "jobs" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "room name")?;
-            client("job", vec![flag("action", "list"), flag("dir", ws()), flag("room", w[1].clone())])
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::JOBS, &w)?;
+            client("job", vec![flag("action", "list"), flag("dir", ws()), flag("room", p.arg(0))])
         }
         "history" => {
             arity(&w, 0, 1, u)?;
@@ -1399,104 +1371,51 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 _ => return Err(u.to_owned()),
             }
         }
-        "pay" if w.get(1).is_some_and(|word| !matches!(word.as_str(), "address" | "status" | "audit")) => {
-            // `pay ROOM week|N [--account REF] [again]` (P-CREDIT). A rerun of the same payment
-            // recovers its record; `again` is the member's decision to pay once more.
-            let again = w.last().is_some_and(|word| word == "again") && w.len() > 3;
-            let w: Vec<String> = if again { w[..w.len() - 1].to_vec() } else { w.to_vec() };
-            if !(w.len() == 3 || w.len() == 5) {
-                return Err(u.to_owned());
-            }
-            ref_name(&w[1], "room name")?;
-            let mut flags = vec![
-                flag("action", "pay"),
-                flag("dir", ws()),
-                flag("room", w[1].clone()),
-                flag("outbox", session.home.join("outbox")),
-            ];
-            match w[2].as_str() {
-                "week" => {}
-                amount => {
-                    decimal(amount, "amount")?;
-                    flags.push(flag("amount", amount));
-                }
-            }
-            if w.len() == 5 {
-                if w[3] != "--account" {
-                    return Err(u.to_owned());
-                }
-                workspace_name(&w[4], "account reference")?;
-                flags.push(flag("account", w[4].clone()));
-            }
-            if again {
-                flags.push(flag("again", "true"));
-            }
-            client("credit", flags)
-        }
         "credit" => {
-            arity(&w, 0, 1, u)?;
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::CREDIT, &w)?;
             let mut flags = vec![flag("action", "balance"), flag("dir", ws())];
-            if let Some(account) = w.get(1) {
-                workspace_name(account, "account reference")?;
-                flags.push(flag("account", account.clone()));
-            }
+            if let Some(account) = p.opt(0) { flags.push(flag("account", account)); }
             client("credit", flags)
         }
         "tariff" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::TARIFF, &w)?;
             let mut flags = vec![flag("action", "tariff"), flag("dir", ws())];
-            match w.len() {
-                2 => {}
-                5 if w[2] == "set" => {
-                    decimal(&w[4], "tariff value")?;
-                    flags.push(flag("set", w[3].clone()));
-                    flags.push(flag("value", w[4].clone()));
-                }
-                _ => return Err(u.to_owned()),
+            if p.index_in(&crate::shell_grammar::TARIFF) == 1 {
+                flags.push(flag("set", p.arg(2)));
+                flags.push(flag("value", p.arg(3)));
             }
-            ref_name(&w[1], "room name")?;
-            flags.push(flag("room", w[1].clone()));
+            flags.push(flag("room", p.arg(0)));
             client("credit", flags)
         }
         "topup" => {
-            if w.len() < 3 {
-                return Err(u.to_owned());
-            }
-            ref_name(&w[1], "room name")?;
-            decimal(&w[2], "amount")?;
-            let mut flags = vec![
-                flag("action", "topup"),
-                flag("dir", ws()),
-                flag("room", w[1].clone()),
-                flag("amount", w[2].clone()),
-            ];
-            let mut i = 3;
-            while i < w.len() {
-                match w[i].as_str() {
-                    "--account" if i + 1 < w.len() => {
-                        workspace_name(&w[i + 1], "account reference")?;
-                        flags.push(flag("account", w[i + 1].clone()));
-                        i += 1;
-                    }
-                    whose @ ("hermes" | "concierge") => flags.push(flag("to", whose)),
-                    "again" => flags.push(flag("again", "true")),
-                    _ => return Err(u.to_owned()),
-                }
-                i += 1;
-            }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::TOPUP, &w)?;
+            let mut flags = vec![flag("action", "topup"), flag("dir", ws()), flag("room", p.arg(0)), flag("amount", p.arg(1))];
+            if let Some(Some(account)) = p.flag("--account") { flags.push(flag("account", account)); }
+            if let Some(whose) = p.opt(2) { flags.push(flag("to", whose)); }
+            if p.opt(3).is_some() { flags.push(flag("again", "true")); }
             client("credit", flags)
         }
         "pay" => {
-            arity(&w, 1, 2, u)?;
-            let mut flags = vec![flag("action", w[1].clone()), flag("dir", ws())];
-            match (w[1].as_str(), w.get(2)) {
-                ("address" | "status", Some(account)) => {
-                    workspace_name(account, "reference name")?;
-                    flags.push(flag("account", account.clone()));
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::PAY, &w)?;
+            match p.leaf.path {
+                ["pay", action @ ("address" | "status" | "audit")] => {
+                    let mut flags = vec![flag("action", *action), flag("dir", ws())];
+                    if let Some(account) = p.opt(0) { flags.push(flag("account", account)); }
+                    client("pay", flags)
                 }
-                ("address" | "status" | "audit", None) => {}
-                _ => return Err(u.to_owned()),
+                _ => {
+                    // `pay ROOM week|N [--account REF] [again]` (P-CREDIT). A rerun of the same payment
+                    // recovers its record; `again` is the member's decision to pay once more.
+                    let mut flags = vec![flag("action", "pay"), flag("dir", ws()), flag("room", p.arg(0)), flag("outbox", session.home.join("outbox"))];
+                    if p.arg(1) != "week" {
+                        decimal(p.arg(1), "amount")?;
+                        flags.push(flag("amount", p.arg(1)));
+                    }
+                    if let Some(Some(account)) = p.flag("--account") { flags.push(flag("account", account)); }
+                    if p.opt(2).is_some() { flags.push(flag("again", "true")); }
+                    client("credit", flags)
+                }
             }
-            client("pay", flags)
         }
         "provision" => {
             arity(&w, 4, 5, u)?;
@@ -1812,160 +1731,72 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             proposal(session, &w[1], &request)
         }
         "delegate" => {
-            arity(&w, 5, 7, u)?;
-            workspace_name(&w[1], "proposal ID")?;
-            ref_name(&w[2], "reference name")?;
-            let verbs: Vec<&str> = w[4].split(',').collect();
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::DELEGATE, &w)?;
+            let verbs: Vec<&str> = p.arg(3).split(',').collect();
             let mut request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-                "name":w[2],"recipient":w[3],"verbs":verbs,"maxCost":w[5]});
-            match (w.get(6).map(String::as_str), w.get(7)) {
-                (None, None) => {}
-                (Some("--until"), Some(height)) => {
-                    decimal(height, "--until height")?;
-                    request["notAfter"] = json!(height);
+                "name":p.arg(1),"recipient":p.arg(2),"verbs":verbs,"maxCost":p.arg(4)});
+            if let Some(Some(height)) = p.flag("--until") {
+                request["notAfter"] = json!(height);
+            }
+            proposal(session, p.arg(0), &request)
+        }
+        "market" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::MARKET, &w)?;
+            match p.leaf.path {
+                ["market", "open"] => client("workspace", vec![flag("action", "market-open"), flag("dir", ws()), flag("name", p.arg(0)), flag("close", p.arg(1)), flag("reveal-end", p.arg(2)), flag("supply", p.arg(3))]),
+                _ => {
+                    let id = p.opt(1).map(str::to_owned).unwrap_or_else(|| format!("settle-{}", p.arg(0)));
+                    client("workspace", vec![flag("action", "market-settle"), flag("dir", ws()), flag("name", p.arg(0)), flag("proposal-id", id)])
                 }
-                _ => return Err(u.to_owned()),
-            }
-            proposal(session, &w[1], &request)
-        }
-        "law" if w.get(1).map(String::as_str) == Some("export") => {
-            if w.len() == 4 && w[2] == "show" {
-                ref_name(&w[3], "reference name")?;
-                client("workspace", vec![flag("action", "law-export-show"), flag("dir", ws()), flag("name", &w[3])])
-            } else {
-                arity(&w, 4, 4, u)?;
-                workspace_name(&w[2], "proposal ID")?; ref_name(&w[3], "reference name")?;
-                let component = if w[4] == "none" { Value::Null }
-                    else { json_argument(session, &w[4], "descendant law component")? };
-                proposal(session, &w[2], &json!({"type":"minidregg-workspace-proposal-v1",
-                    "action":"install-export","name":w[3],"component":component}))
             }
         }
-        "law" if w.len() == 3 && w[1] == "show" => {
-            workspace_name(&w[2], "reference name")?;
-            client("workspace", vec![flag("action", "law-show"), flag("dir", ws()), flag("name", w[2].clone())])
-        }
-        "market" => match w.get(1).map(String::as_str) {
-            Some("open") => {
-                arity(&w, 5, 5, u)?;
-                workspace_name(&w[2], "market name")?;
-                decimal(&w[3], "CLOSE")?;
-                decimal(&w[4], "REVEAL-END")?;
-                decimal(&w[5], "SUPPLY")?;
-                client(
-                    "workspace",
-                    vec![
-                        flag("action", "market-open"),
-                        flag("dir", ws()),
-                        flag("name", w[2].clone()),
-                        flag("close", w[3].clone()),
-                        flag("reveal-end", w[4].clone()),
-                        flag("supply", w[5].clone()),
-                    ],
-                )
-            }
-            Some("settle") => {
-                arity(&w, 2, 3, u)?;
-                workspace_name(&w[2], "market name")?;
-                let id = w.get(3).cloned().unwrap_or_else(|| format!("settle-{}", w[2]));
-                workspace_name(&id, "proposal ID")?;
-                client(
-                    "workspace",
-                    vec![flag("action", "market-settle"), flag("dir", ws()), flag("name", w[2].clone()), flag("proposal-id", id)],
-                )
-            }
-            _ => return Err(u.to_owned()),
-        },
         "bid" => {
-            arity(&w, 3, 4, u)?;
-            workspace_name(&w[1], "market name")?;
-            let id = w.get(4).cloned().unwrap_or_else(|| format!("bid-{}", w[1]));
-            workspace_name(&id, "proposal ID")?;
-            for (word, label) in [(&w[2], "PRICE"), (&w[3], "QTY")] {
-                decimal(word, label)?;
-            }
-            client(
-                "workspace",
-                vec![
-                    flag("action", "market-bid"),
-                    flag("dir", ws()),
-                    flag("name", w[1].clone()),
-                    flag("price", w[2].clone()),
-                    flag("qty", w[3].clone()),
-                    flag("proposal-id", id),
-                ],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::BID, &w)?;
+            let id = p.opt(3).map(str::to_owned).unwrap_or_else(|| format!("bid-{}", p.arg(0)));
+            client("workspace", vec![flag("action", "market-bid"), flag("dir", ws()), flag("name", p.arg(0)), flag("price", p.arg(1)), flag("qty", p.arg(2)), flag("proposal-id", id)])
         }
         "reveal" => {
-            arity(&w, 1, 2, u)?;
-            workspace_name(&w[1], "market name")?;
-            let id = w.get(2).cloned().unwrap_or_else(|| format!("reveal-{}", w[1]));
-            workspace_name(&id, "proposal ID")?;
-            client(
-                "workspace",
-                vec![flag("action", "market-reveal"), flag("dir", ws()), flag("name", w[1].clone()), flag("proposal-id", id)],
-            )
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::REVEAL, &w)?;
+            let id = p.opt(1).map(str::to_owned).unwrap_or_else(|| format!("reveal-{}", p.arg(0)));
+            client("workspace", vec![flag("action", "market-reveal"), flag("dir", ws()), flag("name", p.arg(0)), flag("proposal-id", id)])
         }
         "bids" => {
-            arity(&w, 1, 1, u)?;
-            workspace_name(&w[1], "market name")?;
-            client("workspace", vec![flag("action", "market-bids"), flag("dir", ws()), flag("name", w[1].clone())])
-        }
-        "law" if w.get(1).map(String::as_str) == Some("check") => {
-            let law = match &w[2..] {
-                [dash] if dash == "-" => law_from_stdin()?,
-                [] => return Err(u.to_owned()),
-                words => law_argument(session, words)?,
-            };
-            let bytes = serde_json::to_vec(&law).expect("JSON values serialise");
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            std::hash::Hasher::write(&mut hasher, &bytes);
-            let name = format!("law-check-{:016x}.json", std::hash::Hasher::finish(&hasher));
-            let path = session.home.join("requests").join(name);
-            Plan::Client {
-                command: "workspace".into(),
-                flags: vec![flag("action", "law-check"), flag("dir", ws()), flag("predicate", path.clone())],
-                writes: vec![request_file(path, &law)],
-            }
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::BIDS, &w)?;
+            client("workspace", vec![flag("action", "market-bids"), flag("dir", ws()), flag("name", p.arg(0))])
         }
         "law" => {
-            // Explicit consent flags cover unsatisfiability, self-lockout and frozen membership.
-            let mut w = w;
-            let (mut allow, mut lockout, mut freeze) = (false, false, false);
-            while let Some(last) = w.last() {
-                match last.as_str() {
-                    "--allow-unsatisfiable" if !allow => allow = true,
-                    "--i-lock-myself-out" if !lockout => lockout = true,
-                    "--freeze-roster" if !freeze => freeze = true,
-                    _ => break,
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::LAW, &w)?;
+            match p.leaf.path {
+                ["law", "show"] => client("workspace", vec![flag("action", "law-show"), flag("dir", ws()), flag("name", p.arg(0))]),
+                ["law", "export", "show"] => client("workspace", vec![flag("action", "law-export-show"), flag("dir", ws()), flag("name", p.arg(1))]),
+                ["law", "export"] => {
+                    let component = if p.arg(2) == "none" { Value::Null } else { json_argument(session, p.arg(2), "descendant law component")? };
+                    proposal(session, p.arg(0), &json!({"type":"minidregg-workspace-proposal-v1","action":"install-export","name":p.arg(1),"component":component}))
                 }
-                w.pop();
-            }
-            if w.len() < 4 {
-                arity(&w, 3, 3, u)?;
-            }
-            workspace_name(&w[1], "proposal ID")?;
-            ref_name(&w[2], "reference name")?;
-            let predicate = law_argument(session, &w[3..])?;
-            let request = json!({"type":"minidregg-workspace-proposal-v1",
-                "action":"install-policy","name":w[2],"predicate":predicate});
-            let mut plan = proposal(session, &w[1], &request);
-            let chat_room = crate::chat::load_room(session, &w[2]).is_ok();
-            if let Plan::Client { flags, .. } = &mut plan {
-                if allow {
-                    flags.push(flag("allow-unsatisfiable", "true"));
+                ["law", "check"] => {
+                    let law = if p.arg(0) == "-" { law_from_stdin()? } else { law_argument(session, &[p.arg(0).to_owned()])? };
+                    let bytes = serde_json::to_vec(&law).expect("JSON values serialise");
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    std::hash::Hasher::write(&mut hasher, &bytes);
+                    let name = format!("law-check-{:016x}.json", std::hash::Hasher::finish(&hasher));
+                    let path = session.home.join("requests").join(name);
+                    Plan::Client { command: "workspace".into(), flags: vec![flag("action", "law-check"), flag("dir", ws()), flag("predicate", path.clone())], writes: vec![request_file(path, &law)] }
                 }
-                if freeze {
-                    flags.push(flag("freeze-roster", "true"));
-                }
-                if chat_room {
-                    flags.push(flag("room-cell", "true"));
+                _ => {
+                    // Explicit consent switches cover unsatisfiability, self-lockout and frozen membership.
+                    let predicate = law_argument(session, &[p.arg(2).to_owned()])?;
+                    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"install-policy","name":p.arg(1),"predicate":predicate});
+                    let mut plan = proposal(session, p.arg(0), &request);
+                    let chat_room = crate::chat::load_room(session, p.arg(1)).is_ok();
+                    if let Plan::Client { flags, .. } = &mut plan {
+                        if p.has("--allow-unsatisfiable") { flags.push(flag("allow-unsatisfiable", "true")); }
+                        if p.has("--freeze-roster") { flags.push(flag("freeze-roster", "true")); }
+                        if chat_room { flags.push(flag("room-cell", "true")); }
+                        if p.has("--i-lock-myself-out") { flags.push(flag("i-lock-myself-out", "true")); }
+                    }
+                    plan
                 }
             }
-            if let (true, Plan::Client { flags, .. }) = (lockout, &mut plan) {
-                flags.push(flag("i-lock-myself-out", "true"));
-            }
-            plan
         }
         "submit" => {
             arity(&w, 1, 2, u)?;
