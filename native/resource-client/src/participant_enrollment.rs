@@ -1924,6 +1924,13 @@ fn refused_without_record(directory: &Path, pin: &Pin, frame: &[u8], ingress: &[
         .ok()
         .filter(|reply| reply.first() == Some(&8))
         .and_then(|reply| serde_json::from_slice::<Value>(&reply[1..]).ok());
+    no_record(directory, pin, ingress, crate::RESPONSE_NO_RECORD, decoded)
+}
+
+/// The Host decided the submit refused and left no record: from the NO_RECORD byte (decoded above)
+/// or from a decoded outcome that says so (`type: refused, effect: no-record`, e.g. an expired
+/// signature, `CredentialSignatureAdmission.Reject.expired`). Either way nothing was admitted.
+fn no_record(directory: &Path, pin: &Pin, ingress: &[u8], response: u8, decoded: Option<Value>) -> Result<()> {
     let reason = decoded
         .as_ref()
         .and_then(|outcome| outcome.get("reason").and_then(Value::as_str))
@@ -1932,7 +1939,7 @@ fn refused_without_record(directory: &Path, pin: &Pin, frame: &[u8], ingress: &[
     save_json(
         &directory.join(SUBMIT_REFUSED),
         &json!({"format":FORMAT,"operation":88,"ingressSha256":digest(ingress),
-            "response":crate::RESPONSE_NO_RECORD,"outcome":decoded,"status":"refused-no-record"}),
+            "response":response,"outcome":decoded,"status":"refused-no-record"}),
     )?;
     let released = participant_namespace::release_attempt(&pin.reservation, directory)?;
     Err(format!(
@@ -1969,6 +1976,11 @@ fn submit(directory: &Path) -> Result<()> {
             let value = outcome(&directory, &pin, "submit", &frame, 88)?;
             if confirmed(&value).is_ok() {
                 return result(&directory, &pin, &value);
+            }
+            if value.get("type").and_then(Value::as_str) == Some("refused")
+                && value.get("effect").and_then(Value::as_str) == Some("no-record")
+            {
+                return no_record(&directory, &pin, &ingress, frame.first().copied().unwrap_or(0), Some(value));
             }
             lookup_exact(&directory, &pin, &ingress)
         }
