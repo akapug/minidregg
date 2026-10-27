@@ -33,16 +33,18 @@ answers:
 | op 164 `DISPATCH-NO-RECORD-REFUSAL` frame | no record | 403 `refused` |
 | op 34 outcome `confirmed` (non-winner or historical) | recorded, never delivered | 502 `recorded-undelivered` |
 | any other reply or a lost reply, then op 35 `confirmed replayed` | recorded, never delivered | 502 `recorded-undelivered` |
-| any other reply or a lost reply, then op 35 `absent` | no record | 503 `contention` / 403 `refused` / 503 `unavailable` per the original outcome |
-| op 35 unanswerable (Host down, 255, malformed) | undecided | 503 `uncertain` |
+| an answered outcome frame (or 255), then op 35 `absent` | no record | 503 `contention` / 403 `refused` / 503 `unavailable` per the original outcome |
+| a lost reply, then op 35 `absent` | undecided | 503 `undecided`, retry `same-call` |
+| op 35 unanswerable (Host down, 255, malformed) | undecided | 503 `undecided`, retry `same-call` |
 | 8 undecided calls already | nothing authored | 503 `uncertain-backlog`, retry later |
 
-`absent` is definitive even after a lost reply because the operator socket
-(`resource-client/src/transport.rs`, `ServeBounds`) runs one FIFO Host thread
-and never writes a queued envelope whose caller has gone; the lookup is sent
-after the submit's connection is closed. Every outcome body carries
-`recorded`, the operation number, Lean's own outcome words and the retry: a
-new request is a new signed call; the host never resends the old one.
+`absent` after a lost reply is not read as never-happened (ruling
+2026-10-26): that would rest on the operator socket's ordering
+(`resource-client/src/transport.rs`, `ServeBounds`), which no theorem states.
+The call stays undecided until Lean's positive no-append frame exists; then
+that branch becomes "settled by Lean's NO_RECORD frame". Every outcome body
+carries `recorded`, the operation number, Lean's own outcome words and the
+retry. The host never resends a call.
 
 ## Lookups never authorize
 

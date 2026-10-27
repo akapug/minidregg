@@ -20,14 +20,14 @@
 //! `Kernel/ApplicationDispatchLookup.lookupVerified`) on the exact retained
 //! ingress. A lookup never mints a delivery permit and never resubmits.
 //!
-//! `absent` settles "no record" even after a lost reply, because of the
-//! operator socket's contract (`resource-client/src/transport.rs`,
-//! `ServeBounds`): one Host thread takes envelopes in FIFO order, and a
-//! queued envelope whose caller has closed its connection is answered 254
-//! and never written to the Host. The lookup is sent only after the submit's
-//! connection is closed, so the submit either already ran (and the lookup,
-//! queued behind it, sees its record) or never will. A lookup that cannot
-//! be answered (Host down, 255, malformed) settles nothing.
+//! `absent` settles "no record" only when the Host answered the submit with
+//! an outcome frame. After a LOST reply, `absent` leaves the call UNDECIDED
+//! (ruling 2026-10-26): reading absence as never-happened would rest on an
+//! ordering property of the operator socket that no theorem states. That
+//! branch switches to "settled by Lean's frame" when the Host answers every
+//! proven no-append outcome with the positive `NO_RECORD` frame (L1 item b).
+//! A lookup that cannot be answered (Host down, 255, malformed) settles
+//! nothing either.
 //!
 //! Undecided calls are bounded: past `MAX_UNDECIDED` a new call is refused
 //! (`uncertain-backlog`) until lookups settle older ones. Settled directories
@@ -98,7 +98,7 @@ impl DispatchOutcome {
             Status::Contention => "contention",
             Status::Unavailable => "unavailable",
             Status::RecordedUndelivered => "recorded-undelivered",
-            Status::Uncertain => "uncertain",
+            Status::Uncertain => "undecided",
             Status::Backlog => "uncertain-backlog",
         }
     }
@@ -111,11 +111,13 @@ impl DispatchOutcome {
             Status::Backlog => "not-submitted",
         }
     }
-    /// The exact retry. This call is never resent by the host; a new request
-    /// is a new signed call with its own operation ID.
+    /// The exact retry. A settled call's retry is a new request (a new signed
+    /// call). An undecided call's is the same call: its outcome is still
+    /// owed by Lean's lookup, and the host never resends it.
     fn retry(&self) -> &'static str {
         match self.status {
             Status::Backlog => "later",
+            Status::Uncertain => "same-call",
             _ => "new-request",
         }
     }
@@ -495,9 +497,13 @@ pub(crate) fn decide(
                 "receipt":receipt_fields(view)});
             settle(active, expected, &resolution).map(|()| Status::RecordedUndelivered)
         }
+        // Lost reply, then absent: UNDECIDED until Lean's positive no-append
+        // frame exists (ruling 2026-10-26; switch here, by name, to
+        // "settled by Lean's NO_RECORD frame").
+        Some(_) if !answered => Ok(Status::Uncertain),
         Some(_) => {
-            // Lean holds no record of this exact call, and the submit can no
-            // longer reach the Host: it is finished with no Store effect.
+            // The Host answered this submit with an outcome frame and Lean
+            // now holds no record of the exact call.
             let status = match original
                 .as_ref()
                 .and_then(|view| view.get("type"))
@@ -505,12 +511,11 @@ pub(crate) fn decide(
             {
                 Some("contention") => Status::Contention,
                 Some("refused") => Status::Refused,
-                // Unavailable, uncertain, uninspectable or lost, then absent.
+                // Unavailable, uncertain or uninspectable, then absent.
                 _ => Status::Unavailable,
             };
-            let by = if answered { "op35-absent-after-reply" } else { "op35-absent-after-lost-reply" };
             let resolution = json!({"protocol":"mini-spk-dispatch-resolution-v1",
-                "status":"no-record","by":by,"original":lean});
+                "status":"no-record","by":"op35-absent-after-reply","original":lean});
             settle(active, expected, &resolution).map(|()| status)
         }
         None => Ok(Status::Uncertain),
@@ -575,7 +580,8 @@ pub(crate) fn admit_new_call(operator: &PrivateOperator, parent: &Path) -> io::R
     Ok(())
 }
 
-/// Look up one retained undecided call; settle it on `confirmed` or `absent`.
+/// Look up one retained undecided call; settle it on `confirmed`, or on
+/// `absent` only when its submit was answered (`op<N>-frame.bin` retained).
 fn settle_retained(operator: &PrivateOperator, attempt_dir: &Path) -> io::Result<()> {
     let active = attempt_dir.join(SUBMIT_ACTIVE);
     let expected = retained(&active, MAX_MARKER)?;
@@ -584,14 +590,20 @@ fn settle_retained(operator: &PrivateOperator, attempt_dir: &Path) -> io::Result
     if marker.get("ingressSha256").and_then(Value::as_str) != Some(&hex(&Sha256::digest(&ingress))) {
         return Err(invalid("retained dispatch ingress differs from its submit marker"));
     }
+    let opcode = marker
+        .get("submitOpcode")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid("dispatch submit marker lacks opcode"))?;
+    let answered = present(&attempt_dir.join(format!("op{opcode}-frame.bin")))?;
     let Some(view) = lookup(operator, attempt_dir, &ingress)? else {
         return Ok(());
     };
     let resolution = match view.get("type").and_then(Value::as_str) {
         Some("confirmed") => json!({"protocol":"mini-spk-dispatch-resolution-v1",
             "status":"recorded-undelivered","by":"op35-sweep","receipt":receipt_fields(&view)}),
-        Some("absent") => json!({"protocol":"mini-spk-dispatch-resolution-v1",
-            "status":"no-record","by":"op35-sweep-absent"}),
+        // Lost reply, then absent: undecided (ruling 2026-10-26).
+        Some("absent") if answered => json!({"protocol":"mini-spk-dispatch-resolution-v1",
+            "status":"no-record","by":"op35-sweep-absent-after-reply"}),
         _ => return Ok(()),
     };
     settle(&active, &expected, &resolution)
@@ -766,18 +778,23 @@ mod tests {
         assert_eq!(resolution["status"], "no-record");
     }
 
-    /// A lost reply settles on Lean's lookup: `absent` (the submit can no
-    /// longer reach the Host) is no record; `confirmed replayed` is
-    /// recorded-undelivered. An unanswerable lookup settles nothing.
+    /// A lost reply then `absent` stays UNDECIDED (ruling 2026-10-26: no
+    /// positive no-append frame yet), with the same-call retry named; a lost
+    /// reply then `confirmed replayed` is recorded-undelivered. An
+    /// unanswerable lookup settles nothing.
     #[test]
-    fn decide_lost_reply_settles_on_the_lookup_answer() {
+    fn decide_lost_reply_settles_only_on_a_confirmed_lookup() {
         let fake = FakeHost::new("fence-lost");
         let (active, marker, ingress) = armed(&fake.root, 1, None);
         let (other, other_marker, other_ingress) = armed(&fake.root, 2, None);
         let served = fake.serve(vec!["absent", "replayed"]);
         let first = decide(&fake.operator, &active, &marker, "1", &ingress, Reply::Lost);
-        assert_eq!(first.status, Status::Unavailable);
-        assert!(!active.exists());
+        assert_eq!(first.status, Status::Uncertain);
+        assert!(active.exists());
+        let body = String::from_utf8(first.http_response(false)).unwrap();
+        assert!(body.contains("\"status\":\"undecided\""));
+        assert!(body.contains("\"retry\":\"same-call\""));
+        assert!(body.contains("\"recorded\":\"unknown\""));
         let second = decide(&fake.operator, &other, &other_marker, "2", &other_ingress, Reply::Lost);
         assert_eq!(second.status, Status::RecordedUndelivered);
         assert!(!other.exists());

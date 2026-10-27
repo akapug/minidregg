@@ -8,11 +8,13 @@
 //!
 //! - BEGIN `confirmed replayed`: the BEGIN is Lean's; STOP resumes from
 //!   CLAIM assembly with the retained plan and Lean's original receipt.
-//! - BEGIN or CLAIM `absent`: Lean holds no record of that exact call and,
-//!   with the submit's connection closed, it can no longer reach the Host
-//!   (one FIFO Host thread; a queued envelope whose caller has gone is never
-//!   written, `resource-client/src/transport.rs` `ServeBounds`). The attempt
-//!   is set aside, whole, under the journal, and STOP authors afresh.
+//! - BEGIN or CLAIM `absent` after the Host ANSWERED that submit (its
+//!   `op22`/`op26-frame.bin` is retained): Lean holds no record of that exact
+//!   call; the attempt is set aside, whole, under the journal, and STOP
+//!   authors afresh.
+//! - `absent` after a LOST reply: undecided (ruling 2026-10-26; no positive
+//!   no-append frame yet). STOP refuses by name and records the lookup; a
+//!   later run looks up again.
 //! - CLAIM `confirmed replayed`: Lean recorded the STOP claim but its
 //!   committed permit (the only thing that may arm the physical fence) was
 //!   lost and a lookup cannot re-issue it. STOP refuses by name and records
@@ -160,6 +162,7 @@ pub(crate) fn reconcile_running(
             ));
         }
         let ingress = retained_claim_ingress(attempts)?;
+        let answered = present(&attempts.claim.join("op26-frame.bin"))?;
         let (view, name, _) = lookup_view(operator, attempts.claim, 27, &ingress)?;
         match decided(&view, name)? {
             Lookup::Replayed(receipt, name) => {
@@ -169,6 +172,14 @@ pub(crate) fn reconcile_running(
                     "noResubmit":true}))?;
                 return Err(invalid(
                     "STOP CLAIM recorded by Mini (op27 lookup) but its committed permit was lost; no fence was armed and source recovery is required",
+                ));
+            }
+            Lookup::Absent(name) if !answered => {
+                record(journal_dir, json!({"protocol":"mini-spk-stop-submit-reconciliation-v1",
+                    "phase":"claim","lookup":"op27","decision":"undecided-absent-after-lost-reply",
+                    "evidence":format!("{name}/outcome.json"),"noResubmit":true}))?;
+                return Err(invalid(
+                    "STOP CLAIM reply was lost and Mini's op27 lookup finds no record; undecided until a positive no-append answer exists, so the attempt is kept and STOP retries the lookup later",
                 ));
             }
             Lookup::Absent(name) => {
@@ -205,6 +216,7 @@ pub(crate) fn reconcile_running(
         return Ok(None);
     }
     let ingress = retained_begin_ingress(attempts)?;
+    let answered = present(&attempts.begin.join("op22-frame.bin"))?;
     let (view, name, _) = lookup_view(operator, attempts.begin, 23, &ingress)?;
     match decided(&view, name)? {
         Lookup::Replayed(receipt, name) => {
@@ -213,6 +225,14 @@ pub(crate) fn reconcile_running(
                 "evidence":format!("{name}/outcome.json"),"receipt":receipt_json(&receipt),
                 "noResubmit":true}))?;
             Ok(Some(AcceptedStopBegin::recovered(attempts.begin, receipt)?))
+        }
+        Lookup::Absent(name) if !answered => {
+            record(journal_dir, json!({"protocol":"mini-spk-stop-submit-reconciliation-v1",
+                "phase":"begin","lookup":"op23","decision":"undecided-absent-after-lost-reply",
+                "evidence":format!("{name}/outcome.json"),"noResubmit":true}))?;
+            Err(invalid(
+                "STOP BEGIN reply was lost and Mini's op23 lookup finds no record; undecided until a positive no-append answer exists, so the attempt is kept and STOP retries the lookup later",
+            ))
         }
         Lookup::Absent(name) => {
             let aside = set_aside(
@@ -253,14 +273,34 @@ mod tests {
         begin
     }
 
-    /// Lost op22, Lean has the BEGIN: STOP resumes with Lean's receipt and the
-    /// retained plan. Lean lacks it: the attempt is set aside, nothing deleted.
+    /// Lean has the BEGIN: STOP resumes with Lean's receipt and the retained
+    /// plan. An answered submit Lean lacks: set aside, nothing deleted. A lost
+    /// reply Lean lacks: undecided, refused, attempt kept.
     #[test]
     fn lost_stop_begin_resumes_on_receipt_and_sets_aside_on_absence() {
+        // The lost-reply absent case is undecided: refused, attempt kept.
+        {
+            let fake = FakeHost::new("stop-begin-lost-absent");
+            let ingress = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3 exact".to_vec();
+            let begin = begin_attempt(&fake.root, &ingress);
+            let served = fake.serve(vec!["absent"]);
+            let attempts = StopAttempts {
+                journal_dir: &fake.root,
+                begin: &begin,
+                claim_author: &fake.root.join("stop-claim-author"),
+                claim: &fake.root.join("stop-claim"),
+            };
+            assert!(reconcile_running(&fake.operator, &attempts).is_err());
+            assert_eq!(served.join().unwrap(), vec![(23, ingress.clone())]);
+            assert!(begin.join("begin-v3.bin").exists());
+            assert!(fake.root.join(BEGIN_ACTIVE).exists());
+        }
         for (word, resumed) in [("replayed", true), ("absent", false)] {
             let fake = FakeHost::new("stop-begin-lookup");
             let ingress = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3 exact".to_vec();
             let begin = begin_attempt(&fake.root, &ingress);
+            // The Host answered the submit (not installed): its frame is kept.
+            write_new(&begin, "op22-frame.bin", b"answered").unwrap();
             let served = fake.serve(vec![word]);
             let attempts = StopAttempts {
                 journal_dir: &fake.root,
