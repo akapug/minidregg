@@ -39,7 +39,7 @@ build green, resource-client filtered 241/241, mini-sdk 33/33, and again at `cce
 Not done here, by decision: grain-runtime's ~13 bounded readers (another crate's lane; the
 `private_file` shape is the template); the three BPF assemblers (RT 30, `setid_bound.rs` deletion,
 the sandbox lane's); `crate::decode_hex` stays any-case (`hex::decode_any_case`): it reads typed
-input as well as Host values, and splitting its ~100 callers is its own pass.
+input as well as Host values, and splitting its ~200 call sites is its own pass.
 
 ## Enrol / world template: waiting on a candidate
 
