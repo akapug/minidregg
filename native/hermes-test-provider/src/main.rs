@@ -945,7 +945,9 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
             .unwrap_or_else(|| cell.to_owned())
     };
     let n_of = |e: &Value| e["n"].as_u64().unwrap_or(0);
-    let answered = |n: u64| entries.iter().any(|e| e["author"].as_str() == Some(me.as_str()) && e["re"].as_u64() == Some(n));
+    // Only a reply said by me answers; the resident's request-status entries
+    // ("queued", "started", re the ask) are not answers.
+    let answered = |n: u64| entries.iter().any(|e| e["kind"] == "say" && e["author"].as_str() == Some(me.as_str()) && e["re"].as_u64() == Some(n));
     let asks: Vec<&Value> = entries
         .iter()
         .filter(|e| e["kind"] == "say" && e["to"].as_str() == Some(me.as_str()) && e["author"].as_str() != Some(me.as_str()))
@@ -1002,7 +1004,9 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
             let text = ask["text"].as_str().unwrap_or("");
             if let Some(height) = number_after(text, "since") {
                 let hist = ok(&format!("hist-{n}"))?;
-                let lines: Vec<String> = hist["entries"]
+                // mini_room_ls since H answers the cells written above H, each
+                // with its heights and writers (older fixtures: per-height entries).
+                let mut lines: Vec<String> = hist["entries"]
                     .as_array()
                     .into_iter()
                     .flatten()
@@ -1011,6 +1015,12 @@ fn room_reply_for(request: &Value) -> Result<(Value, &'static str, String), Stri
                         format!("h{} {} wrote {}", e["height"].as_str().unwrap_or("?"), e["subject"].as_str().unwrap_or("?"), wrote.join(", "))
                     })
                     .collect();
+                lines.extend(hist["cells"].as_array().into_iter().flatten().map(|c| {
+                    let cell = c["cell"].as_str().unwrap_or("?");
+                    let writers: Vec<&str> = c["writers"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                    format!("h{}..h{} {} wrote cell {} ({})", c["firstHeight"].as_str().unwrap_or("?"), c["lastHeight"].as_str().unwrap_or("?"),
+                        writers.join(","), cell, name_of_cell(cell))
+                }));
                 let answer = if lines.is_empty() {
                     format!("Nothing was written in this room above height {height}.")
                 } else {
@@ -1770,6 +1780,13 @@ mod tests {
         assert_eq!(writes[0].2, json!({"from":"lab-index","to":"lab-cell-501"}));
         assert!(writes[1].2["text"].as_str().unwrap().starts_with("entries #1-#4: "));
         assert!(writes[2].2["text"].as_str().unwrap().contains("h13 7 wrote lab-cell-501"));
+        // The history as mini_room_ls since H answers it: cells with heights and writers.
+        let mut cells_history = messages.clone();
+        cells_history.push(second.0.clone());
+        cells_history.push(tool_msg("hist-3", json!({"ok":{"cells":[{"cell":"501","firstHeight":"13","lastHeight":"14","writers":["7"],"names":["lab-cell-501"]}]}})));
+        let by_cells = calls_of(&room_reply_for(&room_request(json!(cells_history))).unwrap().0);
+        let answer = by_cells.iter().find(|w| w.0 == "answer-3").unwrap().2["text"].as_str().unwrap().to_owned();
+        assert!(answer.starts_with("Since height 12") && answer.contains("h13..h14 7 wrote cell 501 (lab-cell-501)"), "{answer}");
         assert_eq!(writes[2].2["to"], "7");
         assert_eq!(writes[3].2, json!({"doc":"lab-cell-501","text":"typo fixed"}));
         messages.push(third.0.clone());
@@ -1791,7 +1808,8 @@ mod tests {
 
     #[test]
     fn out_of_budget_ends_the_attach() {
-        let tail = json!({"ok":{"entries":[{"n":1,"author":"7","kind":"say","text":"what changed since 3","to":"42","re":null}]}});
+        let tail = json!({"ok":{"entries":[{"n":1,"author":"7","kind":"say","text":"what changed since 3","to":"42","re":null},
+            {"n":2,"author":"42","kind":"request-status","text":"started: Hermes is working on it","to":"7","re":1}]}});
         let calls = json!({"role":"assistant","tool_calls":[{"id":"answer-1","type":"function","function":{"name":"mini_say","arguments":"{}"}}]});
         let reads = json!({"role":"assistant","tool_calls":[{"id":"ls"},{"id":"index"},{"id":"digest"},{"id":"tail"},{"id":"hist-1"}]});
         let messages = json!([brief(), reads,

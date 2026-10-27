@@ -517,10 +517,12 @@ ok ask alice "ask lab what changed since $H0"
 hermes ask "answers alice from the signed history"
 tail_json >"$SD/tail-ask.jsonl"
 ASKN=$(jq -s --arg h "$HS" --arg a "$A" '[.[] | select(.author == $a and .to == $h)] | .[-1].n' "$SD/tail-ask.jsonl")
-ANSWER=$(jq -s -r --arg h "$HS" --argjson n "${ASKN:-0}" '[.[] | select(.author == $h and .re == $n)] | .[0].text // ""' "$SD/tail-ask.jsonl")
+# Hermes's reply is its `say` re the ask (the resident's queued/started
+# request-status entries also reply to it).
+ANSWER=$(jq -s -r --arg h "$HS" --argjson n "${ASKN:-0}" '[.[] | select(.author == $h and .re == $n and .kind == "say")] | .[0].text // ""' "$SD/tail-ask.jsonl")
 printf '%s\n' "$ANSWER" >"$SD/answer-1.txt"
 checkp ask "Hermes's answer replies to alice's entry #$ASKN, addressed to alice" \
-  jq -s -e --arg h "$HS" --arg a "$A" --argjson n "${ASKN:-0}" 'any(.[]; .author == $h and .re == $n and .to == $a)' "$SD/tail-ask.jsonl"
+  jq -s -e --arg h "$HS" --arg a "$A" --argjson n "${ASKN:-0}" 'any(.[]; .author == $h and .re == $n and .to == $a and .kind == "say")' "$SD/tail-ask.jsonl"
 checkp ask "the answer is the history: it names paper and data by their cells" \
   sh -c "grep -q 'Since height $H0' '$SD/answer-1.txt' && grep -q '$PAPER_T' '$SD/answer-1.txt' && grep -q '$DATA_T' '$SD/answer-1.txt'"
 
@@ -533,7 +535,7 @@ checkp nogrant "the Host's operator log names it: capabilityRejected (no grant c
   sh -c "[ \$(wc -l <'$SD/operator-refusals-nogrant.txt') -ge 1 ] && grep -q 'DeclaredResourceController.Reject.capabilityRejected' '$SD/operator-refusals-nogrant.txt'"
 tail_json >"$SD/tail-nogrant.jsonl"
 checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to bob" \
-  jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
+  jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and .kind == "say" and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
 check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  ')"
 
 # ------------------------------------------------ topup
