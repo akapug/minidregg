@@ -255,7 +255,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 2
   domain := domain
   eventId := commitmentBytes
-    ("DREGG.RESOURCE.BIRTH.EVENT/v2".toUTF8.toList ++
+    ("DREGG.RESOURCE.BIRTH.EVENT/v3".toUTF8.toList ++
       digestStream.encode domain ++ ingress.bytes)
   canonicalBytes := ingress.bytes
 

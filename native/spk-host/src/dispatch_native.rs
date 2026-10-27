@@ -2306,7 +2306,7 @@ mod tests {
         // NativeHostCodec.outcomeCodec: confirmed (.inl), replayed (.inr false),
         // then receipt(transactionId=11,eventId=12,acceptedCount=13,worldRoot=14).
         // Each positive Nat/Digest is one base-255 digit followed by 255.
-        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v7".to_vec();
+        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v8".to_vec();
         outcome.extend_from_slice(&[0, 1, 0, 11, 255, 12, 255, 13, 255, 14, 255]);
         let mut historical = ((outcome.len() + 1) as u32).to_le_bytes().to_vec();
         historical.push(34);

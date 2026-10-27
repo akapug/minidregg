@@ -288,7 +288,7 @@ each ticker's `C_tick` are derived, beside the optional payment observer) and C1
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v8".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v9".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
