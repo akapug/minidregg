@@ -98,20 +98,15 @@ pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>,
             ("name", (*name).into()),
         ],
         ["doc", "mark", name, line, kind] | ["doc", "mark", name, line, kind, _] => {
-            if !matches!(*kind, "bold" | "italic" | "code" | "heading" | "link") {
-                return Err(format!("unknownKind: {kind} (expected bold, italic, code, heading or link)"));
-            }
+            // The grammar admits a style alone, or `link` with its TARGET.
             let mut flags = vec![
                 ("action", "mark".into()),
                 ("name", (*name).into()),
                 ("line", number(line, "LINE")?),
                 ("kind", (*kind).into()),
             ];
-            match (w.get(5), *kind) {
-                (Some(target), "link") => flags.push(("to", (*target).into())),
-                (None, "link") => return usage("doc mark NAME LINE link TARGET"),
-                (Some(_), _) => return usage("doc mark NAME LINE KIND (a TARGET is a link's only)"),
-                (None, _) => {}
+            if let Some(target) = w.get(5) {
+                flags.push(("to", (*target).into()));
             }
             flags
         }

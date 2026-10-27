@@ -210,6 +210,7 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         ["grain", n, "pane"] => apps::pane(site, n),
         ["verb"] => verbs::index(site),
         ["verb", name] => verbs::page(site, name),
+        ["verb", name, "dry"] => verbs::dry(site, name),
         ["receipts"] => receipts(site),
         ["receipts", "lookup"] => match query(target, "id") {
             Some(id) => receipt(site, &id),
@@ -334,6 +335,7 @@ fn receipt(site: &Site, id: &str) -> Page {
             body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome_of(&ending, &[], transition)));
         }
     }
+    body.push_str(&anchor(&site.root.join("attempts").join(id)));
     if !site.front.read_only {
         body.push_str(&format!(
             "<p class=\"next\"><form method=\"post\" action=\"/receipts/{id}/retry\" class=\"inline\"><button class=\"quiet\">retry {id}</button></form> \
@@ -342,6 +344,38 @@ fn receipt(site: &Site, id: &str) -> Page {
         ));
     }
     Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body }
+}
+
+/// What the retained attempt anchors to, said without overclaiming: the exact bytes the client
+/// sealed before sending (`call.bin`, by digest and length) and the Host's confirmation point
+/// (`acceptedCount`, `worldRoot`, the transaction and event ids). The inclusion opening of that
+/// receipt against the published world root (op 151, DEMO-EXPERIENCE A10) is L1's and is not
+/// here yet: the page says so rather than implying the receipt is verifiable today.
+fn anchor(attempt: &std::path::Path) -> String {
+    use sha2::Digest;
+    if !attempt.is_dir() {
+        return String::new();
+    }
+    let call = std::fs::read(attempt.join("call.bin")).ok();
+    let bytes = match &call {
+        Some(b) => format!("<p>Exact call: <code>sha256 {:x}</code>, {} bytes, sealed before it was sent (a retry resends these bytes and no others).</p>", sha2::Sha256::digest(b), b.len()),
+        None => "<p>No sealed call is retained for this attempt (it was never sent).</p>".to_owned(),
+    };
+    let point = match crate::workspace::retained_attempt_outcome(attempt) {
+        Ok(crate::workspace::AttemptOutcome::Confirmed(v)) | Ok(crate::workspace::AttemptOutcome::Charged(v)) => {
+            let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+            format!(
+                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>\
+                 <p class=\"outcome undecided\">Anchored to a point; inclusion proof pending: the opening of this receipt against the published world root (op 151) is not yet issued by the Host, so this page shows the point the Host named and does not claim a stranger can verify it offline.</p>",
+                escape(&s("acceptedCount")), escape(&s("worldRoot")), escape(&s("transactionId")), escape(&s("eventId")), escape(&s("confirmation")),
+                if v.get("disposition").and_then(Value::as_str) == Some("charged") { ", charged: only its price was posted" } else { "" }
+            )
+        }
+        Ok(crate::workspace::AttemptOutcome::Refused) => "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned(),
+        Ok(crate::workspace::AttemptOutcome::Pending) => "<p>Undecided: no confirmation point yet; <code>lookup</code> or <code>retry</code> resolves it.</p>".to_owned(),
+        Err(e) => format!("<p>The retained history could not be read: {}</p>", escape(&e)),
+    };
+    format!("<section class=\"anchor\"><h2>Anchor</h2>{bytes}{point}</section>\n")
 }
 
 fn grants(site: &Site) -> Page {
@@ -532,8 +566,10 @@ fn tour(site: &Site, outcome: Option<(usize, String)>) -> Page {
             forms(4, &[("can", "can"), ("why", "why"), ("inspect", "inspect law")])),
         ("delegates, bounded", "A narrower grant on one document to another member, then its revocation; both are receipts; the other member's attempt after revocation is refused with that clause.".into(),
             forms(5, &[("delegate", "delegate"), ("revoke", "revoke"), ("renounce", "renounce")])),
-        ("summons an agent", "A Hermes resident into your room with a budget; ask it to read a document and post a summary; its turns land as paid, admitted writes with receipts; the purse drains; <code>dismiss</code> refunds the remainder.".into(),
-            forms(6, &[("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("dismiss", "dismiss")])),
+        ("summons an agent", "First a bounded grant on one document to the resident's subject (<code>delegate … --until H</code>: the grant's expiry is a height); then a Hermes resident into your room with a budget funded from your purse (the meter); ask it to read the document and post a summary; its turns land as paid, admitted writes with receipts and the meter drains; a write outside its grant is refused <code>no-grant</code> as a receipt; <code>revoke</code> ends the grant; <code>dismiss</code> refunds the remainder.".into(),
+            if member {
+                format!("{}{}", purse_meter(site), forms(6, &[("delegate", "delegate"), ("summon", "summon"), ("ask", "ask"), ("tail", "tail"), ("hermes", "hermes status"), ("revoke", "revoke"), ("dismiss", "dismiss")]))
+            } else { String::new() }),
         ("installs an application", "The Sandstorm store index; install any SPK; the grain opens on its own origin in a pane; its grants are Mini capabilities on the Grants page.".into(),
             format!("<p><a href=\"/apps\">the market</a> · <a href=\"/grain\">your grains</a></p>{}", forms(7, &[("apps", "apps search")]))),
         ("asks the oracle", "The veri7vn grain: a question, an answer with its evidence and the machine-checked function it rests on (the oracle appliance lands on the same grain path).".into(), String::new()),
@@ -601,6 +637,24 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["new-document", id] => create::post(site, id, body, "create"),
         ["new-document", id, op] => create::post(site, id, body, op),
         ["verb", name] => verbs::post(site, name, &form),
+        // The line `can --any` composed, submitted as this member: `ID` becomes a fresh proposal
+        // id; a leaf that proposes is followed by its `submit`. The shell parses the line as it
+        // would any line typed at it.
+        ["paste"] => {
+            let raw = field("line");
+            let id = fresh_id();
+            let line = raw.split_whitespace().map(|w| if w == "ID" { id.as_str() } else { w }).collect::<Vec<_>>().join(" ");
+            let proposes = crate::shell::words(&line).ok().and_then(|w| {
+                let g = crate::shell_grammar::grammar(w.first()?)?;
+                crate::shell_grammar::parse(g, &w).ok().map(|p| p.leaf.effect == crate::shell_grammar::Effect::Propose)
+            });
+            let Some(proposes) = proposes else { return simple(400, "Paste", "that line is not one the shell's grammar accepts") };
+            let mut lines = vec![line];
+            if proposes {
+                lines.push(format!("submit {id}"));
+            }
+            act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
+        }
         ["tour", step] => {
             let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
             let outcome = verbs::post(site, name, &form);
@@ -734,8 +788,15 @@ impl Ending {
     /// 2 usage, 3 refused, 4 undecided). Admitted, refused and undecided name WORLD TRANSITIONS
     /// only; a local or read verb that returns 0 is "answered", a refused read "read refused".
     fn class(&self, transition: bool) -> (&'static str, String) {
-        // Script mode echoes `mini> LINE` before each line; the ending's own first line follows.
-        let first = self.stderr.lines().find(|l| !l.trim().is_empty() && !l.starts_with("mini> ")).unwrap_or("").to_owned();
+        // Script mode echoes `mini> LINE` before each line, and the client may print notices
+        // (`workspace continuity: legacy; ...`) before the ending; the ending is the first
+        // `refused:`/`undecided:`/`error:`/`usage:` line, else the first line that is not an echo.
+        let lines = || self.stderr.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("mini> "));
+        let first = lines()
+            .find(|l| ["refused: ", "undecided: ", "error: ", "usage: "].iter().any(|p| l.starts_with(p)))
+            .or_else(|| lines().next())
+            .unwrap_or("")
+            .to_owned();
         match (self.code, transition) {
             (0, true) => ("admitted", "Admitted".into()),
             (0, false) => ("answered", "Answered".into()),
@@ -746,6 +807,27 @@ impl Ending {
             _ => ("error", if first.is_empty() { "The client could not complete this".into() } else { first }),
         }
     }
+}
+
+/// Plan one line as this member without running it (`mini shell --line L --plan`): the shell's
+/// parser and plan builder, no Host.
+pub(super) fn plan_line(site: &Site, line: &str) -> Option<Ending> {
+    let shell = site.shell.as_ref()?;
+    let exe = std::env::current_exe().ok()?;
+    if line.bytes().any(|b| b.is_ascii_control()) {
+        return Some(Ending { code: 2, stdout: String::new(), stderr: "usage: a form field contains a control character\n".into() });
+    }
+    let mut command = Command::new(exe);
+    command.arg("shell");
+    if let Some(socket) = super::super::SOCKET.get() {
+        command.arg("--socket").arg(socket);
+    }
+    let output = command
+        .arg("--workspace").arg(&site.root).arg("--home").arg(&shell.home).arg("--host").arg(&shell.host).arg("--config").arg(&shell.config)
+        .arg("--line").arg(line).arg("--plan")
+        .env_clear().env("PATH", "/usr/bin:/bin").env("HOME", &shell.home)
+        .stdin(Stdio::null()).output().ok()?;
+    Some(Ending { code: output.status.code().unwrap_or(1), stdout: String::from_utf8_lossy(&output.stdout).into_owned(), stderr: String::from_utf8_lossy(&output.stderr).into_owned() })
 }
 
 /// Run shell lines as this member: `mini shell` in script mode (one line per form action, or the
@@ -848,10 +930,15 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         }
     }
     let detail = ending.text();
+    // `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
+    let paste = ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
+        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
+    }).unwrap_or_default();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>\n",
+        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
+        paste,
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
     )
 }
@@ -892,25 +979,30 @@ fn json_tree(v: &Value) -> String {
     }
 }
 
-/// `/purse`: the member's account as a meter (`credit`), then `pay status`.
-fn purse(site: &Site) -> Page {
-    let mut body = String::new();
+/// The member's purse as a meter (`credit`): the balance a summon's budget is funded from and
+/// that a resident's paid turns drain; on the purse page and in the tour's agent step.
+fn purse_meter(site: &Site) -> String {
     match verb(site, &["credit".to_owned()]) {
         Some(ending) if ending.code == 0 => {
             let line = ending.stdout.lines().find(|l| l.starts_with("credit ")).unwrap_or("").to_owned();
             let balance: u64 = line.split_whitespace().nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
             let scale = balance.max(1000);
-            body.push_str(&format!(
-                "<section class=\"purse\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
+            format!(
+                "<section class=\"purse\" data-live=\"15000\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
                  <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
                 scale / 10,
                 escape(&line)
-            ));
+            )
         }
-        Some(ending) => body.push_str(&answered(&ending, &[])),
-        None => body.push_str("<p class=note>no shell paths</p>"),
+        Some(ending) => answered(&ending, &[]),
+        None => "<p class=note>no shell paths</p>".to_owned(),
     }
+}
+
+/// `/purse`: the member's account as a meter (`credit`), then `pay status`.
+fn purse(site: &Site) -> Page {
+    let mut body = purse_meter(site);
     if let Some(ending) = verb(site, &["pay status".to_owned()]) {
         body.push_str(&format!("<section><h2>Pay</h2>{}</section>", answered(&ending, &[("pay", "/verb/pay"), ("topup", "/verb/topup"), ("tariff", "/verb/tariff")])));
     }

@@ -83,7 +83,10 @@ pub enum Failure {
 /// next exchange writes and does not read. Consumed on first use.
 pub const LOSE_REPLY_ENV: &str = "MINI_FAULT_LOSE_REPLY_ONCE";
 
-fn lose_reply_armed(operation: u8) -> bool {
+/// Whether the lost-reply fault is armed for this operation byte (`MINI_FAULT_LOSE_REPLY_ONCE`
+/// holds the byte). Every socket path a client sends a Host call on honours it: the SDK's own
+/// below, and the resource client's `transport::invoke_pinned_deadline`.
+pub fn lose_reply_armed(operation: u8) -> bool {
     std::env::var(LOSE_REPLY_ENV).ok().and_then(|v| v.trim().parse::<u8>().ok()) == Some(operation)
 }
 

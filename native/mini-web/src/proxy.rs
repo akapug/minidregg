@@ -48,8 +48,15 @@ pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Fragm
     if let Some(kind) = request.header("content-type") {
         head.push_str(&format!("Content-Type: {kind}\r\n"));
     }
-    head.push_str(&format!("Content-Length: {}\r\n\r\n", request.body.len()));
-    stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(&request.body)).map_err(|e| (502, format!("writing to the body: {e}")))?;
+    // The `csrf` field is the gateway's (it put it into every form it served and has checked it);
+    // the body sees the form the member filled and nothing of the gateway's.
+    let body = if request.method == "POST" && request.header("content-type").is_some_and(|k| k.starts_with("application/x-www-form-urlencoded")) {
+        without_field(&request.body, "csrf")
+    } else {
+        request.body.clone()
+    };
+    head.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
+    stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(&body)).map_err(|e| (502, format!("writing to the body: {e}")))?;
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 16384];
     loop {
@@ -97,5 +104,24 @@ mod tests {
     fn the_target_is_reencoded() {
         let request = Request { path: "/doc/a b/é".into(), query: "x=1".into(), ..Default::default() };
         assert_eq!(target_of(&request), "/doc/a%20b/%C3%A9?x=1");
+    }
+}
+
+/// A urlencoded form body without the pairs named `name` (the gateway's own field).
+fn without_field(body: &[u8], name: &str) -> Vec<u8> {
+    let prefix = format!("{name}=");
+    body.split(|b| *b == b'&')
+        .filter(|pair| !pair.starts_with(prefix.as_bytes()) && *pair != name.as_bytes())
+        .collect::<Vec<_>>()
+        .join(&b'&')
+}
+
+#[cfg(test)]
+mod body_tests {
+    #[test]
+    fn the_csrf_field_is_the_gateways_and_never_reaches_the_body() {
+        assert_eq!(super::without_field(b"csrf=abc&text=hello%26more&csrf=again", "csrf"), b"text=hello%26more".to_vec());
+        assert_eq!(super::without_field(b"text=only", "csrf"), b"text=only".to_vec());
+        assert_eq!(super::without_field(b"csrfs=notme&csrf", "csrf"), b"csrfs=notme".to_vec());
     }
 }

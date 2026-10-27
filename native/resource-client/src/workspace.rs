@@ -7954,9 +7954,10 @@ mod tests {
         fs::create_dir_all(root.join("refs")).unwrap();
         let workspace = json!({"subject":"7"});
         let current = page(vec![atom("401", "first", "7"), atom("402", "second", "1103")]);
-        let lowered =
-            document_actions(&root, &workspace, "paper", &current, false, &json!([{"type":"append","text":"hi"}]))
-                .unwrap();
+        // An append reads the document's tail runs from the Host first (K-RUNS-RANGES: every run
+        // ending at the last line grows by the new one), which a unit test has no Host for; the
+        // lowering itself is `append_actions`, pure, and asserted here on no runs.
+        let lowered = Value::Array(append_actions("401", hex(b"hi"), std::iter::empty::<&String>()));
         assert_eq!(lowered[0]["type"], "createAtom");
         assert_eq!(lowered[0]["payload"], "6869");
         assert_eq!(lowered[0]["kind"], json!({"type":"text"}));
