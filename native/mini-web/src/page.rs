@@ -440,7 +440,7 @@ mod tests {
             out
         };
         assert_eq!(EARLY_JS_HASH, format!("sha256-{b64}"));
-        let html = page("Keys", None, "/keys", "<p>x</p>", "");
+        let html = page("Keys", 200, None, "/keys", "<p>x</p>", "");
         let head = html.split("</head>").next().unwrap();
         // Order in the head: the script that marks the root, then the blocking stylesheet; app.js is deferred.
         let script = head.find(&format!("<script>{EARLY_JS}</script>")).expect("the early script");
