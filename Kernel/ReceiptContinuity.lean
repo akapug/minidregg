@@ -89,7 +89,7 @@ theorem opens_sound (point : Point) (chain : Digest) (siblings : List Digest)
     rcases Theory.AuthTrie.verify_sound worldDig deployedIx 256 deployedIx_length _
         (Theory.AuthTrie.Cache.wf_canon deployedIx_length inj) _ _ _ accepted with read | nodes
     · exact Or.inl (by rwa [Theory.AuthTrie.Cache.lookup_canon] at read)
-    · exact Or.inr (worldDig_collision nodes)
+    · exact Or.inr (worldDig_collision (Theory.AuthTrie.CollisionAmong.global _ nodes))
   · exact Or.inr collision
 
 /-- All client-verifiable continuity conditions. New roots cannot be accepted
