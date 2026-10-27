@@ -788,3 +788,16 @@ the profile is forced by the profile hashing `profile.template` into the semanti
    `issuer`/`birthSlack`. Gate this with a census row that refuses any reader of those fields outside the
    cell path. Otherwise the re-genesis that is meant to be the last one leaves stale pricing in families
    nobody re-checked.
+
+**Addendum, lean-audit-c f2010f574 (unbuilt): the first half is accepted.**
+- `pricedAt` refuses an absent cell (`platformUnavailable`) and a tariff that disagrees with the record
+  (`platformStale`) on the committed image, before admission. While `opened.pins` is not yet read from
+  the cell, a birth after an install is therefore refused loudly instead of being priced stale. That is
+  the right interim behaviour.
+- `readGuards_platform` carries the premise "the birth does not write the cell". Discharge it from
+  `platform_written_only_by_install` (the birth family is not `.platformInstall`), so the guard holds
+  unconditionally.
+- Condition 2 is met: the field-reader census refuses new readers and holds `--ship` while any owed row
+  remains (73).
+- The keystone, the cell-read `opened.pins`, `templateAt` in `preparePending` and the audit (c) Lean
+  poles remain owed. The label "ordinary births" is correct.
