@@ -3,7 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--exit-before-rpc")) { puts("early-child-exit"); return 42; }
     char b[64] = {0};
     int f = open("/opt/oracle-data/probe.txt", O_RDONLY);
     if (f < 0 || read(f,b,sizeof(b)) != 15 || memcmp(b,"public fixture\n",15)) return 21;

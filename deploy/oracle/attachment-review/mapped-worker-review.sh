@@ -5,7 +5,8 @@ set -euo pipefail
 : "${REVIEW_FIXTURE_PARENT:?set protected app-searchable fixture parent}"
 : "${CARGO_TARGET_DIR:?set independent cargo target}"
 cd "$REVIEW_SNAPSHOT"
-for mode in positive private acl; do
+if [ "$#" -eq 0 ]; then set -- positive private acl early-exit; fi
+for mode in "$@"; do
     fixture=$(mktemp -d "$REVIEW_FIXTURE_PARENT/mapped-worker.XXXXXXXX")
     mounted=0
     cleanup() {

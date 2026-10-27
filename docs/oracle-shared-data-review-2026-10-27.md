@@ -84,3 +84,19 @@ b73b54f09dcdfda431dce8d1ebbe0997d5708997711cb760332d3a0fee9484ea  mapped-positiv
 2a4ed281aa8c85d00820c6f004e22c100fdefc7add932cdb8f89ba516dcdb7c1  mapped-private.log
 b1ec5a80ffcd7ad0ea0890b3f9104ef08d183b5b2db5b9a0f202d6587332f6be  mapped-acl.log
 ```
+
+## Early child exit and descriptor lifetime
+
+A mapped-worker regression keeps the worker control channel open while a disposable app exits with status 42 before making an RPC. The fixture requires both RPC disconnect and output-pump EOF within three seconds, without first requesting wait or kill; only after both does it request an exact reap and check status 42. It uses the same snapshot-only bootstrap wrapper and actual namespace, worker, descriptor transport, spawn gate and bubblewrap described above.
+
+Against the earlier worker (`resident_privilege.rs` SHA-256 `2361423133ba39dfcd4e02d7588fdcc28771bfe82d7e510287635a96dd852e8f`), the test failed because RPC EOF did not arrive within three seconds. The failure occurred at that first check, so it does not separately measure output EOF in the old worker. Against the repaired worker (`a1d8cc4148e7f7c99a5d3c0a966ae3014f8da85b96f9df82248c95d507304e96`), the test passed: both EOFs arrived before the reap, and the reaped child had status 42. This checks the physical channel lifetime, not the live r3 Store or Mini admission.
+
+Both runs used the hbox independent snapshot `/tank/dregg-build/attachment-worker-review` and `SWARM_MEM_MAX=4G`, `swarm-build taskset -c 22,23`, and `cargo test -j2 --offline`. The scoped driver was `mapped-worker-review.sh early-exit`. Evidence hashes:
+
+```text
+ca68637209d3790060cb57bf1b341a3cedaa78542c3fe58835aed6ade353d502  mapped-early-exit-before.log
+b8518edc0dd2bb3399d0468945cc3143abac5710289da89cf2d252ab42bad0f1  mapped-early-exit.log
+3f152091fa5b4e4db0cf9e1baed152dc159468632e88c1ab05bb1902a23c9df9  mapped-worker-test.rs
+e8f82288985b451ad41e864ce4b91cb8494166b0bea7ba160f3a7ca9fe3b3517  mapped-probe.c
+2bac5a4516e3e16a14d2cf72479fb6e1be583c1ffe4ec3c94fb6f924d4afb9f3  mapped-worker-review.sh
+```

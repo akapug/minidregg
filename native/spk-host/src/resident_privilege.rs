@@ -444,6 +444,12 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(e);
         }
     };
+    // The child inherited its own descriptor table at fork. The reaper must
+    // release both SCM_RIGHTS originals and high duplicates now: retaining an
+    // RPC peer or output writer would hide EOF after the app exits, until the
+    // supervisor sends a wait/kill command or closes this control channel.
+    drop(fds);
+    drop(owned);
     // Only the admitted one-shot fork precedes this filter. Once it becomes
     // the reaper, this app-uid process cannot create or enter namespaces.
     // Installing here keeps bubblewrap's existing namespace setup intact.
