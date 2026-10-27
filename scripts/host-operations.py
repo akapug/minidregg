@@ -451,6 +451,21 @@ def rust_literals(root, data):
         for m in re.finditer(r"Some\(\s*&?\s*(\d+(?:\s*\|\s*&?\s*\d+)*)\s*\)\s*=\s*[\w.]+\.first\(\)", text):
             for number in re.finditer(r"\d+", m[1]):
                 report(f, m.start(1) + number.start(), "first()", int(number[0]))
+        # A `match` on an operation-named variable whose top-level arms are literals (`183 =>`,
+        # `185 | 186 =>`, `183 if guard =>`).
+        for m in re.finditer(r"\bmatch\s+\*?(?:" + "|".join(sorted(OP_PARAMETERS)) + r")\s*\{", text):
+            depth, k, seen = 1, m.end(), set()
+            while depth and k < len(text):
+                c = text[k]
+                depth += c == "{"
+                depth -= c == "}"
+                if depth == 1 and text[k - 1] in ",{\n":
+                    arm = re.match(r"\s*(\d+(?:\s*\|\s*\d+)*)\s*(?:if\b[^=]*)?=>", text[k:])
+                    if arm and k + arm.start(1) not in seen:
+                        seen.add(k + arm.start(1))
+                        for number in re.finditer(r"\d+", arm[1]):
+                            report(f, k + arm.start(1) + number.start(), "match arm", int(number[0]))
+                k += 1
         # A reply classified by its leading marker in a slice pattern: `[255, ..] =>`.
         for m in re.finditer(r"\[\s*(\d+)\s*,\s*(?:\w+\s*@\s*)?\.\.\s*\]\s*(?:=>|\||if\b)", text):
             if int(m[1]) in markers: report(f, m.start(1), "[marker, ..]", int(m[1]))

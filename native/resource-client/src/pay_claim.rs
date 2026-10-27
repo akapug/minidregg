@@ -38,10 +38,10 @@ fn bootstrap_url(base: &str) -> Result<()> {
 
 fn claim_route(operation: u8) -> Result<(&'static str, &'static str)> {
     match operation {
-        183 => Ok(("/claim/plan", "canonicalPlan")),
-        184 => Ok(("/claim/assemble", "canonicalIngress")),
-        185 => Ok(("/claim/submit", "canonicalOutcome")),
-        186 => Ok(("/claim/lookup", "canonicalOutcome")),
+        mini_sdk::host_operations::PAY_CLAIM_PLAN => Ok(("/claim/plan", "canonicalPlan")),
+        mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE => Ok(("/claim/assemble", "canonicalIngress")),
+        mini_sdk::host_operations::PAY_CLAIM_SUBMIT => Ok(("/claim/submit", "canonicalOutcome")),
+        mini_sdk::host_operations::PAY_CLAIM_LOOKUP => Ok(("/claim/lookup", "canonicalOutcome")),
         _ => Err("claim HTTP transport has no generic operation route".into()),
     }
 }
@@ -1069,10 +1069,10 @@ mod tests {
         fn call(&mut self, operation: u8, _payload: &[u8]) -> Result<Vec<u8>> {
             self.calls.push(operation);
             let body = match operation {
-                183 if self.stale_plan => return Err("fixture source: roots changed".into()),
-                183 => b"PLAN".to_vec(),
-                184 => b"INGRESS".to_vec(),
-                185 | 186 => {
+                mini_sdk::host_operations::PAY_CLAIM_PLAN if self.stale_plan => return Err("fixture source: roots changed".into()),
+                mini_sdk::host_operations::PAY_CLAIM_PLAN => b"PLAN".to_vec(),
+                mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE => b"INGRESS".to_vec(),
+                mini_sdk::host_operations::PAY_CLAIM_SUBMIT | mini_sdk::host_operations::PAY_CLAIM_LOOKUP => {
                     // Every external submission/lookup has the completed durable record.
                     let record = workspace::bounded_json(&self.dir.join("operation.json"))?;
                     assert_eq!(record["type"], RECORD_TYPE);

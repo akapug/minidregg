@@ -196,9 +196,9 @@ pub(crate) fn codec_process(host:&Path,config:&Path,args:&[&OsStr])->Result<Outp
         Ok(mini_sdk::local::kind(label.to_str().ok_or("local codec kind is not UTF-8")?,&bytes)?)
     };
     let (op,payload,destination)=match verb {
-        "author" | "inspect" if args.len()==4 => (if verb=="author" {7} else {8},kind(args[1],read(2)?)?,args[3]),
-        "signatures" if args.len()==3 => (9,read(1)?,args[2]),
-        "observe-assemble" | "assemble" if args.len()==4 => (if verb=="assemble" {11} else {10},mini_sdk::local::pair(&read(1)?,&read(2)?)?,args[3]),
+        "author" | "inspect" if args.len()==4 => (if verb=="author" {mini_sdk::host_operations::AUTHOR} else {mini_sdk::host_operations::INSPECT},kind(args[1],read(2)?)?,args[3]),
+        "signatures" if args.len()==3 => (mini_sdk::host_operations::SIGNATURES,read(1)?,args[2]),
+        "observe-assemble" | "assemble" if args.len()==4 => (if verb=="assemble" {mini_sdk::host_operations::CALL_ASSEMBLE} else {mini_sdk::host_operations::OBSERVATION_ASSEMBLE},mini_sdk::local::pair(&read(1)?,&read(2)?)?,args[3]),
         _=>return Err("unsupported local native codec arguments".into())
     };
     let frame=codec_frame(host,config,op,&payload)?;
@@ -243,7 +243,7 @@ fn local_frame(host:&Path,config:&Path,operation:u8,payload:&[u8])->Result<Vec<u
         Err(CodecError::Failed(error))=>Err(error),
         Err(CodecError::Refused{marker,encoded,decoded})=>{
             let line=Some(crate::no_record_line(decoded.as_ref()));
-            let command=match operation {7=>"author",8=>"inspect",9=>"signatures",10=>"observe-assemble",_=>"assemble"};
+            let command=match operation {mini_sdk::host_operations::AUTHOR=>"author",mini_sdk::host_operations::INSPECT=>"inspect",mini_sdk::host_operations::SIGNATURES=>"signatures",mini_sdk::host_operations::OBSERVATION_ASSEMBLE=>"observe-assemble",_=>"assemble"};
             let decision=crate::HostDecision::Frame{command:command.to_owned(),byte:marker,encoded:encoded.clone(),decoded};
             let kind=crate::outcome_type(decision.outcome()).to_owned();
             let refusal=decision.is_refusal();
