@@ -196,18 +196,63 @@ Qualification is `scripts/spk-platform/featured-qualify.sh` on a standing world:
 create, install, share, start, enrol and page load, then ONE write beneath the HTML by a script
 standing in for a resident; its rows are recorded in §0.
 
-## 2b. What the bridge grows for the set's full surface
+## 2b. The bridge's surface beyond GET/POST: DAV calls and bodies
 
-All 13 run on today's bridge; three widenings unlock the rest of their surface, in order:
+**DAV calls** (`dfdecbba` on `lane/app-market-dav`, landing with a cut, because the Host changes).
+PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT and OPTIONS are ordinary exchanges
+(`web-session.capnp` @7..@16; `acl` is not served). Each is one request, one response and one Mini
+write. The method token is part of the signed record, so the rule is Lean's:
+- `Kernel/ApplicationDispatchAdmission.lean`: `davMethod` is part of `exchangeMethod`.
+- `requestSafeFor` gives each method its body rule: COPY, MOVE, UNLOCK and OPTIONS carry none;
+  PROPFIND, PROPPATCH and LOCK carry UTF-8 `xmlContent`.
+- The four parameter headers (`depth`, `destination`, `overwrite`, `lock-token`, `davHeaderName`)
+  are signed on a DAV call and refused on any other.
+- Theorems: `dav_header_needs_dav_method`, `dav_bodyless_body_empty`, the witnesses
+  `dav_propfind_admitted` and `dav_write_calls_admitted`, and the poles `dav_poles`.
+- The lists reach Rust through `protocol/host-operations.json` (`dav_methods`, `dav_headers`),
+  which is checked against the Lean definitions.
 
-1. **The WebDAV/CalDAV verbs** (PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT). The
-   in-app bridge serves them through `WebSession`; ours stops at `dispatch_web_input.rs::call_for`
-   (GET/HEAD/POST/PUT/PATCH/DELETE and the WebSocket open). The method is part of each request's
-   Mini record, so this is a Lean-and-Rust change to the dispatched HTTP record, not a
-   one-line map: Davros' tree operations, SandCal and Radicale over CalDAV.
-2. **Streamed request and response bodies** (`ByteStream`/`RequestStream`, fail-closed in
-   `spk-rpc/src/protocol.rs`): git's pack protocol in Gogs, large Davros moves, Datasette exports.
-3. **Powerbox request/offer**: none of the 13; the way back in for TT-RSS and Collections.
+On the Rust side:
+- The entrance parses the methods.
+- `dispatch_web_input` projects the headers into spk-rpc's `DavArgs`. The destination is taken
+  from an https URL on this grain's origin, or an absolute path, and becomes the relative
+  Sandstorm path.
+- `dispatch_web` makes the typed WebSession call. 207 Multi-Status is a mapped success code.
+- OPTIONS answers `DAV: 1, 2, …` from the app's typed `Options`.
+- The agent wires admit the same calls, so a resident can drive Davros over WebDAV exactly as a
+  desktop client would.
+
+**Bodies.** A request body is part of the signed record and is bounded at 8 MiB by Lean and by the
+transport. Within that bound, the entrance now takes the shapes git and DAV clients send:
+- `transfer-encoding: chunked` (git uses it above 1 MiB), decoded into the bounded body. Trailers
+  are refused, and so is a length beside chunked.
+- `Expect: 100-continue`.
+- `content-encoding`, signed as an ordinary header and carried as PostContent's `encoding`. git
+  gzips the bodies it sends on fetch.
+
+Response bodies already stream from the app over `ByteStream` into the 8 MiB response bound
+(`web.rs` `ResponseStream`). So Gogs' git pushes and fetches, and Davros' file moves, work up to
+8 MiB per request.
+
+**Above 8 MiB (designed, not built).** The record cannot carry such a body, so it would commit to
+one instead:
+- The record holds `bodyDigest` and `bodyLength` in place of the bytes. That is a codec kind in
+  `ApplicationDispatchCodec`: a new `Request` field, with `requestSafeFor` bounding the length by
+  the import profile rather than by 8 MiB.
+- The entrance spools the body to a per-request file under the resident's private directory
+  while it hashes it.
+- Mini admits the digest.
+- The resident streams the file into `putStreaming`/`postStreaming`'s `RequestStream`
+  (`web-session.capnp` @5/@6), and refuses at `done` if the bytes it sent do not hash to the
+  admitted digest.
+- Responses above 8 MiB stream to the client as `ByteStream` writes, with the digest in the
+  completion record.
+
+This is a codec flag day for every dispatch record, so it lands as its own cut once an app in the
+market needs it: Groove Basin and Tube media, or large Davros uploads.
+
+**Powerbox request/offer**: none of the featured set needs it. It is the way back in for TT-RSS
+and Collections.
 
 ## 3. Install: the member turn, and what admits it
 
