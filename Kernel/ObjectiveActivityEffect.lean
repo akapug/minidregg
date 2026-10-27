@@ -20,7 +20,9 @@ open Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory.ObjectiveBendDemandData (Data)
 open Minidregg.Theory.ObjectiveBendDemandMachine (State resume)
-open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook)
+open Minidregg.Theory.CanonicalResourceKernel (Book Batch Operation AccountId AssetId logicalBook
+  applyOperations registerAccounts deregisterAccounts deregisterAccounts_accounts)
+open Minidregg.Kernel.ObjectiveTariff (addCapacity)
 open Minidregg.Kernel.ObjectRecord (ObjectRecord admitWrite)
 set_option autoImplicit false
 
@@ -657,7 +659,6 @@ theorem deliverLawRefuses : DeliverLawRefusesStatement := by
   · rename_i h; rw [hTail] at h; cases h
   rename_i tail' h
   rw [hTail] at h; cases h
-  dsimp only
   rw [dif_pos hCovered, dif_pos hHeap, dif_pos hExtract, if_neg hTried]
   split
   · rename_i h; rw [hBook] at h; cases h

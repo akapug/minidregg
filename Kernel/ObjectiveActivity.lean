@@ -710,7 +710,10 @@ inductive Refusal where
   | bookUnavailable
   /-- The purse is already a Book account (a second birth of one record). -/
   | purseTaken
-  /-- The payer is the issuer well, the collector or the purse itself. -/
+  /-- The paying or submitting account is a reserved one: the issuer well, the collector or the
+  purse, as each operation checks it. At a delivery it is the submitter's account or the collector
+  being the activity's own purse (`Delivery.purseApart`): the funds a transfer is judged against
+  then differ from the Book the batch posts to. -/
   | payerInvalid
   /-- The deposit cannot reserve the first await's fee pair and storage deposit. -/
   | underfunded (deposit reserve : Nat)
