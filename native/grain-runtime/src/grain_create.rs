@@ -85,6 +85,22 @@ struct Charges {
     charge: String,
 }
 
+/// The provider purse: a third grain owned by its own worker subject, born
+/// in the same intent, witnessed by the parent like the tool task. `gateway`
+/// carries the providerTask fields the operator chooses (providers table,
+/// credential broker, gateway bind, model, reserve, token and byte bounds,
+/// onBehalfOf, provider row pin); the identity fields are filled here.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderPurse {
+    key: Key,
+    task: String,
+    observe_capability: String,
+    control_capability: String,
+    budget: String,
+    gateway: serde_json::Map<String, Value>,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Spec {
@@ -108,9 +124,8 @@ pub(crate) struct Spec {
     budgets: Budgets,
     worker: Worker,
     tool_charges: Charges,
-    /// Passed through into the controller config and validated by its type.
     #[serde(default)]
-    provider_task: Option<Value>,
+    provider: Option<ProviderPurse>,
     #[serde(default)]
     room: Option<Value>,
 }
@@ -206,6 +221,22 @@ impl Spec {
                 return Err("sponsor.grants[].kind must be object or account".into());
             }
         }
+        if let Some(p) = &self.provider {
+            for (value, what) in [(&p.key.subject, "provider.key.subject"), (&p.task, "provider.task"),
+                (&p.observe_capability, "provider.observeCapability"), (&p.control_capability, "provider.controlCapability"),
+                (&p.budget, "provider.budget")] {
+                canonical_decimal(value, what)?;
+            }
+            if [&self.task, &self.tool_task].contains(&&p.task)
+                || [&self.owner.subject, &self.worker_key.subject].contains(&&p.key.subject) {
+                return Err("provider task and subject must be distinct from the parent and tool".into());
+            }
+            for owned in ["task", "subject", "capability", "queryCapability", "custodyKey", "parentCapability", "parentObserveCapability"] {
+                if p.gateway.contains_key(owned) {
+                    return Err(format!("provider.gateway must not set {owned}; create fills it"));
+                }
+            }
+        }
         if self.task == self.tool_task {
             return Err("task and toolTask must differ".into());
         }
@@ -245,6 +276,9 @@ impl Spec {
         private_key(&self.sponsor.key, "sponsor.key")?;
         private_key(&self.owner.key, "owner.key")?;
         private_key(&self.worker_key.key, "workerKey.key")?;
+        if let Some(p) = &self.provider {
+            private_key(&p.key.key, "provider.key.key")?;
+        }
         executable(&self.worker.launcher, "worker.launcher")?;
         if self.worker.launcher.file_name().and_then(|n| n.to_str()) != Some("bwrap") {
             return Err("worker.launcher must be the bwrap launcher".into());
@@ -254,13 +288,13 @@ impl Spec {
         directory(&self.worker.workspace, "worker.workspace")?;
         match self.worker.network.as_str() {
             "none" => {
-                if self.provider_task.is_some() {
+                if self.provider.is_some() {
                     executable(&self.worker.runtime_root.join("grain-provider-bridge"),
                         "worker.runtimeRoot/grain-provider-bridge (required by --network none with a provider)")?;
                 }
             }
             "host" => {
-                if self.provider_task.as_ref().is_some_and(|p| p["localFixtureHostNetwork"] != json!(true)) {
+                if self.provider.as_ref().is_some_and(|p| p.gateway.get("localFixtureHostNetwork") != Some(&json!(true))) {
                     return Err("worker.network host is a fixture topology; a provider task then needs localFixtureHostNetwork".into());
                 }
             }
@@ -270,22 +304,32 @@ impl Spec {
     }
 
     fn birth_intent(&self, genesis: &Value) -> Value {
+        let mut workers = vec![json!(self.worker_key.subject)];
+        let mut resources = vec![
+            json!({"kind":"object","storage":"grain","target":self.task,"owner":self.owner.subject,
+                "ownerCapability":self.capabilities.parent_observe,"controlCapability":self.capabilities.parent_control,
+                "budget":self.budgets.parent,"workerGeneration":"1"}),
+            json!({"kind":"object","storage":"grain","target":self.tool_task,"owner":self.worker_key.subject,
+                "ownerCapability":self.capabilities.tool_observe,"controlCapability":self.capabilities.tool_control,
+                "budget":self.budgets.tool}),
+        ];
+        if let Some(p) = &self.provider {
+            workers.push(json!(p.key.subject));
+            resources.push(json!({"kind":"object","storage":"grain","target":p.task,"owner":p.key.subject,
+                "ownerCapability":p.observe_capability,"controlCapability":p.control_capability,"budget":p.budget}));
+        }
+        resources[0]["workerSubjects"] = json!(workers);
+        let resources = Value::Array(resources);
         json!({"subject":self.sponsor.subject,"nonce":self.nonce,
             "birth":{"genesis":genesis,
                 "template":{"issuer":self.template.issuer,"ownerBudget":self.template.owner_budget,"lifetime":self.template.lifetime},
                 "creator":self.sponsor.subject,"nonce":self.nonce,
-                "resources":[
-                    {"kind":"object","storage":"grain","target":self.task,"owner":self.owner.subject,
-                     "ownerCapability":self.capabilities.parent_observe,"controlCapability":self.capabilities.parent_control,
-                     "budget":self.budgets.parent,"workerSubject":self.worker_key.subject,"workerGeneration":"1"},
-                    {"kind":"object","storage":"grain","target":self.tool_task,"owner":self.worker_key.subject,
-                     "ownerCapability":self.capabilities.tool_observe,"controlCapability":self.capabilities.tool_control,
-                     "budget":self.budgets.tool}],
+                "resources":resources,
                 "sourceCapabilities":[self.sponsor.account_capability],"funding":[],"feePayer":self.sponsor.subject},
             "grants":self.sponsor.grants})
     }
 
-    fn controller(&self, witness: &str) -> Value {
+    fn controller(&self, witness: &str, provider_witness: Option<&str>) -> Value {
         let state = self.root.join("state");
         let mut args = vec![
             "--workspace".to_owned(), self.worker.workspace.display().to_string(),
@@ -310,8 +354,15 @@ impl Spec {
             "commands":[{"name":"hermes-acp","program":self.worker.launcher,"args":args,
                 "systemdScope":true,"wallTimeSeconds":self.worker.wall_time_seconds,
                 "reserve":self.worker.reserve,"charge":self.worker.charge}]});
-        if let Some(provider) = &self.provider_task {
-            config["providerTask"] = provider.clone();
+        if let (Some(provider), Some(witness)) = (&self.provider, provider_witness) {
+            let mut task = provider.gateway.clone();
+            for (key, value) in [("task", json!(provider.task)), ("subject", json!(provider.key.subject)),
+                ("capability", json!(provider.observe_capability)), ("queryCapability", json!(provider.observe_capability)),
+                ("custodyKey", json!(provider.key.key)), ("parentCapability", json!(witness)),
+                ("parentObserveCapability", json!(witness))] {
+                task.insert(key.into(), value);
+            }
+            config["providerTask"] = Value::Object(task);
         }
         config
     }
@@ -391,6 +442,33 @@ fn write_private_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The owner delegates RECIPIENT observe+mutate on the parent (its witness).
+fn delegate_witness(spec: &Spec, work: &Path, owner_ws: &Path, id: &str, recipient: &str) -> Result<String> {
+    let proposal = owner_ws.join(format!("proposals/{id}/proposal.json"));
+    if !proposal.exists() {
+        let request = work.join(format!("{id}-request.json"));
+        if !request.exists() {
+            write_private_new(&request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+                "name":"parent","recipient":recipient,"verbs":["observe","mutate"],
+                "maxCost":spec.budgets.witness_max_cost}).to_string().as_bytes())?;
+        }
+        run(Command::new(&spec.mini).args(["workspace", "--action", "propose", "--dir"]).arg(owner_ws)
+            .arg("--request").arg(&request).args(["--proposal-id", id]), &format!("propose {id}"))?;
+    }
+    let attempt = owner_ws.join(format!("attempts/{id}"));
+    signed_step(spec, &attempt, &format!("{id} delegation"), || {
+        run(Command::new(&spec.mini).args(["workspace", "--action", "submit", "--dir"]).arg(owner_ws)
+            .arg("--intent").arg(owner_ws.join(format!("proposals/{id}/intent.json")))
+            .arg("--attempt").arg(&attempt), &format!("submit {id}")).map(|_| ())
+    })?;
+    let value: Value = serde_json::from_slice(&fs::read(&proposal).map_err(|e| format!("{id} proposal: {e}"))?)
+        .map_err(|e| format!("{id} proposal: {e}"))?;
+    let child = value["delegation"]["childCapability"].as_str()
+        .ok_or_else(|| format!("{id} proposal names no childCapability"))?.to_owned();
+    canonical_decimal(&child, "witness capability")?;
+    Ok(child)
+}
+
 pub(crate) fn create(spec_path: &Path) -> Result<Value> {
     let spec_bytes = fs::read(spec_path).map_err(|e| format!("spec {}: {e}", spec_path.display()))?;
     let spec: Spec = serde_json::from_slice(&spec_bytes).map_err(|e| format!("spec: {e}"))?;
@@ -435,28 +513,11 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
             .arg("--observe-capability").arg(&spec.capabilities.parent_observe)
             .arg("--control-capability").arg(&spec.capabilities.parent_control), "import parent")?;
     }
-    let proposal = owner_ws.join("proposals/witness/proposal.json");
-    if !proposal.exists() {
-        let request = work.join("witness-request.json");
-        if !request.exists() {
-            write_private_new(&request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
-                "name":"parent","recipient":spec.worker_key.subject,"verbs":["observe","mutate"],
-                "maxCost":spec.budgets.witness_max_cost}).to_string().as_bytes())?;
-        }
-        run(Command::new(&spec.mini).args(["workspace", "--action", "propose", "--dir"]).arg(&owner_ws)
-            .arg("--request").arg(&request).args(["--proposal-id", "witness"]), "propose witness")?;
-    }
-    let witness_attempt = owner_ws.join("attempts/witness");
-    signed_step(&spec, &witness_attempt, "witness delegation", || {
-        run(Command::new(&spec.mini).args(["workspace", "--action", "submit", "--dir"]).arg(&owner_ws)
-            .arg("--intent").arg(owner_ws.join("proposals/witness/intent.json"))
-            .arg("--attempt").arg(&witness_attempt), "submit witness").map(|_| ())
-    })?;
-    let witness: Value = serde_json::from_slice(&fs::read(&proposal).map_err(|e| format!("witness proposal: {e}"))?)
-        .map_err(|e| format!("witness proposal: {e}"))?;
-    let witness = witness["delegation"]["childCapability"].as_str()
-        .ok_or("witness proposal names no childCapability")?.to_owned();
-    canonical_decimal(&witness, "witness capability")?;
+    let witness = delegate_witness(&spec, &work, &owner_ws, "witness", &spec.worker_key.subject)?;
+    let provider_witness = match &spec.provider {
+        Some(p) => Some(delegate_witness(&spec, &work, &owner_ws, "provider-witness", &p.key.subject)?),
+        None => None,
+    };
 
     // 3. The controller's private state and the tool subject's workspace.
     let state = spec.root.join("state");
@@ -466,7 +527,7 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
     init_workspace(&spec, &spec.worker_key, &state.join("resource-workspace"))?;
 
     // 4. The controller config, decoded through the controller's own type.
-    let config = spec.controller(&witness);
+    let config = spec.controller(&witness, provider_witness.as_deref());
     let typed: Config = serde_json::from_value(config.clone()).map_err(|e| format!("controller config refused by its own type: {e}"))?;
     let config_path = spec.root.join("controller.json");
     let bytes = serde_json::to_vec_pretty(&typed).map_err(|e| e.to_string())?;
@@ -479,7 +540,7 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
     Ok(json!({"type":"mini-grain-created-v1","task":spec.task,"toolTask":spec.tool_task,
         "owner":spec.owner.subject,"worker":spec.worker_key.subject,"witnessCapability":witness,
         "config":config_path,"configSha256":sha256_bytes(&bytes)?,
-        "birthOutcome":birth.join("outcome.json"),"witnessOutcome":witness_attempt.join("outcome.json"),
+        "providerWitnessCapability":provider_witness,"birthOutcome":birth.join("outcome.json"),
         "next":format!("install-controller --config {} ... (user shape) or --system --service-user ACCOUNT (root registration)", config_path.display())}))
 }
 
@@ -531,15 +592,32 @@ mod tests {
     #[test]
     fn create_writes_a_config_the_controller_type_accepts() {
         let spec: Spec = serde_json::from_value(spec_json()).unwrap();
-        let config = spec.controller("8790");
+        let config = spec.controller("8790", None);
         let typed: Config = serde_json::from_value(config.clone()).unwrap();
         assert_eq!(typed.task, "8751");
         assert_eq!(config["toolTask"]["parentCapability"], "8790");
         assert_eq!(config["commands"][0]["args"][5], "none");
         assert_eq!(config["controlSocket"], "/r/state/control.sock");
         let intent = spec.birth_intent(&json!({"g":1}));
-        assert_eq!(intent["birth"]["resources"][0]["workerSubject"], "9");
         assert_eq!(intent["birth"]["resources"][1]["owner"], "9");
+        assert_eq!(intent["birth"]["resources"][0]["workerSubjects"], json!(["9"]));
+        let mut with = spec_json();
+        with["provider"] = json!({"key":{"key":"/p","subject":"10","noPrerotation":true},"task":"8753",
+            "observeCapability":"8781","controlCapability":"8782","budget":"50",
+            "gateway":{"providers":"/etc/mini/providers.json","credentialBroker":"/etc/mini/keys-client.json",
+                "gatewayBind":"127.0.0.1:18761","model":"m","reserve":"30000","maxInputTokens":1000,
+                "maxOutputTokens":100,"maxRequestBytes":1048576,"maxResponseBytes":8388608,"timeoutSeconds":600}});
+        let spec: Spec = serde_json::from_value(with.clone()).unwrap();
+        spec.check_values().unwrap();
+        let intent = spec.birth_intent(&json!({}));
+        assert_eq!(intent["birth"]["resources"][0]["workerSubjects"], json!(["9", "10"]));
+        assert_eq!(intent["birth"]["resources"][2]["owner"], "10");
+        let config = spec.controller("8790", Some("8791"));
+        assert_eq!(config["providerTask"]["parentCapability"], "8791");
+        assert_eq!(config["providerTask"]["subject"], "10");
+        serde_json::from_value::<Config>(config).unwrap();
+        with["provider"]["gateway"]["task"] = json!("1");
+        assert!(serde_json::from_value::<Spec>(with).unwrap().check_values().unwrap_err().contains("must not set task"));
     }
 
     #[test]

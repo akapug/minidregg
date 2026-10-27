@@ -662,6 +662,9 @@ controller = subprocess.run(["systemd-run", "--user", "--collect", f"--unit={UNI
                              "--property=KillMode=control-group", "--property=Restart=on-failure",
                              "--property=RestartSec=2", "--property=RuntimeMaxSec=3600s",
                              f"--setenv=MINI_CONSENT_ANCHOR_DIR={os.environ['MINI_CONSENT_ANCHOR_DIR']}",
+                             # the user-manager shape systemd_manager::load accepts without a registration
+                             "--setenv=MINI_GRAIN_CONTROLLER_MANAGER=user", "--setenv=MINI_GRAIN_WORKER_MANAGER=user",
+                             f"--setenv=MINI_GRAIN_CONTROLLER_UNIT={UNIT}.service",
                              f"--property=StandardOutput=append:{path('controller.stdout')}",
                              f"--property=StandardError=append:{path('controller.stderr')}",
                              GRAIN, "serve", path("runtime-config.json")], capture_output=True, text=True)
