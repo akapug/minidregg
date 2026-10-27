@@ -34,6 +34,8 @@ mod studio;
 mod search;
 #[path = "web/body.rs"]
 mod body;
+#[path = "web/verbs.rs"]
+mod verbs;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};

@@ -186,6 +186,8 @@ fn get(site: &Site, parts: &[&str], target: &str) -> Page {
         }
         ["board"] | ["room"] => place_index(site, parts[0]),
         ["search"] => search::page(site, target),
+        ["verb"] => verbs::index(site),
+        ["verb", name] => verbs::page(site, name),
         ["receipts"] => receipts(site),
         ["receipts", "lookup"] => match query(target, "id") {
             Some(id) => receipt(site, &id),
@@ -421,6 +423,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["doc", name, "edit", id, "action"] => editor::action(site, name, id, body),
         ["new-document", id] => create::post(site, id, body, "create"),
         ["new-document", id, op] => create::post(site, id, body, op),
+        ["verb", name] => verbs::post(site, name, &form),
         ["doc", "new"] => {
             let name = field("name");
             let room = field("room");
@@ -495,7 +498,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
 }
 
 /// Run the lines as this member and render the ending.
-fn act(site: &Site, title: &str, lines: Vec<String>, id: &str, next: &[(&str, &str)]) -> Page {
+pub(super) fn act(site: &Site, title: &str, lines: Vec<String>, id: &str, next: &[(&str, &str)]) -> Page {
     let Some(ending) = verb(site, &lines) else {
         return simple(500, title, "this body has no shell paths");
     };
@@ -646,7 +649,7 @@ fn query(target: &str, key: &str) -> Option<String> {
 }
 
 /// A fresh proposal id: `w-` and 12 hex digits (the shell's `workspace_name` rule).
-fn fresh_id() -> String {
+pub(super) fn fresh_id() -> String {
     format!("w-{}", crate::fsio::random::<6>().map(|b| hex(&b)).unwrap_or_else(|_| "000000000000".into()))
 }
 
@@ -659,7 +662,7 @@ fn workspace_id(id: &str) -> std::result::Result<(), String> {
 
 /// TEXT arguments go through `@FILE` in HOME/requests, so a form's text can hold spaces, quotes
 /// and newlines without touching the line syntax.
-fn text_file(site: &Site, id: &str, text: &str) -> Option<String> {
+pub(super) fn text_file(site: &Site, id: &str, text: &str) -> Option<String> {
     if text.is_empty() || text.len() > 4096 {
         return None;
     }

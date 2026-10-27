@@ -22,6 +22,9 @@
 #   doc-new            POST /doc/new (law note) through the form                             -> admitted
 #   doc-append         POST /doc/NAME/append through the form                               -> admitted; the page shows the text
 #   receipt            GET /receipts/ID shows the attempt's decoded outcome                  -> 200, outcome admitted
+#   verb-parity        every verb in `help` has a form at /verb/NAME (derived from the verb table)  -> none missing
+#   verb-index         /verb lists the catalog                                                       -> 200
+#   verb-run           POST /verb/whoami through the derived form                                    -> admitted, the subject
 #   logout             POST /logout clears the cookie; the old cookie no longer opens /term   -> 303; 401
 #   public-reader      GET / without a session answers (the public body, or a named refusal) -> 200|502, "public reader"
 # Output: one row per check (`PASS|FAIL<TAB>row<TAB>detail`), then `J-WEB-FRONTEND PASS n/n` or
@@ -134,6 +137,21 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$STATUS receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$STATUS" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+# Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
+# /verb/NAME in the body; a verb with no face is red by name.
+help=$("$MINI" --socket "$SOCKET" shell --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)
+verbs=$(awk '/^  [a-z][a-z-]* / {print $1}' <<<"$help" | sort -u)
+missing=""; count=0
+for v in $verbs; do
+  count=$((count + 1))
+  page=$(req GET "/verb/$v")
+  [ "$STATUS" = 200 ] && grep -q "action=\"/verb/$v\"" <<<"$page" || missing="$missing $v"
+done
+row verb-parity "$([ "$count" -gt 40 ] && [ -z "$missing" ] && echo 1 || echo 0)" "$count verbs in help; without a form:${missing:- none}"
+page=$(req GET /verb)
+row verb-index "$([ "$STATUS" = 200 ] && grep -q '/verb/delegate' <<<"$page" && echo 1 || echo 0)" "$STATUS"
+page=$(req POST /verb/whoami --data-urlencode "csrf=$CSRF" --data-urlencode "alt=0")
+row verb-run "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$SUBJECT" <<<"$page" && echo 1 || echo 0)" "$STATUS whoami through the derived form"
 req POST /logout --data-urlencode "csrf=$CSRF" >/dev/null
 logout_status=$STATUS
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE_NAME=$COOKIE_VALUE" "$BASE/term")

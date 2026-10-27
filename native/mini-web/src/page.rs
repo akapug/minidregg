@@ -14,6 +14,7 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
+    ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),
     ("Terminal", "/term", "mini shell, in the page."),
 ];
 
