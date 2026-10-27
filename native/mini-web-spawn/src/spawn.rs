@@ -43,6 +43,15 @@ pub struct DevConfig {
     pub public: Option<(PathBuf, PathBuf)>,
     /// The public reader's enrolled subject (authors delegate `observe` to it).
     pub public_subject: Option<String>,
+    /// The published document the public front page shows (`frontDoc`).
+    pub front_doc: Option<String>,
+}
+
+/// A front-page document name as the body accepts it: a workspace reference name (1-64 of
+/// `[A-Za-z0-9-]`). Anything else is no setting at all, so the front page stays the index.
+pub fn front_doc_name(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    (!name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')).then(|| name.to_owned())
 }
 
 impl DevConfig {
@@ -75,7 +84,8 @@ impl DevConfig {
         }
         let public = if v["public"].is_object() { Some(pair(&v["public"], "public")?) } else { None };
         let public_subject = v["publicSubject"].as_str().map(str::to_owned).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject })
+        let front_doc = v["frontDoc"].as_str().and_then(front_doc_name);
+        Ok(DevConfig { mini: abs("mini")?, host: abs("host")?, config: abs("config")?, socket: abs("socket")?, wrapper: abs("wrapper")?, sessions, public, public_subject, front_doc })
     }
 }
 
@@ -98,6 +108,9 @@ impl BoxLayout {
     pub fn sessions(&self) -> PathBuf { self.p("/var/lib/mini/sessions") }
     /// The public reader's enrolled subject, written by the operator after `mini-reenroll public`.
     pub fn public_subject_file(&self) -> PathBuf { self.p("/etc/mini/public-subject") }
+    /// The published document the public front page shows, one name, written by the operator (run-sheet
+    /// step 9c: `welcome`). Absent, empty or not a reference name: the front page is the index.
+    pub fn front_doc_file(&self) -> PathBuf { self.p("/etc/mini/front-doc") }
 }
 
 pub enum Layout {
@@ -169,6 +182,14 @@ impl Spawner {
         match &self.layout {
             Layout::Dev(dev) => dev.public_subject.clone(),
             Layout::Box(layout) => fs::read_to_string(layout.public_subject_file()).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())),
+        }
+    }
+
+    /// The public front page's document (`/etc/mini/front-doc`, or `frontDoc` in the dev config).
+    pub fn front_doc(&self) -> Option<String> {
+        match &self.layout {
+            Layout::Dev(dev) => dev.front_doc.clone(),
+            Layout::Box(layout) => fs::read_to_string(layout.front_doc_file()).ok().as_deref().and_then(front_doc_name),
         }
     }
 
@@ -263,6 +284,12 @@ impl Spawner {
         }
         if let Some(subject) = self.public_subject() {
             command.arg("--public-subject").arg(subject);
+        }
+        // Only the public reader's front page shows the operator's document; a member's is their own.
+        if member.anonymous {
+            if let Some(doc) = self.front_doc() {
+                command.arg("--front-doc").arg(doc);
+            }
         }
         let listener_fd = listener.as_raw_fd();
         unsafe {
@@ -373,6 +400,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mini-web-spawn-{}-{}", std::process::id(), crate::new_token().unwrap()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn front_doc_is_one_reference_name_or_no_setting() {
+        assert_eq!(front_doc_name("welcome\n").as_deref(), Some("welcome"));
+        for bad in ["", "  ", "../etc/passwd", "a b", "doc/x", &"x".repeat(65)] {
+            assert_eq!(front_doc_name(bad), None, "{bad:?}");
+        }
+        let dir = scratch();
+        let layout = BoxLayout { root: dir.clone() };
+        let spawner = Spawner { layout: Layout::Box(layout.clone()) };
+        assert_eq!(spawner.front_doc(), None, "absent file: the index");
+        fs::create_dir_all(layout.front_doc_file().parent().unwrap()).unwrap();
+        fs::write(layout.front_doc_file(), "welcome\n").unwrap();
+        assert_eq!(spawner.front_doc().as_deref(), Some("welcome"));
+        fs::write(layout.front_doc_file(), "../welcome").unwrap();
+        assert_eq!(spawner.front_doc(), None, "not a reference name: the index");
+        assert_eq!(dev(&dir).front_doc(), None, "dev config without frontDoc");
     }
 
     #[test]
