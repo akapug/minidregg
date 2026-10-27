@@ -43,7 +43,7 @@ fn write_before_publish(path:&Path,bytes:&[u8],before:impl FnOnce()->io::Result<
     before()?;
     let identity=file.metadata()?;
     let st=stat_leaf(&dir,&stage)?.ok_or_else(||refused("journal stage disappeared"))?;
-    if st.st_dev!=identity.dev() || st.st_ino!=identity.ino() || st.st_nlink!=1 || st.st_uid!=uid || st.st_mode&libc::S_IFMT!=libc::S_IFREG {
+    if st.st_dev as u64!=identity.dev() || st.st_ino as u64!=identity.ino() || st.st_nlink as u64!=1 || st.st_uid!=uid || st.st_mode&libc::S_IFMT!=libc::S_IFREG {
         return Err(refused("journal stage switched; retained bytes not published"))
     }
     if unsafe{libc::renameat(dir.as_raw_fd(),stage.as_ptr(),dir.as_raw_fd(),name.as_ptr())}!=0{return Err(io::Error::last_os_error())}
