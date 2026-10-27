@@ -832,26 +832,37 @@ def invokeRefusal (config : Config) (opened : Opened config)
 as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
 judged by its own preparation; an ordinary birth's factory law was otherwise met only at the
 blind submission, whose refusal is `undisclosed`, so a member refused by the factory law
-learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's: the law the
-branch configuration resolves, on that branch's step (`Pending.branchStep .factory`), the
-very pair `Pending.admitBranch` admits on; disclosure is through the slots the requester's
-grant on the factory names. -/
+learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's plan verdict
+(`Pending.factoryRefusal`: the compiler's support, range and cast verdicts and the law's own,
+on the law the branch configuration resolves and the very step `Pending.admitBranch` admits
+on), so a plan refusal is one admission of the same image makes
+(`ResourceBirthPolicyController.Concrete.planRefusalSound`) and every law refusal at
+admission is disclosed here (`lawRefusalDisclosed`). A draft that does not decode, prepare
+or bind its pending admission is refused by name, never passed silently. Disclosure is
+through the slots the requester's grant on the factory names. -/
 def birthRefusal (config : Config) (opened : Opened config)
     (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
-  | .birth bytes _ => do
+  | .birth bytes _ =>
       if (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome then none else
-      let descriptor ← CanonicalCellRegistry.sourceEncoding.codec.decode bytes
-      let height := logicalHeight config opened.durable
-      let prepared ← (ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
-        config.profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor
-        height).toOption
-      let pending ← (ResourceBirthPolicyController.Concrete.preparePending
-        (profile := config.profile) prepared.prepared height).toOption
-      let law ← (pending.branchConfig .factory).resolve?
-      let step := pending.branchStep .factory
-      if Minidregg.Pred.eval law.predicate step.oldState step.newState then none
-      else some (ComposedLawDiagnostics.publicRefusal
-        (grantFields config opened grants config.deployment.factoryId) law)
+      match CanonicalCellRegistry.sourceEncoding.codec.decode bytes with
+      | none => some ⟨.operationRejected, "noncanonical birth draft", none⟩
+      | some descriptor =>
+          let height := logicalHeight config opened.durable
+          match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+              config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+              descriptor height with
+          | .error reason => some ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
+          | .ok prepared =>
+              match ResourceBirthPolicyController.Concrete.preparePending
+                  (profile := config.profile) prepared.prepared height with
+              | .error reason =>
+                  some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
+              | .ok pending =>
+                  match pending.factoryRefusal with
+                  | none => none
+                  | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
+                  | some (some law) => some (ComposedLawDiagnostics.publicRefusal
+                      (grantFields config opened grants config.deployment.factoryId) law)
   | _ => none
 
 /-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
