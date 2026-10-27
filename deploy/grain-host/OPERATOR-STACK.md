@@ -1,6 +1,6 @@
 # Private operator Mini Host and frontend services
 
-> **Cannot be run as written (2026-10-26).** Its per-UID frontend, `host-frontend.rs`, was deleted: a
+> **Cannot be run as written.** Its per-UID frontend, `host-frontend.rs`, was deleted: a
 > hand-written public-operation allowlist (`0..=11, 17, 19` with hand payload limits) twinning
 > `protocol/host-operations.json` and `mini serve-public-proxy` (RUST-TRIAGE 2.1 row 37). The frontend role
 > is `mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json --socket-gid GID`;
@@ -42,7 +42,7 @@ The operator supplies a mode-0600 JSON manifest in an operator-owned directory. 
 }
 ```
 
-`host.config` must name the same pinned `storageBinary` and `signatureBinary`; its `storageRoot` and private socket directory stay operator-owned 0700 outside every worker mount. Each public frontend directory is operator-owned, mode 0700 before launch. The frontend binds its own socket and grants only its named UID directory traverse, config read, and socket connect. The installer checks exact ACLs and listener PIDs at `status`/`start`/`restart`. Task custody keys, state, workspace, and output belong to separate task accounts in mode-0700 homes. Paths to selected executables, configs, Store, sockets, logs, and units must have root/operator-owned, non-task-writable ancestors; root-owned sticky `/tmp` is accepted for bounded scratch but **cannot be boot-enabled**.
+The Host config (`host.json`) must name the same pinned `storageBinary` and `signatureBinary`; its `storageRoot` and private socket directory stay operator-owned 0700 outside every worker mount. Each public frontend directory is operator-owned, mode 0700 before launch. The frontend binds its own socket and grants only its named UID directory traverse, config read, and socket connect. The installer checks exact ACLs and listener PIDs at `status`/`start`/`restart`. Task custody keys, state, workspace, and output belong to separate task accounts in mode-0700 homes. Paths to selected executables, configs, Store, sockets, logs, and units must have root/operator-owned, non-task-writable ancestors; root-owned sticky `/tmp` is accepted for bounded scratch but **cannot be boot-enabled**.
 
 Each `workerRuntime` pin must name the `grain-runtime` executable in that task's configured Hermes `--runtime-root`. Its SHA must equal the controller runtime SHA. This binds the keyless MCP process inside the worker to the controller image; the installer rechecks both worker files in its pre-exec guard. Changing a task config to point at a new runtime root also changes its durable journal binding, so an existing grain upgrade must retain the configured root path and replace its operator-owned executable only while the controller and all worker cgroups are stopped.
 
