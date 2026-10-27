@@ -48,7 +48,7 @@
 #                  against its `expected`; a row count that differs from the file is red, and a
 #                  planted wrong expectation must be refused each run (scripts/check-world-cohorts.sh)
 #   website        website/status.html is what website/gen-status.py generates from README.md's
-#                  Honest state table, and every <pre data-source=PATH> block on a page is text
+#                  What is live table, and every <pre data-source=PATH> block on a page is text
 #                  of PATH; two controls (a mutated README row, a mutated block) must be refused
 #   workspace      every Cargo package is a root-workspace member or an `exclude` with its reason; no member
 #                  carries its own lock; the root lock is current; each member compiles, all targets

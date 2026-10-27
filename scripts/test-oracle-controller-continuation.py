@@ -137,6 +137,61 @@ class ContinuationGuards(unittest.TestCase):
     def test_unmount_failure_prevents_destroy(self):
         self.assertEqual(self.cleanup_fixture('unmount', False, True), ['unmount'])
 
+    def enrollment_fixture(self, fail_native=False, change_other=False):
+        bundle = self.root / 'bundle'
+        bundle.mkdir()
+        (bundle / 'controller.json').write_text('{"dispatchTask": {"task": "123"}}')
+        before = {'binding': {'configPath': '/fixture/controller.json', 'config': {}}, 'pending': None}
+        after = {'binding': {'configPath': '/fixture/controller.json', 'config': {'dispatchTask': {'task': '123'}}},
+                 'pending': 'unexpected' if change_other else None}
+        (self.root / 'before.json').write_text(json.dumps(before))
+        (self.root / 'after.json').write_text(json.dumps(after))
+        stub = self.root / 'native.py'
+        stub.write_text("import hashlib,json,pathlib,sys\np=pathlib.Path(sys.argv[1]);r=pathlib.Path(sys.argv[2])\n"
+            "j=json.loads((p/'after.json').read_text())\n"
+            "b=json.dumps(j['binding'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()\n"
+            "print(json.dumps({'protocol':'mini-controller-application-enrollment-v1','status':'enrolled',"
+            "'replayed':False,'requestSha256':hashlib.sha256(r.read_bytes()).hexdigest(),"
+            "'bindingSha256':hashlib.sha256(b).hexdigest()}))\n")
+        body = ('installer=/fixture/installer store=fixture helper=/fixture/helper\n'
+                'fixture_root=' + shlex.quote(str(self.root)) + '\n'
+                'count=0\n'
+                'timeout() { local verb=${6}; printf "%s\\n" "$verb" >>"$fixture_root/effects"; '
+                'case $verb in controller-journal) count=$((count+1)); '
+                'if [[ $count == 1 ]]; then cat "$fixture_root/before.json"; else cat "$fixture_root/after.json"; fi;; '
+                'controller-config) printf "%s\\n" \'{}\';; controller-enroll) '
+                + ('return 23;' if fail_native else 'python3 "$fixture_root/native.py" "$fixture_root" "${*: -1}";')
+                + ' esac; }\nworld_controller_enroll bootstrap-dispatch "$fixture_root/bundle" fixture\n')
+        if fail_native or change_other:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.shell(body)
+        else:
+            self.shell(body)
+        return (self.root / 'effects').read_text().splitlines()
+
+    def test_native_enrollment_orders_exact_stopped_transition(self):
+        self.assertEqual(self.enrollment_fixture(),
+                         ['controller-journal', 'controller-config', 'controller-enroll', 'controller-journal'])
+        request = json.loads((self.run / 'agent-lifetime/enrollment-fixture/request.json').read_text())
+        self.assertEqual(request['mode'], 'bootstrap-dispatch')
+        self.assertEqual(request['targetConfigSha256'], hashlib.sha256((self.root / 'bundle/controller.json').read_bytes()).hexdigest())
+
+    def test_native_enrollment_failure_is_not_retried(self):
+        self.assertEqual(self.enrollment_fixture(fail_native=True),
+                         ['controller-journal', 'controller-config', 'controller-enroll'])
+
+    def test_native_enrollment_other_journal_change_refuses(self):
+        self.enrollment_fixture(change_other=True)
+
+    def test_second_continuation_refuses_changed_original_exit(self):
+        first = self.run / 'continuations/controller-create-1'
+        first.mkdir(parents=True)
+        (first / 'prepared.json').write_text(json.dumps({'prior_exit': {}}))
+        with self.assertRaisesRegex(ValueError, 'original failure receipt differs'):
+            CONTINUATION.prepare_session(self.run, Path('/unused'), Path('/unused'), Path('/unused'),
+                                         Path('/unused'), Path('/unused'), check_only=True)
+        self.assertFalse((self.run / 'continuations/session-refusal-1').exists())
+
 
 class SessionRefusalGuards(unittest.TestCase):
     def setUp(self):

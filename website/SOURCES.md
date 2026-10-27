@@ -15,19 +15,19 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 
 | Claim | Source |
 | --- | --- |
-| a programmable shared world for people and agents | README.md:3 |
-| every change is a signed request a Lean kernel admits or refuses | FRIENDS:81-84 |
-| documents, applications, communities, computations share one set of rules; bounded delegation without unrestricted access | README.md:5-9 |
-| devnet; re-genesis on a data-model or kernel-wire change; everything made is lost | FRIENDS:41-44 |
-| no admission uses a proof | README.md:180-181; docs/SDK.md:136 |
-| private rooms main only; privacy not audited | FRIENDS:31, 386-388 |
-| a native Host admits Objective Bend programs on scratch worlds, by re-execution; none is deployed | OB:299-346; native/resource-client/objective-native-acceptance.py:88-134; journey row `objective`; commits 6df4602f, a2454432 |
-| public node: shell, documents, boards; no outside member enrolled | README.md:69; FRIENDS:13-22, 37 |
-| Lean owns semantics, Rust the physical boundary; capabilities, laws, read roots, funding; Rust decides nothing semantic | README.md:17-21 |
-| re-execution at admission and on every replay | README.md:180-182; docs/SDK.md:135-136 |
-| a correct calculation cannot grant itself permission; a reference is not ownership | README.md:22-23 |
-| a law is checked on every change; a lock stops owner and operator | FRIENDS:186-196 |
-| repository and host binary keep the name minidregg | README.md:113, 149 |
+| one shared world; one Lean-owned admission path; durable world root; refusal explained by clause; lost reply stays undecided with its exact retry | docs/DEMO-EXPERIENCE-2026-10-27.md §0 |
+| computation proposes, authority admits | README.md (the design paragraph); DEMO-EXPERIENCE §0 |
+| "machine-checked" names the admission path's theorems, not every deployed behaviour | DEMO-EXPERIENCE §0 |
+| shuts down 11 November 2026 and everything is erased; opening target 29 October 2026 | README.md "The demo" |
+| devnet; may be re-genesised | deploy/shell/FRIENDS.md "beta, read this first"; DEMO-PREFIX §3 |
+| world-readable; hosted key held on the box, readable by operator and own account | DEMO-PREFIX §5 (D8); deploy/door/README.md (Custody contract) |
+| privacy not audited | FRIENDS:386-388 |
+| free route: fixed seats (door default 50), closes below the sponsor floor | deploy/door/README.md (Funding and caps: freeCap, sponsorFloor) |
+| paid route 50 DREGG a week on Solana; wallet, ssh key, account publicly linked; not yet live | README.md "What is live" (Pay-to-enrol); deploy/pay/enrol-terms.json |
+| application readable without an account | deploy/web/README.md |
+| door/application may answer 503 until the door opens | README.md "What is live" (rehearsal row: `/join` held closed) |
+| nano's testground at nano.demo.dregg.online | README.md "The demo"; DEMO-PREFIX §2 |
+| the repository and host binary keep the name minidregg | README.md |
 
 ## language.html
 
@@ -109,15 +109,4 @@ continuous runner (its tables live outside this repository: `objective` PASS wit
 
 ## join.html
 
-| Claim | Source |
-| --- | --- |
-| sign up yourself at demo.dregg.online/join; no account by hand | deploy/door/README.md (Two routes); deploy/shell/FRIENDS.md "getting in" |
-| everything on the box is world-readable; the hosted key is on the box, readable by the operator and your own account, no other member's | docs/DEMO-PREFIX-2026-10-26.md §5 (D8); docs/review/2026-10-26-deploy/WEB-SPK-PUBLIC.md §5.3; deploy/door/README.md (Rate limits and abuse; Custody contract); FRIENDS "beta, read this first" |
-| reading needs no account: a static snapshot at demo.dregg.online, refreshed every few minutes | deploy/web/README.md; deploy/web/mini-pubread.timer; `mini web --render-static` (native/resource-client/src/web.rs) |
-| the status page's address is the request's only key | deploy/door/README.md (Trust boundary) |
-| free (a small sponsor-funded balance while it lasts) or pay 50 DREGG a week on Solana; wallet, ssh key and account publicly linked | deploy/door/README.md (Funding and caps); FRIENDS "joining by yourself" |
-| `ssh -t mini-s-NAME@demo.dregg.online`; FRIENDS.md is the guide | FRIENDS "getting in" |
-| `/mini line:link CODE` links Discord | deploy/discord/README.md (Linking) |
-| redeployed every few days, may be re-genesised; ssh key stays, what you made goes | docs/DEMO-PREFIX-2026-10-26.md §3 Phase 2; FRIENDS "beta, read this first" |
-| publish: delegate observe to the public reader, submit, publish; revoke takes it down at the next refresh | deploy/web/README.md (Authors) |
-| README, AGENTS.md, developer guide; no users; a format change is a rebuild; old shapes refuse; say what breaks | README.md:109-110, 187-192 |
+A redirect to https://demo.dregg.online/join (meta refresh and a link); no factual claim beyond the shutdown date (README.md "The demo").
