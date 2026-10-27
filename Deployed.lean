@@ -11,10 +11,11 @@ by re-execution, not by proof (decision 10-01), so no deployed module needs them
 `AxiomCensus` checks this umbrella; `AxiomCensusResearch` checks `Minidregg`.
 `scripts/lane/ub.sh` builds this; `scripts/lane/rb.sh` builds the research set.
 
-Residual: the Host still imports 12 `Selvage` modules through the Tower256
-digest backend (`Compiler.Tower256ConcreteBackend` -> `BinaryTower256Profile` ->
-`Tower256CshakeMerkleController` -> `Selvage.BinaryLookup`); see the task opened
-with this split.
+No module in this closure imports `Selvage`. The Tower256 digest backend that
+once carried 12 Selvage modules in (`Tower256CshakeMerkleController` ->
+`Selvage.BinaryLookup`, `AuthenticatedColumnPlan` -> `Selvage.Commitment`) takes
+its cube addresses from `Theory.BinaryCubeAddress`, and the Selvage adapters live
+in `Compiler.AuthenticatedColumnSelvage`, which only `Minidregg` builds.
 -/
 import Theory
 import Kernel
