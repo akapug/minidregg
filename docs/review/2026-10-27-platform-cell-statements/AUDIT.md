@@ -409,3 +409,37 @@ prefix byte, not one tag.
 
 **Tamper guarantee.** The same as the sixth pass for the reader, but it now rests on the chain hash's collision resistance
 rather than on per-entry KMAC tags. Name that boundary in the spec's header beside the MAC's.
+
+## 2026-10-27, eighth pass: `Theory/ReceivingVerifier.lean` (lane/un-pred-census 726e1c09)
+
+State of the tree: the module is imported by nothing, `Theory/Receiving.lean:105` still has the old
+`Vouchers verify`, and `Ran` does not exist yet in `Compiler/CredentialSignatureAdmission.lean`. So this
+pass judges the shape.
+
+| statement | verdict |
+|---|---|
+| `Verifier`, `pureVerifier` | SOUND |
+| `Vouchers` (private `mk`) | WEAK: `ofAnswered` is public, so the privacy is cosmetic; the docstring's "only use is `admitVia`" is false |
+| `not_verified_of_not_answered`, `pure_false_not_verified`, `pure_observed_eq` | SOUND teeth, relative to `V` |
+| `exists_for_true`, `pureVerifier_poles`, `Verifier.exists_refuting` | SOUND, but all at `Id` |
+
+**(a) Index.** The deputy's worry is right. `Verifier IO` is an open structure:
+`⟨fun _ _ => True, fun _ => pure (.ok ⟨true, trivial⟩)⟩` builds without the shim, and `Vouchers` over it
+carry nothing. `Theory/` cannot name `receiverVerifier` (import boundary), so the index belongs one layer up.
+Every deployed receiver's `prepare`, and every top-level receiver theorem, must be stated at
+`Vouchers receiverVerifier`, never `∀ V`. Generic `∀ V` lemmas stay in Theory as tools. Add a census row:
+no `Verifier IO` value besides `receiverVerifier`, and no deployed receiver whose type is polymorphic in `V`.
+Either drop `ofAnswered` and mint only in `admitVia` (keeping `mk` private), or correct the docstring. The
+proofs, not the privacy, carry layer 1.
+
+**(b) `Ran` outside the shim.** A private constructor is unreachable from other files, but `Ran` leaks
+through anything its own file exports. Before the conversion lands, check: no lemma or def in that file
+returns `Ran q b` for caller-chosen `b` other than the shim; no derived or explicit `Inhabited`/`Nonempty`/
+`Decidable` instance for `Ran`; no `unsafe` or `@[implemented_by]` near it (`#assert_axioms` does not see
+`unsafe`). Then the only inhabitant is the shim's post-`verify` mint, which is the named layer-2 trust.
+
+**(c) Pilot.** Enough to prove the shape, on three conditions. The pilot must use both `verified` and
+`observed` (a `false` answer the family decides on), not only `verified`. Its top-level theorem must be
+stated at `receiverVerifier`. And it must carry an IO-level teeth pole: an ingress whose signature the
+shim answered `false` yields no voucher for it, which is `not_verified_of_not_answered` instantiated at
+`Ran`. Today every satisfiable and inhabitation pole is at `Id`; the pilot must give one at `IO`.
