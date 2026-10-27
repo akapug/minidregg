@@ -29,12 +29,15 @@ mkdir -m 700 "$out"
 rows=0 fails=0
 row() { rows=$((rows + 1)); if [ "$2" = 1 ]; then printf 'PASS\t%s\t%s\n' "$1" "$3"; else fails=$((fails + 1)); printf 'FAIL\t%s\t%s\n' "$1" "$3"; fi; }
 verdict() { local v="J-APPS-E2E PASS $rows/$rows"; [ "$fails" = 0 ] || v="J-APPS-E2E FAIL $fails/$rows"; echo "$v"; echo "$v" >&2; [ "$fails" = 0 ]; }
-MINI=$BIN/mini
+# The client under test is the lane's current `mini` (E2E_MINI), not the world's pinned copy: the
+# world's Host, broker and spk-host stay as world-up left them; the member verbs and the worker are
+# what this script exercises.
+MINI=${E2E_MINI:-$BIN/mini}
 WR=$RUN/store/base/workroom
 GENESIS=$WR/genesis.json
 [[ -f $GENESIS && -f $WR/tool.key && -f $WR/member.key ]] || { echo "the world's workroom lacks genesis.json, tool.key or member.key" >&2; exit 1; }
 # `--socket` is a client option after the command (never before it).
-mini() { local command=$1; shift; "$MINI" "$command" --socket "$PSOCK" "$@"; }
+mini() { "$MINI" "$@" --socket "$PSOCK"; }   # the Host socket last: `mini apps ACTION` wants the action right after the verb
 
 # ---- two workspaces over the workroom's own keys ----------------------------------------------
 context() { # SUBJECT FACTORY-CAP ACCOUNT-CAP -> file
