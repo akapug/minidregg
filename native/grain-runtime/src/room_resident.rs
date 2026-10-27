@@ -290,7 +290,6 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     let config: crate::Config = serde_json::from_slice(&bounded_regular_file(&options.controller, 262_144)?)
         .map_err(|e| format!("resident controller config after lock: {e}"))?;
     if options.state.parent() != Some(config.state_dir.as_path()) { return Err("resident state/config changed during lock acquisition".into()); }
-    config_migration::ensure_resident_current(&config)?;
     validate(&config)?;
     let room = config.tool_task.as_ref().and_then(|t| t.room.clone()).ok_or("resident needs controller toolTask.room")?;
     let state = options.state.join("resident.json");

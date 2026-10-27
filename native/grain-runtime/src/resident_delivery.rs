@@ -995,7 +995,6 @@ pub(crate) fn drain_completed(config: &Config, state: &Path, lock: &File) -> Res
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("resident lock changed while final delivery was draining; reload under its current owner".into());
     }
-    config_migration::ensure_resident_current(config)?;
     result
 }
 

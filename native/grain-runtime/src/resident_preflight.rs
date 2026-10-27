@@ -108,7 +108,6 @@ impl Runtime {
         Ok(value)
     }
     pub(crate) fn retained_preparation(&self,id:&str,sha:&str)->Result<(Value,String)> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident preparation lookup identity".into());}
         let bytes=bounded_regular_file(&preparation_path(&self.config,id),65_536)
             .map_err(|_|"prompt has no exact source-issued preparation; old unknown work cannot be classified as unadmitted")?;
@@ -148,7 +147,6 @@ impl Runtime {
         File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
     }
     pub(crate) fn resident_admission(&self,id:&str,sha:&str)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident admission identity".into());}
         let file=refusal_path(&self.config,id);
         if !file.try_exists().map_err(|e|e.to_string())? {
@@ -164,7 +162,6 @@ impl Runtime {
         check_refusal(&self.config,&self.config_path,id,sha,value)
     }
     pub(crate) fn preflight_resident_prompt(&self)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         let status=self.quiescence_status()?;
         if !status.active.is_empty() || !status.retained.is_empty() {
             return Err("resident preflight requires recovery of retained or active service work".into());

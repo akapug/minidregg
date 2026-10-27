@@ -499,7 +499,7 @@ impl Runtime {
             }
             if self.journal.resident_completion.is_some() {
                 self.journal.resident_completion = None;
-                self.publish_completion_journal(turn.operation()?)?;
+                { turn.operation()?; self.publish_completion_journal() }?;
             }
             return Ok(receipt);
         }
@@ -528,7 +528,7 @@ impl Runtime {
         publish_resident(&receiving)?;
         retain(&received_path, &receipt)?;
         self.journal.resident_completion = None;
-        self.publish_completion_journal(turn.operation()?)?;
+        { turn.operation()?; self.publish_completion_journal() }?;
         Ok(receipt)
     }
 
@@ -542,18 +542,14 @@ impl Runtime {
             return Err("completion session is outside its old/new source vectors".into());
         }
         self.journal.hermes_session = Some(turn.session_after.clone());
-        self.publish_completion_journal(turn.operation()?)
+        { turn.operation()?; self.publish_completion_journal() }
     }
 
-    fn publish_completion_journal(&self, operation: u64) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
+    fn publish_completion_journal(&self) -> Result<()> {
         session_failure::ensure_publication_known(&self.config.state_dir)?;
         let bytes = serde_json::to_vec_pretty(&self.journal).map_err(|e| e.to_string())?;
-        config_migration::publish_bytes(
-            &self.config.state_dir.join("journal.json"),
-            &bytes,
-            &format!("resident-completion-{operation}-{}", sha256_bytes(&bytes)?),
-        )
+        journal_io::write(&self.config.state_dir.join("journal.json"), &bytes)
+            .map_err(|e| format!("completion journal publication: {e}"))
     }
 }
 
@@ -598,11 +594,8 @@ fn publish_resident(receiving: &Receiving) -> Result<()> {
     if current == receiving.resident_after.as_bytes() {
         return Ok(());
     }
-    config_migration::publish_bytes(
-        &path,
-        receiving.resident_after.as_bytes(),
-        &receiving.turn_sha256[..16],
-    )
+    journal_io::write(&path, receiving.resident_after.as_bytes())
+        .map_err(|e| format!("completion resident publication: {e}"))
 }
 
 /// Called with the resident flock held before rejecting pending, before a new
@@ -643,7 +636,6 @@ pub(crate) fn drain(config: &Config, state: &Path, lock: &File) -> Result<()> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("resident lock changed while completion was receiving".into());
     }
-    config_migration::ensure_resident_current(config)?;
     result
 }
 

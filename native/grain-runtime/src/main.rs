@@ -12,7 +12,6 @@ mod room_task;
 mod room_resident;
 mod resident_context;
 mod quiescence;
-mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
 mod prompt_outcome;
@@ -29,7 +28,6 @@ mod birth_lifecycle_tests;
 mod control;
 mod cgroup_stop;
 mod systemd_manager;
-mod controller_write_scopes;
 // One source shared with `mini key` (resource-client includes it by path):
 // the write verbs are used there, the reserve-time lookups here.
 #[allow(dead_code)]
@@ -6896,11 +6894,6 @@ impl Runtime {
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
-        Self::open_mode(config, config_path, None)
-    }
-    // The migration entrypoint never calls serve or any worker/provider action.
-    // Its only relaxed seam is cross-file transport validation before publication.
-    fn open_mode(config: Config, config_path: PathBuf, migration: Option<&Path>) -> Result<Self> {
         if !config_path.is_absolute() {
             return Err("controller config path must be absolute".into());
         }
@@ -6929,13 +6922,8 @@ impl Runtime {
         let locked_state_dir = config.state_dir.clone();
         systemd_manager::initialize(&config, &config_path)?;
         session_failure::ensure_publication_known(&config.state_dir)?;
-        let startup = config_migration::recover_startup(&config, &config_path)?;
-        let config: Config = if startup.is_some() {
-            serde_json::from_slice(&bounded_regular_file(&config_path, 262_144)?)
-                .map_err(|e| format!("controller config after migration recovery: {e}"))?
-        } else { config };
         if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
-        if migration.is_none() { validate(&config)?; }
+        validate(&config)?;
         let binding = json!({"config":config,"configPath":config_path});
         let path = config.state_dir.join("journal.json");
         let journal = if path.exists() {
@@ -6951,17 +6939,13 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
-            if let Some(request) = migration {
-                config_migration::check_stopped_open(&config, &config_path, &j, request)?;
-            } else { j.validate_workspace(&config)?; }
+            j.validate_workspace(&config)?;
             j
         } else {
-            if migration.is_some() { return Err("configuration migration requires an existing journal".into()); }
             let j = Journal::fresh(binding);
             atomic_json(&path, &j)?;
             j
         };
-        config_migration::activate_startup(&config.state_dir, startup)?;
         let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
@@ -6990,10 +6974,10 @@ impl Runtime {
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
-        if migration.is_none() && (rt.journal.child.is_some()
+        if rt.journal.child.is_some()
             || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
-            || rt.journal.hard_reconnect_pending)
+            || rt.journal.hard_reconnect_pending
         {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
@@ -7001,7 +6985,6 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
@@ -17951,8 +17934,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
-        if let Err(error) = config_migration::ensure_process_current(&rt.config.state_dir)
-            .and_then(|()|session_failure::ensure_publication_known(&rt.config.state_dir)) {
+        if let Err(error) = session_failure::ensure_publication_known(&rt.config.state_dir) {
             if let Input::Admin(request) = next {
                 request.phase.store(2, Ordering::SeqCst);
                 let _ = request.reply.send(format!("error: {error}"));
@@ -18019,15 +18001,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let _ = request
                         .reply
                         .send("admin action expired before dispatch".into());
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("config migrate ") {
-                    let result = rt.migrate_config(Path::new(path), false);
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
                     continue;
                 }
                 if let Some(sha)=request.command.strip_prefix("resident prepare ") {
@@ -18281,18 +18254,6 @@ fn main() -> ExitCode {
         return match systemd_manager::launch_client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime controller-launch: {error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "controller-write-scopes" {
-        return match controller_write_scopes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "config-migrate" {
-        return match config_migration::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime config-migrate: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "resident-completion" {
