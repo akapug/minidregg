@@ -254,6 +254,28 @@ page=$(req GET /tour)
 row tour "$([ "$(st)" = 200 ] && [ "$(grep -c 'class="step"' <<<"$page")" = 12 ] && grep -q 'action="/tour/4"' <<<"$page" && echo 1 || echo 0)" "$(st) steps=$(grep -c 'class="step"' <<<"$page")"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0")
 row tour-step "$(grep -q 'id="step-4"' <<<"$page" && grep -q 'step-outcome' <<<"$page" && grep -qE 'outcome (admitted|refused|undecided)' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-100)"
+# The tour's lost reply (DEMO-EXPERIENCE A11): the append form with `lose this reply once` comes
+# back undecided with its retained attempt; the retry shows the decided outcome; one line landed.
+alt=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {match($0,/name="alt" value="[0-9]+"/); print substr($0,RSTART+18,RLENGTH-19); exit}')
+fields=$(tr -d '\n' <<<"$page" | awk 'BEGIN{RS="</form>"} /name="lose"/ {while (match($0,/name="a[0-9]+"/)) {print substr($0,RSTART+6,RLENGTH-7); $0=substr($0,RSTART+RLENGTH)}; exit}' | tr '\n' ' ')
+set -- $fields; F_ID=${1:-a2}; F_NAME=${2:-a3}; F_TEXT=${3:-a4}
+LOSE_ID="w-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"; LOSE_TEXT="lost once $(date +%s)"
+page=$(req POST /tour/3 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=doc" --data-urlencode "alt=${alt:-0}" --data-urlencode "$F_ID=$LOSE_ID" --data-urlencode "$F_NAME=$DOC" --data-urlencode "$F_TEXT=$LOSE_TEXT" --data-urlencode "submit=on" --data-urlencode "lose=on")
+row tour-lose "$(grep -q 'outcome undecided' <<<"$page" && grep -q "/receipts/$LOSE_ID" <<<"$page" && echo 1 || echo 0)" "$(st) alt=${alt:-?} fields=$F_ID,$F_NAME,$F_TEXT $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-140)"
+page=$(req POST "/receipts/$LOSE_ID/retry" --data-urlencode "csrf=$CSRF")
+docpage=$(req GET "/doc/$DOC")
+row tour-lose-retry "$(grep -q 'outcome admitted' <<<"$page" && [ "$(grep -c "$LOSE_TEXT" <<<"$docpage")" = 1 ] && echo 1 || echo 0)" "$(st) lines=$(grep -c "$LOSE_TEXT" <<<"$docpage") $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
+# The tour's refusal and its paste-back (step 4): an append to a document under the law `sealed`
+# is refused with its clause; `can --any` on the note names a write its law admits; that line,
+# run as the member, is admitted.
+SEALED="sealed$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+req POST /doc/new --data-urlencode "csrf=$CSRF" --data-urlencode "name=$SEALED" --data-urlencode "law=sealed" >/dev/null
+page=$(req POST "/doc/$SEALED/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=into the sealed")
+row tour-refused "$(grep -q 'outcome refused' <<<"$page" && grep -q '<mark class="clause">' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-140)"
+page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC" --data-urlencode "a3=on")
+paste=$(sed -n 's/.*<pre>//; s/<\/pre>.*//p' <<<"$page" | sed 's/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g' | grep -m1 -E '^\s*(doc|propose|submit) ' | sed 's/^ *//')
+if [ -n "$paste" ]; then shell_as_member "$paste" >"$R/paste.out"; paste_rc=$?; else paste_rc=99; fi
+row tour-paste-back "$(grep -q 'outcome answered' <<<"$page" && [ "$paste_rc" = 0 ] && echo 1 || echo 0)" "$(st) can --any $DOC: $(sed -n 's/.*<pre>//; s/<\/pre>.*//p' <<<"$page" | tr '\n' ' ' | cut -c1-160) | paste=${paste:-none} rc=$paste_rc"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then
