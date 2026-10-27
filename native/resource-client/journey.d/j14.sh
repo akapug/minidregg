@@ -71,6 +71,22 @@ for x in "$BRIDGE" "$MINI_KEYS" "$LAUNCH_GATE"; do [ -x "$x" ] || { echo "j14: n
 . "$REPO/native/resource-client/journey.d/lib/shortdir.sh"
 JOURNEY_SHORTDIR_NOTRAP=1 journey_shortdir j14
 G=$JOURNEY_D/g
+# J14 runs on its OWN Store, served through the private operator socket (the
+# resident's preflight requires it, and a public socket cannot be upgraded to
+# operator mode) with Hermes's purse tariff pinned from the first event.
+PURSE_T=9870003 USER_FEE=5 MODEL=mini-hermes-protocol-fixture
+jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" '[{providerResourceId:($p|tonumber),
+  tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:"7",inputMicroPerMillion:"20000000",outputMicroPerMillion:"40000000"},
+  homelab:{perOp:"3",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}]' >"$JOURNEY_STEP_DIR/provider-services.json"
+NEWPARTICIPANT_SERVE=serve-operator NEWPARTICIPANT_PROVIDER_SERVICES=$JOURNEY_STEP_DIR/provider-services.json \
+  sh "$REPO/native/resource-client/newparticipant-acceptance.sh" "$HOST" "$MINI" "${STORE:?}" "${VERIFIER:?}" \
+  "$JOURNEY_STEP_DIR/world" "$JOURNEY_D/world.sock" >"$JOURNEY_STEP_DIR/world-bootstrap.out" 2>"$JOURNEY_STEP_DIR/world-bootstrap.err" \
+  || { echo "j14: own world bootstrap failed: $(tail -1 "$JOURNEY_STEP_DIR/world-bootstrap.err")" >&2; journey_shortdir_return; exit 1; }
+JOURNEY_WORLD=$JOURNEY_STEP_DIR/world
+CONFIG=$(jq -r .config "$JOURNEY_WORLD/handoff.json")
+SOCKET=$JOURNEY_D/world.sock
+SPONSOR_WS=$(jq -r .sponsorWorkspace "$JOURNEY_WORLD/handoff.json")
+SPONSOR_SUBJECT=$(jq -r .sponsorSubject "$JOURNEY_WORLD/handoff.json")
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
@@ -91,6 +107,7 @@ cleanup() {
   fi
   [ -n "$KEYS_PID" ] && kill -TERM "$KEYS_PID" 2>/dev/null
   if [ -n "$PROVIDER_PID" ]; then kill -TERM "$PROVIDER_PID" 2>/dev/null; wait "$PROVIDER_PID" 2>/dev/null; fi
+  [ -f "$JOURNEY_WORLD/public/server.pid" ] && kill -TERM "$(cat "$JOURNEY_WORLD/public/server.pid")" 2>/dev/null
   journey_shortdir_return
 }
 trap cleanup EXIT
@@ -290,31 +307,11 @@ operator room "DELIVER: bob's invitation" install_private 0600 "$H/alice/chat/in
 ok room bob "chat join lab @lab-invite.json"
 
 # ------------------------------------------------ Hermes's grain, controller and the deterministic provider
-PARENT_T=9870001 TOOL_T=9870002 PURSE_T=9870003 USER_FEE=5
-MODEL=mini-hermes-protocol-fixture
+PARENT_T=9870001 TOOL_T=9870002
 GPORT=$((20000 + RANDOM % 20000))
-# The World serves the purse's per-route tariff (profile semantics unchanged)
-# through the private operator socket the resident's preflight requires.
-CONFIG_J14=$SD/j14-config.json
-jq --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" '.providerServices = [{providerResourceId:($p|tonumber),
-  tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:"7",inputMicroPerMillion:"20000000",outputMicroPerMillion:"40000000"},
-  homelab:{perOp:"3",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}]' "$CONFIG" >"$CONFIG_J14"
 pidfile=$W/public/server.pid
-serve_world() { # MODE CONFIG LABEL: stop the World's Host and serve it again
-  local pid; pid=$(cat "$pidfile")
-  kill -TERM "$pid"
-  for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-  kill -0 "$pid" 2>/dev/null && { echo "server $pid alive after TERM" >&2; return 1; }
-  setsid nohup "$MINI" "$1" --host "$HOST" --config "$2" --socket "$SOCKET" >"$W/public/serve-j14-$3.log" 2>&1 </dev/null &
-  echo $! >"$pidfile"
-  for i in $(seq 1 6000); do
-    [ -S "$SOCKET" ] && grep -q serving "$W/public/serve-j14-$3.log" 2>/dev/null && break; sleep 0.1
-  done
-  [ -S "$SOCKET" ]
-}
-operator hermes "WORLD: serve-operator with the purse tariff" serve_world serve-operator "$CONFIG_J14" operator
 operator hermes "the private operator socket answers operator-status" \
-  "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG_J14"
+  "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG"
 # The deterministic librarian upstream.
 "$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" --room-librarian >"$SD/provider.out" 2>"$SD/provider.err" &
 PROVIDER_PID=$!
@@ -328,7 +325,7 @@ jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" \
 operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$TABLE"
 head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
-  --arg host "$HOST" --arg cfg "$CONFIG_J14" --arg sock "$SOCKET" --arg t "$TABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
+  --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg t "$TABLE" --arg r "$SD/credentials" --arg k "$SD/credentials.key" \
   --argjson uid "$(id -u)" --argjson gid "$(id -g)" \
   '{type:"mini-keys-broker-v1",socket:$s,audit:$a,spool:$sp,singleAccount:true,
     peers:[{role:"member",gids:[$gid]},{role:"provider",uids:[$uid]},{role:"discord",uids:[$uid]},{role:"operator",uids:[$uid]}],
@@ -363,7 +360,7 @@ install -m 0755 "$GRAIN_RUNTIME" "$SD/runtime-root/grain-runtime"
 install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
 install -m 0755 "$BRIDGE" "$SD/runtime-root/grain-provider-bridge"
 # Hermes's grain and controller config, in one command.
-jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG_J14" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
+jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
   --arg ns "$W/namespace" --arg root "$G" --arg sk "$W/sponsor.key" --arg sp "$SPONSOR_SUBJECT" \
   --arg hk "$H/hhost/keys/mini.key" --arg hs "${SUBJ[hhost]}" --arg tk "$H/htool/keys/mini.key" --arg ts "${SUBJ[htool]}" \
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
@@ -570,7 +567,7 @@ restart() {
   kill -0 "$pid" 2>/dev/null && { echo "server $pid alive after TERM" >&2; return 1; }
   "$MINI" audit --host "$HOST" --config "$CONFIG" >"$SD/audit-$1.out" 2>"$SD/audit-$1.err"
   echo $? >"$SD/audit-$1.rc"
-  setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+  setsid nohup "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     >"$W/public/serve-j14-$1.log" 2>&1 </dev/null &
   echo $! >"$pidfile"
   for i in $(seq 1 6000); do
