@@ -2140,30 +2140,15 @@ pub(crate) fn dry_run(
         Ok(observed) => observed,
         Err(line) => return Ok(Some(line)),
     };
-    let plan_bin = directory.join("plan.bin");
-    if let Err(line) = host_decided_keeping(host_files(
-        host,
-        &retained_config,
-        &[Path::new("prepare"), &observed.signed, &plan_bin],
-    ), &directory.join("refusal.frame"))? {
-        return Ok(Some(line));
-    }
-    let presentation = inspect(
-        host,
-        &retained_config,
-        "plan",
-        &plan_bin,
-        &directory.join("plan.json"),
-    )?;
-    let signatures_bin = directory.join("transaction-signatures.bin");
-    encode_signatures(
-        host,
-        &retained_config,
-        &signing,
-        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, signing.verifying_key().as_bytes())?,
-        &directory.join("transaction-signatures.json"),
-        &signatures_bin,
-    )?;
+    let mut cli = CliHost { host, config: &retained_config };
+    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
+    let plan_bin = match host_decided_keeping(flow.prepare(&observed.signed).map_err(String::from),
+        &directory.join("refusal.frame"))? {
+        Ok(plan_bin) => plan_bin,
+        Err(line) => return Ok(Some(line)),
+    };
+    flow.present(&plan_bin, &directory.join("plan.json"))?;
+    let signatures_bin = flow.sign(&plan_bin, &mut command_release)?;
     match host_decided_keeping(host_files(
         host,
         &retained_config,
