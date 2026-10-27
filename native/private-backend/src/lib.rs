@@ -1,3 +1,14 @@
+/// `Debug` for secret-bearing types prints the type name only: a derived `Debug`
+/// would put share values, masks and dealer seeds into any log or panic message.
+macro_rules! redacted_debug {
+    ($t:ident) => {
+        impl ::std::fmt::Debug for $t {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.write_str(concat!(stringify!($t), "(<redacted>)"))
+            }
+        }
+    };
+}
 pub mod acs;
 pub mod acs_store;
 pub mod allocation_receipt;
@@ -8,7 +19,6 @@ pub mod custody;
 pub mod gather;
 pub mod private_send;
 pub mod private_send_store;
-pub mod protocol_store;
 pub mod reconstruction;
 pub mod entropy;
 #[cfg(test)]

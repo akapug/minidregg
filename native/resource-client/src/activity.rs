@@ -27,16 +27,16 @@ use crate::agent_reserve::field;
 use crate::*;
 use serde_json::{json, Value};
 
-struct Ws {
-    root: PathBuf,
-    host: PathBuf,
+pub(crate) struct Ws {
+    pub(crate) root: PathBuf,
+    pub(crate) host: PathBuf,
     socket: PathBuf,
-    config: PathBuf,
+    pub(crate) config: PathBuf,
     key: PathBuf,
-    subject: String,
+    pub(crate) subject: String,
 }
 
-fn ws(root: PathBuf) -> Result<Ws> {
+pub(crate) fn ws(root: PathBuf) -> Result<Ws> {
     let bytes = fs::read(root.join("workspace.json"))
         .map_err(|error| format!("activity: cannot read workspace.json: {error}"))?;
     if bytes.len() > 64 * 1024 {
@@ -93,12 +93,12 @@ fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
     invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, value.to_string().as_bytes()))
 }
 
-fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
+pub(crate) fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("activity: invalid Host inspection of {kind}: {error}"))
 }
 
-fn view(ws: &Ws, request: &Value) -> Result<Value> {
+pub(crate) fn view(ws: &Ws, request: &Value) -> Result<Value> {
     serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::ACTIVITY_VIEW, request.to_string().as_bytes())?)
         .map_err(|error| format!("activity: invalid view: {error}"))
 }
@@ -199,7 +199,7 @@ fn plan_command(ws: &Ws, command: &Value, out: &Path) -> Result<(Vec<u8>, Value)
 /// budget in its envelope and postage, doubling while the plan runs out of it, up to the ceiling; then
 /// declare the plan's `frontEnd` in the envelope and `postageLoads` times its postage figures in the
 /// postage. The caller (activity_world.py `front_end_quote`) chooses the start, ceiling and loads.
-struct FrontEndQuote {
+pub(crate) struct FrontEndQuote {
     start: (u128, u128),
     ceiling: (u128, u128),
     loads: u128,
@@ -293,7 +293,7 @@ fn quote(ws: &Ws, turn: &Value, out: &Path, front_end: &FrontEndQuote) -> Result
 
 /// With `front_end`, the invoke is first quoted (`quote_front_end`) in this same process and the
 /// declared turn is what is signed and submitted.
-fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>, again: bool) -> Result<Value> {
+pub(crate) fn submit(ws: &Ws, turn: &Value, out: &Path, prepare_only: bool, front_end: Option<&FrontEndQuote>, again: bool) -> Result<Value> {
     let nonce = turn_nonce(ws, turn, out, again)?;
     create_out(out)?;
     let authority = authority_root(ws)?;
@@ -365,6 +365,26 @@ fn retain_decision(ingress: &Path, outcome: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The exact retained bytes submitted again (op 212): a retry replays, never a new nonce. An attempt's
+/// own `ingress.bin` is marked transmitted first, and a decided answer is retained beside it.
+pub(crate) fn resubmit(ws: &Ws, retained: &Path) -> Result<Value> {
+    let ingress = read_ingress(retained)?;
+    if let Some(dir) = own_attempt(retained) {
+        mark_submitted(dir)?;
+    }
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::ACTIVITY_SUBMIT, &ingress)?)?;
+    retain_decision(retained, &outcome)?;
+    Ok(outcome)
+}
+
+/// The receipt-only lookup (op 213) of the retained ingress; absence never submits.
+pub(crate) fn lookup(ws: &Ws, retained: &Path) -> Result<Value> {
+    let ingress = read_ingress(retained)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::ACTIVITY_LOOKUP, &ingress)?)?;
+    retain_decision(retained, &outcome)?;
+    Ok(outcome)
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = args.required("action")?.into_string().map_err(|_| "activity action must be UTF-8")?;
     let ws = ws(path(args.required("workspace")?))?;
@@ -396,17 +416,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "resubmit" | "lookup" => {
             let retained = path(args.required("ingress")?);
-            let ingress = read_ingress(&retained)?;
             args.finish()?;
-            let op = if action == "resubmit" { 212 } else { 213 };
-            if op == 212 {
-                if let Some(dir) = own_attempt(&retained) {
-                    mark_submitted(dir)?;
-                }
-            }
-            let outcome = inspect(&ws, "outcome", &invoke(&ws, op, &ingress)?)?;
-            retain_decision(&retained, &outcome)?;
-            outcome
+            if action == "resubmit" { resubmit(&ws, &retained)? } else { lookup(&ws, &retained)? }
         }
         "view" => {
             let request = match args.optional("request") {

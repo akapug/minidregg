@@ -37,14 +37,36 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-# This private exact-source overlay changes only the operator-pinned new
-# permission tariff and installed factory law. Owner 7 keeps bare birth;
-# worker 8 is permitted only by the grain-backed factory mode slot.
+# Preserve the workroom owner/worker law. An explicitly supplied fresh agent
+# allocation adds only its tool subjects, each under the same read-or-governed
+# birth restriction. The admission kernel still checks capabilities and witnesses.
+FACTORY_PREDICATE='{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"1"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}'
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  case "$SPK_AGENT_ALLOCATION" in /*) ;; *) echo "agent allocation must be absolute" >&2; exit 2;; esac
+  [ -f "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || exit 2
+  jq -e '
+    .protocol == "mini-spk-integrated-allocation-v1" and
+    .status == "reserved-coordinates-only" and
+    (.agents | type == "array" and length >= 1 and length <= 8) and
+    ([.agents[].tool.subject] as $tools |
+      ($tools | all(.[]; type == "string" and test("^[1-9][0-9]{0,14}$"))) and
+      ($tools | unique | length) == ($tools | length) and
+      ($tools - (["7","8","9"] + [.agents[] | .controller.subject,.dispatch.subject,.provider.subject])) == $tools)
+  ' "$SPK_AGENT_ALLOCATION" >/dev/null || { echo "invalid fresh agent factory allocation" >&2; exit 2; }
+  sha256sum "$SPK_AGENT_ALLOCATION" >"$STAGE/agent-factory-allocation.sha256"
+  FACTORY_PREDICATE=$(jq -c --argjson base "$FACTORY_PREDICATE" '
+    . as $allocation | $base | .predicates += [ $allocation.agents[].tool.subject |
+      {type:"all",predicates:[{type:"eq",slot:"request/subject",value:.},
+        {type:"any",predicates:[{type:"eq",slot:"request/verb",value:"1"},
+          {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}]
+  ' "$SPK_AGENT_ALLOCATION")
+fi
+printf '%s\n' "$FACTORY_PREDICATE" >"$STAGE/factory-predicate.json"
 # shellcheck disable=SC2016 # Match the provisioner's literal shell variable.
 sed \
   -e 's|"signatureBinary":"$SIGNATURE_BINARY"}|"signatureBinary":"$SIGNATURE_BINARY","grainBirthTariff":{"base":2,"perBirth":1}}|' \
   -e 's|"birth":{"genesis":|"birth":{"grainBirthTariff":{"base":"2","perBirth":"1"},"genesis":|' \
-  -e 's|"factoryPredicate":{"type":"all","predicates":\[\]}|"factoryPredicate":{"type":"any","predicates":[{"type":"eq","slot":"request/subject","value":"7"},{"type":"all","predicates":[{"type":"eq","slot":"request/subject","value":"8"},{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"1"},{"type":"eq","slot":"birth/mode/grain-backed","value":"1"}]}]}]}|' \
+  -e "s|\"factoryPredicate\":{\"type\":\"all\",\"predicates\":\[\]}|\"factoryPredicate\":$FACTORY_PREDICATE|" \
   "$SOURCE" > "$STAGE/provision.sh"
 test "$(rg -c 'grainBirthTariff' "$STAGE/provision.sh")" = 6
 test "$(rg -c 'birth/mode/grain-backed' "$STAGE/provision.sh")" = 1
@@ -88,14 +110,11 @@ WORKROOM_PARENT_TASK=7901 WORKROOM_TOOL_TASK=7902 \
 cp "$STAGE/provision.sha256" "$EVIDENCE/overlay.sha256"
 cp "$STAGE/provision-member.sh" "$EVIDENCE/overlay-provision.sh"
 jq -e '.grainBirthTariff == {base:2,perBirth:1}' "$EVIDENCE/operator.json" >/dev/null
-jq -e '.factoryPredicate == {type:"any",predicates:[
-    {type:"eq",slot:"request/subject",value:"7"},
-    {type:"all",predicates:[
-      {type:"eq",slot:"request/subject",value:"8"},
-      {type:"any",predicates:[
-        {type:"eq",slot:"request/verb",value:"1"},
-        {type:"eq",slot:"birth/mode/grain-backed",value:"1"}]}]}]}' \
+jq -e --argjson expected "$FACTORY_PREDICATE" '.factoryPredicate == $expected' \
   "$EVIDENCE/genesis.json" >/dev/null
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  sha256sum -c "$STAGE/agent-factory-allocation.sha256" >"$STAGE/agent-factory-allocation-recheck.txt"
+fi
 jq -e '.birth.grainBirthTariff == {base:"2",perBirth:"1"} and
     ([.birth.resources[].target] | index("8301") | not)' \
   "$EVIDENCE/birth-intent.json" >/dev/null
@@ -202,7 +221,8 @@ jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/born-content/view.json" >/dev/null
 query tool-after 8 7902 81 "$EVIDENCE/tool.key" 41011
 query parent-after 8 7901 73 "$EVIDENCE/tool.key" 41012
-jq -e '.cell.grain.remaining == "47" and .cell.grain.reserved == "0"' \
+# The birth's metered reserve is 3 of the provisioned tool budget (50 unless the caller set one).
+jq -e --arg left "$(( ${WORKROOM_TOOL_BUDGET:-50} - 3 ))" '.cell.grain.remaining == $left and .cell.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
 jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null

@@ -5,6 +5,11 @@ use std::io::Result;
 /// functional, not a constant-time implementation for online secret computation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Field(pub u128);
+impl zeroize::Zeroize for Field {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 impl Field {
     pub fn add(self, b: Self) -> Self {
         Self(self.0 ^ b.0)

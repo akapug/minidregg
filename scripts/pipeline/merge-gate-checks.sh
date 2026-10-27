@@ -80,6 +80,12 @@ builders() {
   # plant (the follower skipping a failed guard) red at its recorded seed and step. Needs the world-sim
   # exe (exe-roots, just above, builds it). The nightly knob is in the script header.
   run world-sim       bash scripts/gates/check-world-sim .lake/build/bin/world-sim
+  # native/private-backend codec agreement: the two Lean fixture exes (exe-roots built them) emit the canonical
+  # frames and Plan; the Rust crate must decode and re-encode them, and refuse a flipped byte.
+  run private-backend-wire bash scripts/gates/check-private-backend-wire .lake/build/bin
+  # Generic Simplex (Kernel/GenericSimplex*): the harness, log-reopen and load programs exe-roots builds,
+  # run, each with its plant red (fixed timer, split tip, flipped journal bit). Seconds; header names them.
+  run generic-simplex bash scripts/gates/check-generic-simplex .lake/build/bin
   # A `sorry` or a declared axiom in a deployed module is only a WARNING to the umbrella build above
   # (measured: `theorem t : 1 = 2 := sorry` in Compiler/DeclaredEffectCellRegistry builds green); the
   # tree-wide axiom census is what turns it red. Deployed is built by the umbrella, so this elaborates
@@ -121,7 +127,7 @@ readers() {
   run shell-paths     bash scripts/check-shell-paths.sh
   run host-operations bash -c 'python3 scripts/host-operations.py check && python3 scripts/test-host-operations.py'
   run gen-sheetlaw    python3 scripts/gen-sheetlaw.py --check
-  # The story law files and Assurance/StoryLaw.lean §8 are the client's own generator output: build `mini` and
+  # The story law files and Kernel/StoryLaw.lean (generated region) are the client's own generator output: build `mini` and
   # require that `mini story-law` still produces exactly the embedded text (a stale embed is how a theorem
   # about `law taleTable` stops being about the law `story seal` installs; the rfl in the build only holds
   # the Lean side, this holds the Rust side).

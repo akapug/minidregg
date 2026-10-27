@@ -105,6 +105,16 @@ root = "Host.ClientConsentSession"
 name = "minidregg-client-consent-specialized"
 root = "Host.ClientConsentSpecializedSession"
 
+# native/private-backend codec agreement (scripts/gates/check-private-backend-wire): Lean emits the
+# canonical journal, request, receipt and Plan bytes; the Rust crate decodes and re-encodes them.
+[[lean_exe]]
+name = "private-backend-boundary-fixture"
+root = "Compiler.PrivateBackendBoundaryFixture"
+
+[[lean_exe]]
+name = "private-circuit-plan-fixture"
+root = "Host.PrivateCircuitPlanFixture"
+
 # B2 exit measurement: wall-clock of the compiled Kernel.World.fold over a
 # 1000-turn log (Kernel.WorldBench). Not part of the umbrella gate.
 [[lean_exe]]

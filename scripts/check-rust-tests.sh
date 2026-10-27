@@ -524,7 +524,23 @@ exact grain-journal-digest   grain-runtime --bin grain-runtime -- \
 # A full-length torn final WAL record truncates like a short one (fa84160e)
 exact private-transition-wal private-backend --lib -- \
   transition_journal::tests::zeroed_final_record_body_truncates_to_one_less_record \
-  transition_journal::tests::invalid_event_has_no_effect_or_outbox
+  transition_journal::tests::invalid_event_has_no_effect_or_outbox \
+  transition_journal::tests::interior_length_damage_is_refused_never_truncated \
+  transition_journal::tests::final_torn_record_is_reported_and_recovery_resumes_from_last_complete_record
+# The dealer WALs: a torn dealer tail re-derives the same deal or published nothing; the dZK
+# store drops a partial trailing length word and keeps every published record
+exact private-dealer-wal     private-backend --lib -- \
+  sh2t_id_store::tests::retained_full_dealer_randomness_exact_outbox_changed_input_identity_and_tear \
+  sh2t_id_store::tests::torn_commit_record_published_nothing_so_a_fresh_deal_is_safe \
+  dzk_store::tests::store_retains_proof_randomness_and_outboxes_and_refuses_changed_identity \
+  dzk_store::tests::canonical_wire_and_durable_recipient_transfer_replay
+# The anchor runs on transition_journal: a torn tail recovers, interior damage refuses, the
+# record is linear in the request
+exact private-anchor-wal     private-backend --lib -- \
+  custody::tests::full_controller_sized_batch_is_single_durable_record_and_preserves_old_rows \
+  custody::tests::torn_anchor_tail_recovers_at_every_cut_and_the_anchor_keeps_serving \
+  custody::tests::lost_reply_and_relabel \
+  custody::tests::singleton_authority
 # W16 MPC: the King composite store recovers a kill -9 mid-King with one dealer event per
 # instance and no new anchor allocation; the curious-holder transcript check and its falsifier
 exact private-king-store private-backend --lib -- \

@@ -7,8 +7,24 @@ pub const MAX: usize = 16 * 1024 * 1024;
 pub fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
 }
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Nat(Vec<u8>);
+/// Numeric order. The digits are little-endian and canonical (no trailing zero
+/// digit), so a longer digit string is larger and equal lengths compare from
+/// the most significant digit; the derived lexicographic order was not numeric.
+impl Ord for Nat {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.iter().rev().cmp(other.0.iter().rev()))
+    }
+}
+impl PartialOrd for Nat {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 impl Nat {
     pub fn digits(&self) -> &[u8] {
         &self.0

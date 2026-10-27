@@ -80,6 +80,10 @@ mod operator_drain;
 mod scheduled_transport;
 #[path = "../../hybrid_kem.rs"]
 mod hybrid_kem;
+// Shared with private-backend; only the sealed-snapshot primitive is used here.
+#[allow(dead_code)]
+#[path = "../../pinned_execution.rs"]
+mod pinned_execution;
 #[cfg(unix)]
 #[path = "../../crypto_transit.rs"]
 mod crypto_transit;
@@ -131,6 +135,7 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+mod bend;
 mod seat;
 #[cfg(unix)]
 mod shell;
@@ -727,6 +732,10 @@ usage:
   mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol tariff]
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP [--enrol-capability C_ENROL --operator-socket OPERATOR-SOCKET] (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
+  mini bend --action publish --dir WORKSPACE --name NAME --source FILE.obend [--entry DEF] [--account REF]   an Objective Bend, captured and lowered by the Host's front end, then published
+  mini bend --action run --dir WORKSPACE --name NAME --object REF [--seed JSON] [--input JSON] [--deposit N] [--state-type JSON] [--account REF]   create REF pinning the bend when it has no record, then birth its activity
+  mini bend --action show --dir WORKSPACE --object REF
+  mini bend --action lookup|retry --dir WORKSPACE --name NAME   the receipt-only lookup of, or the exact retry of, NAME's last retained attempt
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
   mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
   mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
@@ -749,6 +758,7 @@ usage:
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|invite-check|transition|rotate|kick|register|rewrap|pin-member|list|open|forget --dir WORKSPACE --name ROOM [op options]
+  mini workspace --action room-key --op wrap-atom --dir WORKSPACE --epoch E --gen G --member SUBJECT   (the atom a wrap lands at: Kernel/PrivateRoomKeys.lean wrapAtomId)
       private rooms: DEVNET QUALITY; PRIVACY NOT AUDITED (hybrid X25519 + ML-KEM-768 wraps; docs/PRIVATE-ROOMS-DESIGN.txt)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini web --dir WORKSPACE --listen 127.0.0.1:PORT [--home H]   (loopback hypertext over this workspace's signed reads, with the document edit/create POST forms; the developer's and the journeys' direct face)
@@ -2677,6 +2687,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
+        "bend" => bend::run(args),
         "seat" => seat::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),

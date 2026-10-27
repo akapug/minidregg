@@ -416,6 +416,53 @@ def checkpoint_continuation(run, require, recovered=None):
             'public_listener': listener, 'execution_exit_path': str(path.parent / 'exit.json')}
 
 
+def pooled_tenant_probe(run, require):
+    marker = run / 'pooled-tenant-probe-request.json'
+    if not marker.exists():
+        return None
+    request = read(marker)
+    require('pooled_probe_request_exact', request == {
+        'protocol':'mini-oracle-pooled-tenant-probe-v1','app':'9101','path':'/query',
+        'request':{'request_id':'mini-u3-weather-structured','conversation_id':'mini-owner-pool-collision',
+                   'text':'Who wrote Leaves of Grass?'}})
+    owner = read(run / 'world/evidence/share-a.stdout')
+    config = read(run / 'agent-lifetime/controller-active-initial.json')
+    routes = [r for r in config['toolTask']['allowedApplicationLifetimeRoutes'] if r['name'] == 'oracle-app']
+    require('pooled_probe_one_agent_route', len(routes) == 1)
+    agent = routes[0]
+    require('pooled_probe_same_grain_distinct_principals_sessions',
+            owner.get('protocol') == 'mini-spk-grain-route-v1' and owner.get('app') == agent.get('appResource') == '9101'
+            and owner.get('kind') == 'api' and owner.get('subject') != agent.get('participantSubject')
+            and owner.get('session') != agent.get('sessionResource'))
+    initial_dir = run / 'agent-lifetime/probe'
+    restart_dir = run / 'agent-lifetime/probe-after-restart'
+    cases = [c for c in read(initial_dir / 'cases.json') if c['name'] == 'weather-structured']
+    require('pooled_probe_exact_agent_request_collision', len(cases) == 1
+            and cases[0]['tool'] == 'mini_oracle_call'
+            and cases[0]['arguments']['requestId'] == request['request']['request_id']
+            and cases[0]['arguments']['operationId'] == 'specialist.meteorology-v2.heat_index_f')
+    initial = read(initial_dir / 'weather-structured.http.json')
+    restarted = read(restart_dir / 'weather-structured.http.json')
+    weather = json.loads(initial['bodyText'])
+    require('pooled_probe_agent_weather_survives_owner_collision_and_restart',
+            initial['status'] == restarted['status'] == 200 and initial['bodyText'] == restarted['bodyText']
+            and weather.get('operation_id') == 'specialist.meteorology-v2.heat_index_f'
+            and weather.get('reply', {}).get('status') == 'answered'
+            and weather['reply'].get('unit') == 'degF')
+    reply_path = run / 'world/evidence/post-a15-body.body'
+    owner_reply = read(reply_path)
+    headers = (run / 'world/evidence/post-a15-body.headers').read_text().splitlines()
+    require('pooled_probe_owner_same_id_query_succeeds', bool(headers) and headers[0].split()[1] == '200'
+            and owner_reply.get('reply', {}).get('status') == 'answered'
+            and 'Whitman' in owner_reply['reply'].get('response',''))
+    return {'request':request,'owner_route':{k:owner[k] for k in ('app','subject','session','issueIndex')},
+            'agent_route':{k:agent[k] for k in ('appResource','participantSubject','sessionResource','grantDigest')},
+            'owner_reply':owner_reply,'owner_reply_sha256':sha(reply_path),
+            'agent_reply':weather,'agent_reply_sha256':sha(initial_dir / 'weather-structured.http.json'),
+            'restarted_agent_reply_sha256':sha(restart_dir / 'weather-structured.http.json'),
+            'scope':'Two distinct principals and source sessions in the same grain; same-principal isolation is not tested.'}
+
+
 def main():
     run, inventory_sha = Path(sys.argv[1]), sys.argv[2]
     ev = run / 'world/evidence'
@@ -726,6 +773,17 @@ def main():
             and authority.get('configSha256') == op155['a']['config_sha256']
             and authority.get('applicationAttemptSha256') == sha(
                 first_agent / 'discover-core-query.lifetime-attempt.json'))
+    browser = None
+    if (run / 'browser').exists():
+        from browser_edge import validate as validate_browser
+        ready = read(run / 'browser/ready.json')
+        browser = read(run / 'browser/result.json')
+        passed = read(run / 'browser/passed.json')
+        validate_browser(browser, ready)
+        require('browser_native_owner_web_journey', passed.get('admission') == 'native owner-web route'
+                and passed.get('result_sha256') == sha(run / 'browser/result.json')
+                and passed.get('ready_sha256') == sha(run / 'browser/ready.json'))
+    pooled = pooled_tenant_probe(run, require)
     report = {'schema': 'mini-oracle-shared-data-acceptance-v1', 'passed': True,
               'scope': 'Private Linux Store; real Mini install/share/enrollment/dispatch, agent lifetime tools, '
                        'source STOP/restart/reconciliation and sandbox. '
@@ -744,7 +802,7 @@ def main():
                   'sha256': sha(run / 'copied-store-stop-benchmark.json'),
                   'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
-              'controller_consent': consent,
+              'controller_consent': consent, 'browser': browser, 'pooled_tenant_probe': pooled,
               'controller_continuation': continuation,
               'session_continuation': resumed_session, 'checkpoint_continuation': checkpoint_result,
               'controller_enrollment': enrollments, 'foreground_recovery': recovered_foreground,

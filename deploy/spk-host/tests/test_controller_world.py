@@ -465,6 +465,40 @@ class ControllerWorldTests(unittest.TestCase):
         finish.assert_called_once_with(registry,self.root,reservation)
         self.assertTrue(result['resumedPendingCreation'])
 
+    def test_controller_export_accepts_normal_history_and_caps_4096_files(self):
+        state=self.root/'state';state.mkdir(mode=0o700)
+        r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            for i in range(513):(state/str(i)).write_bytes(b'evidence')
+            self.assertEqual(len(c.export_state('fixture','/unused')['files']),513)
+            for i in range(513,4096):(state/str(i)).write_bytes(b'evidence')
+            self.assertEqual(len(c.export_state('fixture','/unused')['files']),4096)
+            (state/'4096').write_bytes(b'evidence')
+            with self.assertRaisesRegex(ValueError,'file bound'):c.export_state('fixture','/unused')
+
+    def test_controller_export_retains_byte_file_and_depth_bounds(self):
+        state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            oversized=state/'oversized'
+            with oversized.open('wb') as f:f.truncate(8*1024*1024+1)
+            with self.assertRaisesRegex(ValueError,'mode/size'):c.export_state('fixture','/unused')
+            oversized.unlink()
+            for i in range(5):(state/str(i)).write_bytes(b'budget fixture')
+            with patch.object(c,'read_file',return_value=b'x'*(8*1024*1024)):
+                with self.assertRaisesRegex(ValueError,'byte bound'):c.export_state('fixture','/unused')
+            for p in state.iterdir():p.unlink()
+            nested=state
+            for _ in range(17):nested=nested/'d';nested.mkdir()
+            with self.assertRaisesRegex(ValueError,'directory bound'):c.export_state('fixture','/unused')
+
+    def test_controller_export_directory_count_stays_bounded(self):
+        state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            for i in range(1023):(state/str(i)).mkdir()
+            self.assertEqual(c.export_state('fixture','/unused')['files'],{})
+            (state/'1023').mkdir()
+            with self.assertRaisesRegex(ValueError,'directory bound'):c.export_state('fixture','/unused')
+
     def test_exact_reserve_export_has_eight_files_and_no_custody(self):
         r=self.record();prefix='agent-lifetime-reserve-0000000000000042'
         (self.root/'state').mkdir(mode=0o700)

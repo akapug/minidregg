@@ -1,0 +1,166 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "publish"
+  },
+  {
+   "step": "create",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "create"
+  },
+  {
+   "step": "birth",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "birth"
+  },
+  {
+   "step": "born-awaiting-total-0",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "state": {
+     "fields": [
+      {
+       "name": "total",
+       "value": {
+        "tag": "natural",
+        "value": "0"
+       }
+      }
+     ],
+     "tag": "record"
+    },
+    "phase": {
+     "await": {
+      "deadline": "17",
+      "id": "104853379671478836329762030624174331268975912836944489109263858523899667267514",
+      "source": {
+       "decider": "40",
+       "kind": "reply",
+       "slot": "29791800278065927536560285315800949395434035442447113302471288161603286311091",
+       "slotCell": "135949110967925654043746895434426026056145997717723549063972889272561301070538"
+      },
+      "yieldedAt": "13"
+     },
+     "kind": "awaiting"
+    }
+   },
+   "group": "tally"
+  },
+  {
+   "step": "stranger-resolve-refused",
+   "expect": "refused",
+   "detailExpected": "notDecider",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.kernel (Minidregg.Kernel.ObjectiveActivity.Refusal.slot (Minidregg.Kernel.AnswerSlot.Refusal.notDecider))",
+   "ok": true,
+   "group": "tally"
+  },
+  {
+   "step": "resolve-5",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "tally"
+  },
+  {
+   "step": "deliver-5",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "tally"
+  },
+  {
+   "step": "resolve-7",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "tally"
+  },
+  {
+   "step": "deliver-7",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "tally"
+  },
+  {
+   "step": "replies-add-never-overwrite",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "total": 12,
+    "generation": "2"
+   },
+   "group": "tally"
+  }
+ ],
+ "totals": [
+  {
+   "after": "born",
+   "height": "14",
+   "total": "0"
+  },
+  {
+   "after": "after-5",
+   "height": "16",
+   "total": "0"
+  },
+  {
+   "after": "after-7",
+   "height": "18",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "obj": {
+   "object": "17275252058549040933",
+   "capability": "11516731246471489019"
+  }
+ },
+ "allPass": true,
+ "pin": "38148469152273222083372176072838437376033934007357644891046916676158582041998",
+ "height": "18"
+}

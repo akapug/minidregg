@@ -106,9 +106,23 @@ fn terminal_text(status:&str,evidence:&Value)->String {
         ("refused",Some("bounded-admission"))=>"refused: Hermes's queue is full; ask again later".into(),
         ("refused",Some(basis))=>format!("refused: {basis}"),
         ("completed",_)=>"completed: replied".into(),
-        ("failed-after-admission",_)=>"failed: Hermes's turn ended without a reply after it started; ask again".into(),
+        ("failed-after-admission",_)=>match provider_refusal(evidence) {
+            // A named refusal of the turn's model call is the author's to know:
+            // it says which cap, not merely that no reply came.
+            Some(code)=>format!("failed: Hermes's model call was refused ({code}); no reply was written"),
+            None=>"failed: Hermes's turn ended without a reply after it started; ask again".into(),
+        },
         _=>status.into(),
     }
+}
+
+/// The key broker's or gateway's refusal name in a failed turn's typed
+/// outcome (its decoded reason carries the gateway's `error.code`).
+const PROVIDER_REFUSALS:&[&str]=&["member-day-ceiling","member-total-ceiling","per-day-cap","per-call-cap",
+    "spend-ceiling","no-credit","no-credential","grant-expired","no-route"];
+fn provider_refusal(evidence:&Value)->Option<&'static str> {
+    let text=evidence.get("outcome")?.to_string();
+    PROVIDER_REFUSALS.iter().copied().find(|code|text.contains(code))
 }
 
 // ---------------------------------------------------------------- notices
@@ -487,6 +501,16 @@ mod tests {
     fn fixture(tag:&str)->PathBuf {let p=std::env::temp_dir().join(format!("resident-queue-{tag}-{}",std::process::id()));fs::create_dir_all(&p).unwrap();fs::set_permissions(&p,std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();p}
     fn entry(author:&str,n:u64)->Value {json!({"author":author,"cell":author,"sequence":n,"height":n,"n":n,"kind":"say","text":"question","to":"8"})}
     fn prepared(entries:Vec<Value>)->Value {json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":"7"},"sourceRoom":{"entries":entries.len(),"selectedEntries":entries.len(),"members":[{"subject":"20","stream":"20"},{"subject":"21","stream":"21"}]},"sourceRequests":entries,"acceptedHeight":"0","me":"8","recentMemberEntries":[]})}
+    #[test]
+    fn a_failed_turn_names_the_cap_its_model_call_hit() {
+        let failed=json!({"basis":"typed-prompt-outcome","outcome":{"refused":{"stage":"turn-failure",
+            "reason":"ACP session/prompt error: HTTP 403 {\"error\":{\"code\":\"member-day-ceiling\"}}"}}});
+        assert_eq!(terminal_text("failed-after-admission",&failed),
+            "failed: Hermes's model call was refused (member-day-ceiling); no reply was written");
+        let plain=json!({"basis":"typed-prompt-outcome","outcome":{"refused":{"stage":"turn-failure","reason":"worker exited"}}});
+        assert!(terminal_text("failed-after-admission",&plain).ends_with("ask again"));
+    }
+
     #[test]fn fair_fifo_restart_and_bounded_admission() {
         let state=fixture("fair");let p=prepared((1..=12).map(|n|entry("20",n)).chain([entry("21",13),entry("21",14)]).collect());
         let first=select(&p,&state,Limits::default()).unwrap().unwrap();assert_eq!(first["recentMemberEntries"][0]["sequence"],1);

@@ -430,6 +430,14 @@ delegate_observe() (
 # same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
+  expected_host=grain.test
+  if [ "$label" = b ] && [ -n "${GRAIN_EXPECTED_HOST_B:-}" ]; then
+    expected_host=$GRAIN_EXPECTED_HOST_B
+    case "$expected_host" in localhost:*) ;; *) fail "browser-B expected host must be localhost with an explicit port" ;; esac
+    host_port=${expected_host#localhost:}
+    case "$host_port" in ''|0*|*[!0-9]*) fail "browser-B port must be canonical decimal" ;; esac
+    [ "$host_port" -ge 1024 ] && [ "$host_port" -le 65535 ] || fail "browser-B port out of range"
+  fi
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
     "$EV/${label%[0-9]}-app-author/source.json")
@@ -493,16 +501,43 @@ share() (
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
   case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
-  jq -n --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
+  jq -n --arg host "$expected_host" --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
     --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
-    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
+    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:$host,
      displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
     >"$EV/$label-route-request.json"
   "$SPK_HOST" grain route "$PROFILE" "$app" "$EV/$label-route-request.json"
+)
+
+# register LABEL APP ROUTE: a route bound after START is served only once the
+# running resident admits it through its own route control
+# (deploy/spk-host/HOT-ROUTE-ENROLLMENT.md); the session generation is the exact
+# one LABEL's enrollment admitted.
+register() (
+  label=$1 app=$2 route=$3
+  plan=$(ls -d "$EV/$label"-enroll-g*/plan-inspected.json | tail -1)
+  gen=$(jq -er .enrollment.appGeneration "$plan") sgen=$(jq -er .enrollment.sessionGeneration "$plan")
+  dir=$STATE/apps/$app/routes/$route
+  R=$EV/$label-register-g$gen
+  [ ! -s "$R/reply.json" ] || exit 0
+  mkdir -p -m 700 "$R"
+  jq -n --arg nonce "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" --arg app "$app" --arg gen "$gen" \
+    --arg sgen "$sgen" --arg dir "$dir" --arg custody "$dir/dispatch-custody.json" \
+    --arg custodySha "$(sha "$dir/dispatch-custody.json")" --arg custodianSha "$(sha "$dir/custodian.json")" \
+    --arg handle "${route%%-*}" '
+    {protocol:"mini-spk-route-register-v1",registrationNonceHex:$nonce,expectedApp:$app,
+     expectedAppGeneration:$gen,expectedSessionGeneration:$sgen,directory:$dir,dispatchCustody:$custody,
+     dispatchCustodySha256:$custodySha,custodianSha256:$custodianSha,displayName:"Second browser",
+     preferredHandle:$handle}' >"$R/request.json"
+  chmod 600 "$R/request.json"
+  "$SPK_HOST" grain register-route --socket "$STATE/apps/$app/g$gen/route-control.sock" \
+    --request "$R/request.json" >"$R/reply.json.new"
+  mv "$R/reply.json.new" "$R/reply.json"
+  [ -S "$dir/http.sock" ] || fail "registered route $route has no socket"
 )
 
 # enroll LABEL APP SESSION TICKET CAP NONCE: bind participant 8's session to
@@ -587,10 +622,11 @@ enroll() (
 # (curl header arguments, one per line): the API bearer, or the browser
 # session cookie the bootstrap would set (the operator owns the route dir).
 cred() {
+  expected_host=$(jq -er .expectedHost "$2/custodian.json")
   case "$1" in
     api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
     web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
-      -H "Origin: https://grain.test" ;;
+      -H "Origin: https://$expected_host" ;;
     *) echo "unknown route kind $1" >&2; return 1 ;;
   esac
 }
@@ -600,14 +636,15 @@ cred() {
 http_post() (
   label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Host: $expected_host" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # One authenticated request through the resident's route: the resident asks
@@ -615,13 +652,14 @@ http_post() (
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
   dir=$STATE/apps/$app/routes/${5:-owner-$kind}
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -H "Host: $expected_host" "$@" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # floor APP: the M11 floor as the running app sees it. Every process in the
@@ -797,9 +835,12 @@ run_phase() {
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
     a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
-    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;;
+    # j..p: the featured market set (featured-qualify.sh), resource prefixes 61..67.
+    j) P=61 i=10 ;; k) P=62 i=11 ;; l) P=63 i=12 ;; m) P=64 i=13 ;; n) P=65 i=14 ;;
+    o) P=66 i=15 ;; p) P=67 i=16 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  upper=$(printf '%s' "$letter" | tr a-p A-P)
   eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
   eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
@@ -841,6 +882,8 @@ run_phase() {
       else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
         $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
+    register) [ "$n" = 2 ] || fail "register applies to a second session (register-X2)"
+      step "$phase" register "${letter}2" "$app" "guest2-$kind" ;;
     get) if [ "$n" = 2 ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
       else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;

@@ -6496,6 +6496,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         // The room-key protocol of a private room (`roomkey.rs`).
         "room-key" => {
             let op = os_string(args.required("op")?, "room-key op")?;
+            if op == "wrap-atom" {
+                let epoch = os_string(args.required("epoch")?, "room-key epoch")?;
+                let gen = os_string(args.required("gen")?, "member key generation")?;
+                let member = os_string(args.required("member")?, "member subject")?;
+                args.finish()?;
+                println!("{}", roomkey::wrap_atom_text(&epoch, &gen, &member)?);
+                return Ok(());
+            }
             if op == "recipient-record" || op == "pin-founder" {
                 let room = os_string(args.required("room-id")?, "room id")?;
                 let keys = os_string(args.required("keys-cell")?, "keys cell id")?;

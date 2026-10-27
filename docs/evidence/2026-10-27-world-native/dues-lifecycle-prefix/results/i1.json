@@ -1,0 +1,23 @@
+{
+ "label": "i1",
+ "expect": "confirmed",
+ "rc": 1,
+ "before": {
+  "height": "13",
+  "notesRoot": "99546510050623822415108488233973704630754806287389337299446187034921620392404",
+  "worldRoot": "9679551327535924477348834943629208439335341986234798324924393392883648031846"
+ },
+ "after": {
+  "height": "13",
+  "notesRoot": "99546510050623822415108488233973704630754806287389337299446187034921620392404",
+  "worldRoot": "9679551327535924477348834943629208439335341986234798324924393392883648031846"
+ },
+ "unchanged": true,
+ "refused": true,
+ "diagnostic": "mini: /build/candidates/3315a9083c4e54220801c839a4297a62b29ea274/bin/minidregg-host exited exit status: 1; request status uncertain: minidregg-host: compute funding refused",
+ "attempt": "/build/lanes/wn-dues-lifecycle-prefix-2630800/w/sponsor/attempts/objective-i1",
+ "expectDetail": null,
+ "stdout": "",
+ "reason": "client (quote/consent, before signing)",
+ "detail": "mini: /build/candidates/3315a9083c4e54220801c839a4297a62b29ea274/bin/minidregg-host exited exit status: 1; request status uncertain: minidregg-host: compute funding refused"
+}

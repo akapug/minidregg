@@ -1,6 +1,8 @@
 //! Shared Linux sealed image/settings execution. Byte custody only: this module
 //! does not select source authority or interpret a native verifier's output.
 //! The kernel, dynamic loader/runtime and fixed timeout executable remain trusted.
+// Non-Linux builds compile only the refusals.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
@@ -8,7 +10,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-const MAX_IMAGE: u64 = 128 * 1024 * 1024;
+pub const MAX_IMAGE: u64 = 128 * 1024 * 1024;
 const MAX_SETTINGS: usize = 16 * 1024 * 1024;
 fn bad(s: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, s)
@@ -18,8 +20,11 @@ pub struct SealedInvocation {
     image: File,
     settings: File,
 }
+/// Copy `source` (at most `maximum` bytes) into a sealed memfd, rewound for
+/// reading. The one copy of this mechanism: private-backend's `SealedInvocation`
+/// and resource-client's Host launch both execute these descriptors.
 #[cfg(target_os = "linux")]
-fn snapshot<R: Read>(source: R, executable: bool, maximum: u64) -> Result<File> {
+pub fn snapshot<R: Read>(source: R, executable: bool, maximum: u64) -> Result<File> {
     use std::{
         io::{Seek, SeekFrom},
         os::fd::FromRawFd,
@@ -141,33 +146,43 @@ impl SealedInvocation {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()?;
-            // Always kill/reap on an IO refusal. No Child or Command escapes.
-            let result = (|| {
-                child
-                    .stdin
-                    .take()
-                    .ok_or_else(|| bad("sealed execution stdin"))?
-                    .write_all(input)?;
-                let mut output = vec![];
-                child
-                    .stdout
-                    .take()
-                    .ok_or_else(|| bad("sealed execution stdout"))?
-                    .take(maximum_output as u64 + 1)
-                    .read_to_end(&mut output)?;
-                if output.len() > maximum_output {
-                    return Err(bad("sealed execution output capacity"));
-                }
-                if !child.wait()?.success() {
-                    return Err(bad("sealed execution child refused"));
-                }
-                Ok(output)
-            })();
-            if result.is_err() {
+            // Write stdin on its own thread so a child that fills its stdout
+            // before reading all of stdin cannot deadlock us. Always kill/reap
+            // on an IO refusal. No Child or Command escapes.
+            let stdin = child.stdin.take();
+            let stdout = child.stdout.take();
+            let (Some(mut stdin), Some(stdout)) = (stdin, stdout) else {
                 let _ = child.kill();
                 let _ = child.wait();
+                return Err(bad("sealed execution pipes"));
+            };
+            let request = input.to_vec();
+            let writer = std::thread::spawn(move || stdin.write_all(&request));
+            let mut output = vec![];
+            let read = stdout
+                .take(maximum_output as u64 + 1)
+                .read_to_end(&mut output);
+            let mut refusal = read.err().or_else(|| {
+                (output.len() > maximum_output).then(|| bad("sealed execution output capacity"))
+            });
+            if refusal.is_some() {
+                // Unblocks the writer (EPIPE) and any child stuck on a full pipe.
+                let _ = child.kill();
             }
-            result
+            let status = child.wait();
+            let written = writer
+                .join()
+                .unwrap_or_else(|_| Err(bad("sealed execution writer")));
+            if refusal.is_none() {
+                refusal = written.err();
+            }
+            if let Some(error) = refusal {
+                return Err(error);
+            }
+            if !status?.success() {
+                return Err(bad("sealed execution child refused"));
+            }
+            Ok(output)
         }
     }
 }
@@ -241,5 +256,29 @@ mod tests {
             .output_with_input(&[], b"too long", 5, 1, 1024)
             .is_err());
         assert!(SealedInvocation::new(&image, &pin, b"").is_err());
+    }
+
+    #[test]
+    fn a_child_that_fills_stdout_before_reading_stdin_does_not_deadlock() {
+        let (_root, image, original) = fixture();
+        let pin: [u8; 32] = Sha256::digest(&original).into();
+        // Far more than one 64 KiB pipe buffer each way; the child writes all of
+        // its output before it reads any input.
+        let held = SealedInvocation::new(
+            &image,
+            &pin,
+            b"head -c 300000 /dev/zero; cat >/dev/null\n",
+        )
+        .unwrap();
+        let input = vec![7u8; 400_000];
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(held.output_with_input(&[], &input, 20, 400_000, 400_000));
+        });
+        let output = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("deadlocked: no result within the test timeout")
+            .unwrap();
+        assert_eq!(output, vec![0u8; 300_000]);
     }
 }

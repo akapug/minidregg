@@ -209,7 +209,16 @@ pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
 }
 /// The journaled dealer event: tag 0, the dealing seed, and every zero-sharing polynomial.
 pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
-    let mut e = vec![0];
+    dealer_body(0, seed, polys)
+}
+/// Tag 5: commit the dealing seed and inputs durably, publishing nothing.
+fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    dealer_body(5, seed, polys)
+}
+/// Tag 6: emit the deal from the committed seed and inputs.
+const EMIT_EVENT: [u8; 1] = [6];
+fn dealer_body(tag: u8, seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    let mut e = vec![tag];
     e.extend(seed);
     Nat::new(polys.len() as u64).put(&mut e);
     for p in polys {
@@ -222,12 +231,14 @@ pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
 #[derive(Clone)]
 pub struct Sh2tMachine {
     pub state: Sh2tId,
+    /// Seed and inputs committed by a tag 5 event, awaiting their tag 6 emission.
+    pub pending: Option<([u8; 32], Vec<Vec<Field>>)>,
 }
 impl Machine for Sh2tMachine {
     fn apply(&mut self, e: &[u8]) -> Result<Vec<u8>> {
         let mut c = Cursor::new(e)?;
         let out = match c.byte()? {
-            0 => {
+            tag @ (0 | 5) => {
                 let seed = c.fixed32()?;
                 let n = count(&mut c)?;
                 if n != self.state.count() {
@@ -243,6 +254,24 @@ impl Machine for Sh2tMachine {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 c.finish()?;
+                if tag == 0 {
+                    self.state.dealer(&polys, seed)?
+                } else {
+                    if self.pending.is_some() {
+                        return Err(bad("Sh2t dealer already committed"));
+                    }
+                    // Dry run on a clone: a commit that could never emit is refused.
+                    self.state.clone().dealer(&polys, seed)?;
+                    self.pending = Some((seed, polys));
+                    vec![]
+                }
+            }
+            6 => {
+                c.finish()?;
+                let (seed, polys) = self
+                    .pending
+                    .take()
+                    .ok_or_else(|| bad("Sh2t emit without committed dealer"))?;
                 self.state.dealer(&polys, seed)?
             }
             1 => {
@@ -286,21 +315,35 @@ impl Store {
         per_group: usize,
     ) -> Result<Self> {
         let state = Sh2tId::new(me, dealer, n, f, g, per_group)?;
-        let mut identity = b"DREGG.SH2T.ID.PARTY.WAL.V1".to_vec();
+        let mut identity = b"DREGG.SH2T.ID.PARTY.WAL.V2".to_vec();
         g.put(&mut identity);
         identity.extend(state.context);
         identity.extend(me.to_le_bytes());
         Ok(Self {
-            journal: Journal::open(path, &identity, Sh2tMachine { state })?,
+            journal: Journal::open(
+                path,
+                &identity,
+                Sh2tMachine {
+                    state,
+                    pending: None,
+                },
+            )?,
         })
     }
     pub fn state(&self) -> &Sh2tId {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, e: &[u8]) -> Result<Vec<Send>> {
         let out = self.journal.append(e)?;
         parse_outbox(&out, self.state().n)
     }
+    /// The deal is two journalled steps: commit the seed and inputs (nothing
+    /// published), then emit. A tear of the emit record, or its loss to
+    /// damage after publication, re-derives the same deal from the committed
+    /// seed; a tear of the commit record means nothing was ever published.
     pub fn dealer(&mut self, polys: &[Vec<Field>]) -> Result<Vec<Send>> {
         if let Some(old) = self.state().dealer_inputs() {
             if old != polys {
@@ -314,10 +357,16 @@ impl Store {
         {
             return Err(bad("Sh2t dealer inputs"));
         }
-        let mut seed = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let e = dealer_event(seed, polys);
-        self.apply(&e)
+        if let Some((_, old)) = &self.journal.state().pending {
+            if old != polys {
+                return Err(bad("Sh2t changed dealer retry"));
+            }
+        } else {
+            let mut seed = [0; 32];
+            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            self.apply(&commit_event(seed, polys))?;
+        }
+        self.apply(&EMIT_EVENT)
     }
     pub fn receive(&mut self, sender: u16, m: &Message) -> Result<Vec<Send>> {
         let mut e = vec![2];
@@ -425,14 +474,48 @@ mod tests {
             .unwrap()
             .set_len(len - 1)
             .unwrap();
-        // The final record lost its last byte: it was never fsynced and never
-        // published, so recovery truncates it (transition_journal, fa84160e)
-        // and the dealer has dealt nothing yet.
+        // The final record (the emit) lost its last byte. Whether that is a crash
+        // tear or damage to a published record cannot be told apart, so the same
+        // deal must come back: re-derived from the committed seed, never re-drawn.
         let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_some(), "the dropped emit record is reported");
         assert!(s.replay_outboxes().unwrap().is_empty());
         assert!(s.state().dealer_inputs().is_none());
-        assert!(fs::metadata(&p).unwrap().len() < len - 1, "torn record truncated away");
-        assert!(!s.dealer(&polys()).unwrap().is_empty());
+        assert!(s.dealer(&changed_polys()).is_err(), "changed inputs refuse after the tear");
+        assert_eq!(s.dealer(&polys()).unwrap(), out, "same deal, not a re-deal");
+        assert_eq!(s.dealer(&polys()).unwrap(), out);
+        drop(s);
+        let s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_none());
+        assert_eq!(s.replay_outboxes().unwrap(), out);
+    }
+    fn changed_polys() -> Vec<Vec<Field>> {
+        let mut c = polys();
+        c[0][0] = Field(1);
+        c
+    }
+    #[test]
+    fn torn_commit_record_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = root().join("wal");
+        let (after_open, after_commit);
+        {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+            after_open = fs::metadata(&p).unwrap().len();
+            s.dealer(&polys()).unwrap();
+            after_commit = fs::metadata(&p).unwrap().len();
+        }
+        assert!(after_commit > after_open);
+        // Cut inside the commit record: the emit record is gone with it.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s.dealer(&changed_polys()).unwrap().is_empty());
     }
     #[test]
     fn actual_recipient_reconstruction_survives_store_reopen_and_canonical_refusers() {

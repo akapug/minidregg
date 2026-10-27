@@ -1272,7 +1272,7 @@ pub(crate) mod tests {
                         Err(e) => panic!("{e}"),
                     }
                 }
-                a.journal
+                a.journal().clone()
             });
             Self {
                 sock,

@@ -10,7 +10,7 @@
 # helpers and fixture inputs selected by this harness.
 world_source_manifest() {
   sha256sum "$repo/scripts/oracle-shared-data-journey.sh" \
-    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+    "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/deploy/oracle/acceptance/browser_edge.py" \
     "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/recover_foreground.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" \
     "$repo/deploy/oracle/acceptance/agent.py" "$repo/deploy/oracle/acceptance/agent-cases.json" \
     "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/scripts/oracle-agent-lifetime-journey.sh" \
@@ -87,6 +87,13 @@ world_stop_probe() {
     --committed "$state/apps/$app/g$generation/stop-claim/committed-v3.bin" \
     --out "$output" --deadline 1200 --resident-only "${args[@]}" >"$output.stdout" 2>"$output.stderr"
 }
+
+world_browser_probe() {
+  timeout 1850 python3 -B "$repo/deploy/oracle/acceptance/browser_edge.py" run "$run" "$state" \
+    "$ORACLE_CADDY_BIN" "$ORACLE_CADDY_SHA256" "$ORACLE_BROWSER_PORT" \
+    >"$run/browser-probe.stdout" 2>"$run/browser-probe.stderr"
+}
+
 
 world_controller_prepare() {
   local home
@@ -395,7 +402,7 @@ world_continue_controller() {
   continuation=$(python3 "$repo/deploy/oracle/acceptance/continue_controller.py" "$run" "$spk" "$inventory" "$benchmark" "$repo")
   [[ $continuation == "$run/continuations/controller-create-1" ]] || fail 'continuation evidence path differs'
   preserve_existing_exit=0
-  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/deploy/oracle/acceptance/browser_edge.py" \
     "$repo/deploy/oracle/acceptance/continue_controller.py" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
     >"$continuation/recovery-input-sha256.txt"
   configured=1
@@ -708,6 +715,9 @@ world_cleanup_volumes() {
 world_cleanup() {
   local result=${1:-$?} cleanup_result=0 unit preserve_namespace=false exit_path volume_evidence
   trap - EXIT INT TERM
+  if [[ -d $run/browser ]]; then
+    python3 -B "$repo/deploy/oracle/acceptance/browser_edge.py" stop "$run/browser" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
+  fi
   if [[ ${configured:-0} == 1 ]]; then
     if [[ ${controller_created:-0} == 1 ]]; then
       world_controller_stop cleanup >>"$run/cleanup.log" 2>&1 || cleanup_result=1

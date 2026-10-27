@@ -22,30 +22,98 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
 
-## State at hand-off (2026-10-27, lane tip after this commit)
+## State at hand-off (2026-10-27 night, lane tip after this commit)
 
-- **Proven on dregg-build** (world w3, store `2fdd71b31d0fe3be`, `/build/lanes/app-market-runs/w3/WORLD.env`):
-  `japps --box` lifecycle rows 23/24 (create, install, share, start, enrol, page load for Hacker
-  Slides and Simple Todos; Hacker Slides renders, its "Present" link from `getPublicId`; stop), and
-  the export row green by hand once the row named the right app (fixed). Simple Todos is running on
-  w3, Hacker Slides stopped and exported.
-- **Member install** (`scripts/spk-platform/apps-e2e.sh`, run as
-  `MEMBER_FUNDING=10000 APPS_MAX=50000 E2E_MINI=…/mini bash apps-e2e.sh $R/w3/WORLD.env OUT APP…`):
-  funded as the door funds, the tool reservation admitted and released on refusal, the birth past
-  prepare; refused at admission `GrainResourceBirthAdmission.Reject.policyRejected` by the parent
-  task's law, which admits the birth's witness touch only for the task's worker subject. Ruled:
-  Option A (any holder of a delegated parent grant), Lean work with the L1 successor; the factory
-  law to be checked on the signed path for ordinary births too, so members get a named refusal.
-- **Measured**: an ordinary birth costs the member 173; a grain-task birth by a member with 10000
-  is insolvent even at budget 1 (a large fixed debit, probably the template `ownerBudget`); the
-  delegated tool/parent `maxCost` must exceed 1000 (50000 passes).
-- **Next, not started**: Etherpad end to end as the worker subject (journey `birth_app` path:
-  `SPK_A=$R/cache/quarantine/aee0806c….spk` with `grain-journey.sh phase` on w3, then name any
-  interface Etherpad calls that `spk-rpc` lacks from its app output, as was done for
-  `HackSessionContext`); Simple Todos co-edit from a second browser session (a second `enroll`
-  and GET on the running grain); the `-www` publishing origin's front dispatch, `www.sock` and
-  connector verb (INSTALL §5a); measuring the first member install and replacing the ~1,500
-  estimate in INSTALL §4.
+- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w11**
+  (`w11/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w11-job.sh` (PID
+  file `w11-job.pid`), which then runs `featured-qualify.sh` (rows in `featured-w11/rows.tsv`).
+  w3 to w6 are torn down; w4 and w7 to w10 failed in their store phase before root setup and were
+  never registered. Stop a job only
+  by its PID file. After each checkout on the box run `chmod go-w deploy/spk-host/*`: the lanes
+  umask leaves `controller-world.py` at 0664 and the installer refuses it.
+- **Proven on w6** (`japps --box`, 26 of 27 rows; `japps-w6.out`): the catalogue, the fetcher, the
+  four qualify exhibits and the front. Hacker Slides and Simple Todos go through create, install,
+  share, start, enrol, page load, stop and export. Etherpad goes through the same steps to
+  `/p/main` 200 (also by hand on w3). **The publishing socket serves Hacker Slides' `/var/www`**:
+  GET / is 200 with the deck, POST is 405 and a `..` escape is 404. Each file is opened by the
+  launch worker as the app (`61f4a1ce`).
+- **Red: the second-browser co-edit.** The second session is shared and enrolled, but its hot
+  route registration is refused by the Host. The reason is now named (`f7b8fe5f`): `authority
+  handoff requires an opening read from the Store`. It comes from
+  `Kernel/ApplicationStreamContinuity.lean` `withOpenedFreshTip`, line 216, and means the serving
+  Host's `durable.headTag` is `None`. A participant's signed read of the session just before the
+  registration does not satisfy it (tried on w6, not kept). The question goes to the Host lane:
+  when does a serving Host hold an opening read of the Store's head, and should route admission
+  take one itself? `ws-continuity-fixture.py` registers routes successfully under its own world
+  setup, so compare that setup with world-up's. Everything after the registration is ready
+  (`register-X2`, `ddp-coedit.py`).
+- **Featured set** (§2a): the scout's 13 are kept. `mini apps search` lists them first with their
+  agent hook (`f7b8fe5f`). `featured-qualify.sh` qualifies EtherCalc, HedgeDoc, Davros, sntfy,
+  DokuWiki, Hledger Web and Datasette (letters j..p) with one write each beneath the HTML. On w6
+  every birth was refused at prepare (`authorityBatch`): the workroom tool task had 4 left of its
+  single-journey budget of 50 after three apps. Each birth reserves 5 and each share ticket 3.
+  `world-up.sh` now gives a standing world a tool budget of 100, enough for about a dozen apps. The store phase checks the workroom's remaining budget; that check was hard-coded at 47 in `native-share-member.sh` and now follows the budget (`4c50e364`); w7 to w10 failed on it. **Datasette's row is read-only by design**: version 0.63 has no HTTP
+  write, since uploading a database is the page's own form, so the row records the read and
+  says so. **Four apps still need their write recipe** probed against a live grain before they
+  go into the harness:
+  - WBO: a stroke as a socket.io event over its WebSocket.
+  - SandCal: the new-event form, or an iCalendar import.
+  - Gogs: a repository created through `/repo/create` with its `_csrf`, or `/api/v1` with a
+    token the session mints.
+  - Wekan: REST after its Sandstorm header login.
+
+  The coordinator's order for the set: Datasette, DokuWiki, HedgeDoc, Davros, SandCal, Gogs,
+  EtherCalc, WBO, Hledger, sntfy, Wekan.
+- **DAV verbs and streamed bodies** (§2b), asked first by the coordinator, not started. The
+  verbs are named in Lean: `Kernel/ApplicationDispatchAdmission.lean` `exchangeMethod` and the
+  body rules of `requestSafeFor` (PROPFIND/PROPPATCH/REPORT/LOCK carry XML bodies; MKCOL, COPY,
+  MOVE and UNLOCK none, with `Destination`, `Depth`, `Overwrite`, `Lock-Token`, `If`, `Timeout`
+  admitted as ordinary headers); then `http_entrance.rs` `Method` and its ordinary-header list,
+  `dispatch_web_input.rs` `call_for` and `spk-rpc` `web.rs` (the `WebSession` propfind, proppatch,
+  mkcol, copy, move, lock, unlock and report calls, and the 207 Multi-Status response). The
+  Host changes, so it lands with a cut, not on a standing world.
+- **Member install**: `apps.rs` bootstrap births the parent under the holder form (`72e6a1a8`).
+  When a candidate carries `lane/lean-l13-laws`, stand up a world from it
+  (`world-up.sh /build/candidates/<sha>/bin /build/lanes/app-market/target/debug RUN`), run
+  `mini apps bootstrap` there, then `apps-e2e.sh RUN/WORLD.env OUT <appIds>` with
+  `MEMBER_FUNDING=10000 APPS_MAX=50000`; read the debit from `OUT/balances.log` into INSTALL.md
+  §4 (replacing the ~1,500 estimate) and the receipt's `budget:` line.
+- **A market of 2–3 dozen (ember, 2026-10-27): the batch table for parallel Sonnet faeries.**
+  Tier 1 is the featured 13 (§2a) plus Simple Todos. Tier 2 is below: apps the scout read as
+  the standard bundled `sandstorm-http-bridge` with no interface we do not serve, grouped three
+  or four to a faerie (42 apps in all). **The successor's own first item is the DAV verbs and
+  streamed bodies** (sites above), designed whole as one Lean+Rust change and landed with a cut:
+  it unlocks Davros' tree, SandCal and Radicale over CalDAV, git in Gogs, and the file-heavy
+  rows marked *stream* below.
+
+  | batch | apps (scout appId prefix) | watch for | the write beneath the HTML (probe first) |
+  |---|---|---|---|
+  | B1 notes | SandMD `9afdqy`, Permanote `svwrpw`, TextEditor `n4n49d`, Dillinger `fq057t` | nothing new | PUT/POST of a markdown document, GET it back |
+  | B2 lists and ledgers | Yet Another TODO `6ee9j5`, Prioritize `nut9xv`, ExpenseOwl `vfdve0`, OrgTodo `sfs5m1` | nothing new | REST POST of an item or expense, GET the JSON |
+  | B3 boards and drawing | diagrams.net `nfqhx8`, EtherDraw `1gda5n`, Scrumblr `w544a4` (bundled redis), Swagger Editor `1d3ump` | WebSocket frames; an inner redis | save a drawio XML or a sticky; read it back |
+  | B4 publishing | Hugo `ksyud8`, WordPress `aax9j6`, Hacker CMS `nqmcqs`, Hakyll CMS `z7za0n` | `HackSessionContext.getPublicId`, the `-www` origin (§5a) | write a page, build, GET it at `https://<grain>-www…` through the publishing socket |
+  | B5 files and media | FileDrop `nn7axg`, Kiwix `5uh349`, Groove Basin `wfg1r0` *stream*, Tube `70xjeu` *stream* | large bodies (fail closed until streaming lands) | upload a small file, GET it; media rows wait for streaming |
+  | B6 forms and tools | SandForms `ztxnre`, OwnTracks `cjv3p2`, Badgepack `kzyafw`, Hummingbird `4mfser` | nothing new | POST a form or a location fix, read the JSON |
+  | B7 doors | 2048 `u0yh8x`, Perplexity Sudoku `r8y55a`, 3D Blockstack `zxent0`, Simple Chat `yp9xt1` | Simple Chat is direct capnp (no http-bridge): a `WebSession` served by the app itself | page load; a state write where the app has one |
+  | B8 second-wave picks | IPython Notebook `rprqf3` (178 MB, class L), Mercurial `61gh7g`, MediaWiki `p04q48`, Firefly III `uws252` | class L memory; MediaWiki's bundled database | create a notebook or page over its REST, read it back |
+
+  **The faerie brief (one per batch).** Worktree:
+  `git -C /Users/ember/dev/minidregg worktree add -b lane/app-market-bN /Users/ember/dev/minidregg-lanes/app-market-bN origin/lane/app-market`.
+  On dregg-build as `lanes` (every build through `swarm-build`; PID files; never kill by pattern),
+  one standing world per faerie: `world-up.sh /build/candidates/<cut>/bin /build/lanes/app-market-bN/target/debug /build/lanes/app-market-bN-runs/w1`
+  (the installer now allocates disjoint app ranges, `f8243aba`; `chmod go-w deploy/spk-host/*`
+  after each checkout). Add the batch's apps to `featured-qualify.sh`'s table (letters j..p, one
+  `write_<Name>` function each: one request over the owner route with the session cookie and
+  Origin, then a read-back that proves the write persisted) and run it against the world. Per app:
+  create, install, share, start, enrol, page load, the write; a refusal is recorded by name
+  (`unsupportedBridge…`, a 500 whose app output names a capnp method we do not serve, a body the
+  bridge refuses) and the method, if any, is added to `spk-rpc` the way `HackSessionContext` was
+  (compile the schema, serve what the app calls, refuse the rest by name). Push per app with the
+  sha; the successor merges the batches and adds each green app's agent hook to `FEATURED` (or a
+  second tier list) in `apps.rs`.
+- **Allocator**: `install-user-world` moves a taken app range to the next free one in the
+  delegation (`f8243aba`; controller-world.py pin `1a6e0c16`). The main worktree had an
+  uncommitted edit to `controller-world.py`; whoever lands it re-pins.
 
 ## 1. The pieces, who runs what
 
@@ -85,6 +153,56 @@ it is showing.
   `native/resource-client/tests/fixtures/sandstorm-index-2026-10-27.json` (98 apps) pins the shape
   the tests and `--dry` use. In the shell they are `apps search` / `apps show` (one row of the verb
   table, §5a); L12's market pane renders the same JSON (`--json`).
+
+## 2a. The featured set: apps an agent can drive beneath the HTML
+
+Ember's ruling (2026-10-27): the market ships a curated set chosen for an easy but powerful data
+model and a scriptable surface beneath the human-visible page, because agents work there. The set
+is the GLM scout's recommendation (`docs/review/2026-10-27-spk-selection/SELECTION.md` on
+`lane/glm-spk-selection`, 98 apps scored, 52 packages read) kept whole: every pick runs the
+bundled `sandstorm-http-bridge` the qualified apps already prove. `mini apps search` lists these
+first, each with its agent hook (`apps.rs` `FEATURED`), then the rest of the store; L12's pane
+reads the same JSON (`featured {rank, agentHook}`).
+
+**How a resident reaches the hook.** The hook is plain HTTP on the grain's own origin. A member's
+resident (Hermes) holds an api route the member issued (`mini apps share`, bearer token,
+`kind api`) or an agent route on the grain (`grain_agent_route.rs`, served by `agent_api_server.rs` on the resident's own socket); either way each request is a Mini turn checked by the custodian under the resident's
+delegated capability, exactly as a browser's, and lands in the app as the same HTTP the page
+would send. Nothing beneath the HTML bypasses the grain's authority or its receipts.
+
+| # | app | the two-minute stranger story | the agent hook beneath the HTML | bridge needs |
+|---|---|---|---|---|
+| 1 | Etherpad | write together in a pad; watch a friend's cursor | `/api`: create pads, append, read text/HTML, revisions | served (`saveIdentityCaps`); **qualified on w3 and w5** |
+| 2 | EtherCalc | type into a sheet beside a second browser | `PUT /_/<sheet>` CSV, `POST` SocialCalc commands, `GET …/csv` | served |
+| 3 | HedgeDoc | markdown on the left, the rendered note on the right, a share link | `POST /new` with markdown makes a note; `GET /<note>/download` | served |
+| 4 | Davros | drop files and folders in, play an mp4 in the browser | a file tree over HTTP: `PUT`/`GET` by path under `/remote.php/webdav/` | served for GET/PUT; PROPFIND/MKCOL/MOVE/COPY/LOCK need the DAV verbs (§2b) |
+| 5 | Datasette | upload a SQLite file, click through its tables | `/<db>.json?sql=…` answers JSON (0.63 has no HTTP write; the upload is the page's) | served |
+| 6 | sntfy | a live feed you can post to | `POST /<topic>` publishes, `GET /<topic>/json?poll=1` reads: the fleet's notification primitive | served |
+| 7 | DokuWiki | edit a page, see history and diffs | flat-text pages: `GET doku.php?id=…&do=export_raw`, `POST do=save` with the form's `sectok` | served |
+| 8 | WBO | draw on a whiteboard with someone else, live | board events as JSON over its WebSocket; `GET /boards/<name>.json` | served (WebSockets) |
+| 9 | SandCal | add an event on a calendar grid | events as forms and iCalendar over HTTP | served; CalDAV clients need REPORT/PROPFIND (§2b) |
+| 10 | Gogs | make a repo, edit a file in the web UI | `REST /api/v1` (repos, issues) | served for REST; `git clone`/`push` needs streamed bodies (§2b) |
+| 11 | Hledger Web | record a transaction, see balances | a plain-text journal: `POST /add`, `GET /journal`, the JSON API | served |
+| 12 | Hacker Slides | write markdown, present the deck at its publishing origin | the deck is `slides.md`; published at `https://<grain>-www.demo.dregg.online` (§5a) | served (`HackSessionContext`); **qualified on w3 and w5** |
+| 13 | Wekan | a kanban board the visitor may already know | `REST /api` (boards, lists, cards) and DDP | served; class L (bundled mongod) |
+
+Simple Todos stays qualified as the Meteor exhibit and the co-edit row's app; it is not featured.
+Qualification is `scripts/spk-platform/featured-qualify.sh` on a standing world: every app through
+create, install, share, start, enrol and page load, then ONE write beneath the HTML by a script
+standing in for a resident; its rows are recorded in §0.
+
+## 2b. What the bridge grows for the set's full surface
+
+All 13 run on today's bridge; three widenings unlock the rest of their surface, in order:
+
+1. **The WebDAV/CalDAV verbs** (PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT). The
+   in-app bridge serves them through `WebSession`; ours stops at `dispatch_web_input.rs::call_for`
+   (GET/HEAD/POST/PUT/PATCH/DELETE and the WebSocket open). The method is part of each request's
+   Mini record, so this is a Lean-and-Rust change to the dispatched HTTP record, not a
+   one-line map: Davros' tree operations, SandCal and Radicale over CalDAV.
+2. **Streamed request and response bodies** (`ByteStream`/`RequestStream`, fail-closed in
+   `spk-rpc/src/protocol.rs`): git's pack protocol in Gogs, large Davros moves, Datasette exports.
+3. **Powerbox request/offer**: none of the 13; the way back in for TT-RSS and Collections.
 
 ## 3. Install: the member turn, and what admits it
 

@@ -421,9 +421,9 @@ impl BoundedChild {
     }
     /// The app's published tree, through the remote launch worker (the only
     /// process with the app's identity outside the sandbox).
-    pub(crate) fn open_www(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
+    pub(crate) fn open_www_file(&mut self, components: &[String]) -> io::Result<crate::resident_privilege::WwwFile> {
         match &mut self.remote {
-            Some(client) if !self.reaped => client.open_www(self.pid as u32),
+            Some(client) if !self.reaped => client.open_www_file(self.pid as u32, components),
             _ => Err(invalid("published tree needs the live remote launch worker")),
         }
     }

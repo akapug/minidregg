@@ -1,0 +1,4 @@
+candidate 3315a9083c4e54220801c839a4297a62b29ea274  method /build/lanes/un-world/world/dues/StandingDues.obend  entry dues  flags none
+world rc=0: /build/lanes/wn-dues-2622516/state.json
+publish rc=1: FAILED publish-propose rc=1: mini: /build/lanes/wn-dues-2622516/publication/proposal.json must contain 1..=262144 bytes
+overall rc=1

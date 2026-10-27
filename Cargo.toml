@@ -30,7 +30,7 @@ members = [
   "prover",
 ]
 exclude = [
-  # research crate leaving for degg-research (DEMO-PREFIX R5); own [workspace] and Cargo.lock pin its aws-lc/ring stack
+  # stays in this repo (owner ruling 2026-10-27); outside the root workspace on purpose: its own [workspace] and Cargo.lock pin the aws-lc/ring stack (the root lock does not carry it). Its tests run as named rows of scripts/check-rust-tests.sh; its Lean codec agreement is the private-backend-wire gate row
   "native/private-backend",
   # the Oracle appliance's standalone packer (deploy/oracle/README.md); its own [workspace] and Cargo.lock
   "deploy/oracle/pack",
