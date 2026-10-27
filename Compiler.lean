@@ -137,3 +137,4 @@ import Compiler.FnWireSized  -- the `sized` node's teeth; the poll-reply accepte
 import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame) read by the interpreter
 import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth
 import Compiler.DurableFastForwardSpec  -- HOT-PATH §2(h): the fast-forward open (checkpoint v4) stated before proof
+import Compiler.DurableFastForwardProofs  -- HOT-PATH §2(h): proofs toward the fast-forward Spec

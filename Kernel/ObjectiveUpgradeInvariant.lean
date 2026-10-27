@@ -1363,6 +1363,8 @@ theorem abandonSlot_silent {rootBytes : Bytes → Digest} {config : Config} {sna
   split at ok
   · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
     rw [← ok.1]; simp
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
   · rename_i name _ _
     cases read : readSlot config snapshot name with
     | none => simp [read] at ok
@@ -1614,10 +1616,10 @@ theorem Abort.upgradable {rootBytes : Bytes → Digest} {config : Config} {snaps
 /-! ## Yields: a state write and a fresh slot -/
 
 /-- What a yield commit posts: its state write, or a fresh slot. -/
-theorem commitYield_posts_shape {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_posts_shape {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     ∀ post ∈ committed.posts, (∃ written, committed.written = some written ∧ post = written.post) ∨
       (payloadOf (snapshot.canonicalBytes post.cell) = none ∧ OfRole .slot (payloadOf post.bytes)) := by
@@ -1656,6 +1658,21 @@ theorem commitYield_posts_shape {rootBytes : Bytes → Digest} {config : Config}
             subst ok
             intro post member
             exact .inl (stateShape _ post member)
+        · split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok
+              subst ok
+              intro post member
+              exact .inl (stateShape _ post member)
+            · split at ok
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                intro post member
+                exact .inl (stateShape _ post member)
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                intro post member; cases member
 
 /-- A state write's post is the next version of the object's state, at its state cell. -/
 theorem stateWrite_post {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -1666,10 +1683,10 @@ theorem stateWrite_post {rootBytes : Bytes → Digest} {config : Config} {snapsh
   subst exact; rfl
 
 /-- The posts of a segment's yield commit: its judged state write, or a fresh slot. -/
-theorem segmentCommit_posts_ok {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_posts_ok {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment = .ok yielded)
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment = .ok yielded)
     (read : ∃ c, readState config snapshot object = .ok c)
     (judged : ∀ written, yielded.bind YieldCommit.written = some written → StateJudged config snapshot object written.after) :
     ∀ post ∈ (yielded.map YieldCommit.posts).getD [], StatePostOk config snapshot post := by
@@ -1680,8 +1697,8 @@ theorem segmentCommit_posts_ok {rootBytes : Bytes → Digest} {config : Config} 
     simp only [Option.map_some, Option.getD_some] at member
     obtain ⟨_, _, _, commitOk⟩ := segmentCommit_spec ok
     rcases commitYield_posts_shape commitOk post member with ⟨written, isWritten, isPost⟩ | ⟨fresh, slot⟩
-    · have wrote := (commitYield_spec commitOk).1
-      rw [isWritten] at wrote
+    · obtain ⟨_, wrote, same⟩ := (commitYield_spec commitOk).1
+      rw [same written isWritten] at wrote
       rw [isPost, stateWrite_post wrote]
       obtain ⟨c, readOk⟩ := read
       exact .inr ⟨object, written.after, rfl, ⟨c, readOk⟩, judged written (by simp [isWritten])⟩
@@ -1837,6 +1854,7 @@ theorem settle_silent {rootBytes : Bytes → Digest} {config : Config} {snapshot
     · split at settled
       · simp only [Except.ok.injEq] at settled; subst settled; simp
       · cases settled
+  · simp only [Except.ok.injEq] at settled; subst settled; simp
 
 theorem Delivery.upgradable {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {request : DeliverRequest} (delivery : Delivery config snapshot height request)

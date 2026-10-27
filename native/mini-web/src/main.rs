@@ -9,6 +9,7 @@
 //! A dev gateway (`--origin http://127.0.0.1:PORT`) carries the cookie without `Secure`.
 
 mod http;
+mod limits;
 mod page;
 mod proxy;
 mod session;
@@ -36,6 +37,8 @@ const COOKIE_MAX_AGE: u64 = 7 * 24 * 3600;
 
 struct Gateway {
     sessions: Sessions,
+    /// Each member's body requests in flight (at most `limits::PER_MEMBER`).
+    inflight: limits::InFlight,
     terminals: Terminals,
     shutdown: String,
     frame_src: String,
@@ -82,6 +85,7 @@ fn run() -> Result<(), String> {
     println!("mini-web: {origin} on {bound} (helper {})", helper.display());
     let _ = std::io::stdout().flush();
     let gateway = Arc::new(Gateway {
+        inflight: limits::InFlight::default(),
         sessions: Sessions { client: Client::new(&helper), origin, secure },
         terminals: Terminals::default(),
         shutdown,
@@ -130,7 +134,7 @@ enum Reply {
     Stage { status: u16, title: String, html: String, who: Option<Who>, path: String, set_cookie: Option<String> },
     Raw(Response),
     /// A file the body hands the member (their export), streamed from the body as it arrives.
-    Download(proxy::Download),
+    Download(proxy::Download, Option<limits::Slot>),
     /// The connection now belongs to a terminal.
     Upgraded,
 }
@@ -151,7 +155,7 @@ impl Gateway {
         let reply = self.route(&request, &mut stream);
         let response = match reply {
             Reply::Upgraded => return,
-            Reply::Download(download) => {
+            Reply::Download(download, _slot) => {
                 if let Err(e) = self.stream_download(download, &mut stream, head_only) {
                     eprintln!("mini-web: download: {e}");
                 }
@@ -397,8 +401,20 @@ impl Gateway {
             }
             None => Target::Public,
         };
+        // One member holds at most PER_MEMBER body requests at once; the slot is held until the
+        // body's answer (or the download it streams) is done.
+        let slot = match &who {
+            Some(w) => match self.inflight.acquire(&w.name) {
+                Some(slot) => Some(slot),
+                None => {
+                    return self.stage(429, "Too many requests", refusal("Too many requests at once",
+                        &format!("you already have {} requests waiting on your workspace; this one was refused, not queued. Let one finish, then try again.", limits::PER_MEMBER)), who.clone(), request);
+                }
+            },
+            None => None,
+        };
         match proxy::fetch(&self.sessions.client, target, request) {
-            Ok(proxy::Answer::Download(download)) => Reply::Download(download),
+            Ok(proxy::Answer::Download(download)) => Reply::Download(download, slot),
             Ok(proxy::Answer::Page(fragment)) => {
                 if let Some(location) = fragment.location.filter(|_| (300..400).contains(&fragment.status)) {
                     if !http::same_origin_path(&location) {

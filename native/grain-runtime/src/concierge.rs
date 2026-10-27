@@ -29,7 +29,7 @@
 //! that with its JOURNAL: one line per decision naming the ledger entry
 //! (height, transaction, payer, signer, amount) it acted on. Every decision
 //! is keyed on the entry's ledger `transactionId` (`ledger-tx:T`); the
-//! proposal id (`renew-tT`), the refund memo and the refund's operation
+//! proposal id (`renew-t` and a digest of T), the refund memo and the refund's operation
 //! record all derive from it, never from the height.
 //!
 //! Restart: the journal is re-read; a decision whose delegation was not
@@ -607,7 +607,7 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
                 continue;
             }
             Decision::Issue { not_after, period, week } => {
-                let id = format!("renew-t{}", entry.transaction);
+                let id = renew_id(&entry.transaction)?;
                 journal.append(json!({"key":key,"decision":"deciding","height":height,"entry":basis,"subject":entry.subject,
                     "notAfter":not_after.to_string(),"proposal":id}))?;
                 match issue(&run, &dir, &program, &entry.subject, not_after, &id, &verbs, &outbox) {
@@ -903,6 +903,15 @@ fn drive_refund(
             }
         }
     }
+}
+
+/// The renewal's proposal id, from the ledger transactionId it acts on. A
+/// Host transactionId is a field element (up to 78 digits) and a workspace
+/// name is at most 64 characters, so the id carries a digest of it: 32 hex
+/// digits, collision-free in practice, the same on every pass and restart.
+fn renew_id(transaction: &str) -> Result<String> {
+    let digest = crate::sha256_bytes(format!("mini-concierge-renew-v1\0{transaction}").as_bytes())?;
+    Ok(format!("renew-t{}", &digest[..32]))
 }
 
 fn refunded(key: &str, height: &str, open: &Refunding, evidence: Value) -> Value {
@@ -1308,6 +1317,15 @@ mod tests {
         assert!(line["notice"].as_str().unwrap().contains("stays in the till"));
         assert!(journal.decided.contains(&key));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_renewal_id_from_a_full_transaction_id_is_a_workspace_name() {
+        let tx = "65521247787507393155002196623437335179160280648006500683460654464838909513152";
+        let id = renew_id(tx).unwrap();
+        assert!(id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'), "{id}");
+        assert_eq!(id, renew_id(tx).unwrap());
+        assert_ne!(id, renew_id("65521247787507393155002196623437335179160280648006500683460654464838909513153").unwrap());
     }
 
     #[test]

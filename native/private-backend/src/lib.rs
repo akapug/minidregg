@@ -14,12 +14,12 @@ pub mod acs_store;
 pub mod allocation_receipt;
 pub mod asks;
 pub mod codec;
+pub mod current_recipient;
 pub mod consensus_wire;
 pub mod custody;
 pub mod gather;
 pub mod private_send;
 pub mod private_send_store;
-pub mod protocol_store;
 pub mod reconstruction;
 pub mod entropy;
 #[cfg(test)]

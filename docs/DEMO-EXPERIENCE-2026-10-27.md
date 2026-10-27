@@ -4,7 +4,7 @@ Present-state product definition, 2026-10-27, rewritten whole after a three-mode
 Kimi k3.1-pro, Astra/codex; `docs/review/2026-10-27-council-experience/`) read the first draft against
 the affordance inventory, the web front end design, the shell's verb table and the ATLAS laws. This is
 what `https://demo.dregg.online` is *for*: the minutes a stranger spends in Mini and what they
-understand at the end. The join page, the front page, the README's honest-state table and the demo
+understand at the end. The join page, the front page, the status table (`docs/STATUS.md`) and the demo
 journey derive from this file, in that order of authority; when the product changes, this file is
 rewritten whole. The plan (`docs/DEMO-PREFIX-2026-10-26.md`) says how we get there.
 

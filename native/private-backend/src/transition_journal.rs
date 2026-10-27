@@ -5,7 +5,11 @@
 //! full-length FINAL frame whose checksum fails: a crash between the length
 //! extension and the data reaching disk leaves exactly that shape, and the
 //! frame was never published (publication requires the completed fsync).
-//! A bad checksum on any EARLIER frame, or a wrong identity, still refuses.
+//! Dropping it is never silent: `Journal::torn_tail` reports the offset and
+//! the dropped bytes, so a machine that must not re-issue a step can refuse.
+//! A bad checksum on any EARLIER frame, a length word that points past EOF
+//! while a complete checksum-valid record sits at that position (interior
+//! damage, not a tear), or a wrong identity, refuses.
 //! Published records require completed fsync.
 //! This assumes crash-prefix storage; arbitrary disk corruption is not repaired.
 //! This is not an independent anti-rollback anchor and cannot mint source authority.
@@ -23,12 +27,34 @@ use std::{
 pub trait Machine: Clone {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>>;
 }
+/// The final record recovery dropped: its start offset in the WAL and the
+/// bytes that were removed (length word included).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TornTail {
+    pub offset: u64,
+    pub dropped: Vec<u8>,
+}
 pub struct Journal<M: Machine> {
     file: File,
+    torn: Option<TornTail>,
     state: M,
     outbox: Vec<Vec<u8>>,
     poisoned: bool,
     _lock: File,
+}
+/// A record whose length word points past EOF is a tear only if no complete,
+/// checksum-valid record is present at that position. `rest` is everything
+/// after the length word. A rotted interior length leaves the real record
+/// intact behind it; its own event/outbox framing gives its true length.
+fn complete_record_behind(rest: &[u8]) -> bool {
+    let Ok(mut c) = Cursor::new(&rest[..rest.len().min(crate::codec::MAX)]) else {
+        return false;
+    };
+    if c.bytes().is_err() || c.bytes().is_err() {
+        return false;
+    }
+    let n = c.consumed();
+    rest.len() >= n + 32 && hash(&rest[..n]) == rest[n..n + 32]
 }
 fn record(e: &[u8], out: &[u8]) -> Vec<u8> {
     let mut b = vec![];
@@ -82,11 +108,19 @@ impl<M: Machine> Journal<M> {
         let mut i = header.len();
         let mut state = initial;
         let mut outbox = vec![];
+        let mut torn = None;
+        let mut drop_tail = |file: &mut File, at: usize| -> Result<()> {
+            torn = Some(TornTail {
+                offset: at as u64,
+                dropped: all[at..].to_vec(),
+            });
+            file.set_len(at as u64)?;
+            file.sync_all()
+        };
         while i < all.len() {
             let record_start = i;
             if all.len() - i < 8 {
-                file.set_len(record_start as u64)?;
-                file.sync_all()?;
+                drop_tail(&mut file, record_start)?;
                 break;
             }
             let n = u64::from_le_bytes(all[i..i + 8].try_into().unwrap());
@@ -100,16 +134,17 @@ impl<M: Machine> Journal<M> {
                 .and_then(|j| j.checked_add(32))
                 .ok_or_else(|| bad("transition length overflow"))?;
             if end > all.len() {
-                file.set_len(record_start as u64)?;
-                file.sync_all()?;
+                if complete_record_behind(&all[i..]) {
+                    return Err(bad("transition interior length damage"));
+                }
+                drop_tail(&mut file, record_start)?;
                 break;
             }
             let b = &all[i..i + n];
             if hash(b) != all[i + n..end] {
                 if end == all.len() {
                     // Torn final frame: never fsynced, never published.
-                    file.set_len(record_start as u64)?;
-                    file.sync_all()?;
+                    drop_tail(&mut file, record_start)?;
                     break;
                 }
                 return Err(bad("transition checksum"));
@@ -128,11 +163,21 @@ impl<M: Machine> Journal<M> {
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
             file,
+            torn,
             state,
             outbox,
             poisoned: false,
             _lock: lock,
         })
+    }
+    /// The final record this open dropped as torn, if any.
+    pub fn torn_tail(&self) -> Option<&TornTail> {
+        self.torn.as_ref()
+    }
+    /// After an uncertain write the in-memory state may trail the disk; every
+    /// append refuses until the journal is reopened.
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
     }
     pub fn state(&self) -> &M {
         &self.state
@@ -221,6 +266,53 @@ mod tests {
         let recovered = Journal::open(&p, b"epoch1", Counter(0)).unwrap();
         assert_eq!(recovered.state().0, 0);
         assert!(recovered.replay_outboxes().is_empty());
+    }
+    fn three_records() -> (Vec<u8>, usize, usize) {
+        let p = path("three-base");
+        let mut j = Journal::open(&p, b"epoch1", Counter(0)).unwrap();
+        j.append(&1u64.to_le_bytes()).unwrap();
+        let one = fs::read(&p).unwrap().len();
+        j.append(&2u64.to_le_bytes()).unwrap();
+        let two = fs::read(&p).unwrap().len();
+        j.append(&4u64.to_le_bytes()).unwrap();
+        (fs::read(&p).unwrap(), one, two)
+    }
+    #[test]
+    fn interior_length_damage_is_refused_never_truncated() {
+        let (full, one, _) = three_records();
+        // Record two's length word rots to a value that points past EOF while
+        // its record and record three sit intact behind it.
+        for rotted in [full.len() as u64, full.len() as u64 * 2, (1 << 20)] {
+            let mut damaged = full.clone();
+            damaged[one..one + 8].copy_from_slice(&rotted.to_le_bytes());
+            let q = path("interior");
+            fs::write(&q, &damaged).unwrap();
+            let err = Journal::open(&q, b"epoch1", Counter(0)).err().expect("refused");
+            assert!(err.to_string().contains("interior"), "{err}");
+            assert_eq!(fs::read(&q).unwrap(), damaged, "refusal must not truncate");
+        }
+    }
+    #[test]
+    fn final_torn_record_is_reported_and_recovery_resumes_from_last_complete_record() {
+        let (full, _, two) = three_records();
+        for cut in two + 1..full.len() {
+            let q = path("final-torn");
+            fs::write(&q, &full[..cut]).unwrap();
+            let mut j = Journal::open(&q, b"epoch1", Counter(0)).unwrap();
+            let torn = j.torn_tail().expect("tear reported");
+            assert_eq!(torn.offset as usize, two, "cut {cut}");
+            assert_eq!(torn.dropped, full[two..cut], "cut {cut}");
+            assert_eq!(j.state().0, 3);
+            assert_eq!(j.replay_outboxes().len(), 2);
+            j.append(&8u64.to_le_bytes()).unwrap();
+            drop(j);
+            let j = Journal::open(&q, b"epoch1", Counter(0)).unwrap();
+            assert!(j.torn_tail().is_none());
+            assert_eq!(j.state().0, 11);
+        }
+        let q = path("no-tear");
+        fs::write(&q, &full).unwrap();
+        assert!(Journal::open(&q, b"epoch1", Counter(0)).unwrap().torn_tail().is_none());
     }
     #[test]
     fn invalid_event_has_no_effect_or_outbox() {

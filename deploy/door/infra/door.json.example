@@ -2,6 +2,8 @@
   "version": 1,
   "funding": "1000",
   "freeCap": 50,
+  "inviteReserve": 20,
+  "inviteCodes": "/etc/mini/invite-codes",
   "dailyCap": 20,
   "perRun": 4,
   "sponsorFloor": "20000",

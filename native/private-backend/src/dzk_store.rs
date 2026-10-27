@@ -155,6 +155,19 @@ fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
 #[derive(Clone)]
 pub struct DzkMachine {
     pub state: Dzk,
+    /// Seed and inputs journalled by tag 0, which publishes nothing.
+    committed: Option<([u8; 32], Vec<Vec<Field>>)>,
+    /// Tag 4 has emitted the committed deal.
+    emitted: bool,
+}
+impl DzkMachine {
+    pub fn new(state: Dzk) -> Self {
+        Self {
+            state,
+            committed: None,
+            emitted: false,
+        }
+    }
 }
 impl Machine for DzkMachine {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
@@ -175,7 +188,26 @@ impl Machine for DzkMachine {
                     polys.push(p);
                 }
                 c.finish()?;
-                self.state.dealer(&polys, seed)?
+                if self.committed.is_some() {
+                    return Err(bad("dZK dealer already committed"));
+                }
+                // Dry run on a clone: a commit that could never emit is refused.
+                self.state.clone().dealer(&polys, seed)?;
+                self.committed = Some((seed, polys));
+                vec![]
+            }
+            4 => {
+                c.finish()?;
+                if self.emitted {
+                    return Err(bad("dZK dealer already emitted"));
+                }
+                let (seed, polys) = self
+                    .committed
+                    .clone()
+                    .ok_or_else(|| bad("dZK emit without committed dealer"))?;
+                let out = self.state.dealer(&polys, seed)?;
+                self.emitted = true;
+                out
             }
             1 => {
                 let holder = c.u16()?;
@@ -215,41 +247,52 @@ impl Store {
         degree: usize,
     ) -> Result<Self> {
         let state = Dzk::new(me, dealer, n, f, g, polynomial_count, degree)?;
-        let mut identity = b"DREGG.DZK.PARTY.WAL.V1".to_vec();
+        let mut identity = b"DREGG.DZK.PARTY.WAL.V2".to_vec();
         g.put(&mut identity);
         identity.extend(state.profile.context);
         identity.extend(me.to_le_bytes());
         Ok(Self {
-            journal: Journal::open(path, &identity, DzkMachine { state })?,
+            journal: Journal::open(path, &identity, DzkMachine::new(state))?,
         })
     }
     pub fn state(&self) -> &Dzk {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, event: &[u8]) -> Result<Vec<Send>> {
         let b = self.journal.append(event)?;
         parse_outbox(&b, self.state().profile.n)
     }
-    /// Exact retry replays retained packets and NEVER regenerates proof randomness.
+    /// The deal is two journalled steps: commit the seed and inputs (nothing
+    /// published), then emit. An exact retry replays the retained packets; a
+    /// tear of the emit record re-derives the same packets from the committed
+    /// seed and NEVER regenerates proof randomness.
     pub fn dealer(&mut self, polys: &[Vec<Field>]) -> Result<Vec<Send>> {
-        if let Some(original) = self.state().dealer_inputs() {
+        let m = self.journal.state();
+        if let Some((_, original)) = &m.committed {
             if polys != original {
                 return Err(bad("dZK changed dealer replay"));
             }
-            return self.replay_outboxes();
+            if m.emitted {
+                return self.replay_outboxes();
+            }
+        } else {
+            if self.state().me != self.state().profile.dealer {
+                return Err(bad("dZK not dealer"));
+            }
+            let mut seed = [0; 32];
+            File::open("/dev/urandom")?.read_exact(&mut seed)?;
+            let mut event = vec![0];
+            event.extend(seed);
+            Nat::new(polys.len() as u64).put(&mut event);
+            for p in polys {
+                put_fields(p, &mut event);
+            }
+            self.apply(&event)?;
         }
-        if self.state().me != self.state().profile.dealer {
-            return Err(bad("dZK not dealer"));
-        }
-        let mut seed = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let mut event = vec![0];
-        event.extend(seed);
-        Nat::new(polys.len() as u64).put(&mut event);
-        for p in polys {
-            put_fields(p, &mut event);
-        }
-        self.apply(&event)
+        self.apply(&[4])
     }
     pub fn authorize_verification(&mut self, holder: u16, receiver: u16) -> Result<Vec<Send>> {
         let mut e = vec![1];
@@ -343,7 +386,67 @@ mod tests {
             .unwrap()
             .write_all(&[7])
             .unwrap();
-        assert!(Store::open(&path, 0, 0, 4, 1, &g(), 1, 1).is_err());
+        // A trailing partial length word is a crash tear after the last complete
+        // record (transition_journal, fa84160e): dropped, reported, and every
+        // published record and the exact dealing survive.
+        let before = std::fs::metadata(&path).unwrap().len();
+        let mut store = Store::open(&path, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+        assert_eq!(store.torn_tail().unwrap().dropped, vec![7]);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), before - 1);
+        assert_eq!(store.replay_outboxes().unwrap(), first);
+        assert_eq!(store.dealer(&polynomials).unwrap(), first);
+    }
+    fn cut_last_byte(p: &std::path::Path) {
+        let len = fs::metadata(p).unwrap().len();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_len(len - 1)
+            .unwrap();
+    }
+    #[test]
+    fn torn_emit_rederives_the_same_deal_never_a_redraw() {
+        let p = root().join("wal");
+        let polys = vec![vec![Field(42), Field(17)]];
+        let out = {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+            s.dealer(&polys).unwrap()
+        };
+        cut_last_byte(&p);
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(s.dealer(&[vec![Field(1), Field(17)]]).is_err());
+        assert_eq!(s.dealer(&polys).unwrap(), out);
+        drop(s);
+        let s = Store::open(&p, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+        assert_eq!(s.replay_outboxes().unwrap(), out);
+    }
+    #[test]
+    fn torn_commit_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = root().join("wal");
+        let polys = vec![vec![Field(42), Field(17)]];
+        let after_open = {
+            let s = Store::open(&p, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+            let n = fs::metadata(&p).unwrap().len();
+            drop(s);
+            n
+        };
+        Store::open(&p, 0, 0, 4, 1, &g(), 1, 1)
+            .unwrap()
+            .dealer(&polys)
+            .unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 1, 1).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s.dealer(&[vec![Field(7), Field(8)]]).unwrap().is_empty());
     }
     use std::io::Write;
     #[test]

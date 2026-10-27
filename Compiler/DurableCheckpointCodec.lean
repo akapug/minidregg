@@ -41,6 +41,7 @@ import Compiler.Sp800185Cshake256
 import Compiler.Sp800185Kmac256
 import Kernel.DurableCheckpoint
 import Kernel.WorldRootCache
+import Kernel.WorldSystemCodec
 import Theory.AssertAxioms
 import Theory.AssertCompiled
 
@@ -183,7 +184,7 @@ def persistedSchemaRefs : String :=
 schema component, and the named census checks equality against receiving tags. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
-    "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v1;checkpoint/v5", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/
@@ -487,7 +488,7 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -499,7 +500,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v5); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -629,6 +630,13 @@ structure Body where
   /-- The index trie's root after `height` records (`DurableIndex`). -/
   indexRoot : Digest
   state : State
+  /-- The fold's World's system store at `height` (journal, head, retired, parent, spent,
+  allowance; `Kernel.WorldSystemCodec`); its cells are `state`'s, decoded. `none` when the
+  sealing session's World was lost: the open then folds from genesis. -/
+  system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)
+  /-- The identity of the fold that produced `system` (`foldSemantics`): a body sealed by
+  another fold under the same Store key is refused by name (`OpenError.foreignSemantics`). -/
+  semantics : Digest
 
 def frontierStream : StreamCodec (List (Nat × Digest)) :=
   StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)
@@ -637,9 +645,14 @@ def bodyStream : StreamCodec Body :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream
-        (StreamCodec.product frontierStream (StreamCodec.product digestStream stateStream)))))
-    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.indexRoot, body.state))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+        (StreamCodec.product frontierStream (StreamCodec.product digestStream
+          (StreamCodec.product stateStream
+            (StreamCodec.product (StreamCodec.option Kernel.WorldSystemCodec.systemStream)
+              digestStream)))))))
+    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.indexRoot, body.state,
+      body.system, body.semantics))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2.1,
+      tuple.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 /-- The world-root entries of a materialized state at a height: the system slot
@@ -666,11 +679,12 @@ def sealedStream : StreamCodec Sealed :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- v3: the body carries the accumulator frontier and the spent root, and its
-state no consumed nullifiers. An older checkpoint refuses (`malformed`): its
-frame differs; the Store epoch (`StoreEpoch.accumulator`) names the change. -/
+/-- v4: the body carries the fold's World's system store and the fold's semantics
+(HOT-PATH §2(h)), beside v3's accumulator frontier and spent root. An older checkpoint
+refuses (`malformed`): its frame differs; the Store epoch (`StoreEpoch.accumulator`,
+`checkpoint/v5`) names the change. -/
 def checkpointFrame : Framed Sealed :=
-  ⟨Minidregg.Compiler.PersistedCodecTags.durable_checkpoint_byte_v3, sealedStream⟩
+  ⟨Minidregg.Compiler.PersistedCodecTags.durable_checkpoint_byte_v4, sealedStream⟩
 
 def macInputStream : StreamCodec (List UInt8 × Nat × Digest × List UInt8) :=
   StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
@@ -683,34 +697,49 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
       cshake256Bytes "DREGG/NATIVE-HOST/CHECKPOINT-BODY/v1".toUTF8.toList
         (bodyStream.encode body)))
 
+/-- The fold's version: bumped whenever `DurableReceiverIO.foldRecords`' World semantics (the
+turn derivation, `admit`, the system rows it writes) change, so a checkpoint's World sealed by
+another fold is refused by name rather than trusted. -/
+def foldVersion : String := "FOLD/turn-of-intent-v1"
+
+/-- The fold's identity a v4 body carries: the epoch (every persisted codec and layout) and the
+fold's version. -/
+def foldSemantics : Digest :=
+  (Sp800185Cshake256.hash "DREGG/NATIVE-HOST/FOLD-SEMANTICS/v1".toUTF8.toList
+    (StoreEpoch.current.label ++ ";" ++ foldVersion).toUTF8.toList).digest
+
 /-- Seal a checkpoint body under a supplied world root. The host supplies its
 cached root (`DurableReceiverIO.sealCheckpoint_uses_cached_root`); `openSealed`
 recomputes it from the body and refuses any other. -/
 def sealAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
-    (indexRoot : Digest) (state : State) (root : Digest) : Sealed :=
-  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state⟩
+    (indexRoot : Digest) (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (root : Digest) : Sealed :=
+  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩
   ⟨body, root, checkpointMac key body root⟩
 
 /-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
-    (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) : Sealed :=
-  sealAt key height chain frontier indexRoot state
-    (worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩)
+    (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) : Sealed :=
+  sealAt key height chain frontier indexRoot state system
+    (worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩)
 
 /-- Sealing under any root equal to the body's world root is the
 specification seal, byte for byte. -/
 theorem sealAt_eq_sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
     (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
-    {root : Digest}
-    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩) :
-    sealAt key height chain frontier indexRoot state root =
-      sealCheckpoint key rootBytes height chain frontier indexRoot state := by
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) {root : Digest}
+    (exact : root = worldRoot rootBytes
+      ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩) :
+    sealAt key height chain frontier indexRoot state system root =
+      sealCheckpoint key rootBytes height chain frontier indexRoot state system := by
   subst exact
   rfl
 
 inductive OpenError where
   | malformed
   | foreignKey
+  | foreignSemantics
   | rootMismatch
   | badMac
   deriving DecidableEq, Repr
@@ -721,6 +750,7 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
     Except OpenError Body := do
   let some sealed := checkpointFrame.decode bytes | throw .malformed
   unless sealed.body.keyId = key.id do throw .foreignKey
+  unless sealed.body.semantics = foldSemantics do throw .foreignSemantics
   unless sealed.root = worldRoot rootBytes sealed.body do throw .rootMismatch
   unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
   pure sealed.body
@@ -737,6 +767,7 @@ def openSealedWith {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 �
     Except OpenError ((body : Body) × α body) := do
   let some sealed := checkpointFrame.decode bytes | throw .malformed
   unless sealed.body.keyId = key.id do throw .foreignKey
+  unless sealed.body.semantics = foldSemantics do throw .foreignSemantics
   let derived := derive sealed.body
   unless sealed.root = rootOf sealed.body derived do throw .rootMismatch
   unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
@@ -754,10 +785,13 @@ theorem openSealedWith_fst {α : Body → Type} (key : MacKey) (rootBytes : List
   | some sealed =>
       simp only [exact]
       by_cases keyOk : sealed.body.keyId = key.id
-      · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
-        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
-            simp [keyOk, rootOk, macOk] <;> rfl
-        · simp [keyOk, rootOk]
+      · by_cases semOk : sealed.body.semantics = foldSemantics
+        · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+          · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+              simp [keyOk, semOk, rootOk, macOk] <;> rfl
+          · simp [keyOk, semOk, rootOk]
+            rfl
+        · simp [keyOk, semOk]
           rfl
       · simp [keyOk]
         rfl
@@ -777,10 +811,13 @@ theorem openSealedWith_eq {α : Body → Type} (key : MacKey) (rootBytes : List 
   | some sealed =>
       simp only [exact]
       by_cases keyOk : sealed.body.keyId = key.id
-      · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
-        · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
-            simp [keyOk, rootOk, macOk]
-        · simp [keyOk, rootOk]
+      · by_cases semOk : sealed.body.semantics = foldSemantics
+        · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+          · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+              simp [keyOk, semOk, rootOk, macOk]
+          · simp [keyOk, semOk, rootOk]
+            rfl
+        · simp [keyOk, semOk]
           rfl
       · simp [keyOk]
         rfl
@@ -805,10 +842,11 @@ theorem openSealedWith_ok {α : Body → Type} {key : MacKey} {rootBytes : List 
 
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) :
+    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint key rootBytes height chain frontier indexRoot state)) =
-      .ok ⟨key.id, height, chain, frontier, indexRoot, state⟩ := by
+        (sealCheckpoint key rootBytes height chain frontier indexRoot state system)) =
+      .ok ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩ := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt]
   rfl
 
@@ -821,14 +859,18 @@ theorem openSealed_bad_mac (key : MacKey) (rootBytes : List UInt8 → Digest)
   unfold openSealed
   simp only [Framed.decode_encode]
   by_cases keyOk : sealed.body.keyId = key.id
-  · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
-    · have forged' : sealed.mac ≠ checkpointMac key sealed.body
-          (worldRoot rootBytes sealed.body) := rootOk ▸ forged
-      refine ⟨.badMac, ?_, by decide⟩
-      simp [keyOk, rootOk, forged']
-      rfl
-    · refine ⟨.rootMismatch, ?_, by decide⟩
-      simp [keyOk, rootOk]
+  · by_cases semOk : sealed.body.semantics = foldSemantics
+    · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+      · have forged' : sealed.mac ≠ checkpointMac key sealed.body
+            (worldRoot rootBytes sealed.body) := rootOk ▸ forged
+        refine ⟨.badMac, ?_, by decide⟩
+        simp [keyOk, semOk, rootOk, forged']
+        rfl
+      · refine ⟨.rootMismatch, ?_, by decide⟩
+        simp [keyOk, semOk, rootOk]
+        rfl
+    · refine ⟨.foreignSemantics, ?_, by decide⟩
+      simp [keyOk, semOk]
       rfl
   · refine ⟨.foreignKey, ?_, by decide⟩
     simp [keyOk]
@@ -845,9 +887,10 @@ theorem empty_mac_forged (key : MacKey) (body : Body) (root : Digest) :
 id refuses. -/
 theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → Digest)
     (height : Nat) (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest)
-    (state : State) (distinct : other.id ≠ key.id) :
+    (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (distinct : other.id ≠ key.id) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint other rootBytes height chain frontier indexRoot state)) =
+        (sealCheckpoint other rootBytes height chain frontier indexRoot state system)) =
       .error .foreignKey := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl

@@ -696,7 +696,7 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
                     return export_page(site, Some(format!("Your world already records that choice (field 1 = {want}).")));
                 }
                 Some(now) => vec![format!("invoke {id} research-consent write 1 {want} {now}"), format!("submit {id}")],
-                None => vec!["create research-consent declared open".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
+                None => vec!["create research-consent declared open 1".to_owned(), format!("invoke {id} research-consent create 1 {want}"), format!("submit {id}")],
             };
             let mut page = act(site, "Research consent", lines, &id, &[("export", "/export")]);
             page.title = "Research consent".into();
@@ -705,6 +705,13 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["subscribe", "pay"] => super::subscribe::pay(site),
         ["subscribe", "join"] => super::subscribe::join(site),
         ["export"] => {
+            // One export per member per EXPORT_COOLDOWN: it reads the whole world. Inside the
+            // window the page names when the next is allowed and the last archive's digest.
+            if let Some(refused) = site.shell.as_ref().and_then(|shell| export_refusal(&shell.home, now_secs())) {
+                let mut page = export_page(site, Some(refused));
+                page.status = 429;
+                return page;
+            }
             let name = format!("world-{}", now_secs());
             // The run's own words land beside the archive (NAME.log), so a failure is said on the page.
             let started = site.shell.as_ref().is_some_and(|shell| {
@@ -921,6 +928,29 @@ fn research_consent(site: &Site) -> Option<i128> {
     view["cell"]["entries"].as_array()?.iter().find(|e| e["key"]["field"] == "1")?["value"].as_str()?.parse().ok()
 }
 
+/// The last archive's name and sha256 (`mini export-world` writes NAME.sha256 beside the archive
+/// and it is kept after the download): shown while the next export waits out its cooldown.
+fn last_digest(dir: &std::path::Path) -> Option<(String, String)> {
+    let mut sums: Vec<(std::time::SystemTime, String, String)> = fs::read_dir(dir).ok()?.flatten().filter_map(|e| {
+        let name = e.file_name().to_string_lossy().strip_suffix(".sha256")?.to_owned();
+        let at = e.metadata().and_then(|m| m.modified()).ok()?;
+        Some((at, name, fs::read_to_string(e.path()).ok()?.trim().to_owned()))
+    }).collect();
+    sums.sort();
+    sums.pop().map(|(_, name, sum)| (name, sum))
+}
+
+/// Why a new export may not start now (the shared rule, `world_export::may_export`, the shell's
+/// own words), with the last archive's digest; None when it may.
+fn export_refusal(home: &std::path::Path, now: u64) -> Option<String> {
+    let why = crate::world_export::may_export(home, now).err()?;
+    let digest = match last_digest(&home.join("exports")) {
+        Some((name, sum)) => format!(" Your last archive, <code>{}</code>, has sha256 <code>{}</code>.", escape(&name), escape(&sum)),
+        None => String::new(),
+    };
+    Some(format!("{}{digest}", escape(why.strip_prefix("export world: ").unwrap_or(&why))))
+}
+
 /// A finished export's file under HOME/exports, by its name (letters, digits, '-').
 fn export_file(site: &Site, name: &str) -> Option<PathBuf> {
     let shell = site.shell.as_ref()?;
@@ -939,6 +969,9 @@ fn export_page(site: &Site, said: Option<String>) -> Page {
         body.push_str(&format!("<p class=\"note\">{said}</p>\n"));
     }
     body.push_str(&format!("<section><h2>What is kept</h2><p class=\"policy\">{}</p>", escape(super::subscribe::RETENTION.trim_end())));
+    if let Some(waiting) = site.shell.as_ref().and_then(|shell| export_refusal(&shell.home, now_secs())) {
+        body.push_str(&format!("<p class=\"note\">{waiting}</p>"));
+    }
     let current = research_consent(site);
     let shown = match current {
         Some(1) => "contributed for research (CC0)".to_owned(),
@@ -1353,6 +1386,25 @@ mod redteam;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_second_export_inside_the_window_is_refused_with_the_time_named() {
+        let home = std::env::temp_dir().join(format!("mini-export-cooldown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let t = 1_794_268_800;
+        assert!(super::export_refusal(&home, t).is_none(), "the first export may start");
+        drop(crate::world_export::claim_export(&home, t).unwrap());
+        std::fs::write(home.join("exports/world-1.sha256"), "ab".repeat(32)).unwrap();
+        let refused = super::export_refusal(&home, t + 60).expect("inside the window");
+        assert!(refused.contains("the last began 2026-11-10 00:00 UTC, the next may begin from 2026-11-10 00:10 UTC"), "{refused}");
+        assert!(refused.contains(&"ab".repeat(32)), "the last archive's digest is shown");
+        assert!(super::export_refusal(&home, t + 600).is_none(), "after the window a new export may start");
+        let held = crate::world_export::claim_export(&home, t + 600).unwrap();
+        assert!(super::export_refusal(&home, t + 601).unwrap().contains("already running"), "a second export while one runs");
+        drop(held);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn only_reads_and_local_lines_may_be_stopped_at_the_deadline() {
         let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

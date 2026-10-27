@@ -2692,6 +2692,24 @@
     "oc-chunked",
     "oc-checksum",
     "oc-chunk-offset",
-    "oc-lazyops"
+    "oc-lazyops",
+    "content-encoding"
+  ],
+  "dav_methods": [
+    "PROPFIND",
+    "PROPPATCH",
+    "MKCOL",
+    "COPY",
+    "MOVE",
+    "LOCK",
+    "UNLOCK",
+    "REPORT",
+    "OPTIONS"
+  ],
+  "dav_headers": [
+    "depth",
+    "destination",
+    "overwrite",
+    "lock-token"
   ]
 }

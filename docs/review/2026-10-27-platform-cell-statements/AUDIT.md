@@ -543,3 +543,54 @@ needed**: it is justified only for a refused transfer, which drops the built wri
 for every other plan, and for `none`. Restate it as `committed.written = built ∨
 (committed.await.source = .performed (.refused _) ∧ committed.written = none)` so consumers of the
 equality keep it.
+
+## 2026-10-27, twelfth pass: L1 restatement 7e39fe90 (pass-4 (a) gaps)
+
+**Verdict: two of the three gaps are closed. Proofs may continue. Two statement items are owed before
+the receiver is called "decided on the deployed cell".**
+
+**Gap 1, signature coverage: CLOSED.** `receiverContext.encode current i = m.frame current (commandAt roots i)
+i.validUntil`, the signed header's frame that `verifyNative` receives. `CredentialSignatureAdmission.prepare`
+refuses unless `controller.envelope.header = header snapshot … validUntil` (`sourceBinding`), so the frame
+is the receiver's own. The custodian cosigns the same frame.
+
+**`PinCollision`: a real collision, not the old vacuity.** Its two fields are `source p i ≠ source p j`
+and equal `pinDigest customization` of exactly those two strings. It is inhabited only by an actual
+cSHAKE collision on compared inputs, which matches the `ArgumentCollision` pattern. `Context.binds` derives
+it from `pins` (realised through `frame_effectsDigest`) and `sourceCovers` (the injective codecs). No
+statement takes it as a free escape.
+
+**Gap 3, a pole through the real path: CLOSED.** `signed_command_admitted` builds the ingress with
+`ingressCodec`/`commandCodec`/`canonicalEnvelopeCodec`, decodes it back, shows the envelope frame is
+`encode`, and admits through the gate and `Admits` with the verdict recorded under the enrolled key. That
+is the transcript boundary, as agreed.
+
+**Gap 2, decided on the loaded cell: HALF.** `Reachable.controller_stays` and
+`platform_written_only_by_install` (from `kernelOnly [.platformInstall]`) are proved. `receiverDecides`
+now quantifies over any loader satisfying `Reachable` and `holds`. Two things are still owed. (i) The bridge
+from the deployed loader: for every durable snapshot the Host reaches, `PlatformCellDomain.load d snap =
+some L → Reachable d.controller L.cell.logical`. This is the conjunction of the writer theorem and a
+genesis clause. (ii) The genesis clause has no producer. `NativeHostGenesis` seeds no platform cell
+(no `PlatformCellLayout.genesisStore` in the seed), so on today's genesis `load` is `none` and every
+install is `platformUnavailable`. That is expected until L1's re-genesis, but state it as the owed
+keystone, not leave it as a hypothesis.
+
+**`validUntil`: checked, but by the verifier, not the spec.** The deployed path refuses an expired
+header: `CredentialSignedEnvelopeController.prepare` tests `envelope.header.validUntil < state.height`
+(`:293`) against the request's admission height (the Host's logical height, not a wall clock), and it
+surfaces as `CredentialSignatureAdmission.Reject.expired`. But `PlatformCell.Admits` never mentions
+`validUntil`, so the spec admits an expired install that the receiver refuses. Soundness holds (the
+receiver refuses more), but `receiverDecides` covers only the gate. Add `height ≤ i.validUntil` to
+`Admits`, with a teeth pole `expired_refused`, so the spec and the full receiver agree.
+
+## 2026-10-27, thirteenth pass: prefix entries with tags (hot-path-v4; judged on the described amendment)
+
+The pushed tip (`107f040d`) still passes record bytes, so this pass judges the amendment as described.
+**Verdict: nothing from passes 7 and 9 breaks, on one condition.** `ffState` still has no prefix in its
+type, so execution stays impossible. The added prefix `verifyTags` from the seed's chain is a further
+refusal, and an honest Store passes it because `exact`'s `OwnEntries` already verifies every entry's
+tag, so `exact` stays satisfiable. Reading receipt roots from the tags is decoding, not execution. The
+reader's prefix guarantee moves back from chain-hash collision resistance to KMAC; update the header.
+**The condition:** the root log read from the tags is new served state. `Opened.view`/`View` must carry it,
+and `View.Honest` must pin it (each entry's receipt root equals the replay's root at that height), or `exact`
+and `keystone` leave it unstated.

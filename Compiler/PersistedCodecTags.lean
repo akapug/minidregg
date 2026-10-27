@@ -154,7 +154,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev fn_selective_release_key_v2 : String := "DREGG/FN/SELECTIVE-RELEASE-KEY/v2"
 @[persisted_codec_tag] abbrev participant_factory_observe : String := "DREGG/PARTICIPANT/FACTORY-OBSERVE/"
 @[persisted_codec_tag] abbrev application_dispatch_request_bind_v2 : String := "DREGG/APPLICATION/DISPATCH-REQUEST-BIND/v2"
-@[persisted_codec_tag] abbrev durable_checkpoint_byte_v3 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [3]
+@[persisted_codec_tag] abbrev durable_checkpoint_byte_v4 : List UInt8 := "DREGG.DURABLE.CHECKPOINT".toUTF8.toList ++ [4]
 @[persisted_codec_tag] abbrev pay_self_enrol_subject_v1 : String := "DREGG.PAY.SELF-ENROL.SUBJECT/v1"
 @[persisted_codec_tag] abbrev fn_selective_ingress_v3 : String := "DREGG/FN/SELECTIVE-INGRESS/v3"
 @[persisted_codec_tag] abbrev well_signed_v1 : String := "DREGG/WELL/SIGNED/v1"
@@ -233,7 +233,7 @@ namespace Minidregg.Compiler.PersistedCodecTags
 @[persisted_codec_tag] abbrev certify_args_v1 : String := "DREGG.CERTIFY.ARGS/v1"
 @[persisted_codec_tag] abbrev pay_soltx_nullifier_v1 : String := "DREGG.PAY.SOLTX.NULLIFIER/v1"
 @[persisted_codec_tag] abbrev application_lifecycle_claim_source_v1 : String := "DREGG/APPLICATION/LIFECYCLE-CLAIM-SOURCE/v1"
-@[persisted_codec_tag] abbrev objective_activity_record_v8 : String := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v8"
+@[persisted_codec_tag] abbrev objective_activity_record_v9 : String := "DREGG/OBJECTIVE/ACTIVITY-RECORD/v9"
 @[persisted_codec_tag] abbrev application_lifecycle_begin_ingress_v2 : String := "DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v2"
 @[persisted_codec_tag] abbrev application_retry_create_begin_ingress_v4 : String := "DREGG/APPLICATION/RETRY-CREATE-BEGIN-INGRESS/v4"
 @[persisted_codec_tag] abbrev seat_args_v1 : String := "DREGG.SEAT.ARGS/v1"
