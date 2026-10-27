@@ -414,7 +414,19 @@ pub(crate) fn worker_call(socket: &Path, request: &Value) -> Result<Value> {
 
 /// Render a worker reply as a decoded outcome. Exit status: 0 decided and
 /// performed, 1 decided refused, 3 undecided (the exact retry is printed).
+/// The amount this install actually reserved on the world's tool task (set once the reservation
+/// is confirmed); the receipt's `budget` line.
+static INSTALL_BUDGET: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn report(reply: &Value, as_json: bool) -> Result<()> {
+    let mut reply = reply.clone();
+    if let (Some(amount), Some(object)) = (INSTALL_BUDGET.get(), reply.as_object_mut()) {
+        if object.contains_key("receipt") {
+            object.insert("budget".into(), json!({"toolReservation":amount,"from":"the world's metered tool task (released by settle 0 if the birth is refused)",
+                "birthFee":"debited from the member's own account by the Host's resource-birth tariff"}));
+        }
+    }
+    let reply = &reply;
     if as_json {
         println!("{}", serde_json::to_string_pretty(reply).map_err(|e| e.to_string())?);
     }
@@ -427,6 +439,9 @@ fn report(reply: &Value, as_json: bool) -> Result<()> {
                 println!("{state}: {detail}");
                 if let Some(receipt) = reply.get("receipt") {
                     println!("receipt: {receipt}");
+                }
+                if let Some(amount) = INSTALL_BUDGET.get() {
+                    println!("budget: {amount} units reserved on the world's tool task; the birth fee came from your own account");
                 }
             }
             Ok(())
@@ -806,8 +821,15 @@ pub(crate) fn tool_intent(subject: &str, nonce: &str, name: &str, tool_ref: &Val
 fn reserve_tool(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &Value, amount: &str) -> Result<()> {
     use crate::workspace::{self as w, member_path};
     let attempt = root.join("attempts").join(format!("apps-reserve-{}", w::ref_file(name)));
+    let reserved = || {
+        let retained = root.join("sources").join(format!("apps-reserve-{}.json", w::ref_file(name)));
+        if let Some(amount) = w::bounded_json(&retained).ok().and_then(|v| v.pointer("/grain/operation/amount").and_then(Value::as_str).map(str::to_owned)) {
+            let _ = INSTALL_BUDGET.set(amount);
+        }
+    };
     if attempt.exists() {
         if w::accepted_outcome(&attempt)?.is_some() {
+            reserved();
             return Ok(());
         }
         if attempt.join("call.bin").is_file() {
@@ -825,7 +847,9 @@ fn reserve_tool(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &V
     crate::create_private(&intent_path, &serde_json::to_vec_pretty(&intent).map_err(|e| e.to_string())?)?;
     eprintln!("apps tool reservation attempt: {}", attempt.display());
     crate::submit(&w::workspace_host(ws)?, &member_path(ws, "config")?, &intent_path, std::ffi::OsStr::new("grain-intent"), &member_path(ws, "key")?, &attempt, false)?;
-    w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("toolReservationRefused: see {}", attempt.display()))
+    w::accepted_outcome(&attempt)?.ok_or_else(|| format!("toolReservationRefused: see {}", attempt.display()))?;
+    reserved();
+    Ok(())
 }
 
 /// Release this install's tool reservation after its birth was definitely refused, so one failed
