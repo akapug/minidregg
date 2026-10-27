@@ -183,19 +183,6 @@ CONTROLLER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/controller.pub" | tr -d ' \n')
 TOOL_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/tool.pub" | tr -d ' \n')
 test "$CONTROLLER_PUBLIC" != "$TOOL_PUBLIC"
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" '. + $profile[0].operator' \
-    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-profiled.json"
-  mv "$EVIDENCE/operator-profiled.json" "$EVIDENCE/operator.json"
-fi
 # OPERATOR_PROVIDER_PINS (a JSON file, non-profiled provider bootstraps only)
 # adds the Host's provider pins before genesis, so the provider purse is born
 # under the per-route tariff it names (HERMES-TARIFF): exactly
@@ -210,54 +197,34 @@ if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
     (.providerServices | type == "array" and length == 1) and
     (.providerServices[0].providerResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
     { echo 'OPERATOR_PROVIDER_PINS is invalid' >&2; exit 2; }
-  jq --slurpfile pins "$OPERATOR_PROVIDER_PINS" '. + $pins[0]' \
-    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-pinned.json"
-  mv "$EVIDENCE/operator-pinned.json" "$EVIDENCE/operator.json"
 fi
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-cat >"$EVIDENCE/genesis.json" <<EOF
-{"domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-  {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"100",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"100",
-   "accountPredicate":{"type":"all","predicates":[]}}],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
-if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  jq --arg public "$PROVIDER_PUBLIC" '.enrollments += [{
-    key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-      publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
-    accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
-    factoryObserveCapabilityId:"57",initialBalance:"100",
-    accountPredicate:{type:"all",predicates:[]}}]' \
-    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-provider.json"
-  mv "$EVIDENCE/genesis-provider.json" "$EVIDENCE/genesis.json"
-fi
+# The genesis through the one template (native/resource-client/scenario-genesis.sh): only what this
+# world differs by. The controller is the sponsor; the tool (and, for a provider bootstrap, the
+# provider) are further enrollments. A profiled bootstrap pins the profile's grain birth tariff as the
+# world's grain platform (lifecycle management and the completion custodian as `run.sh init` makes
+# them), its provider service and its factory predicate; OPERATOR_PROVIDER_PINS pins its provider service.
+jq -n --arg tool "$TOOL_PUBLIC" --arg provider "${PROVIDER_PUBLIC:-}" --arg withProvider "${PROVIDER_BOOTSTRAP:-0}" '
+  [{subject: 8, keyId: 8008, publicKey: $tool, accountId: 8, spendCapabilityId: 42,
+    controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 100}]
+  + (if $withProvider == "1" then
+      [{subject: 9, keyId: 9009, publicKey: $provider, accountId: 9, spendCapabilityId: 43,
+        controlCapabilityId: 56, factoryObserveCapabilityId: 57, initialBalance: 100}] else [] end)' \
+  >"$EVIDENCE/enrollments.json"
+overlay='.sponsor.initialBalance = 100'
 if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" '.factoryPredicate = $profile[0].factoryPredicate' \
-    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-profiled.json"
-  mv "$EVIDENCE/genesis-profiled.json" "$EVIDENCE/genesis.json"
+  overlay="$overlay | .grainPlatform.grainBirthTariff = $(jq -c .operator.grainBirthTariff "$PROFILE")
+    | .providerServices = $(jq -c .operator.providerServices "$PROFILE")
+    | .factoryPredicate = $(jq -c .factoryPredicate "$PROFILE")"
+else
+  overlay="del(.grainPlatform) | $overlay"
 fi
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
+  overlay="$overlay | .providerServices = $(jq -c .providerServices "$OPERATOR_PROVIDER_PINS")"
+fi
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$REPO/native/resource-client/scenario-genesis.sh" "$EVIDENCE" "$CONTROLLER_PUBLIC" "$overlay" \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
 CONFIG="$EVIDENCE/deployment/pinned-config.json"

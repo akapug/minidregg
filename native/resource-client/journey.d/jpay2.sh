@@ -35,6 +35,9 @@ mkdir -p "$DIR"
 # The genesis clock is chosen by the one candidate helper, never written here.
 . "$(dirname -- "$0")/lib/genesis-params.sh"
 resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || exit 2
+# The genesis is the one template's (scenario-genesis.sh beside genesis.sh); this hook passes only
+# what its world differs by.
+SCENARIO_GENESIS="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)/scenario-genesis.sh"; export SCENARIO_GENESIS
 exec python3 - "$DIR" <<'PY'
 import hashlib, json, os, struct, subprocess, sys, time
 import nacl.signing
@@ -55,37 +58,21 @@ def fail(message):
 # ---------------------------------------------------------------- genesis
 keys = {s: nacl.signing.SigningKey.generate() for s in SUBJECTS}
 def enrollment(s):
-    return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
-                    "publicKey": keys[s].verify_key.encode().hex(), "activeFrom": "0",
-                    "activeUntil": "1000000", "nextKeyDigest": None},
-            "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
-            "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
-            "initialBalance": "100", "accountPredicate": {"type": "all", "predicates": []}}
-operator = {"domain": 8501, "federation": 9, "factoryId": FACTORY, "resourceBookId": BOOK_ID,
-            "authorityCellId": AUTH_ID, "issuer": 5, "ownerBudget": 100000, "lifetime": 10000,
-            "tariffBase": 3, "tariffPerBirth": 2, "tariffPerGrant": 1,
-            "tariffPerInitialPayloadByte": 0, "collector": 99, "asset": 0, "genesisHeight": 10,
-            "expectedSeed": 0, "storageBinary": STORE, "storageRoot": path("store"),
-            "signatureBinary": VERIFIER}
-json.dump(operator, open(path("operator.json"), "w"), indent=1)
-profile = json.loads(subprocess.run([HOST, path("operator.json"), "profile"], check=True,
-                                    capture_output=True).stdout)
-genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BOOK_ID),
-           "authorityCellId": str(AUTH_ID), "federation": "9", "tariffBase": "3",
-           "tariffPerBirth": "2", "tariffPerGrant": "1", "tariffPerInitialPayloadByte": "0",
-           "collector": "99", "asset": "0", "expectedSemantics": profile["semantics"],
-           "issuerEpoch": "2", "genesisHeight": "10",
-           "factoryPredicate": {"type": "all", "predicates": []},
-           "enrollments": [enrollment(s) for s in SUBJECTS],
-           "factoryControllerSubject": str(EMBER),
-           "factoryControllerCapability": str(FACTORY_CONTROL),
-           "clockTickers": [],
-           "tailBound":"256", "issuanceCap":"1000000000000000",
-           "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
-               "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
-               "feeDebit", "leaseByteBlocks")}}
-with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
-subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+    # the compact form genesis.sh completes (keyEpoch, activity window, nextKeyDigest, accountPredicate)
+    return {"subject": s, "keyId": 7000 + s, "publicKey": keys[s].verify_key.encode().hex(),
+            "accountId": acct(s), "spendCapabilityId": 1000 + s, "controlCapabilityId": 2000 + s,
+            "factoryObserveCapabilityId": 3000 + s, "initialBalance": 100}
+os.makedirs(DIR, exist_ok=True)
+with open(path("enrollments.json"), "w") as out: json.dump([enrollment(s) for s in PAYERS + [LATE]], out)
+# EMBER is the sponsor; the clock subject moves off 70 (a payer) to 900.
+overlay = (f"del(.grainPlatform) | .sponsor.subject = {EMBER} | .sponsor.keyId = {7000 + EMBER}"
+           f" | .sponsor.accountId = {acct(EMBER)} | .sponsor.spendCapabilityId = {1000 + EMBER}"
+           f" | .sponsor.controlCapabilityId = {2000 + EMBER} | .sponsor.factoryObserveCapabilityId = {3000 + EMBER}"
+           f" | .sponsor.initialBalance = 100 | .factoryControllerCapability = {FACTORY_CONTROL}"
+           " | .clock.subject = 900 | .clock.accountId = 900 | .clock.keyId = 9900")
+subprocess.run(["sh", os.environ["SCENARIO_GENESIS"], DIR, keys[EMBER].verify_key.encode().hex(), overlay,
+                path("enrollments.json")], check=True,
+               env=dict(os.environ, STORE=STORE, VERIFIER=VERIFIER, HOST=HOST, MINI=MINI))
 subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                 "--source", path("genesis.json"), "--dir", path("deployment")],
                check=True, capture_output=True)

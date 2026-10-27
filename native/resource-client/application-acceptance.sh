@@ -115,50 +115,18 @@ SECOND_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/second.pub" | tr -d ' \n')
 [ "$OWNER_PUBLIC" != "$FIRST_PUBLIC" ] && [ "$OWNER_PUBLIC" != "$SECOND_PUBLIC" ] &&
   [ "$FIRST_PUBLIC" != "$SECOND_PUBLIC" ]
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8527,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-
-cat >"$EVIDENCE/genesis.json" <<EOF
-{"domain":"8527","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-  {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$OWNER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$FIRST_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"9009","keyEpoch":"2","algorithm":"1","subject":"9",
-    "publicKey":"$SECOND_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"9","spendCapabilityId":"43","controlCapabilityId":"53",
-   "factoryObserveCapabilityId":"56","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}}
- ],
- "factoryControllerSubject":"7","factoryControllerCapability":"57","clockTickers":[],
- "tailBound":"256", "issuanceCap":"1000000000000000",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+# The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+jq -n --arg first "$FIRST_PUBLIC" --arg second "$SECOND_PUBLIC" '[
+  {subject: 8, keyId: 8008, publicKey: $first, accountId: 8, spendCapabilityId: 42,
+   controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 1000},
+  {subject: 9, keyId: 9009, publicKey: $second, accountId: 9, spendCapabilityId: 43,
+   controlCapabilityId: 53, factoryObserveCapabilityId: 56, initialBalance: 1000}]' >"$EVIDENCE/enrollments.json"
+# subject 9's control capability is 53, so the factory controller's moves to 57
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$HERE/scenario-genesis.sh" "$EVIDENCE" "$OWNER_PUBLIC" \
+  'del(.grainPlatform) | .domain = 8527 | .factoryControllerCapability = 57 | .sponsor.initialBalance = 1000' \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" \
   >"$EVIDENCE/bootstrap.stdout"
