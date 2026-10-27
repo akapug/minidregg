@@ -8,7 +8,7 @@ Store is retained.
 From the Mini repository root:
 
 ```sh
-lake env lean --run scripts/probe-participant-key-enrollment.lean \
+lake env lean --run scripts.probe-participant-key-enrollment [deleted 1e68f88d] \
   native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier \
   native/credential-signature-verifier/target/debug/examples/sign-probe \
   native/hyperdocument-link-sqlite-store/target/release/minidregg-link-sqlite-store
@@ -40,7 +40,7 @@ Source SHA-256 at the run:
 | `Kernel/ParticipantKeyEnrollmentReceiver.lean` | `905ff49c93d7e9df65689332efa84e1d4ad27ea53b4ee4f50586d2bc62249bf2` |
 | `Kernel/NativeHostReplay.lean` | `ed0f41efa6750b204ce477e116e4a9276ddee350a44dbd572a4798d8e09b8fcc` |
 | `Kernel/NativeHost.lean` | `11794e2fd2cb72a19d80e3f3a7790f6f955ad5969e95dad55e069bfc39922e08` |
-| `scripts/probe-participant-key-enrollment.lean` | `c2c3411e382d948dd0c5fac7fbf4a830dbd37c493cddc405623bfae2d7f4ca07` |
+| `scripts.probe-participant-key-enrollment [deleted 1e68f88d]` | `c2c3411e382d948dd0c5fac7fbf4a830dbd37c493cddc405623bfae2d7f4ca07` |
 
 Execution binary SHA-256:
 

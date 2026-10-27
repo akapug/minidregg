@@ -38,6 +38,7 @@ FILES = {'controller.json': 524288, 'host-config.json': 1048576,
 FINAL_FILES = {'state/shared-app-refs/agent-ticket.bin': 1048576,
                **{f'state/oracle-grant/{n}': 1048576 for n in ('seal.json', 'call.bin', 'submit-marker.json', 'receipt.json')}}
 BINS = ('grain-runtime', 'mini', 'minidregg-host')
+CONSENT_BIN = 'minidregg-client-consent'
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
 
 
@@ -221,7 +222,7 @@ def occupied_ids():
         require(isinstance(h, dict) and h.get('removed') is True and isinstance(h.get('receipt'), dict), 'removed controller receipt malformed')
         r = h['receipt']; store = r.get('store')
         require(isinstance(store, str) and re.fullmatch('[0-9a-f]{16}', store) and path.name == store + '.json'
-                and r.get('protocol') == 'mini-spk-controller-v1' and r.get('name') == 'mini-c-' + store
+                and r.get('protocol') in ('mini-spk-controller-v1', 'mini-spk-controller-v2') and r.get('name') == 'mini-c-' + store
                 and ident(r.get('uid')) and ident(r.get('gid')), 'removed controller identity malformed')
         if store in reservations:
             require((r['uid'], r['gid']) == (reservations[store]['controllerUid'], reservations[store]['controllerGid']), 'removed controller reservation changed')
@@ -356,13 +357,37 @@ def store_context(store, helper):
     return r, base
 
 
-def names(store):
-    return [f'mini-spk-controller-{store}.service', f'mini-spk-controller-proxy-{store}.socket',
-            f'mini-spk-controller-proxy-{store}.service']
+def names(store, consent=False):
+    units = [f'mini-spk-controller-{store}.service', f'mini-spk-controller-proxy-{store}.socket',
+             f'mini-spk-controller-proxy-{store}.service']
+    return units + ([f'mini-spk-controller-consent-{store}.socket',
+                     f'mini-spk-controller-consent-{store}.service'] if consent else [])
+
+
+def has_consent(r):
+    return r.get('protocol') == 'mini-spk-controller-v2'
+
+
+def binary_names(r):
+    return (*BINS, CONSENT_BIN) if has_consent(r) else BINS
+
+
+def consent_environment(r, base, pins):
+    if not has_consent(r):
+        return {}
+    home = Path(r['home'])
+    return {'MINI_LOCAL_HOST': str(home / 'bin/minidregg-host'),
+            'MINI_CONSENT_HOST': str(base / 'bin' / CONSENT_BIN),
+            'MINI_CONSENT_CONFIG': str(home / 'host-config.json'),
+            'MINI_CONSENT_SOCKET': str(home / 'consent/peer.sock'),
+            'MINI_CONSENT_PEER_UID': '0',
+            'MINI_CONSENT_SHA256': pins['providerSha256'],
+            'MINI_CONSENT_CONFIG_SHA256': pins['configSha256']}
+
 
 
 def manager_properties(name):
-    output = run(['/usr/bin/systemctl', 'show', name, '--property=LoadState,FragmentPath,Transient,User,ActiveState,MainPID'],
+    output = run(['/usr/bin/systemctl', 'show', name, '--property=LoadState,FragmentPath,Transient,User,ActiveState,MainPID,InvocationID'],
                  stdout=subprocess.PIPE).stdout.decode()
     return dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
 
@@ -371,10 +396,10 @@ def load(store, helper):
     registry, base = store_context(store, helper)
     ancestry(base, {0})
     receipt = json.loads(read_file(base / 'receipt.json', 0, 65536))
-    require(receipt['protocol'] == 'mini-spk-controller-v1' and receipt['store'] == store
+    require(receipt['protocol'] in ('mini-spk-controller-v1', 'mini-spk-controller-v2') and receipt['store'] == store
             and receipt['operatorUid'] == registry['operatorUid'], 'controller receipt differs')
     require(receipt['name'] == 'mini-c-' + store and receipt['home'] == str(base / 'home')
-            and receipt['units'] == names(store), 'controller layout differs')
+            and receipt['units'] == names(store, has_consent(receipt)), 'controller layout differs')
     account = pwd.getpwnam(receipt['name'])
     require((account.pw_uid, account.pw_gid, account.pw_dir, account.pw_shell) ==
             (receipt['uid'], receipt['gid'], receipt['home'], '/usr/sbin/nologin'), 'controller account changed')
@@ -424,13 +449,14 @@ def create(store, helper):
     mkdir(base / 'listener', registry['operatorUid'], registry['operatorGid'])
     mkdir(base / 'reverse', a.pw_uid, a.pw_gid, 0o711)
     m = (base / 'home').stat()
-    receipt = {'protocol': 'mini-spk-controller-v1', 'store': store, 'name': name, 'uid': a.pw_uid, 'gid': a.pw_gid,
+    receipt = {'protocol': 'mini-spk-controller-v2', 'store': store, 'name': name, 'uid': a.pw_uid, 'gid': a.pw_gid,
                'operatorUid': registry['operatorUid'], 'operatorGid': registry['operatorGid'],
-               'home': str(base / 'home'), 'homeIdentity': [m.st_dev, m.st_ino], 'units': names(store),
+               'home': str(base / 'home'), 'homeIdentity': [m.st_dev, m.st_ino], 'units': names(store, True),
                'activationPeerUid': 0, 'proxyServiceUid': registry['operatorUid'],
                'controllerHome': str(base / 'home'), 'controllerUid': a.pw_uid,
                'listenerSocket': str(base / 'listener/api.sock'), 'reverseSocket': str(base / 'reverse/custody.sock'),
-               'operatorSocket': str(base / 'home/operator/mini.sock'), 'operatorPeerUid': 0}
+               'operatorSocket': str(base / 'home/operator/mini.sock'), 'operatorPeerUid': 0,
+               'consentSocket': str(base / 'home/consent/peer.sock'), 'consentPeerUid': 0}
     write_new(base / 'receipt.json', encoded(receipt))
     write_new(base / 'namespace.json', encoded(namespace), mode=0o644)
     return receipt
@@ -448,7 +474,7 @@ def no_processes(uid):
     require(not live, f'controller still has processes; preserve resources: {live}')
 
 
-def unit_bytes(r, base, upstream):
+def unit_bytes(r, base, upstream, consent=None):
     home = Path(r['home'])
     stem = 'mini-spk-controller-proxy-' + r['store']
     common = ('\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\n'
@@ -465,7 +491,26 @@ def unit_bytes(r, base, upstream):
              f'[Service]\nUser={r["operatorUid"]}\nGroup={r["operatorGid"]}\n'
              f'ExecStart={base}/bin/mini serve-agent-operator-proxy --socket {home}/operator/mini.sock '
              f'--upstream {upstream} --config {base}/proxy/config.json --controller-uid {r["uid"]}\n' + common)
-    return dict(zip(r['units'], (runtime.encode(), sock.encode(), proxy.encode())))
+    values = [runtime, sock, proxy]
+    if has_consent(r):
+        require(consent is not None, 'consent service pins missing')
+        environment = consent_environment(r, base, consent)
+        # Values are fixed canonical paths, decimal identities and exact hashes.
+        runtime += ''.join(f'Environment={key}={value}\n' for key, value in environment.items())
+        values[0] = runtime
+        consent_stem = 'mini-spk-controller-consent-' + r['store']
+        values.append(f'[Unit]\nDescription=Mini controller consent activation {r["store"]}\n[Socket]\n'
+                      f'ListenStream={home}/consent/peer.sock\nSocketUser={r["uid"]}\nSocketGroup={r["gid"]}\n'
+                      f'SocketMode=0600\nDirectoryMode=0700\nRemoveOnStop=yes\nAccept=no\nService={consent_stem}.service\n')
+        values.append(f'[Unit]\nDescription=Mini independent full consent {r["store"]}\nRequires={consent_stem}.socket\n'
+                      f'[Service]\nUser={r["operatorUid"]}\nGroup={r["operatorGid"]}\n'
+                      f'ExecStart={base}/bin/mini serve-controller-consent --socket {home}/consent/peer.sock '
+                      f'--consent {base}/bin/{CONSENT_BIN} --config {base}/consent/config.json '
+                      f'--consent-sha256 {consent["providerSha256"]} --config-sha256 {consent["configSha256"]} '
+                      f'--controller-uid {r["uid"]} --anchors {base}/consent/anchors\n'
+                      f'Environment=HOME={base}/consent\nReadWritePaths={base}/consent/anchors\n' + common)
+    require(len(values) == len(r['units']), 'controller service layout differs')
+    return dict(zip(r['units'], (value.encode() for value in values)))
 
 
 def acl_text(path):
@@ -511,7 +556,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     data = {n: read_file(bundle / n, op, limits[n], required_mode=0o600 if n.startswith('custody/') else None)
             for n in actual}
     require(all(len(data['custody/' + role + '.key']) == 32 for role in ('controller', 'tool', 'dispatch', 'provider')), 'controller key size differs')
-    binaries = {n: read_file(bins / n, op, 256 * 1024 * 1024, True) for n in BINS}
+    binaries = {n: read_file(bins / n, op, 256 * 1024 * 1024, True) for n in binary_names(r)}
     config = json.loads(data['controller.json']); host = json.loads(data['host-config.json'])
     home = Path(r['home'])
     require(config.get('commands') == [] and config.get('stateDir') == str(home / 'state')
@@ -522,7 +567,8 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     require(stat.S_ISSOCK(um.st_mode), 'primary operator endpoint is not a socket')
     ancestry(public.parent, {0, op}); pm = metadata(public, op)
     require(stat.S_ISSOCK(pm.st_mode), 'public endpoint is not a socket')
-    units = unit_bytes(r, base, upstream)
+    consent = {'providerSha256': sha(binaries[CONSENT_BIN]), 'configSha256': sha(data['host-config.json'])} if has_consent(r) else None
+    units = unit_bytes(r, base, upstream, consent)
     require(all(not (UNITS / n).exists() and not (UNITS / n).is_symlink() for n in units), 'controller unit already exists')
     require(all(manager_properties(n).get('LoadState') == 'not-found' for n in units),
             'controller unit name already loaded; replacement refused')
@@ -530,11 +576,18 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
                'binaries': {n: sha(v) for n, v in binaries.items()}, 'publicSocket': str(public),
                'upstreamSocket': str(upstream), 'upstreamIdentity': [um.st_dev, um.st_ino], 'acl': [],
                'units': {n: sha(value) for n, value in units.items()}}
+    if consent is not None:
+        pending['consent'] = consent
     write_new(base / 'stage-pending.json', encoded(pending))
     # Fresh home only; no running controller can redirect the root setup writes.
     require(not list(home.iterdir()), 'controller home is not fresh')
     for rel in ('bin', 'custody', 'state', 'state/shared-app-refs', 'state/oracle-grant', 'workspace', 'operator', 'tool-requests'):
         mkdir(home / rel, r['uid'], r['gid'])
+    if has_consent(r):
+        mkdir(home / 'consent', r['uid'], r['gid'])
+        mkdir(base / 'consent', op, registry['operatorGid'])
+        mkdir(base / 'consent/anchors', op, registry['operatorGid'])
+        write_new(base / 'consent/config.json', data['host-config.json'], op, registry['operatorGid'])
     mkdir(base / 'bin', mode=0o755); mkdir(base / 'configs'); mkdir(base / 'proxy', op, registry['operatorGid'])
     for n, value in data.items():
         write_new(home / n, value, r['uid'], r['gid'])
@@ -553,7 +606,7 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg):
     pending['units'] = {n: sha(value) for n, value in units.items()}
     write_new(base / 'stage.json', encoded(pending))
     run(['/usr/bin/systemctl', 'daemon-reload'])
-    return {**r, 'stage': str(base / 'stage.json')}
+    return {**r, 'stage': str(base / 'stage.json'), **({'consent': consent_record(base, r, pending)} if has_consent(r) else {})}
 
 
 def checked_units(base, r, partial=False):
@@ -568,16 +621,60 @@ def checked_units(base, r, partial=False):
         if partial and not (UNITS / n).exists() and not (UNITS / n).is_symlink():
             continue
         require(sha(read_file(UNITS / n, 0, 16384)) == stage['units'][n], 'controller unit changed')
-    for n in BINS:
+    for n in binary_names(r):
         if partial and not (base / 'bin' / n).exists() and not (base / 'bin' / n).is_symlink():
             continue
         require(sha(read_file(base / 'bin' / n, 0, 256 * 1024 * 1024, True)) == stage['binaries'][n], 'controller binary changed')
+    if has_consent(r) and not partial:
+        pins = stage['consent']
+        require(pins['providerSha256'] == stage['binaries'][CONSENT_BIN], 'consent provider pin differs')
+        for path, owner in ((base / 'consent/config.json', r['operatorUid']),
+                            (Path(r['home']) / 'host-config.json', r['uid'])):
+            require(sha(read_file(path, owner, 1048576, required_mode=0o600)) == pins['configSha256'],
+                    'consent configuration bytes differ')
+        metadata(base / 'consent/anchors', r['operatorUid'], 0o700)
     return stage
+
+
+def consent_record(base, r, stage):
+    return {**stage['consent'], 'transportSha256': stage['binaries']['mini'], 'socket': str(Path(r['home']) / 'consent/peer.sock'),
+            'socketUnit': r['units'][3], 'serviceUnit': r['units'][4],
+            'serviceUid': r['operatorUid'], 'controllerUid': r['uid'], 'activationPeerUid': 0,
+            'provider': str(base / 'bin' / CONSENT_BIN), 'config': str(base / 'consent/config.json'),
+            'anchors': str(base / 'consent/anchors')}
+
+
+def consent_readiness(base, r, stage):
+    # Observation only: the authenticated first request still has to complete
+    # native independent admission. Never report process readiness as consent.
+    record = consent_record(base, r, stage)
+    observed = manager_properties(record['serviceUnit'])
+    require(observed.get('ActiveState') == 'active' and observed.get('MainPID', '0').isdigit()
+            and int(observed['MainPID']) > 0, 'consent service is not active')
+    require(re.fullmatch('[0-9a-f]{32}', observed.get('InvocationID', '')) is not None, 'consent invocation identity missing')
+    pid = int(observed['MainPID'])
+    proc = Path('/proc') / str(pid)
+    require(proc.stat().st_uid == r['operatorUid'], 'consent process UID differs')
+    executable = (proc / 'exe').stat(); expected = (base / 'bin/mini').stat()
+    require((executable.st_dev, executable.st_ino) == (expected.st_dev, expected.st_ino), 'consent process executable differs')
+    raw_stat = (proc / 'stat').read_text()
+    ticks = int(raw_stat[raw_stat.rfind(')') + 2:].split()[19])
+    m = metadata(Path(record['socket']), r['uid'], 0o600)
+    require(stat.S_ISSOCK(m.st_mode), 'consent endpoint is not a socket')
+    again = (proc / 'stat').read_text()
+    require(int(again[again.rfind(')') + 2:].split()[19]) == ticks, 'consent process start changed')
+    after = manager_properties(record['serviceUnit'])
+    require(after.get('MainPID') == str(pid) and after.get('InvocationID') == observed.get('InvocationID')
+            and after.get('ActiveState') == 'active', 'consent process changed during readiness')
+    return {**record, 'mainPid': pid, 'processStartTicks': ticks, 'invocationId': observed.get('InvocationID'),
+            'processExecutableIdentity': [executable.st_dev, executable.st_ino],
+            'socketUid': m.st_uid, 'socketMode': '0600', 'socketIdentity': [m.st_dev, m.st_ino],
+            'readiness': 'process-and-socket-only', 'independentAdmissionObserved': False}
 
 
 def service(store, helper, action):
     _, base, r = load(store, helper)
-    checked_units(base, r, partial=(action == 'stop'))
+    stage = checked_units(base, r, partial=(action == 'stop'))
     for name in r['units']:
         observed = manager_properties(name)
         if observed.get('LoadState') == 'not-found' and action == 'stop':
@@ -588,6 +685,8 @@ def service(store, helper, action):
             expected = r['uid'] if name == r['units'][0] else r['operatorUid']
             require(observed.get('User') == str(expected), 'controller manager unit user differs')
     if action == 'start':
+        if has_consent(r):
+            run(['/usr/bin/systemctl', 'start', r['units'][3], r['units'][4]])
         run(['/usr/bin/systemctl', 'start', r['units'][1], r['units'][0]])
         ready = Path(r['home']) / 'state/control.sock'
         deadline = time.monotonic() + 180
@@ -613,7 +712,8 @@ def service(store, helper, action):
         if present:
             run(['/usr/bin/systemctl', 'stop', *present])
         no_processes(r['uid'])
-    return {'store': store, 'action': action, 'units': r['units']}
+    return {'store': store, 'action': action, 'units': r['units'],
+            **({'consent': consent_readiness(base, r, stage)} if action == 'start' and has_consent(r) else {})}
 
 
 def config_update(store, helper, source_arg):
@@ -638,6 +738,9 @@ def config_update(store, helper, source_arg):
     value = json.loads(data); home = Path(r['home'])
     require(value.get('commands') == [] and value.get('stateDir') == str(home / 'state')
             and value.get('controlSocket') == str(home / 'state/control.sock'), 'controller config layout differs')
+    if has_consent(r):
+        require(value.get('hostConfig') == str(home / 'host-config.json')
+                and value.get('cwd') == str(home / 'workspace'), 'consent-bound controller config layout differs')
     old = read_file(home / 'controller.json', r['uid'], 524288)
     require((base / 'configs' / (sha(old) + '.json')).is_file(), 'current config is not a retained revision')
     for name, content in proof.items():
@@ -665,7 +768,7 @@ def controller_child(r, argv, setup=None):
         if setup:
             setup()
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            preexec_fn=identity, env={**ENV, 'HOME': r['home']})
+                            preexec_fn=identity, env={**ENV, 'HOME': r['home'], **r.get('_consentEnvironment', {})})
     try:
         total = 0; deadline = time.monotonic() + 1200
         sel = selectors.DefaultSelector()
@@ -688,7 +791,9 @@ def controller_child(r, argv, setup=None):
 
 def tool(store, helper, verb, request_id, extra):
     _, base, r = load(store, helper)
-    checked_units(base, r)
+    stage = checked_units(base, r)
+    if has_consent(r):
+        r['_consentEnvironment'] = consent_environment(r, base, stage['consent'])
     require(re.fullmatch('[0-9a-f]{32}', request_id), 'request ID must be 32 lowercase hex')
     home = Path(r['home']); runtime = str(base / 'bin/grain-runtime'); socket = str(home / 'state/control.sock')
     if verb == 'tool':
@@ -740,10 +845,46 @@ def reserve_export(store, helper, attempt_text):
     return {'protocol': 'mini-spk-controller-evidence-v1', 'store': store, 'files': files}
 
 
+def preserve_consent_state(base, r):
+    if not has_consent(r):
+        return None
+    source = base / 'consent/anchors'
+    if not source.exists():
+        require(not source.is_symlink(), 'consent anchor directory is a dangling link')
+        return {'notCreated': True}
+    metadata(source, r['operatorUid'], 0o700)
+    limits = {'binding': 1024, 'frontier': 12_103_784, 'lock': 1}
+    children = list(source.iterdir())
+    require(len(children) <= 3 and all(p.name in limits for p in children), 'unexpected consent anchor files')
+    # Also retain partial initialization (binding without frontier); never turn a
+    # failed verifier into a fresh unanchored verifier by discarding its bytes.
+    data = {p.name: read_file(p, r['operatorUid'], limits[p.name], allow_empty=p.name == 'lock', required_mode=0o600)
+            for p in children}
+    require(not data.get('lock'), 'consent lock contents differ')
+    target = HISTORY / (r['store'] + '-consent')
+    if not target.exists():
+        mkdir(target)
+    ancestry(target, {0}); metadata(target, 0, 0o700)
+    require(set(p.name for p in target.iterdir()) <= set(data), 'retained consent archive differs')
+    for name, content in data.items():
+        path = target / name
+        if path.exists() or path.is_symlink():
+            require(read_file(path, 0, limits[name], allow_empty=name == 'lock', required_mode=0o600) == content,
+                    'retained consent archive bytes differ')
+        else:
+            write_new(path, content)
+    return {'directory': str(target), 'files': {name: {'sha256': sha(content), 'size': len(content)}
+                                               for name, content in data.items()}}
+
+
 def remove(store, helper):
     _, base, r = load(store, helper)
     stage = checked_units(base, r, partial=True)
     service(store, helper, 'stop')
+    if not HISTORY.exists():
+        mkdir(HISTORY)
+    ancestry(HISTORY, {0})
+    consent_archive = preserve_consent_state(base, r)
     # Only restore ACLs on the exact recorded objects and exact unchanged ACL.
     for path in sorted(base.glob('acl-[0-9][0-9][0-9].json'), reverse=True):
         intent = json.loads(read_file(path, 0, 16384))
@@ -774,7 +915,7 @@ def remove(store, helper):
     if not HISTORY.exists():
         mkdir(HISTORY)
     ancestry(HISTORY, {0})
-    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True}))
+    write_new(HISTORY / (store + '.json'), encoded({'receipt': r, 'stage': stage, 'removed': True, 'consentArchive': consent_archive}))
     shutil.rmtree(base)
     return {'store': store, 'removedController': r['name'], 'receipt': str(HISTORY / (store + '.json'))}
 

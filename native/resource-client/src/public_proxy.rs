@@ -579,7 +579,7 @@ pub(crate) fn serve_agent_activated(socket: &Path, upstream: &Path, config: &Pat
 }
 
 #[cfg(target_os = "linux")]
-fn validate_activated_listener(listener: &UnixListener, socket: &Path) -> Result<(), String> {
+pub(crate) fn validate_activated_listener(listener: &UnixListener, socket: &Path) -> Result<(), String> {
     if !socket.is_absolute() || listener.local_addr().map_err(|e| e.to_string())?.as_pathname() != Some(socket) {
         return Err("activated listener path differs from configured controller socket".into());
     }

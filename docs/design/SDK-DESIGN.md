@@ -42,7 +42,7 @@ nucleus; `@[export] minidregg_intent_encode`), and the SDK carries ONE client-si
 `golden/lean-intents.json`, which Lean's own entry points emit
 (`Kernel/Contracts/IntentVectors.lean`), and, with the `lean-codec` feature, against Lean's
 exported code itself: `native/mini-sdk/lean-codec/build.sh` links `libminidregg-intents.so`
-(`Kernel.Contracts.Intents` and its closure) and `tests/lean_codec.rs` dlopens it and compares
+(`Kernel.Contracts.Intents` and its closure) and `native/mini-sdk/tests/lean_codec.rs` dlopens it and compares
 `minidregg_intent_encode` / `minidregg_intent_id_preimage` with the encoder on every golden row.
 The TypeScript SDK has no encoder: it reaches the Rust
 core through wasm. (Earlier, the SDK owned a `MINI/SDK/INTENT/v1` encoding with a copy in each

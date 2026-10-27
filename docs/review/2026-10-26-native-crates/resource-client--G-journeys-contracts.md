@@ -18,7 +18,7 @@
 4. KBW and KC fail in all three CI runs. KCHR and KCHC always fail because `check-journey.sh` never builds `libminidregg-channel.so`. JMKT fails because `jmarket.sh:177` uses a stale shell grammar, `enroll plan NAME KEY` with no next key. `j12w.sh:121` and `jdisclose.sh:48` carry the same line, so J12W and JDISCLOSE are broken the same way.
 5. K12I is broken. `j12i-links.sh:222,233` calls the Host CLI verb `link-index`, which a merge dropped from `Host/Main.lean` (`a26328e9`); `presence-index` survives at `Host/Main.lean:7917`.
 6. In the 10-23 run, K11 hung for 3,600 s and left the world service dead. The next 17 hooks then failed with "Connection refused", because `journey.sh` checks service liveness only after a hook succeeds (`journey.sh:995-997`).
-7. `acceptance.sh` is broken: it sends content targets with `"schemaVersion": "1"` (`:222`, `:337`), while `Kernel/ContentResource.lean:432` is `commandVersion := 10`. `TRAFFIC-PRIVACY.md:206-208` records `selected-release-acceptance.sh` failing for this reason. `journey-timers/ticker.sh` waits forever for `$W/public/mini.sock`, which `journey.sh:158` no longer creates. `scripts/cohort-native-tcp.py` passes `--key` where `mix-live` now requires `--roster`.
+7. `acceptance.sh` is broken: it sends content targets with `"schemaVersion": "1"` (`:222`, `:337`), while `Kernel/ContentResource.lean:432` is `commandVersion := 10`. `TRAFFIC-PRIVACY.md:206-208` records `selected-release-acceptance.sh` failing for this reason. `journey-timers/ticker.sh` waits forever for `$W/public/mini.sock`, which `journey.sh:158` no longer creates. `native/resource-client/scripts/cohort-native-tcp.py` passes `--key` where `mix-live` now requires `--roster`.
 8. M6 is permanently UNBUILT (no `journey.d/m6.sh`, pinned in `scripts/gates/journey-unbuilt.tsv`). JJOB1, JJOB, J14 and J17 need environment variables that `check-journey.sh` never supplies, and their step functions do not call `needs_env`, so they record FAIL instead of UNCONFIGURED.
 9. JPD (`jprotected-docs.sh`) runs `scripts/protected-document-journey.sh`. That script's own header says it "has only had bash syntax checking; it does not claim a completed journey".
 10. The prose is mostly construction diary, not present-state contract. Six `.txt` files and the dated tails of COHORT-TCP, PQ-MAILBOX, TRAFFIC-PRIVACY, PAID-COLD-ENTRY, MEMBER-WORKSPACE and APPEND-PROOF are appended run logs. Several contradict code or each other: PQ-MAILBOX says the handshake is "MCE2", the code is MCE4 (`cohort_tcp.rs:425,691-694`); TRAFFIC-ENROLLMENT says "pure ML-KEM768", the code is hybrid; `qualification/pq-native-pipeline.py` does not exist.
@@ -316,7 +316,7 @@ All of these run on the journey's live Store unless noted.
 | Script | Lines | Claims to test | `mini` subcommands | Host ops / CLI | Step | Runner | Last recorded run | Verdict |
 |---|---|---|---|---|---|---|---|---|
 | `cohort-native-tcp.py` | 503 | roster-enrolled cohort over TCP, observers | mix; mix-live; keygen | — | — | — | docs/evidence/traffic-v13 (2026-10-04, lane W15) | EO |
-| `scripts/cohort-native-tcp.py` | 185 | the older pre-shared-key orchestrator | mix (key, registrar-key); mix-live `--key` | — | — | — | — | BR (`mix-live` needs `--roster`: `cohort_tcp.rs:1076`) |
+| `native/resource-client/scripts/cohort-native-tcp.py` | 185 | the older pre-shared-key orchestrator | mix (key, registrar-key); mix-live `--key` | — | — | — | — | BR (`mix-live` needs `--roster`: `cohort_tcp.rs:1076`) |
 | `cohort-scratch-world.py` | 179 | scratch Host world + fixtures for the carrier | workspace; serve; retry | ops 2, 3 (v2 frames) | — | — | traffic-v13 | EO |
 | `cohort-secrecy-check.py` | 84 | plaintext absent off the endpoint side | — | scp/ssh to `--remote` | — | — | traffic-v13 | EO |
 | `cohort-two-host/env.sh` | 19 | lane W15 paths (`/srv/lanes/W15-TRAFFIC-V13`, `w15b`) | — | — | — | — | traffic-v13 | EO |
@@ -325,10 +325,10 @@ All of these run on the journey's live Store unless noted.
 | `cohort-two-host/run-planted-faults.sh` | 12 | plants must go red | — | — | — | — | traffic-v13/planted-faults.summary: both exit 1 | EO |
 | `cohort-two-host/run-single-mce3.sh` | 9 | v12 schedule through roster enrollment | — | — | — | — | traffic-v13 | EO |
 | `cohort-two-host/run-v13-two-host.sh` | 15 | relays on host B | — | — | — | — | traffic-v13 | EO |
-| `scripts/check-cohort-async.sh` | 14 | focused nextest + release (`df -B1`, 50 GB free) | cargo | — | — | — | — | LU (one-off build task) |
-| `scripts/check-traffic-adoption-consumer.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
-| `scripts/check-traffic-emission-memory.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
-| `scripts/check-traffic-pipeline.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
+| `native/resource-client/scripts/check-cohort-async.sh` | 14 | focused nextest + release (`df -B1`, 50 GB free) | cargo | — | — | — | — | LU (one-off build task) |
+| `native/resource-client/scripts/check-traffic-adoption-consumer.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
+| `native/resource-client/scripts/check-traffic-emission-memory.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
+| `native/resource-client/scripts/check-traffic-pipeline.sh` | 17 | same pattern | cargo | — | — | — | — | LU |
 | `check-traffic-crypto-alias.sh` | 14 | same pattern | cargo | — | — | — | — | LU |
 
 #### J. Selected release and fn
@@ -561,7 +561,7 @@ Correct deferrals worth naming:
 | `selected-release-acceptance.sh` | the same, plus "legacy logical-image `store read-to` failed (`published byte record is missing`)" | TRAFFIC-PRIVACY.md:209-211 |
 | `selected-release-drop-reply.rs` | only meaningful inside the above | `selected-release-acceptance.sh:381` |
 | `journey-timers/ticker.sh` | waits `while ... [ ! -S "$W/public/mini.sock" ]` (`ticker.sh:10`) and gates every tick and certify on it (`:16`, `:22`); `journey.sh:158` puts the world socket at `$JOURNEY_RT/world.sock` and passes it to J0 (`:573`), so `$W/public/mini.sock` never exists | `newparticipant-acceptance.sh:50` defaults to `ROOT/public/mini.sock` only when no socket is given |
-| `scripts/cohort-native-tcp.py` | passes `mix-live ... --key worker.key` (`:69-70`) without `--roster`; `cohort_tcp.rs:1073-1077` requires `--roster` for every non-cover action and `args.finish()` refuses unknown flags | COHORT-TCP.md:43-44: "a bare 32-byte Ed25519 roster key or key file ... refuse by name" |
+| `native/resource-client/scripts/cohort-native-tcp.py` | passes `mix-live ... --key worker.key` (`:69-70`) without `--roster`; `cohort_tcp.rs:1073-1077` requires `--roster` for every non-cover action and `args.finish()` refuses unknown flags | COHORT-TCP.md:43-44: "a bare 32-byte Ed25519 roster key or key file ... refuse by name" |
 | `journey.d/jprotected-docs.sh` (JPD) | execs `scripts/protected-document-journey.sh`, whose header says it "has only had bash syntax checking; it does not claim a completed journey" (`:2-4`) | — |
 | `journey.d/jchan-relay.sh`, `jchan-client.sh` | default socket root `/home/ember/build/chr` and `/home/ember/build/chc` (`jchan-relay.sh:43`, `jchan-client.sh:53`) | breaks on any box without that path unless `CHR_SOCK_ROOT`/`CHC_SOCK_ROOT` is set |
 
@@ -636,8 +636,8 @@ Each item below is not a `journey.sh` step, not a runner row, not called by anot
 | Lost-reply / fault proxies | `journey.d/lib/hostraw.py proxy` (lose-reply, never-forward; `:109-144`); `selected-release-drop-reply.rs` (95, rustc at run time); `selected-source-drop-reply.sh` (23, host shim); `acceptance.sh` generated `drop-first-submit.sh` (`:241-250`); `welcome-continuity-journey.sh` heredoc `proxy.py` + `ssh-shim` (`:102-127`); `jpay-v2.sh` transparent fault relay (`:416-530`); `cohort-native-tcp.py` 2 s delay relay (`:225-234`) | `hostraw.py` (JROTL, runner `journey`) | the rest. Fold the delay/drop modes into `hostraw.py proxy` |
 | Raw Host frame encoders | `hostraw.py:47-50` vs inline encoders in `jnock2/3/3p/5.sh`, `jjob.sh`, `jjob1.sh`, `jjob-money.sh`, `jeval.sh`, `j12x.sh`, `journey-stranger.py`, `journey-key-adoption.py`, `paid-entry-adapter.py`, `cohort-scratch-world.py`, `jpay-v2.sh` (about 15 copies; nine use v1) | `hostraw.py` | the inline copies (`import hostraw`) |
 | Consent/codec imitation | `thin-proxy.py` slot parser (`:46-107`) vs the Lean codec | — | replace with a Lean-emitted forged plan (section 8) |
-| Cohort orchestrators | `cohort-native-tcp.py` (503, roster MCE4) vs `scripts/cohort-native-tcp.py` (185, pre-shared key, broken) | root | `scripts/cohort-native-tcp.py` |
-| Traffic build gates | `scripts/check-cohort-async.sh`, `check-traffic-adoption-consumer.sh`, `check-traffic-emission-memory.sh`, `check-traffic-pipeline.sh`, root `check-traffic-crypto-alias.sh`: five 14–17-line copies of "free-space floor, focused nextest, release build, copy binary" | none (one-off lane tasks) | all five |
+| Cohort orchestrators | `cohort-native-tcp.py` (503, roster MCE4) vs `native/resource-client/scripts/cohort-native-tcp.py` (185, pre-shared key, broken) | root | `native/resource-client/scripts/cohort-native-tcp.py` |
+| Traffic build gates | `native/resource-client/scripts/check-cohort-async.sh`, `check-traffic-adoption-consumer.sh`, `check-traffic-emission-memory.sh`, `check-traffic-pipeline.sh`, root `check-traffic-crypto-alias.sh`: five 14–17-line copies of "free-space floor, focused nextest, release build, copy binary" | none (one-off lane tasks) | all five |
 | Protected docs | `journey.d/jprivate-docs.sh` (171, unhooked) vs `scripts/protected-document-journey.sh` (307, run by JPD via `jprotected-docs.sh`) | the scripts/ one (unproven) | `jprivate-docs.sh` |
 | Continuity journeys | `continuity-journey.sh`, `fresh-onboarding-journey.sh`, `welcome-continuity-journey.sh`, `carry-source-journey.sh`: identical 30-line preamble (arg checks, `mktemp -d /tmp/mini-continuity.XXXXXX`, `rows.tsv`, `stop_server`; e.g. `continuity-journey.sh:1-30` vs `fresh-onboarding-journey.sh:1-30`) | welcome (runner) | merge into one driver with modes, or delete the three ungated ones |
 | Short-dir allocators | `journey.d/lib/shortdir.sh` vs `jinspect.sh:14` mktemp vs the continuity family's `/tmp/mini-continuity.*` vs `jchan-*.sh` `SOCKROOT` defaults | `shortdir.sh` | the others |

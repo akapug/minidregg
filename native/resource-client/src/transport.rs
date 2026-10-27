@@ -1394,7 +1394,7 @@ impl PinnedLocalInvocation {
 }
 
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
-struct HostProcess {
+pub(crate) struct HostProcess {
     child: std::process::Child,
     input: std::process::ChildStdin,
     output: std::process::ChildStdout,
@@ -1406,7 +1406,7 @@ struct HostProcess {
 
 impl HostProcess {
     /// Each restart must execute the advertised image and exact original settings.
-    fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
+    pub(crate) fn start_pinned(host: &Path, config: &Path, expected: &[u8; 32], expected_config: &[u8]) -> Result<Self, String> {
         let config_image = Self::checked_config(config, expected_config)?;
         let image = Self::checked_image(host, expected)?;
         Self::start_checked_images(host, config, image, config_image)
@@ -1553,7 +1553,7 @@ impl HostProcess {
     }
 
     /// `exchange` with the Host-time budget named by the caller.
-    fn exchange_within(&mut self, request: &[u8], budget: Duration) -> Result<Vec<u8>, String> {
+    pub(crate) fn exchange_within(&mut self, request: &[u8], budget: Duration) -> Result<Vec<u8>, String> {
         write_frame(
             &mut DeadlinePipeWrite {
                 writer: &mut self.input,

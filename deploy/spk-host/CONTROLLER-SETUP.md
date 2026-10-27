@@ -66,7 +66,8 @@ Stage only this explicit bundle, with no additional files or symlinks:
 - optionally `state/shared-app-refs/agent-ticket.bin` and the four files
   `state/oracle-grant/{seal.json,call.bin,submit-marker.json,receipt.json}`.
 
-`BIN_DIR` supplies `grain-runtime`, `mini` and `minidregg-host`. All source files
+`BIN_DIR` supplies `grain-runtime`, `mini`, `minidregg-host` and the source-matched
+`minidregg-client-consent` for new version-2 allocations. All source files
 must belong to the registered operator, be regular single-link files under
 protected, non-symlink ancestors, and have no set-ID bits, writable group/other
 bits or file capabilities. Each binary is bounded to 256 MiB. Configurations are
@@ -109,6 +110,42 @@ The public Host socket gets only a dedicated controller connect ACL and the
 necessary ancestor traversal ACLs. Existing extended ACLs refuse rather than
 having their masks widened. The primary private listener and Store files stay
 unchanged. ACL intent and completion receipts retain exact inode identities.
+
+New allocations also have a separate full consent service. Its activated socket
+is `HOME/consent/peer.sock`, under a controller-owned 0700 directory with mode
+0600. The service runs as the Store operator; the systemd-created listener's
+peer UID remains 0. It runs only the root-copied `mini serve-controller-consent`
+with a fixed provider, exact provider/configuration SHA-256 pins, controller UID
+and `WORLD/controller/consent/anchors`. The service configuration is an
+operator-owned 0600 copy of the exact `HOME/host-config.json` bytes. The
+controller gets no Store/verifier/key access through this setup.
+
+The runtime and fixed helper children select that service explicitly using
+`MINI_CONSENT_SOCKET`, `MINI_CONSENT_PEER_UID`, `MINI_CONSENT_SHA256` and
+`MINI_CONSENT_CONFIG_SHA256`, alongside the existing fixed `MINI_LOCAL_HOST`,
+`MINI_CONSENT_HOST` and `MINI_CONSENT_CONFIG` selections. The ordinary runtime's
+mini subprocesses inherit these values. Native consent retains this selection
+in its per-attempt pins; the transport checks the exact config/provider binding
+and controller peer, with no local or thin fallback. A controller config update
+keeps the fixed host-config path; it does not change the service settings.
+
+Only the operator-private anchor directory is writable through the consent
+service's systemd filesystem view; the Store stays read-only. The verifier may
+use its private temporary directory. Stop/start and controller configuration
+updates preserve the `binding`, `frontier` and `lock` files. Missing/corrupt
+retained state is a native refusal, not permission to replay from an empty
+frontier. Removal first copies these exact bounded files, including an
+incomplete initialization, to a root-private
+`/var/lib/mini-spk-controller-history/STORE-consent` archive and records their
+hashes. A changed archive refuses removal.
+
+Stage returns the consent service/socket/provider/config/identity pins. Start
+adds its observed systemd invocation, MainPID, process start ticks, exact
+executable inode and socket owner/mode. This is labeled **process and socket
+readiness only**; independent source admission is established by the actual
+native request, not by systemctl or an invented health response. Version-1
+allocations retain their original three units and three binaries for supported
+stop/export/removal; setup does not silently retrofit an old failed attempt.
 
 Stage the initial configuration, start the controller, and earn the session
 birth through `mini_create_application_session`. After the real event22/event27
@@ -163,7 +200,8 @@ They exercise source-file custody, links, bounds, capability refusal, private
 immutable copying, fixed unit users, request-ID reuse, actual Linux ACL grant/
 restore, delegated-range intersection, foreign/NSS/stale-grant exclusions,
 permanent and pending reservations, failure before account creation, and the
-exact reserve evidence export. Actual account/systemd setup and the complete source-admitted tool
+exact reserve evidence export, full-consent service pins, both configuration
+copies, legacy layout compatibility, and retained partial anchor state. Actual account/systemd setup and the complete source-admitted tool
 journey remain separate receiving tests.
 
 The entrypoint executes only its SHA-256-pinned Python companion bytes, read once

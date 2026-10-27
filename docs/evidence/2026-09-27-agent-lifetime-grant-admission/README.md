@@ -6,7 +6,7 @@ This is a source-only component cut following the committed lifetime-grant codec
 | --- | --- |
 | `Kernel/ApplicationAgentLifetimeGrantSource.lean` (domain-bound event ID follow-up) | `b51df9c18ff5393143281282be2ccde3433b11e6e0c2846bcf812224b7b85c1b` |
 | `Kernel/ApplicationAgentLifetimeGrantDelegation.lean` | `da7439f0bf27e048752616276d844f9ba1debbd00a77d0b73f78caadb46761f2` |
-| `Kernel/ApplicationAgentLifetimeGrantAtomicBirth.lean` | `38d82e9324bfa7337df821a5888e2615ce2ec46206416b6999830e2fefc570e1` |
+| `Kernel.ApplicationAgentLifetimeGrantAtomicBirth [deleted ad393729]` | `38d82e9324bfa7337df821a5888e2615ce2ec46206416b6999830e2fefc570e1` |
 | `Kernel/ApplicationAgentLifetimeGrantAdmission.lean` | `5fcd184b70b5947b26435ce3399747c340672b073db550b3d4bdd6aa06acf323` |
 | `Kernel/ApplicationAgentLifetimeGrantIntentTemplate.lean` | `67e62e0edb4b30fd16acb90c64a46bc45c4c1b7731ce057d2d6e723edfb3e4fe` |
 

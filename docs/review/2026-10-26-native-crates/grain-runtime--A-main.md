@@ -16,14 +16,14 @@ Files covered (line counts from `wc -l`):
 | native/grain-runtime/Cargo.toml | 32 |
 | native/grain-runtime/README.md | 413 |
 | native/grain-runtime/BYOK.md | 66 |
-| native/grain-runtime/CONFIG-MIGRATION.md | 182 |
-| native/grain-runtime/CONTROLLER-WRITE-SCOPES.md | 66 |
+| CONFIG-MIGRATION.md [deleted eedb450a] | 182 |
+| CONTROLLER-WRITE-SCOPES.md [deleted eedb450a] | 66 |
 | native/grain-runtime/RESIDENT-DELIVERY.md | 62 |
-| native/grain-runtime/RESIDENT-OUTCOMES.md | 61 |
+| RESIDENT-OUTCOMES.md [deleted 2050a348] | 61 |
 | native/grain-runtime/RESIDENT-REQUESTS.md | 104 |
 | native/grain-runtime/RESOURCE-WORKSPACE-EVIDENCE-2026-09-28.md | 49 |
 | native/grain-runtime/RESOURCE-WORKSPACE-MIGRATION.md | 9 |
-| native/grain-runtime/SESSION-FAILURE.md | 105 |
+| SESSION-FAILURE.md [deleted 2050a348] | 105 |
 | native/grain-runtime/SYSTEMD-MANAGERS.md | 96 |
 | native/grain-runtime/TERMINAL.md | 9 |
 | native/grain-runtime/acceptance.sh | 872 |

@@ -122,14 +122,14 @@ lines plus the TS package) can be deleted, or re-wired, without breaking any bin
 - **`fsread.rs` (119):** bounded regular-file reader that refuses a file that changes during the read (`:52-73`).
 - **`random.rs` (63):** `/dev/urandom` with `read_exact`, and a u128 decimal nonce (`:10-28`).
 - **`lean_codec.rs` (100, feature `lean-codec`):** dlopens `libminidregg-intents.so` and binds `mdi_*` from `lean-codec/shim.c` plus `minidregg_intent_encode` / `minidregg_intent_id_preimage` (`:50-73`).
-  - `lean-codec/build.sh` links it from `lake build Kernel.Contracts.Intents:o.export` objects, reusing `native/resource-client/channel-lib/closure.lean` (`build.sh:21`).
+  - `lean-codec/build.sh` links it from `lake build Kernel.Contracts.Intents:o.export` objects, reusing `native/mini-sdk/lean-codec/closure.lean` (`build.sh:21`).
 
 ### 1.4 Tests and evidence files
 
-- **`tests/golden.rs`:** `golden/vectors.json` (`MINI_SDK_REGEN=1` rewrites it, `:83-86`) and `golden/lean-intents.json` (56 rows, 27 admitted, printed by `Kernel/Contracts/IntentVectors.lean`). The test requires byte equality and at least 25 admitted and 25 refused rows (`:115-145`).
-- **`tests/lean_codec.rs`:** the live check against the Lean export, with a planted one-bit failure (`:81-87`).
-- **`tests/examples.rs`:** pins the example output.
-- **`tests/ssh.rs`, `tests/ssh_e2e.rs` (`#[ignore]`):** use a real sshd, driven by `tests/ssh-e2e.sh` (starts the Store via `run.sh` and an unprivileged loopback sshd forcing `deploy/shell/mini-socket-proxy`). `ssh-e2e-plant.sh` proves the gate can go red.
+- **`native/mini-sdk/tests/golden.rs`:** `golden/vectors.json` (`MINI_SDK_REGEN=1` rewrites it, `:83-86`) and `golden/lean-intents.json` (56 rows, 27 admitted, printed by `Kernel/Contracts/IntentVectors.lean`). The test requires byte equality and at least 25 admitted and 25 refused rows (`:115-145`).
+- **`native/mini-sdk/tests/lean_codec.rs`:** the live check against the Lean export, with a planted one-bit failure (`:81-87`).
+- **`native/mini-sdk/tests/examples.rs`:** pins the example output.
+- **`native/mini-sdk/tests/ssh.rs`, `native/mini-sdk/tests/ssh_e2e.rs` (`#[ignore]`):** use a real sshd, driven by `native/mini-sdk/tests/ssh-e2e.sh` (starts the Store via `run.sh` and an unprivileged loopback sshd forcing `deploy/shell/mini-socket-proxy`). `ssh-e2e-plant.sh` proves the gate can go red.
 - Gate rows are in `scripts/check-rust-tests.sh:204,225,238,246,254,537`.
 
 ### 1.5 mini-sdk-ts
@@ -158,7 +158,7 @@ lines plus the TS package) can be deleted, or re-wired, without breaking any bin
 | `op::CHALLENGE` | 4 | OBSERVATION_CHALLENGE | matched |
 | `op::QUERY` | 5 | AUTHORIZED_QUERY | matched; **no SDK caller** |
 | ssh_e2e DESCRIBE | 0 | DESCRIBE | matched (test only) |
-| ssh_e2e op 22 | 22 | APPLICATION_LIFECYCLE_BEGIN_SUBMIT, operator-only | used as the "refused on public socket" probe (`tests/ssh_e2e.rs:117-119`) |
+| ssh_e2e op 22 | 22 | APPLICATION_LIFECYCLE_BEGIN_SUBMIT, operator-only | used as the "refused on public socket" probe (`native/mini-sdk/tests/ssh_e2e.rs:117-119`) |
 | reply markers 254/255 | | `response_markers` 254 "never forwarded", 255 "Host refusal/outcome envelope" | matched (`operator.rs:557-571`) |
 
 The registry also defines marker 164 ("private ordinary dispatch definitive no-record refusal").
@@ -191,7 +191,7 @@ The SDK has no handling for it, so it falls to "unexpected operation" → `Uncer
 
 - **`DREGG/CONTRACT/INTENT/v1` bytes and the `InvocationId`.** These are defined in Lean (`Kernel/Contracts/Intents.lean:214-228`) and are in the build (`Kernel.lean:189`), but they are imported only by `Kernel/Contracts/IntentVectors.lean:17`. No Host or Kernel receiver decodes them. The Host's own `Kernel.Contracts.InvocationId` is a different thing, `(source, transaction, event)` (`Kernel/Contracts/Identities.lean:76-80`). The SDK's InvocationId and salt never reach the Host: `lower` drops the salt (`contracts.rs:421-430`). This is law-6 territory: a Lean codec whose only consumers are a client-local name and a test.
 - **`MINI/SDK/HEADERS/v1`, `MINI/SDK/CONFIRM/v1`** (`confirm.rs:15-16`). These are client-local by design.
-- **`MINI/SDK/HYBRID/ML-DSA-65/v1` and algorithm code 2** (`signer.rs:35`, `:48-55`). Lean has only `ed25519Algorithm := 1` (`Compiler/CredentialSignatureAdmission.lean:44`). `native/credential-signature-verifier/src/main.rs:45` says the context is "chosen by Lean", but no Lean definition exists. Only its test pins the string (`tests/mldsa.rs:11`).
+- **`MINI/SDK/HYBRID/ML-DSA-65/v1` and algorithm code 2** (`signer.rs:35`, `:48-55`). Lean has only `ed25519Algorithm := 1` (`Compiler/CredentialSignatureAdmission.lean:44`). `native/credential-signature-verifier/src/main.rs:45` says the context is "chosen by Lean", but no Lean definition exists. Only its test pins the string (`mldsa.rs [not in tree]:11`).
 - **The `retry-NNNN.*` layout and the standing rule** (`store.rs:81-167`, `custody.rs:73-97`). Lean has an `AttemptId {invocation, ordinal}` type (`Kernel/Contracts/Identities.lean:84-87`) but no classifier.
 
 ### 2.6 Environment and filesystem
@@ -217,7 +217,7 @@ No ports are bound and no listeners are created.
 4. **Sent or unsent classification** (`operator.rs:242-299`, `:412-432`, `:458-506`). Rust decides "certainly never reached the Host" from ssh's stderr text (`name_refusal`, `:181-195`) and from the presence of the stderr marker. This is a physical-boundary judgement, so it fits the README carve. But it directly licenses a successor attempt (`NeverSent`→`successor`), so a misclassification is a double-submit risk. The direction is conservative: anything ambiguous becomes `Uncertain`.
 5. **Which operator plans are checkable: `OPERATOR_PLAN_OPS`** (`consent.rs:20-21`, `:59-61`). This is a Rust allowlist in front of the Lean check. It should be derived from `protocol/host-operations.json`, and it has already drifted (210, 215).
 6. **Domain admission in lowering** (`contracts.rs:412-415`). The client refuses targets "governed by" a domain other than the deployment's. This is an admission-shaped decision. The Host checks domain itself, so it is redundant here and should not be a second authority.
-7. **The payload number rule** (`contracts.rs:226-267`). It duplicates Lean `integerValue?` (`Kernel/Contracts/Intents.lean:306`). The vectors hold the two together (`payload-number-*` rows). It is acceptable only because the live Lean check exists (`tests/lean_codec.rs`). It is still a twin by construction, against ATLAS law 13.
+7. **The payload number rule** (`contracts.rs:226-267`). It duplicates Lean `integerValue?` (`Kernel/Contracts/Intents.lean:306`). The vectors hold the two together (`payload-number-*` rows). It is acceptable only because the live Lean check exists (`native/mini-sdk/tests/lean_codec.rs`). It is still a twin by construction, against ATLAS law 13.
 8. **Identity binding.** The profile path family (`mini/<gen>`) and the derivation function are Rust/TS-authored (`profile.rs:20-36`). The Host binds keys via consent op 220 (`ClientConsentCore.lean:363-367`), so the authority stays in Lean. This is fine.
 9. **Not semantic:**
    - `explain` renders only (it does not decide).
@@ -261,7 +261,7 @@ No ports are bound and no listeners are created.
 - **F9 — the TS example test is red, and the admitted-intent pin is stale.**
   - Commit `eff01705` moved `ts/examples/intent.ts:29` to `schemaVersion: "10"`. `examples/intent.rs:37`, `examples/intent.expected` (bytes `…09ff…`) and the `example-invoke` vector all stay at 9.
   - So `ts/test/examples.test.ts:15-25` cannot pass. No gate runs it (§5).
-  - Separately, `tests/golden.rs:98-107` claims to reproduce "a REAL retained intent.json that the native Host … admitted" with schemaVersion 9. Per the same commit message, the current Host refuses v9 content commands (`unsupportedVersion`). The pin proves agreement with a wire that is no longer admitted.
+  - Separately, `native/mini-sdk/tests/golden.rs:98-107` claims to reproduce "a REAL retained intent.json that the native Host … admitted" with schemaVersion 9. Per the same commit message, the current Host refuses v9 content commands (`unsupportedVersion`). The pin proves agreement with a wire that is no longer admitted.
 - **F10 — durable leftovers.**
   - A crash leaves `.name.durable-PID-N-NANOS` staging files (`durable.rs:118`), and nothing sweeps them.
   - A crash after `hard_link` and before `remove_file` (`:228-235`) leaves a **second link to a secret** (0600, but a duplicate secret copy). `private::file_ok` would then refuse it as nlink=2 (`private.rs:32`) if it were later checked by name.
@@ -376,7 +376,7 @@ PAY, Discord). Every surface reaches mini-sdk only through resource-client and d
 
 ## 7. Deployability on a small public Linux VM
 
-- **Build:** pure Rust, stable toolchain. `std::path::absolute` (`durable.rs:80`) needs Rust ≥1.79. No C toolchain is needed except for `lean-codec` (leanc plus the Lean toolchain; test only). `--offline --locked` is used by the tests (`tests/examples.rs:12`).
+- **Build:** pure Rust, stable toolchain. `std::path::absolute` (`durable.rs:80`) needs Rust ≥1.79. No C toolchain is needed except for `lean-codec` (leanc plus the Lean toolchain; test only). `--offline --locked` is used by the tests (`native/mini-sdk/tests/examples.rs:12`).
 - **System dependencies at runtime:**
   - Unix only (`libc`, `std::os::unix`).
   - `/dev/urandom` (`random.rs:11`).

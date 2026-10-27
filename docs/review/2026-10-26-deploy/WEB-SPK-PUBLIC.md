@@ -731,7 +731,7 @@ second scenario. It must do the following:
 
 | item | lines | why |
 |---|---|---|
-| `native/spk-host/src/bin/spk-hostd.rs` + `src/endpoint.rs` + `http_entrance::serve_resident`/`serve_unavailable` (`:1221-1239`) | 42 + 314 + about 20 | run by nothing. It is the 503 the scout read as "by design". Delete together with the duplicate `init-custodian` entry point |
+| `spk-hostd.rs [deleted 469d69a5]` + `src/endpoint.rs` + `http_entrance::serve_resident`/`serve_unavailable` (`:1221-1239`) | 42 + 314 + about 20 | run by nothing. It is the 503 the scout read as "by design". Delete together with the duplicate `init-custodian` entry point |
 | `deploy/spk-host/HTTP-CUSTODIAN-CONTRACT.md` | 104 | contradicts the code (signer and delivery "unimplemented", proxy "one connection"). Rewrite it whole as the custodian contract, or fold it into the spk-host README |
 | `deploy/spk-host/README.md` "Who runs what" root-broker text (`:34-60`, `:147-150`) | about 35 | twin of `USER-TENANCY.md`, which says root broker configs refuse. Rewrite the section whole |
 | `native/spk-host/src/bin/spk-browser-proxy.rs` | 840 (320 tests) | if Caddy is the edge (D2), it has no role left: it is loopback-only and uses operator-trusted certificates. Delete it after the edge passes the M6 edge phase plus `jspk10-ws.py` through the edge. If D2 picks Rust, this binary *is* the edge and grows instead |
