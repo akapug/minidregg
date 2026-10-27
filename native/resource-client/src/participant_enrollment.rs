@@ -382,28 +382,28 @@ fn plan_custody(subject: &str, key_id: &str, public_key: &str, plan_view: &Value
 fn retained_plan_is_current(directory: &Path, pin: &Pin) -> Result<bool> {
     let retained = bounded(&directory.join("plan.frame"), transport::HOST_MAX_FRAME)?;
     let observation = private_bytes(&directory.join("observation/signed-observation.bin"), LIMIT)?;
-    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &pair(&observation, &pin.command)?);
+    let request = pair(&observation, &pin.command)?;
+    let current = session_invoke(&pin.host, &pin.operation_socket, &pin.config, 86, &request);
     let _ = take_host_decision();
-    let Ok(frame) = current else { return Ok(false) };
-    if frame == retained {
+    if current.as_ref().is_ok_and(|frame| *frame == retained) {
         return Ok(true);
     }
-    // A pinned plan: the Host's fresh plan differs only by its deadline when the source merely
-    // moved; pinned to the same observation height it is the retained pinned plan again (what the
-    // consent provider accepts, `checkExactOrPinned`). Anything else is a dead plan.
-    let Some(height) = &pin.pinned_at else { return Ok(false) };
-    let body = reply(&frame, 86)?;
-    let fresh = directory.join("plan-current.bin");
-    let fresh_pinned = directory.join("plan-current-pinned.bin");
-    for stale in [&fresh, &fresh_pinned] {
-        if stale.exists() { fs::remove_file(stale).map_err(|error| error.to_string())?; }
+    // A pinned plan outlives the source it was planned over: once a commit lands, the Host no longer
+    // plans over the retained observation (it refuses it with no record), so the Host cannot vouch
+    // for it. The authority is the one `seal` asks before it signs: the local consent provider
+    // re-derives the plan at the observation's height and accepts the exact or the pinned form
+    // (`NativeSpecializedConsent.checkExactOrPinned`). It judges, it signs nothing. Accepted: the
+    // plan is resumed; refused: it is dead and re-planned under the same request.
+    if pin.pinned_at.is_none() {
+        return Ok(false);
     }
-    retain_exact(&fresh, body)?;
-    let pinned_now = pin_plan_height(&pin.host, &pin.config, &fresh, height, &fresh_pinned)?;
-    for temporary in [&fresh, &fresh_pinned] {
-        let _ = fs::remove_file(temporary);
+    match crate::client_consent::operator_plan(&pin.host, &pin.config, 86, &request, &pin.plan) {
+        Ok(()) => Ok(true),
+        Err(_) => {
+            let _ = crate::client_consent::take_stale_observation();
+            Ok(false)
+        }
     }
-    Ok(pinned_now.is_some_and(|bytes| bytes == pin.plan))
 }
 
 /// The next free `replanned/NN` of a directory.
