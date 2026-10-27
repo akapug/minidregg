@@ -29,5 +29,5 @@ systemctl --user start "$unit"
 cd "$snapshot"
 export CARGO_TARGET_DIR="$target"
 SWARM_MEM_MAX=4G swarm-build taskset -c 22,23 cargo test -j2 --offline --locked -p minidregg-spk-host --lib source_stop -- --nocapture > "$evidence/source-stop.log" 2>&1
-MINI_SPK_STOPPED_RUNNING_PROBE=1 SWARM_MEM_MAX=4G swarm-build taskset -c 22,23 cargo test -j2 --offline --locked -p minidregg-spk-host --lib hostd::tests::source_stop_already_inactive_actual_manager_probe -- --exact --nocapture --test-threads=1 > "$evidence/manager.log" 2>&1
+SWARM_MEM_MAX=4G swarm-build taskset -c 22,23 cargo test -j2 --offline --locked -p minidregg-spk-host --lib hostd::tests::source_stop_already_inactive_actual_manager_probe -- --exact --ignored --nocapture --test-threads=1 > "$evidence/manager.log" 2>&1
 printf 'source_stop_tests=passed\nactual_manager_probe=passed\n' > "$evidence/result.txt"
