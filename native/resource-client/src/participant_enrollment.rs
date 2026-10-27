@@ -30,11 +30,6 @@ const COMMAND_KIND: &str = "participant-key-enrollment";
 const PLAN_KIND: &str = "participant-key-enrollment-plan";
 const INGRESS_KIND: &str = "participant-key-enrollment-ingress";
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
-/// A plan the Host made over a source newer than the observation it was given (a commit landed between
-/// the challenge and the plan): its pinned form differs from the Host's answer. The local consent
-/// provider authorizes against the current source, so such a plan is born unsignable; `plan` observes
-/// again instead of keeping it (the re-plan predicate matches this prefix).
-const BORN_STALE: &str = "enroll plan: the source moved between the observation and the Host's plan";
 
 pub(crate) fn json_private(path: &Path) -> Result<Value> {
     serde_json::from_slice(&private_bytes(path, 256 * 1024)?).map_err(|error| {
@@ -1119,9 +1114,6 @@ fn plan(mut args: Args) -> Result<()> {
             // survives the ticks between plan, possession and seal (`pin_plan_height`).
             let height = observation_height(&directory)?;
             match pin_plan_height(&host, &retained_config, &directory.join("plan.bin"), &height, &directory.join("plan-pinned.bin"))? {
-                Some(pinned_plan) if pinned_plan != plan => Err(format!(
-                    "{BORN_STALE} (observed at height {height}); observing again"
-                )),
                 Some(pinned_plan) => {
                     let pinned_view = inspect(
                         &host,
@@ -1144,10 +1136,9 @@ fn plan(mut args: Args) -> Result<()> {
         // The Host's own stale-root, or the local consent provider's proven stale observation (the
         // source moved between the Host's challenge and the local check; nothing was signed): both
         // observe again. Any other refusal stays terminal.
-        |error, decision| {
+        |_, decision| {
             let consent_stale = crate::client_consent::take_stale_observation();
             stale_refusal(&host, &public_socket, &retained_config, decision) || consent_stale
-                || error.starts_with(BORN_STALE)
         },
         |number| {
             crate::replan::retire(&directory, number, &["request.json", "config.json", "enrollment.lock"])
