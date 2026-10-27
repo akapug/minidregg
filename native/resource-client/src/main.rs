@@ -39,7 +39,6 @@ mod fleet;
 mod append_proof;
 #[cfg(unix)]
 mod fleet_sign;
-mod bend_session;
 #[cfg(unix)]
 mod objective_invoke;
 #[cfg(unix)]
@@ -4477,12 +4476,6 @@ fn main() -> ExitCode {
     workspace::private::adopt_keycache_passphrase();
     #[cfg(unix)]
     let parsed = match env::args_os().nth(1) {
-        Some(command) if command == OsStr::new("bend-session-sign") => {
-            env::args_os().skip(2)
-                .map(|value| value.into_string().map_err(|_| "Bend session arguments must be UTF-8".to_owned()))
-                .collect::<Result<Vec<_>>>()
-                .and_then(|arguments| bend_session::run(&arguments))
-        }
         Some(command) if command == OsStr::new("fleet-sign") => {
             fleet_sign::run(env::args_os().skip(2).collect())
         }
