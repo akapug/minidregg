@@ -803,7 +803,7 @@ published bytes.
 **Kernel** (scope: the Lean kernel model of each turn): the theorems named in the sections
 above, and `admitted_front_end`, `admitted_source_semantics`, `admitted_data_unique`.
 
-**Not proved, though it reads like it:** `TotalProof law := law`; `checked_erasure` and the
+**Not proved, though it reads like it:** `checked_erasure` and the
 prepared output's `native_matches`/`no_returns` are projections; `ExecutionWith.runExact`
 records that a value came from the call that produced it.
 
