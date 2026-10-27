@@ -112,3 +112,41 @@ python3 -I scripts/host-operations.py check
 The Mac's system file table fills when several agents build at once ("Too many open files in
 system"). Retry; do not lower anything. Commit named files with
 `git -c commit.gpgsign=false commit -F <file>`, never `git stash`.
+
+## Audit (c) design (for lane/lean-audit-c, L1c)
+
+Today `law.admit … = none` in `Pending.admitBranch` (Kernel/ResourceBirthPolicyController.lean,
+the `| none => .error .policyRejected` arm at about line 1630) also covers the address,
+membership and request-binding failures of `ComposedPolicyAdmission.admitWithCheck`, and the
+compiled-law range and cast checks. So `.policyRejected` does not mean the law refused, and
+`PlanPassNotLawRefused` is false as stated. The design:
+
+1. `admitBranch` runs `ComposedPolicyAdmission.bind config wanted.2 evidence law membership
+   epoch revision` first (Compiler/ComposedPolicyAdmission.lean, `bind`, `Bound`). On `none`
+   it refuses with a new `Reject.policyBinding`. It then checks the compiled law's verdicts
+   on the branch step, each refusal named by a new constructor: `supported` →
+   `.policyUnsupported`, `inputsInRange` → `.policyInputRange`, `castInjOn` →
+   `.policyCastAlias`. Only then does `law.admit` run, and its `none` (`.policyRejected`)
+   is the law's verdict alone. The authorization term is unchanged (still `law.admit`).
+2. `Pending.factoryVerdict` becomes supported ∧ inputsInRange ∧ castInjOn ∧ eval, read off
+   `(pending.branchConfig .factory).resolve?` on `pending.branchStep .factory`. Note
+   `(branchConfig b).step = branchStep b` holds by definition (`PhysicalLawResolution.config`).
+3. `PlanRefusalSound`: a verdict of `some false` makes `BranchAccepted pending .factory`
+   empty. This follows from `BranchAccepted.law_admits_step` (about line 1658) and the uniqueness of
+   `loadTarget`'s `.ok` graph against `PreparedLaw.graphExact`. For the range and cast cases,
+   acceptance implies `compiledLawAccepts`, hence both checks.
+4. `PlanPassNotLawRefused`: a verdict of `some true` means `admitBranch .factory` never answers
+   `.policyRejected`. Past `bind`, `Bound.verifies_iff_eval` (ComposedPolicyAdmission.lean,
+   with `PreparedLaw.verifies_iff_eval`, `lower_complete`) turns the verdict into
+   `config.verifies … law.witness = true`, and `Bound.admit_of_verifies` gives `some`.
+   State the converse too: `.policyRejected` implies a plan verdict of `some false`.
+5. `NativeHost.birthRefusal` (Kernel/NativeHost.lean, about line 839) names the range and cast
+   refusals as `invokeRefusal` does (`PreparedPolicyLeg.rangeRefusal`/`castRefusal` in
+   Kernel/PreparedInvocationDiagnostics.lean, through `ComposedLawDiagnostics.publicRefusal`).
+   It also surfaces a `prepareDraft`/`preparePending` error as a named refusal instead of
+   `.toOption` passing silently.
+6. The keystones and `factoryVerdict_congr` sit at the end of ResourceBirthPolicyController.lean
+   (`Pending.factoryVerdict`, `PlanRefusalSound`, `PlanPassNotLawRefused`); extend them there.
+   Refusals reach the Host as `repr reason` text, and the new constructors only change that
+   text. The birth Reject has no exhaustive match outside its file (GrainResourceBirthAdmission
+   wraps it as `metadata reason`).
