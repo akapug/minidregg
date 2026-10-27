@@ -87,6 +87,7 @@ cp "$HERE/genesis-params.example.json" "$RUN/params.json"
 . "$HERE/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$HERE/../.." || exit 2
 sh "$GENESIS_PARAMS_SH" fill-genesis "$RUN/params.json"
+fill_completion_custodian "$RUN/params.json" "$RUN" "$MINI" || exit 2
 run genesis sh "$HERE/genesis.sh" "$RUN/params.json" "$PUBLIC" "$CLOCK_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$RUN/fixture"
 run bootstrap "$MINI" bootstrap --host "$HOST" --config "$RUN/fixture/operator.json" \
