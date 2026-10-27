@@ -52,7 +52,7 @@ account pays for app creation; MINI_REENROLL_APPS_MAX 50000; apps bootstrap budg
 Parent-task law admits the birth touch for any delegated-grant holder (Option A, L1). storeIdentity replaces
 expectedSeed (every grain world's tag changes at the next candidate). Lanes' umask 0022 on the build boxes.
 Subscriber tier 4000 DREGG/month on GLM via the Z.AI plan key (terms question flagged to ember). Distill at 400k;
-fixed cuts; no foreground waits; lanes run their own rows.
+continuous integration onto main (no cut cadence); no foreground waits; lanes run their own rows.
 
 ## Owner items outstanding (ember)
 

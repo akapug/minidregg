@@ -148,7 +148,7 @@ and pay-watcher units hardened; the measured lane rules in `docs/COORDINATION-20
 2026-10-27-genesis-coupling/`, `2026-10-27-process/`, `2026-10-27-platform-cell-statements/`) and the
 harvested backlog (`docs/BACKLOG-2026-10-27.md`: 34 landed, 72 open, 14 superseded, 9 in flight).
 
-**Cuts** (the integrator reads `lane/*` itself every 60–90 min; one report per cut): cut 6 = 23861533
+**Past cuts** (integration is continuous now; no cadence): cut 6 = 23861533
 (tour 38 PASS / 0 FAIL / 1 UNCONFIGURED, the headless-Chromium row now configured on the build box;
 composed rooms/churn/documents/restart PASS, apps/connector/residents blocked only on the scratch world's
 genesis, now fixed in dregg-infra; the enrol acceptance PASS with five members back to back under a
