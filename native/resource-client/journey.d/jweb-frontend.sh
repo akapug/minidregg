@@ -187,6 +187,23 @@ docpage=$(req GET "/doc/$DOC")
 row doc-append "$(grep -q 'outcome admitted' <<<"$page" && grep -q "$TEXT" <<<"$docpage" && echo 1 || echo 0)" "$(st) receipt=${RID:-none} $(grep -o 'class="headline">[^<]*' <<<"$page" | head -1 | cut -c18-120)"
 page=$(req GET "/receipts/${RID:-none}")
 row receipt "$([ "$(st)" = 200 ] && grep -q 'outcome admitted' <<<"$page" && echo 1 || echo 0)" "$(st)"
+# The receipt's anchor: the sealed call's digest and the Host's confirmation point, labelled as a
+# point and not as a proof (A10's inclusion opening is pending).
+row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acceptedCount' <<<"$page" && grep -q 'inclusion proof pending' <<<"$page" && echo 1 || echo 0)" "$(grep -o 'acceptedCount [0-9?]*' <<<"$page" | head -1) $(grep -o 'worldRoot [0-9?]*' <<<"$page" | head -1)"
+# The private-room shape of `room invite` (parity's one world leaf): this member founds a private
+# room; the sponsor, as invitee, signs its key declaration into HOME/requests/decl.json.
+shell_as_member() { "$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line "$1" 2>"$R/shell.err"; }
+if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
+  PRIV="priv$(od -An -N3 -tu4 /dev/urandom | tr -d ' ' | cut -c1-6)"
+  shell_as_member "room new $PRIV --private" >"$R/priv.out"; priv_rc=$?
+  if [ "$priv_rc" = 0 ] && [ -f "$WS/refs/$PRIV.json" ]; then
+    rid=$(jq -r .target "$WS/refs/$PRIV.json"); kid=$(jq -r .private.keys "$WS/refs/$PRIV.json")
+    fk=$(od -An -tx1 -v "${HOMEDIR:-$R/home}/keys/mini.key.pub" | tr -d ' \n')
+    ke=$("$MINI" key-status --workspace "$SPONSOR_WS" 2>/dev/null | jq -r .keyEpoch)
+    "$MINI" workspace --action room-key --op recipient-record --dir "$SPONSOR_WS" --room-id "$rid" --keys-cell "$kid" --key-epoch "$ke" --founder-key "$fk" >"${HOMEDIR:-$R/home}/requests/decl.json" 2>"$R/decl.err"; decl_rc=$?
+  else decl_rc=1; fi
+  row private-room "$([ "$priv_rc" = 0 ] && [ "${decl_rc:-1}" = 0 ] && jq -e '.type == "minidregg-signed-room-recipient-v3"' "${HOMEDIR:-$R/home}/requests/decl.json" >/dev/null 2>&1 && echo 1 || echo 0)" "room new $PRIV --private rc=$priv_rc; declaration rc=${decl_rc:-1} $(tail -1 "$R/shell.err" 2>/dev/null | cut -c1-100) $(tail -1 "$R/decl.err" 2>/dev/null | cut -c1-100)"
+fi
 # Parity (docs/DEMO-EXPERIENCE-2026-10-27.md §1a): every verb the shell's `help` lists has a form at
 # /verb/NAME in the body; a verb with no face is red by name.
 help=$("$MINI" shell --socket "$SOCKET" --workspace "$WS" --home "${HOMEDIR:-$R/home}" --host "$HOST" --config "$CONFIG" --line help 2>/dev/null)

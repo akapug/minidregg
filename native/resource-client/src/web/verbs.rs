@@ -464,7 +464,8 @@ fn placeholder(kind: crate::shell_grammar::Kind, name: &str, refs: &[String]) ->
         G::Rest => "hello there".into(),
         G::Word => {
             let n = name.to_ascii_uppercase();
-            if n.contains("JSON") { "@x.json".into() }
+            if n.contains("DECLARATION") { "@decl.json".into() }
+            else if n.contains("JSON") { "@x.json".into() }
             else if n.starts_with("T|") { "social".into() }
             else if n.contains("GRAIN") { "a1".into() }
             else if n.contains("COSIGN") || n.contains("SIGNATURE") { "ab".repeat(64) }
@@ -492,6 +493,14 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
     let alts = alternatives_of(name, verb.usage);
     let grammar = crate::shell_grammar::grammar(name);
     let refs = site.names();
+    // A PRIVATE-ROOM argument takes a private room this workspace founded (its reference names
+    // its keys cell), when there is one; the journey founds one before it measures parity.
+    let private_refs: Vec<String> = refs
+        .iter()
+        .filter(|r| std::fs::read(site.root.join("refs").join(format!("{r}.json"))).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|v| v.get("private").is_some()))
+        .cloned()
+        .collect();
+    let refs_for = |label: &str| if label.contains("PRIVATE") && !private_refs.is_empty() { &private_refs } else { &refs };
     let mut rows = String::new();
     let mut errors = 0usize;
     let mut world = 0usize;
@@ -507,7 +516,7 @@ pub(super) fn dry(site: &Site, name: &str) -> Page {
                 Tok::Arg { name: label, .. } => {
                     let kind = leaf.and_then(|l| l.args.get(position)).map(|a| a.kind).unwrap_or(crate::shell_grammar::Kind::Word);
                     position += 1;
-                    form.insert(format!("a{i}"), placeholder(kind, label, &refs));
+                    form.insert(format!("a{i}"), placeholder(kind, label, refs_for(label)));
                 }
                 Tok::Flag { name: flag, value, optional: false } => {
                     let kind = leaf.and_then(|l| l.flags.iter().find(|f| f.name == flag)).and_then(|f| f.value).map(|(_, k)| k);

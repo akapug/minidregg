@@ -335,6 +335,7 @@ fn receipt(site: &Site, id: &str) -> Page {
             body.push_str(&format!("<section><h2>{heading}</h2>{}</section>\n", outcome_of(&ending, &[], transition)));
         }
     }
+    body.push_str(&anchor(&site.root.join("attempts").join(id)));
     if !site.front.read_only {
         body.push_str(&format!(
             "<p class=\"next\"><form method=\"post\" action=\"/receipts/{id}/retry\" class=\"inline\"><button class=\"quiet\">retry {id}</button></form> \
@@ -343,6 +344,38 @@ fn receipt(site: &Site, id: &str) -> Page {
         ));
     }
     Page { status: 200, title: format!("Attempt {id}"), stamp: Stamp::None, body }
+}
+
+/// What the retained attempt anchors to, said without overclaiming: the exact bytes the client
+/// sealed before sending (`call.bin`, by digest and length) and the Host's confirmation point
+/// (`acceptedCount`, `worldRoot`, the transaction and event ids). The inclusion opening of that
+/// receipt against the published world root (op 151, DEMO-EXPERIENCE A10) is L1's and is not
+/// here yet: the page says so rather than implying the receipt is verifiable today.
+fn anchor(attempt: &std::path::Path) -> String {
+    use sha2::Digest;
+    if !attempt.is_dir() {
+        return String::new();
+    }
+    let call = std::fs::read(attempt.join("call.bin")).ok();
+    let bytes = match &call {
+        Some(b) => format!("<p>Exact call: <code>sha256 {:x}</code>, {} bytes, sealed before it was sent (a retry resends these bytes and no others).</p>", sha2::Sha256::digest(b), b.len()),
+        None => "<p>No sealed call is retained for this attempt (it was never sent).</p>".to_owned(),
+    };
+    let point = match crate::workspace::retained_attempt_outcome(attempt) {
+        Ok(crate::workspace::AttemptOutcome::Confirmed(v)) | Ok(crate::workspace::AttemptOutcome::Charged(v)) => {
+            let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("?").to_owned();
+            format!(
+                "<p>Confirmation point: <code>acceptedCount {}</code>, <code>worldRoot {}</code> (transaction {}, event {}, {}{}).</p>\
+                 <p class=\"outcome undecided\">Anchored to a point; inclusion proof pending: the opening of this receipt against the published world root (op 151) is not yet issued by the Host, so this page shows the point the Host named and does not claim a stranger can verify it offline.</p>",
+                escape(&s("acceptedCount")), escape(&s("worldRoot")), escape(&s("transactionId")), escape(&s("eventId")), escape(&s("confirmation")),
+                if v.get("disposition").and_then(Value::as_str) == Some("charged") { ", charged: only its price was posted" } else { "" }
+            )
+        }
+        Ok(crate::workspace::AttemptOutcome::Refused) => "<p>Refused: the Host named no point; the refusal's clause is the receipt.</p>".to_owned(),
+        Ok(crate::workspace::AttemptOutcome::Pending) => "<p>Undecided: no confirmation point yet; <code>lookup</code> or <code>retry</code> resolves it.</p>".to_owned(),
+        Err(e) => format!("<p>The retained history could not be read: {}</p>", escape(&e)),
+    };
+    format!("<section class=\"anchor\"><h2>Anchor</h2>{bytes}{point}</section>\n")
 }
 
 fn grants(site: &Site) -> Page {
