@@ -669,3 +669,16 @@ Two gaps remain:
 2. **`.recorded`:** `receiverVerifier (.recorded t)` vouches for whatever a constructible transcript
    says. That is fine for fixtures, but the Host's receivers must be shown to run at `.live`. Add a census
    row or check that `.recorded` is named only in fixture or assurance modules.
+
+**Addendum, un-pred-census f013827d6.** Gap 2 is closed: `.recorded` is refused outside fixtures,
+assurance and tests, and is never allowed in `Host/`, with a plant. Gap 1 is narrowed but **not closed**.
+The gate refuses files that *name* `Ran`, but a forged proof need not name it. Each of these elaborates to
+`Ran.mk` by unfolding:
+- `theorem x : oracleAnswered (.live c) q a := ⟨⟩`
+- `(receiverVerifier (.live c)).Answered q a := ⟨⟩`
+- `Vouchers.ofAnswered … (fun _ _ => ⟨⟩)` at the live verifier
+
+`oracleAnswered` and `Vouchers.ofAnswered` are not restricted. The only spelling-independent guard is
+term-level. Every forged proof's value contains the constant `Ran.mk`, so add one environment scan,
+theorems included, that admits `Ran.mk` only inside `receiverVerifier`. This is a small Lean check over
+`env.constants` for one constant, not the whole census. Add a plant for the `oracleAnswered` spelling.
