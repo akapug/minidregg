@@ -26,8 +26,14 @@ Realizer slots (law 1):
   under the factory's current law (PayBookReceiver's authority).
 * The controller is the deployment's `factoryController`; the genesis record is
   `genesisRecord` of the deployment's `NativeHost.Config`, not any valid record.
-* `Context.encode` is the family's command codec, required to cover the whole record
-  (`Context.covers`), so a relay cannot swap a field under a valid signature.
+* `Context.encode current i` is the exact byte string the controller's signature covers
+  for an install on `current` (at the receiver: the signed header's frame,
+  `SignedEnvelope.frame`, with the command inside it by digest). Those bytes pin
+  `Context.source` through a cSHAKE256 digest (`Context.pins`), and `source` covers the
+  whole record (`Context.sourceCovers`); so two installs under one signature agree on the
+  record, subject and capability or form a `PinCollision` of the two compared source byte
+  strings (`Context.binds`). A relay cannot swap a field under a valid signature short of
+  that collision.
 * `BirthView.platformAt` decodes the platform cell in the store the birth commits against
   (`none`: missing or undecodable, and the birth is refused); the quote is
   `ResourceBirth.Descriptor.quotedFee` (`Host/Json.lean:2341`).
@@ -125,13 +131,45 @@ structure Install where
   envelope : List UInt8
   /-- The current custodian's signature over the same bytes, when the key rotates. -/
   custodianCosign : Option (List UInt8)
+  /-- The last admission height the controller's signature names (signed, the signer's
+  choice; the receiver's header `validUntil`). -/
+  validUntil : Nat
 
-/-- A context: a deployment and a command codec that covers the whole record. -/
+/-- The digest a signed frame pins its command bytes by. -/
+def pinDigest (customization bytes : List UInt8) : Digest :=
+  (Sp800185Cshake256.hash customization bytes).digest
+
+/-- A context: a deployment, the exact bytes its controller signs for an install on a
+current record, and the command bytes those signed bytes pin by digest. -/
 structure Context where
   deployment : Deployment
-  encode : Install → List UInt8
-  covers : ∀ i j, encode i = encode j →
+  /-- The bytes the controller's signature (and a custodian's cosignature) covers. -/
+  encode : Platform → Install → List UInt8
+  /-- The command bytes the signed bytes pin through `pinDigest customization`. -/
+  source : Platform → Install → List UInt8
+  customization : List UInt8
+  pins : ∀ p i j, encode p i = encode p j →
+    pinDigest customization (source p i) = pinDigest customization (source p j)
+  sourceCovers : ∀ p i j, source p i = source p j →
     i.next = j.next ∧ i.subject = j.subject ∧ i.capability = j.capability
+
+/-- The compared-pair collision event: two different source byte strings under one pin
+digest. A fixed-width digest cannot be injective on all byte strings, so binding is stated
+with this disjunct over exactly the two strings compared. -/
+structure PinCollision (ctx : Context) (p : Platform) (i j : Install) : Prop where
+  sourcesDifferent : ctx.source p i ≠ ctx.source p j
+  digestsEqual : pinDigest ctx.customization (ctx.source p i) =
+    pinDigest ctx.customization (ctx.source p j)
+
+/-- **Binding.** Two installs on one current record that share signed bytes agree on the
+record, subject and capability, or their two source strings collide under the pin digest. -/
+theorem Context.binds (ctx : Context) (p : Platform) (i j : Install)
+    (same : ctx.encode p i = ctx.encode p j) :
+    (i.next = j.next ∧ i.subject = j.subject ∧ i.capability = j.capability) ∨
+      PinCollision ctx p i j := by
+  by_cases sources : ctx.source p i = ctx.source p j
+  · exact Or.inl (ctx.sourceCovers p i j sources)
+  · exact Or.inr ⟨sources, ctx.pins p i j same⟩
 
 /-- **Custodian separation.** The controller alone may name a first key; rotating a key
 needs the CURRENT custodian's signature over the install bytes; dropping a key is refused. -/
@@ -145,11 +183,11 @@ def CustodianStep (verifiesKey : List UInt8 → List UInt8 → List UInt8 → Bo
 /-- The admission the platform receiver must decide. -/
 def Admits (ctx : Context) (h : History) (i : Install) : Prop :=
   i.subject = ctx.deployment.controller ∧
-    ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope = true ∧
+    ctx.deployment.verifies ctx.deployment.controller (ctx.encode h.current i) i.envelope = true ∧
     ctx.deployment.holdsInstall ctx.deployment.controller i.capability = true ∧
     h.current.version < i.next.version ∧
     i.next.valid = true ∧
-    CustodianStep ctx.deployment.verifiesKey (ctx.encode i) i.custodianCosign
+    CustodianStep ctx.deployment.verifiesKey (ctx.encode h.current i) i.custodianCosign
       h.current.completionCustodianKey i.next.completionCustodianKey
 
 /-- The cell's reachable histories: the deployment's genesis record, then admitted installs. -/
@@ -182,7 +220,7 @@ def Decides (ctx : Context) (decide : History → Install → Bool) : Prop :=
 
 def ReceiverAuthenticated (ctx : Context) (decide : History → Install → Bool) : Prop :=
   ∀ h i, decide h i = true →
-    ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope = true ∧
+    ctx.deployment.verifies ctx.deployment.controller (ctx.encode h.current i) i.envelope = true ∧
       ctx.deployment.holdsInstall ctx.deployment.controller i.capability = true
 
 /-! ### Proofs of L1-a, L1-b, L1-c -/
@@ -272,11 +310,11 @@ theorem custodianCheck_iff (verifiesKey : List UInt8 → List UInt8 → List UIn
 /-- The reference admission the platform receiver runs. -/
 def decideInstall (ctx : Context) (h : History) (i : Install) : Bool :=
   decide (i.subject = ctx.deployment.controller) &&
-    ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope &&
+    ctx.deployment.verifies ctx.deployment.controller (ctx.encode h.current i) i.envelope &&
     ctx.deployment.holdsInstall ctx.deployment.controller i.capability &&
     decide (h.current.version < i.next.version) &&
     i.next.valid &&
-    custodianCheck ctx.deployment.verifiesKey (ctx.encode i) i.custodianCosign
+    custodianCheck ctx.deployment.verifiesKey (ctx.encode h.current i) i.custodianCosign
       h.current.completionCustodianKey i.next.completionCustodianKey
 
 /-- **L1-c proved for the reference receiver.** -/
@@ -350,8 +388,8 @@ def installWire (i : Install) : InstallWire :=
 
 theorem installWire_covers (i j : Install) (same : installWire i = installWire j) :
     i.next = j.next ∧ i.subject = j.subject ∧ i.capability = j.capability := by
-  rcases i with ⟨⟨v, ⟨a, b, c, d, e, f⟩, g, k, o, l⟩, ⟨s⟩, ⟨cap⟩, _, _⟩
-  rcases j with ⟨⟨v', ⟨a', b', c', d', e', f'⟩, g', k', o', l'⟩, ⟨s'⟩, ⟨cap'⟩, _, _⟩
+  rcases i with ⟨⟨v, ⟨a, b, c, d, e, f⟩, g, k, o, l⟩, ⟨s⟩, ⟨cap⟩, _, _, _⟩
+  rcases j with ⟨⟨v', ⟨a', b', c', d', e', f'⟩, g', k', o', l'⟩, ⟨s'⟩, ⟨cap'⟩, _, _, _⟩
   rcases g with _ | ⟨gb, gp⟩ <;> rcases g' with _ | ⟨gb', gp'⟩ <;>
     simp_all [installWire]
 
@@ -373,11 +411,17 @@ def toyDeployment (host : NativeHost.Config) (genesis : Config) (key : List UInt
   holdsRefill s _ := decide (s = genesis.factoryController.subject)
   transcript := ⟨verified⟩
 
-def toyContext (d : Deployment) : Context := ⟨d, wireEncode, wireEncode_covers⟩
+def toyContext (d : Deployment) : Context where
+  deployment := d
+  encode _ := wireEncode
+  source _ := wireEncode
+  customization := []
+  pins _ _ _ same := congrArg (pinDigest []) same
+  sourceCovers _ := wireEncode_covers
 
 /-- The controller's install of `next`, with envelope `env`. -/
 def installOf (genesis : Config) (next : Platform) (env : List UInt8) : Install :=
-  ⟨next, genesis.factoryController.subject, ⟨0⟩, env, none⟩
+  ⟨next, genesis.factoryController.subject, ⟨0⟩, env, none, 0⟩
 
 /-- The verdict a signed install needs in the transcript. -/
 def verdictFor (key : List UInt8) (genesis : Config) (next : Platform) (env : List UInt8) :
@@ -421,7 +465,7 @@ theorem premises_inhabited (host : NativeHost.Config) (genesis : Config) (key : 
 /-- Teeth: a request whose envelope the verifier did not record under the controller's key
 is refused, whatever its subject field says. -/
 theorem forged_refused (ctx : Context) (h : History) (i : Install)
-    (forged : ctx.deployment.verifies ctx.deployment.controller (ctx.encode i) i.envelope = false) :
+    (forged : ctx.deployment.verifies ctx.deployment.controller (ctx.encode h.current i) i.envelope = false) :
     ¬ Admits ctx h i := by
   rintro ⟨-, verified, -⟩
   simp [forged] at verified
@@ -498,9 +542,9 @@ theorem cosigned_rotation_admitted (host : NativeHost.Config) (genesis : Config)
     (nextKey : next.completionCustodianKey = some new)
     (above : h.current.version < next.version) (valid : next.valid = true) :
     Admits (toyContext (toyDeployment host genesis key
-      [(key, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig⟩, env),
-       (old, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig⟩, cosig)]))
-      h ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig⟩ := by
+      [(key, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩, env),
+       (old, wireEncode ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩, cosig)]))
+      h ⟨next, genesis.factoryController.subject, ⟨0⟩, env, some cosig, 0⟩ := by
   refine ⟨rfl, ?_, ?_, above, valid, ?_⟩
   · simp [toyContext, Deployment.verifies, Deployment.controller, toyDeployment]
   · simp [toyContext, toyDeployment, Deployment.controller]
