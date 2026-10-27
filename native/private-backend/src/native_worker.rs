@@ -341,12 +341,7 @@ pub fn receive(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -
     }
     let keys =
         RecipientKeyCustody::open(&config.key_wal, &config.key_identity, config.key_capacity)?;
-    let opened = keys.open_capsule(
-        &capsule,
-        &capsule.party,
-        capsule.sequence,
-        &capsule.recipient,
-    )?;
+    let opened = keys.open_current(&capsule, &capsule.party, capsule.sequence)?;
     let native_request = InnerCredentialRequest::from_opened(
         &request,
         &opened,

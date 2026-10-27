@@ -232,12 +232,19 @@ pub struct PublicProof {
     roots: Vec<[u8; 32]>,
     final_poly: Vec<Field>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PrivateProof {
     holder: u16,
     mask: Field,
     blocks: Vec<[Field; 2]>,
     openings: Vec<Opening>,
+}
+redacted_debug!(PrivateProof);
+impl Drop for PrivateProof {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.mask);
+        zeroize::Zeroize::zeroize(&mut self.blocks);
+    }
 }
 pub fn encode_public(p: &Profile, v: &PublicProof) -> Vec<u8> {
     let mut b = b"DREGG.DZK.PUBLIC\x01".to_vec();
@@ -454,12 +461,13 @@ fn verify(
     }
     previous == eval(&public.final_poly, x)
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Delivered {
     context: [u8; 32],
     public_bytes: Vec<u8>,
     local_bytes: Vec<u8>,
 }
+redacted_debug!(Delivered);
 impl Delivered {
     pub fn context(&self) -> [u8; 32] {
         self.context
@@ -471,13 +479,19 @@ impl Delivered {
         &self.local_bytes
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct VerifiedShares {
     context: [u8; 32],
     holder: u16,
     receiver: u16,
     values: Vec<Field>,
     public_hash: [u8; 32],
+}
+redacted_debug!(VerifiedShares);
+impl Drop for VerifiedShares {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.values);
+    }
 }
 impl VerifiedShares {
     pub fn context(&self) -> [u8; 32] {
@@ -517,18 +531,20 @@ impl RejectedProof {
         self.evidence_hash
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Verification {
     Accepted(VerifiedShares),
     Rejected(RejectedProof),
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+redacted_debug!(Verification);
+#[derive(Clone, Eq, PartialEq)]
 pub struct OpenProof {
     verification: Verification,
     public_bytes: Vec<u8>,
     private_bytes: Vec<u8>,
     values: Vec<Field>,
 }
+redacted_debug!(OpenProof);
 impl OpenProof {
     pub fn verification(&self) -> &Verification {
         &self.verification
@@ -899,6 +915,29 @@ impl Dzk {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+    #[test]
+    fn debug_of_secret_proof_types_prints_no_share_bytes() {
+        const SECRET: u128 = 0x5ec2e75ec2e75ec2e75ec2e75ec2e771;
+        let verified = VerifiedShares {
+            context: [1; 32],
+            holder: 1,
+            receiver: 2,
+            values: vec![Field(SECRET)],
+            public_hash: [0; 32],
+        };
+        let private = PrivateProof {
+            holder: 1,
+            mask: Field(SECRET),
+            blocks: vec![[Field(SECRET), Field(SECRET)]],
+            openings: vec![],
+        };
+        let accepted = Verification::Accepted(verified.clone());
+        for shown in [format!("{verified:?}"), format!("{private:?}"), format!("{accepted:?}"), format!("{verified:#?}")] {
+            assert!(shown.contains("redacted"), "{shown}");
+            assert!(!shown.contains(&SECRET.to_string()), "{shown}");
+            assert!(!shown.to_lowercase().contains(&format!("{SECRET:x}")), "{shown}");
+        }
+    }
     pub(super) fn generation() -> Generation {
         Generation {
             invocation: Nat::new(91),

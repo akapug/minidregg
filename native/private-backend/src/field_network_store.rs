@@ -11,9 +11,8 @@ use crate::{
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{Read, Result, Write},
-    os::unix::fs::OpenOptionsExt,
+    fs::File,
+    io::{Read, Result},
     path::{Path, PathBuf},
 };
 mod runtime_seal {
@@ -222,22 +221,7 @@ impl<R: FieldRuntime> RuntimeStore<R> {
             return Err(bad("field initial framed capacity"));
         }
         let initial_file = initial_path(path);
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&initial_file)?;
-        f.write_all(&framed)?;
-        f.sync_all()?;
-        File::open(
-            initial_file
-                .parent()
-                .ok_or_else(|| bad("field initial parent"))?,
-        )?
-        .sync_all()?;
-        if fs::read(&initial_file)? != framed {
-            return Err(bad("field initial durable readback"));
-        }
+        crate::private_initial::write_new_durable(&initial_file, &framed)?;
         let n = state.roster().0;
         let journal = Journal::open(path, &identity::<R>(&initial), RuntimeMachine { state })?;
         Ok(Self {
@@ -302,6 +286,7 @@ impl<R: FieldRuntime> RuntimeStore<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use crate::reconstruction::Field;
     use std::{
         collections::VecDeque,

@@ -973,6 +973,7 @@ mod tests {
             outer_start = fs::metadata(&wp).unwrap().len();
             store.attach_outer(&receipt, vec![8; 32]).unwrap();
             custody.generate_epoch(Nat::new(8)).unwrap();
+            custody.adopt_current_epoch(&Nat::new(7)).unwrap();
         }
         // Simulate an incomplete UNRELEASED outer attachment. Retained sealed
         // bytes from the completed prior event must not be rerandomized.
@@ -1006,20 +1007,98 @@ mod tests {
             public
         );
         let sealed = SealedIngress::decode(&final_raw).unwrap();
+        assert_eq!(custody.current_epoch(), Some(&Nat::new(7)));
         assert_eq!(
             custody
-                .open_capsule(&sealed, &p, 9, &sp)
+                .open_current(&sealed, &p, 9)
                 .unwrap()
                 .inner()
                 .message,
             vec![42; 32]
         );
-        let rotated = custody
-            .generate_epoch(Nat::new(8))
-            .unwrap()
-            .recipient_spec(4096)
+        custody.generate_epoch(Nat::new(8)).unwrap();
+        custody.adopt_current_epoch(&Nat::new(8)).unwrap();
+        let stale = custody.open_current(&sealed, &p, 9).err().unwrap();
+        assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
+        // Rotation survives restart and never moves backward.
+        drop(custody);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 3).unwrap();
+        assert_eq!(custody.current_epoch(), Some(&Nat::new(8)));
+        let back = custody.adopt_current_epoch(&Nat::new(7)).unwrap_err();
+        assert!(back.to_string().contains("backward"), "{back}");
+    }
+    fn sealed_at(
+        custody: &mut RecipientKeyCustody,
+        epoch: u64,
+        wp: &std::path::Path,
+        p: &CommitteeParty,
+    ) -> SealedIngress {
+        let key = custody.generate_epoch(Nat::new(epoch)).unwrap();
+        let sp = key.recipient_spec(4096).unwrap();
+        let mut store = Store::open(wp, b"party-1", 4).unwrap();
+        let receipt = store
+            .prepare(p.clone(), 9, vec![42; 32], sp, key.public_key().to_vec())
             .unwrap();
-        assert!(custody.open_capsule(&sealed, &p, 9, &rotated).is_err());
+        store.seal(&receipt, vec![3; 32]).unwrap();
+        let raw = store.attach_outer(&receipt, vec![8; 32]).unwrap();
+        SealedIngress::decode(&raw).unwrap()
+    }
+    #[test]
+    fn capsule_epoch_is_custodys_current_epoch_not_the_capsules_choice() {
+        let kp = path("cur-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        let at7 = sealed_at(&mut custody, 7, &path("cur-w7"), &p);
+        let at8 = sealed_at(&mut custody, 8, &path("cur-w8"), &p);
+        let at9 = sealed_at(&mut custody, 9, &path("cur-w9"), &p);
+        // Nothing adopted yet: nothing opens, even though every key is retained.
+        let none = custody.open_current(&at7, &p, 9).err().unwrap();
+        assert!(none.to_string().contains("current epoch not adopted"), "{none}");
+        // Adopting an epoch custody does not hold is refused.
+        assert!(custody.adopt_current_epoch(&Nat::new(99)).is_err());
+        custody.adopt_current_epoch(&Nat::new(8)).unwrap();
+        assert_eq!(custody.open_current(&at8, &p, 9).unwrap().inner().message, vec![42; 32]);
+        let stale = custody.open_current(&at7, &p, 9).err().unwrap();
+        assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
+        let future = custody.open_current(&at9, &p, 9).err().unwrap();
+        assert!(future.to_string().contains("future recipient key epoch"), "{future}");
+    }
+    #[test]
+    fn nat_order_is_numeric() {
+        assert!(Nat::new(300) > Nat::new(255));
+        assert!(Nat::new(255) > Nat::new(254));
+        assert!(Nat::new(65026) > Nat::new(65025));
+        assert!(Nat::new(0) < Nat::new(1));
+    }
+    #[test]
+    fn recipient_seeds_are_wrapped_at_rest_and_reopen_recovers_them() {
+        let kp = path("wrap-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let seed;
+        let sealed;
+        {
+            let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+            sealed = sealed_at(&mut custody, 7, &path("wrap-w"), &p);
+            custody.adopt_current_epoch(&Nat::new(7)).unwrap();
+            seed = custody.journal_secret_for_test(&Nat::new(7));
+        }
+        let wal = fs::read(&kp).unwrap();
+        for window in [&seed[..32], &seed[32..]] {
+            assert!(
+                !wal.windows(window.len()).any(|w| w == window),
+                "plaintext seed bytes on disk"
+            );
+        }
+        let wrapkey = fs::read(kp.with_extension("wrapkey")).unwrap();
+        assert_eq!(wrapkey.len(), 32);
+        let custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        assert_eq!(custody.journal_secret_for_test(&Nat::new(7)), seed);
+        assert_eq!(custody.open_current(&sealed, &p, 9).unwrap().inner().message, vec![42; 32]);
+        drop(custody);
+        // A populated journal with its wrap key gone is refused, never re-keyed.
+        fs::remove_file(kp.with_extension("wrapkey")).unwrap();
+        let gone = RecipientKeyCustody::open(&kp, b"party-2", 4).err().unwrap();
+        assert!(gone.to_string().contains("wrap key missing"), "{gone}");
     }
     // Native source admission is NOT implemented by this fixture. It models a
     // separately authorized opaque commitment signature inside the endpoint.

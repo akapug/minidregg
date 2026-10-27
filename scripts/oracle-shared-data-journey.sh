@@ -141,6 +141,11 @@ if [[ ${ORACLE_BROWSER_B:-0} == 1 ]]; then
 elif [[ ${ORACLE_BROWSER_B:-0} != 0 ]]; then
   fail 'ORACLE_BROWSER_B must be 0 or 1'
 fi
+case ${ORACLE_POOLED_TENANT_PROBE:-0} in
+  0) ;;
+  1) [[ $mode == new ]] || fail 'pooled tenant probe requires a fresh qualification' ;;
+  *) fail 'ORACLE_POOLED_TENANT_PROBE must be 0 or 1' ;;
+esac
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
@@ -213,6 +218,12 @@ request() {
   if [[ $letter == a ]]; then export POST_BODY_A=$body; else export POST_BODY_B=$body; fi
   phase "post-$letter$label"
 }
+if [[ ${ORACLE_POOLED_TENANT_PROBE:-0} == 1 ]]; then
+  jq -n '{protocol:"mini-oracle-pooled-tenant-probe-v1",app:"9101",path:"/query",
+    request:{request_id:"mini-u3-weather-structured",conversation_id:"mini-owner-pool-collision",text:"Who wrote Leaves of Grass?"}}' \
+    >"$run/pooled-tenant-probe-request.json"
+  request a 15 mini-u3-weather-structured mini-owner-pool-collision 'Who wrote Leaves of Grass?'
+fi
 request a 1 oracle-isolation oracle-acceptance 'Who wrote Leaves of Grass?'
 request a 2 oracle-austen oracle-followup 'Who wrote Emma?'
 request a 3 oracle-pronoun oracle-followup 'When was she born?'
