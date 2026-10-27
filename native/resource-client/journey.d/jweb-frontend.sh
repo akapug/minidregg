@@ -57,15 +57,17 @@ hook|--dry)
   [ -x "$GATEWAY" ] && [ -x "$HELPER" ] || unconfigured "no mini-web / mini-web-spawn beside $MINI (cargo build -p minidregg-mini-web -p minidregg-mini-web-spawn), or set MINI_WEB_BIN / MINI_WEB_SPAWN_BIN"
   WRAPPER=$REPO/deploy/shell/mini-shell-ssh
   [ -x "$WRAPPER" ] || unconfigured "no $WRAPPER"
-  R=$D/jwf; mkdir -p "$R/state" "$R/run" "$R/home" "$R/pubhome"
+  R=$D/jwf; mkdir -p "$R/state" "$R/home" "$R/pubhome"
+  # Unix sockets need a short path (sun_path); the step directory can be long.
+  RUNDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/jwf.XXXXXX"); trap 'stop; rm -rf "$RUNDIR"' EXIT
   HOMEDIR=$R/home
   cat >"$R/dev.json" <<EOF
 {"mini":"$MINI","host":"$HOST","config":"$CONFIG","socket":"$SOCKET","wrapper":"$WRAPPER",
  "sessions":{"alice":{"workspace":"$WS","home":"$HOMEDIR"}},
  "public":{"workspace":"$WS","home":"$R/pubhome"}}
 EOF
-  HSOCK=$R/run/spawn.sock
-  nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$R/run" >"$R/helper.log" 2>&1 &
+  HSOCK=$RUNDIR/spawn.sock
+  nohup "$HELPER" --dev "$R/dev.json" --socket "$HSOCK" --state "$R/state" --run "$RUNDIR" >"$R/helper.log" 2>&1 &
   echo $! >"$R/helper.pid"; PIDS+=("$R/helper.pid")
   PORT=$(free_port); ORIGIN=http://127.0.0.1:$PORT
   nohup "$GATEWAY" --listen "127.0.0.1:$PORT" --helper "$HSOCK" --origin "$ORIGIN" --shutdown "the end of this journey" >"$R/gateway.log" 2>&1 &

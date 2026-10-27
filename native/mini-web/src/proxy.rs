@@ -37,6 +37,7 @@ pub fn fetch(client: &Client, target: Target, request: &Request) -> Result<Fragm
     let answer = match client.call(&ask) {
         Ok(answer) => answer,
         Err(Error::Refused(why)) => return Err((403, why)),
+        Err(Error::Failed(why)) => return Err((502, format!("the body could not be started or reached: {why}"))),
         Err(Error::Transport(why)) => return Err((502, format!("the helper did not answer: {why}"))),
     };
     let fd = answer.fd.ok_or((502, "the helper passed no body stream".to_owned()))?;

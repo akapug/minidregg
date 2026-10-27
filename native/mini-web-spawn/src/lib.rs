@@ -12,7 +12,8 @@
 //! mini-web-spawn-v1 logout SID            → ok
 //! mini-web-spawn-v1 sessions SID          → ok N, then N lines: PREFIX CREATED LASTSEEN CURRENT
 //! mini-web-spawn-v1 revoke SID PREFIX     → ok
-//! anything else                           → refused REASON
+//! anything else                           → refused REASON      (policy: the request is not allowed)
+//!                                         → error REASON        (the helper could not do it: spawn, connect)
 //! ```
 //!
 //! A token (CODE, SID) is 43 characters of base64url (32 random bytes); the helper stores
@@ -110,8 +111,10 @@ pub struct Answer {
 
 #[derive(Debug)]
 pub enum Error {
-    /// The helper said `refused REASON`.
+    /// The helper said `refused REASON`: policy, not a fault.
     Refused(String),
+    /// The helper said `error REASON`: it could not spawn or connect.
+    Failed(String),
     /// The socket, or a malformed answer.
     Transport(String),
 }
@@ -120,6 +123,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Refused(why) => write!(f, "refused: {why}"),
+            Error::Failed(why) => write!(f, "helper could not: {why}"),
             Error::Transport(why) => write!(f, "helper: {why}"),
         }
     }
@@ -150,6 +154,7 @@ impl Client {
         match words.next().as_deref() {
             Some("ok") => Ok(Answer { words: words.collect(), lines: lines.collect(), fd }),
             Some("refused") => Err(Error::Refused(words.collect::<Vec<_>>().join(" "))),
+            Some("error") => Err(Error::Failed(words.collect::<Vec<_>>().join(" "))),
             _ => Err(Error::Transport(format!("malformed answer {first:?}"))),
         }
     }

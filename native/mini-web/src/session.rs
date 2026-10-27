@@ -50,7 +50,7 @@ impl Sessions {
             }),
             Ok(_) => None,
             Err(Error::Refused(_)) => None,
-            Err(Error::Transport(why)) => {
+            Err(Error::Failed(why)) | Err(Error::Transport(why)) => {
                 eprintln!("mini-web: helper: {why}");
                 None
             }

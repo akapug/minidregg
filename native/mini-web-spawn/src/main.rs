@@ -139,6 +139,10 @@ impl Helper {
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
         let (text, fd) = match self.handle(&mut stream) {
             Ok((text, fd)) => (format!("ok{text}\n"), fd),
+            Err(why) if why.starts_with("spawn ") || why.starts_with("connect body") || why.starts_with("bind body") => {
+                eprintln!("mini-web-spawn: ERROR: {why}");
+                (format!("error {why}\n"), None)
+            }
             Err(why) => {
                 eprintln!("mini-web-spawn: REFUSED: {why}");
                 (format!("refused {why}\n"), None)

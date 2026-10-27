@@ -262,7 +262,7 @@ impl Gateway {
             }
             Ok(_) => self.stage(502, "Helper", refusal("The helper answered strangely", ""), None, request),
             Err(HelperError::Refused(why)) => self.stage(403, "Login refused", refusal("This link does not open a session", &format!("{why}. A login link works once and expires; the door's status page shows yours.")), None, request),
-            Err(HelperError::Transport(why)) => self.stage(502, "Helper", refusal("The helper is not answering", &why), None, request),
+            Err(HelperError::Failed(why)) | Err(HelperError::Transport(why)) => self.stage(502, "Helper", refusal("The helper is not answering", &why), None, request),
         }
     }
 
