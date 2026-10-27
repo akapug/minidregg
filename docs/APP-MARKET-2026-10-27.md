@@ -22,30 +22,51 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
 | `saveIdentityCaps` and `expectAppHooks` served (§3a): `spk-rpc` identity save/restore/drop with the dual Identity+AppPersistent object, `spk-host/identity_custody.rs`, the three refusal sites widened | **built**; spk-rpc tests on the Mac; spk-host builds and its custody tests run on dregg-build; the four exhibits accepted by `qualify` in `--box` |
 | Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
 
-## State at hand-off (2026-10-27, lane tip after this commit)
+## State at hand-off (2026-10-27 evening, lane tip after this commit)
 
-- **Proven on dregg-build** (world w3, store `2fdd71b31d0fe3be`, `/build/lanes/app-market-runs/w3/WORLD.env`):
-  `japps --box` lifecycle rows 23/24 (create, install, share, start, enrol, page load for Hacker
-  Slides and Simple Todos; Hacker Slides renders, its "Present" link from `getPublicId`; stop), and
-  the export row green by hand once the row named the right app (fixed). Simple Todos is running on
-  w3, Hacker Slides stopped and exported.
-- **Member install** (`scripts/spk-platform/apps-e2e.sh`, run as
-  `MEMBER_FUNDING=10000 APPS_MAX=50000 E2E_MINI=…/mini bash apps-e2e.sh $R/w3/WORLD.env OUT APP…`):
-  funded as the door funds, the tool reservation admitted and released on refusal, the birth past
-  prepare; refused at admission `GrainResourceBirthAdmission.Reject.policyRejected` by the parent
-  task's law, which admits the birth's witness touch only for the task's worker subject. Ruled:
-  Option A (any holder of a delegated parent grant), Lean work with the L1 successor; the factory
-  law to be checked on the signed path for ordinary births too, so members get a named refusal.
-- **Measured**: an ordinary birth costs the member 173; a grain-task birth by a member with 10000
-  is insolvent even at budget 1 (a large fixed debit, probably the template `ownerBudget`); the
-  delegated tool/parent `maxCost` must exceed 1000 (50000 passes).
-- **Next, not started**: Etherpad end to end as the worker subject (journey `birth_app` path:
-  `SPK_A=$R/cache/quarantine/aee0806c….spk` with `grain-journey.sh phase` on w3, then name any
-  interface Etherpad calls that `spk-rpc` lacks from its app output, as was done for
-  `HackSessionContext`); Simple Todos co-edit from a second browser session (a second `enroll`
-  and GET on the running grain); the `-www` publishing origin's front dispatch, `www.sock` and
-  connector verb (INSTALL §5a); measuring the first member install and replacing the ~1,500
-  estimate in INSTALL §4.
+- **Box**: dregg-build, run root `/build/lanes/app-market-runs`. The standing world is **w6**
+  (`w6/WORLD.env`, candidate `23861533` plus this lane's Rust), brought up by `w6-job.sh` (PID
+  file `w6-job.pid`), which then runs `japps.sh --box` (→ `japps-w6.out`) and
+  `featured-qualify.sh` (→ `featured-w6/rows.tsv`). w3, w4 (partial, never registered) and w5 are
+  torn down. Stop a job only by its PID file. Each checkout on the box needs
+  `chmod go-w deploy/spk-host/*` (the lanes umask leaves `controller-world.py` 0664 and the
+  installer refuses it).
+- **Proven** (w5, 26 of 28 japps rows): catalogue, fetcher, the four qualify exhibits, the front,
+  Hacker Slides and Simple Todos through create, install, share, start, enrol, page load, stop and
+  export; **Etherpad** on the same world (also by hand on w3: install 739 s, share 1002 s, start
+  293 s, enrol 193 s, `/` → 303 → `/p/main` 200 with the pad editor, one saved identity held).
+- **Red on w5, fixed in code, rerunning on w6**: (a) the publishing socket answered 404 for
+  every path: the app runs under a 077 umask and Sandstorm publishes `/var/www` whatever its
+  modes, so the launch worker now opens each published file as the app (tag 6, `61f4a1ce`);
+  (b) the co-edit's second route was bound but never served: a route added after START needs
+  the running resident's route control (`register-X2`, `61f4a1ce`); on w5 that registration was
+  refused `Mini refused current route admission` with no reason; `f7b8fe5f` makes the refusal
+  name the Host's marker and text and keep `refusal.bin` in the attempt, so w6's `register-b2`
+  says why.
+- **Featured set** (§2a): the scout's 13 kept; `mini apps search` lists them first with their
+  agent hook (`f7b8fe5f`); `featured-qualify.sh` qualifies letters j..p (EtherCalc, HedgeDoc,
+  Davros, sntfy, DokuWiki, Hledger Web, Datasette) with one write each beneath the HTML. Not yet
+  in the harness: WBO (WebSocket write), SandCal, Gogs (REST with its CSRF form), Wekan (REST
+  login): each needs its write recipe probed against a live grain first. The coordinator's
+  order is Datasette, DokuWiki, HedgeDoc, Davros, SandCal, Gogs, EtherCalc, WBO, Hledger, sntfy,
+  Wekan.
+- **DAV verbs and streamed bodies** (§2b), asked first by the coordinator, not started. The
+  verbs are named in Lean: `Kernel/ApplicationDispatchAdmission.lean` `exchangeMethod` and the
+  body rules of `requestSafeFor` (PROPFIND/PROPPATCH/REPORT/LOCK carry XML bodies; MKCOL, COPY,
+  MOVE and UNLOCK none, with `Destination`, `Depth`, `Overwrite`, `Lock-Token`, `If`, `Timeout`
+  admitted as ordinary headers); then `http_entrance.rs` `Method` and its ordinary-header list,
+  `dispatch_web_input.rs` `call_for` and `spk-rpc` `web.rs` (the `WebSession` propfind, proppatch,
+  mkcol, copy, move, lock, unlock and report calls, and the 207 Multi-Status response). The
+  Host changes, so it lands with a cut, not on a standing world.
+- **Member install**: `apps.rs` bootstrap births the parent under the holder form (`72e6a1a8`).
+  When a candidate carries `lane/lean-l13-laws`, stand up a world from it
+  (`world-up.sh /build/candidates/<sha>/bin /build/lanes/app-market/target/debug RUN`), run
+  `mini apps bootstrap` there, then `apps-e2e.sh RUN/WORLD.env OUT <appIds>` with
+  `MEMBER_FUNDING=10000 APPS_MAX=50000`; read the debit from `OUT/balances.log` into INSTALL.md
+  §4 (replacing the ~1,500 estimate) and the receipt's `budget:` line.
+- **Allocator**: `install-user-world` moves a taken app range to the next free one in the
+  delegation (`f8243aba`; controller-world.py pin `1a6e0c16`). The main worktree had an
+  uncommitted edit to `controller-world.py`; whoever lands it re-pins.
 
 ## 1. The pieces, who runs what
 
