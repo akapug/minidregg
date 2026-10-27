@@ -335,7 +335,14 @@ the demo's **shutdown date is 2026-11-11**, written on the join page and in the 
 backup retention defaults to 7 days after shutdown. **Mainnet** for pay-to-enrol (ember, 2026-10-27
 morning; two mainnet providers; the sponsor's total cap and per-stranger funding amount are the door's
 configured values, published on the join page). The oracle lands as a grain if it can be got away with
-(ember, same morning). The 1Password state bundle is re-saved in a few days when the state stabilises.
+(ember, same morning). **A subscriber tier** (ember, 2026-10-27 afternoon): a flat 4000 DREGG per month
+(the price exists to stop spam) buys a generous Hermes allowance on GLM models (glm-5.3, glm-5.3-flash)
+through ember's Z.AI coding-plan key, whose weekly quota is large and underused and holds three one-time
+resets valid to 2026-12-22; built as existing machinery (a `subscribers` room whose concierge grants the
+GLM provider-route capability for 30 days on `pay subscribers 4000`; L4 builds the Anthropic-messages
+adapter and the row; infra seals the key; the web lane the Subscribe form). Whether the coding plan's
+terms permit serving third parties' agents is ember's call, flagged; the join page carries the sentence
+ember supplies. The 1Password state bundle is re-saved in a few days when the state stabilises.
 Main advances after every integration round; other sessions' work in the shared worktree is committed
 as found and fixed forward.
 
