@@ -242,7 +242,7 @@ def tick(tag, tip, primary, extras=(), enrol_row=False, background=False):
                PAY_RPC_FIXTURES=" ".join(endpoints(tag, tip, primary, extras)))
     env.pop("PAY_RPC_ENDPOINTS", None)
     if enrol_row:
-        env.update(PAY_ENROL_INDEX="2", PAY_JOURNAL_FLOOR="1000000")
+        env.update(PAY_WATCH_ENROL="yes")
     if background:
         return subprocess.Popen(["sh", TICK_SCRIPT], env=env, stdout=open(path(f"tick-{tag}.out"), "w"),
                                 stderr=subprocess.STDOUT, start_new_session=True)

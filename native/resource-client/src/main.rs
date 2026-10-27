@@ -685,7 +685,7 @@ usage:
   mini operation-proof --dir WORKSPACE --operation-record ABSOLUTE-FILE
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
-  mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
+  mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol tariff]
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP [--enrol-capability C_ENROL --operator-socket OPERATOR-SOCKET] (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
@@ -695,6 +695,7 @@ usage:
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true] [--operator-socket OPERATOR-SOCKET]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
+  mini join --memo-version v2 --solana ... --key BOX-HELD.key --ssh-public LOGIN.pub [--ssh-signature SSHSIG]   (detached: the first run prints the statement to sign, the second takes the signature)
   mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub]
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]

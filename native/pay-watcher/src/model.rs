@@ -90,6 +90,10 @@ impl Reason {
                 | Reason::SlotMismatch
                 | Reason::PrunedTransaction
                 | Reason::EndpointsDisagree
+                // A full newest-N window on a non-enrollment index: an older unreceipted
+                // transfer may have been pushed out by dust, so the run says so loudly
+                // (exit 3) instead of reporting a clean read.
+                | Reason::PageBound
         )
     }
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Join · Mini</title>
-<meta name="description" content="How to get an account on Mini's public node, what works there, and what does not.">
+<meta name="description" content="Get an account on the Mini demo box yourself, and what it means that everything there is world-readable.">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -28,38 +28,36 @@
 <main id="main">
 <div class="wrap">
 <h1>Join</h1>
-<p class="lede"><strong>Everything on this box is world-readable.</strong> Put nothing
-private on it.</p>
+<p class="lede">Get an account on the demo box yourself, at
+<a href="https://demo.dregg.online/join">demo.dregg.online/join</a>. No one needs to add you by hand.</p>
+<div class="note">
+<p><strong>Everything on this box is world-readable.</strong> Every member can read the whole demo
+Store, and your Mini signing key is held on the box (a hosted account): readable by the operator, by your
+own account and by no other member's. Keep nothing private or precious there.</p>
+</div>
 <p>Reading needs no account: the documents members publish are at
 <a href="https://demo.dregg.online/">demo.dregg.online</a>, a static snapshot
-refreshed every few minutes. Writing happens in the hosted shell over SSH. The guide is
-<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>;
-read it first.</p>
+refreshed every few minutes. Writing happens in the hosted shell over SSH.</p>
 <ol>
-<li>Make an SSH key for Mini.</li>
-<li>Sign up for a hosted shell account at
-<a href="https://demo.dregg.online/join">demo.dregg.online/join</a> with its public half
-and the session name you want.</li>
-<li>Once your account is made, SSH in to the <code>mini&gt;</code> prompt.</li>
+<li>Make an SSH key if you have none: <code>ssh-keygen -t ed25519</code>.</li>
+<li>At <a href="https://demo.dregg.online/join">/join</a>, choose a name and paste the public half
+(<code>~/.ssh/id_ed25519.pub</code>). Keep the status page it gives you: its address is your
+request's only key.</li>
+<li>Choose free (the box funds a small starting balance while it lasts) or pay (50 DREGG a week on
+Solana; your wallet, SSH key and account are then publicly linked on-chain).</li>
+<li>When the page says your account is ready, <code>ssh -t mini-s-NAME@demo.dregg.online</code> opens the
+<code>mini&gt;</code> prompt. The guide is
+<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>.</li>
+<li>To use Mini from Discord, tick "link Discord" and type the code the page shows:
+<code>/mini line:link CODE</code>.</li>
 <li>To publish a document to the public snapshot, delegate <code>observe</code> on it to the
 public reader (<code>delegate ID DOC PUBLIC observe 0</code>, <code>submit ID</code>,
 <code>publish ID</code>); <code>revoke</code> takes it down at the next refresh.</li>
 </ol>
 
-<h2>On the public node</h2>
-<p><strong>Works</strong> (shell journey J0–J8): keys, resources, delegation and revocation,
-JSON laws including locks, retries, history, documents, boards.</p>
-<p><strong>Not yet:</strong> rooms, chat, private rooms, key rotation, proxy mode, the
-librarian, paying to enrol (50 DREGG a week; built and run on fixtures, not deployed).</p>
-<div class="note">
-<p>Everything on this box is world-readable: any signer on it, the public reader included,
-replays the whole Store to check what it signs, so treat every document, room and
-message as public. The devnet is re-genesised when its data model or kernel wire changes: your SSH
-and signing keys stay, and everything you made is erased. Your hosted
-signing key is on the operator's machine, readable by the operator and, on today's single
-shared account, by other members' sessions. A split-account setup, where only your own account
-and the operator can read it, is built and on no box yet. Keep nothing precious behind it.</p>
-</div>
+<h2>What to expect</h2>
+<p>The demo is redeployed every few days and may be re-genesised: your SSH key stays, and everything
+you made is erased. FRIENDS.md lists what the shipped node has.</p>
 
 <h2>Contributing</h2>
 <p>Read the <a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>,

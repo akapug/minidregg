@@ -59,6 +59,11 @@ ROLES = {
     "spkHostd": "spk-hostd",
     "spkVolumeHelper": "mini-spk-volume-helper",
     "discord": "mini-discord",
+    # The self-serve door (deploy/door/README.md): the /join form and its root processor.
+    "door": "mini-door",
+    "doorProcess": "mini-door-process",
+    # The room mirror ships so it can be enabled; it is off unless configured (deploy/discord/README.md).
+    "discordMirror": "mini-discord-mirror",
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
     # The grain launch gate: deploy/grain-host/install-controller and bwrap require it beside the
@@ -73,7 +78,8 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
               ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
-              ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
+              ("discord", "discord-entrance"), ("door", "discord-entrance"), ("doorProcess", "discord-entrance"), ("discordMirror", "discord-entrance"),
+              ("payWatcher", "pay-watcher"),
               ("keys", "mini-keys"), ("launchGate", "launch-gate"))
 # Journey fixtures: built from the tip they test by the journey tooling (lane-build.sh rust puts them in
 # LANE_DIR/fixtures, pack copies them to OUT/fixtures/ with their own SHA256SUMS; journey-runner reads

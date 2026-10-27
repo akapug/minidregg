@@ -52,18 +52,6 @@ impl Ending {
     }
 }
 
-/// The reply for a line that ran.
-pub fn render(stdout: &str, ending: &Ending) -> String {
-    if ending.word == "ok" {
-        if stdout.trim().is_empty() {
-            return "done (no output)".to_string();
-        }
-        code_block(stdout.trim_end())
-    } else {
-        code_block(&ending.line)
-    }
-}
-
 /// `body` in a code block, cut to [`DISCORD_LIMIT`] characters with a note when it is long.
 pub fn code_block(body: &str) -> String {
     code_block_limit(body, DISCORD_LIMIT)
@@ -104,14 +92,6 @@ mod tests {
         assert_eq!(Ending::of_shell(None, "").line, "error: mini shell was stopped by a signal without an ending line");
         // prose containing the word later in a line is not an ending
         assert_eq!(Ending::of_shell(Some(1), "the host refused: no\n").word, "error");
-    }
-
-    #[test]
-    fn render_ok_failure_and_empty() {
-        assert_eq!(render("", &Ending::ok()), "done (no output)");
-        assert_eq!(render("{\"a\":1}\n", &Ending::ok()), "```\n{\"a\":1}\n```");
-        let e = Ending::of_shell(Some(2), "usage: read REF\n");
-        assert_eq!(render("ignored", &e), "```\nusage: read REF\n```");
     }
 
     #[test]

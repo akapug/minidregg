@@ -244,10 +244,15 @@ pub enum DeliveryState {
     Fresh,
     /// Started and not completed: the destination may or may not have it.
     Unknown,
+    /// The destination answered a send and did not take it (an HTTP refusal such as 429):
+    /// nothing was delivered, so a new send may start. `attempts` sends were refused so far;
+    /// `not_before` is the caller's backoff, retained with the refusal.
+    Refused { attempts: u64, not_before: u64 },
     Completed(Value),
 }
 
-/// A delivery record's JSON: `{"binding", "phase": "started"|"completed", "request", "at", "evidence"?}`.
+/// A delivery record's JSON: `{"binding", "phase": "started"|"refused"|"completed", "request", "at",
+/// "evidence"?, "attempts"?, "notBefore"?}`.
 /// `binding` is what the effect IS (known before it starts, so a later open can check it);
 /// `request` is the identity of this one send (a nonce, a message id) that the destination can be
 /// asked about, known only once the send is decided, so it lives beside the binding, not in it.
@@ -264,7 +269,7 @@ impl Delivery {
             if r.get("binding") != Some(&binding) {
                 return Err("delivery record is bound to another source or destination".into());
             }
-            if !matches!(r.get("phase").and_then(Value::as_str), Some("started" | "completed")) {
+            if !matches!(r.get("phase").and_then(Value::as_str), Some("started" | "refused" | "completed")) {
                 return Err("delivery record has no readable phase".into());
             }
         }
@@ -275,14 +280,22 @@ impl Delivery {
         match &self.record {
             None => DeliveryState::Fresh,
             Some(r) if r["phase"] == "completed" => DeliveryState::Completed(r["evidence"].clone()),
+            Some(r) if r["phase"] == "refused" => DeliveryState::Refused {
+                attempts: r["attempts"].as_u64().unwrap_or(1),
+                not_before: r["notBefore"].as_u64().unwrap_or(0),
+            },
             Some(_) => DeliveryState::Unknown,
         }
     }
 
-    /// The record to retain BEFORE the external send, naming the send (`request`). Only from `Fresh`.
+    /// The record to retain BEFORE the external send, naming the send (`request`). From `Fresh`,
+    /// or from `Refused` once its backoff has passed (the refusal count is carried forward).
     pub fn start(&self, request: Value, at: u64) -> Result<Value> {
         match self.state() {
             DeliveryState::Fresh => Ok(json!({"binding":self.binding,"phase":"started","request":request,"at":at})),
+            DeliveryState::Refused { attempts, not_before } if at >= not_before => Ok(json!({"binding":self.binding,
+                "phase":"started","request":request,"at":at,"attempts":attempts})),
+            DeliveryState::Refused { not_before, .. } => Err(format!("delivery refused by the destination; backing off until {not_before}").into()),
             DeliveryState::Unknown => Err("delivery UNKNOWN: inspect the destination and resolve before continuing; never re-sent automatically".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
         }
@@ -293,8 +306,23 @@ impl Delivery {
         match self.state() {
             DeliveryState::Unknown => Ok(json!({"binding":self.binding,"phase":"completed",
                 "request":self.record.as_ref().map_or(Value::Null, |r| r["request"].clone()),"evidence":evidence,"at":at})),
-            DeliveryState::Fresh => Err("cannot complete a delivery that was never started".into()),
+            DeliveryState::Fresh | DeliveryState::Refused { .. } => Err("cannot complete a delivery that was never started".into()),
             DeliveryState::Completed(_) => Err("delivery already completed".into()),
+        }
+    }
+
+    /// The record after the destination ANSWERED the started send with a refusal (it did not
+    /// take it): back to a state a new send may start from, no earlier than `not_before`. Only
+    /// from `Unknown`; a send whose answer was lost stays `Unknown`.
+    pub fn refused(&self, evidence: Value, at: u64, not_before: u64) -> Result<Value> {
+        match self.state() {
+            DeliveryState::Unknown => {
+                let record = self.record.as_ref().expect("an unknown delivery has a record");
+                Ok(json!({"binding":self.binding,"phase":"refused","request":record["request"].clone(),
+                    "evidence":evidence,"at":at,"notBefore":not_before,
+                    "attempts":record["attempts"].as_u64().unwrap_or(0) + 1}))
+            }
+            _ => Err("only a started delivery can be refused by its destination".into()),
         }
     }
 }
@@ -426,5 +454,21 @@ mod tests {
         assert_eq!(done.state(), DeliveryState::Completed(json!({"http":204})));
         assert!(done.start(json!(null), 4).is_err());
         assert!(Delivery::open(json!({"other":1}), done.record).is_err());
+    }
+
+    #[test]
+    fn a_destination_refusal_returns_to_a_startable_state_after_its_backoff() {
+        let binding = json!({"source":"42:8","destination":"webhook"});
+        let started = Delivery::open(binding.clone(), None).unwrap().start(json!({"n":1}), 10).unwrap();
+        let refused = Delivery::open(binding.clone(), Some(started)).unwrap().refused(json!({"http":429}), 11, 70).unwrap();
+        let refused = Delivery::open(binding.clone(), Some(refused)).unwrap();
+        assert_eq!(refused.state(), DeliveryState::Refused { attempts: 1, not_before: 70 });
+        assert!(refused.start(json!({"n":2}), 69).is_err(), "not before the backoff");
+        assert!(refused.complete(json!({}), 69).is_err());
+        let again = Delivery::open(binding.clone(), Some(refused.start(json!({"n":2}), 70).unwrap())).unwrap();
+        assert_eq!(again.state(), DeliveryState::Unknown);
+        let twice = Delivery::open(binding.clone(), Some(again.refused(json!({"http":429}), 71, 200).unwrap())).unwrap();
+        assert_eq!(twice.state(), DeliveryState::Refused { attempts: 2, not_before: 200 });
+        assert!(Delivery::open(binding, None).unwrap().refused(json!({}), 1, 2).is_err());
     }
 }
