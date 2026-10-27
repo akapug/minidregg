@@ -113,7 +113,7 @@ mini workspace --action import --dir "$WSC" --name parent --kind object --target
 row "the task owners hold their references (tool: 8, parent: 7)" "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSC/refs/parent.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/import-parent.out" | cut -c1-100)"
 delegate() { # WORKSPACE REF
   local ws=$1 ref=$2 id=apps-$2-member
-  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"1000"}\n' "$ref" >"$out/delegate-$ref.json"
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"%s"}\n' "$ref" "${APPS_MAX:-1000}" >"$out/delegate-$ref.json"
   mini workspace --action propose --dir "$ws" --request "$out/delegate-$ref.json" --proposal-id "$id" >"$out/propose-$ref.out" 2>&1 || return 1
   mini workspace --action submit --dir "$ws" --intent "$ws/proposals/$id/intent.json" --attempt "$ws/attempts/$id" >"$out/submit-$ref.out" 2>&1 || return 1
   mini workspace --action publish-delegation --dir "$ws" --proposal-id "$id" --attempt "$ws/attempts/$id" >"$out/publish-$ref.out" 2>&1 || return 1
