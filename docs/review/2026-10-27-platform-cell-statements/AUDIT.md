@@ -384,3 +384,201 @@ session is outside the keystone.
 **Verdict:** proofs may start once there is the bundled `Spec` with `SealOpens` and the inhabitation
 pole, plus the light-session clause in `Wrote`. Strengthen `TailCutAsReplay` and add the `Loaded`
 Prop in the same commit.
+
+## 2026-10-27, seventh pass: Option A spec (lane/hot-path-v4 41099e07)
+
+**Verdict: unsatisfiable as stated; one change before proofs.**
+
+**`executesNoPrefix` against `exact`.** `exact` requires `view.snapshot = replaySnapshot ⟨seed, pre ++ suf⟩`.
+That snapshot is `State.snapshot state (image.accepted.take height)` replayed (`DurableCheckpoint.lean:101-115, 151-156`).
+Its model's `journal`, `history` and `consumed` are built from the prefix records. `executesNoPrefix` sets
+`view.snapshot = stateSnapshot state` with `state` from `ffState`, whose inputs are the checkpoint and suffix only. Option A
+takes the journal out of the checkpoint, so `ffState` has no source for the prefix journal. Two prefixes giving the same body
+(a chain collision, which exists by counting) would demand two snapshots from one input. Fix: split the snapshot.
+`executesNoPrefix` should speak of the executed part only (`roots`, `available`, the World). Add a clause that `journal`,
+`history` and `consumed` are a pure function of the decoded `below ++ suffix` (the same non-executing rebuild as the indexes).
+
+**Does it forbid execution?** Only extensionally. An `ff` that replays the prefix as a check and then returns the
+checkpoint's World satisfies it. A fold divergence does break it: a replaying `ff`'s World differs from `ffState`'s, which
+reads `body.world`. Non-execution is a cost claim, so make it structural. Define `ff` in `Impl` as
+`ffState` ∘ `rebuild (decode below)` rather than a free field, and the type then proves it. That is ATLAS law 5: one
+executable path, no twin.
+
+**Dropping the anchor.** Safe, and stronger. The recomputed prefix chain must equal the MAC'd `body.chain`, which binds every
+prefix byte, not one tag.
+
+**Tamper guarantee.** The same as the sixth pass for the reader, but it now rests on the chain hash's collision resistance
+rather than on per-entry KMAC tags. Name that boundary in the spec's header beside the MAC's.
+
+## 2026-10-27, eighth pass: `Theory/ReceivingVerifier.lean` (lane/un-pred-census 726e1c09)
+
+State of the tree: the module is imported by nothing, `Theory/Receiving.lean:105` still has the old
+`Vouchers verify`, and `Ran` does not exist yet in `Compiler/CredentialSignatureAdmission.lean`. So this
+pass judges the shape.
+
+| statement | verdict |
+|---|---|
+| `Verifier`, `pureVerifier` | SOUND |
+| `Vouchers` (private `mk`) | WEAK: `ofAnswered` is public, so the privacy is cosmetic; the docstring's "only use is `admitVia`" is false |
+| `not_verified_of_not_answered`, `pure_false_not_verified`, `pure_observed_eq` | SOUND teeth, relative to `V` |
+| `exists_for_true`, `pureVerifier_poles`, `Verifier.exists_refuting` | SOUND, but all at `Id` |
+
+**(a) Index.** The deputy's worry is right. `Verifier IO` is an open structure:
+`⟨fun _ _ => True, fun _ => pure (.ok ⟨true, trivial⟩)⟩` builds without the shim, and `Vouchers` over it
+carry nothing. `Theory/` cannot name `receiverVerifier` (import boundary), so the index belongs one layer up.
+Every deployed receiver's `prepare`, and every top-level receiver theorem, must be stated at
+`Vouchers receiverVerifier`, never `∀ V`. Generic `∀ V` lemmas stay in Theory as tools. Add a census row:
+no `Verifier IO` value besides `receiverVerifier`, and no deployed receiver whose type is polymorphic in `V`.
+Either drop `ofAnswered` and mint only in `admitVia` (keeping `mk` private), or correct the docstring. The
+proofs, not the privacy, carry layer 1.
+
+**(b) `Ran` outside the shim.** A private constructor is unreachable from other files, but `Ran` leaks
+through anything its own file exports. Before the conversion lands, check: no lemma or def in that file
+returns `Ran q b` for caller-chosen `b` other than the shim; no derived or explicit `Inhabited`/`Nonempty`/
+`Decidable` instance for `Ran`; no `unsafe` or `@[implemented_by]` near it (`#assert_axioms` does not see
+`unsafe`). Then the only inhabitant is the shim's post-`verify` mint, which is the named layer-2 trust.
+
+**(c) Pilot.** Enough to prove the shape, on three conditions. The pilot must use both `verified` and
+`observed` (a `false` answer the family decides on), not only `verified`. Its top-level theorem must be
+stated at `receiverVerifier`. And it must carry an IO-level teeth pole: an ingress whose signature the
+shim answered `false` yields no voucher for it, which is `not_verified_of_not_answered` instantiated at
+`Ran`. Today every satisfiable and inhabitation pole is at `Id`; the pilot must give one at `IO`.
+
+## 2026-10-27, ninth pass: lane/hot-path-v4 571f9981
+
+**Verdict: proofs may start.**
+
+`Impl.ff` (:210) is now a definition: `ffState` (whose type has no prefix), then the chain gate (prefix count
+equals `stateBase.1`, the recomputed chain equals `stateBase.2`, and `suffixGate` pins that pair to the MAC'd
+body), then decoding. A replaying `ff` cannot be written. `Opened.view` (:224) pairs the executed part
+(`stateHead`, `stateWorld`) with `rebuildDerived` and `State.snapshot head records`, so the prefix journal,
+history and consumed set come from decoding, and the pass-7 contradiction is gone. `exact` (:346) pins the
+executed head's snapshot over `pre ++ suf` to the replay's, and the World to the fold's. It is satisfiable:
+a v3 `resume` at `height = length` is exactly `State.snapshot st records`, and a head state exists because
+`storeCheckpoint` seals at any height. The laws are bundled: an `ffState` that always errors fails `exact`,
+`inhabited` and `headSealZero`. `viewOpened` ties `ofOpened` to the open's view.
+
+One note for the prover. The first lemma `exact` needs is that replaying the suffix from
+`State.snapshot base pre` equals `State.snapshot head (pre ++ suf)` for the head state the executing part
+builds (roots by `rootTable`, consumed, journal, history). If that equation fails at some corner (a
+retired cell, absent bytes), suspect the `State.snapshot` shape before the prover. The `representsCheck` of
+earlier passes is replaced by `representsFromDerived`; no change is needed.
+
+## 2026-10-27, tenth pass: `Kernel/ApplicationStreamContinuityFresh.lean` (lane/un-stream-continuity 351dab72)
+
+**Verdict: not yet; two changes before proofs.**
+
+**The left side is weaker than "a fresh opening read".** `Held.verifiedRead : Option (List UInt8)` is a bare
+option, and `decide` verifies no MAC. Admission reduces to "some tag equals the tip's tag, and the record and
+height equal the tip's". A re-read that copies the tip entry's tag into `verifiedRead` without running
+`DurableHistory.Head.verify` satisfies the iff, so the authentication the docstring promises is absent from
+the statement. Fix: make `verifiedRead : Option {tag // Head.verify key height record tag = true}` (the
+verifier `readerWith` uses), or add that conjunct to the iff. `headTag`'s authentication is `Loaded`'s
+invariant; name it as a hypothesis in the same shape.
+
+**Deployed path.** `decide` is called "the pure core of `withOpenedFreshTip`"
+(`ApplicationStreamContinuity.lean:208`), but nothing ties them, and today's `withOpenedFreshTip` does not
+call it. Add `withOpenedFreshTip_refuses : … = .ok _ → decide … = .admitted`, or define the IO by `decide`,
+in the same commit.
+
+**Teeth.** These are named refusals, but as closed `decide +kernel` instances (law 9). The general content
+is the iff plus `noRead_noAdmission`, which is adequate. Stale and forked tips share `.tipChanged`; that is
+acceptable.
+
+**`Loaded.extend` dropping the tag.** It is a defect against `Loaded.headTag`'s own docstring ("read from
+(or appended to) the Store"). `extend` (`DurableReceiverCore.lean:1434-1480`) is pure and cannot know the
+tag, but the IO append that wrote the entry computed it under the key. The cleaner fix is
+`Loaded.withHeadTag` set by the append path, with
+`appended_headTag : (append …).headTag = some (DurableHistory.trailer key height …)`. That makes the
+re-read unnecessary on the Host's own path. Keep (a) for robustness only. Pin the append lemma in this
+statement module too, so the fix cannot regress to `none` silently.
+
+## 2026-10-27, eleventh pass: `Kernel/ObjectiveActivityEffect.lean` (lane/un-effects 60cd8f64)
+
+**Verdict: proofs may start on Performed, Refused, Verdict, TransferMoves and Resumed. Three
+statement additions come before the Delivery\* and CommitJudged proofs.**
+
+**On the deployed path.** Yes. `commitYield`, `transferVerdict` and `settle` are the kernel's own
+functions, and the Delivery\* statements quantify over `Delivery`, whose `batchExact` (`ObjectiveActivity.lean:3296`)
+is the deployed batch. The ordering is right: `settlePurse` checks `pair + deposit` on the purse after the
+delivery's charges AND the effect transfer (`:2456-2461`), so a transfer can never leave the purse
+underfunded. Safety holds even where the verdict errs.
+
+**`VerdictStatement` is complete over `transferVerdict`'s four outcomes** (reserved, closed, unfunded, settled).
+But it judges against `funds.book`, which for a delivery is `applyOperations book (purseCharges …)`
+(`deliveryFunds`, `:3119-3123`). The batch applies `deliveryCharges …`, and nothing states that these
+agree on the purse balance and the open-account set. If they disagree, a transfer judged `settled` is
+refused at `settlePurse` as `awaitsFunding`, which refuses the whole turn under the wrong name, or a
+covered one is recorded `unfunded`. **Add `FundsAgree`:** the purse balance and the `accounts` of
+`funds.book written` equal those after `deliveryCharges` (and likewise for the birth's funds, `:2722`).
+
+**Storage-deposit independence is asserted, not stated.** The verdict is judged with the reserve of a
+`settled` await (`commitYield`), while `settlePurse` charges the deposit of the record actually committed,
+whose await may be `refused r`. They agree only because `VerdictWire` is two octets for every verdict (a
+comment at `:255`). **Add** `storageDeposit config (nextRecord … ⟨…, .performed v, …⟩)` independent of `v`.
+
+**`CommitJudgedStatement` binds to the same `admitWrite`** that `Delivery.judged` (`:3318`) uses, with the same
+`factsOf payer height object 2 (some pin)`, so a commit and an await are judged by one law. But (i) it is an
+instance of the existing `judgeWritten_ok delivery.judged` (`:5207`), so it adds no content beyond the
+`Delivery` field. (ii) Births (`:2781`, other facts) are not covered, though a first segment can yield
+`commit`. (iii) Its "a law-refused commit admits no turn" has no pole. **Add** a birth clause and a teeth
+pole: an object whose law refuses the write makes `deliver` return `.error (.objectWrite _)`. Also
+inhabit the premise `committed.written = some _`: `SatisfiablePole`'s `commit {write: {}}` may build
+`none`.
+
+**Deputy's additions.** (a) *Issuer well as `config.asset`:* this is the kernel's convention, not invented
+here. `CanonicalResourceKernel.lean:63` says "an asset is named by its issuer-well account", and `:150`
+says "the asset identifier is its issuer-well identifier". `AccountId` and `AssetId` are both `Nat` (`:64-65`), and
+`ObjectiveActivity.lean:3721` already refuses `request.account = config.asset` as the issuer well.
+(b) *`TeethPole`* is quantified over the context but fixed in its numbers (purse 10, reserve 3, amounts 8
+and 1). It is a non-vacuity witness, which law 9 permits, not the general teeth. The general shape is
+`RefusedStatement` with `VerdictStatement`'s refusal clauses, so that is adequate. Its docstring's
+"purse, recipient and state untouched" is not in the Prop; that claim belongs to
+`DeliveryRefusedStatement`, so the docstring should point there.
+(c) *Changed conclusions.* `Delivery.yield_reserves_deposit` now reads the purse after the effect transfer
+too. That is **stronger**: a transfer only lowers the purse, so the old conclusion follows. Justified.
+`commitYield_spec`'s write clause went from `stateWrite … = .ok committed.written` to
+"∃ built, stateWrite = .ok built ∧ committed.written = some w → built = some w". That is **weaker than
+needed**: it is justified only for a refused transfer, which drops the built write, but it gives up equality
+for every other plan, and for `none`. Restate it as `committed.written = built ∨
+(committed.await.source = .performed (.refused _) ∧ committed.written = none)` so consumers of the
+equality keep it.
+
+## 2026-10-27, twelfth pass: L1 restatement 7e39fe90 (pass-4 (a) gaps)
+
+**Verdict: two of the three gaps are closed. Proofs may continue. Two statement items are owed before
+the receiver is called "decided on the deployed cell".**
+
+**Gap 1, signature coverage: CLOSED.** `receiverContext.encode current i = m.frame current (commandAt roots i)
+i.validUntil`, the signed header's frame that `verifyNative` receives. `CredentialSignatureAdmission.prepare`
+refuses unless `controller.envelope.header = header snapshot … validUntil` (`sourceBinding`), so the frame
+is the receiver's own. The custodian cosigns the same frame.
+
+**`PinCollision`: a real collision, not the old vacuity.** Its two fields are `source p i ≠ source p j`
+and equal `pinDigest customization` of exactly those two strings. It is inhabited only by an actual
+cSHAKE collision on compared inputs, which matches the `ArgumentCollision` pattern. `Context.binds` derives
+it from `pins` (realised through `frame_effectsDigest`) and `sourceCovers` (the injective codecs). No
+statement takes it as a free escape.
+
+**Gap 3, a pole through the real path: CLOSED.** `signed_command_admitted` builds the ingress with
+`ingressCodec`/`commandCodec`/`canonicalEnvelopeCodec`, decodes it back, shows the envelope frame is
+`encode`, and admits through the gate and `Admits` with the verdict recorded under the enrolled key. That
+is the transcript boundary, as agreed.
+
+**Gap 2, decided on the loaded cell: HALF.** `Reachable.controller_stays` and
+`platform_written_only_by_install` (from `kernelOnly [.platformInstall]`) are proved. `receiverDecides`
+now quantifies over any loader satisfying `Reachable` and `holds`. Two things are still owed. (i) The bridge
+from the deployed loader: for every durable snapshot the Host reaches, `PlatformCellDomain.load d snap =
+some L → Reachable d.controller L.cell.logical`. This is the conjunction of the writer theorem and a
+genesis clause. (ii) The genesis clause has no producer. `NativeHostGenesis` seeds no platform cell
+(no `PlatformCellLayout.genesisStore` in the seed), so on today's genesis `load` is `none` and every
+install is `platformUnavailable`. That is expected until L1's re-genesis, but state it as the owed
+keystone, not leave it as a hypothesis.
+
+**`validUntil`: checked, but by the verifier, not the spec.** The deployed path refuses an expired
+header: `CredentialSignedEnvelopeController.prepare` tests `envelope.header.validUntil < state.height`
+(`:293`) against the request's admission height (the Host's logical height, not a wall clock), and it
+surfaces as `CredentialSignatureAdmission.Reject.expired`. But `PlatformCell.Admits` never mentions
+`validUntil`, so the spec admits an expired install that the receiver refuses. Soundness holds (the
+receiver refuses more), but `receiverDecides` covers only the gate. Add `height ≤ i.validUntil` to
+`Admits`, with a teeth pole `expired_refused`, so the spec and the full receiver agree.

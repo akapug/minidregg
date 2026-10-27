@@ -33,8 +33,10 @@ The bar: a stranger with the URL exercises every surface, for as long as the dem
 (`docs/DEMO-EXPERIENCE-2026-10-27.md` is what that product is). There is no "week-1" scope and no
 degraded first edition; half-built prototypes are compost for the one design.
 
-**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships on the day
-with its reds named; the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
+**The gate is the tour** (ember, 2026-10-27 morning: no row burndown). A rehearsal ships when ember says, from the
+newest green candidate, with its reds named; it tests a CONVERGED sprint, never green alone (ember,
+2026-10-27 late evening: no rehearsal this sprint; the next carries ALL outstanding work, including the
+one re-genesis of the platform cell, the activity effects and checkpoint v4, after a harness restart); the only reds a rehearsal or the opening is judged by are (a) the stranger's tour,
 `jtour`: the web journey's rows driven against the box's own Host (the twelve steps of the experience
 document, parity over every verb leaf, the lost reply and its exact retry, the paste-the-yes), and
 (b) the composed scenario over N forced-ssh members (rooms, churn, documents, apps, connector,
@@ -146,7 +148,7 @@ and pay-watcher units hardened; the measured lane rules in `docs/COORDINATION-20
 2026-10-27-genesis-coupling/`, `2026-10-27-process/`, `2026-10-27-platform-cell-statements/`) and the
 harvested backlog (`docs/BACKLOG-2026-10-27.md`: 34 landed, 72 open, 14 superseded, 9 in flight).
 
-**Cuts** (the integrator reads `lane/*` itself every 60–90 min; one report per cut): cut 6 = 23861533
+**Past cuts** (integration is continuous now; no cadence): cut 6 = 23861533
 (tour 38 PASS / 0 FAIL / 1 UNCONFIGURED, the headless-Chromium row now configured on the build box;
 composed rooms/churn/documents/restart PASS, apps/connector/residents blocked only on the scratch world's
 genesis, now fixed in dregg-infra; the enrol acceptance PASS with five members back to back under a

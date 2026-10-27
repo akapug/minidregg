@@ -176,6 +176,17 @@ file's head and tail, and those ranges are in the middle. The rest of the checks
 3× smaller and the re-orientation count is unchanged by this measure. The real "after" number
 is the next actual resume.
 
+**Live distills with the branch binary** (the coordinator, tonight; real resumes, not counterfactuals):
+
+| lane | before | after | note |
+|---|---|---|---|
+| infra `ae6499559bb424054` | 1.4× (0.18.0) | 2.6× (164k tokens) | debug build at fa4e3af1, before the slim generations |
+| L1 `a436f5b0c02ab4364` | — | 8.2× (516k → 62.8k) | |
+| integrator `a67de9cf3f217c50e` | — | 4.3× (976k → 226k) | 60 commits kept |
+
+None of the three successors asked the coordinator a re-orientation question. Their first calls
+read live box state (git, PID files, logs), which no pack written earlier can answer.
+
 **Left for ember.** Whether a state file this large is carried whole (83 KB is about 36k
 tokens, which would bring a221 to about 4.4×), and whether coordinator turns should become a
 first-class kind in the IR instead of being matched by their opening line in distill.
