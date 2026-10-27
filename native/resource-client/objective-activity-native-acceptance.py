@@ -166,11 +166,10 @@ policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_
 (root / 'policy.json').write_text(json.dumps(policy, indent=1))
 sh('policy', host, '/dev/null', 'author', 'objective-policy', root / 'policy.json', root / 'policy.hex')
 
-sh('keygen-40', mini, 'keygen', '--secret', root / 'subject40.key', '--public', root / 'subject40.pub')
-public40 = (root / 'subject40.pub').read_bytes().hex()
+# subject 40's key is the fixture's (NEWPARTICIPANT_EXTRA_SUBJECTS -> W/extra/40.key): no per-run key in the genesis
 SECOND = '40'
 enrollment = [{'key': {'keyId': '4000', 'keyEpoch': '2', 'algorithm': '1', 'subject': SECOND,
-                       'publicKey': public40, 'activeFrom': '0', 'activeUntil': '1000000', 'nextKeyDigest': None},
+                       'activeFrom': '0', 'activeUntil': '1000000', 'nextKeyDigest': None},
                'accountId': SECOND, 'spendCapabilityId': '4002', 'controlCapabilityId': '4003',
                'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
                'accountPredicate': {'type': 'all', 'predicates': []}}]
@@ -179,7 +178,7 @@ W = root / 'w'
 sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
-        'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
+        'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-40.json'),
         'NEWPARTICIPANT_SPONSOR_BALANCE': '100000000000'})
 config = W / 'deployment' / 'pinned-config.json'
 sponsor = W / 'sponsor'
@@ -187,7 +186,7 @@ second = root / 'subject40'
 second.mkdir(mode=0o700)
 (second / 'workspace.json').write_text(json.dumps({
     'type': 'minidregg-participant-workspace-v1', 'host': str(host), 'socket': str(sock), 'config': str(config),
-    'key': str(root / 'subject40.key'), 'subject': SECOND}))
+    'key': str(W / 'extra' / '40.key'), 'subject': SECOND}))
 params = json.loads((W / 'genesis-params.json').read_text())
 SPONSOR = str(params['sponsor']['subject'])
 SPONSOR_ACCOUNT = str(params['sponsor']['accountId'])

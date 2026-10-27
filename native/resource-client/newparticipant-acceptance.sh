@@ -66,7 +66,7 @@ variant_digest() {
       "$DOMAIN" "$SUBJECT" "$OWNER_BUDGET" "$SPONSOR_BALANCE" "$DISABLED_EVALUATORS" "${MINI_TAIL_BOUND:-256}" \
       "${OBJECTIVE_INVOCATION_POLICY:-}" "${NEWPARTICIPANT_CLOCK_OBSERVER:-}" "${NEWPARTICIPANT_SERVE:-serve}" \
       "${GENESIS_NOW:-}" "${MAX_STEP_SECONDS:-}" "$(case $SOCKET in "$ROOT"/*) echo yes;; *) echo no;; esac)"
-    for f in "${EXTRA_GENESIS_ENROLLMENTS:-}" "${EXTRA_CLOCK_TICKERS:-}" "${NEWPARTICIPANT_PROVIDER_SERVICES:-}"; do
+    for f in "${EXTRA_GENESIS_ENROLLMENTS:-}" "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" "${EXTRA_CLOCK_TICKERS:-}" "${NEWPARTICIPANT_PROVIDER_SERVICES:-}"; do
       [ -n "$f" ] && { printf '%s ' "$(basename "$f")"; sha256sum "$f"; }
     done
   } | sha256sum | cut -c1-32
@@ -194,11 +194,35 @@ cat >"$ROOT/pay/genesis-enrollments.json" <<EOF
 EOF
 # A caller's own EXTRA_GENESIS_ENROLLMENTS (hosted agent-grain subjects) is kept;
 # the observer is appended to it.
+# NEWPARTICIPANT_EXTRA_SUBJECTS, if set, is an absolute path to a JSON array of further genesis
+# enrollments WITHOUT their public keys: this fixture makes each subject's key here, at
+# ROOT/extra/SUBJECT.key (its public half beside it, `mini keygen`'s next key too), and fills
+# `.key.publicKey` in. A caller that made its own keys passes EXTRA_GENESIS_ENROLLMENTS instead;
+# the difference is that a world described this way is the same world every time (no per-run key
+# in its genesis), so it has a template.
+if [ -n "${NEWPARTICIPANT_EXTRA_SUBJECTS:-}" ]; then
+  case "$NEWPARTICIPANT_EXTRA_SUBJECTS" in /*) ;; *) echo 'NEWPARTICIPANT_EXTRA_SUBJECTS must be absolute' >&2; exit 2;; esac
+  jq -e 'type == "array" and length <= 8 and all(.[]; .key.subject | type == "string")' "$NEWPARTICIPANT_EXTRA_SUBJECTS" >/dev/null ||
+    { echo 'NEWPARTICIPANT_EXTRA_SUBJECTS: an array of at most 8 enrollments, each with .key.subject' >&2; exit 2; }
+  mkdir -m 700 "$ROOT/extra"
+  : >"$ROOT/extra/public-keys.tsv"
+  for s in $(jq -r '.[].key.subject' "$NEWPARTICIPANT_EXTRA_SUBJECTS"); do
+    case $s in ""|0?*|*[!0-9]*) echo "extra subject must be canonical decimal: $s" >&2; exit 2;; esac
+    "$MINI" keygen --secret "$ROOT/extra/$s.key" --public "$ROOT/extra/$s.pub" >"$ROOT/extra/$s-keygen.json"
+    printf '%s\t%s\n' "$s" "$(od -An -tx1 -v "$ROOT/extra/$s.pub" | tr -d ' \n')" >>"$ROOT/extra/public-keys.tsv"
+  done
+  jq --rawfile keys "$ROOT/extra/public-keys.tsv" '
+    ($keys | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $pub
+    | map(.key.publicKey = $pub[.key.subject])' "$NEWPARTICIPANT_EXTRA_SUBJECTS" >"$ROOT/pay/genesis-extra-subjects.json"
+else
+  printf '[]\n' >"$ROOT/pay/genesis-extra-subjects.json"
+fi
 if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then
-  jq -s '.[0] + .[1]' "$EXTRA_GENESIS_ENROLLMENTS" "$ROOT/pay/genesis-enrollments.json" \
+  jq -s '.[0] + .[1] + .[2]' "$EXTRA_GENESIS_ENROLLMENTS" "$ROOT/pay/genesis-extra-subjects.json" "$ROOT/pay/genesis-enrollments.json" \
     >"$ROOT/pay/genesis-enrollments-all.json"
 else
-  cp "$ROOT/pay/genesis-enrollments.json" "$ROOT/pay/genesis-enrollments-all.json"
+  jq -s '.[0] + .[1]' "$ROOT/pay/genesis-extra-subjects.json" "$ROOT/pay/genesis-enrollments.json" \
+    >"$ROOT/pay/genesis-enrollments-all.json"
 fi
 cat >"$ROOT/pay/genesis-observer.json" <<EOF
 {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}
