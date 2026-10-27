@@ -66,3 +66,19 @@ Compose this branch with lane/oracle-grant-factory (34aaf5044) for a fresh Store
 Then run the real agent/browser journey through grant issue, dispatch, answer,
 restart and exact retry. No event27 submission, repaired hosted answer or current
 Store upgrade is claimed by this source repair.
+
+## Current-main source review
+
+Merged main aa9366f88 (platform/genesis, activity effects and stream continuity)
+without conflicts. The four changed grant modules, operator-consent caller and
+NativeHost.Config definition had no intervening source changes. The source
+fixture still supplies the actual required `expectedSeed` field; `storeIdentity`
+is a derived function, not a replacement field. New platform/clock selectors
+belong to NativeHostGenesis.Config and must be supplied by fresh provisioning.
+Neither fixture constructs a genesis configuration or an exact-readback token.
+The grant receiver uses its existing verified reopen/lookup path; downstream
+lifetime dispatch now retains the append tag through the updated receiver.
+
+The current protocol uses genesis-source v8 and outcome v7. The fresh journey
+therefore needs matching newly built Host, consent and native helpers. This is
+source review only; all outstanding central checks above still apply.
