@@ -36,6 +36,10 @@ while read -r o; do [ -f "$o" ] || { echo "missing object: $o" >&2; missing=1; }
 echo "closure: $(wc -l <"$tmp/oleans") modules, $(wc -l <"$tmp/objs") package objects" >&2
 leanc -c -O2 -fPIC -o "$tmp/shim.o" "$here/shim.c"
 mkdir -p "$(dirname "$out")"
+# HOT-PATH 2d: Theory.Sp800185Cshake256Core is in this closure, so its compiled hash is the Rust
+# kernel (native/mini-kernels); the kernel's link inputs come from scripts/build-mini-kernels.sh.
+[ -f "$root/.lake/native/link-inputs.txt" ] || "$root/scripts/build-mini-kernels.sh" >/dev/null
+cat "$root/.lake/native/link-inputs.txt" >>"$tmp/objs"
 leanc -shared -o "$out.tmp" "$tmp/shim.o" @"$tmp/objs" -L"$prefix/lib/lean" \
   -lInit_shared -lleanshared_1 -lleanshared_2 -lleanshared -Wl,-rpath,"$prefix/lib/lean"
 mv -f "$out.tmp" "$out"

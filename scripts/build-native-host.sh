@@ -1914,6 +1914,15 @@ while IFS= read -r module; do
   printf '%s\n' ".lake/build/ir/$stem.c.o.native" >> "$response"
 done < "$source_modules"
 cat "$output_dir/package-objects.txt" >> "$response"
+# HOT-PATH 2d: the Rust kernels the compiled hashes call through @[extern] (native/mini-kernels)
+# are link inputs of every Lean executable. Build them here, from this snapshot's sources, and
+# record their hashes beside the objects'.
+scripts/build-mini-kernels.sh > "$output_dir/mini-kernels.log" 2>&1 || {
+  printf 'build-native-host: native/mini-kernels did not build; see %s\n' "$output_dir/mini-kernels.log" >&2
+  exit 65
+}
+cat .lake/native/link-inputs.txt >> "$response"
+cp .lake/native/SHA256SUMS "$output_dir/mini-kernels-sha256.txt"
 
 # Recheck immediately before linking in case another process created the path.
 if [[ -e "$binary" || -L "$binary" ]]; then

@@ -854,8 +854,11 @@ theorem cshake256Fast_eq (customization input : List UInt8) :
   funext padded
   exact (absorbPadded_fast_eq padded).symm
 
-/-- The compiled Host's cSHAKE256 is the fast path. -/
-@[csimp] theorem cshake256Bytes_eq_fast : cshake256Bytes = cshake256Fast := by
+/-- The fast path is the specification. It is no longer the `@[csimp]` attachment: the compiled
+`cshake256Bytes` is the kernel seam `Native.cshake256Native` (`Theory.Sp800185Cshake256Native`,
+`cshake256Bytes_eq_native`), whose Lean body is this fast path; a module importing only this
+file compiles against the list definitions. -/
+theorem cshake256Bytes_eq_fast : cshake256Bytes = cshake256Fast := by
   funext customization input
   exact (cshake256Fast_eq customization input).symm
 
