@@ -801,3 +801,38 @@ the profile is forced by the profile hashing `profile.template` into the semanti
   remains (73).
 - The keystone, the cell-read `opened.pins`, `templateAt` in `preparePending` and the audit (c) Lean
   poles remain owed. The label "ordinary births" is correct.
+
+## 2026-10-27, eighteenth pass: item 3, the deployed keystone `ReceiverReadsCurrent` (lean-audit-c e421c0830, statement only)
+
+**Verdict: accepted as stated. One change to the spec module, one interim condition.**
+
+**(1) Pricing into `Pending`, deleting `pricedAt`: correct.** Over `AcceptedBirth` the keystone needs no
+assumption, and the IO check would be a twin of the admission check (law 13). The IO receiver commits
+`DurableReceiverIO.receiveLoaded … (intent accepted)` directly (`ResourceBirthReceiver.lean:602`), so
+"the theorem covers every value the receiver commits" is true by the code's definition and needs no
+lemma.
+
+**(2) The vacuity argument: correct.** It also says something about `PlatformCell` itself.
+`BirthsReadCurrent view terms guards` over a store-only `terms` is satisfied by `currentReader` by `rfl`,
+so as a keystone it constrains nothing deployed. Its job now belongs to `ReceiverReadsCurrent`. **Change:**
+in `PlatformCell.lean`, either delete `BirthsReadCurrent`/`BirthQuoteCurrent` and their poles, pointing to
+`ReceiverReadsCurrent`, or relabel them as the store-level shape, explicitly *not* a keystone. A
+vacuous-by-construction keystone left standing beside the real one is the shape law 2 forbids.
+
+**The statement.** Each conjunct is about the deployed object:
+- the record on the image the birth commits against;
+- `priced` and `FeeBound` at `record.creation`;
+- `template` built from `record.ownerBudget/lifetime`, reaching the grant through `RootGrantShape`/`BirthWindow`;
+- the platform cell's *exact root* in `(intent accepted).readGuards`.
+
+Teeth are real and general: `unpriced_empty` for absence, `preparePending_stale` for a genesis-tariff
+reader after an install, and the pre-f2010f574 guard list failing the last conjunct. The premise
+`platformRecordAt = some` is inhabited on the deployed genesis by `platform_seeded`. The label states
+its scope and the 87 owed rows. Item 6's discharge from the birth's own write list is sound:
+- allocations are at ids `allocate` requires absent, while the platform cell is present;
+- the factory, book and authority cells differ from it by observed kind.
+
+**Interim condition, the same as pass 16.** The satisfiable pole needs a concrete loaded, signed
+`AcceptedBirth`. That is the same owed Lean object as item 7, and one witness serves both.
+`neutral-birth.lean` is accepted as the executed interim witness only. The keystone is not "done" until
+the declaration-level witness exists.
