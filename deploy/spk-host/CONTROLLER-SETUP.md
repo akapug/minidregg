@@ -10,6 +10,7 @@ Run these verbs through the same authorized `install-user-world` entrypoint:
 
 ```text
 controller-create STORE HELPER
+controller-resume-create STORE HELPER
 controller-stage STORE HELPER BUNDLE BIN_DIR UPSTREAM_PRIVATE_SOCKET PUBLIC_SOCKET
 controller-start STORE HELPER
 controller-stop STORE HELPER
@@ -29,7 +30,12 @@ account, group, unit names and home inode. Account names are fixed to
 `mini-c-STORE`. The installer selects one unused UID/GID from the operator's
 existing `/etc/subuid` and `/etc/subgid` intersection; it grants no new range.
 It creates the private group with that exact GID before creating the named
-account with both explicit IDs. Existing accounts/groups, app ranges,
+account with both explicit IDs. Account creation uses `useradd --system` without
+`--add-subids-for-system`, so it grants no subordinate ranges. Before creation,
+the installer checks the bounded `useradd -D` output requires
+`CREATE_MAIL_SPOOL=no` and no implicit supplementary groups. It does not change
+host defaults or pass defaults-file settings as unsupported `-K` login.defs
+keys. Existing accounts/groups, app ranges,
 controller reservations, other principals' overlapping delegations and a
 different calling operator refuse. Numeric subid-owner aliases are supported.
 A controller name or numeric UID with its own stale subordinate grants also
@@ -43,6 +49,18 @@ allocation enforce these reservations and retained removal receipts under the
 same global installation lock. Malformed or unsafe registry data fails closed.
 The installer bounds registry counts, delegation input, candidate enumeration
 and NSS snapshots rather than silently truncating a range.
+
+`controller-resume-create` handles the specific interruption after the permanent
+reservation and private group were created, but before the account exists. It
+requires the exact root-owned `pending.json` and lifecycle lock as the entire
+controller directory; matching world/deployment/operator reservation; the
+reserved group name/GID with no members or aliases; no passwd entry, UID/GID
+use, live identity process or controller unit; and still-exclusive subordinate
+delegation. It then creates the account with the **same recorded identity** and
+finishes normal setup. It never allocates again, deletes partial state, adopts
+an existing account or accepts partially populated home/configuration files.
+The original pending record and permanent reservation remain. Recovery after a
+later creation step is outside this narrow verb and fails closed.
 
 The provisioning operator is explicitly trusted: it generates the controller's
 keys, supplies its code/configuration and already owns the delegated ID range.
@@ -187,8 +205,8 @@ subtrees, replaced ACL objects or changed ACLs. It removes only this account and
 its recorded units, then retains a cleanup receipt under
 `/var/lib/mini-spk-controller-history`. Ordinary world removal refuses while a
 controller allocation remains. Interrupted setup retains its pending records;
-an incomplete ACL mutation or account allocation without a completed identity
-receipt needs operator repair, not an ownership guess or destructive retry.
+an incomplete ACL mutation or account allocation outside the exact supported
+pending-create shape needs operator repair, not an ownership guess or destructive retry.
 
 The unprivileged tests are:
 
