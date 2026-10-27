@@ -4,6 +4,8 @@
 Run: python3 scripts/test-oracle-controller-continuation.py
 The successful real preflight is separate acceptance evidence.
 """
+import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -134,6 +136,62 @@ class ContinuationGuards(unittest.TestCase):
 
     def test_unmount_failure_prevents_destroy(self):
         self.assertEqual(self.cleanup_fixture('unmount', False, True), ['unmount'])
+
+
+class SessionRefusalGuards(unittest.TestCase):
+    def setUp(self):
+        self.request_id = '1' * 32
+        self.result = {'isError': True, 'operationId': None, 'requestId': self.request_id,
+                       'result': 'foreground tool requires an attached, reconciled idle task',
+                       'type': 'tool-complete', 'v': 1}
+        self.journal = dict.fromkeys(('pending toolPending providerPending child settlementDue parentHold '
+            'toolHold dispatchPending dispatchHold dispatchAttempt applicationApiAttempt providerHold '
+            'providerAttempt providerSettlement foregroundAttempt birthOperation birthPending workspaceAttempt '
+            'roomAttempt workspaceBirth managedLawGeneration hermesSession promptWitness').split())
+        self.journal.update({key: [] for key in ('applicationApiHistory providerReplays foregroundHistory '
+            'publicationReceipts bornResources workspaceProposals roomResolutions workspaceResolutions '
+            'reconciliationLog priorHermesSessions unresolvedExternal').split()})
+        self.journal.update(format='minidregg-grain-runtime-v1', connection='fenced', nextOperationId=2,
+                            birthNextOrdinal={}, hardReconnectPending=False, providerPromptRequests=0)
+        names = ('controller.lock journal.json query-0000000000000001/attempt/attempt.json '
+                 'query-0000000000000001/attempt/config.json query-0000000000000001/attempt/intent.bin '
+                 'query-0000000000000001/attempt/intent.json query-0000000000000001/intent-source.json '
+                 'shared-app-refs/app-birth.bin shared-app-refs/bootstrap-ticket.bin').split()
+        self.export = {'protocol': 'mini-spk-controller-evidence-v1', 'store': 'fixture',
+                       'files': {name: self.entry(b'') for name in names}}
+        self.export['files']['query-0000000000000001/attempt/attempt.json'] = self.entry(json.dumps({
+            'format': 'minidregg-resource-client-attempt-v1', 'operation': 'query'}).encode())
+
+    @staticmethod
+    def entry(raw):
+        return {'base64': base64.b64encode(raw).decode(), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+    def check(self):
+        self.export['files']['journal.json'] = self.entry(json.dumps(self.journal).encode())
+        return CONTINUATION.session_refusal(self.request_id, self.result, self.journal, self.export, 'fixture')
+
+    def test_exact_definite_refusal_never_permits_resend(self):
+        self.assertFalse(self.check()['permits_resend'])
+
+    def test_unrelated_error_is_not_this_boundary(self):
+        self.result['result'] = 'timeout'
+        with self.assertRaisesRegex(ValueError, 'exact definite'):
+            self.check()
+
+    def test_existing_birth_state_refuses(self):
+        self.journal['bornResources'] = [{'resource': 'session'}]
+        with self.assertRaisesRegex(ValueError, 'pending or completed work'):
+            self.check()
+
+    def test_sealed_query_refuses(self):
+        self.export['files']['query-0000000000000001/attempt/observation.bin'] = self.entry(b'sealed')
+        with self.assertRaisesRegex(ValueError, 'another operation or sealed'):
+            self.check()
+
+    def test_different_request_refuses(self):
+        self.result['requestId'] = '2' * 32
+        with self.assertRaisesRegex(ValueError, 'exact definite'):
+            self.check()
 
 
 if __name__ == '__main__':
