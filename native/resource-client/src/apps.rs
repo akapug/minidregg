@@ -1091,15 +1091,16 @@ const BOOTSTRAP_ROLES: [(&str, IdKind); 6] = [
 
 /// The op 91 `birth-intent` for the two metered tasks an apps world needs, as the workroom
 /// provisioner births them at genesis (`scripts/workroom/provision.sh`): two `grain` resources
-/// owned by the operator's subject with explicit budgets, the parent naming the operator as its
-/// worker. Budget is an explicit operator allocation, never a metered claim.
+/// owned by the operator's subject with explicit budgets, the parent under the holder form (any
+/// holder of a delegated grant may make a birth's witness no-op; only the owner manages it).
+/// Budget is an explicit operator allocation, never a metered claim.
 pub(crate) fn bootstrap_source(subject: &str, nonce: &str, context: &Value, ids: &std::collections::BTreeMap<String, String>, budget: &str) -> Result<Value> {
     let id = |role: &str| -> Result<&str> { ids.get(role).map(String::as_str).ok_or_else(|| format!("reservation lacks {role}")) };
     let mut birth = json!({"genesis":context["genesis"],"template":context["template"],"creator":subject,"nonce":nonce,
         "resources":[
             {"kind":"object","storage":"grain","target":id("parentTask")?,"owner":subject,
              "ownerCapability":id("parentOwnerCapability")?,"controlCapability":id("parentControlCapability")?,
-             "budget":budget,"workerSubject":subject,"workerGeneration":"1"},
+             "budget":budget,"holderWitnessGeneration":"1"},
             {"kind":"object","storage":"grain","target":id("toolTask")?,"owner":subject,
              "ownerCapability":id("toolOwnerCapability")?,"controlCapability":id("toolControlCapability")?,
              "budget":budget}],
@@ -1597,7 +1598,10 @@ mod tests {
         assert_eq!(resources.len(), 2);
         assert_eq!(resources[0]["storage"], "grain");
         assert_eq!(resources[0]["target"], "7901");
-        assert_eq!(resources[0]["workerSubject"], "8");
+        // The holder form (AgentGrain.holderPolicy, ruling Option A): any holder of a delegated
+        // grant may make the birth witness; no worker subject is named.
+        assert_eq!(resources[0]["holderWitnessGeneration"], "1");
+        assert!(resources[0].get("workerSubject").is_none());
         assert_eq!(resources[0]["budget"], "100000");
         assert_eq!(resources[1]["target"], "7902");
         assert!(resources[1].get("workerSubject").is_none(), "the tool names no worker, as the workroom births it");
