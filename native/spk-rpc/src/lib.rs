@@ -16,7 +16,7 @@ pub use protocol::{
     ViewInfo,
 };
 pub use web::{
-    dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, ETag,
+    dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, DavArgs, Depth, ETag,
     ETagPrecondition, Header, Method, RequestContext, SetCookie, WebRequest, WebResponse,
     WebResult, WebSocketOpen, WebSocketSession, MAX_WEBSOCKET_MESSAGE,
 };

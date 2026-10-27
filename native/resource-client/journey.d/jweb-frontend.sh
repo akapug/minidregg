@@ -94,7 +94,7 @@ if [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ]; then
       mline "$M/home/workspace" "$M/home" "init mini.key $subject" >/dev/null || return 1
       # The door's last enrolment step for a stranger who ticked "contribute my data for research":
       # the member's research-consent fact, as the member (door::research_consent_lines(true)).
-      for l in "create research-consent declared open" "invoke research-consent-0 research-consent create 1 1" "submit research-consent-0"; do
+      for l in "create research-consent declared open 1" "invoke research-consent-0 research-consent create 1 1" "submit research-consent-0"; do
         mline "$M/home/workspace" "$M/home" "$l" >/dev/null || return 1
       done
       : >"$M/provisioned-this-run"

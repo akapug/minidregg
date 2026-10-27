@@ -444,7 +444,7 @@ def observeValues (domain semantics : Digest) (federation : FederationId) (comma
     (target : Target) : Request target.kind :=
   { legValues domain semantics federation command target with
     verb := observeVerb target.kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v4".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v5".toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes domain semantics command, target.target))).digest }
 

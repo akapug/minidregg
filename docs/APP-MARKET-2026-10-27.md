@@ -62,6 +62,11 @@ fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-
     token the session mints.
   - Wekan: REST after its Sandstorm header login.
 
+  **First rows on w11** (`featured-w11/rows.tsv`): EtherCalc passes the lifecycle (741 s) and its write
+  (`PUT /_/featured` CSV 201, CSV read-back 200). HedgeDoc passes the lifecycle (938 s), but its write
+  `POST /new` with `text/markdown` answered `400 Client Error`. The body is in `featured-w11/bodies/k`.
+  Its recipe needs probing: the Sandstorm port may want the form `POST /new` or `/api`. The other
+  five apps are still running in the same job.
   The coordinator's order for the set: Datasette, DokuWiki, HedgeDoc, Davros, SandCal, Gogs,
   EtherCalc, WBO, Hledger, sntfy, Wekan.
 - **DAV verbs and streamed bodies** (§2b), asked first by the coordinator, not started. The

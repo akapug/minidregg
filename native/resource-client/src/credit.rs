@@ -381,6 +381,18 @@ fn window_of(root: &Path, ws: &Value, via: &str, capability: &str) -> Result<(St
     Ok((workspace::member(head, "notAfter")?.to_owned(), places))
 }
 
+/// `chat join` of a room this workspace already names (a guest's observe
+/// reference): adopt the newest member window addressed to me in `inbox`
+/// exactly as `room status --inbox` does. Returns whether NAME now presents
+/// a window (adopted now, or already).
+pub(crate) fn adopt_window_from(root: &Path, ws: &Value, name: &str, inbox: &Path) -> Result<bool> {
+    let current = room(root, ws, name)?;
+    if adopt_window(root, ws, name, &current, inbox)?.is_some() {
+        return Ok(true);
+    }
+    Ok(window(root, name)?.is_some())
+}
+
 /// Adopt the newest member window for room `name` from `inbox`: every
 /// delegated room reference addressed to me whose target is the room; the one
 /// whose signed capability view ends latest replaces `NAME` (the guest

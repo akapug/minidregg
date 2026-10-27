@@ -111,7 +111,7 @@ textarea,input[type=text]{width:100%;box-sizing:border-box}.warn{border-left:4px
 /// own payment script; nothing is fetched from anywhere else.
 fn asset(path: &str) -> Option<(&'static [u8], &'static str)> {
     Some(match path {
-        "/join/assets/web3.js" => (include_bytes!("../../assets/vendor/web3.js"), "application/javascript; charset=utf-8"),
+        "/join/assets/solpay.js" => (include_bytes!("../../assets/solpay.js"), "application/javascript; charset=utf-8"),
         "/join/assets/wallet.js" => (include_bytes!("../../assets/vendor/wallet.js"), "application/javascript; charset=utf-8"),
         "/join/assets/pay.js" => (include_bytes!("../../assets/pay.js"), "application/javascript; charset=utf-8"),
         _ => return None,
@@ -126,12 +126,11 @@ const WALLET_PAGE: &str = r#"(async () => {
   const say = (t) => { out.querySelector(".status").textContent = t; };
   try {
     const quote = JSON.parse(document.getElementById("quote").textContent);
-    const web3 = solanaWeb3;
-    const conn = new web3.Connection(quote.rpc, "confirmed");
-    const pay = makeDoorPay(web3, quote, { conn, fetch: (u, o) => fetch(u, o) });
+    const conn = new solpay.Connection(quote.rpc, "confirmed", (u, o) => fetch(u, o));
+    const pay = makeDoorPay(solpay, quote, { conn, fetch: (u, o) => fetch(u, o) });
     const late = pay.stale();
     if (late) { say(late); return; }
-    const wallets = await passwapWallets.list(web3, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
+    const wallets = await passwapWallets.list(solpay, { chain: quote.network === "devnet" ? "solana:devnet" : "solana:mainnet" });
     if (!wallets.length) { say("No Solana wallet extension was found in this browser (Phantom, Solflare, Backpack, Talisman, ...); the paste path below works with any wallet."); return; }
     for (const w of wallets) {
       const b = document.createElement("button"); b.textContent = "Pay with " + w.name;
@@ -198,6 +197,13 @@ impl Door {
                 None => "Free: the box funds a starting balance (the amount is published once the door's processor has run)".to_owned(),
             };
             body.push_str(&format!("<p><label><input type=radio name=route value=free checked> {funded}</label><br>"));
+            // Only when the door holds seats for invite codes; with no reserve the page says nothing of codes.
+            if state["inviteReserve"].as_u64().unwrap_or(0) > 0 {
+                let open = state["openSeats"].as_u64().unwrap_or(0);
+                let held = state["reservedSeats"].as_u64().unwrap_or(0);
+                body.push_str(&format!("{open} open free seats remain; {held} more are held for people with an invite code (a code is single-use and issued by the operator).<br>\
+                    <label>Invite code, <em>optional</em> (free route only)<br><input type=text name=invite maxlength=64 pattern=\"[A-Za-z0-9-]{{8,64}}\" autocomplete=off></label><br>"));
+            }
         } else {
             let why = state["freeReason"].as_str().unwrap_or("closed");
             body.push_str(&format!("<p>The free route is closed ({}).<br>", html(why)));
@@ -278,7 +284,7 @@ impl Door {
                  <section><h2>Or paste the transaction signature</h2>\
                  <form method=post action=/join/paid><input type=hidden name=id value=\"{}\">\
                  <input type=text name=transaction required maxlength=88><p><button>I have paid</button></p></form></section>\
-                 <script src=/join/assets/web3.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
+                 <script src=/join/assets/solpay.js></script><script src=/join/assets/wallet.js></script><script src=/join/assets/pay.js></script>\
                  <script>{WALLET_PAGE}</script>",
                 html(p["amountAtomic"].as_str().unwrap_or("?")),
                 html(p["amountTokens"].as_str().unwrap_or("")),
@@ -342,11 +348,23 @@ impl Door {
                     "paid" if state["paid"] == true => Route::Paid,
                     _ => return refuse(400, "choose a route the door offers"),
                 };
+                let invite = field("invite").trim();
+                if !invite.is_empty() && (route != Route::Free || state["inviteReserve"].as_u64().unwrap_or(0) == 0) {
+                    return refuse(400, "invite-unknown: this door takes an invite code only on the free route, and only while it holds seats for them");
+                }
+                if !invite.is_empty() && !door::is_invite_code(invite) {
+                    return refuse(400, "invite-unknown: that is not the shape of an invite code");
+                }
+                if invite.is_empty() && route == Route::Free && state["inviteReserve"].as_u64().unwrap_or(0) > 0 && state["openSeats"].as_u64() == Some(0) {
+                    let held = state["reservedSeats"].as_u64().unwrap_or(0);
+                    return refuse(409, &format!("open-seats-gone: the open free seats are taken; {held} remain for people with an invite code"));
+                }
                 let id = match door::new_request_id() {
                     Ok(id) => id,
                     Err(e) => return refuse(503, &e),
                 };
-                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0" }
+                Request::Join { id, at: now, name: name.into(), ssh_key, discord: field("discord") == "on", route, research: field("research") == "cc0",
+                    invite: (!invite.is_empty()).then(|| invite.to_owned()) }
             }
             "/join/sign" | "/join/paid" => {
                 let id = field("id");
@@ -581,10 +599,11 @@ mod tests {
         assert_eq!(quote["decimals"], "6");
         assert!(body.contains("Pay with your wallet") && body.contains("/join/assets/pay.js") && body.contains("action=/join/paid"));
         assert!(body.contains("solana-rpc.publicnode.com"));
-        for a in ["/join/assets/web3.js", "/join/assets/wallet.js", "/join/assets/pay.js"] {
+        for a in ["/join/assets/solpay.js", "/join/assets/wallet.js", "/join/assets/pay.js"] {
             assert!(asset(a).is_some(), "{a}");
         }
         assert!(asset("/join/assets/other.js").is_none());
+        assert!(asset("/join/assets/web3.js").is_none(), "no SDK bundle is served");
     }
 
     #[test]
@@ -623,7 +642,7 @@ mod tests {
     fn vendored_assets_match_their_pins() {
         use sha2::Digest;
         let table = include_str!("../../assets/vendor/VENDOR.md");
-        for (file, bytes) in [("web3.js", &include_bytes!("../../assets/vendor/web3.js")[..]), ("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..])] {
+        for (file, bytes) in [("wallet.js", &include_bytes!("../../assets/vendor/wallet.js")[..]), ("solpay.js", &include_bytes!("../../assets/solpay.js")[..])] {
             let digest = format!("{:x}", sha2::Sha256::digest(bytes));
             assert!(table.contains(&digest), "{file}: sha256 {digest} is not in VENDOR.md");
         }
@@ -636,5 +655,27 @@ mod tests {
         let out = std::process::Command::new("node").arg(test).output().expect("node is on PATH (the wallet page test needs it)");
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(String::from_utf8_lossy(&out.stdout).starts_with("ok: transfer 50000007 atomic"));
+    }
+
+    #[test]
+    fn the_page_and_the_post_speak_of_invite_codes_only_when_the_door_holds_a_reserve() {
+        let d = door("invite");
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(!page.to_lowercase().contains("invite"), "no reserve, no mention of codes");
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"funding":"10000","inviteReserve":20,"openSeats":12,"reservedSeats":20}"#).unwrap();
+        let page = String::from_utf8(d.join_page()).unwrap();
+        assert!(page.contains("12 open free seats remain; 20 more are held for people with an invite code (a code is single-use and issued by the operator)"), "{page}");
+        assert!(page.contains("name=invite"));
+        // A code rides in the queued request; open seats gone and no code is refused by name.
+        let (status, _) = d.post("/join", b"name=alice&route=free&invite=INVITE001-abcdef", "203.0.113.9", 100);
+        assert_eq!(status, 200);
+        let files = door::spool_list(&d.queue).unwrap();
+        assert!(matches!(Request::parse(&std::fs::read(&files[0]).unwrap()).unwrap(), Request::Join { invite: Some(c), .. } if c == "INVITE001-abcdef"));
+        std::fs::write(d.status.join("door-state.json"), r#"{"type":"minidregg-door-state-v1","free":true,"paid":false,"inviteReserve":20,"openSeats":0,"reservedSeats":20}"#).unwrap();
+        let (status, body) = d.post("/join", b"name=bob&route=free", "203.0.113.10", 101);
+        assert_eq!(status, 409);
+        assert!(String::from_utf8(body).unwrap().contains("open-seats-gone: the open free seats are taken; 20 remain for people with an invite code"));
+        let (status, _) = d.post("/join", b"name=bob&route=free&invite=short", "203.0.113.10", 102);
+        assert_eq!(status, 400);
     }
 }

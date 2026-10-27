@@ -72,6 +72,16 @@ fn run() -> std::io::Result<()> {
    let pending=mini_private_backend::native_worker::receive(&config,&dispatch,&held)?;
    std::io::stdout().write_all(&pending)?;Ok(())
   }
+  Some("adopt-current-recipient") if a.len()==9=>{
+   // CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL (decimal), READBACK = the Host inspect output.
+   let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
+   let readback=std::fs::read(&a[3])?;
+   if readback.len()>8192{return Err(bad("readback capacity"));}
+   let n=|i:usize|->std::io::Result<u64>{a[i].parse().map_err(|_|bad("scope number"))};
+   let scope=mini_private_backend::current_recipient::ReadbackScope{domain:Nat::new(n(4)?),semantics:Nat::new(n(5)?),member:Nat::new(n(6)?),room:n(7)?,keys_cell:n(8)?};
+   mini_private_backend::native_worker::adopt_current_recipient(&config,&readback,&scope)?;
+   println!("current recipient epoch adopted");Ok(())
+  }
   Some("anchor") if a.len()==4=>run_anchor(Path::new(&a[2]),Path::new(&a[3])),
   Some("provision-test") if a.len()==4=>{
    let n:usize=a[3].parse().map_err(|_|bad("count"))?;
@@ -92,6 +102,6 @@ fn run() -> std::io::Result<()> {
   }
   Some("recover") if a.len()==4=>{let j=recover_snapshot(Path::new(&a[2]),Path::new(&a[3]))?;println!("recovered {} permanent tombstones",j.spent.len());Ok(())}
   Some("journal-empty")=>{for b in Journal::default().encode(){print!("{b:02x}");}println!();Ok(())}
-  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | provision-test POOL COUNT | reserve POOL ROW SOCKET LOCAL OUTPUT CUT | recover SOCKET LOCAL | journal-empty"))
+  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | provision-test POOL COUNT | reserve POOL ROW SOCKET LOCAL OUTPUT CUT | recover SOCKET LOCAL | journal-empty | adopt-current-recipient CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL"))
  }
 }

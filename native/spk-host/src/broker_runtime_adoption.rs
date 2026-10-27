@@ -455,9 +455,9 @@ fn supervisor_text(
     let spk = unit_argument(&pin.spk_host)?;
     let root = unit_argument(&config.grains_root)?;
     Ok(format!("# rendered by mini-spk-broker store={store} app={app}\n[Unit]\nDescription=Mini SPK grain supervisor {store}-{app}\n\
-        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nSlice=s{store}-{prefix}-grains.slice\n\
+        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nSlice={slice}\n\
         ExecStart={spk} grain supervise-instance {root} {store}-{app}\nRestart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-        NoNewPrivileges=yes\nUMask=0077\n",prefix=config.unit_prefix))
+        NoNewPrivileges=yes\nUMask=0077\n",slice=super::grains_slice(&config.unit_prefix,store)))
 }
 fn quiescent_cgroup(text: &str) -> io::Result<Option<&str>> {
     if !text
