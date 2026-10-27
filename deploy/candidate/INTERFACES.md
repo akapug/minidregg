@@ -433,11 +433,14 @@ above that the Host needs (`domain federation factoryId resourceBookId
 authorityCellId issuer ownerBudget lifetime tariffBase tariffPerBirth
 tariffPerGrant tariffPerInitialPayloadByte collector asset genesisHeight`),
 `expectedSeed: 0`, and three absolute paths: `storageBinary`, `storageRoot`,
-`signatureBinary`. Optional sections (`fnGateway fnPoll fnReplyPoll
-fnReplyCatalog providerServices grainBirthTariff completionCustodianKey completionManagement
-residentBeginManagement residentClaimManagement agentDispatchFixed
-agentLifetimeDispatchFixed agentLifetimeDispatchServices`) stay absent/null in
-this candidate.
+`signatureBinary`. `providerServices` (the per-route provider tariffs a
+provider purse is born under) is copied verbatim from genesis-params.json when
+present (`genesis.sh` checks its shape and names `providerServicesInvalid`;
+deploy/hermes/demo/provider-services.json is Hermes's). The other optional
+sections (`fnGateway fnPoll fnReplyPoll fnReplyCatalog grainBirthTariff
+completionCustodianKey completionManagement residentBeginManagement
+residentClaimManagement agentDispatchFixed agentLifetimeDispatchFixed
+agentLifetimeDispatchServices`) stay absent/null in this candidate.
 
 **`genesis.json`** (genesis source): the same coordinates as decimal strings,
 `expectedSemantics` (from `profile.json`), `issuerEpoch`, `factoryPredicate`

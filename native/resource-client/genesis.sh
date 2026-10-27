@@ -71,8 +71,28 @@ check_params() {
     and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
 }
+# The Host's per-route provider tariffs (deploy/hermes/README.md "Charges"):
+# `providerServices [{providerResourceId, tariff {version, model, routes}}]`,
+# copied verbatim into operator.json. A serving Store refuses a changed config,
+# so a provider purse's tariff exists only if genesis pins it. Optional; when
+# present it is one to eight entries with positive, distinct resource IDs and a
+# tariff object each (the Host's checkedServices parses the tariff itself), and
+# the refusal names what is wrong.
+check_provider_services() {
+  jq -e 'has("providerServices") | not' "$1" >/dev/null && return 0
+  jq -e '.providerServices | type == "array" and length >= 1 and length <= 8' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: .providerServices must be an array of one to eight entries' >&2; exit 2; }
+  jq -e 'def int: type == "number" and . > 0 and . == floor and . < 9007199254740992;
+    .providerServices | all(type == "object" and (keys | sort) == ["providerResourceId", "tariff"]
+      and (.providerResourceId | int)
+      and (.tariff | type == "object" and (.version | type == "string") and (.model | type == "string" and length > 0)
+           and (.routes | type == "object" and length > 0)))
+    and (map(.providerResourceId) | length == (unique | length))' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: each entry is {providerResourceId: positive distinct integer, tariff: {version, model, routes}}' >&2; exit 2; }
+}
 if [ "$#" -eq 2 ] && [ "$1" = --check ]; then
   check_params "$2"
+  check_provider_services "$2"
   exit 0
 fi
 if [ "$#" -ne 7 ]; then
@@ -95,6 +115,7 @@ for target in operator.json profile.json genesis.json sponsor-birth-context.json
 done
 
 check_params "$params"
+check_provider_services "$params"
 
 jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg verifier "$verifier" '
   $p[0] as $p |
@@ -106,7 +127,8 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
    asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
    storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}
   + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)
-  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)' >"$dir/operator.json"
+  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)
+  + (if $p.providerServices then {providerServices: $p.providerServices} else {} end)' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
