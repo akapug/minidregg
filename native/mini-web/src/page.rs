@@ -15,6 +15,7 @@ pub const PLACES: &[(&str, &str, &str)] = &[
     ("Purse", "/purse", "Your account as a meter; pay, top up, tariffs."),
     ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
     ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
+    ("Registry", "/registry", "The box's laws: every Host operation, its receiver and effect; the response markers; the consent plans."),
     ("Commands", "/verb", "Every shell verb as a form, derived from the shell's own table."),
     ("Terminal", "/term", "mini shell, in the page."),
 ];
@@ -163,6 +164,73 @@ pub fn sessions_page(sessions: &[(String, u64, u64, bool)]) -> String {
     )
 }
 
+/// `/registry`: the operation registry the box runs (`protocol/host-operations.json`, the one
+/// place L1, L2 and L8 meet), rendered as data: every operation byte, its symbol, status, routes,
+/// owner, receiver and effect; the response markers; the consent plans. Public: it is the law of
+/// the box, not a member's state.
+pub fn registry(path: Option<&std::path::Path>) -> String {
+    let Some(path) = path else {
+        return "<p>The operation registry is the law of this box: every Host operation byte, who receives it and what it may change. This gateway was started without <code>--registry PATH</code>, so it cannot show it here; the file is <code>protocol/host-operations.json</code> in the candidate.</p>".to_owned();
+    };
+    let value: serde_json::Value = match std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
+        Some(v) => v,
+        None => return refusal("No registry", &format!("{} is missing or malformed", path.display())),
+    };
+    registry_html(&value)
+}
+
+pub fn registry_html(value: &serde_json::Value) -> String {
+    let text = |v: &serde_json::Value| match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(a) => a.iter().map(|x| x.as_str().unwrap_or("").to_owned()).collect::<Vec<_>>().join(" "),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    let mut out = format!(
+        "<p>Every Host operation this box answers, by byte: the receiver that decides it and the effect it may have. Format <code>{}</code>. An <em>active</em> row is live; a <em>reserved</em> one is a number held for a receiver not yet landed.</p>\n",
+        h(&text(&value["format"]))
+    );
+    let mut rows = String::new();
+    let mut active = 0;
+    for op in value["operations"].as_array().into_iter().flatten() {
+        let status = text(&op["status"]);
+        if status == "active" {
+            active += 1;
+        }
+        rows.push_str(&format!(
+            "<tr class=\"{s}\"><td><code>{}</code></td><td><code>{}</code></td><td>{s}</td><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td><td class=\"note\">{}</td></tr>\n",
+            h(&text(&op["code"])),
+            h(&text(&op["symbol"])),
+            h(&text(&op["routes"])),
+            h(&text(&op["owner"])),
+            h(&text(&op["receiver"])),
+            h(&text(&op["effect"])),
+            h(&text(&op["purpose"])),
+            s = h(&status)
+        ));
+    }
+    out.push_str(&format!(
+        "<section><h2>Operations ({active} active)</h2><table class=\"registry\"><thead><tr><th>byte</th><th>symbol</th><th>status</th><th>routes</th><th>owner</th><th>receiver</th><th>effect</th><th>purpose</th></tr></thead><tbody>{rows}</tbody></table></section>\n"
+    ));
+    if let Some(markers) = value["response_markers"].as_object() {
+        let mut rows = String::new();
+        for (k, v) in markers {
+            rows.push_str(&format!("<tr><td><code>{}</code></td><td>{}</td></tr>", h(k), h(&text(v))));
+        }
+        out.push_str(&format!("<section><h2>Response markers</h2><p class=note>What a reply byte means before any frame is decoded: the classes a client turns into admitted, refused and undecided.</p><table><tbody>{rows}</tbody></table></section>\n"));
+    } else if let Some(markers) = value["response_markers"].as_array() {
+        let mut rows = String::new();
+        for m in markers {
+            rows.push_str(&format!("<tr><td><code>{}</code></td><td>{}</td><td class=note>{}</td></tr>", h(&text(&m["code"])), h(&text(&m["symbol"])), h(&text(&m["purpose"]))));
+        }
+        out.push_str(&format!("<section><h2>Response markers</h2><table><tbody>{rows}</tbody></table></section>\n"));
+    }
+    if !value["consent_plans"].is_null() {
+        out.push_str(&format!("<section><h2>Consent plans</h2><p class=note>What a member's client is asked to consent to before it signs, by plan.</p><pre>{}</pre></section>\n", h(&serde_json::to_string_pretty(&value["consent_plans"]).unwrap_or_default())));
+    }
+    out
+}
+
 pub fn when(t: u64) -> String {
     // Unix seconds as an ISO-like UTC stamp, without a clock library.
     let days = t / 86400;
@@ -203,6 +271,9 @@ mod tests {
         assert!(injected.starts_with("<form method=\"post\" action=\"/x\"><input type=\"hidden\" name=\"csrf\" value=\"tok\"><button>"), "{injected}");
         let anon = page("Mini", None, "/", &term_page("abc"), "");
         assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
+        let table = registry_html(&serde_json::json!({"format": 3, "operations": [{"code": 0, "symbol": "DESCRIBE", "status": "active", "routes": ["public"], "owner": "kernel-client", "purpose": "describe", "receiver": "dispatchSession", "effect": "none"}, {"code": 9, "symbol": "X", "status": "reserved"}], "response_markers": {"253": "NO_RECORD"}}));
+        assert!(table.contains("DESCRIBE") && table.contains("(1 active)") && table.contains("NO_RECORD"), "{table}");
+        assert!(registry(None).contains("--registry"));
         assert_eq!(when(0), "1970-01-01 00:00Z");
         assert_eq!(when(1_761_600_000), "2025-10-27 21:20Z");
     }

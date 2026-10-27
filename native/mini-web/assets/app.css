@@ -127,6 +127,7 @@ body.js .pane.term-pane .pane-body { padding: 0; background: var(--term-bg); }
 .purse meter { width: 100%; max-width: 32rem; height: 1.1rem; }
 .outcome .reason { font-family: var(--mono); color: var(--refused); }
 mark.clause { background: color-mix(in srgb, var(--refused) 18%, transparent); color: inherit; padding: 0 .2rem; border-radius: 2px; }
+table.registry { font-size: 13px; } table.registry tr.reserved { color: var(--ink-2); }
 /* documents */
 .doc .line { margin: .15rem 0; } .doc .line .n { color: var(--ink-2); font: 11px var(--mono); margin-right: .5rem; }
 .doc .transclusion { border-left: 2px solid var(--accent); padding-left: .6rem; margin: .3rem 0; }
