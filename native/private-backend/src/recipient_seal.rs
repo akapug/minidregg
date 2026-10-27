@@ -495,7 +495,7 @@ impl HidingDraft {
 ///
 /// The CURRENT epoch is the epoch of the member's current recipient record
 /// (`Compiler.CurrentRecipientRecord.Claim.epoch`, checked by the Host's
-/// current-recipient verifier). Custody records it by `adopt_current_epoch`; a
+/// current-recipient verifier). Custody records it by `adopt_current`; a
 /// capsule never names the epoch it opens under.
 const WRAP_LABEL: &[u8] = b"DREGG.PRIVATE.RECIPIENT.KEY.WRAP\x01";
 const EVENT_KEY: u8 = 1;
@@ -649,7 +649,7 @@ impl RecipientKeyCustody {
     }
     /// Generate on the designated endpoint, fsync/read back before publishing
     /// the public enrollment candidate. The source must separately admit it.
-    /// Generation does not make the epoch current: that is `adopt_current_epoch`.
+    /// Generation does not make the epoch current: that is `adopt_current`.
     pub fn generate_epoch(&mut self, epoch: Nat) -> Result<KeyRecord> {
         if let Some((_, public_key)) = self.journal.state().keys.get(&epoch) {
             return Ok(KeyRecord {
@@ -676,11 +676,25 @@ impl RecipientKeyCustody {
         let public_key = self.journal.append(&event)?;
         Ok(KeyRecord { epoch, public_key })
     }
-    /// Adopt `epoch` as the current recipient epoch. The caller passes the epoch
-    /// of the member's current recipient record as the Host's current-recipient
-    /// verifier read it back (`Claim.epoch`); it must be a retained epoch and may
-    /// not move backward. Idempotent.
-    pub fn adopt_current_epoch(&mut self, epoch: &Nat) -> Result<()> {
+    /// Adopt the epoch of a Host-verified current recipient record. This is the
+    /// only way to set the current epoch and `VerifiedCurrentRecipient` has no
+    /// other constructor than the exact readback parse. The epoch must be a
+    /// retained epoch and may not move backward; the record's 32-byte X25519
+    /// encryption key must equal the X25519 half of custody's hybrid public key
+    /// at that epoch (the record is Suite1 and cannot name the 1184-byte ML-KEM
+    /// half; that half is bound by the capsule's key digest, see `open_current`).
+    /// Idempotent.
+    pub fn adopt_current(&mut self, record: &crate::current_recipient::VerifiedCurrentRecipient) -> Result<()> {
+        let epoch = record.epoch();
+        let (_, public) = self
+            .journal
+            .state()
+            .keys
+            .get(epoch)
+            .ok_or_else(|| bad("recipient current epoch is not a retained epoch"))?;
+        if public.len() != crate::hybrid_kem::PUBLIC_LEN || public[..32] != record.encryption_key()[..] {
+            return Err(bad("current recipient record encryption key differs from custody's X25519 key at that epoch"));
+        }
         if self.journal.state().current.as_ref() == Some(epoch) {
             return Ok(());
         }
@@ -720,6 +734,9 @@ impl RecipientKeyCustody {
             .keys
             .get(current)
             .ok_or_else(|| bad("recipient retained epoch missing"))?;
+        if capsule.recipient.key_id != recipient_key_id(public) {
+            return Err(bad("sealed capsule key digest differs from the current recipient key bytes"));
+        }
         let expected = RecipientSpec {
             algorithm: Nat::new(ALGORITHM_HYBRID),
             key_epoch: current.clone(),
