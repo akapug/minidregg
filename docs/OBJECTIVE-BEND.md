@@ -783,7 +783,6 @@ trusted, the equalities are theorems.
 | `state_roundTrip` | the checkpoint codec restores every machine state | none |
 | `execution_source_semantics`, `deepEvaluates_unique`, `execution_data_unique` | a successful `executeWith` is a finished `runBounded`, its Data is the deep reference evaluation, and two executions of one term under any policies extract the same Data | `Scoped 0`; an `ExecutionWith` |
 | `forceWith_unrestricted`, `forceWith_policy_suspends` | a capacity policy can only stop a run early, retaining its state | none |
-| `mix_append`, `composition_associative` | homogeneous extension lists compose associatively | on the separate list model `ObjectiveBendExtensions`; no theorem ties it to `Term.mix` |
 
 **Templates** (scope: the checker): `Discharges.infer_instantiate`,
 `Discharges.check_instantiate` (above).
@@ -821,7 +820,7 @@ records that a value came from the call that produced it.
 - **Ecosystem** (LT5, OB5): no surface form names another package's root; no dynamic
   selection by label; no generative identity beyond the kernel's object ids.
 - **Reflection** (LT4): a provenance-establishing prototype constructor; `R(Y M)` vs `Y(R∘M)`;
-  resource observations stated as theorems; `composition_associative` tied to `Term.mix`.
+  resource observations stated as theorems; associativity of `Term.mix` (up to `≈b`) as a theorem.
 - **Guardedness** (LT6): no check that a well-typed resident's segment terminates.
 - **Machine**: a resource bound for completeness (completion is finite, not bounded); use
   counts at run time (quantities are static); `stepRaw` linear in the heap.
