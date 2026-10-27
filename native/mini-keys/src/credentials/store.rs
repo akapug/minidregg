@@ -12,6 +12,7 @@ const SEALED_TYPE: &str = "mini-provider-credential-v1";
 const GRANTS_TYPE: &str = "mini-provider-grants-v1";
 const SCOPED_GRANTS_TYPE: &str = "mini-provider-grants-v2";
 const USAGE_TYPE: &str = "mini-provider-usage-v1";
+const SPEND_TYPE: &str = "mini-provider-pool-spend-v1";
 const MAX_RECORD: u64 = 65_536;
 const MAX_GRANTS: usize = 64;
 
@@ -29,6 +30,12 @@ pub struct CredentialStore {
     root: PathBuf,
     key: [u8; 32],
     rooted_namespaces: bool,
+}
+
+impl Drop for CredentialStore {
+    fn drop(&mut self) {
+        crate::wire::zero(&mut self.key);
+    }
 }
 
 fn private_dir_check(path: &Path, label: &str) -> Result<(), String> {
@@ -479,6 +486,7 @@ impl CredentialStore {
     /// owner's `provider` credential for a call with this output ceiling at
     /// this signed height? A yes counts the call against today's cap before
     /// the secret is returned.
+    #[cfg(test)]
     pub fn authorize(
         &self,
         owner: &Owner,
@@ -493,6 +501,7 @@ impl CredentialStore {
 
     /// Model-aware reserve-time authorization. Legacy callers cannot use a
     /// scoped grant because they supply no model. Refusal never consumes a call.
+    #[cfg(test)]
     pub fn authorize_model(
         &self,
         owner: &Owner,
@@ -508,8 +517,9 @@ impl CredentialStore {
         )
     }
 
-    /// Production use supplies a freshly verified native epoch. Legacy grants
-    /// and old epochs cannot regain authority when a public key is reused.
+    /// The secret-returning form the store's own tests drive: authorize, count, unseal.
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub fn authorize_model_epoch(
         &self,
         owner: &Owner,
@@ -521,6 +531,30 @@ impl CredentialStore {
         max_tokens: Option<u64>,
         day: u64,
     ) -> Result<Secret, String> {
+        self.authorize_grant(owner, provider, runner, model, owner_epoch, height, max_tokens, day, &mut |_| Ok(()))?;
+        self.unseal(Namespace::Owner(owner), provider)
+    }
+
+    /// Reserve-time authorization of one member-key call. Production supplies a
+    /// freshly observed native epoch, so legacy grants and old epochs cannot
+    /// regain authority when a public key is reused. Every check runs first;
+    /// then `mint` runs (the broker writes its durable ticket there), and only
+    /// after `mint` succeeds is the call counted against today's cap. The
+    /// grant that authorized it is returned: its `perCall` and `model` are what
+    /// the forwarded body is later held to. Refusal never consumes a call.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorize_grant(
+        &self,
+        owner: &Owner,
+        provider: &str,
+        runner: &str,
+        model: Option<&str>,
+        owner_epoch: Option<&str>,
+        height: u64,
+        max_tokens: Option<u64>,
+        day: u64,
+        mint: &mut dyn FnMut(&Grant) -> Result<(), String>,
+    ) -> Result<Grant, String> {
         provider_name(provider)?;
         let namespace = Namespace::Owner(owner);
         let dir = self.directory(namespace, false)?;
@@ -552,11 +586,17 @@ impl CredentialStore {
         if max_tokens.is_none_or(|tokens| tokens > grant.per_call) {
             return Err(refused("per-call-cap"));
         }
-        let secret = self
-            .secret(namespace, provider)?
-            .ok_or_else(|| refused("no-credential"))?;
+        // The secret must open before anything is minted or counted.
+        drop(self.unseal(namespace, provider)?);
+        mint(&grant)?;
         self.count_call(&dir, provider, runner, grant.per_day, day)?;
-        Ok(secret)
+        Ok(grant)
+    }
+
+    /// The namespace's secret for `provider`, opened under the seal key.
+    pub fn unseal(&self, namespace: Namespace<'_>, provider: &str) -> Result<Secret, String> {
+        self.secret(namespace, provider)?
+            .ok_or_else(|| refused("no-credential"))
     }
 
     /// Validate the current member grant without charging daily usage. Used by
@@ -593,7 +633,9 @@ impl CredentialStore {
     /// The pool secret, for one call of `runner` within the row's caps: a
     /// call without `max_tokens`, or above `caps.per_call`, is refused
     /// `per-call-cap`; the call is counted against `caps.per_day` (in the
-    /// pool namespace, per runner) before the secret is returned.
+    /// pool namespace, per runner) before the secret is returned. The tests'
+    /// form of [`CredentialStore::pool_grant`].
+    #[cfg(test)]
     pub fn pool(
         &self,
         provider: &str,
@@ -602,6 +644,21 @@ impl CredentialStore {
         caps: Caps,
         day: u64,
     ) -> Result<Secret, String> {
+        self.pool_grant(provider, runner, max_tokens, caps, day, &mut || Ok(()))?;
+        self.unseal(Namespace::Pool, provider)
+    }
+
+    /// Reserve-time authorization of one pool call: the per-call cap is checked
+    /// and the secret must open, then `mint` runs, then the call is counted.
+    pub fn pool_grant(
+        &self,
+        provider: &str,
+        runner: &str,
+        max_tokens: Option<u64>,
+        caps: Caps,
+        day: u64,
+        mint: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), String> {
         provider_name(provider)?;
         let dir = self.directory(Namespace::Pool, false)?;
         if fs::symlink_metadata(&dir).is_err()
@@ -614,11 +671,64 @@ impl CredentialStore {
         if max_tokens.is_none_or(|tokens| tokens > caps.per_call) {
             return Err(refused("per-call-cap"));
         }
-        let secret = self
-            .secret(Namespace::Pool, provider)?
-            .ok_or_else(|| refused("no-credential"))?;
-        self.count_call(&dir, provider, runner, caps.per_day, day)?;
-        Ok(secret)
+        drop(self.unseal(Namespace::Pool, provider)?);
+        if let Some((ceiling, call)) = caps.spend {
+            if self.pool_spend(provider)?.saturating_add(call) > ceiling {
+                return Err(refused("spend-ceiling"));
+            }
+        }
+        mint()?;
+        // Charged before the count, refunded if the count refuses: a crash in
+        // between over-charges the ceiling, never under-charges it.
+        if let Some((ceiling, call)) = caps.spend {
+            self.charge_spend(&dir, provider, call as i64, ceiling)?;
+        }
+        let counted = self.count_call(&dir, provider, runner, caps.per_day, day);
+        if let (Err(_), Some((ceiling, call))) = (&counted, caps.spend) {
+            self.charge_spend(&dir, provider, -(call as i64), ceiling)?;
+        }
+        counted
+    }
+
+    /// The pool key's charged spend (micro-USD, worst case per call), all time
+    /// since the operator last reset it.
+    pub fn pool_spend(&self, provider: &str) -> Result<u64, String> {
+        provider_name(provider)?;
+        let dir = self.directory(Namespace::Pool, false)?;
+        Ok(match read_record(&dir.join(format!("{provider}.spend.json")), "pool spend")? {
+            None => 0,
+            Some(r) => {
+                object_keys(&r, &["type", "provider", "spentMicroUsd"], "pool spend")?;
+                if r.get("type").and_then(Value::as_str) != Some(SPEND_TYPE) || r.get("provider").and_then(Value::as_str) != Some(provider) {
+                    return Err("pool spend record names another provider or version".into());
+                }
+                r.get("spentMicroUsd").and_then(Value::as_u64).ok_or("pool spend must be a natural number")?
+            }
+        })
+    }
+
+    fn charge_spend(&self, dir: &Path, provider: &str, delta: i64, ceiling: u64) -> Result<(), String> {
+        let before = self.pool_spend(provider)?;
+        let spent = if delta >= 0 { before.saturating_add(delta as u64) } else { before.saturating_sub(delta.unsigned_abs()) };
+        if delta > 0 && spent > ceiling {
+            return Err(refused("spend-ceiling"));
+        }
+        let mut bytes = serde_json::to_vec(&json!({"type":SPEND_TYPE,"provider":provider,"spentMicroUsd":spent})).map_err(|e| e.to_string())?;
+        bytes.push(b'\n');
+        replace_private(&dir.join(format!("{provider}.spend.json")), &bytes)
+    }
+
+    /// The operator's reset of the pool spend total (after topping up or
+    /// re-checking the provider-side cap). Returns what had been charged.
+    pub fn reset_pool_spend(&self, provider: &str) -> Result<u64, String> {
+        let before = self.pool_spend(provider)?;
+        let dir = self.directory(Namespace::Pool, false)?;
+        let _lock = provider_lock(&dir, provider)?;
+        match fs::remove_file(dir.join(format!("{provider}.spend.json"))) {
+            Ok(()) => Ok(before),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(format!("pool spend: {e}")),
+        }
     }
 
     fn count_call(
@@ -678,8 +788,6 @@ impl CredentialStore {
         // The lock is released when `lock` drops.
     }
 }
-
-/// Parse a bearer secret from `mini key set` input: one line, surrounding
 
 /// Signed provider choices, stored in the member's namespace.
 impl CredentialStore {
@@ -1036,6 +1144,7 @@ mod credential_tests {
         let caps = Caps {
             per_call: 64,
             per_day: 1,
+            spend: None,
         };
         assert_eq!(
             store.pool("pool", "9", Some(65), caps, 1).unwrap_err(),
@@ -1369,7 +1478,8 @@ mod credential_tests {
             table.select("shared", Some("pool")).unwrap().caps,
             Some(Caps {
                 per_call: 1024,
-                per_day: 50
+                per_day: 50,
+                spend: None,
             })
         );
         assert_eq!(
@@ -1409,6 +1519,24 @@ mod credential_tests {
         assert!(validate_endpoint("https://openrouter.ai/other").is_err());
         assert!(validate_endpoint("http://127.0.0.1:9/v1/chat/completions").is_ok());
         assert!(validate_endpoint("https://user@host/v1/chat/completions").is_err());
+    }
+
+    #[test]
+    fn the_pool_spend_ceiling_refuses_before_the_provider_cap_is_reached() {
+        let (_dir, store) = store();
+        store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();
+        let caps = Caps { per_call: 64, per_day: 100, spend: Some((25, 10)) };
+        let mut minted = 0;
+        for _ in 0..2 {
+            store.pool_grant("pool", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap();
+        }
+        assert_eq!(store.pool_spend("pool").unwrap(), 20);
+        // A third call would pass the ceiling: refused before anything is minted.
+        assert_eq!(store.pool_grant("pool", "9", Some(64), caps, 1, &mut || { minted += 1; Ok(()) }).unwrap_err(), refused("spend-ceiling"));
+        assert_eq!(minted, 2);
+        assert_eq!(store.reset_pool_spend("pool").unwrap(), 20);
+        store.pool_grant("pool", "9", Some(64), caps, 1, &mut || Ok(())).unwrap();
+        assert_eq!(store.pool_spend("pool").unwrap(), 10);
     }
 
     #[test]

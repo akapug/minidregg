@@ -356,7 +356,8 @@ mod tests {
         });
         let config = json!({"type":"mini-keys-broker-v1","socket":dir.join("run/broker.sock"),"audit":dir.join("state/audit.jsonl"),
             "spool":dir.join("state/spool"),"singleAccount":true,"peers":[{"role":"member","gids":[peer::egid()]}],
-            "credentials":{"host":dir.join("etc/host"),"hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),
+            "credentials":{"host":dir.join("etc/host"),"hostSha256":mini_keys::server::native::host_sha256(&dir.join("etc/host")).unwrap(),
+                "hostConfig":dir.join("etc/config.json"),"publicSocket":dir.join("run/public.sock"),"publicSocketUid":mini_keys::peer::euid(),
                 "providers":dir.join("etc/providers.json"),"root":dir.join("credentials"),"key":dir.join("keys/credentials.key")}});
         put(&dir.join("etc/broker.json"), config.to_string().as_bytes(), 0o644);
         let (b, listener) = server::Broker::start(server::Config::load(&dir.join("etc/broker.json"), peer::euid()).unwrap()).unwrap();

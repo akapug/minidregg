@@ -126,11 +126,20 @@ impl CredentialSource {
 }
 
 /// The operator's bound on its own key, per runner: the largest
-/// `max_tokens` one call may ask for and the calls per UTC day.
+/// `max_tokens` one call may ask for and the calls per UTC day; and, across
+/// all runners, the broker's own spend ceiling on the key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Caps {
     pub per_call: u64,
     pub per_day: u64,
+    /// The broker's own ceiling, below the provider-side hard cap so that cap
+    /// is never the first line: `(ceilingMicroUsd, callMicroUsd)`. Each
+    /// authorized pool call is charged `callMicroUsd` (the operator's worst
+    /// case for one call at `perCall` output tokens and the row's input bound)
+    /// against a durable running total before the call is counted; a call that
+    /// would pass the ceiling refuses `spend-ceiling`. A deployed (root-owned)
+    /// broker refuses to start with a pool row that has none.
+    pub spend: Option<(u64, u64)>,
 }
 
 #[derive(Clone, Debug)]
@@ -286,7 +295,7 @@ impl ProviderTable {
             let caps = match (credential, entry.get("caps")) {
                 (CredentialSource::Pool, Some(caps)) => {
                     let label = "provider caps";
-                    object_keys(caps, &["perCall", "perDay"], label)?;
+                    object_keys(caps, &["perCall", "perDay", "ceilingMicroUsd", "callMicroUsd"], label)?;
                     let field = |n: &str, max: u64| -> Result<u64, String> {
                         let v = string(caps, n, label)?;
                         decimal(v, n)?;
@@ -295,9 +304,22 @@ impl ProviderTable {
                             .filter(|v| (1..=max).contains(v))
                             .ok_or_else(|| format!("provider {name}: caps.{n} must be 1..{max}"))
                     };
+                    let spend = match (caps.get("ceilingMicroUsd"), caps.get("callMicroUsd")) {
+                        (None, None) => None,
+                        (Some(_), Some(_)) => {
+                            let ceiling = field("ceilingMicroUsd", 1_000_000_000_000)?;
+                            let call = field("callMicroUsd", 1_000_000_000)?;
+                            if call > ceiling {
+                                return Err(format!("provider {name}: caps.callMicroUsd exceeds caps.ceilingMicroUsd"));
+                            }
+                            Some((ceiling, call))
+                        }
+                        _ => return Err(format!("provider {name}: caps.ceilingMicroUsd and caps.callMicroUsd go together")),
+                    };
                     Some(Caps {
                         per_call: field("perCall", 1_000_000)?,
                         per_day: field("perDay", 100_000)?,
+                        spend,
                     })
                 }
                 (CredentialSource::Pool, None) => {
@@ -505,6 +527,7 @@ pub fn namespace_path(root: &Path, namespace: Namespace<'_>) -> Result<PathBuf, 
     })
 }
 
+/// Parse a bearer secret from `mini key set` input: one line, surrounding
 /// whitespace removed.
 pub fn secret_from_input(bytes: &[u8]) -> Result<Secret, String> {
     if bytes.len() > MAX_SECRET + 2 {
