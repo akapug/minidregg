@@ -336,7 +336,8 @@ class CheckpointGuards(unittest.TestCase):
             original_inputs={}, original_binaries={}, native_files_before={}, run_custody={'controller_uid': 123},
             store_before={'db': 'same'}, native_profile_sha256='same', host_config_sha256='same', stopped_services={})
         self.write(self.old / 'prepared.json', dict(self.current, prior_files={}))
-        storage = {'store': 'fixture', 'consent': {'storage': {'root': '/fixture/store'}}}
+        raw_consent = {'configSha256': 'config', 'providerSha256': 'provider', 'storage': {'root': '/fixture/store'}}
+        storage = {'store': 'fixture', 'consent': {**raw_consent, 'serviceUid': 1000}}
         self.write(self.old / 'consent-storage.json', storage)
         runtime = {'store': 'fixture', 'stageSha256':'stage',
             'runtimeSha256':CONTINUATION.sha(self.old / 'bin/grain-runtime'),
@@ -347,7 +348,7 @@ class CheckpointGuards(unittest.TestCase):
         self.status = self.root / 'status.json'
         self.write(self.status, {'store':'fixture','controllerUid':123,'stopped':True,'stageSha256':'stage',
             'runtimeSha256':runtime['runtimeSha256'],'controllerConfigSha256':CONTINUATION.sha(config),
-            'consent':storage['consent']})
+            'consent':raw_consent})
         self.export = self.root / 'export.json'; self.write(self.export,{})
         self.failure = self.root / 'failure.json'
         self.write(self.failure, {'schema':'mini-oracle-physical-repair-service-failure-v1', 'run':str(self.run),
@@ -393,6 +394,11 @@ class CheckpointGuards(unittest.TestCase):
 
     def test_unjoined_installed_runtime_cannot_seal(self):
         status=json.loads(self.status.read_bytes()); status['runtimeSha256']='other'; self.write(self.status,status)
+        with self.assertRaisesRegex(ValueError,'repair pins differ'):
+            self.seal()
+
+    def test_unknown_raw_stage_consent_field_refuses(self):
+        status=json.loads(self.status.read_bytes()); status['consent']['unexpected']='field'; self.write(self.status,status)
         with self.assertRaisesRegex(ValueError,'repair pins differ'):
             self.seal()
 
