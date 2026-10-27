@@ -1,0 +1,224 @@
+# The app market: any Sandstorm app, installed by a member, on its own origin
+
+Present-state design, 2026-10-27 (lane L13). Ember: "we should let people grab anything from the
+main sandstorm store ... raise our ambitions." One bar: a member of the demo picks any app from the
+Sandstorm app market, installs it, opens it in their browser on its own origin, with Mini's
+authority, confinement and receipts around it. Companion files: `deploy/market/` (the units, the
+fetcher, `INSTALL.md` with the exact Caddy and nftables rows), `native/resource-client/src/apps.rs`
+(`mini apps …` and `mini apps-front`), `native/resource-client/journey.d/japps.sh`.
+
+## 0. Status, said plainly
+
+| piece | state |
+|---|---|
+| Catalogue: `mini apps search/show`, the recorded index fixture, the verdict table | **built**, tests pass on the Mac (`cargo nextest -p minidregg-resource-client -E 'test(apps_)'`) |
+| Market fetcher `mini-market-fetch` + `mini-market.{service,timer}` (uid `mini-market`, the one egress path) | **built** (bash + curl, the shape `fetch-test-spk.sh` already has); not yet run on a box |
+| The grain front `mini apps-front` (Host-dispatching entrance behind Caddy, replaces `spk-browser-proxy`) | **built** with loopback tests; not yet run against a live route socket |
+| `japps.sh --dry` (Mac: catalogue, the two real packages verified, a tampered copy and an unknown appId refused by name) | **built and green** |
+| Member verbs `mini apps install/list/open/stop/start/share/export/delete` over the worker socket | verbs **built** against the socket protocol of §4; the worker itself is the next increment |
+| `mini apps-worker` (the operator-side custodian that drives `spk-host grain`) | **designed** (§4); the `--box` journey drives the same steps through `grain-journey.sh` meanwhile |
+| The request law `law.apps` rendered from Lean (`scripts/AppsLawTemplate.lean`) | **designed** (§3); until it lands, the member's package choice is carried by the worker socket and the signed state is the birth + delegation |
+| Per-grain origin via the wildcard certificate and `*.demo.dregg.online` | infra lane applies DNS (live) and Caddy; the routing rule is §5 and `deploy/market/INSTALL.md` |
+| Compost (§7) | the GitWeb chain deleted in this lane; `spk-browser-proxy` deleted once the front has served one grain over the real edge |
+
+## 1. The pieces, who runs what
+
+Everything below is on the demo box (`dregg-demo`, Debian 13, split tenancy, loopback behind
+Caddy, nftables default-deny egress per uid; `dregg-infra` `edge/demo/CONFINEMENT.md`). The grain
+world is `mini-core`'s (its user manager runs the SPK broker, residents and the worker), exactly as
+the one-grain EtherCalc design (WEB-SPK-PUBLIC §4) already has it.
+
+| who | uid | does | reaches |
+|---|---|---|---|
+| **market fetcher** `mini-market-fetch` (`mini-market.timer`, every 6 h and on demand) | `mini-market` | refreshes `/var/lib/mini-market/index.json` from `https://app-index.sandstorm.io/apps/index.json` (bounded 4 MiB, parsed and re-serialised by `mini apps index-check`: unknown shape refused, the file replaced atomically); fetches packages named in `/var/lib/mini-market/wanted/` into the quarantine `/var/lib/mini-market/quarantine/<packageId>.spk` (0640 `mini-market:mini-apps`), refusing a download whose SHA-256 does not start with its `packageId` or exceeds the standard profile's 256 MiB; writes `meta/<packageId>.json` (sha256, bytes, fetchedAt) | **the only uid with egress to `app-index.sandstorm.io:443`** (nftables `cg_market`/`dst_market`, resolved from `/etc/mini/market.json` like every other egress row); nothing else, no Mini socket, no key |
+| **member verbs** `mini apps …` | `mini-s-NAME` | read the index and the verdict table (world-readable data); author the member's own Mini turns (§3); talk to the worker over `/run/mini-apps/worker.sock` | the public socket, as every member verb does; the worker socket |
+| **worker** `mini apps-worker` | `mini-core` (user manager, beside the broker) | acts on admitted install requests through `spk-host grain` (install, share, start, enroll, route, stop, export); writes receipts, verdicts and the origin table; serves the worker socket | the operator socket (it is the operator), the broker, the quarantine (read), `/var/lib/mini-apps` (write) |
+| **front** `mini apps-front` | `mini-apps-edge` (group `mini-edge`) | one loopback listener `127.0.0.1:8797` that Caddy proxies every `*.demo.dregg.online` request to; selects the grain by `Host`, the participant route by the token presented, and pumps the request (and a WebSocket after 101) to that route's `http.sock` | the route sockets (0660, group `mini-edge`, the W6 `edgeGid`), the origin table (read); no key, no Mini socket, no network but loopback |
+| **Caddy** | `caddy` | terminates TLS for `*.demo.dregg.online` with the one wildcard certificate (ember's ruling 2026-10-27; hybrid X25519MLKEM768 then X25519), proxies to the front | loopback; `/var/lib/mini` stays hidden from it |
+| **residents / apps** | `mini-core` → app uid in bwrap | unchanged (`deploy/spk-host/README.md`) | fd 3, loopback in their own netns; no egress ever |
+
+The index is data, never instructions: titles, descriptions and links are shown as the index's
+claims; identity is the signed package's (appId from the signing key, packageId = the first 16
+bytes of the SPK's SHA-256, title and version from the signed manifest), verified by the same
+`sandstorm-package` + `spk-package-stream` parse the broker's ingest runs. The catalogue says which
+it is showing.
+
+## 2. Catalogue: `mini apps search`, `mini apps show`
+
+- `mini apps search [TERM] [--category C] [--json]` lists matching apps: name, version, appId (the
+  publisher's key hash), publisher, package size when known, and **Mini's verdict** from
+  `/var/lib/mini-apps/verdicts/<packageId>.json`, written by the worker's real ingest: `verified`
+  (signature and appId checked, bridge profile supported, within the standard profile),
+  `refused: <reason>` (e.g. `expectAppHooks`, `sizeOverProfile`), `running N` (grains on this box),
+  or `unverified` (never fetched here; install verifies). Nothing in the index can produce
+  `verified`.
+- `mini apps show <appId|packageId>` shows one entry whole, with the package URL the fetcher would
+  use, the size class the worker would pick from the fetched size (S under 64 MiB raw, M up to the
+  profile's 256 MiB; L is the operator's explicit choice), and the refusals an install could meet.
+- Both read `MINI_MARKET_INDEX` (default `/var/lib/mini-market/index.json`); the recorded fixture
+  `native/resource-client/tests/fixtures/sandstorm-index-2026-10-27.json` (98 apps) pins the shape
+  the tests and `--dry` use. L12's market pane renders the same JSON (`--json`).
+
+## 3. Install: the member turn, and what admits it
+
+`mini apps install <appId|packageId> [--class S|M|L] --dir WORKSPACE` is a member verb. Admission
+is Mini's, through receivers that already exist; this lane registers **no new operation byte**,
+because every statement the install needs is already a kernel-admitted record:
+
+1. **The application birth** (op 30 `APPLICATION_CURRENT_BIRTH`, public route): the member births
+   the app, package-manifest and snapshot-manifest resources with their own key, paying the birth
+   tariff from their own purse. This is "the member's app-install capability and the funding": a
+   member whose purse cannot pay the tariff is refused by the kernel (`funding`), and L1b's grain
+   work tariff (R12) attaches here when it lands. Retained: `WORKSPACE/apps/<app>/birth/{source,
+   outcome}.json` (the same shape `grain-journey.sh birth_app` retains).
+2. **The hosting delegation** (`mini app-lifecycle …`, `app_lifecycle.rs`: six ordinary current
+   proposals, policy + grant for app, package and snapshot, admitted by the capability-delegation
+   receivers): the member delegates lifecycle hosting of *this* app to the operator's management
+   subject. `spk-host grain install --management-selector` consumes exactly this
+   (`grain_management.rs`, protocol `mini-spk-grain-lifecycle-delegation-v1`), and the share
+   authority the worker later exercises is the delegated app capability
+   (`Kernel/ApplicationShareIssueDelegation.lean` records it; the custodian never holds the
+   member's key: custody contract L2).
+3. **The package choice** is the one statement with no record yet: which signed package, which
+   class. It is a write to the member's `apps` cell under the law `law.apps`, rendered from Lean by
+   `scripts/AppsLawTemplate.lean` the way `law.market` is rendered from `Kernel/SealedMarket.lean`:
+   fields packageId (two u64), appId digest (four u64), class, app resource; the requester writes
+   them once; the manager (subject 8) writes the outcome fields (grain state, generation) and
+   nothing else. Until that template lands, the choice travels over the worker socket (§4) and the
+   INSTALL BEGIN (lifecycle v3, `prospectiveManifest`) is the signed statement of which package
+   runs; the receipt names this gap.
+
+The verb then hands the worker, over the authenticated socket, the three pointers (birth source and
+receipt, the delegation file) and the choice. **Refusals by name** before any effect:
+`unknownApp` (not in the index), `sizeOverProfile` (the fetcher's recorded size or the index's
+declared size above 256 MiB raw / 768 MiB decoded), `unverifiedSignature` (the ingest's verdict),
+`appIdMismatch` (signed appId differs from the catalogue's), `unsupportedBridge` (`expectAppHooks`,
+`saveIdentityCaps`, an unchecked `apiPath`), `funding` (the kernel's), `classRefused`,
+`originBudget` is gone with the wildcard. A lost reply is answered by the **exact retry** of the
+same request id (`mini apps install --retry ID`); the worker's idempotency is per request id and
+per the lifecycle's own one-shot markers (SPK-LIFECYCLE); a second install is never issued.
+
+**Receipt.** `WORKSPACE/apps/<app>/receipt.json`: the request id, the app resource, the package's
+raw SHA-256 and signed appId, the class, the grain id `a<app>`, the origin
+`https://a<app>.demo.dregg.online`, the INSTALL and START receipts' accepted counts, and the
+bootstrap hand-off (`mini apps open`).
+
+## 4. The worker: one custodian, the existing lifecycle
+
+`mini apps-worker --state /var/lib/mini-apps --profile GRAIN-HOST.json --socket /run/mini-apps/worker.sock`
+runs as `mini-core` in the user manager (a user unit beside `mini-spk-broker@`). Per admitted
+request, in order, each step idempotent on its retained artifact, as `grain-journey.sh` does today:
+
+1. **Package**: the quarantine copy with the exact SHA-256 (or `wanted/<packageId>` for the
+   fetcher, and the request waits `fetching`); never a path from the member.
+2. **`spk-host grain install PROFILE source receipt SPK --class C --management-selector DELEG`**:
+   stage, broker `place`/`set-cgroup`/`ingest` (the bounded no-network unit; `standard-v1`), INSTALL
+   BEGIN/CLAIM/COMPLETION through Mini. The verdict file is written from this parse.
+3. **Guest participant**: one hosted subject per (grain, member) whose key the worker holds
+   (`/var/lib/mini-apps/guests/<app>/<member>.key`, 0600 `mini-core`): session birth (op 31),
+   ticket issue under the delegated capability (`grain-share-issue-*`), `spk-host grain route` with
+   `expectedHost = a<app>.demo.dregg.online`, `edgeGid = mini-edge`, the route directory
+   `/var/lib/mini-apps/routes/a<app>/<member>/` (0750 `mini-core:mini-edge`). Signing is custodial
+   over a purpose-made subject, never over the member's key.
+4. **START** (`grain start`), then **enroll** the guest session against the serving generation.
+5. **Origin table**: `/var/lib/mini-apps/origins/a<app>.json` (0644): the grain's routes, each with
+   its socket path and the SHA-256 of its three tokens. Token *hashes* are not secrets; the tokens
+   stay 0600 in the route directory.
+6. **Receipt** written; the request's state file (`requests/<id>.json`) moves to `running`.
+
+**The worker socket** (`/run/mini-apps/worker.sock`, 0660 `mini-core:mini-sessions`, peer named by
+`SO_PEERCRED` exactly as `mini-keys`'s broker does): one JSON line per request, bounded 64 KiB,
+verbs `install`, `retry`, `list`, `status`, `open`, `stop`, `start`, `share`, `export`, `delete`.
+The uid names the member; a grain is acted on only by its owner (the birth's subject, re-read from
+the Store) or a member it was shared with (for `open`). Private material flows only here: `open`
+returns the member's unused bootstrap token (one use, `bootstrap.used` is the custodian's marker)
+or registers a fresh route when it is consumed; `export` passes the export's file descriptor with
+`SCM_RIGHTS` so no chown and no shared directory is needed.
+
+**Decoded outcomes, never a spinner.** Every verb returns `{decided: true|false, state, exactRetry}`.
+STOP is BEGIN, claim, fence, report and completion through the serial Host, minutes long
+(WEB-SPK-PUBLIC §4.5; L3/hot-path shrink it): `mini apps stop` returns `undecided: stop in
+progress since <t>; retry: mini apps status a<app>` and the UI shows exactly that. A failed first
+START is recovered through `grain supervise` (failed-START recovery) and reported as such.
+
+## 5. Per-grain origin and the front
+
+Every grain gets **one fixed origin for its life**: `https://a<app>.demo.dregg.online`, `<app>`
+the app resource's decimal id (DNS-safe, unique per world). Stable links, share tickets and
+`__Host-` cookies are scoped per origin, so two grains, or a grain and the docuverse, never share
+a browser origin (EtherCalc and the oracle appliance ride the same rule). DNS: `*.demo.dregg.online`
+A/AAAA are live (infra). TLS: the one wildcard certificate (ember's ruling; hybrid then classical),
+so hostnames are unbounded and there is no per-name issuance and no `ask` endpoint.
+
+**Routing rule for Caddy: one entrance that dispatches by `Host`**, `reverse_proxy 127.0.0.1:8797`
+for the whole `*.demo.dregg.online` block (`deploy/market/INSTALL.md` has the filled block). Why
+not one upstream per grain: a custodian socket is per *participant* (one fixed subject, session,
+ticket and token set per `custodian.json`), so a grain with two members has two sockets and the
+choice between them is made by the token the browser presents, which Caddy cannot look up without
+putting token hashes in its config and restarting it per share. Why not Caddy to the sockets
+directly: `/var/lib/mini` is hidden from `caddy` by design and must stay so. The front:
+
+- reads `Host` → `a<app>` → `origins/a<app>.json` (missing → 404 `no such grain`);
+- selects the route whose `browserTokenSha256` matches the `__Host-mini_spk_session` cookie, whose
+  `apiTokenSha256` matches a `Bearer`, or, for `POST /__mini/bootstrap` (the custodian's 128-byte
+  form), whose `bootstrapTokenSha256` matches the form token; a request with none answers the
+  custodian's tokenless bootstrap form for `GET /__mini/bootstrap` and a plain 403 ("private
+  grain; open it with `mini apps open a<app>`") otherwise, with no Mini call and no record;
+- forwards the request unchanged to `http.sock` (the custodian keeps doing every check: Host,
+  Origin, cookie, `Sec-Fetch-*`, Mini admission op36/37/34), and after a 101 pumps bytes both ways
+  with the 64 KiB queues and the half-close rules `spk-browser-proxy` had, which it replaces;
+- bounds: 64 KiB head, the custodian's 8 MiB body, 10 s head deadline, 136 connections per grain
+  (class L's 128 WebSocket slots plus eight), one thread per connection.
+
+Opening a grain from the browser: `mini apps open a<app>` prints the origin and the one-time
+bootstrap token; the member visits `/__mini/bootstrap`, pastes it, and the custodian sets the
+`__Host-` cookie for that origin. L12's market pane does the same with a self-submitting form (its
+session cookie on `demo.dregg.online` cannot cross to the grain origin, by design). `mini apps share
+a<app> --to NAME` gives NAME their own guest participant, ticket and route (hot registration on the
+running generation, 64 routes per generation); NAME then runs `mini apps open a<app>`.
+
+## 6. Journey row `japps.sh`
+
+`--dry` (the Mac, no Store): the catalogue over the recorded fixture (search, show, an unknown
+appId refused `unknownApp`); the two real packages fetched into a scratch quarantine by the real
+fetcher, their SHA-256 prefixes equal to their packageIds, their signatures and signed appIds
+verified by the stream reader's `inspect`; a tampered copy refused by name; the front started on a
+loopback port against a fake route socket: cookie, bearer and bootstrap dispatch, 404 for an unknown
+grain, 403 without a credential, a 101 pumped both ways.
+
+`--box` (`dregg-build`, Debian 13, as the `lanes` user): everything `--dry` does, plus `spk-host
+qualify` on the four exhibits, and, when a grain world is at hand (`GRAINS_ROOT`, `BROKER_SOCKET`
+as `grain-journey.sh` wants them), a scratch world through `scripts/spk-platform/grain-journey.sh`
+with `SPK_A`/`SPK_B` the two market packages (birth, install, share, start, enroll, GET 200 over the
+edge phase, stop one, export it). The two apps: **Hacker Slides 0.4.0**
+(`7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh`, package `f0277a5d…`, 16.8 MB) and
+**Simple Todos** (`0dp7n6ehj8r5ttfc0fj0au6gxkuy1nhw2kx70wussfa1mqj8tf80`, package `5830d701…`,
+23.6 MB, the retained sample the SPK work began with). Both signed bridge configs decode with
+`saveIdentityCaps=false`, `expectAppHooks=false`, no `apiPath`. The first picks, Etherpad and Tiny
+Tiny RSS, are the row's **named refusals** instead: Etherpad's signed bridge config has
+`saveIdentityCaps=true` and TT-RSS's `expectAppHooks=true` (it ships `ttrss-apphooks`), and the
+qualifier refuses each by name (`unsupportedBridge: saveIdentityCaps` / `expectAppHooks`). The
+catalogue shows those verdicts beside the apps; growing the custodian's vocabulary to those two
+bridge facilities is the next widening of "any app" (batch item).
+
+## 7. Compost
+
+Lands as the market path lands, in this lane's commits:
+
+- **GitWeb chain, deleted now**: the three dated probe notes `deploy/spk-host/GITWEB-*.md` (187)
+  and `scripts/gitweb-content-export/` (run by nothing since 2026-09-27). The three GitWeb
+  binaries and the entrance probe were already deleted by L3 on `lane/fence`; the GitWeb selection
+  record and the share-issue fixtures named `gitweb-*` stay (evidence and test inputs).
+- **`spk-browser-proxy`** (840 + the test certificate fixtures): deleted when `japps.sh --box` has
+  served one grain through Caddy → `mini apps-front` → route socket (the W9/E1 precondition the
+  review named). The front is its successor.
+- **"The operator copies an .spk into the inbox by hand"**: `deploy/spk-host/README.md`'s inbox
+  paragraph is rewritten to the market path; `fetch-test-spk.sh`'s pin becomes
+  `mini-market-fetch --pin <packageId> <sha256>` so the M6 gate's sntfy comes through the one
+  fetcher (the pin stays: the gate package is sntfy, the public apps are the market's).
+
+## 8. What this file is not
+
+It is not a claim that a stranger has installed an app: `japps.sh --box` on `dregg-build` and the
+rehearsal ship's `apps` row say that, in that order. Performance is measured and published, not
+gated (DEMO-PREFIX §1.4): the first GET through a fresh grain pays the full Mini transaction.
