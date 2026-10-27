@@ -136,3 +136,4 @@ import Compiler.FnWireFncu  -- fncu.cursor read by the interpreter (replaces fn 
 import Compiler.FnWireSized  -- the `sized` node's teeth; the poll-reply accepted-arm grammar
 import Compiler.FnWireConsumer  -- fn consumer / identity reply frames (--frame) read by the interpreter
 import Compiler.FnWirePinned  -- the vendored file at a pinned fn revision: digest, 1028 vectors, teeth
+import Compiler.DurableFastForwardSpec  -- HOT-PATH §2(h): the fast-forward open (checkpoint v4) stated before proof
