@@ -48,9 +48,11 @@ Registration keeps immutable records (up to 64 revisions, eight selected
 routes). An optional `replaces` names the currently selected record; forks and
 cycles are refused. Registration leaves an active generation pinned to its
 existing routes. A source-authorized STOP followed by START activates the new
-selection. There is no removal command in this interface yet. Host service
-configuration must use the corresponding source-selected event22/event27
-indices through the supported profile transition before launch.
+selection. There is no removal command in this interface yet. A fresh Host can
+pin `agentLifetimeDispatchTargets` before genesis: these select the resource,
+capability and purse coordinates without guessing future history indices.
+Native authoring still checks the actual event22/event27 receipts and current
+grant authority. The existing exact-index configuration remains supported.
 
 For native qualification, `scripts/oracle-agent-lifetime-journey.sh` takes a
 running controller and fixed JSON cases. It invokes the real foreground tools
@@ -58,6 +60,22 @@ and requires each reply to join the controller's event26 committed receipt and
 confirmed purse settlement. A receiving-session HTTP response cannot pass that
 probe. Its companion test uses a fake process only to test the probe's guards;
 those tests are not evidence of native admission.
+
+The same helper's `provision`, `prepare-controller`, `issue-grant`,
+`prepare-route` and `activate` phases implement the fresh-world setup. They
+use native genesis enrollment, actual controller session birth, signed grants
+and session enrollment; they never write a Store or controller journal.
+Activation checks the current running native generation and unit before
+enrollment and again before publishing its controller configuration. The
+controller bundle includes its own four role keys and public Host settings,
+with protected storage/checkpoint paths left as paths. It contains no Store,
+checkpoint key or operator signing key.
+
+For a separate controller account, the probe uses the installer's fixed
+`controller-tool`, `controller-tool-result`, `controller-tool-ack` and
+`controller-journal` operations. The acceptance journey runs the fixed cases
+again after appliance restart, preserving appliance request IDs and arguments
+while retaining fresh Mini delivery and purse-settlement receipts.
 
 Start with:
 

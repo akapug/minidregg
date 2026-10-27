@@ -18,17 +18,20 @@ command -v jq >/dev/null 2>&1 || exit 2
 # All resource and capability coordinates are distinct from the existing
 # genesis 7/8/9, deployment 10/11/12 and initial workroom resources.
 jq -e '
+  (.agents | length) as $count |
   .protocol == "mini-spk-integrated-allocation-v1" and
   .status == "reserved-coordinates-only" and
-  ([.agents[].route] == ["hermes-a","hermes-b"]) and
-  ([.agents[] | [.controller,.tool,.dispatch,.provider][]] | length == 8) and
+  (.agents | type == "array" and length >= 1 and length <= 8) and
+  (.agents | all(.[]; .route | type == "string" and test("^[a-z][a-z0-9-]{0,63}$"))) and
+  ([.agents[].route] | unique | length) == (.agents | length) and
+  ([.agents[] | [.controller,.tool,.dispatch,.provider][]] | length == (4 * $count)) and
   ([.agents[] | [.controller,.tool,.dispatch,.provider][] |
       .subject,.keyId,.account,.factoryObserveCapability,.task] |
       all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
   ([.agents[] | [.controller,.tool,.dispatch,.provider][] | .subject] +
-    ["7","8","9"] | unique | length == 11) and
+    ["7","8","9"] | unique | length == (4 * $count + 3)) and
   ([.agents[] | [.controller,.tool,.dispatch,.provider][] | .keyId] +
-    ["7007","8008","9009"] | unique | length == 11) and
+    ["7007","8008","9009"] | unique | length == (4 * $count + 3)) and
   ([.humans[].plannedCaps[],.agents[].plannedCaps[],
       (.agents[] | [.controller,.tool,.dispatch,.provider][] |
         .factoryObserveCapability)] |
@@ -62,7 +65,7 @@ cat >"$STAGE/preboot" <<'EOF'
 # Agent signing keys are generated only in this private fresh fixture. Each
 # genesis enrollment has its own account and cannot borrow another signer.
 mkdir -m 700 "$EVIDENCE/agents"
-for route in hermes-a hermes-b; do
+for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
   mkdir -m 700 "$EVIDENCE/agents/$route"
   for role in controller tool dispatch provider; do
     spec=$(jq -c --arg route "$route" --arg role "$role" '
@@ -130,10 +133,10 @@ mv "$EVIDENCE/agents/birth-with-agents.json" "$EVIDENCE/birth-intent.json"
 EOF
 
 cat >"$STAGE/postbirth" <<'EOF'
-# The one signed birth receipt covers all eight added grains. Verify each
+# The one signed birth receipt covers all explicitly allocated agent grains. Verify each
 # owner can separately observe its exact born resource and record that view.
 mkdir -m 700 "$EVIDENCE/agents/verified"
-for route in hermes-a hermes-b; do
+for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
   for role in controller tool dispatch provider; do
     spec=$(jq -c --arg route "$route" --arg role "$role" \
       '.agents[] | select(.route == $route) | .[$role]' "$SPK_AGENT_ALLOCATION")
@@ -181,7 +184,7 @@ for route in hermes-a hermes-b; do
 done
 # Check each parent's actual installed grain policy against the source-owned
 # owner/tool-worker rule; the separate parent child grants are added below.
-for route in hermes-a hermes-b; do
+for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
   controller=$(jq -c --arg route "$route" \
     '.agents[] | select(.route == $route) | .controller' \
     "$SPK_AGENT_ALLOCATION")
@@ -235,7 +238,7 @@ done
 # Three separately held parent witnesses per controller. Each delegation is
 # prepared from a fresh signed owner observation, then the named holder signs
 # its own readback. The initial workerSubject is not used as a grant shortcut.
-for route in hermes-a hermes-b; do
+for route in $(jq -er ' .agents[].route' "$SPK_AGENT_ALLOCATION"); do
   controller=$(jq -c --arg route "$route" \
     '.agents[] | select(.route == $route) | .controller' \
     "$SPK_AGENT_ALLOCATION")
