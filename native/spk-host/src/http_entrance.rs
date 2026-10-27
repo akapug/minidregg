@@ -423,27 +423,10 @@ fn session_cookie(raw: &str) -> io::Result<(String, Option<String>)> {
     Ok((ordinary.join("; "), credential))
 }
 
+/// Lean's `ordinaryHeaderName` (generated, protocol/host-operations.json `ordinary_headers`) minus
+/// `cookie`, which this entrance splits into ordinary cookies and the credential itself.
 fn allowed_ordinary_header(name: &str) -> bool {
-    matches!(
-        name,
-        "accept"
-            | "accept-encoding"
-            | "content-type"
-            | "user-agent"
-            | "if-match"
-            | "if-none-match"
-            | "x-requested-with"
-            | "x-csrftoken"
-            | "x-csrf-token"
-            | "oc-total-length"
-            | "oc-chunk-size"
-            | "x-oc-mtime"
-            | "oc-fileid"
-            | "oc-chunked"
-            | "oc-checksum"
-            | "oc-chunk-offset"
-            | "oc-lazyops"
-    )
+    name != "cookie" && crate::host_operations::ordinary_header_name(name)
 }
 
 fn header_name(name: &str) -> bool {

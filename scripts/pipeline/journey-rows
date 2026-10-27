@@ -835,6 +835,12 @@ row_jpay() {
 # ExecStart (deploy/fn/mini-fn-receive@.service). No live fn is contacted.
 # exchange: two Stores with distinct domains (NEWPARTICIPANT_DOMAIN), one of them a selected-release recipient;
 # the second is not the fixture's default world. Left on its own constructor.
+# unit_verify_warns TEXT: does systemd-analyze verify's output carry a warning? Only lines in its
+# message shape (a unit or path, an optional :LINE, then ": "), and the warning words as whole words
+# bounded by spaces or punctuation, never inside a hyphenated or slashed path component.
+unit_verify_warns() {
+  printf '%s\n' "$1" | grep -Eiq '^[^:[:space:]]+(:[0-9]+)?: (.*[[:space:]])?(invalid|ignoring|unknown|failed|bad)([[:space:],.;:]|$)'
+}
 row_exchange() {
   local d=$SRC/native/resource-client/selected-exchange-journey.sh rc name
   [ -f "$d" ] || return 99
@@ -856,7 +862,14 @@ row_exchange() {
   verify=$(cd "$unitdir" && systemd-analyze verify "$unitdir/mini-fn-receive@probe.service" "$unitdir/mini-fn-receive@probe.timer" 2>&1); rc=$?
   rm -rf "$unitdir"
   printf '%s\n' "$verify" >"$OUT/unit-verify.log"
-  if [ "$rc" != 0 ] || printf '%s\n' "$verify" | grep -Eiq 'invalid|ignoring|unknown|failed|bad'; then
+  # The verdict reads systemd-analyze's own message shape (UNIT[:LINE]: MESSAGE) and its words as
+  # words, so a path in a message (x86_64-unknown-linux-gnu) never reads as a warning. Self-check
+  # first: one harmless line must pass and one real warning must fail, or the row refuses itself.
+  if unit_verify_warns 'mini-fn-receive@probe.service: Using /opt/x86_64-unknown-linux-gnu/lib/libfoo-bad-1.so (bad-free path)' \
+     || ! unit_verify_warns "mini-fn-receive@probe.service:7: Unknown key name 'Foo' in section 'Service', ignoring."; then
+    echo "row_exchange: the systemd-analyze verdict pattern fails its own self-check" >&2; return 1
+  fi
+  if [ "$rc" != 0 ] || unit_verify_warns "$verify"; then
     echo "fn consumer unit failed systemd-analyze verify: $verify" >&2; return 1
   fi
   product_exec exchange bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$MINI_FN_LAUNCHER" "$MINI_FN_CORE" "$RUN/x"; rc=$?

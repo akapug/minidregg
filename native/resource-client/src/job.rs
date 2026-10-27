@@ -96,11 +96,11 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 }
 
 fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, value.to_string().as_bytes()))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, value.to_string().as_bytes()))
 }
 
 fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("job: invalid Host inspection of {kind}: {error}"))
 }
 
@@ -153,7 +153,7 @@ fn name_ok(name: &str) -> Result<()> {
 
 /// The deployment clock (op 129).
 fn now(ws: &Ws) -> Result<i128> {
-    let view = inspect(ws, "clock-view", &invoke(ws, 129, &[])?)?;
+    let view = inspect(ws, "clock-view", &invoke(ws, mini_sdk::host_operations::CLOCK_VIEW, &[])?)?;
     int(view.get("now").ok_or("job: clock view lacks now")?, "clock now")
 }
 
@@ -332,14 +332,14 @@ fn money(
     job_capability: &str,
 ) -> Result<Value> {
     fs::create_dir_all(dir).map_err(|error| format!("job: {}: {error}", dir.display()))?;
-    let view = inspect(ws, "pay-view", &invoke(ws, 107, &[])?)?;
+    let view = inspect(ws, "pay-view", &invoke(ws, mini_sdk::host_operations::PAY_VIEW, &[])?)?;
     let authority = view.get("authorityRoot").and_then(Value::as_str).ok_or("job: pay view lacks authorityRoot")?;
     let command = json!({"subject":ws.subject,"capability":capability,"jobCapability":job_capability,
         "job":job,"action":action.to_string(),
         "account":account,"amount":amount,"nonce":crate::fsio::random_nonce()?,"expectedAuthorityRoot":authority});
     crate::shell::session_fs::replace(&ws.root, &dir.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "job-money", &command)?;
-    let plan = match invoke(ws, 160, &command_bytes) {
+    let plan = match invoke(ws, mini_sdk::host_operations::JOB_MONEY_PLAN, &command_bytes) {
         Ok(plan) => plan,
         Err(refused) => {
             let named = refused
@@ -356,7 +356,7 @@ fn money(
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&crate::decode_hex(canonical).map_err(|e| format!("job: {e}"))?).to_bytes();
-    let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::JOB_MONEY_ASSEMBLE, &pair(&plan, &signature))?;
     retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)
 }
@@ -394,7 +394,7 @@ fn begin_money_submission(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<String>
 
 fn submit_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<Value> {
     let id = begin_money_submission(ws, dir, ingress)?;
-    let outcome = inspect(ws, "outcome", &invoke(ws, 162, ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::JOB_MONEY_SUBMIT, ingress)?)?;
     retain_money_outcome(ws, dir, outcome, Some(&id))
 }
 
@@ -489,7 +489,7 @@ fn recover_settlement(ws: &Ws, dir: &Path, job: &str) -> Result<(Value, bool)> {
     settlement_identity(ws, job, &inspect(ws, "job-money-ingress", &ingress)?)?;
     // Receipt-only lookup cannot create another effect. Absence permits only
     // the exact original ingress, whose current admission/replay stays native.
-    let outcome = inspect(ws, "outcome", &invoke(ws, 163, &ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::JOB_MONEY_LOOKUP, &ingress)?)?;
     if outcome.get("type").and_then(Value::as_str) == Some("absent") {
         submit_ingress(ws, dir, &ingress).map(|value| (value, true))
     } else {
@@ -511,7 +511,7 @@ fn operation_capability(reference: &Value) -> Result<String> {
 /// claim a truth turn carries, and the writes it names.
 fn dry_run(ws: &Ws, job: &str, fields: &BTreeMap<u32, String>) -> Result<(Value, Value)> {
     let program = fields.get(&1).ok_or("job: no program field")?;
-    let show: Value = serde_json::from_slice(&invoke(ws, 132, program.as_bytes())?)
+    let show: Value = serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::NOCK_PROGRAM_SHOW, program.as_bytes())?)
         .map_err(|error| format!("job: program show: {error}"))?;
     let sample = show.pointer("/abi/sample").and_then(Value::as_array).ok_or("job: program ABI lacks sample")?;
     let mut values = Vec::new();
@@ -528,7 +528,7 @@ fn dry_run(ws: &Ws, job: &str, fields: &BTreeMap<u32, String>) -> Result<(Value,
         values.push(json!([slot.get("target").cloned().unwrap_or(json!("0")), name, value]));
     }
     let request = json!({"programId":program,"caller":ws.subject,"room":"0","targets":[job],"values":values});
-    let dry: Value = serde_json::from_slice(&invoke(ws, 134, request.to_string().as_bytes())?)
+    let dry: Value = serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::NOCK_DRY_RUN, request.to_string().as_bytes())?)
         .map_err(|error| format!("job: dry run: {error}"))?;
     if dry.get("verdict").and_then(Value::as_str) != Some("ok") {
         return Err(format!("job: the program did not finish on the job's sample: {dry}"));

@@ -238,9 +238,9 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op68-requested.json", &active)?;
     write_new(parent, CLAIM_ACTIVE_MARKER, &active)?;
-    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 68, PLAN_TAG)?;
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -277,9 +277,9 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op69-requested.bin", &pair)?;
-    let reply = operator.invoke(69, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op69-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, CLAIM_INGRESS_FILE, &ingress)?;
     Ok(AssembledLaunchClaim {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -446,9 +446,9 @@ pub(crate) fn submit_fresh_once(
         "op26-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(26, &assembled.ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, &assembled.ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &reply)?;
-    let committed = framed_payload(&reply, 26, COMMITTED_TAG)?.to_vec();
+    let committed = framed_payload(&reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let inspection = operator.tool(
         "inspect",
@@ -618,11 +618,11 @@ mod tests {
         frame.push(69);
         frame.extend_from_slice(INGRESS_TAG);
         frame.push(1);
-        assert!(framed_payload(&frame, 69, INGRESS_TAG).is_ok());
+        assert!(framed_payload(&frame, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG).is_ok());
         assert!(
-            framed_payload(&frame, 69, b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v2").is_err()
+            framed_payload(&frame, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v2").is_err()
         );
-        assert!(framed_payload(&frame, 53, INGRESS_TAG).is_err());
+        assert!(framed_payload(&frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_ASSEMBLE, INGRESS_TAG).is_err());
     }
 
     #[test]

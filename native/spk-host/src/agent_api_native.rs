@@ -744,7 +744,7 @@ pub(crate) fn authorize_once(
         "application-agent-paid-request",
         &paid_json,
     )?;
-    let paid_plan = reply(&operator.invoke(48, &paid_request)?, 48)?.to_vec();
+    let paid_plan = reply(&operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_PLAN, &paid_request)?, crate::host_operations::AGENT_PAID_DISPATCH_PLAN)?.to_vec();
     let paid_view = source_inspect(
         operator,
         attempt_dir,
@@ -788,8 +788,8 @@ pub(crate) fn authorize_once(
     let payer_bytes = signatures(operator, attempt_dir, "payer-signatures", &payer)?;
     let paid_signatures = pair(&app_bytes, &payer_bytes)?;
     let ingress = reply(
-        &operator.invoke(49, &pair(&paid_plan, &paid_signatures)?)?,
-        49,
+        &operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE, &pair(&paid_plan, &paid_signatures)?)?,
+        crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE,
     )?
     .to_vec();
     write_new(attempt_dir, "paid-ingress.bin", &ingress)?;
@@ -817,9 +817,9 @@ pub(crate) fn authorize_once(
         File::open(parent)?.sync_all()?;
         return Err(invalid("agent caller cancelled before op46"));
     }
-    let frame = operator.invoke(46, &ingress)?;
+    let frame = operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op46-frame.bin", &frame)?;
-    let permit = reply(&frame, 46)?;
+    let permit = reply(&frame, crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT)?;
     if !permit.starts_with(COMMITTED)
         || permit.len() <= COMMITTED.len()
         || permit.starts_with(OUTCOME)
@@ -873,8 +873,8 @@ mod tests {
     fn committed_agent_requires_exact_op46_and_distinct_tag() {
         let mut permit = COMMITTED.to_vec();
         permit.push(1);
-        assert_eq!(reply(&frame(46, &permit), 46).unwrap(), permit);
-        assert!(reply(&frame(47, &permit), 46).is_err());
+        assert_eq!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).unwrap(), permit);
+        assert!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_LOOKUP, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).is_err());
         assert!(!OUTCOME.starts_with(COMMITTED));
         assert!(pair(b"abc", b"def")
             .unwrap()

@@ -327,7 +327,7 @@ fn verify(
         &host,
         socket,
         &config,
-        144,
+        mini_sdk::host_operations::KEY_ROTATION_STATUS,
         &serde_json::to_vec(&json!({"subject":p["founder"],"publicKey":bundle["publicKey"]}))
             .unwrap(),
     )?;
@@ -646,7 +646,7 @@ fn check_registration_custody(r: &Value) -> Result<()> {
         &host,
         socket,
         &config,
-        144,
+        mini_sdk::host_operations::KEY_ROTATION_STATUS,
         &serde_json::to_vec(
             &json!({"subject":r["subject"],"publicKey":hex(key.verifying_key().as_bytes())}),
         )

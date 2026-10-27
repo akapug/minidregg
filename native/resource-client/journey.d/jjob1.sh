@@ -86,14 +86,15 @@ row all "fresh Store: A sponsors; B enrolled (account 121); the operator's tarif
 # collatz: reads job field 2 as `input`, writes field 15 (truth).
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/open.json"
 PID=$(python3 - "$CONFIG" "$SOCK" "$JOB_PROGRAMS/collatz.jam" "$D/collatz.check.json" <<'PY'
-import json, socket, struct, sys
+import hashlib, json, socket, struct, sys
 cfg = open(sys.argv[1], "rb").read(); sock = sys.argv[2]; jam = open(sys.argv[3], "rb").read()
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 abi = {"evaluator": "nock", "version": "5", "context": "live", "arm": "2", "fuel": "5000000",
        "sample": [{"target": "0", "slot": "resource/field/2/before", "key": "input", "type": "nat"}],
        "outputs": [{"key": "truth", "target": "0", "field": "15", "type": "nat"}], "libraries": []}
 payload = struct.pack("<I", len(jam)) + jam + json.dumps(abi).encode()
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(sock)
-body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([131]) + payload
+body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([131]) + payload
 s.sendall(struct.pack("<I", len(body)) + body)
 def exact(n):
     out = b""

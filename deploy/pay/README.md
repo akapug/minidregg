@@ -263,7 +263,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   `enrol-v2.json`) is rendered from `enrol-terms.json` and published with the friend bundle. The client
   refuses a pin whose address differs from the box's book row at the enrollment index, and refuses an
   unset one (`EMBER_ENROL_ADDRESS`). The roster sync reads the same view with
-  `mini enrollment-view --socket PUBLIC/mini.sock`.
+  `mini enrollment-view --socket PUBLIC/mini.sock --host HOST` (the v2 envelope pins the Host image).
 
 ## What a friend sees (PAY §5)
 

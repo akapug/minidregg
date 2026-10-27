@@ -17,10 +17,10 @@ const FORMAT: &str = "minidregg-participant-factory-observation-custody-v1";
 const COMMAND_KIND: &str = "participant-factory-provisioning";
 const PLAN_KIND: &str = "participant-factory-provisioning-plan";
 const INGRESS_KIND: &str = "participant-factory-provisioning-ingress";
-const PLAN_OPERATION: u8 = 92;
-const ASSEMBLE_OPERATION: u8 = 93;
-const SUBMIT_OPERATION: u8 = 94;
-const LOOKUP_OPERATION: u8 = 95;
+const PLAN_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_PLAN;
+const ASSEMBLE_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_ASSEMBLE;
+const SUBMIT_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_SUBMIT;
+const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::PARTICIPANT_PROVISIONING_LOOKUP;
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 
 /// Everything the sponsor's workspace pins; `holder` is data the Host checks.
@@ -150,7 +150,7 @@ fn plan(
         grant.host,
         grant.socket,
         &retained_config,
-        7,
+        mini_sdk::host_operations::AUTHOR,
         Some(COMMAND_KIND),
         &directory.join("source.json"),
         &directory.join("command.bin"),

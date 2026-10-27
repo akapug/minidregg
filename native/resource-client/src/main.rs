@@ -738,7 +738,7 @@ usage:
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
   mini enrollment-bootstrap --host HOST --config PUBLIC-CONFIG --socket PUBLIC-SOCKET --listen 127.0.0.1:8794 --metadata PUBLIC-BOOTSTRAP.json [--trusted-proxy IP]
-  mini enrollment-view --socket SOCKET [--config CONFIG]
+  mini enrollment-view --socket SOCKET [--config CONFIG] (--host HOST | --host-sha256 HEX)
   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
   mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
   mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
@@ -1366,7 +1366,7 @@ fn socket_process(
         // outcome`). A failed decode leaves the decision undecoded; it is
         // never reconstructed here. The class is the marker's (`is_refusal`).
         let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
-            .and_then(|request| session_invoke(host, socket, config, 8, &request))
+            .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
@@ -2530,7 +2530,7 @@ fn continuity(
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
     sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
-    let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
     if is_outcome_frame(frame[0]) {
         return Err("Host refused provider continuity; complete frame retained".into());
@@ -2550,10 +2550,11 @@ fn continuity(
 /// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
 /// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
 /// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
-/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config.
+/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config, and the Host
+/// image the socket serves (`--host HOST`, or its `--host-sha256`) pins the v2 envelope (v1 is retired).
 #[cfg(unix)]
-fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
-    let frame = transport::invoke(socket, config, 112, &[])?;
+fn enrollment_view(socket: &Path, config: &Path, host_sha256: &str) -> Result<()> {
+    let frame = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::PAY_ENROLLMENT_VIEW, &[])?;
     let body = match frame.as_slice() {
         [112, body @ ..] => body,
         [code, rest @ ..] => {
@@ -2568,7 +2569,7 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
     let mut request = (kind.len() as u16).to_le_bytes().to_vec();
     request.extend_from_slice(kind);
     request.extend_from_slice(body);
-    let inspected = transport::invoke(socket, config, 8, &request)?;
+    let inspected = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::INSPECT, &request)?;
     let json = match inspected.as_slice() {
         [8, json @ ..] => json,
         _ => return Err("the Host could not decode its own enrollment view".into()),
@@ -2702,10 +2703,17 @@ fn run(mut args: Args) -> Result<()> {
         "enrollment-bootstrap" => enrollment_bootstrap::run(args),
         "enrollment-view" => {
             let config = args.optional("config").map(path);
+            let host = args.optional("host").map(path);
+            let sha = args.optional("host-sha256").map(|s| s.into_string().map_err(|_| "--host-sha256 must be UTF-8".to_owned())).transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("enrollment-view requires --socket")?;
             let config = config.unwrap_or_else(|| socket.with_extension("config"));
-            enrollment_view(socket, &config)
+            let host_sha256 = match (host, sha) {
+                (Some(host), None) => host_image_sha256(&host)?,
+                (None, Some(sha)) => sha,
+                _ => return Err("enrollment-view requires exactly one of --host HOST or --host-sha256 HEX (the v2 envelope pins the Host image)".to_owned()),
+            };
+            enrollment_view(socket, &config, &host_sha256)
         }
         #[cfg(unix)]
         "selected-exchange" => {

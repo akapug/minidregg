@@ -58,7 +58,7 @@ fn inspect(source: &mut impl Source, kind: &str, bytes: &[u8]) -> Result<Value> 
     let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
     payload.extend_from_slice(kind.as_bytes());
     payload.extend_from_slice(bytes);
-    serde_json::from_slice(&call(source, 8, &payload)?)
+    serde_json::from_slice(&call(source, mini_sdk::host_operations::INSPECT, &payload)?)
         .map_err(|e| format!("invalid adoption inspection: {e}"))
 }
 fn json_call(source: &mut impl Source, opcode: u8, value: &Value) -> Result<Value> {
@@ -86,7 +86,7 @@ fn public(value: &Value, name: &str) -> Result<[u8; 32]> {
         .map_err(|_| "invalid public key".into())
 }
 fn status(source: &mut impl Source, subject: &Value, public: &Value) -> Result<Value> {
-    json_call(source, 144, &json!({"subject":subject,"publicKey":public}))
+    json_call(source, mini_sdk::host_operations::KEY_ROTATION_STATUS, &json!({"subject":subject,"publicKey":public}))
 }
 fn current(view: &Value, subject: &Value) -> Result<()> {
     if view["type"] != "subject-key-status-v1"
@@ -194,7 +194,7 @@ fn seal(
 ) -> Result<Vec<u8>> {
     let request = &pin["request"];
     let bytes = serde_json::to_vec(request).map_err(|e| e.to_string())?;
-    let plan = stored_call(source, attempt, "plan", 187, &bytes)?;
+    let plan = stored_call(source, attempt, "plan", mini_sdk::host_operations::NEXT_KEY_ADOPTION_PLAN, &bytes)?;
     let view = source.inspect_signed("subject-key-adoption-plan", &plan)?;
     check_plan(&view, request, &pin["initialStatus"], &pin["profile"])?;
     save_json_staged(&attempt.join("plan.json"), &view)?;
@@ -240,7 +240,7 @@ fn seal(
         source,
         attempt,
         "ingress",
-        188,
+        mini_sdk::host_operations::NEXT_KEY_ADOPTION_ASSEMBLE,
         &pair(&plan, &pair(&signatures[0], &signatures[1])?)?,
     )?;
     let decoded = source.inspect_signed("subject-key-adoption-ingress", &ingress)?;
@@ -295,14 +295,14 @@ fn resolve(
         return Err("adoption has no submitted or uncertain attempt".into());
     } else {
         save_json_staged(&marker, &expected)?;
-        if let Ok(value) = outcome(source, attempt, "submit", 189, ingress) {
+        if let Ok(value) = outcome(source, attempt, "submit", mini_sdk::host_operations::NEXT_KEY_ADOPTION_SUBMIT, ingress) {
             if value["type"] == "confirmed" {
                 return Ok(value);
             }
         }
     }
     let stem = format!("lookup-{}", crate::fsio::random_nonce()?);
-    outcome(source, attempt, &stem, 190, ingress)
+    outcome(source, attempt, &stem, mini_sdk::host_operations::NEXT_KEY_ADOPTION_LOOKUP, ingress)
 }
 fn uncommitted_manifest(manifest: &Value) -> bool {
     manifest["prerotation"] == false
@@ -401,7 +401,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         trusted: Some((root.clone(), ws.clone(), identity.clone())),
     };
     let profile: Value =
-        serde_json::from_slice(&call(&mut source, 6, &[])?).map_err(|e| e.to_string())?;
+        serde_json::from_slice(&call(&mut source, mini_sdk::host_operations::PROFILE, &[])?).map_err(|e| e.to_string())?;
     let profile = json!({"domain":profile["domain"],"semantics":profile["semantics"],"expectedSeed":profile["expectedSeed"]});
     for name in ["domain", "semantics", "expectedSeed"] {
         if profile[name] != identity[name] {

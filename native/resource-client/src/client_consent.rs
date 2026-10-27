@@ -334,7 +334,7 @@ mod tests {
     // plan it expects. One changed byte in the served plan must refuse before
     // any signing consumer receives the bytes.
     const STUB_PLAN: &[u8] = b"DREGG/PLAN/stub-transfer-10";
-    const STUB_OPERATION: u8 = 32;
+    const STUB_OPERATION: u8 = mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN;
     fn stub_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mini-remote-consent-{label}-{}-{}", std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
@@ -382,7 +382,7 @@ mod tests {
     #[ignore = "worker for remote_signing_plan_with_one_changed_byte_is_refused_before_signing"]
     fn remote_plan_stub_worker() {
         let config = PathBuf::from(std::env::var_os("MINI_REMOTE_CONSENT_STUB_CONFIG").expect("stub config"));
-        match crate::transport::invoke(Path::new("ssh:plan-stub"), &config, STUB_OPERATION, b"retained request") {
+        match crate::transport::invoke_pinned(Path::new("ssh:plan-stub"), &config, &"00".repeat(32), STUB_OPERATION, b"retained request") {
             Ok(reply) => println!("REMOTE-PLAN-ACCEPTED {}", hex(&reply)),
             Err(error) => println!("REMOTE-PLAN-REFUSED {error}"),
         }
@@ -406,7 +406,7 @@ mod tests {
         let host = codec_stub(&dir);
         let settings = dir.join("settings.json");
         for _ in 0..3 {
-            assert_eq!(local_frame(&host, &settings, 7, b"intent").unwrap(), b"\x07ok");
+            assert_eq!(local_frame(&host, &settings, mini_sdk::host_operations::AUTHOR, b"intent").unwrap(), b"\x07ok");
         }
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1);
         let other = stub_dir("codec-refusal");
@@ -416,10 +416,10 @@ mod tests {
         fs::write(other.join("reply"), framed(b"\x07again")).unwrap();
         let refusing = codec_stub(&other);
         let settings = other.join("settings.json");
-        let error = local_frame(&refusing, &settings, 7, b"intent").unwrap_err();
+        let error = local_frame(&refusing, &settings, mini_sdk::host_operations::AUTHOR, b"intent").unwrap_err();
         assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
         assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::Frame { byte: 253, .. })));
-        assert_eq!(local_frame(&refusing, &settings, 7, b"intent").unwrap(), b"\x07again");
+        assert_eq!(local_frame(&refusing, &settings, mini_sdk::host_operations::AUTHOR, b"intent").unwrap(), b"\x07again");
         assert_eq!(fs::read_to_string(other.join("starts")).unwrap().lines().count(), 1);
         CODEC.lock().unwrap().reset();
         let _ = fs::remove_dir_all(&dir);
@@ -439,12 +439,12 @@ mod tests {
             d = dir.display())).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(dir.join("reply"), framed(&[255, 0xff, 0x00])).unwrap();
-        let error = local_frame(&host, &settings, 7, b"intent").unwrap_err();
+        let error = local_frame(&host, &settings, mini_sdk::host_operations::AUTHOR, b"intent").unwrap_err();
         // Under the 255 envelope and undecoded: undecided, never "refused".
         assert!(error.starts_with("undecided: Host answered author with reply byte 255 and outcome undecoded"), "{error}");
         assert!(matches!(crate::take_host_decision(), Some(crate::HostDecision::Frame { byte: 255, decoded: None, .. })));
         fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
-        assert_eq!(local_frame(&host, &settings, 7, b"intent").unwrap(), b"\x07ok");
+        assert_eq!(local_frame(&host, &settings, mini_sdk::host_operations::AUTHOR, b"intent").unwrap(), b"\x07ok");
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 2);
         CODEC.lock().unwrap().reset();
         let _ = fs::remove_dir_all(&dir);

@@ -286,7 +286,7 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
         })
         .count();
     let stem = format!("lookup-{count:04}");
-    invoke(agent, directory, &stem, 99, ingress)?;
+    invoke(agent, directory, &stem, mini_sdk::host_operations::FLEET_TURN_LOOKUP, ingress)?;
     inspect(
         agent,
         "outcome",
@@ -573,7 +573,7 @@ fn attempt(
     };
     retain(&directory.join("signed-observation.bin"), &signed)?;
     retain_json(&directory.join("account-view.json"), &view)?;
-    let plan = match invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?) {
+    let plan = match invoke(agent, &directory, "plan", mini_sdk::host_operations::FLEET_TURN_PLAN, &pair(&signed, &draft_bytes)?) {
         Ok(plan) => plan,
         Err(error) => match plan_refusal(agent, &directory)? {
             Some(refusal) if refusal.get("reason").and_then(Value::as_str) == Some("stale-root") => {
@@ -600,7 +600,7 @@ fn attempt(
     let signing = read_secret(&workspace::member_path(&agent.workspace, "key")?)?;
     let signature = signing.sign(&header).to_bytes();
     retain(&directory.join("signature.bin"), &signature)?;
-    let ingress = invoke(agent, &directory, "ingress", 97, &pair(&plan, &signature)?)?;
+    let ingress = invoke(agent, &directory, "ingress", mini_sdk::host_operations::FLEET_TURN_ASSEMBLE, &pair(&plan, &signature)?)?;
     let ingress_view = inspect(agent, "fleet-turn-ingress", &directory.join("ingress.bin"), &directory.join("ingress.json"))?;
     if field(&ingress_view, "canonical")? != hex(&ingress)
         || field(&ingress_view, "commandBytes")? != field(&plan_view, "commandBytes")?
@@ -615,7 +615,7 @@ fn attempt(
     if let Some(journal) = journal {
         journal_attempt(journal, &directory)?;
     }
-    let outcome = match invoke(agent, &directory, "submit", 98, &ingress) {
+    let outcome = match invoke(agent, &directory, "submit", mini_sdk::host_operations::FLEET_TURN_SUBMIT, &ingress) {
         Ok(_) => inspect(agent, "outcome", &directory.join("submit.bin"), &directory.join("submit.json"))?,
         Err(error) => {
             eprintln!("fleet submit uncertain ({error}); exact lookup follows");
@@ -769,7 +769,7 @@ pub(crate) fn resubmit(agent: &Agent, directory: &Path) -> Result<Value> {
         })
         .count();
     let stem = format!("resubmit-{count:04}");
-    invoke(agent, &canonical, &stem, 98, &ingress)?;
+    invoke(agent, &canonical, &stem, mini_sdk::host_operations::FLEET_TURN_SUBMIT, &ingress)?;
     inspect(
         agent,
         "outcome",
@@ -792,8 +792,8 @@ fn lookup(agent: &Agent, directory: &Path) -> Result<()> {
 /// The Host's answer to op 102 for one transaction id, uninterpreted.
 pub(crate) fn receipt_by_transaction(agent: &Agent, transaction: &str) -> Result<Value> {
     canonical_decimal(transaction, "--transaction")?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 102, transaction.as_bytes())?;
-    let body = reply(&frame, 102)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_RECEIPT, transaction.as_bytes())?;
+    let body = reply(&frame, mini_sdk::host_operations::FLEET_RECEIPT)?;
     serde_json::from_slice(body).map_err(|error| error.to_string())
 }
 
@@ -810,9 +810,9 @@ fn by_transaction(agent: &Agent, transaction: &str) -> Result<()> {
 /// The agent head (op 101) of `reference`, behind this agent's signed observation.
 pub(crate) fn head_of(agent: &Agent, reference: &Value) -> Result<Value> {
     let (_, signed) = observe(agent, reference)?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 101, &signed)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_HEAD, &signed)?;
     let value: Value =
-        serde_json::from_slice(reply(&frame, 101)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_HEAD)?).map_err(|error| error.to_string())?;
     if field(&value, "payer")? != field(reference, "target")? {
         return Err("agent head answered for another account".into());
     }
@@ -893,9 +893,9 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
     let (_, signed) = observe(agent, reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(&topic),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 100, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_TOPIC_POLL, &pair(&signed, &request)?)?;
     let mut value: Value =
-        serde_json::from_slice(reply(&frame, 100)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_TOPIC_POLL)?).map_err(|error| error.to_string())?;
     if field(&value, "payer")? != field(reference, "target")? || field(&value, "topic")? != hex(&topic)
     {
         return Err("topic poll answered for another stream".into());
@@ -1026,9 +1026,9 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
     let (_, signed) = observe(&agent, &reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 180, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &pair(&signed, &request)?)?;
     let mut value: Value =
-        serde_json::from_slice(reply(&frame, 180)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())?;
     if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {
         return Err("incoming ledger answered for another account or topic".into());
     }
@@ -1336,9 +1336,9 @@ mod tests {
 
     #[test]
     fn refusal_frames_never_read_as_success() {
-        assert!(reply(&[255, b'x'], 98).is_err());
-        assert!(reply(&[99, 1], 98).is_err());
-        assert_eq!(reply(&[98, 1, 2], 98).unwrap(), &[1, 2]);
+        assert!(reply(&[255, b'x'], mini_sdk::host_operations::FLEET_TURN_SUBMIT).is_err());
+        assert!(reply(&[99, 1], mini_sdk::host_operations::FLEET_TURN_SUBMIT).is_err());
+        assert_eq!(reply(&[98, 1, 2], mini_sdk::host_operations::FLEET_TURN_SUBMIT).unwrap(), &[1, 2]);
     }
 
     #[test]

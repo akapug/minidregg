@@ -52,10 +52,10 @@ const ENROL_OPS: Ops = Ops {
     submit: 119,
     lookup: 120,
 };
-const VIEW_OP: u8 = 107;
+const VIEW_OP: u8 = mini_sdk::host_operations::PAY_VIEW;
 /// The public clock view (K-CLOCK): the deployment clock's `{now, slot}`.
-const CLOCK_VIEW_OP: u8 = 129;
-const ENROLMENT_VIEW_OP: u8 = 112;
+const CLOCK_VIEW_OP: u8 = mini_sdk::host_operations::CLOCK_VIEW;
+const ENROLMENT_VIEW_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_VIEW;
 
 /// The durable preflight's refusal of a spent nullifier, exactly as the Host renders it
 /// (phase `durable`). On a report whose tip is newer than the clock it can only be an
@@ -1493,8 +1493,8 @@ fn v2_enrol_decision(session: &Session, attempt: &Path, record: &Record)
         workspace::bounded_json(&path)?
     } else {
         let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
-        let frame = session.call(181, &payload)?;
-        let body = frame_body(&frame, 181)?;
+        let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+        let body = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
         if body.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
         serde_json::from_slice(body).map_err(|e| format!("invalid source paid status: {e}"))?
     };
@@ -1963,8 +1963,8 @@ fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: boo
         let mut statuses = Vec::new();
         for request in &requests {
             let payload = serde_json::to_vec(request).map_err(|e|e.to_string())?;
-            let frame = session.call(181, &payload)?;
-            let bytes = frame_body(&frame, 181)?;
+            let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+            let bytes = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
             if bytes.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
             let value = serde_json::from_slice(bytes).map_err(|e|format!("source paid status: {e}"))?;
             statuses.push(crate::pay_status::parse(&value, request)?);

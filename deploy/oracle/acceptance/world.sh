@@ -75,8 +75,13 @@ world_stop_probe() {
 
 world_controller_prepare() {
   local home request_id
-  timeout 120 sudo -n -- "$installer" controller-create "$store" "$helper" >"$run/agent-lifetime/controller-create.json"
+  timeout 120 sudo -n -- "$installer" "$controller_create_verb" "$store" "$helper" >"$run/agent-lifetime/controller-create.json"
   controller_created=1
+  if [[ $controller_create_verb == controller-resume-create ]]; then
+    jq -e --argjson expected "$(jq -er .controller_uid "$continuation/prepared.json")" \
+      '.resumedPendingCreation == true and .controllerUid == $expected' \
+      "$run/agent-lifetime/controller-create.json" >/dev/null || fail 'pending controller identity changed'
+  fi
   cp "$GRAINS_ROOT/controller/namespace.json" "$run/agent-lifetime/controller-namespace.json"
   home=$(jq -er .controllerHome "$run/agent-lifetime/controller-create.json")
   timeout 1800 sh "$repo/scripts/oracle-agent-lifetime-journey.sh" prepare-controller "$run" "$repo" "$home" \
@@ -302,6 +307,47 @@ world_resume() {
   "$journey" phase "$run/world" services workroom profile >"$run/resume-prepare.log" 2>&1
 }
 
+# Only the checked pre-START account-creation boundary can enter here. All
+# prior source operations remain completed; only existing services restart.
+world_continue_controller() {
+  local run=$1 repo=$2 app
+  op_uid=$(id -u)
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$op_uid}
+  export BIN=$run/bin
+  store=$(jq -er '.store | select(test("^[0-9a-f]{16}$"))' "$run/world-identity.json")
+  helper=$(jq -er .helper "$run/world-identity.json")
+  export GRAINS_ROOT=/var/lib/mini-spk-worlds/$store
+  export BROKER_SOCKET=$GRAINS_ROOT/runtime-$store/broker.sock
+  [[ $(jq -er .root "$run/world-identity.json") == "$GRAINS_ROOT" ]] || fail 'continuation namespace differs'
+  [[ $helper =~ ^/usr/local/libexec/mini-spk-volume-helper-[0-9a-f]{16}$ ]] || fail 'continuation helper malformed'
+  jq -e --arg helper "$helper" --argjson uid "$op_uid" \
+    '.helper == $helper and .operatorUid == $uid' "/etc/mini-spk-volumes/$store.json" >/dev/null || fail 'continuation registry differs'
+  [[ $(systemctl --user show "mini-spk-broker@$store.service" -p ActiveState --value) == inactive ]] || fail 'broker was not stopped'
+  installer=$repo/deploy/spk-host/install-user-world
+  units=$XDG_RUNTIME_DIR/systemd/user
+  config=$run/world/store/base/workroom/deployment/pinned-config.json
+  profile=$(jq -er .profilePath "$run/world/evidence/profile-result.json")
+  state=$(jq -er .stateRoot "$run/world/evidence/profile-result.json")
+  continuation=$(python3 "$repo/deploy/oracle/acceptance/continue_controller.py" "$run" "$spk" "$inventory" "$benchmark" "$repo")
+  [[ $continuation == "$run/continuations/controller-create-1" ]] || fail 'continuation evidence path differs'
+  preserve_existing_exit=0
+  sha256sum "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" \
+    "$repo/deploy/oracle/acceptance/continue_controller.py" "$installer" "$repo/deploy/spk-host/controller-world.py" \
+    >"$continuation/recovery-input-sha256.txt"
+  configured=1
+  systemctl --user start "mini-spk-broker@$store.service"
+  for ((i=0;i<100;i++)); do [[ ! -S $BROKER_SOCKET ]] || break; sleep .1; done
+  [[ -S $BROKER_SOCKET && $(stat -c '%u:%a' "$BROKER_SOCKET") == "$op_uid:600" ]] || fail 'continuation broker readiness failed'
+  "$journey" phase "$run/world" services >"$continuation/services.log" 2>&1
+  for app in 9101 9201; do
+    timeout 1800 "$BIN/spk-host" grain status "$profile" "$app" >"$continuation/status-$app.json"
+    jq -e --arg app "$app" '.app == $app and .installCompleted and (.runs | length == 0)' \
+      "$continuation/status-$app.json" >/dev/null || fail 'continuation requires installed grains with no START'
+  done
+  world_disk_snapshot before-controller-continuation
+  controller_create_verb=controller-resume-create
+}
+
 world_cleanup() {
   local result=${1:-$?} cleanup_result=0 unit request verb preserve_namespace=false
   trap - EXIT INT TERM
@@ -352,8 +398,11 @@ world_cleanup() {
     [[ ! -e /etc/mini-spk-volumes/$store.json && ! -e /etc/sudoers.d/mini-spk-$store && ! -e $helper ]] || cleanup_result=1
     fi
   fi
-  if [[ -d $run ]]; then
+  if [[ -d $run && ${preserve_existing_exit:-0} != 1 ]]; then
     jq -n --argjson execution "$result" --argjson cleanup "$cleanup_result" --argjson preserved "$preserve_namespace" '{execution_exit:$execution,cleanup_exit:$cleanup,namespace_preserved:$preserved}' >"$run/exit.json"
+    if [[ -n ${continuation:-} && -d $continuation ]]; then
+      cp "$run/exit.json" "$continuation/exit.json"
+    fi
   fi
   [[ $result != 0 || $cleanup_result == 0 ]] || result=1
   exit "$result"

@@ -295,7 +295,7 @@ impl Worker {
         Ok(reply[1..].to_vec())
     }
     fn retain(&mut self) -> Result<()> {
-        let anchor = self.internal(229, &[])?;
+        let anchor = self.internal(mini_sdk::host_operations::CONSENT_ANCHOR_ADMITTED, &[])?;
         if anchor.is_empty() {
             self.failed = true;
             return Err("verifier returned empty anchor".into());
@@ -312,7 +312,7 @@ impl Worker {
         if !allowed(frame) {
             return Err("consent operation is not delegated".into());
         }
-        self.internal(233, &[])?;
+        self.internal(mini_sdk::host_operations::CONSENT_STORE_RECHECK, &[])?;
         let answer = self.exchange(frame)?;
         if answer.first() != frame.first() && answer.first() != Some(&255) {
             self.failed = true;
@@ -380,7 +380,7 @@ impl Worker {
             _lock: lock,
         };
         if let Some(retained) = retained {
-            worker.internal(228, &retained)?;
+            worker.internal(mini_sdk::host_operations::CONSENT_ANCHOR_OFFER, &retained)?;
         }
         // 228 only installs the retained comparison point. 233 before first admission
         // is a no-op; only a source-dependent caller frame creates a new frontier.

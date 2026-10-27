@@ -283,11 +283,13 @@ mod tests {
             ssh
         };
         let config = std::fs::read(env("MINI_SDK_E2E_CONFIG")).unwrap();
-        // DESCRIBE (operation 0): envelope version 1, config, operation, no payload.
-        let mut frame = vec![1];
+        // DESCRIBE: envelope v2 (config, the served Host image's pin, operation), no payload.
+        let pin = crate::decode_hex(&env("MINI_SDK_E2E_HOST_SHA256")).unwrap();
+        let mut frame = vec![2];
         frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
         frame.extend_from_slice(&config);
-        frame.push(0);
+        frame.extend_from_slice(&pin);
+        frame.push(mini_sdk::host_operations::DESCRIBE);
         let over_ssh = exchange_with(&ssh("MINI_SDK_E2E_SSH_CONFIG_GOOD"), &frame).unwrap();
         assert_eq!(over_ssh[0], 0, "the Host answered DESCRIBE");
         assert!(over_ssh.len() > 1);

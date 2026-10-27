@@ -81,7 +81,7 @@ impl ConsentError {
     /// The provider's refusal of an observation (221) as stale: the source moved between the
     /// Host's challenge and the local check. Every other refusal stays terminal.
     pub fn is_stale_observation(&self) -> bool {
-        matches!(self, ConsentError::Refused { operation: 221, answer: CONSENT_REFUSAL, detail }
+        matches!(self, ConsentError::Refused { operation: crate::host_operations::CONSENT_OBSERVATION, answer: CONSENT_REFUSAL, detail }
             if detail.starts_with(STALE_OBSERVATION_TAG.as_bytes()))
     }
 }
@@ -203,7 +203,7 @@ fn retain_anchor_with(session: &mut Session, observe: &mut dyn FnMut(crate::dura
     if session.anchor.is_none() {
         return;
     }
-    let anchor = match round_trip(session, 229, &[]) {
+    let anchor = match round_trip(session, crate::host_operations::CONSENT_ANCHOR_ADMITTED, &[]) {
         Ok(anchor) => anchor,
         Err(_) => return, // nothing admitted yet (a refused first admission ends the provider)
     };
@@ -235,7 +235,7 @@ pub fn start(anchors: &Path, executable: PathBuf, settings: &Path, settings_byte
     let mut session = Session::spawn(executable, settings, settings_bytes, "stdio", &what)?;
     session.anchor = Some(AnchorCustody { path: path.clone(), binding, retained: retained.clone() });
     if let Some(anchor) = retained {
-        round_trip(&mut session, 228, &anchor).map_err(|e| format!("retained consent anchor {}: {e}", path.display()))?;
+        round_trip(&mut session, crate::host_operations::CONSENT_ANCHOR_OFFER, &anchor).map_err(|e| format!("retained consent anchor {}: {e}", path.display()))?;
     }
     Ok(session)
 }
@@ -479,15 +479,15 @@ fn serve_connection(kind: ResidentKind, stream: std::os::unix::net::UnixStream, 
                         return;
                     }
                     (CONSENT_REFUSAL, b"the resident consent provider ended; the next command starts a new one".to_vec())
-                } else if !codec && matches!(operation, 228 | 229 | 233) {
+                } else if !codec && matches!(operation, crate::host_operations::CONSENT_ANCHOR_OFFER | crate::host_operations::CONSENT_ANCHOR_ADMITTED | crate::host_operations::CONSENT_STORE_RECHECK) {
                     (CONSENT_REFUSAL, format!("frame {operation} is reserved to the resident consent provider").into_bytes())
                 } else {
                     // The codec Host holds no Store: nothing to re-check, no anchor to retain.
                     let checked = if rechecked || codec {
                         Ok(())
                     } else {
-                        match resident.session.exchange(233, &[]) {
-                            Ok((233, _)) => Ok(()),
+                        match resident.session.exchange(crate::host_operations::CONSENT_STORE_RECHECK, &[]) {
+                            Ok((crate::host_operations::CONSENT_STORE_RECHECK, _)) => Ok(()),
                             Ok((_, detail)) => Err(String::from_utf8_lossy(&detail).into_owned()),
                             Err(e) => Err(e.0),
                         }
@@ -562,7 +562,7 @@ impl Consent {
     /// Op 220 (thin: 230): `key` is the intent subject's current signing key at the verified
     /// frontier. The provider must return the retained intent unchanged.
     pub fn intent(&mut self, intent_bin: &[u8], key: &[u8], thin: bool) -> ConsentResult<()> {
-        let checked = self.call(if thin { 230 } else { 220 }, &pair(intent_bin, &pair(key, &[])?)?)?;
+        let checked = self.call(if thin { crate::host_operations::CONSENT_THIN_INTENT } else { crate::host_operations::CONSENT_INTENT }, &pair(intent_bin, &pair(key, &[])?)?)?;
         if checked != intent_bin {
             return Err("local consent returned a different retained intent".into());
         }
@@ -573,12 +573,12 @@ impl Consent {
     pub fn observation(&mut self, intent_bin: &[u8], key: &[u8], intent_signature: &[u8], challenge: &[u8], thin: bool)
         -> ConsentResult<Vec<Vec<u8>>> {
         let payload = pair(intent_bin, &pair(key, &pair(intent_signature, challenge)?)?)?;
-        Ok(headers(&self.call(if thin { 231 } else { 221 }, &payload)?)?)
+        Ok(headers(&self.call(if thin { crate::host_operations::CONSENT_THIN_OBSERVATION } else { crate::host_operations::CONSENT_OBSERVATION }, &payload)?)?)
     }
 
     /// Op 222: the headers of the operator's plan this intent permits `key` to sign.
     pub fn plan(&mut self, intent_bin: &[u8], key: &[u8], plan: &[u8]) -> ConsentResult<Vec<Vec<u8>>> {
-        Ok(headers(&self.call(222, &pair(intent_bin, &pair(key, plan)?)?)?)?)
+        Ok(headers(&self.call(crate::host_operations::CONSENT_PLAN, &pair(intent_bin, &pair(key, plan)?)?)?)?)
     }
 
     /// Op 232, thin consent: checked against the provider's own command and the target `views`
@@ -587,7 +587,7 @@ impl Consent {
     /// refused with the unsigned input named.
     pub fn thin_plan(&mut self, intent_bin: &[u8], key: &[u8], plan: &[u8], views: &[Vec<u8>]) -> ConsentResult<(Value, Vec<Vec<u8>>)> {
         let payload = pair(intent_bin, &pair(key, &pair(plan, &stream_byte_list(views))?)?)?;
-        let reply = self.call(232, &payload)?;
+        let reply = self.call(crate::host_operations::CONSENT_THIN_PLAN, &payload)?;
         let value: Value = serde_json::from_slice(&reply).map_err(|e| Error(format!("thin consent reply: {e}")))?;
         let display = value.get("display").cloned().ok_or("thin consent reply lacks display")?;
         let rows = value.get("headers").and_then(Value::as_array).ok_or("thin consent reply lacks headers")?;
@@ -605,7 +605,7 @@ impl Consent {
             return Err(ConsentError::Failed(Error(format!("operation {operation} is not a checked operator plan"))));
         }
         let retained = [vec![operation], request.to_vec()].concat();
-        let expected = self.call(224, &pair(&retained, candidate)?)?;
+        let expected = self.call(crate::host_operations::CONSENT_OPERATOR_PLAN, &pair(&retained, candidate)?)?;
         if expected != candidate {
             return Err("local native specialized consent returned a different plan".into());
         }
@@ -620,7 +620,7 @@ impl Consent {
         }
         let selected = serde_json::to_vec(&json!({"subject": subject, "publicKey": crate::hex::encode(public_key)}))
             .map_err(|e| Error(e.to_string()))?;
-        let checked = self.call(226, &pair(command, &pair(&selected, candidate)?)?)?;
+        let checked = self.call(crate::host_operations::CONSENT_POSSESSION, &pair(command, &pair(&selected, candidate)?)?)?;
         if checked != candidate {
             return Err("native possession frame changed".into());
         }
@@ -637,7 +637,7 @@ impl Consent {
         }
         let selection = serde_json::to_vec(&json!({"publicKey": crate::hex::encode(public_key), "role": role}))
             .map_err(|e| Error(e.to_string()))?;
-        Ok(headers(&self.call(227, &pair(intent_bin, &pair(&selection, plan)?)?)?)?)
+        Ok(headers(&self.call(crate::host_operations::CONSENT_OBJECTIVE, &pair(intent_bin, &pair(&selection, plan)?)?)?)?)
     }
 }
 
@@ -719,14 +719,14 @@ mod tests {
 
     #[test]
     fn a_refusal_never_returns_header_bytes_and_only_a_stale_observation_is_stale() {
-        let error = round_trip(&mut answering(255, "changed-plan"), 222, b"retained").unwrap_err();
+        let error = round_trip(&mut answering(255, "changed-plan"), crate::host_operations::CONSENT_PLAN, b"retained").unwrap_err();
         assert_eq!(error.to_string(), "local consent refused before signing: changed-plan");
         assert!(!error.is_stale_observation());
         let stale = "stale observation: the remote challenge answers this intent at source height 36";
-        assert!(round_trip(&mut answering(255, stale), 221, b"retained").unwrap_err().is_stale_observation());
+        assert!(round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_OBSERVATION, b"retained").unwrap_err().is_stale_observation());
         // The tag counts only on an observation frame, and only as a refusal.
-        assert!(!round_trip(&mut answering(255, stale), 222, b"retained").unwrap_err().is_stale_observation());
-        assert!(!round_trip(&mut answering(254, stale), 221, b"retained").unwrap_err().is_stale_observation());
+        assert!(!round_trip(&mut answering(255, stale), crate::host_operations::CONSENT_PLAN, b"retained").unwrap_err().is_stale_observation());
+        assert!(!round_trip(&mut answering(254, stale), crate::host_operations::CONSENT_OBSERVATION, b"retained").unwrap_err().is_stale_observation());
     }
 
     #[test]
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn unchecked_operator_opcodes_refuse_before_any_frame() {
         let mut consent = Consent(answering(224, ""));
-        assert!(consent.operator_plan(1, b"", b"").is_err());
+        assert!(consent.operator_plan(crate::host_operations::AUTHORIZED_PREPARE, b"", b"").is_err());
         // The list is generated from protocol/host-operations.json; pin membership, not a count.
         assert!(CONSENT_PLANS.contains(&210) && CONSENT_PLANS.contains(&215));
         assert!(CONSENT_PLANS.contains(&187) && CONSENT_PLANS.contains(&194));
@@ -761,7 +761,7 @@ mod tests {
         fs::write(&settings, b"{}").unwrap();
         // No retained anchor: admission from genesis (no 228), then the anchor is retained.
         let mut session = start(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
-        round_trip(&mut session, 220, b"intent").unwrap();
+        round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         retain_anchor(&mut session);
         drop(session);
         assert_eq!(opcodes(&dir), vec![220, 229]);
@@ -770,13 +770,13 @@ mod tests {
         // The next provider is offered it first.
         fs::remove_file(dir.join("opcodes")).unwrap();
         let mut session = start(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
-        round_trip(&mut session, 220, b"intent").unwrap();
+        round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         drop(session);
         assert_eq!(opcodes(&dir), vec![228, 220]);
         // Changed settings bytes: another binding, so no offer.
         fs::remove_file(dir.join("opcodes")).unwrap();
         let mut session = start(&dir.join("anchors"), provider.clone(), &settings, b"{ }".to_vec()).unwrap();
-        round_trip(&mut session, 220, b"intent").unwrap();
+        round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
         drop(session);
         assert_eq!(opcodes(&dir), vec![220]);
         // A replaced provider file (new inode) binds differently too.
@@ -817,10 +817,10 @@ mod tests {
             panic!("resident provider never listened");
         };
         let mut first = connect();
-        assert_eq!(round_trip(&mut first, 220, b"intent").unwrap(), Vec::<u8>::new());
-        assert_eq!(round_trip(&mut first, 221, b"observe").unwrap(), Vec::<u8>::new());
+        assert_eq!(round_trip(&mut first, crate::host_operations::CONSENT_INTENT, b"intent").unwrap(), Vec::<u8>::new());
+        assert_eq!(round_trip(&mut first, crate::host_operations::CONSENT_OBSERVATION, b"observe").unwrap(), Vec::<u8>::new());
         let mut second = connect();
-        assert_eq!(round_trip(&mut second, 222, b"plan").unwrap(), Vec::<u8>::new());
+        assert_eq!(round_trip(&mut second, crate::host_operations::CONSENT_PLAN, b"plan").unwrap(), Vec::<u8>::new());
         for reserved in [228u8, 229, 233] {
             let error = round_trip(&mut second, reserved, b"x").unwrap_err().to_string();
             assert!(error.contains("reserved to the resident consent provider"), "{error}");
@@ -870,10 +870,10 @@ mod tests {
             panic!("resident codec Host never listened");
         };
         let mut first = connect();
-        assert_eq!(round_trip(&mut first, 7, b"intent").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut first, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         let mut second = connect();
-        assert_eq!(round_trip(&mut second, 8, b"outcome").unwrap(), b"ok");
-        assert_eq!(round_trip(&mut first, 11, b"assemble").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut second, crate::host_operations::INSPECT, b"outcome").unwrap(), b"ok");
+        assert_eq!(round_trip(&mut first, crate::host_operations::CALL_ASSEMBLE, b"assemble").unwrap(), b"ok");
         assert_eq!(fs::read_to_string(dir.join("starts")).unwrap().lines().count(), 1, "one child for all connections");
         assert!(read_anchor(&anchor_path(&anchors, &binding), &binding).unwrap().is_none(), "the codec Host retains no anchor");
         assert!(resident_file(ResidentKind::Codec, &anchors, &binding, "pid").exists());
@@ -916,7 +916,7 @@ mod tests {
             fs::create_dir(dir.join("anchors")).unwrap();
             crate::durable::replace(&path, &anchor_file(&binding, b"OLD-ANCHOR"), crate::durable::Perm::Private).unwrap();
             let mut session = start(&dir.join("anchors"), provider.clone(), &settings, b"{}".to_vec()).unwrap();
-            round_trip(&mut session, 220, b"intent").unwrap();
+            round_trip(&mut session, crate::host_operations::CONSENT_INTENT, b"intent").unwrap();
             retain_anchor_with(&mut session, &mut |at| if at == stage { Err(io::Error::other("crash")) } else { Ok(()) });
             drop(session);
             let survived = read_anchor(&path, &binding).unwrap().unwrap();

@@ -366,16 +366,16 @@ mod tests {
         let settings = dir.join("settings.json");
         let mut codec = Codec::new();
         for _ in 0..3 {
-            assert_eq!(codec.frame(&host, &settings, 7, b"intent").unwrap(), b"ok");
+            assert_eq!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         }
         assert_eq!(starts(&dir), 1);
         fs::rename(&settings, dir.join("moved.json")).unwrap();
-        assert_eq!(codec.frame(&host, &dir.join("moved.json"), 7, b"intent").unwrap(), b"ok");
+        assert_eq!(codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         assert_eq!(starts(&dir), 1, "the same bytes at another path keep the child");
         fs::write(dir.join("moved.json"), b"{ }").unwrap();
-        codec.frame(&host, &dir.join("moved.json"), 7, b"intent").unwrap();
+        codec.frame(&host, &dir.join("moved.json"), crate::host_operations::AUTHOR, b"intent").unwrap();
         assert_eq!(starts(&dir), 2);
-        assert!(matches!(codec.frame(&host, &dir.join("moved.json"), 12, b""), Err(CodecError::Failed(_))));
+        assert!(matches!(codec.frame(&host, &dir.join("moved.json"), crate::host_operations::FN_POLL, b""), Err(CodecError::Failed(_))));
 
         let other = stub_dir("codec-refusal");
         fs::write(other.join("settings.json"), b"{}").unwrap();
@@ -384,14 +384,14 @@ mod tests {
         fs::write(other.join("reply"), framed(b"\x07again")).unwrap();
         let refusing = codec_stub(&other);
         let mut codec = Codec::new();
-        match codec.frame(&refusing, &other.join("settings.json"), 7, b"intent") {
+        match codec.frame(&refusing, &other.join("settings.json"), crate::host_operations::AUTHOR, b"intent") {
             Err(CodecError::Refused { encoded, decoded: Some(v), .. }) => {
                 assert_eq!(encoded, vec![0xff, 0x00]);
                 assert_eq!(v["reason"], "malformed");
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(codec.frame(&refusing, &other.join("settings.json"), 7, b"intent").unwrap(), b"again");
+        assert_eq!(codec.frame(&refusing, &other.join("settings.json"), crate::host_operations::AUTHOR, b"intent").unwrap(), b"again");
         assert_eq!(starts(&other), 1);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&other);
@@ -410,9 +410,9 @@ mod tests {
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(dir.join("reply"), framed(&[255, 0xff, 0x00])).unwrap();
         let mut codec = Codec::new();
-        assert!(matches!(codec.frame(&host, &settings, 7, b"intent"), Err(CodecError::Refused { decoded: None, .. })));
+        assert!(matches!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent"), Err(CodecError::Refused { decoded: None, .. })));
         fs::write(dir.join("reply"), framed(b"\x07ok")).unwrap();
-        assert_eq!(codec.frame(&host, &settings, 7, b"intent").unwrap(), b"ok");
+        assert_eq!(codec.frame(&host, &settings, crate::host_operations::AUTHOR, b"intent").unwrap(), b"ok");
         assert_eq!(starts(&dir), 2);
         let _ = fs::remove_dir_all(&dir);
     }

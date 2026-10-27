@@ -173,6 +173,22 @@ pass-through for the grain platform). Oracle lane lane/oracle-grain (the design,
 `joracle` row; the 15 GB dataset syncing to the build box). Hot-path successor (the codec resident
 re-applied; J12X's malformed codec frames; thin consent's JP2).
 
+**Published numbers** (the demo box's own soak, candidate a0db11f8-era binaries, consent in full
+mode; read back 2026-10-27; seconds, p50 / p99 / max; performance is published, never a gate):
+
+| level | propose | submit | cold reopen |
+|---|---|---|---|
+| ~100 records | 0.55–0.63 / ≤0.80 / 0.80 | 0.71–0.81 / ≤0.85 / 0.85 | 1.1–3.9 |
+| records 102–1,105 | 1.34 / 2.07 / 2.18 | 0.83 / 0.96 / 1.12 | 1.5 |
+| ~1,100 records | 2.10–2.21 / ≤2.30 / 2.30 | 0.86–0.93 / ≤1.20 / 1.20 | 16–17.6 |
+| records 1,191–1,770 | 2.63 / 3.40 / 3.54 | 0.90 / 1.08 / 1.82 | 18.0 |
+
+The soak stopped at 1,770 records when the box rebooted for a security kernel (as ruled). Propose
+grows ~1.2 ms per record (the consent re-check the box still runs in full mode; the O(1) provider
+switches on when thin consent's JP2 is green); submit is flat near 0.9 s; the cold reopen's growth
+(the full open re-hashes the whole chain before the light open) is a hot-path item with the
+before/after at 1.7k records owed.
+
 **The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
 replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
 clock alone would have emptied it in about 7 days. Rehearsal #3's genesis raises it to 10^10 per lane;

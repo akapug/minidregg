@@ -131,7 +131,7 @@ fn submit_ingress(host: &Path, socket: &Path, config: &Path, attempt: &Path, rep
     let bin = attempt.join("outcome.bin");
     let _ = fs::remove_file(attempt.join("outcome.json"));
     let _ = fs::remove_file(attempt.join("outcome.class"));
-    let reply = session_invoke(host, socket, config, 125, &ingress)?;
+    let reply = session_invoke(host, socket, config, mini_sdk::host_operations::REALM_WELL_SUBMIT, &ingress)?;
     let class = match reply.split_first() {
         Some((&code, body)) if code == 125 || crate::is_outcome_frame(code) => {
             if bin.exists() {
@@ -259,7 +259,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         ],
     )?;
     let command = fs::read(&command_path).map_err(|error| error.to_string())?;
-    let plan = invoke(&host, &socket, &config, 123, &command, "well plan")?;
+    let plan = invoke(&host, &socket, &config, mini_sdk::host_operations::REALM_WELL_PLAN, &command, "well plan")?;
     retain(&attempt.join("plan.bin"), &plan)?;
     let plan_json = attempt.join("plan.json");
     process(
@@ -284,7 +284,7 @@ fn command(root: &Path, mut args: Args, op: &str) -> Result<()> {
         &host,
         &socket,
         &config,
-        124,
+        mini_sdk::host_operations::REALM_WELL_ASSEMBLE,
         &pair(&plan, &signature)?,
         "well assembly",
     )?;

@@ -218,7 +218,7 @@ impl Session {
         let bytes = match &self.endpoint {
             Endpoint::Socket(socket) => {
                 let reply =
-                    transport::invoke_pinned(socket, &self.config, &self.sha, 182, &payload)?;
+                    transport::invoke_pinned(socket, &self.config, &self.sha, mini_sdk::host_operations::PAY_CLAIM_QUOTE, &payload)?;
                 if reply.first() != Some(&182) {
                     return Err("source claim quote refused".into());
                 }
@@ -577,7 +577,7 @@ fn recover<B: Backend>(
     if record.get("expectedReceipt") != Some(&expected.json()) {
         return Err("retained expected receipt differs from original source ingress".into());
     }
-    exchange_outcome(backend, dir, 186, &ingress, &expected)
+    exchange_outcome(backend, dir, mini_sdk::host_operations::PAY_CLAIM_LOOKUP, &ingress, &expected)
 }
 
 fn execute<B, S, I>(
@@ -622,8 +622,8 @@ where
         .get("command")
         .ok_or("source command view lacks command")?;
     let signing_key = command_action(command_view, action)?;
-    let frame = backend.call(183, command)?;
-    let plan = frame_body(&frame, 183, 3072)?;
+    let frame = backend.call(mini_sdk::host_operations::PAY_CLAIM_PLAN, command)?;
+    let plan = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_PLAN, 3072)?;
     create_private(&dir.join("plan.bin"), plan)?;
     let view = backend.inspect(
         "pay-claim-plan",
@@ -655,8 +655,8 @@ where
     let mut pair = (plan.len() as u32).to_le_bytes().to_vec();
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&signature);
-    let frame = backend.call(184, &pair)?;
-    let ingress = frame_body(&frame, 184, 4096)?;
+    let frame = backend.call(mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE, &pair)?;
+    let ingress = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_ASSEMBLE, 4096)?;
     create_private(&dir.join("ingress.bin"), ingress)?;
     let view_ingress = backend.inspect(
         "pay-claim-ingress",
@@ -676,7 +676,7 @@ where
     // immediately after it, even before the send, is lookup-only recovery.
     retain_json(&dir.join("operation.json"), &record)?;
     sync_retained_call(dir, &dir.join("ingress.bin"))?;
-    exchange_outcome(backend, dir, 185, ingress, &expected)
+    exchange_outcome(backend, dir, mini_sdk::host_operations::PAY_CLAIM_SUBMIT, ingress, &expected)
 }
 
 fn quote_natural(args: &mut Args, name: &str) -> Result<String> {
@@ -1496,7 +1496,7 @@ mod tests {
         for op in [0, 117, 121, 182, 187, 255] {
             assert!(claim_route(op).is_err());
         }
-        assert!(decode_claim_wire(183, &vec![b' '; 16385]).is_err());
+        assert!(decode_claim_wire(mini_sdk::host_operations::PAY_CLAIM_PLAN, &vec![b' '; 16385]).is_err());
         for url in [
             "https://node.test/mini/v2",
             "http://127.0.0.1:8080/mini/v2",

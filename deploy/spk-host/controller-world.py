@@ -417,6 +417,31 @@ def load(store, helper):
     return registry, base, receipt
 
 
+def account_defaults():
+    # CREATE_MAIL_SPOOL is a useradd defaults-file setting, not a login.defs
+    # key accepted by -K. Never change host defaults to provision one account.
+    raw = run(['/usr/sbin/useradd', '-D'], stdout=subprocess.PIPE).stdout
+    require(len(raw) <= 16384, 'useradd defaults exceed bound')
+    defaults = {}
+    for line in raw.decode('utf-8').splitlines():
+        if not line or line.startswith('#'): continue
+        key, separator, value = line.partition('=')
+        require(separator and key not in defaults, 'useradd defaults malformed')
+        defaults[key] = value
+    require(defaults.get('CREATE_MAIL_SPOOL') == 'no' and defaults.get('GROUPS', '') == '',
+            'useradd must disable mail spool and implicit supplementary groups')
+
+
+def create_account(base, name, identity):
+    # --system does not grant subuids/subgids; never pass --add-subids-for-system.
+    run(['/usr/sbin/useradd', '--system', '--uid', str(identity), '--gid', str(identity),
+         '--no-user-group', '--no-create-home', '--no-log-init',
+         '--home-dir', str(base / 'home'), '--shell', '/usr/sbin/nologin', name])
+    delegated_names, delegated_ids = delegation_owners()
+    require(name not in delegated_names and identity not in delegated_ids,
+            'created controller unexpectedly has subordinate grants')
+
+
 def create(store, helper):
     registry, base = store_context(store, helper)
     name = 'mini-c-' + store
@@ -424,6 +449,7 @@ def create(store, helper):
     require(not (HISTORY / (store + '.json')).exists(), 'removed controller identity cannot be silently reused')
     require(not any(p.pw_name == name for p in pwd.getpwall()) and not any(g.gr_name == name for g in grp.getgrall()),
             'controller account/group name already exists')
+    account_defaults()
     identity = allocate_identity(registry['operatorUid'], name)
     namespace = {'protocol': 'mini-spk-controller-namespace-v1', 'store': store,
                  'deploymentId': registry['deploymentId'], 'hostId': registry['hostId'],
@@ -439,9 +465,12 @@ def create(store, helper):
     write_new(base / 'lifecycle.lock', b'controller lifecycle lock\n')
     write_new(base / 'pending.json', encoded({'store': store, 'name': name, 'operatorUid': registry['operatorUid']}))
     run(['/usr/sbin/groupadd', '--system', '--gid', str(identity), name])
-    run(['/usr/sbin/useradd', '--system', '--uid', str(identity), '--gid', str(identity), '--no-user-group', '--no-create-home', '--no-log-init',
-         '--key', 'CREATE_MAIL_SPOOL=no', '--key', 'SUB_UID_COUNT=0', '--key', 'SUB_GID_COUNT=0',
-         '--home-dir', str(base / 'home'), '--shell', '/usr/sbin/nologin', name])
+    create_account(base, name, identity)
+    return finish_create(registry, base, namespace)
+
+
+def finish_create(registry, base, namespace):
+    store, name, identity = namespace['store'], namespace['account'], namespace['controllerUid']
     a = pwd.getpwnam(name)
     require((a.pw_uid, a.pw_gid) == (identity, identity) and a.pw_uid not in [0, registry['operatorUid'], *registry['appUids']], 'allocated controller UID/GID collision')
     require(not any(g.gr_mem and name in g.gr_mem for g in grp.getgrall()), 'controller supplemental groups refused')
@@ -460,6 +489,60 @@ def create(store, helper):
     write_new(base / 'receipt.json', encoded(receipt))
     write_new(base / 'namespace.json', encoded(namespace), mode=0o644)
     return receipt
+
+
+def pending_create_identity(registry, base):
+    store = registry['store']; name = 'mini-c-' + store
+    ancestry(base, {0}); metadata(base, 0, 0o755)
+    require(set(p.name for p in base.iterdir()) == {'pending.json', 'lifecycle.lock'},
+            'pending controller layout differs; no completed or partial account adoption')
+    require(read_file(base / 'lifecycle.lock', 0, 64, required_mode=0o600) == b'controller lifecycle lock\n',
+            'pending controller lifecycle lock differs')
+    pending = strict_json(read_file(base / 'pending.json', 0, 4096, required_mode=0o600))
+    require(pending == {'store': store, 'name': name, 'operatorUid': registry['operatorUid']},
+            'pending controller intent differs')
+    namespace = namespace_record(strict_json(read_file(RESERVATIONS / (store + '.json'), 0, 4096, required_mode=0o644)))
+    require(namespace['store'] == store and namespace['account'] == name
+            and all(namespace[key] == registry[key] for key in ('deploymentId', 'hostId', 'operatorUid', 'operatorGid')),
+            'pending controller reservation differs from world')
+    identity = namespace['controllerUid']
+    require(identity == namespace['controllerGid'], 'pending controller UID/GID differ')
+    require(not (HISTORY / (store + '.json')).exists(), 'removed controller cannot resume creation')
+    occupied_ids()  # Validate all app/reservation records, including collisions.
+    own, foreign = delegated(registry['operatorUid'])
+    delegated_names, delegated_ids = delegation_owners()
+    require(in_ranges(identity, own) and not in_ranges(identity, foreign)
+            and name not in delegated_names and identity not in delegated_ids,
+            'pending controller delegation changed')
+    users, groups = pwd.getpwall(), grp.getgrall()
+    require(len(users) <= 16384 and len(groups) <= 16384, 'NSS identity snapshot bound exceeded')
+    require(not any(p.pw_name == name or identity in (p.pw_uid, p.pw_gid) for p in users),
+            'pending controller account or UID/GID already used')
+    for lookup, key in ((pwd.getpwnam, name), (pwd.getpwuid, identity)):
+        try: lookup(key)
+        except KeyError: pass
+        else: raise ValueError('pending controller account already exists')
+    matches = [g for g in groups if g.gr_name == name or g.gr_gid == identity]
+    require(len(matches) == 1 and matches[0].gr_name == name and matches[0].gr_gid == identity
+            and not matches[0].gr_mem, 'pending controller group identity differs')
+    for group in (grp.getgrnam(name), grp.getgrgid(identity)):
+        require(group.gr_name == name and group.gr_gid == identity and not group.gr_mem,
+                'pending controller NSS group differs')
+    require(not any(name in g.gr_mem for g in groups), 'pending controller supplemental group refused')
+    no_processes(identity)
+    for unit in names(store, True):
+        require(not (UNITS / unit).exists() and not (UNITS / unit).is_symlink()
+                and manager_properties(unit).get('LoadState') == 'not-found', 'pending controller unit already exists')
+    return namespace
+
+
+def resume_create(store, helper):
+    registry, base = store_context(store, helper)
+    namespace = pending_create_identity(registry, base)
+    account_defaults()
+    create_account(base, namespace['account'], namespace['controllerUid'])
+    result = finish_create(registry, base, namespace)
+    return {**result, 'resumedPendingCreation': True}
 
 
 def no_processes(uid):
@@ -952,6 +1035,7 @@ def main(args):
             # visible busy refusal, not account/config deletion underneath it.
             fcntl.flock(held, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         if action == 'controller-create' and not extra: result = create(store, helper)
+        elif action == 'controller-resume-create' and not extra: result = resume_create(store, helper)
         elif action == 'controller-stage' and len(extra) == 4: result = stage(store, helper, *extra)
         elif action in ('controller-start', 'controller-stop') and not extra: result = service(store, helper, action[11:])
         elif action == 'controller-config' and len(extra) == 1: result = config_update(store, helper, extra[0])

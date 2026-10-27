@@ -320,7 +320,7 @@ fn inspect_original(
     let committed = read_private(&claim_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private(&claim_dir.join("op26-frame.bin"), MAX_FRAME)?;
     let committed_tag = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
-    if framed_payload(&original_frame, 26, committed_tag)? != committed {
+    if framed_payload(&original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, committed_tag)? != committed {
         return Err(invalid("STOP original fresh callback differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private(
@@ -812,9 +812,9 @@ fn assemble_completion(
         "lifecycle-stop-completion-v2-active.json",
         &active,
     )?;
-    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 70, PLAN_TAG)?;
+    let plan = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&operator.tool(
         "inspect",
@@ -874,9 +874,9 @@ fn assemble_completion(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
-    let reply = operator.invoke(71, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 71, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload(&reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(ingress)
 }
@@ -920,7 +920,7 @@ fn completion_ingress_retained(
     }
     let ingress = read_private(&dir.join("completion-v2.bin"), MAX_FRAME)?;
     let frame = read_private(&dir.join("op71-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&frame, 71, INGRESS_TAG)? != ingress {
+    if framed_payload(&frame, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)? != ingress {
         return Err(invalid("STOP retained completion assembly differs"));
     }
     Ok(ingress)
@@ -1015,7 +1015,7 @@ fn retained_completion_anchor(
     {
         return Ok(None);
     }
-    let payload = framed_payload(&bytes, 38, OUTCOME_TAG)?;
+    let payload = framed_payload(&bytes, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let probe = fresh_probe(dir, "frame-recovery")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
@@ -1050,9 +1050,9 @@ fn complete_once_or_lookup(
             "ingressSha256":hex(&Sha256::digest(ingress)),
             "claimSha256":hex(&Sha256::digest(&evidence.committed))});
         write_new(dir, "op38-requested.json", &serde_json::to_vec(&marker)?)?;
-        let frame = operator.invoke(38, ingress)?;
+        let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, ingress)?;
         write_new(dir, "op38-frame.bin", &frame)?;
-        let payload = framed_payload(&frame, 38, OUTCOME_TAG)?;
+        let payload = framed_payload(&frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
         let input = write_new(dir, "op38-outcome.bin", payload)?;
         let inspected =
             operator.tool("inspect", "outcome", &input, &dir.join("op38-outcome.json"))?;
@@ -1075,8 +1075,8 @@ fn complete_once_or_lookup(
     let anchor = retained_completion_anchor(operator, dir, &evidence.claim_receipt)?;
     let probe = fresh_probe(dir, "op39-lookup")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
-    let frame = operator.invoke(39, ingress)?;
-    let payload = framed_payload(&frame, 39, OUTCOME_TAG)?;
+    let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, ingress)?;
+    let payload = framed_payload(&frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
     let inspected = operator.tool("inspect", "outcome", &input, &probe.join("outcome.json"))?;
     let view: Value = serde_json::from_slice(&inspected)?;

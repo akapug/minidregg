@@ -30,13 +30,14 @@ mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 set +e
 python3 - "$DIR" "$HERE" <<'PY'
-import json, os, re, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, socket, struct, subprocess, sys, time
 def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
     r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
     if r.returncode: raise OSError(r.stderr.strip() or "no answer")
     return json.loads(r.stdout)
 DIR, HERE = sys.argv[1], sys.argv[2]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
+HOST_PIN = hashlib.sha256(open(HOST, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 W = os.path.join(DIR, "w")
 ROWS = []
 PRICE, BOND = 10000, 10000
@@ -103,7 +104,7 @@ for ws, account, cap in ((A, 7, 41), (P, 121, 1021), (S, 122, 1022)):
 cfg = open(CONFIG, "rb").read()
 def op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload
+    body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload
     s.sendall(struct.pack("<I", len(body)) + body)
     def exact(n):
         out = b""
@@ -158,7 +159,7 @@ def named(err, name): return "refused" in err and name in err
 
 def raw_op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload
+    body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload
     s.sendall(struct.pack("<I", len(body)) + body)
     def exact(n):
         out = b""

@@ -17,10 +17,10 @@ const SUBMIT_MARKER: &str = "minidregg-agent-lifetime-grant-submit-attempt-v1";
 const LOOKUP_MARKER: &str = "minidregg-agent-lifetime-grant-lookup-v1";
 const REQUEST_TYPE: &str = "application-agent-lifetime-grant-request-v1";
 const PLAN_TYPE: &str = "application-agent-lifetime-grant-plan-v1";
-const PLAN_OPERATION: u8 = 74;
-const ASSEMBLE_OPERATION: u8 = 75;
-const SUBMIT_OPERATION: u8 = 72;
-const LOOKUP_OPERATION: u8 = 73;
+const PLAN_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_PLAN;
+const ASSEMBLE_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_ASSEMBLE;
+const SUBMIT_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_SUBMIT;
+const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_LOOKUP;
 
 // These names are the source-owned Host author/inspection routes. The exact
 // native image and these strings are pinned together by `plan`.

@@ -190,7 +190,7 @@ pub(crate) fn meter(
     payload.extend_from_slice(&(request_bytes.len() as u32).to_le_bytes());
     payload.extend_from_slice(&request_bytes);
     payload.extend_from_slice(&response_bytes);
-    let frame = session_invoke(host, socket, &retained_config, 19, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_USAGE_QUOTE, &payload)?;
     create_private(&directory.join("reply.frame"), &frame)?;
     sync_directory_ancestors(directory)?;
     match frame.first() {

@@ -198,7 +198,7 @@ row("bootstrap: 8-row book (row 0 = the enrollment address), the float takes ind
     f"{b1.stdout.strip()} | {a0.stdout.splitlines()[0] if a0.stdout else a0.stderr[-120:]} | {b2.stdout.strip() or b2.stderr[-160:]}")
 
 def enrolment_view():
-    r = mini("enrollment-view", "--socket", SOCKET)
+    r = mini("enrollment-view", "--socket", SOCKET, "--host", HOST)
     if r.returncode != 0: fail(f"enrollment-view: {r.stderr[-300:]}")
     return json.loads(r.stdout)
 def ledger_well():
@@ -562,7 +562,7 @@ CONFIG_BYTES = open(path("public", "mini.config"), "rb").read()
 def sock(op, payload=b""):
     import socket as so
     s = so.socket(so.AF_UNIX, so.SOCK_STREAM); s.connect(SOCKET)
-    frame = bytes([1]) + struct.pack("<I", len(CONFIG_BYTES)) + CONFIG_BYTES + bytes([op]) + payload
+    frame = bytes([2]) + struct.pack("<I", len(CONFIG_BYTES)) + CONFIG_BYTES + hashlib.sha256(open(HOST, "rb").read()).digest() + bytes([op]) + payload  # v2: the Host image pin
     s.sendall(struct.pack("<I", len(frame)) + frame)
     data = b""
     while True:

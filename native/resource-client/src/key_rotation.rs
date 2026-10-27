@@ -62,7 +62,7 @@ fn kind_payload(kind: &str, body: &[u8]) -> Result<Vec<u8>> {
 
 fn author(host: &Path, socket: &Path, config: &Path, kind: &str, value: &Value) -> Result<Vec<u8>> {
     let source = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-    call(host, socket, config, 7, &kind_payload(kind, &source)?)
+    call(host, socket, config, mini_sdk::host_operations::AUTHOR, &kind_payload(kind, &source)?)
 }
 
 fn inspect_bytes(
@@ -72,7 +72,7 @@ fn inspect_bytes(
     kind: &str,
     bytes: &[u8],
 ) -> Result<Value> {
-    let body = call(host, socket, config, 8, &kind_payload(kind, bytes)?)?;
+    let body = call(host, socket, config, mini_sdk::host_operations::INSPECT, &kind_payload(kind, bytes)?)?;
     serde_json::from_slice(&body).map_err(|error| format!("invalid Host inspection: {error}"))
 }
 
@@ -106,7 +106,7 @@ fn status(
 ) -> Result<Value> {
     let query = serde_json::to_vec(&json!({"subject":subject,"publicKey":hex(public)}))
         .map_err(|error| error.to_string())?;
-    let body = call(host, socket, config, 144, &query)?;
+    let body = call(host, socket, config, mini_sdk::host_operations::KEY_ROTATION_STATUS, &query)?;
     serde_json::from_slice(&body).map_err(|error| format!("invalid key status: {error}"))
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn status_if_enrolled(
 ) -> Result<Option<Value>> {
     let query = serde_json::to_vec(&json!({"subject":subject,"publicKey":hex(public)}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(host, socket, config, 144, &query)?;
+    let frame = session_invoke(host, socket, config, mini_sdk::host_operations::KEY_ROTATION_STATUS, &query)?;
     match frame.as_slice() {
         [144, body @ ..] if !body.is_empty() => serde_json::from_slice(body)
             .map(Some)
@@ -682,7 +682,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             }
             Err(error)
         };
-        let plan = match call(&ws.host, &ws.socket, &ws.config, 140, &command) {
+        let plan = match call(&ws.host, &ws.socket, &ws.config, mini_sdk::host_operations::KEY_ROTATION_PLAN, &command) {
             Ok(plan) => plan,
             Err(error) => return refuse(error, &state).map(|_| ()),
         };
@@ -717,7 +717,7 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
             &ws.host,
             &ws.socket,
             &ws.config,
-            141,
+            mini_sdk::host_operations::KEY_ROTATION_ASSEMBLE,
             &pair(&plan, &signature)?,
         ) {
             Ok(ingress) => ingress,
@@ -743,17 +743,17 @@ pub(crate) fn rotate_key(mut args: Args) -> Result<()> {
         let frame = if state["phase"] == "prepared" {
             // Durable responsibility precedes the only semantic submission.
             state = custody::phase(&state_path, &state, "submitted")?;
-            match call(&ws.host, &ws.socket, &ws.config, 142, &ingress) {
+            match call(&ws.host, &ws.socket, &ws.config, mini_sdk::host_operations::KEY_ROTATION_SUBMIT, &ingress) {
                 Ok(frame) => frame,
                 Err(error) if error.starts_with("host refused") => {
                     let _ = custody::phase(&state_path, &state, "refused")?;
                     return Err(error);
                 }
-                Err(_) => call(&ws.host, &ws.socket, &ws.config, 143, &ingress)?,
+                Err(_) => call(&ws.host, &ws.socket, &ws.config, mini_sdk::host_operations::KEY_ROTATION_LOOKUP, &ingress)?,
             }
         } else {
             // Even an absent/uncertain lookup cannot authorize a second effect.
-            call(&ws.host, &ws.socket, &ws.config, 143, &ingress)?
+            call(&ws.host, &ws.socket, &ws.config, mini_sdk::host_operations::KEY_ROTATION_LOOKUP, &ingress)?
         };
         let outcome = inspect_bytes(&ws.host, &ws.socket, &ws.config, "outcome", &frame)?;
         if outcome["type"] != "confirmed" {
