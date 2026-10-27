@@ -515,6 +515,50 @@ fn classify_post_reply(line: String) -> FnPostOutcome {
     }
 }
 
+/// The custody status word and fn's exact line for one POST outcome, as a
+/// publisher retains it.
+pub(super) fn post_status(outcome: FnPostOutcome) -> (&'static str, String) {
+    match outcome {
+        FnPostOutcome::Accepted(line) => ("accepted", line),
+        FnPostOutcome::AlreadyStored(line) => ("already-stored", line),
+        FnPostOutcome::Conflict(line) => ("conflict", line),
+        FnPostOutcome::ExplicitUncertain(line) => ("explicit-uncertain", line),
+        FnPostOutcome::Refused(line) => ("refused", line),
+        FnPostOutcome::TransportUncertain(line) => ("transport-uncertain", line),
+    }
+}
+
+/// Whether a retained status word and line prove fn stored the exact article:
+/// fn's own 240, or its Message-ID dedupe reporting the same article stored.
+pub(super) fn post_stored(status: Option<&str>, detail: Option<&str>) -> bool {
+    matches!(
+        (status, detail),
+        (Some("accepted"), Some("240 article received OK"))
+            | (Some("already-stored"), Some("441 posting failed; this article is already stored here"))
+    )
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum PostAction {
+    First,
+    Accepted,
+    Hold,
+}
+
+/// The one NNTP repost rule. A durable attempt marker precedes every POST;
+/// once it exists the article is never POSTed again by the client. Only a
+/// retained result that proves the exact article stored finishes; any other
+/// state (no result, uncertain, refused, conflict) holds for the operator,
+/// with the exact article retained. A result without a marker is corrupt.
+pub(super) fn post_action(attempt: bool, stored: Option<bool>) -> Result<PostAction> {
+    match (attempt, stored) {
+        (false, None) => Ok(PostAction::First),
+        (true, Some(true)) => Ok(PostAction::Accepted),
+        (true, None | Some(false)) => Ok(PostAction::Hold),
+        (false, Some(_)) => Err("fn POST result lacks preceding attempt marker".into()),
+    }
+}
+
 fn bounded_tls_write(
     tls: &mut StreamOwned<ClientConnection, TcpStream>,
     bytes: &[u8],
@@ -787,6 +831,35 @@ fn run_route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fn_post_repost_rule_never_reposts_after_a_marker() {
+        assert_eq!(post_action(false, None).unwrap(), PostAction::First);
+        assert_eq!(post_action(true, None).unwrap(), PostAction::Hold);
+        assert_eq!(post_action(true, Some(false)).unwrap(), PostAction::Hold);
+        assert_eq!(post_action(true, Some(true)).unwrap(), PostAction::Accepted);
+        assert!(post_action(false, Some(true)).is_err());
+        // Every outcome a lost or unclear reply can produce holds; only fn's
+        // 240 or its exact dedupe line finishes.
+        for line in [
+            "441 posting failed; the outcome is uncertain, do not repost",
+            "441 posting failed; a different article with this Message-ID is stored here",
+            "441 something else",
+            "999 surprise",
+        ] {
+            let (status, detail) = post_status(classify_post_reply(line.to_owned()));
+            assert!(!post_stored(Some(status), Some(&detail)), "{line}");
+        }
+        for line in [
+            "240 article received OK",
+            "441 posting failed; this article is already stored here",
+        ] {
+            let (status, detail) = post_status(classify_post_reply(line.to_owned()));
+            assert!(post_stored(Some(status), Some(&detail)), "{line}");
+        }
+        let (status, detail) = post_status(FnPostOutcome::TransportUncertain("lost".into()));
+        assert!(!post_stored(Some(status), Some(&detail)));
+    }
 
     #[test]
     fn a_catalog_wake_requires_reply_type_and_matching_scope_query() {
