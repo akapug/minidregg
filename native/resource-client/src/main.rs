@@ -3207,7 +3207,15 @@ fn run(mut args: Args) -> Result<()> {
             proxy::serve(socket)
         }
         #[cfg(unix)]
-        "workspace" => workspace::run(args),
+        "workspace" => {
+            // One `mini workspace` action publishes 30-40 custody files; their directory fsyncs
+            // are coalesced to the barriers (every Host request, and here before exit), each file
+            // still complete or absent (`mini_sdk::durable`).
+            mini_sdk::durable::defer_directory_syncs();
+            let result = workspace::run(args);
+            let barrier = transport::durability_barrier();
+            result.and(barrier)
+        }
         "member" => member::run(args),
         #[cfg(unix)]
         "web" => web::run(args),
