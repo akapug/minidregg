@@ -3190,6 +3190,75 @@ def AdmittedStep (config : Config) (before after : Opened config)
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
         before.durable.image.accepted.length + 1, next.worldRoot⟩
 
+/-- **The head tag rides along.** Validation judges an image without reading its `headTag`: for any
+tag, the same refusal or the same pins (and by `validateLoaded_durable` the validated image is the
+input, so it differs only in that cache field). This confines `AdmittedStep`'s `∃ headTag` to the
+cache; if validation ever reads the tag, this breaks. -/
+theorem validateLoaded_headTag (config : Config) (durable : Durable) (headTag : Option (List UInt8)) :
+    (validateLoaded config { durable with headTag := headTag }).map (·.pins) =
+      (validateLoaded config durable).map (·.pins) := by
+  have rows : CredentialAuthorityDomainReceiver.directoryRows { durable with headTag := headTag } =
+      CredentialAuthorityDomainReceiver.directoryRows durable := rfl
+  have directories :
+      (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag }).map
+          (·.directory) =
+        (CredentialAuthorityDomainReceiver.loadDirectory durable).map (·.directory) := by
+    unfold CredentialAuthorityDomainReceiver.loadDirectory
+    dsimp only
+    by_cases absent : durable.image.seed.absentBytes = []
+    · rw [dif_pos absent, dif_pos absent]
+      split
+      · split
+        · rfl
+        · rename_i left _ right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+      · split
+        · rename_i _ left right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+        · rename_i _ left _ right
+          rw [rows] at left
+          rw [left] at right
+          cases right
+          rfl
+    · rw [dif_neg absent, dif_neg absent]
+      rfl
+  have lawfulSame : ∀ directory,
+      cellsLawful config { durable with headTag := headTag } directory = cellsLawful config durable directory :=
+    fun _ => rfl
+  have lawfuls :
+      (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag }).map
+          (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory) =
+        (CredentialAuthorityDomainReceiver.loadDirectory durable).map
+          (fun loaded => cellsLawful config durable loaded.directory) := by
+    have mapped := congrArg (Option.map (cellsLawful config durable)) directories
+    simpa only [Option.map_map, Function.comp_def, lawfulSame] using mapped
+  have core := validateCore_map config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory)
+    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical)
+    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory)
+    directories lawfuls rfl
+  unfold validateLoaded validateParts validatePartsWith validatePartsVia
+  revert core
+  generalize validateCore config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical) (fun loaded => cellsLawful config durable loaded.directory) = right
+  generalize validateCore config durable.image.seed durable.logStart
+    (CredentialAuthorityDomainReceiver.loadDirectory { durable with headTag := headTag })
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+    (·.directory) (·.snapshot.logical)
+    (fun loaded => cellsLawful config { durable with headTag := headTag } loaded.directory) = left
+  intro core
+  cases left <;> cases right <;> simp_all [Except.map]
+
 /-- **`tail_bounded`, on the replayed history.**  Every step of the replay walk
 that is not a certify record sits at most `L` heights past the certified height
 it was judged on. -/
@@ -4829,6 +4898,8 @@ def verifyBytes (config : Config)
 #guard_msgs (whitespace := lax) in #print axioms advance_judged
 /-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedStep.tail_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms AdmittedStep.tail_bounded
+
+#assert_axioms validateLoaded_headTag
 
 end Minidregg.Kernel.NativeHostReplay
 
