@@ -213,20 +213,36 @@ class RecoveryTests(unittest.TestCase):
                              'goal':'settle-refusal','native_operation_id':39}
         payload={'type':'mini-resource-birth-refused-v1','reason':'law-denied','phase':'prepare',
                  'born':False,'toolCharge':'0','nativeOperationId':'39'}
-        def fixture(body=payload):
-            result={'isError':True,'text':json.dumps(body)};raw=json.dumps(result).encode();digest=hashlib.sha256(raw).hexdigest()
+        disposition={'requestId':request,'requestSha256':'fixture-original-request',
+                     'origin':{'promptOperationId':13,'operationId':39,'family':'oracle-session','ordinal':0,'route':'session'}}
+        def fixture(body=payload, record=disposition):
+            disposition_raw=json.dumps(record).encode()
+            result={'isError':True,'text':json.dumps(dict(body,dispositionSha256=hashlib.sha256(disposition_raw).hexdigest()))}
+            raw=json.dumps(result).encode();digest=hashlib.sha256(raw).hexdigest()
             recovered={'type':'mini-foreground-session-recovery-v1','requestId':request,'operationId':'13',
                        'resultSha256':digest,'resultReady':True,'acknowledged':False}
             retained={'type':'tool-complete','requestId':request,'operationId':'13','isError':True,'result':result}
             journal={'binding':{'config':{'stateDir':'/private/state'}},'foregroundAttempt':{
-                'requestId':request,'operationId':13,'phase':'definite','reported':False,
+                'requestId':request,'operationId':13,'phase':'definite','reported':False,'requestSha256':'fixture-original-request',
                 'resultPath':'/private/state/foreground-0000000000000013.result.json','resultSha256':digest},
                 'bornResources':[],'birthNextOrdinal':{'oracle-session':1},'unresolvedExternal':[]}
-            files={'journal.json':json.dumps(journal).encode(),'foreground-0000000000000013.result.json':raw}
+            files={'journal.json':json.dumps(journal).encode(),'foreground-0000000000000013.result.json':raw,
+                   'foreground-0000000000000013.birth-refusal.json':disposition_raw}
             exported={'protocol':'mini-spk-controller-evidence-v1','store':'fixture','files':{name:{
                 'sha256':hashlib.sha256(data).hexdigest(),'base64':base64.b64encode(data).decode()} for name,data in files.items()}}
             return recovered,retained,journal,exported
         r.validate_result(plan,*fixture())
+        recovered,retained,journal,exported=fixture()
+        changed=json.dumps(dict(disposition,requestId='cd'*16)).encode()
+        exported['files']['foreground-0000000000000013.birth-refusal.json']={'sha256':hashlib.sha256(changed).hexdigest(),'base64':base64.b64encode(changed).decode()}
+        with self.assertRaisesRegex(ValueError,'disposition digest'):r.validate_result(plan,recovered,retained,journal,exported)
+        for field,value in [('requestId','cd'*16),('requestSha256','different')]:
+            with self.subTest(disposition=field),self.assertRaisesRegex(ValueError,'disposition identity'):
+                r.validate_result(plan,*fixture(record=dict(disposition,**{field:value})))
+        for field,value in [('promptOperationId',14),('operationId',40),('family','other'),('ordinal',1),('route','application')]:
+            bad=dict(disposition,origin=dict(disposition['origin'],**{field:value}))
+            with self.subTest(origin=field),self.assertRaisesRegex(ValueError,'disposition identity'):
+                r.validate_result(plan,*fixture(record=bad))
         for key,value in [('type','other-error'),('reason','unknown'),('phase','submit'),('born',True),('toolCharge','1'),('nativeOperationId','40')]:
             with self.subTest(key=key),self.assertRaises(ValueError):r.validate_result(plan,*fixture(dict(payload,**{key:value})))
         for key,value in [('parentHold',{'reserve':'1'}),('bornResources',[{'target':'29420'}]),('dispatchPending',{'pending':True}),('unresolvedExternal',['unknown'])]:

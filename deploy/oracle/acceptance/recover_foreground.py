@@ -211,6 +211,18 @@ def validate_result(plan, recovered, retained, journal, exported):
                 and refusal.get('born') is False and refusal.get('toolCharge') == '0'
                 and str(refusal.get('nativeOperationId')) == str(plan['native_operation_id']),
                 'native definite refusal payload differs')
+        disposition_name = f"foreground-{plan['operation_id']:016}.birth-refusal.json"
+        disposition_raw = files[disposition_name]
+        require(hashlib.sha256(disposition_raw).hexdigest() == refusal.get('dispositionSha256'),
+                'native refusal disposition digest differs')
+        disposition = json.loads(disposition_raw)
+        origin = disposition.get('origin') or {}
+        require(disposition.get('requestId') == plan['request_id']
+                and disposition.get('requestSha256') == attempt.get('requestSha256')
+                and origin.get('promptOperationId') == plan['operation_id']
+                and origin.get('operationId') == plan['native_operation_id']
+                and origin.get('family') == 'oracle-session' and origin.get('ordinal') == 0
+                and origin.get('route') == 'session', 'native refusal disposition identity differs')
         require(journal.get('bornResources') == [] and journal.get('birthNextOrdinal') == {'oracle-session':1},
                 'terminal refusal must preserve consumed ordinal without a born resource')
         for name in ('dispatchPending','providerPending','dispatchHold','providerHold',
