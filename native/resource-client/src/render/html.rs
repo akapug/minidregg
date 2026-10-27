@@ -3,7 +3,7 @@
 //! escaped; a link carries the reader's name for its target in `data-target`
 //! and no URL, since routes are the web face's.
 
-use super::{Annotation, Body, Deco, Rendered, RenderedLine};
+use super::{Annotation, Body, Deco, Rendered, RenderedLine, SharedName};
 use serde_json::Value;
 
 pub fn escape(text: &str) -> String {
@@ -137,13 +137,20 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
     )];
     if !rendered.shared_names.is_empty() {
         out.push("<section class=\"shared-names\"><h2>Shared names</h2><dl>".to_owned());
-        for binding in &rendered.shared_names {
-            out.push(format!(
-                "<dt>{}</dt><dd>{}:{}</dd>",
-                escape(&binding.name),
-                escape(&binding.kind),
-                escape(&binding.target)
-            ));
+        for name in &rendered.shared_names {
+            out.push(match name {
+                SharedName::Bound(binding) => format!(
+                    "<dt>{}</dt><dd>{}:{}</dd>",
+                    escape(&binding.name),
+                    escape(&binding.kind),
+                    escape(&binding.target)
+                ),
+                SharedName::Invalid { link, reason } => format!(
+                    "<dt class=\"invalid\" data-invalid-name=\"{0}\">invalid link {0}</dt><dd>{1}</dd>",
+                    escape(link),
+                    escape(reason)
+                ),
+            });
         }
         out.push("</dl></section>".to_owned());
     }
