@@ -131,6 +131,7 @@ readers() {
   # commit as the implementation, and only with an Authority-Change trailer; every generated fixture has
   # a row in scripts/pipeline/fixture-authorities.txt (cv 01a1147b-103d).
   run fixture-authority bash scripts/pipeline/check-fixture-authority.sh "$FROM..$TO"
+  run intent-vector-authority python3 scripts/pipeline/check-intent-vector-authority.py
   python3 "$H/rust-rows.py" "$SRC" "$FROM" "$TO" "$B/tmp-rust-rows-$TAG.sh" > "$L/gate-$TAG-rust-rows.txt" 2>&1 || echo "rust-rows RED (selector failed)" | tee -a "$S"
   cat "$L/gate-$TAG-rust-rows.txt"
   run rust-rows       $SB bash "$B/tmp-rust-rows-$TAG.sh"
