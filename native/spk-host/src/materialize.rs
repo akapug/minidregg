@@ -143,6 +143,13 @@ fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> io::Result<In
     if let Some(bytes) = &spk.data_config_bytes {
         crate::shared_data::parse_signed_attachment(bytes)?;
     }
+    // A package from before bridgeConfig carries no member; it runs under the canonical empty
+    // config (spk-rpc `default_bridge_config_bytes`: no permissions, roles, API path or
+    // identity capabilities), whose fixed digest binds the descriptor like a signed member's.
+    let bridge_config = spk
+        .bridge_config_bytes
+        .clone()
+        .unwrap_or_else(minidregg_spk_rpc::default_bridge_config_bytes);
     let raw_sha256 = spk
         .raw_sha256
         .iter()
@@ -154,11 +161,8 @@ fn verified_identity(spk: &VerifiedPackage, directory: PathBuf) -> io::Result<In
         raw_sha256_bytes: spk.raw_sha256,
         raw_length: spk.raw_length,
         signed_manifest_sha256: Sha256::digest(&spk.manifest_bytes).into(),
-        signed_bridge_config_sha256: spk
-            .bridge_config_bytes
-            .as_ref()
-            .map(|bytes| Sha256::digest(bytes).into()),
-        signed_bridge_config: spk.bridge_config_bytes.clone(),
+        signed_bridge_config_sha256: Some(Sha256::digest(&bridge_config).into()),
+        signed_bridge_config: Some(bridge_config),
         signed_data_config: spk.data_config_bytes.clone(),
         manifest: spk.manifest.clone(),
     })

@@ -14,17 +14,25 @@ fn safe_segment(segment: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~'))
 }
 
-/// Accept only a literal, canonical, slash-terminated signed prefix. `/` is
+/// Accept only a literal, canonical signed prefix: it starts with `/`, and every
+/// segment after it is a safe segment, the last one optionally followed by `/`. `/` is
 /// the root API profile; a missing prefix means that the SPK has no HTTP API.
+///
+/// Sandstorm's own bridge forms an API request line as `rootPath + path`, the signed
+/// `apiPath` followed by the relative path, with nothing between them
+/// (sandstorm-http-bridge.c++, `lines.add(kj::str(method, " ", rootPath, path, ...))`).
+/// So a prefix such as `/pub` is legal there, and the request for `x` reaches the app as
+/// `/pubx`. Admitting it here gives the same meaning. `route` still emits the literal
+/// signed prefix followed by a canonical relative path, which has no leading slash, no dot
+/// segment and no escape. The routed path therefore always begins with the bytes the
+/// package signed and cannot leave them.
 pub fn checked_prefix(prefix: &str) -> Result<(), &'static str> {
-    if prefix.is_empty()
-        || prefix.len() > MAX_PREFIX
-        || !prefix.starts_with('/')
-        || !prefix.ends_with('/')
-    {
+    if prefix.is_empty() || prefix.len() > MAX_PREFIX || !prefix.starts_with('/') {
         return Err("signed API prefix is not canonical");
     }
-    if prefix != "/" && !prefix[1..prefix.len() - 1].split('/').all(safe_segment) {
+    let body = &prefix[1..];
+    let body = body.strip_suffix('/').unwrap_or(body);
+    if prefix != "/" && !body.split('/').all(safe_segment) {
         return Err("signed API prefix contains an unsafe segment");
     }
     Ok(())
@@ -165,10 +173,19 @@ mod exact_prefix_tests {
         assert!(!is_under("/api/", "other/api/v1"));
         assert!(!is_under("/api/", "api//v1"));
         assert!(!is_under("/api/", "api/v1/"));
-        // A prefix without its terminating slash is not a signed prefix at all.
-        assert!(checked_prefix("/api").is_err());
-        assert!(route("/api", "v1").is_err());
+        // A prefix without its terminating slash is Sandstorm's plain concatenation: the
+        // relative path follows the signed bytes directly, and nothing escapes them.
+        assert!(checked_prefix("/api").is_ok());
+        assert_eq!(route("/api", "v1"), Ok("apiv1".into()));
+        assert_eq!(route("/pub", ""), Ok("pub".into()));
+        assert!(is_under("/pub", "pubx"));
         assert!(!is_under("/api", "api/v1"));
+        assert!(route("/pub", "../secret").is_err());
+        assert!(route("/pub", "/etc").is_err());
+        assert!(!is_under("/pub", "pu"));
+        for hostile in ["/pub/../x", "/pub//", "/./", "/a/./b", "/pub%2f", "/p\\", "pub", "/pub?x", "/pub#x"] {
+            assert!(checked_prefix(hostile).is_err(), "{hostile}");
+        }
         // Nested prefixes route exactly and do not leak into siblings.
         assert_eq!(route("/api/v2/", "x"), Ok("api/v2/x".into()));
         assert!(!is_under("/api/v2/", "api/v1/x"));
