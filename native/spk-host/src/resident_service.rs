@@ -1942,6 +1942,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let www = crate::www_publish::WwwListener::bind(&crate::www_publish::socket_for_journal(&config.journal_dir)?)?;
     let www_index = agent_fds.len();
     agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.listener));
+    let www_wake_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.wake));
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
@@ -1987,9 +1989,24 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             return Err(invalid("app process exited; this generation ends"));
         }
         if index == www_index {
-            if let Err(error) = www.accept_one(|| resident.open_www()) {
+            if let Err(error) = www.accept_one() {
                 eprintln!("spk-host: publishing connection refused: {error}");
             }
+            return Ok(None);
+        }
+        if index == www_wake_index {
+            use crate::resident_privilege::WwwFile;
+            use crate::www_publish::Opened;
+            www.answer_asks(|components| match resident.open_www_file(components) {
+                Ok(WwwFile::File(fd)) => Opened::File(std::fs::File::from(fd)),
+                Ok(WwwFile::NoSite) => Opened::NoSite,
+                Ok(WwwFile::NoSuchFile) => Opened::NoSuchFile,
+                Ok(WwwFile::TooLarge) => Opened::TooLarge,
+                Err(error) => {
+                    eprintln!("spk-host: published file unavailable: {error}");
+                    Opened::Unavailable
+                }
+            });
             return Ok(None);
         }
         if index == checkpoint_index {

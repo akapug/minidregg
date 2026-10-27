@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The story law files and Assurance/StoryLaw.lean §8 are the client's generator output; this script writes them.
+"""The story law files and Kernel/StoryLaw.lean (the GENERATED region) are the client's generator output; this script writes them.
 
 usage (from the repository root):
   scripts/gen-storylaw.py --mini PATH           run `PATH story-law --table native/resource-client/templates/story/tale/table`
                                                 (the parser and generator `story seal` runs) and write
                                                 tale/law.player.json, tale/law.player and tale/law.table.json,
-                                                then rewrite the GENERATED region of Assurance/StoryLaw.lean
+                                                then rewrite the GENERATED region of Kernel/StoryLaw.lean
   scripts/gen-storylaw.py --mini PATH --check   exit 1 if any of them is not what the client generates now
 
 The Lean region holds `taleTable` (the table's edges and item scenes, as the client parsed them) and
@@ -16,7 +16,7 @@ the law `story seal` installs."""
 import json, re, subprocess, sys
 
 T = "native/resource-client/templates/story/tale"
-F = "Assurance/StoryLaw.lean"
+F = "Kernel/StoryLaw.lean"
 BEGIN, END = "-- BEGIN GENERATED (scripts/gen-storylaw.py)\n", "-- END GENERATED"
 PH = re.compile(r"\{([A-Z_0-9]+)\}")
 

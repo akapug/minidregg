@@ -13,3 +13,4 @@ umbrella target list (`scripts/pipeline/umbrella-targets`) builds it explicitly,
 and `TokenCensus.Fixtures` runs the token census over its modules.
 -/
 import Fixtures.NativeAcceptedFixture
+import Fixtures.NativeDocWriteFixture

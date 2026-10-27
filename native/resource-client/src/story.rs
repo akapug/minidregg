@@ -17,7 +17,7 @@
 //! mover (only the player), turn (+1 exactly), exits (stay, or one table
 //! edge), needs (per conditional edge: its item already held), here and once
 //! (per item: taken in its scene, standing still, 0 to 1 and never back), and
-//! progress (a turn moves or takes). The Lean file `Assurance/StoryLaw.lean` defines the same law for every table and
+//! progress (a turn moves or takes). The Lean file `Kernel/StoryLaw.lean` defines the same law for every table and
 //! proves `sealed_story_scene_monotone`; `scripts/gen-storylaw.py` embeds this
 //! generator's output for the tale and the build proves it is that `law`.
 //!
@@ -307,7 +307,7 @@ pub(crate) struct Clause {
 
 /// The law of player `subject`'s cell (`subject` may be a placeholder such as
 /// `{S}`, for the template files). Clause order is the refusal order and is
-/// `Assurance/StoryLaw.lean`'s `clauses`.
+/// `Kernel/StoryLaw.lean`'s `clauses`.
 pub(crate) fn player_clauses(table: &Table, subject: &str) -> Vec<Clause> {
     let c = |name: String, predicate: Value| Clause { name, predicate };
     let step = |w: &Way| all(vec![eq(&slot(0, "before"), w.from), eq(&slot(0, "after"), w.to)]);

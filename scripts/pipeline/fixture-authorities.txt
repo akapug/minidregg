@@ -15,6 +15,7 @@
 # Census (2026-10-07, lane kn2-token-sound): `git log --name-only` since 2026-09-25 over commits
 # that regenerate, re-emit or re-pin, for *Fixture*, *fixture*, *Vectors*, golden/, *.snapshot, expect*.
 Fixtures/NativeAcceptedFixtureData.lean | scripts/native-accepted-fixture/generate.sh | Fixtures/NativeAcceptedFixtureAuthority.lean | checked
+Fixtures/NativeDocWriteFixtureData.lean | scripts/native-doc-write-fixture/generate.sh | Fixtures/NativeDocWriteFixtureAuthority.lean | checked
 # lean-intents.json: checked by scripts/pipeline/check-intent-vector-authority.py (gate row intent-vector-authority).
 # intents.json: self -- hand-written inputs, not generated; the emitter reads them and tests/golden.rs requires every echoed text to equal them byte for byte.
 # vectors.json: self -- the `expect` values are the Rust core's, but the TS suite (native/mini-sdk-ts/test/golden.test.ts) recomputes them independently and tests/golden.rs pins Bread's external dregg/0 vector; a change is an authority change.

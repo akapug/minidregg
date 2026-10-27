@@ -621,13 +621,16 @@ world_recover_foreground() {
   request_id=$(jq -er .request_id "$recovery_plan")
   world_source_manifest >"$fresh/source-input-sha256.txt"
   sha256sum "$controller_runtime" "$candidate" >>"$fresh/source-input-sha256.txt"
-  continuation=$run/continuations/foreground-$(jq -er .operation_id "$recovery_plan")
+  continuation=$(python3 -B "$repo/deploy/oracle/acceptance/recover_foreground.py" directory "$recovery_plan")
   python3 -B "$repo/deploy/oracle/acceptance/recover_foreground.py" prepare "$recovery_plan" \
     "$fresh/controller-export.json" "$fresh/controller-status.json" "$fresh/source-input-sha256.txt" "$continuation" \
     >"$fresh/prepared.stdout"
   recovery_manifest=$continuation/recovery-input-sha256.txt
   (set -o noclobber; cat "$fresh/source-input-sha256.txt" >"$recovery_manifest")
   configured=1 controller_created=1 controller_staged=1 preserve_existing_exit=0
+  if [[ $(jq -r '.goal // "resume-session"' "$recovery_plan") == settle-refusal ]]; then
+    preserve_retained_namespace=1
+  fi
   world_phase_record runtime-upgrade started
   timeout 120 sudo -n -- "$installer" controller-runtime-upgrade "$store" "$helper" "$controller_runtime" \
     >"$continuation/runtime-upgrade.json"
@@ -673,6 +676,19 @@ world_recover_foreground() {
   timeout 120 sudo -n -- "$installer" controller-export "$store" "$helper" >"$continuation/settled-export.json"
   python3 -B "$repo/deploy/oracle/acceptance/recover_foreground.py" result "$recovery_plan" \
     "$continuation/recovery-result.json" "$continuation/retained-result.json" "$continuation/settled-journal.json" "$continuation/settled-export.json"
+  if [[ ${preserve_retained_namespace:-0} == 1 ]]; then
+    world_phase_record exact-foreground-recovery completed "$continuation/recovery-result.json" \
+      "$continuation/retained-result.json" "$continuation/settled-journal.json" "$continuation/settled-export.json"
+    world_phase_record refusal-ack started
+    timeout 120 sudo -n -- "$installer" controller-tool-ack "$store" "$helper" "$request_id" \
+      >"$continuation/refusal.ack.json"
+    jq -e --arg id "$request_id" '.type == "tool-acknowledged" and .requestId == $id and .isError != true' \
+      "$continuation/refusal.ack.json" >/dev/null
+    timeout 120 sudo -n -- "$installer" controller-journal "$store" "$helper" >"$continuation/acknowledged-journal.json"
+    world_phase_record refusal-ack completed "$continuation/refusal.ack.json" "$continuation/acknowledged-journal.json"
+    foreground_settlement_only=1
+    return
+  fi
   (set -o noclobber; cat "$continuation/retained-result.json" >"$run/agent-lifetime/session-birth.retained-result.json")
   world_phase_record exact-foreground-recovery completed "$continuation/recovery-result.json" \
     "$continuation/retained-result.json" "$continuation/settled-journal.json" "$continuation/settled-export.json"
@@ -728,7 +744,7 @@ world_cleanup() {
       # The public listener owns its socket's ACL. Stop it before removing the
       # controller registration and restoring its exact ancestor ACL grants.
       "$journey" stop-services "$run/world" >>"$run/cleanup.log" 2>&1 || cleanup_result=1
-      if [[ $result == 0 && $cleanup_result == 0 ]]; then
+      if [[ $result == 0 && $cleanup_result == 0 && ${preserve_retained_namespace:-0} != 1 ]]; then
         timeout 120 sudo -n -- "$installer" controller-remove "$store" "$helper" \
           >"$run/agent-lifetime/controller-remove.json" 2>>"$run/cleanup.log" || cleanup_result=1
       fi
@@ -751,7 +767,7 @@ world_cleanup() {
     fi
     # A failed journey keeps its own stopped namespace and state volumes for
     # diagnosis/recovery. Never erase an uncertain admitted operation's journal.
-    [[ $result == 0 ]] || preserve_namespace=true
+    [[ $result == 0 && ${preserve_retained_namespace:-0} != 1 ]] || preserve_namespace=true
     if [[ $cleanup_result == 0 ]]; then
       if volume_evidence=$(mktemp -d "${continuation:-$run}/volume-cleanup.XXXXXXXX"); then
         # The helper owns this new child; mktemp protects the unique parent.

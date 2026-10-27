@@ -339,8 +339,8 @@ impl ResidentProcess {
     pub(crate) fn child_pid(&self) -> u32 {
         self.child.pid()
     }
-    pub(crate) fn open_www(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
-        self.child.open_www()
+    pub(crate) fn open_www_file(&mut self, components: &[String]) -> io::Result<crate::resident_privilege::WwwFile> {
+        self.child.open_www_file(components)
     }
 }
 

@@ -74,8 +74,6 @@ import Kernel.ObjectLaw  -- the enforced `law` fragment of a package: its meanin
 import Kernel.OutboxDelivery  -- stable terminal/outbox identity, receiver replay, and authenticated acknowledgements without invented transport liveness
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races
-import Kernel.PrivateEscrowSettlement  -- sealed computation and separately authorized declassification stage exact escrow release, terminal, and outbox effects
-import Kernel.QuotaGcSettlement  -- root-bound reachability, lease expiry, quotas, and guarded atomic compaction make deletion an admitted settlement rather than a host guess
 import Kernel.ReceivingLawFixture  -- LAWS-RECEIVER: the Receiver judges every written cell's law; the Bypass tooth and every refusal arm
 import Kernel.Receipt    -- the receipt word Q: uproj faithfulness + the frame as a receipt fact (OB-3's kernel side)
 import Kernel.Verbs   -- create + gwrite: the remaining conservation-algebra verbs, conservation (honest side-conditions) + frames + the receipt bridge
@@ -165,6 +163,7 @@ import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every p
 import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 and the blinding ratchet the field-3 reader's opened entries are unchanged by a write to field 4, the root moves, and every sealed leaf moves (narrowed_view_hides_field_four)
 
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge
+import Kernel.StoryLaw  -- the table-to-law generator of a sealed story (a Host receiver may import it)
 
 import Kernel.WorldKindChecks -- descriptor/instance preparation refusals for shipped world methods
 

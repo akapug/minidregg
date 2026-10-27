@@ -129,11 +129,20 @@ impl Runtime {
                 Err("the settle's custody child is not proven reaped".into())
             }
         };
-        let Some(evidence) = provider_continuity_rejection::inspect(&self.config, &pending, reaped)? else {
-            return Ok(false);
+        let evidence = match provider_continuity_rejection::inspect(&self.config, &pending, reaped)? {
+            Some(evidence) => serde_json::to_value(evidence).map_err(|e| e.to_string())?,
+            // Killed at the deadline before it assembled a call: the pinned
+            // client seals `call.bin` (fsynced with its directory) before it
+            // transmits anything, and its whole process group is dead, so the
+            // settle was never sent. Re-preparing is safe twice over: the next
+            // attempt re-reads the signed hold and refuses if it moved.
+            None if error.contains("undecided (deadline)") => json!({
+                "basis":"deadline: the custody child's process group was killed and reaped before call.bin existed",
+                "attempt":pending.attempt}),
+            None => return Ok(false),
         };
         self.journal.reconciliation_log.push(json!({
-            "action":"retire-provider-settle-continuity-rejection",
+            "action":"retire-provider-settle-before-call",
             "operationId":pending.operation_id.to_string(), "operation":pending.operation,
             "attempt":pending.attempt, "evidence":evidence, "error":error,
             "senderStopped":"custody child exit observed with output pipes at EOF",

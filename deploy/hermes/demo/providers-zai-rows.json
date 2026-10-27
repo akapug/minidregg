@@ -1,0 +1,10 @@
+[
+  {"name":"zai-glm","kind":"openai-compatible","credential":"pool",
+   "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+   "models":["glm-5.3-flash"],
+   "caps":{"perCall":"4096","perDay":"160","ceilingMicroUsd":"70000","callMicroUsd":"150",
+           "memberDayMicroUsd":"3000","memberTotalMicroUsd":"35000"}},
+  {"name":"zai-byok","kind":"openai-compatible","credential":"user",
+   "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+   "models":["glm-5.3","glm-5.3-flash"]}
+]

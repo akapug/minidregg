@@ -63,7 +63,7 @@ fn block_hash(context: [u8; 32], holder: usize, receiver: usize, hs: &[[u8; 32]]
     }
     hash(&b)
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct AcceptedSharing {
     context: [u8; 32],
     holder: u16,
@@ -71,6 +71,13 @@ pub struct AcceptedSharing {
     masks: Vec<Field>,
     group_count: usize,
     per_group: usize,
+}
+redacted_debug!(AcceptedSharing);
+impl Drop for AcceptedSharing {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.values);
+        zeroize::Zeroize::zeroize(&mut self.masks);
+    }
 }
 impl AcceptedSharing {
     pub fn context(&self) -> [u8; 32] {
@@ -109,11 +116,12 @@ impl RejectedSharing {
         self.evidence_hash
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum LocalSharing {
     Accepted(AcceptedSharing),
     Rejected(RejectedSharing),
 }
+redacted_debug!(LocalSharing);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FaultParty {
     Dealer(u16),
@@ -165,7 +173,7 @@ impl AgreedAccusation {
         self.holder
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PrivateReconstructed {
     context: [u8; 32],
     group: usize,
@@ -174,6 +182,13 @@ pub struct PrivateReconstructed {
     mask_polynomials: Vec<Vec<Field>>,
     commitment_bytes: Vec<u8>,
     accepted_holders: Vec<u16>,
+}
+redacted_debug!(PrivateReconstructed);
+impl Drop for PrivateReconstructed {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.polynomials);
+        zeroize::Zeroize::zeroize(&mut self.mask_polynomials);
+    }
 }
 impl PrivateReconstructed {
     pub fn context(&self) -> [u8; 32] {
@@ -243,12 +258,13 @@ impl InvalidReconstruction {
         &self.accepted_holders
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Reconstruction {
     Verified(PrivateReconstructed),
     Invalid(InvalidReconstruction),
     AgreedAccusation(AgreedAccusation),
 }
+redacted_debug!(Reconstruction);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Body {
     Commitment(PhaseMessage),
@@ -293,11 +309,18 @@ pub struct Send {
     pub to: u16,
     pub message: Message,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct Payload {
     values: Vec<Field>,
     masks: Vec<Field>,
     hashes: Vec<[u8; 32]>,
+}
+redacted_debug!(Payload);
+impl Drop for Payload {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.values);
+        zeroize::Zeroize::zeroize(&mut self.masks);
+    }
 }
 #[derive(Clone)]
 pub struct Sh2tId {
@@ -1054,6 +1077,25 @@ fn interpolate(
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+    #[test]
+    fn debug_of_secret_sharing_types_prints_no_share_bytes() {
+        const SECRET: u128 = 0x5ec2e75ec2e75ec2e75ec2e75ec2e771;
+        let accepted = AcceptedSharing {
+            context: [1; 32],
+            holder: 2,
+            values: vec![Field(SECRET)],
+            masks: vec![Field(SECRET)],
+            group_count: 1,
+            per_group: 1,
+        };
+        let local = LocalSharing::Accepted(accepted.clone());
+        let payload = Payload { values: vec![Field(SECRET)], masks: vec![Field(SECRET)], hashes: vec![] };
+        for shown in [format!("{accepted:?}"), format!("{local:?}"), format!("{payload:?}"), format!("{accepted:#?}")] {
+            assert!(shown.contains("redacted"), "{shown}");
+            assert!(!shown.contains(&SECRET.to_string()), "{shown}");
+            assert!(!shown.to_lowercase().contains(&format!("{SECRET:x}")), "{shown}");
+        }
+    }
     pub(super) fn generation() -> Generation {
         Generation {
             invocation: Nat::new(72),

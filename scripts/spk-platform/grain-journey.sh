@@ -513,6 +513,33 @@ share() (
   "$SPK_HOST" grain route "$PROFILE" "$app" "$EV/$label-route-request.json"
 )
 
+# register LABEL APP ROUTE: a route bound after START is served only once the
+# running resident admits it through its own route control
+# (deploy/spk-host/HOT-ROUTE-ENROLLMENT.md); the session generation is the exact
+# one LABEL's enrollment admitted.
+register() (
+  label=$1 app=$2 route=$3
+  plan=$(ls -d "$EV/$label"-enroll-g*/plan-inspected.json | tail -1)
+  gen=$(jq -er .enrollment.appGeneration "$plan") sgen=$(jq -er .enrollment.sessionGeneration "$plan")
+  dir=$STATE/apps/$app/routes/$route
+  R=$EV/$label-register-g$gen
+  [ ! -s "$R/reply.json" ] || exit 0
+  mkdir -p -m 700 "$R"
+  jq -n --arg nonce "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" --arg app "$app" --arg gen "$gen" \
+    --arg sgen "$sgen" --arg dir "$dir" --arg custody "$dir/dispatch-custody.json" \
+    --arg custodySha "$(sha "$dir/dispatch-custody.json")" --arg custodianSha "$(sha "$dir/custodian.json")" \
+    --arg handle "${route%%-*}" '
+    {protocol:"mini-spk-route-register-v1",registrationNonceHex:$nonce,expectedApp:$app,
+     expectedAppGeneration:$gen,expectedSessionGeneration:$sgen,directory:$dir,dispatchCustody:$custody,
+     dispatchCustodySha256:$custodySha,custodianSha256:$custodianSha,displayName:"Second browser",
+     preferredHandle:$handle}' >"$R/request.json"
+  chmod 600 "$R/request.json"
+  "$SPK_HOST" grain register-route --socket "$STATE/apps/$app/g$gen/route-control.sock" \
+    --request "$R/request.json" >"$R/reply.json.new"
+  mv "$R/reply.json.new" "$R/reply.json"
+  [ -S "$dir/http.sock" ] || fail "registered route $route has no socket"
+)
+
 # enroll LABEL APP SESSION TICKET CAP NONCE: bind participant 8's session to
 # the app's current serving generation (event28). A session still active for
 # an older generation is first closed by its owner; renewal then re-enrolls.
@@ -808,9 +835,12 @@ run_phase() {
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
     a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
-    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;;
+    # j..p: the featured market set (featured-qualify.sh), resource prefixes 61..67.
+    j) P=61 i=10 ;; k) P=62 i=11 ;; l) P=63 i=12 ;; m) P=64 i=13 ;; n) P=65 i=14 ;;
+    o) P=66 i=15 ;; p) P=67 i=16 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  upper=$(printf '%s' "$letter" | tr a-p A-P)
   eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
   eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
@@ -852,6 +882,8 @@ run_phase() {
       else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
         $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
+    register) [ "$n" = 2 ] || fail "register applies to a second session (register-X2)"
+      step "$phase" register "${letter}2" "$app" "guest2-$kind" ;;
     get) if [ "$n" = 2 ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
       else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;

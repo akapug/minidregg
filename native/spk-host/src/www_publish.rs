@@ -2,18 +2,19 @@
 //!
 //! Sandstorm apps publish a static site by writing `/var/www`; the grain's
 //! publishing origin (`https://<grain>-www.<base>`, `HackSessionContext.getPublicId`
-//! in `spk-rpc`) serves it to anyone. The resident binds `apps/<app>/www.sock`
-//! (0600, the operator's) beside the generations; the apps worker's edge connector
-//! hands a connected stream to the front. The directory itself comes from the
-//! app-identity launch worker (`resident_privilege`, tag 6), because the grain's
-//! `/var` is the app's 0700 mount: the worker opens `www` as the app and passes the
-//! descriptor back; every file under it is then opened as the operator, so only
-//! what the app made world-readable is published.
+//! in `spk-rpc`) serves it to anyone, whatever the files' modes. The resident binds
+//! `apps/<app>/www.sock` (0600, the operator's) beside the generations; the apps
+//! worker's edge connector hands a connected stream to the front. The grain's
+//! `/var` is the app's 0700 mount, so each file is opened by the app-identity
+//! launch worker (`resident_privilege`, tag 6) from the request's checked path
+//! components and handed back as one read-only descriptor; the resident only
+//! reads it. A connection thread parses the request and asks the resident's loop,
+//! which owns the worker channel, through a queue and a wake socket.
 //!
-//! Each path component is opened with `O_NOFOLLOW` below that descriptor; `..`,
-//! `.`, dotfile segments, NUL, backslash and percent-encoded separators are
-//! refused before any open, so nothing outside the tree or behind a symlink is
-//! reached. No session, no Mini transaction, no write.
+//! Each path component is opened with `O_NOFOLLOW` below `/var/www`; `..`, `.`,
+//! dotfile segments, NUL, backslash and percent-encoded separators are refused
+//! before any open, so nothing outside the tree or behind a symlink is reached.
+//! No session, no Mini transaction, no write.
 
 use std::ffi::CString;
 use std::fs::File;
@@ -23,6 +24,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -43,10 +45,26 @@ pub fn socket_for_journal(journal: &Path) -> io::Result<PathBuf> {
     Ok(journal.parent().ok_or_else(|| refuse("generation journal has no app directory"))?.join("www.sock"))
 }
 
+/// What a publishing request found.
+pub enum Opened {
+    File(File),
+    NoSite,
+    NoSuchFile,
+    TooLarge,
+    Unavailable,
+}
+
+type Ask = (Vec<String>, mpsc::Sender<Opened>);
+
 /// The bound publishing socket. A stale socket from an ended generation (same
 /// owner, nothing accepting) is replaced; a live one refuses the bind.
 pub struct WwwListener {
     pub listener: UnixListener,
+    /// Readable when a connection thread has queued a file request.
+    pub wake: UnixStream,
+    wake_writer: UnixStream,
+    asks: mpsc::Receiver<Ask>,
+    ask: mpsc::Sender<Ask>,
     socket: PathBuf,
     ino: u64,
     open: Arc<AtomicUsize>,
@@ -76,13 +94,15 @@ impl WwwListener {
             return Err(refuse("publishing socket identity drift"));
         }
         listener.set_nonblocking(true)?;
-        Ok(Self { listener, socket: socket.to_owned(), ino: meta.ino(), open: Arc::default() })
+        let (wake, wake_writer) = UnixStream::pair()?;
+        wake.set_nonblocking(true)?;
+        let (ask, asks) = mpsc::channel();
+        Ok(Self { listener, wake, wake_writer, asks, ask, socket: socket.to_owned(), ino: meta.ino(), open: Arc::default() })
     }
 
-    /// Accept one connection and answer it on its own thread. `www` is asked
-    /// for only when a request arrives (the app may publish at any time):
-    /// `Ok(None)` means the app has no `/var/www`.
-    pub fn accept_one(&self, www: impl FnOnce() -> io::Result<Option<OwnedFd>>) -> io::Result<()> {
+    /// Accept one connection and answer it on its own thread; the thread asks
+    /// the loop (`answer_asks`) for the file.
+    pub fn accept_one(&self) -> io::Result<()> {
         let stream = match self.listener.accept() {
             Ok((stream, _)) => stream,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
@@ -92,20 +112,37 @@ impl WwwListener {
         if self.open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             self.open.fetch_sub(1, Ordering::SeqCst);
             let mut stream = stream;
-            let _ = stream.write_all(&response("503 Service Unavailable", "text/plain; charset=utf-8", b"publishing connections exhausted\n".len() as u64, false, &[("Retry-After", "5")]));
-            let _ = stream.write_all(b"publishing connections exhausted\n");
+            let body = b"publishing connections exhausted\n";
+            let _ = stream.write_all(&response("503 Service Unavailable", "text/plain; charset=utf-8", body.len() as u64, false, &[("Retry-After", "5")]));
+            let _ = stream.write_all(body);
             return Ok(());
         }
-        let www = www();
+        let ask = self.ask.clone();
+        let wake = self.wake_writer.try_clone()?;
         let open = self.open.clone();
         let spawned = std::thread::Builder::new().name("spk-www".into()).spawn(move || {
-            let _ = serve(stream, www);
+            let _ = serve(stream, |components| {
+                let (reply, answer) = mpsc::channel();
+                if ask.send((components, reply)).is_err() || (&wake).write_all(&[1]).is_err() {
+                    return Opened::Unavailable;
+                }
+                answer.recv_timeout(Duration::from_secs(30)).unwrap_or(Opened::Unavailable)
+            });
             open.fetch_sub(1, Ordering::SeqCst);
         });
         if spawned.is_err() {
             self.open.fetch_sub(1, Ordering::SeqCst);
         }
         Ok(())
+    }
+
+    /// In the loop that owns the launch worker: answer every queued request.
+    pub fn answer_asks(&self, mut open: impl FnMut(&[String]) -> Opened) {
+        let mut drained = [0_u8; 64];
+        while matches!((&self.wake).read(&mut drained), Ok(n) if n > 0) {}
+        while let Ok((components, reply)) = self.asks.try_recv() {
+            let _ = reply.send(open(&components));
+        }
     }
 }
 
@@ -176,6 +213,12 @@ pub fn components(path: &str) -> Option<Vec<String>> {
         out.push("index.html".into());
     }
     Some(out)
+}
+
+/// The worker's own check of the components it is asked to open.
+pub fn valid_components(components: &[String]) -> bool {
+    components.len() <= 33
+        && components.iter().all(|c| !c.is_empty() && c.len() <= 255 && !c.starts_with('.') && !c.contains(['/', '\\', '\0']))
 }
 
 fn percent_decode(path: &str) -> Option<String> {
@@ -315,8 +358,8 @@ fn read_head(stream: &mut UnixStream) -> io::Result<Vec<u8>> {
     }
 }
 
-/// Answer one request on `stream` from the published tree `www`.
-pub fn serve(mut stream: UnixStream, www: io::Result<Option<OwnedFd>>) -> io::Result<()> {
+/// Answer one request on `stream`; `open` finds the file for its components.
+pub fn serve(mut stream: UnixStream, open: impl FnOnce(Vec<String>) -> Opened) -> io::Result<()> {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let refused = |stream: &mut UnixStream, status: &str, body: &str, extra: &[(&str, &str)]| -> io::Result<()> {
         stream.write_all(&response(status, "text/plain; charset=utf-8", body.len() as u64, false, extra))?;
@@ -333,15 +376,19 @@ pub fn serve(mut stream: UnixStream, www: io::Result<Option<OwnedFd>>) -> io::Re
             return refused(&mut stream, status, body, allow);
         }
     };
-    let root = match www {
-        Ok(Some(root)) => root,
-        Ok(None) => return refused(&mut stream, "404 Not Found", "no such published site\n", &[]),
-        Err(_) => return refused(&mut stream, "503 Service Unavailable", "the grain's published tree is unavailable\n", &[("Retry-After", "30")]),
+    let name = components.last().cloned().unwrap_or_else(|| "index.html".into());
+    let mut file = match open(components) {
+        Opened::File(file) => file,
+        Opened::NoSite => return refused(&mut stream, "404 Not Found", "no such published site\n", &[]),
+        Opened::NoSuchFile => return refused(&mut stream, "404 Not Found", "no such published file\n", &[]),
+        Opened::TooLarge => return refused(&mut stream, "413 Payload Too Large", "published file exceeds 64 MiB\n", &[]),
+        Opened::Unavailable => return refused(&mut stream, "503 Service Unavailable", "the grain's published tree is unavailable\n", &[("Retry-After", "30")]),
     };
-    let (mut file, length, name) = match open_beneath(&root, &components) {
-        Ok(found) => found,
-        Err((status, body)) => return refused(&mut stream, status, body, &[]),
-    };
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() > MAX_FILE {
+        return refused(&mut stream, "404 Not Found", "no such published file\n", &[]);
+    }
+    let length = meta.len();
     let kind = content_type(&name);
     stream.write_all(&response("200 OK", kind, length, kind == "image/svg+xml", &[]))?;
     if head_only {
@@ -352,6 +399,15 @@ pub fn serve(mut stream: UnixStream, www: io::Result<Option<OwnedFd>>) -> io::Re
         return Err(refuse("published file changed length while served"));
     }
     Ok(())
+}
+
+/// The opener the tests and a local tree use: open beneath a directory.
+pub fn open_in(root: &OwnedFd, components: &[String]) -> Opened {
+    match open_beneath(root, components) {
+        Ok((file, _, _)) => Opened::File(file),
+        Err((status, _)) if status.starts_with("413") => Opened::TooLarge,
+        Err(_) => Opened::NoSuchFile,
+    }
 }
 
 #[cfg(test)]
@@ -373,7 +429,7 @@ mod tests {
     fn ask(www: &Path, request: &str) -> String {
         let (mut client, server) = UnixStream::pair().unwrap();
         let fd = root(www);
-        let handle = std::thread::spawn(move || serve(server, Ok(Some(fd))));
+        let handle = std::thread::spawn(move || serve(server, |c| open_in(&fd, &c)));
         client.write_all(request.as_bytes()).unwrap();
         let mut out = String::new();
         client.read_to_string(&mut out).unwrap();
@@ -410,7 +466,7 @@ mod tests {
         let page = ask(&www, "GET / HTTP/1.1\r\nHost: a1-www.demo\r\n\r\n");
         assert!(page.starts_with("HTTP/1.1 200 OK\r\n") && page.contains("text/html") && page.ends_with("<h1>hi</h1>"), "{page}");
         assert!(!page.contains("Content-Security-Policy"));
-        let deck = ask(&www, "GET /deck HTTP/1.1\r\n\r\n");
+        let deck = ask(&www, "GET /deck/ HTTP/1.1\r\n\r\n");
         assert!(deck.ends_with("deck"), "{deck}");
         let svg = ask(&www, "GET /pic.svg HTTP/1.1\r\n\r\n");
         assert!(svg.contains("Content-Security-Policy: sandbox"), "{svg}");
@@ -428,7 +484,7 @@ mod tests {
     #[test]
     fn www_publish_without_a_tree_says_no_published_site() {
         let (mut client, server) = UnixStream::pair().unwrap();
-        let handle = std::thread::spawn(move || serve(server, Ok(None)));
+        let handle = std::thread::spawn(move || serve(server, |_| Opened::NoSite));
         client.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
         let mut out = String::new();
         client.read_to_string(&mut out).unwrap();

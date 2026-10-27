@@ -221,7 +221,8 @@ jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/born-content/view.json" >/dev/null
 query tool-after 8 7902 81 "$EVIDENCE/tool.key" 41011
 query parent-after 8 7901 73 "$EVIDENCE/tool.key" 41012
-jq -e '.cell.grain.remaining == "47" and .cell.grain.reserved == "0"' \
+# The birth's metered reserve is 3 of the provisioned tool budget (50 unless the caller set one).
+jq -e --arg left "$(( ${WORKROOM_TOOL_BUDGET:-50} - 3 ))" '.cell.grain.remaining == $left and .cell.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
 jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null

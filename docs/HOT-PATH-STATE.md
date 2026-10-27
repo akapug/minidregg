@@ -1,66 +1,93 @@
-# HOT-PATH lane state (lane/hot-path-codec, 2026-10-27)
+# HOT-PATH lane state (lane/hot-path-codec, 2026-10-27 evening)
 
-Branch `lane/hot-path-codec` from `origin/integration/2026-10-26` 9525547e; Mac worktree
-`/Users/ember/dev/minidregg-lanes/hot-path-codec` (its `.lake` is a hardlink seed of
-`minidregg-lanes/integration/.lake` at 90315db2: good for `lake env lean Compiler/*.lean`, NOT a build of this
-branch; `Kernel/NativeHost.lean` cannot be elaborated there). Design: `docs/HOT-PATH-2026-10-27.md` §2 (a), (f),
-(h).
+Branch `lane/hot-path-codec` (origin/main merged at 27502f54); Mac worktree
+`/Users/ember/dev/minidregg-lanes/hot-path-codec`; box worktree `/build/lanes/hot-path-codec` (dregg-build, user
+`lanes`). Design: `docs/HOT-PATH-2026-10-27.md` §2 (a), (f), (h).
 
 ## Landed (pushed)
 
 | sha | what | verified |
 |---|---|---|
-| 3717320a | (a) the resident codec Host re-applied on the moved code: `mini_sdk::consent::{ResidentKind, connect_resident_kind, serve_resident_kind}` (`native/mini-sdk/src/consent.rs`), `mini_sdk::local::Codec::frame_with` (`local.rs`), `mini codec-resident --host --settings` (`native/resource-client/src/main.rs`), `local_frame` connects unless `MINI_CODEC_RESIDENT=0` (`client_consent.rs`); the semantic authority stays `pure_host` | Mac + dregg-build: `cargo nextest run -p minidregg-mini-sdk --lib --features native -E 'test(resident) \| test(codec)'` 5/5; `cargo nextest run -p minidregg-resource-client -E 'test(client_consent) \| test(resident) \| test(codec)'` 10/10 incl. `tests/codec_resident.rs` (two real `mini` processes, one `HOST codec` child; `=0` one per process; idle exit) |
-| 40152929 | J12X: raw malformed codec frames (ops 7/10/11) are refused under NO_RECORD 253 (L1 `Host/RequestRefusal.lean` exceptionAnswer, grammar verdict); `journey.d/j12x.sh` asserts the decided refusal by name (`host_refused` default 253) | dregg-build, candidate 6236826f binaries, this tree's hooks: `JOURNEY_STEPS="J0 J1 J2 J3 J12X"` → J12X PASS 20/20 |
-| bef3b452 | JP2/THIN: a birth under `MINI_THIN_CONSENT=1` is refused BY NAME in `workspace.rs::birth` (thin consent has no birth arm: `Kernel/NativeThinConsent.lean` `checkPlanThin` → `.notInvocation`; a birth plan is Store-derived, `Kernel/NativeHost.lean:307` `.birth`); `jthin-consent.sh` runs its per-row env-configured proxy with `MINI_CONSENT_RESIDENT=0` (the resident kept a proxy child started under the first row's `THIN_PROXY_MODE`) | dregg-build: THIN PASS (all rows; was red `fb-capture` on r2b); JP2 FAIL 20/60 at row 19 `create` with the named refusal, rows 1–18 pass. JP2 green needs a thin BIRTH consent arm (design ruling: what thin consent SHOWS for a birth and from which served inputs its factory/authority/allocation/source slot headers are bound) — NOT (f); on the round-3 candidate JP2/THIN never ran (demo row budget 2000 s spent: KC 703 s, K12C 345 s, KIX 315 s) |
-| 6e6e3a09 | `MINI_OPEN_TIMING=1` laps for every stage of the FULL open: `Compiler/DurableReceiverCore.lean` `loadChained` (read/decode/chain/checkpoint/tags/frontier/resume/roots/presence index/link index/session indexes/world fold) and `Kernel/NativeHost.lean` `openExisting` (load/validate) | `lake env lean Compiler/DurableReceiverCore.lean` green on the Mac; `Kernel/NativeHost.lean` checked only by the dregg-build Host build (see below) |
+| 3717320a | (a) the resident codec Host on mini-sdk (`ResidentKind::{Consent,Codec}`, `mini codec-resident`, `MINI_CODEC_RESIDENT=0`) | Mac + dregg-build filtered: mini-sdk 5/5, resource-client 10/10 incl. `tests/codec_resident.rs` |
+| 40152929 | J12X asserts NO_RECORD 253 for malformed codec frames (L1 grammar verdict) | dregg-build J12X 20/20 on 6236826f |
+| bef3b452 | thin-consent birth refused by name; THIN's per-row proxy is its own child | dregg-build THIN PASS; JP2 20/60 at row 19 (thin birth arm = Phase 3 design, not this lane) |
+| 6e6e3a09 | `MINI_OPEN_TIMING=1` laps for the full open | elaborates; superseded as the attribution tool by the sampler below |
+| d50306c1 | design §2(h) + first state file | doc |
+| a20dad89 | the World's maps compacted every 32 heights (`Compiler/WorldCompact.lean`; `foldRecords`, `WorldTrack.advance`) | probe map 4000 writes: all reads 4405 ms chained vs 13 ms compacted |
+| 6eb74814 | compaction reaches every cell's own store (`compactWith`, `compactCell`); the second sample put the chains inside cells | Mac `lake build minidregg-host` + `minidregg-client-consent` green (7472 jobs); Mac births workload: 49 births admitted across heights 32/64/96 (World held through compactions), b0050 refused by the Mac's file-table ceiling (ENFILE in the verifier spawn), not the change |
+| 8f66d6cc | `lane/hot-path-compact-6236`: 6236826f + the two compaction commits (clean), so the box's standing worlds (6236826f epoch) can be opened | staged dregg-ref build `/build/lanes/hot-path-compact-build.sh` (candidate builder, 24 G, own PID `/build/lanes/hot-path-compact.pid`): waits for the coordinator's window |
 
-## Mid-flight: the cold reopen (design §2(h), the doc section is in this commit)
+## The cold reopen: cause, measured
 
-Cause (read, not yet measured): `NativeHostSession.start` (`Kernel/NativeHostSession.lean:154`) runs the FULL
-open before the light one; `loadChained` (`Compiler/DurableReceiverCore.lean:1207–1340`) reads/decodes/hashes/MACs
-EVERY entry and builds six indexes + `trackOf` (genesis World fold, `:953`) over every record;
-`validateLoaded` (`Kernel/NativeHostContext.lean:612`) checks every cell. Only `walkFrontier`/`resumeEngine`/roots
-are suffix-only. Fix (statement-first in the doc): the checkpoint body carries the indexes, the World and the
-chain; the open reads/hashes/MACs only the suffix (`readFromCheckpoint`), `Exact` restated relative to the base
-(writer's theorem across the seal), `trackOf` and the genesis chain → `store audit` (`NativeHost.auditWithTiming`).
-Complement: port reads to the light opening (25 `session.opened` arms vs 4 `session.light` in `Host/Main.lean`).
+One full open (`HOST CONFIG describe` = `NativeHost.openExisting`) of the 6236826f Host on a 483-record snapshot of the
+births-only world: **175 s** (load 25). Sampled (`/build/lanes/hot-path-codec-sample.py`, ptrace, 345 samples):
+**99% `trackOf` → `foldRecords`** (the genesis World fold), 86% inside `DFinsupp.update`/`Function.update` of
+`Theory.Store.Store.set`. A `Store` is a `DFinsupp`; each `set` adds a closure layer and a support entry, so reads
+are linear in the writes so far and the fold is quadratic (0.37 s/record at 483). Read, chain, tags, indexes and
+validation are noise at this size. Fix a20dad89 changes representation only (`compactBy_eq`, `compact_eq`,
+`compactEvery_eq`): no statement moves. The served session's `advance` reads the same World on every append, so the
+propose slope should flatten too (to be measured).
 
-dregg-build (`ssh -o IdentitiesOnly=yes -i ~/.ssh/id_portable lanes@178.105.4.114`; it fetches anonymously, never
-pushes; load 14–18 from other lanes all day):
-- worktree `/build/lanes/hot-path-codec` (detached at the pushed sha; `target/release/mini` built at bef3b452;
-  `.lake/native` kernels built).
-- BEFORE measurement: `/build/lanes/hot-path-codec-perf-before.sh`, PID file `/build/lanes/hot-path-codec-perf-before.pid`,
-  log `/build/lanes/hot-path-codec-perf-before.log`, output `/build/lanes/hot-path-codec-perf/before-*`: births-only
-  workload (`scripts/perf/workload.py --births 840 --births-only`, ≈1.7k records) with candidate 6236826f, Store at
-  `/run/user/1000/hpcp-before/w` (tmpfs); 188/840 births at 15:25Z (12–24 s each under load; hours to go), STILL RUNNING under its PID file. Its `reopen` phase is
-  the cold-reopen BEFORE; `before-results.tsv` has p50/p99 per (phase, op); the propose slope = births `create`
-  samples over the run (per-sample order is in `before-transcript`/`before-results.json`).
-- Instrumented Host build: `/build/lanes/hot-path-codec-host-build.sh` (log `hot-path-codec-host-build.log`,
-  `lake build minidregg-host` under the shared lake cache) was OOM-KILLED at 15:23Z inside its `SWARM_MEM_MAX=12G`
-  scope after 3643 steps (the cache restored most of the tree in 13 min; the heavy modules need more). Rerun it
-  with `SWARM_MEM_MAX=24G` (edit the script's export) when the box is quieter (the pipeline's own rows run at
-  MemoryMax 24 G); it writes `/build/lanes/hot-path-codec/.lake/build/bin/minidregg-host`. Nothing of it is
-  running; no PID to stop.
-- Attribution, staged: `/build/lanes/hot-path-codec-reopen.sh HOST LABEL [STORE_ROOT]` reopens the before-Store with
-  HOST under `MINI_OPEN_TIMING=1`, prints time-to-first-read and the `LAP` lines. Run it once the before-run is DONE
-  (not before: it kills the Store's server by its PID file) with the instrumented host (label `laps`) and the
-  candidate's `bin/minidregg-host` (label `cand`, the paired control).
+§2(h) (checkpoint carries indexes + World; suffix-only open; genesis fold → `store audit`) remains the next step
+for the O(n) that is left; its order is decided by the AFTER sample (what dominates once the fold is linear).
 
-## Next three steps
+## After the compaction (Mac, 110-record Store born under this tree)
 
-1. When `hot-path-codec-perf-before.log` has `DONE`: read `before-table.txt` (reopen row = BEFORE at ~1.7k);
-   compute the births slope (`create` p50 first vs last 100 births); then `./hot-path-codec-reopen.sh
-   /build/lanes/hot-path-codec/.lake/build/bin/minidregg-host laps` and `… $CAND/bin/minidregg-host cand`; put the
-   stage laps into §2(h) (which stage carries the seconds decides whether (h) ships whole or the World fold /
-   indexes first).
-2. Implement (h) on this branch, statement-first: new checkpoint body version carrying indexes + World + chain;
-   `Loaded` base+suffix for all of them; `trackOf`/genesis chain → `store audit`; `rootLog` at-use; theorems as the
-   doc lists. Elaborate per file with `lake env lean` (seed `.lake` from a warm build of THIS branch's base: the
-   integration seed misses `Kernel.PayEnrolV2Receiver`, `Compiler.ObjectiveBendPublication`), full `lake build
-   minidregg-host` on dregg-build (`swarm-build`, `SWARM_MEM_MAX=12G`, `LEAN_NUM_THREADS=4`, `. box.env`).
-3. AFTER: rebuild, rerun `hot-path-codec-reopen.sh <new host> after` on the same 1.7k Store; record before/after in
-   §2(h); push; report. Then the thin birth consent arm needs ember's ruling (JP2).
+One full open 9.5 s; `MINI_OPEN_TIMING` laps (cumulative): read 53 ms, decode 158, chain 261, checkpoint 276, tags
+490, frontier 514, resume 622, roots 913, indexes 916, **world fold 9032**, validate 9197. The fold is still 8.1 s
+(74 ms/record). No same-machine BEFORE (macOS `sample` cannot attach without `get-task-allow`; this tree's epoch
+cannot open the box snapshots). Expected remainder: per-turn whole-cell work (`TurnOfIntent` diffs whole touched
+cells; the root hash re-encodes them), O(cell size) per turn for a cell that grows with births. The paired box
+sample (8f66d6cc Host vs 6236826f on the 483 snapshot) decides; fixes then are rulings: diff only the intent's
+written keys (a `TurnOfIntent` statement change) and/or §2(h)'s World checkpoint (a checkpoint epoch change).
 
-Standing: never kill by pattern; stop only by the PID files above; never run an unfiltered `-p <crate>` suite;
-never touch the demo box.
+## Ruling (2b), the World in the checkpoint: scoped, not started (needs an owner decision)
+
+It is HP-DESIGN §1.4's step 1 ("Checkpoint = World v1 = {cells : CellTable, system : systemStream} under one MAC and
+one tag", checkpoint v3 -> v4; TURN-LOG-3's plan), not a new design; `Kernel/WorldSystemCodec.lean` (`systemStream`,
+`systemStream_roundtrip`) is its system codec and the body's `state.cells` are its cells. Minimal shape: `Body` gains
+`system : List UInt8` (MAC-covered through `bodyStream`), the open builds w0 = (cells decoded from `body.state`,
+`systemStream.decode body.system`), folds only the suffix and decides `representsCheck` (no statement moves; the seal
+family's theorems gain the field as a parameter, mechanically); the genesis fold moves to `store audit`.
+Why it is not a field add: three sites seal or re-derive checkpoints without the full open's World:
+`Compiler/DurableServed.lean:1059` (the LIGHT session appends and seals with no World track at all: it never runs
+`World.admit`), `Compiler/DurableReceiverCore.lean:2080` (`checkpointDifferential`), `Compiler/DurableStoreAudit.lean:213`.
+So the light session must hold and advance the World per append: KN2 x TURN-LOG territory, L size. 31 `Body`/seal
+sites in 8 files (`rg 'sealAt |sealCheckpoint |bodyStream|body\.state'`). Local branch `lane/hot-path-world-checkpoint`
+(integration 006cd214 + the two compaction commits), not pushed, no edits.
+
+## Box procedure that works (dregg-build, 30 G, co-tenants 10-15 G)
+
+- `lake` has no job limit and `LEAN_NUM_THREADS` does not bound concurrent modules: heavy pairs met every cap.
+  `Kernel.PayObservationReceiver` alone peaks 15.5 G, `Compiler.LegacyContentCarry` 8.7 G, `Host.Main` > 16 G.
+  `/build/lanes/hot-path-codec-host-build-steps.sh SHA` builds `Kernel.NativeHost`, `Host.Main`, `minidregg-host` in
+  turn, each after waiting for >= 18 G free, capped at free-2 (<= 24) G. It writes its own PID to
+  `/build/lanes/hot-path-codec-host-build.pid`; log `/build/lanes/hot-path-codec-host-build.log`.
+- Every box script writes `echo $$ > <pidfile>` itself (a `$!` of a `setsid` wrapper names the wrapper).
+- Attribution without a rebuild: `/build/lanes/hot-path-codec-profile-open.sh LABEL SNAPDIR` runs one describe of a
+  snapshot under the sampler (PID file `/build/lanes/hot-path-codec-profile.pid`); output in `/build/lanes/hpc-laps/LABEL/`.
+  Snapshots: `/build/lanes/hot-path-codec-laps.sh LABEL HOST` (anchor copied first, then sqlite `.backup`).
+  The 483-record snapshot is `/build/lanes/hpc-laps/cand-n1/snap`.
+- BEFORE run (births to ~1.7k, then the workload's reopen): `/build/lanes/hot-path-codec-perf-before.sh`, PID file
+  `/build/lanes/hot-path-codec-perf-before.pid`, output `/build/lanes/hot-path-codec-perf/`; ~250/840 births at 16:10Z
+  (the World fold also makes every birth slower as the Store grows).
+
+## Next (successor: start here)
+
+Ruling (ember, 2026-10-27): §2(h) is the PRIMARY fix: snapshots fast-forwarded, replay only as `store audit`.
+Statements drafted in `docs/HOT-PATH-2026-10-27.md` §2(h), items 1-5 (lines listed in the report), sent to the
+coordinator for the statements auditor. Order:
+1. After the audit verdict: elaborate items 1-5 as `Prop`s in `Compiler/DurableFastForwardSpec.lean` on a branch from
+   integration (the local `lane/hot-path-world-checkpoint`, integration 006cd214 + the compaction, can be reused;
+   seed its `.lake/build` with `cp -Rc` from the integration worktree, never hardlinks), then build v4: `Body` + `system`
+   + six indexes (`bodyStream`, frame v4 tag in `PersistedCodecTags`), the three sealers (full `storeCheckpoint`, LIGHT
+   `DurableServed.lean:1059` which must now hold and advance the World per append, `checkpointDifferential`), the
+   fast-forward open in `loadChained`, `store audit` = genesis replay + v4 byte comparison. Epoch bump rides L1's one
+   re-genesis (coordinator schedules). Build on the Mac (warm clone) or dregg-ref when the coordinator gives a slot.
+2. The paired compaction measurement on dregg-ref (staged script) when nano's window ends, then the `TurnOfIntent`
+   written-keys statement (second item) to the coordinator as file:line.
+3. Shell start / `can` growth on a fresh ~500-record world born under this tree (dregg-build, Linux binaries from a
+   dregg-ref build of this tree); the Mac cannot host it (system file table shared, ENFILE at 50 births).
+
+Standing: never kill by pattern; stop only by PID files; filtered tests; never the demo box; named-file commits; on the
+box no Lean closure builds except the integrator's cut and the nightly; dregg-ref one closure at a time, `uptime` < 8.

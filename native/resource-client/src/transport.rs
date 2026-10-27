@@ -957,6 +957,7 @@ pub(crate) fn invoke_pinned_deadline(
     // stays retained as uncertain; `lookup`/`retry` ask for the same decided outcome.
     if mini_sdk::operator::lose_reply_armed(operation) {
         std::env::remove_var(mini_sdk::operator::LOSE_REPLY_ENV);
+        await_unread_reply(&stream, deadline);
         drop(stream);
         return Err(LOST_REPLY.to_owned());
     }
@@ -1142,6 +1143,7 @@ fn invoke_inner(
             durability_barrier()?;
             let mut stream = UnixStream::connect(path).map_err(|e| format!("cannot connect to {}: {e}", path.display()))?;
             write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
+            await_unread_reply(&stream, Instant::now() + Duration::from_secs(120));
             drop(stream);
         }
         return Err(LOST_REPLY.to_owned());
@@ -1174,6 +1176,19 @@ fn invoke_inner(
 /// A failure after the write leaves the request's status uncertain.
 /// What the client says when it chose not to read the reply (the uncertain-response class, so
 /// the attempt is retained and resolved by lookup or retry, never re-sent).
+/// The lost-reply switch loses the REPLY, not the request: it waits (up to `deadline`) until the
+/// Host's answer is readable on the connection, without reading a byte of it, and only then drops
+/// the connection. Closing right after the write let a Host that notices the vanished peer before
+/// committing drop the call, so the switch showed "never decided" where the tour shows a decided
+/// outcome whose reply was not read (DEMO-EXPERIENCE step 6).
+fn await_unread_reply(stream: &UnixStream, deadline: Instant) {
+    let remaining = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
+    let mut descriptor = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    let millis = remaining.as_millis().min(i32::MAX as u128) as libc::c_int;
+    // Readable (the answer arrived) or hung up (the Host closed): either way nothing is read.
+    let _ = unsafe { libc::poll(&mut descriptor, 1, millis) };
+}
+
 const LOST_REPLY: &str = "uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look up or retry the exact retained call";
 
 pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
@@ -1365,6 +1380,10 @@ impl PinnedLocalInvocation {
     }
 }
 
+/// Bound on a Host image copied into a sealed snapshot.
+#[cfg(target_os = "linux")]
+const MAX_HOST_IMAGE: u64 = 4 << 30;
+
 /// One running Host and its two pipes. Dropping it kills and reaps the process.
 pub(crate) struct HostProcess {
     child: std::process::Child,
@@ -1392,37 +1411,12 @@ impl HostProcess {
         {
             // Copy the original advertised bytes, rather than reopen the checked
             // pathname. Later pathname changes cannot alter the child's settings.
-            return Self::sealed_snapshot(io::Cursor::new(expected), false).map(Some);
+            return crate::pinned_execution::snapshot(io::Cursor::new(expected), false, expected.len() as u64)
+                .map(Some)
+                .map_err(|e| format!("cannot snapshot host config: {e}"));
         }
         #[cfg(not(target_os = "linux"))]
         Ok(None)
-    }
-
-    #[cfg(target_os = "linux")]
-    fn sealed_snapshot<R: Read>(mut source: R, executable: bool) -> Result<fs::File, String> {
-        use std::os::fd::FromRawFd;
-        use std::io::{Seek, SeekFrom};
-        let base = libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING;
-        let name = if executable { c"mini-host" } else { c"mini-host-config" };
-        // Explicit execute/no-execute intent on new kernels; older kernels
-        // reject these flags with EINVAL and support the original memfd API.
-        let intent = if executable { 0x10 } else { 0x08 };
-        let mut fd = unsafe { libc::memfd_create(name.as_ptr(), base | intent) };
-        if fd < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EINVAL) {
-            fd = unsafe { libc::memfd_create(name.as_ptr(), base) };
-        }
-        if fd < 0 { return Err(format!("cannot create immutable host snapshot: {}", io::Error::last_os_error())); }
-        let mut snapshot = unsafe { fs::File::from_raw_fd(fd) };
-        if unsafe { libc::fchmod(fd, if executable { 0o700 } else { 0o400 }) } != 0 {
-            return Err(format!("cannot protect host snapshot: {}", io::Error::last_os_error()));
-        }
-        io::copy(&mut source, &mut snapshot).map_err(|e| format!("cannot copy host snapshot: {e}"))?;
-        let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
-        if unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, seals) } != 0 {
-            return Err(format!("cannot seal host snapshot: {}", io::Error::last_os_error()));
-        }
-        snapshot.seek(SeekFrom::Start(0)).map_err(|e| format!("cannot read sealed host snapshot: {e}"))?;
-        Ok(snapshot)
     }
 
     fn checked_image(host: &Path, expected: &[u8; 32]) -> Result<fs::File, String> {
@@ -1435,7 +1429,8 @@ impl HostProcess {
         // Hash AFTER sealing, so an in-place writer racing the copy cannot
         // change bytes between their verification and execution.
         #[cfg(target_os = "linux")]
-        let mut image = Self::sealed_snapshot(source, true)?;
+        let mut image = crate::pinned_execution::snapshot(source, true, MAX_HOST_IMAGE)
+            .map_err(|e| format!("cannot snapshot pinned host: {e}"))?;
         #[cfg(not(target_os = "linux"))]
         let mut image = source;
         let mut hash = Sha256::new();

@@ -20,6 +20,11 @@ pub struct Entropy {
     key: [u8; 32],
     counter: u64,
 }
+impl Drop for Entropy {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.key);
+    }
+}
 impl Entropy {
     /// A fresh key from the operating system.
     pub fn os() -> Result<Self> {

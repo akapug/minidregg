@@ -19,7 +19,7 @@ The harness takes the existing run lock, obtains a fresh fixed-installer export
 and stopped status, and compares them to the reviewed predecessor. It checks
 the exact retained request and reserve receipt, then archives the stopped
 SQLite Store and anchor before any upgrade. It keeps the v5 package identity;
-v6 qualification uses a separate fresh run and its own package receipts.
+v7 qualification uses a separate fresh run and its own package receipts.
 
 The fixed installer upgrades the stopped runtime and public listener with
 archived old/new bytes. The listener upgrade preserves its UID, socket,
@@ -39,3 +39,19 @@ A timeout, lost response or nonzero exit does not authorize another invocation.
 Keep the started phase and inspect the native retained state. Harness tests
 and installer publication tests do not establish that the native operation
 or full hosted journey succeeded.
+
+A plan with `goal: "settle-refusal"` and `native_operation_id: 39` selects the
+bounded completion of the retained pre-submit refusal. Its evidence goes into
+`foreground-13-refusal-settlement`, preserving the earlier recovery directories.
+The same native admin command verifies the original request, native refusal,
+tool cleanup and parent reservation; it must not repeat resource creation.
+
+This mode requires a definite error whose parsed text is
+`mini-resource-birth-refused-v1`, with `reason: "law-denied"`,
+`phase: "prepare"`, `born: false`, `toolCharge: "0"`, and the selected native
+operation ID. The compact admin digest must match the retained native result
+bytes, and every hold must be settled with no born resources. Only then does
+the harness perform the ordinary result acknowledgment. It exits before grant
+issuance or application START and preserves the stopped Store even on success.
+A successful settlement ends the failed v5 attempt; it does not qualify a
+successful session birth or the fresh v7 appliance.
