@@ -132,7 +132,8 @@ Read-only source review found the following integration facts:
   handling, not replacement of either file. WorldKindMethods' numeric-output
   bridge should gain the common typed-effect contract rather than a competing
   permanent method system.
-- Mini already has a CHANNELS prototype (channel.rs/relay.rs): constant-rate
+- Mini had a CHANNELS prototype (channel.rs/relay.rs, deleted 2026-10-26 with traffic
+  stack 1, RUST-TRIAGE row 6; recover it from git history before d4f30d1f): constant-rate
   sealed cells, padding, fanout and epoch records, with Unix and TCP IO. Recorded
   trace comparisons cover socket-call sizes, not complete WAN timing anonymity.
   Shared a33c1f97 still has unsigned DCW1 witness records. Source at ch-omit

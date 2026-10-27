@@ -18,7 +18,7 @@ out=${1:-$root/.lake/build/lib/libminidregg-intents.so}
 prefix=$(lean --print-prefix)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-lake env lean --run "$root/native/resource-client/channel-lib/closure.lean" Kernel.Contracts.Intents >"$tmp/oleans"
+lake env lean --run "$root/native/mini-sdk/lean-codec/closure.lean" Kernel.Contracts.Intents >"$tmp/oleans"
 grep -v "^$prefix/" "$tmp/oleans" | sed 's|/build/lib/lean/|/build/ir/|; s|\.olean$|.c.o.export|' >"$tmp/objs"
 missing=0
 while read -r o; do [ -f "$o" ] || { echo "missing object: $o" >&2; missing=1; }; done <"$tmp/objs"

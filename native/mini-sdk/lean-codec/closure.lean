@@ -1,6 +1,6 @@
 /-
 `closure.lean` — the import closure of the given modules, as olean paths, dependencies first.
-`lake env lean --run native/resource-client/channel-lib/closure.lean Kernel.DomainEpochExport`
+`lake env lean --run native/mini-sdk/lean-codec/closure.lean Kernel.DomainEpochExport`
 `build.sh` maps each package olean to its compiled object (`.c.o.export`) and links them.
 -/
 import Lean

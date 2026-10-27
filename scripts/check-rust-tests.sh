@@ -448,7 +448,6 @@ exact rc-shell-confinement   resource-client --bin mini -- \
 # R2-1 R6: hex decoders refuse malformed input without panicking (76757030)
 exact rc-hex-decoders        resource-client --bin mini -- \
   ascii_hex_regression::refuses_non_ascii_without_panicking \
-  relay::unhex_rejects_malformed_unicode_without_panicking \
   render::decode_hex_malformed_payload_retains_empty_fallback \
   render::history::payload_text_malformed_unicode_retains_diagnostic
 # W1.8 tenancy (535fea1e, f86e394a): operator peer allowlist, tenant-group public

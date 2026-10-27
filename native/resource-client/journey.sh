@@ -21,9 +21,6 @@
 #   KT     C14 TAIL-BOUND: journey.d/jtail.sh (a fresh L=8 Store: writes past certified+L refused; certify resumes)
 #   JJ     K-JOINT-INDEX: journey.d/jjoint.sh (a law reads a participant by position)
 #   KCH    CH-EPOCH: journey.d/jchan-epoch.sh (a channel domain's epoch records under ChannelLaw)
-#   KCHR   CH-RELAY-1: journey.d/jchan-relay.sh (`mini relay` ticking in real time; records appended per epoch)
-#   KCHC   CH-CLIENT-1 + CH-J-TRACE: journey.d/jchan-client.sh (`mini channel`: sealed messages in the constant-rate
-#          cells; the trace test across runs with different traffic; the presence pole; the own-slot re-send)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
 #   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
@@ -189,7 +186,7 @@ cap_s() {
   echo "$want"
 }
 
-STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
+STEPS=(J0 J1 J2 J3 J12X J4 P7KR THIN JSERVE J5 J6 G J7 J8 K4 KBW KC KT JJ K10 K11 KCH KIX KF KH K12C JMKT K12I K12T K12N K12E K12M K12R K12H WEB KW K10C JLI KTPL J15 J17 J14 JPRIV1 JN2 JN3 JN3P JN5 JSYNC M3 M4 M5 M6 M7 M8 BD J12 J12W JNAMES JDV JPD J13 JJOB1 JJOB JJOBM KCL J12A JCHAT JINSPECT JLS JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT JROTL JRLANE JGATE JDISCLOSE JAUDIT)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -213,8 +210,6 @@ TITLE[KBW]="births under concurrent admissions: authored window, bounded lag, a 
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[KCH]="a channel domain's epoch records: delta exactly 1, E roots, the sequencer only, openings checked"
-TITLE[KCHC]="two friends talk through the relay in sealed cells; a third member cannot read them and the wire is the same whatever they say"
-TITLE[KCHR]="a channel relay ticks in real time: every slot every tick, one admitted record per epoch, the opening only at the witness"
 TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[KH]="a narrowed read verifies against a salted root: covered entries open, the rest are sealed leaves"
@@ -1017,8 +1012,6 @@ step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read throu
 step_JCHAT() { hook jchat "friends talk in a room through the shell: say/tail merged by height, topic/pin by the founder (a member's shown ignored), reactions, replies, a late joiner, an outsider and a forged author refused by the Host, concurrent says with no re-plan and one order for every reader across a restart, a tampered held payload unreadable, the Discord bridge both ways with no loop (lane P-CHAT)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_KCH() { hook jchan-epoch "CH-EPOCH rows: e0 e1 e2 admitted; a gap, an out-of-order record, E-1 roots and a non-sequencer refused by name; a wrong-length opening refused maskLength; tail in order; cold audit (lane ch-epoch)"; }
-step_KCHC() { hook jchan-client "CH-CLIENT-1 rows: alice -> bob delivered byte-exact in order (one message over 3 cells), carol opens nothing; 887 B down and 256 B up per (tick, slot) in every run; the (tick, slot, size) logs of runs with different traffic diff to 0 lines; with carol killed only her slot differs at the relay; a dropped cell is re-sent by its sender own-slot check; every record checked; cold audit (lane ch-client)"; }
-step_KCHR() { hook jchan-relay "CH-RELAY-1 rows: two runs at P1 n=3 with 0 missed ticks and one admitted record per epoch; 3 sends every tick with a member killed and the same member receipt shape; openings at the witness and not in the Store; a gap record refused epochGap; cold audit (lane ch-relay)"; }
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves the root and every sealed leaf (the blinding ratchets), a return to an old value is invisible, the owner re-derives the ratcheted salts, restart and audit replay the ratchet (lanes k-narrow-hide, k-hide-rotate)"; }
@@ -1095,8 +1088,6 @@ run_step JJ J2
 run_step K10 J5
 run_step K11 J5
 run_step KCH J5
-run_step KCHR J5
-run_step KCHC J5
 run_step KIX K10
 run_step KF J5
 run_step KH J5
