@@ -284,3 +284,55 @@ Across time, claim only that drift makes the submission stale.
 
 **Before proofs:** (a) signed-bytes `encode` and the loaded-cell controller invariant; (b) the
 "nothing else" scope fixed; (c) the agreement statement, with range and cast in `birthRefusal`.
+
+## 2026-10-27, fifth pass: fast-forward open statements (lane/hot-path-codec acad2eb7, HOT-PATH §2(h))
+
+| statement | verdict |
+|---|---|
+| 1 MAC gate over v4 | SOUND (about the deployed `openSealed`) |
+| 2 suffix extends snapshot | SOUND, with one unstated scope (truncation) |
+| 3 exactness over snapshot + suffix | NOT WELL-TYPED against today's `Loaded`; `representsCheck` cannot run |
+| 4 keystone | WEAK: premise is provenance the open cannot decide, no teeth; must be an induction; needs World equality |
+| 5 audit | SOUND; needs a refusal pole |
+
+**1.** `openSealed` (`DurableCheckpointCodec.lean:693`) is the deployed gate; its check order matches
+the named poles, and the MAC hashes `bodyStream.encode body`, so the new fields are covered.
+
+**2.** Real, but a tail-truncated suffix (rollback to any height above the checkpoint) is accepted,
+as replay accepts a truncated log: state it, or bind the open to the head anchor (`headTag`).
+
+**3. The blocking finding.** `Loaded` carries `image : Image` with
+`chainExact : chain = chainAfter logStart image.accepted` and
+`indexExact : index = PresenceIndex.ofRecords image.accepted` (`DurableReceiverCore.lean:981-1009`).
+`representsCheck` (`DeployedRepresentsCheck.lean:68`) reads `image.accepted` for the nullifier keys,
+the transaction ids and `w.head = image.accepted.length`. An open that "reads no entry below the
+checkpoint" has no `image.accepted` for the prefix. Statement 3 either re-reads the prefix or cannot be built. Before elaboration, `Loaded` needs a
+checkpoint-relative shape: `prefix : Body` with
+`chainExact : chain = chainAfter prefix.chain suffix`, indexes `= prefix.ix.extendFrom prefix.height
+suffix`, and `representsCheck` restated over the six indexes (keys from `spentAt`, txs from `txs`,
+head from `height`) instead of `image.accepted`.
+
+**4. Keystone.** (i) *Circularity.* An ff-opened `L` inherits `B`'s World, so its next seal is the replay's value only if `B` was. State it inductively: define `HostWritten key fold : Store → Prop` (genesis; append; a seal by
+`storeCheckpoint` of a `Loaded` from either open of a `HostWritten` store). Then prove
+`HostWritten s → ∀ checkpoint at h, body = replayBody fold (s.prefix h)`. Inhabitant: the genesis Store plus appends. (ii) *No teeth at the open.* `Body` has no semantics or World-fold identity, and the key is the Store's. A Host binary with a different World
+fold that opens the same Store seals under the same key and passes gate 1. "A Store this Host wrote"
+is a provenance premise the open cannot decide (law 1). Fix: put `profile.semantics` and a
+`worldFoldVersion` in the v4 body (under the MAC) and refuse a mismatch by name (`.foreignFold`). The
+teeth pole is then expressible: a body sealed with another fold identity is refused. A same-version fold divergence stays audit-only; say so.
+(iii) *`representsCheck` is not enough.* It checks consistency, not equality: `rowOk` is `true`
+for every `.head`/`.allowance` row, and spent/journal rows are checked for membership, not value. A `system` that differs from the fold in those rows passes. The keystone
+must state `B.system = (foldWorld (prefix h)).system` (and `decodeCells B.state` equal to its cells).
+`representsCheck` stays a guard, not the trust argument.
+
+**Light session** (`DurableServed.lean:1059`). It must hold `track` and state, per append,
+`track' = WorldTrack.advance track record` (the `ofIntent_run` step). At a seal it must state
+`lightSeal L = storeCheckpoint transport rootBytes L indexRoot` byte for byte, so the light sealer is
+one more constructor case of `HostWritten`, not a third body producer. `checkpointDifferential` (`:2080`) and the audit
+(`DurableStoreAudit.lean:213`) likewise: all three call one `bodyOf L`.
+
+**5.** Add a pole: a Store whose checkpoint at `h` differs from `replayBody` in any field (system
+included) is refused naming `h`. A fold divergence is caught nightly, never at open.
+
+**Before `DurableFastForwardSpec.lean`:** the checkpoint-relative `Loaded` and an index-based
+`representsCheck`; the fold identity in the v4 body with its refusal; the keystone as `HostWritten`
+induction concluding World equality; one shared `bodyOf` for the three sealers.
