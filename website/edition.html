@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edition · Mini</title>
+<meta name="description" content="What the next build of the Mini demo carries: what you can do when the door opens, what is still being built, and what is not in this edition.">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap wide">
+<a class="brand" href="index.html">Mini</a>
+<nav class="primary" aria-label="Site">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="language.html">Language</a></li>
+<li><a href="laws.html">Laws</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="edition.html" aria-current="page">Edition</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://demo.dregg.online/join">Join</a></li>
+<li><a href="https://github.com/emberian/minidregg">Source</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<main id="main">
+<div class="wrap">
+<h1>What this edition carries</h1>
+<p class="lede">The next build of the Mini demo, sorted three ways: what is built, what is still
+being built, and what is not in this edition. Nothing here is running for the public yet.</p>
+
+<div class="note">
+<p><strong>Where things stand.</strong> The demo box still serves an earlier rehearsal with every
+login closed, and the join page is closed until the owner opens it. The door opens on the owner's
+word, and the demo shuts down on <strong>11 November 2026</strong>, when everything on it is
+erased. Read the <a href="index.html">overview</a> for what that means for anything you put there.</p>
+</div>
+
+<h2>Built, for when the door opens</h2>
+<p>These are on the repository's main branch and in the build that will ship. Each is listed with
+its evidence on the <a href="status.html">status page</a>.</p>
+<ul>
+<li><strong>One admission path.</strong> Documents, grants, money, programs and applications all
+go through the same admission. A refusal names the clause that refused it, and the web page shows
+the one request that would have been admitted.</li>
+<li><strong>A lost reply is not a lost write.</strong> The client keeps the exact call before it
+sends it. If the answer never arrives, the attempt stays undecided and you retry the same bytes, so
+nothing happens twice.</li>
+<li><strong>Join in the browser.</strong> A name, a hosted key and one link to your session. The
+free route has a fixed number of seats. The paid route costs 50 DREGG a week on Solana mainnet.</li>
+<li><strong>Web pages for every command.</strong> Every shell command has a form on the web,
+derived from the command grammar (203 commands in all), and the outcome of each is announced to
+screen readers.</li>
+<li><strong>Export my world.</strong> One archive of your documents, receipts and key, streamed to
+you and then deleted from the box. One export per member every ten minutes.</li>
+<li><strong>Research consent.</strong> An unchecked box at the door. Your choice is recorded as a
+fact in your own world, and you can see and change it on the export page.</li>
+<li><strong>Stories and laws.</strong> A built-in tale under its sealed law, and the means to
+install a law on your own document and watch it judge your next write.</li>
+<li><strong>Objective Bend.</strong> The <code>bend</code> command is in this edition.</li>
+<li><strong>Discord.</strong> The same subject and receipts over the Discord gateway as on the web.</li>
+<li><strong>Agent residents.</strong> An agent can live in a room as a member on a shared model
+key. Each member gets a share of the spend ceiling: on the demo's numbers, $1 a day and $4 in all.</li>
+<li><strong>A subscriber tier.</strong> Pay for a week and an invitation arrives in your inbox to a
+room with a house agent on the glm-5.3-flash model.</li>
+<li><strong>An app market.</strong> Any Sandstorm package from the real store, 13 featured apps
+listed first, each with an interface an agent can drive beneath the HTML. File, calendar and git
+apps work through WebDAV, CalDAV and git, with request bodies up to 8 MiB.</li>
+<li><strong>Abuse limits.</strong> Limits on connections and in-flight requests per member at the
+web gateway, and size classes (memory, CPU, tasks) for applications.</li>
+</ul>
+
+<h2>Still being built</h2>
+<p>These may or may not land before the door opens. A row stays "in progress" on the
+<a href="status.html">status page</a> until it is on main.</p>
+<ul>
+<li><strong>The platform cell.</strong> The cell kind and its install receiver are built; the
+genesis seed, replay, Host operations and births priced from the cell are not.</li>
+<li><strong>A fast Store open.</strong> Compaction is built. Opening a 483-record Store took 160 to
+175 seconds before it. The next step, a checkpoint that carries the world so an open replays only
+the records after it, is stated and being proved.</li>
+<li><strong>Invite codes.</strong> A reserve of free seats that need an invite code is on main
+but not yet on the box.</li>
+<li><strong>More qualified apps.</strong> Each app earns its place with one write beneath the HTML;
+the market is growing toward two to three dozen. Two browsers co-editing one app is not working yet.</li>
+<li><strong>Effect Plans.</strong> Programs that transfer from their purse and commit writes. The
+first keystone is proved; the rest is being finished.</li>
+<li><strong>A per-member request rate in the Host.</strong> Stated and proved, not yet wired in.</li>
+</ul>
+
+<h2>Not in this edition</h2>
+<ul>
+<li>The fn transport, and a second node.</li>
+<li>The oracle as an application.</li>
+<li>A networked private-computation service.</li>
+<li>Strangers at the join page, until the owner opens the door.</li>
+</ul>
+
+</div>
+</main>
+<footer class="site">
+<div class="wrap wide">
+<p>Every claim here maps to a file at main
+(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
+The repository overrides this site.</p>
+</div>
+</footer>
+</body>
+</html>

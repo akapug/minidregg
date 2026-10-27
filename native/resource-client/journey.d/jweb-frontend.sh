@@ -203,7 +203,7 @@ row receipt-anchor "$(grep -qE 'sha256 [0-9a-f]{64}' <<<"$page" && grep -q 'acce
 # export's manifest carries the value the world holds.
 page=$(req GET /export)
 if [ -f "${M:-/nonexistent}/provisioned-this-run" ]; then
-  row consent-enrol "$(grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
+  row consent-enrol "$(grep -q 'field 1): <strong>contributed for research (CC0)' <<<"$page" && grep -q 'Data is not retained after' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
 else
   row consent-enrol "$(grep -qE 'field 1\): <strong>(contributed for research \(CC0\)|not contributed)' <<<"$page" && echo 1 || echo 0)" "reused member: $(grep -o 'field 1): <strong>[^<]*' <<<"$page" | sed 's/.*<strong>//')"
 fi
@@ -217,7 +217,7 @@ row consent-flip "$(grep -q "field 1): <strong>$want_text" <<<"$page" && echo 1 
 # The subscriber tier's page: what it buys (from the provider table, when the box has the row),
 # the policy line marked for ember, the price and window from the room, the two forms.
 page=$(req GET /subscribe)
-row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'Nothing you make here is retained' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
+row subscribe-page "$([ "$(st)" = 200 ] && grep -q 'action="/subscribe/pay"' <<<"$page" && grep -q 'action="/subscribe/join"' <<<"$page" && grep -q 'Data is not retained after' <<<"$page" && echo 1 || echo 0)" "$(st) $(grep -o 'model calls a day' <<<"$page" | head -1)"
 # Export my world (the 11 November shutdown): start, wait until it is ready, read the document page
 # (its stamp carries the read's height and world root), download (streamed through the gateway,
 # then deleted on the box), untar: the document's text and the manifest's root are the live world's.

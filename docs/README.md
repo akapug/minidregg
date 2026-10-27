@@ -10,7 +10,7 @@ Start with [Objective Bend](OBJECTIVE-BEND.md) for the language and a worked
 composition, then [Developing Mini](DEVELOPING.md) to follow the actual source and
 commands. The [dated evidence index](evidence/2026-10-03-objective-bend.md) separates
 checked source, executed components and joined native behavior. These guides
-explain the system; the older [proof-system introduction](../README.md#selvage),
+explain the system; the older [proof-system introduction](SELVAGE-COMPLETE.md),
 [project architecture](../PROJECT.md) and [founding atlas](../ATLAS.md) retain their
 useful detail and historical context.
 
@@ -90,7 +90,7 @@ or implementation; there is no second manual for each subsystem.
 | Confidential computation and custody | [Private cell](PRIVATE-CELL.md), [language execution contract](OBJECTIVE-BEND.md#backends-and-privacy) | [PrivateWorldIR](../Compiler/PrivateWorldIR.lean), [PrivateSuccessorCustody](../Kernel/PrivateSuccessorCustody.lean) |
 | Traffic privacy | [PQ mailbox](../native/resource-client/PQ-MAILBOX.md) | The research line kept (traffic stack 2: `pq_mailbox.rs`, `cohort_tcp.rs`, the dispatch journal in `scheduled_transport.rs`); stacks 1 (channel/relay) and 3 (`mini traffic`) were deleted 2026-10-26; distinct from computation secrecy |
 | Hosted services and SPK | [Provider custody](HOSTED-PROVIDER-CUSTODY.md), [SPK RPC](../native/spk-rpc/README.md) | `native/grain-runtime/`, `native/spk-host/`, `native/resource-client/` |
-| Proof systems and compilation | [Selvage introduction](../README.md#selvage), [proof-system survey](PROOF-SYSTEM-SURVEY.md) | `Theory/`, `Selvage/`, `Compiler/`, `Assurance/` |
+| Proof systems and compilation | [Selvage introduction](SELVAGE-COMPLETE.md), [proof-system survey](PROOF-SYSTEM-SURVEY.md) | `Theory/`, `Selvage/`, `Compiler/`, `Assurance/` |
 | Build and native qualification | [Developer guide](DEVELOPING.md), [native host](NATIVE-HOST.md), [journey](JOURNEY.md) | `scripts/build-native-host.sh`, `native/resource-client/journey.sh` |
 
 Dated design documents sometimes describe gaps that subsequent source has closed.
