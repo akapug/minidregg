@@ -201,7 +201,20 @@ def stallDelay (timeout : Nat) : Delay := fun _ recipient m =>
     else 1
   else 15 * timeout / 10
 
-def main : IO Unit := do
+/-- A plant the gate (`scripts/gates/check-generic-simplex`) runs to prove this harness can go red.
+`fixed-timer` removes the backoff from the recovery run (`backoffCap := 0`, the paper's fixed
+timer): "backoff: pending block never committed". `split-tip` gives replica 1 a committed tip
+that is not a prefix of the others' after the normal run: "normal safety/replay". -/
+def plantOf (args : List String) : IO (Option String) :=
+  match args with
+  | [] => pure none
+  | ["--plant", name] =>
+      if name == "fixed-timer" || name == "split-tip" then pure (some name)
+      else throw (IO.userError s!"unknown plant {name}: fixed-timer | split-tip")
+  | _ => throw (IO.userError "usage: generic-simplex-harness [--plant fixed-timer|split-tip]")
+
+def main (args : List String) : IO Unit := do
+  let plant ← plantOf args
   -- (1) The recorded stall, under the paper's fixed timer and under backoff.
   for cap in [0,3] do
     let cfgT : Config := {cfg with timeout := 100, backoffCap := cap}
@@ -219,7 +232,7 @@ def main : IO Unit := do
   -- commits with no resubmission, prefix-consistent everywhere; the paper's
   -- fixed timer under the same schedule commits nothing (the falsifier: this
   -- schedule discriminates fix C, it does not pass without it).
-  let cfgC : Config := {cfg with timeout := 100, backoffCap := 3}
+  let cfgC : Config := {cfg with timeout := 100, backoffCap := if plant == some "fixed-timer" then 0 else 3}
   let recovered := (Timed.initial cfgC (stallDelay 100)).runUntil (stallDelay 100) 10 4000 400000
   ensure (recovered.nodes.all committedPayload) "backoff: pending block never committed"
   let views := recovered.nodes.toList.map payloadView
@@ -251,6 +264,9 @@ def main : IO Unit := do
   ensure (timedSafe late) "late offer: delivered histories not prefix-consistent"
   IO.println s!"PASS idle quiescence: 1 proposal for 1 operation over t=20000 (views reached {idle.nodes.toList.map (·.current)}); a late offer committed within {late.now - idle.now} time units of being checked (views now {late.nodes.toList.map (·.current)})"
   let normal := run 4000 initial (fun _ => false)
+  let normal := if plant == some "split-tip" then
+      {normal with nodes := normal.nodes.modify 1 fun s => {s with committedTip := [[99]]}}
+    else normal
   ensure (normal.nodes.all (fun s => !s.committedTip.isEmpty)) "normal progress"
   ensure (safe normal && restarted normal) "normal safety/replay"
   -- A source offer learned after consensus already inserted inert blocks must
@@ -302,4 +318,4 @@ def main : IO Unit := do
     ensure (honestSafe n && restarted n) "adversarial crash replay"
   IO.println "PASS GenericSimplex event harness: normal, silent-leader fallback, equivocation, old-view continuation, crash replay, roster, timeout"
 end Minidregg.Verify.GenericSimplexHarness
-def main : IO Unit := Minidregg.Verify.GenericSimplexHarness.main
+def main (args : List String) : IO Unit := Minidregg.Verify.GenericSimplexHarness.main args

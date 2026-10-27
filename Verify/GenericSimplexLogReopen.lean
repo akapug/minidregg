@@ -62,7 +62,14 @@ def fresh (base : Journal) : IO (Restored context) := do
     | throw (IO.userError "base journal does not replay")
   return r
 
-def main : IO Unit := do
+/-- The gate's plant (`scripts/gates/check-generic-simplex`): `flip-byte` flips one bit in the
+middle of the 100 000-frame image before it is reopened; the reopen must refuse or differ
+("delta-frames: ..."). -/
+def main (args : List String) : IO Unit := do
+  let flip ← match args with
+    | [] => pure false
+    | ["--plant", "flip-byte"] => pure true
+    | _ => throw (IO.userError "usage: generic-simplex-log-reopen [--plant flip-byte]")
   let empty : Journal := ⟨context,0,0,[],[],none⟩
   -- 1. 100 000 appended delta frames, one input each.
   IO.println s!"{entries} appended delta frames"
@@ -77,6 +84,7 @@ def main : IO Unit := do
     image := frame.foldl Array.push image
   require (r.length == image.size) "appended frame lengths disagree with the image"
   require (image.size > 1073741824 / 64) "delta-frame image does not exceed the per-byte recursion limit"
+  if flip then image := image.modify (image.size / 2) (· ^^^ 1)
   reopenMatches image.toList r "delta-frames"
   -- A torn final frame (an unacknowledged append cut short) is classified as
   -- such: the valid prefix ends before it.
@@ -112,4 +120,4 @@ def main : IO Unit := do
 
 end Minidregg.Verify.GenericSimplexLogReopen
 
-def main : IO Unit := Minidregg.Verify.GenericSimplexLogReopen.main
+def main (args : List String) : IO Unit := Minidregg.Verify.GenericSimplexLogReopen.main args
