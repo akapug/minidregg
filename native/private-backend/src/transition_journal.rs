@@ -174,6 +174,11 @@ impl<M: Machine> Journal<M> {
     pub fn torn_tail(&self) -> Option<&TornTail> {
         self.torn.as_ref()
     }
+    /// After an uncertain write the in-memory state may trail the disk; every
+    /// append refuses until the journal is reopened.
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
     pub fn state(&self) -> &M {
         &self.state
     }

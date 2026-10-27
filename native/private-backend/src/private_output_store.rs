@@ -457,7 +457,7 @@ pub(crate) mod tests {
                     &custody::rpc(anchors[i].socket(), &[0]).unwrap(),
                 )
                 .unwrap();
-                assert_eq!(exported.journal, live);
+                assert_eq!(exported.journal(), &live);
             }
             write(&root.join("PROFILE.txt"),b"PRIVATE-INPUT 255+1 reference integration fixture; holder0 deals left and holder2 deals right from party-local entropy; King preprocessing from per-dealer OS/seeded entropy; actual ACSS/Sh2t/King/LayerMPC/output WAL. All original outboxes/spent retained. No source authority, recipient enrollment, current release, Qualified successor, simulator, GOD/PQ claim.
 ");

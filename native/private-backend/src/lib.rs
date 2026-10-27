@@ -19,7 +19,6 @@ pub mod custody;
 pub mod gather;
 pub mod private_send;
 pub mod private_send_store;
-pub mod protocol_store;
 pub mod reconstruction;
 pub mod entropy;
 #[cfg(test)]
