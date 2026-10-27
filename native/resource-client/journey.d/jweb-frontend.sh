@@ -279,8 +279,11 @@ page=$(req POST "${EDIT_URL:-/doc/$DOC/edit/none}" --data-urlencode "csrf=$CSRF"
 row tour-refused "$(grep -q 'data-save-status="refused"' <<<"$page" && echo 1 || echo 0)" "$(st) ${EDIT_URL:-no editor form} $(grep -o 'data-save-status="[a-z]*"[^>]*>[^<]*' <<<"$page" | head -1 | cut -c1-160)"
 page=$(req POST /tour/4 --data-urlencode "csrf=$CSRF" --data-urlencode "verb=can" --data-urlencode "alt=0" --data-urlencode "a1=$DOC" --data-urlencode "a3=on")
 can_text=$(pre_of <<<"$page")
-page2=$(req POST "/doc/$DOC/append" --data-urlencode "csrf=$CSRF" --data-urlencode "text=the write the law admits")
-row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law version' <<<"$can_text" && grep -q 'outcome admitted' <<<"$page2" && echo 1 || echo 0)" "$(st) can --any $DOC: $(tr '\n' ' ' <<<"$can_text" | cut -c1-200) | append: $(grep -o 'class="headline">[^<]*' <<<"$page2" | head -1 | cut -c18-60)"
+# The line `can --any` composed from the grammar leaf of the witnessed verb (`doc append ID DOC
+# 'hello'`), offered as "paste and submit", is submitted and admitted.
+paste_line=$(grep -A1 '^ *paste:' <<<"$can_text" | tail -1 | sed 's/^ *//')
+page2=$(req POST /paste --data-urlencode "csrf=$CSRF" --data-urlencode "line=$paste_line")
+row tour-can-any "$(grep -q 'outcome answered' <<<"$page" && grep -q 'law version' <<<"$can_text" && grep -q 'action="/paste"' <<<"$page" && [ -n "$paste_line" ] && grep -q 'outcome admitted' <<<"$page2" && echo 1 || echo 0)" "$(st) can --any $DOC: $(tr '\n' ' ' <<<"$can_text" | cut -c1-160) | paste=${paste_line:-none}: $(grep -o 'class="headline">[^<]*' <<<"$page2" | head -1 | cut -c18-60)"
 # The same, headless through Chromium (jtour.mjs), with a second one-time code; needs Playwright.
 PW=${PLAYWRIGHT_DIR:-$HOME/tools/playwright/node_modules}
 if [ -f "$PW/playwright/index.mjs" ] && command -v node >/dev/null && [ "$mode" != --box ]; then

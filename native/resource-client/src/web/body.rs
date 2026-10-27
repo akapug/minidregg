@@ -637,6 +637,24 @@ fn post(site: &Site, parts: &[&str], body: &[u8]) -> Page {
         ["new-document", id] => create::post(site, id, body, "create"),
         ["new-document", id, op] => create::post(site, id, body, op),
         ["verb", name] => verbs::post(site, name, &form),
+        // The line `can --any` composed, submitted as this member: `ID` becomes a fresh proposal
+        // id; a leaf that proposes is followed by its `submit`. The shell parses the line as it
+        // would any line typed at it.
+        ["paste"] => {
+            let raw = field("line");
+            let id = fresh_id();
+            let line = raw.split_whitespace().map(|w| if w == "ID" { id.as_str() } else { w }).collect::<Vec<_>>().join(" ");
+            let proposes = crate::shell::words(&line).ok().and_then(|w| {
+                let g = crate::shell_grammar::grammar(w.first()?)?;
+                crate::shell_grammar::parse(g, &w).ok().map(|p| p.leaf.effect == crate::shell_grammar::Effect::Propose)
+            });
+            let Some(proposes) = proposes else { return simple(400, "Paste", "that line is not one the shell's grammar accepts") };
+            let mut lines = vec![line];
+            if proposes {
+                lines.push(format!("submit {id}"));
+            }
+            act_as(site, "Pasted", lines, if proposes { &id } else { "" }, &[("all commands", "/verb")], true)
+        }
         ["tour", step] => {
             let Some(name) = form.get("verb").map(String::as_str).filter(|v| v.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')) else { return simple(400, "Tour", "which verb?") };
             let outcome = verbs::post(site, name, &form);
@@ -912,10 +930,15 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         }
     }
     let detail = ending.text();
+    // `can --any`'s composed line (`  paste:` then the line): one button submits it as this member.
+    let paste = ending.stdout.lines().skip_while(|l| l.trim() != "paste:").nth(1).map(str::trim).filter(|l| !l.is_empty()).map(|line| {
+        format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
+    }).unwrap_or_default();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>\n",
+        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
+        paste,
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
     )
 }

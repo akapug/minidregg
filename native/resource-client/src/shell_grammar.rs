@@ -503,6 +503,26 @@ pub fn leaf_usage(leaf: &Leaf) -> String {
     words.join(" ")
 }
 
+/// A leaf's path followed by one word per positional argument, each from `value(arg)`: the pure
+/// render of a line a caller has already decided (e.g. the write a law's witness names). Flags
+/// are not rendered; an optional argument whose value is empty is left out.
+pub fn compose(leaf: &Leaf, value: &dyn Fn(&Arg) -> String) -> String {
+    let mut words: Vec<String> = leaf.path.iter().map(|w| w.to_string()).collect();
+    for a in leaf.args {
+        let v = value(a);
+        if v.is_empty() && a.optional {
+            continue;
+        }
+        words.push(v);
+    }
+    words.join(" ")
+}
+
+/// The leaf of `g` whose literal path is exactly `path`.
+pub fn leaf(g: &'static Grammar, path: &[&str]) -> Option<&'static Leaf> {
+    g.leaves.iter().find(|l| l.path == path)
+}
+
 /// The operation words, rendered: one segment per leaf, aligned with the usage.
 pub fn operation(g: &Grammar) -> String {
     g.leaves.iter().map(|l| l.about).collect::<Vec<_>>().join(" | ")
@@ -799,6 +819,15 @@ mod tests {
 
     fn words(line: &str) -> Vec<String> {
         line.split(' ').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_line_composes_from_a_leaf_and_the_caller_s_values() {
+        let append = leaf(&DOC, &["doc", "append"]).unwrap();
+        let line = compose(append, &|a| match a.name { "ID" => "ID".into(), "NAME" => "paper".into(), _ => "'hello'".into() });
+        assert_eq!(line, "doc append ID paper 'hello'");
+        let remove = leaf(&DOC, &["doc", "remove"]).unwrap();
+        assert_eq!(compose(remove, &|a| if a.name == "NAME" { "paper".into() } else { "1".into() }), "doc remove paper 1");
     }
 
     #[test]
