@@ -13,7 +13,8 @@
       "bootstrap_descriptor_transport_requires_exact_command_bindings"
     ],
     "passed_marker": "ORACLE_SHARED_NATIVE_CHECKS_PASS",
-    "stream_and_inspection": 3
+    "stream_library_tests": 9,
+    "inspection_example_tests": 2
   },
   "host": "hbox",
   "mount_audit": {

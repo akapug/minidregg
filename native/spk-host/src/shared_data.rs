@@ -225,12 +225,15 @@ struct Identity {
 }
 impl Identity {
     fn of(meta: &Metadata) -> Self {
+        // UID and GID can each become overflow values in the resident namespace.
+        // Restore them only from the exact unchanged pre-entry held inode.
+        let (uid,gid)=crate::namespace_identity::original_owner(meta).unwrap_or((meta.uid(),meta.gid()));
         Self {
             dev: meta.dev(),
             ino: meta.ino(),
             size: meta.len(),
-            uid: meta.uid(),
-            gid: meta.gid(),
+            uid,
+            gid,
             mode: meta.mode(),
             links: meta.nlink(),
             mtime: meta.mtime(),
@@ -286,9 +289,9 @@ fn mkdir_at(parent: &File, name: &str, mode: u32) -> io::Result<File> {
     directory_at(parent, name)
 }
 fn trusted(meta: &Metadata, app_uid: Option<u32>) -> bool {
-    (meta.uid() == 0 || meta.uid() == unsafe { libc::geteuid() })
-        && app_uid != Some(meta.uid())
-        && meta.permissions().mode() & 0o022 == 0
+    crate::namespace_identity::original_owner(meta).is_some_and(|(uid,_)| {
+        (uid == 0 || uid == unsafe { libc::geteuid() }) && app_uid != Some(uid)
+    }) && meta.permissions().mode() & 0o022 == 0
 }
 fn check_node(file: &File, kind: NodeKind, app_uid: Option<u32>) -> io::Result<Identity> {
     let meta = file.metadata()?;

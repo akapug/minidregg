@@ -353,6 +353,18 @@ pub fn verify_in_private_temp_at(
     parent: &Path,
     limits: Limits,
 ) -> io::Result<VerifiedPackage> {
+    verify_in_private_temp_at_with_root_custody(path, parent, limits, |_, meta| meta.uid()==0)
+}
+
+/// A host that changes user namespaces must supply its held pre-entry root
+/// provenance here. The predicate cannot be inferred from an overflow UID.
+/// All ordinary operator, type, no-symlink and mode checks remain mandatory.
+pub fn verify_in_private_temp_at_with_root_custody(
+    path: &Path,
+    parent: &Path,
+    limits: Limits,
+    root_owned: impl Fn(&Path, &std::fs::Metadata) -> bool,
+) -> io::Result<VerifiedPackage> {
     if !parent.is_absolute() {
         return Err(invalid("scratch parent must be absolute"));
     }
@@ -360,7 +372,7 @@ pub fn verify_in_private_temp_at(
         let meta = std::fs::symlink_metadata(ancestor)?;
         if !meta.is_dir()
             || meta.file_type().is_symlink()
-            || (meta.uid() != 0 && meta.uid() != unsafe { libc::geteuid() })
+            || (!root_owned(ancestor,&meta) && meta.uid() != unsafe { libc::geteuid() })
             || meta.permissions().mode() & 0o022 != 0
         {
             return Err(invalid("scratch parent custody refused"));

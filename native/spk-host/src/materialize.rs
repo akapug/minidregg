@@ -57,7 +57,9 @@ pub(crate) fn open_signed_public_data(package: &InstalledPackage, app_uid: u32)
     }
     let root = packages.parent().ok_or_else(|| invalid("SPK namespace absent"))?;
     let store = root.join("public-data");
-    crate::shared_data::open_published(&store, &requirement, app_uid).map(Some)
+    crate::shared_data::open_published(&store, &requirement, app_uid).map(Some).map_err(|error| {
+        io::Error::new(error.kind(), format!("signed public-data {} custody refused: {}", requirement.inventory_sha256_hex(), error))
+    })
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -180,7 +182,7 @@ pub fn qualify_bridge_spk_with_profile(
     let parent = input
         .parent()
         .ok_or_else(|| invalid("package parent absent"))?;
-    let spk = stream::verify_in_private_temp_at(&input, parent, profile.limits())?;
+    let spk = stream::verify_in_private_temp_at_with_root_custody(&input, parent, profile.limits(), crate::namespace_identity::root_owned)?;
     let verified = verified_identity(&spk, PathBuf::new())?;
     let member = verified
         .signed_bridge_config
@@ -342,7 +344,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     if !package_meta.is_file()
         || package_meta.file_type().is_symlink()
         || package_meta.nlink() != 1
-        || (package_meta.uid() != 0 && package_meta.uid() != unsafe { libc::geteuid() })
+        || (!crate::namespace_identity::root_owned(&package_path, &package_meta) && package_meta.uid() != unsafe { libc::geteuid() })
         || package_meta.permissions().mode() & 0o777 != 0o444
     {
         return Err(invalid("installed SPK custody changed"));
@@ -351,7 +353,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     let store = image_dir
         .parent()
         .ok_or_else(|| invalid("image store parent absent"))?;
-    let spk = stream::verify_in_private_temp_at(&package_path, store, profile.limits())?;
+    let spk = stream::verify_in_private_temp_at_with_root_custody(&package_path, store, profile.limits(), crate::namespace_identity::root_owned)?;
     let verified = verified_identity(&spk, image_dir.to_owned())?;
     if image_dir.file_name().and_then(|name| name.to_str())
         != Some(format!("sha256-{}", verified.raw_sha256).as_str())
@@ -365,7 +367,7 @@ pub fn verify_installed_spk(image_dir: &Path, app_uid: u32) -> io::Result<Instal
     if !manifest_meta.is_file()
         || manifest_meta.file_type().is_symlink()
         || manifest_meta.nlink() != 1
-        || (manifest_meta.uid() != 0 && manifest_meta.uid() != unsafe { libc::geteuid() })
+        || (!crate::namespace_identity::root_owned(&manifest_path, &manifest_meta) && manifest_meta.uid() != unsafe { libc::geteuid() })
         || manifest_meta.permissions().mode() & 0o777 != 0o444
         || manifest_meta.len() > 1024 * 1024
     {
@@ -394,7 +396,7 @@ fn retained_import_profile(image_dir: &Path) -> io::Result<ImportProfile> {
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
         || metadata.nlink() != 1
-        || (metadata.uid() != 0 && metadata.uid() != unsafe { libc::geteuid() })
+        || (!crate::namespace_identity::root_owned(&path, &metadata) && metadata.uid() != unsafe { libc::geteuid() })
         || metadata.permissions().mode() & 0o777 != 0o444
         || metadata.len() > 128
     {

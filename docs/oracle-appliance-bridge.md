@@ -151,3 +151,43 @@ this inventory check does not re-attest the large deployment stores. The script
 uses Python only as an operator test harness and does not implement platform
 semantics. These five examples are transport/conversation checks, not specialist
 panel scores or evidence that Mini admission ran.
+
+## Custody across the resident user namespace
+
+The resident maps only its operator and app identities into its user namespace.
+Host-root files and files belonging to unrelated unmapped users can therefore
+show the same overflow UID there; unmapped groups have the same ambiguity. That
+number is never accepted as evidence of root ownership.
+
+Before entering the namespace, the existing bootstrap opens protected custody
+paths without following symlinks and checks their real host owners. It retains
+handles and original UID/GID metadata for root/operator-owned entries under the
+fixed world's `spk` namespace: finalized packages contribute their retained SPK,
+manifest, import policy and image-root metadata; finalized public datasets
+contribute their complete metadata trees. Executable image contents and archive
+bytes are not parsed at this stage. Foreign/app ownership, writable ancestry and
+symlinks are refused.
+
+After entry, the signature verifier uses that retained root provenance for its
+scratch ancestors. Public-data receipt checks recover the original UID and GID
+only when a captured handle and the observed inode still agree on device, inode,
+mode, link count, length, modification time and change time, with the handle's
+current namespace-visible ownership also matching the observation. Unknown or
+replaced inodes do not inherit trust. The signed archive and public inventory
+checks still run normally; this does not add a new admission route.
+
+Current operator cost: bootstrap scans finalized package metadata and public
+catalogs for that world, not just the requested revision, because selecting the
+package would otherwise require parsing resident inputs before isolation. The
+capture is bounded to 131,072 paths/handles, 32 MiB of retained path bytes and
+32 levels of public-data traversal; the process's descriptor limit may be lower.
+Exceeding a bound refuses startup. It does not hash the large public payloads
+again. Future narrower selection should use a trusted bootstrap input, not an
+app-supplied host pathname.
+
+Normal publication adds a new hash-addressed revision and leaves existing ones
+unchanged. Renaming an already-held catalog administratively can change its
+ctime; a later in-process custody recheck then refuses. Once IDs are unmapped,
+treating that change as harmless would also hide an ownership change. The
+already-mounted data remains pinned, and a fresh START can capture a restored
+publication again. No collector or update operation removes old revisions.

@@ -1,6 +1,9 @@
 //! Independent adversarial controls against the production custody API.
 //! Run on Linux with ATTACHMENT_REVIEW_ROOT set to an existing private directory.
 #![cfg(target_os = "linux")]
+#[path = "../../../../native/spk-host/src/namespace_identity.rs"]
+mod namespace_identity;
+mod os { pub(crate) fn root_owner(uid: u32) -> bool { uid == 0 } }
 #[path = "../../../../native/spk-host/src/shared_data.rs"]
 mod shared_data;
 use shared_data::{audit, open_published, parse_signed_attachment, publish};
@@ -119,4 +122,18 @@ fn held_descriptor_rejects_data_directory_replacement() {
     fs::set_permissions(&publication, fs::Permissions::from_mode(0o555)).unwrap();
     assert!(held.recheck().is_err());
     assert!(open_published(&c.store, &req, app_uid()).is_err());
+}
+
+#[test]
+fn held_revision_survives_catalog_rename_but_restart_fails_closed() {
+    let c = Case::new(); c.publish(); let req = c.req();
+    let held = open_published(&c.store, &req, app_uid()).unwrap();
+    let published = c.published(); let moved = c.store.join("temporarily-removed");
+    fs::rename(&published, &moved).unwrap();
+    assert!(held.recheck().is_ok(), "retained verified publication should stay usable");
+    assert!(open_published(&c.store, &req, app_uid()).is_err(), "restart must not find removed revision");
+    symlink("temporarily-removed", &published).unwrap();
+    assert!(open_published(&c.store, &req, app_uid()).is_err(), "restart must reject catalog symlink");
+    fs::remove_file(&published).unwrap(); fs::rename(&moved, &published).unwrap();
+    assert!(open_published(&c.store, &req, app_uid()).is_ok());
 }
