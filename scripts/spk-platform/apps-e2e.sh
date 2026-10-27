@@ -45,33 +45,35 @@ context() { # SUBJECT FACTORY-CAP ACCOUNT-CAP -> file
      grants:[{kind:"object",target:"10",capability:$f},{kind:"account",target:$s,capability:$a}]}' >"$f"
   echo "$f"
 }
-init_ws() { # NAME SUBJECT KEY CONTEXT
+init_ws() { # NAME SUBJECT KEY CONTEXT  (the workroom's records commit to no next key: --no-prerotation)
   local ws=$out/ws-$1 home=$out/home-$1
   mkdir -m 700 -p "$home/inbox" "$out/ns-$1"
   mini workspace --action init --dir "$ws" --host "$HOST" --config "$CONFIG" --key "$3" --subject "$2" \
-    --birth-context "$4" --namespace-root "$out/ns-$1" --next-pub "$3.next.pub" >"$out/init-$1.out" 2>"$out/init-$1.err" \
-    || mini workspace --action init --dir "$ws" --host "$HOST" --config "$CONFIG" --key "$3" --subject "$2" \
-      --birth-context "$4" --namespace-root "$out/ns-$1" --no-prerotation >>"$out/init-$1.out" 2>>"$out/init-$1.err"
+    --birth-context "$4" --namespace-root "$out/ns-$1" --no-prerotation >"$out/init-$1.out" 2>"$out/init-$1.err"
   [[ -f $ws/workspace.json ]]
 }
 init_ws manager 8 "$WR/tool.key" "$(context 8 55 42)"; row "manager workspace (subject 8) over the workroom's tool key" "$([ -f "$out/ws-manager/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-manager.err" 2>/dev/null | cut -c1-120)"
+init_ws controller 7 "$WR/controller.key" "$(context 7 54 41)"; row "controller workspace (subject 7, the parent task's owner) over the workroom's controller key" "$([ -f "$out/ws-controller/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-controller.err" 2>/dev/null | cut -c1-120)"
 init_ws member 9 "$WR/member.key" "$(context 9 57 43)"; row "member workspace (subject 9) over the workroom's member key" "$([ -f "$out/ws-member/workspace.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/init-member.err" 2>/dev/null | cut -c1-120)"
-WSM=$out/ws-manager WS9=$out/ws-member HOME9=$out/home-member
+WSM=$out/ws-manager WSC=$out/ws-controller WS9=$out/ws-member HOME9=$out/home-member
 
-# ---- the manager's references to the metered tasks, delegated to the member ---------------------
+# ---- the metered tasks' owners delegate observe+mutate to the member -------------------------------
+# The workroom's tool (7902) is owned by subject 8 (capability 81), its parent (7901) by the
+# controller 7 (capability 71; 8 holds only the management capability 73, which cannot delegate).
+# On the box both are the sponsor's, born by mini apps bootstrap; here each owner delegates its own.
 mini workspace --action import --dir "$WSM" --name tool --kind object --target 7902 --observe-capability 81 --operation-capability 81 >"$out/import-tool.out" 2>&1
-mini workspace --action import --dir "$WSM" --name parent --kind object --target 7901 --observe-capability 73 --operation-capability 73 >"$out/import-parent.out" 2>&1
-row "the manager holds tool and parent references" "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSM/refs/parent.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/import-parent.out" | cut -c1-100)"
-delegate() { # REF
-  local id=apps-$1-member
-  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"1000"}\n' "$1" >"$out/delegate-$1.json"
-  mini workspace --action propose --dir "$WSM" --request "$out/delegate-$1.json" --proposal-id "$id" >"$out/propose-$1.out" 2>&1 || return 1
-  mini workspace --action submit --dir "$WSM" --intent "$WSM/proposals/$id/intent.json" --attempt "$WSM/attempts/$id" >"$out/submit-$1.out" 2>&1 || return 1
-  mini workspace --action publish-delegation --dir "$WSM" --proposal-id "$id" --attempt "$WSM/attempts/$id" >"$out/publish-$1.out" 2>&1 || return 1
-  cp "$WSM/proposals/$id/recipient-reference.json" "$HOME9/inbox/$1.json"
+mini workspace --action import --dir "$WSC" --name parent --kind object --target 7901 --observe-capability 71 --operation-capability 71 >"$out/import-parent.out" 2>&1
+row "the task owners hold their references (tool: 8, parent: 7)" "$([ -f "$WSM/refs/tool.json" ] && [ -f "$WSC/refs/parent.json" ] && echo 1 || echo 0)" "$(tail -1 "$out/import-parent.out" | cut -c1-100)"
+delegate() { # WORKSPACE REF
+  local ws=$1 ref=$2 id=apps-$2-member
+  printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"%s","recipient":"9","verbs":["observe","mutate"],"maxCost":"1000"}\n' "$ref" >"$out/delegate-$ref.json"
+  mini workspace --action propose --dir "$ws" --request "$out/delegate-$ref.json" --proposal-id "$id" >"$out/propose-$ref.out" 2>&1 || return 1
+  mini workspace --action submit --dir "$ws" --intent "$ws/proposals/$id/intent.json" --attempt "$ws/attempts/$id" >"$out/submit-$ref.out" 2>&1 || return 1
+  mini workspace --action publish-delegation --dir "$ws" --proposal-id "$id" --attempt "$ws/attempts/$id" >"$out/publish-$ref.out" 2>&1 || return 1
+  cp "$ws/proposals/$id/recipient-reference.json" "$HOME9/inbox/$ref.json"
 }
-ok=1; delegate tool || ok=0; delegate parent || ok=0
-row "the manager delegates observe+mutate on both tasks to the member; references land in HOME/inbox" "$ok" "$(for r in tool parent; do tail -1 "$out/publish-$r.out" 2>/dev/null | cut -c1-80; done | tr '\n' ' ')"
+ok=1; delegate "$WSM" tool || ok=0; delegate "$WSC" parent || ok=0
+row "each owner delegates observe+mutate on its task to the member; references land in HOME/inbox" "$ok" "$(for r in tool parent; do tail -1 "$out/propose-$r.out" 2>/dev/null | cut -c1-80; done | tr '\n' ' ')"
 
 # ---- the world's apps config and the worker --------------------------------------------------------
 mkdir -m 700 -p "$out/quarantine" "$out/wanted" "$out/verdicts" "$out/meta" "$out/state"
