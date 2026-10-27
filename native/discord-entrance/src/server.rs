@@ -31,8 +31,24 @@ pub const MAX_PENDING_LINKS: usize = 64;
 /// 2,000 characters; the full output is the session's own business).
 pub const CUSTODY_STREAM: usize = 64 * 1024;
 
+/// How interactions arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Discord POSTs signed interactions to the application's Interactions Endpoint URL.
+    Http,
+    /// The application has no endpoint URL: Discord delivers `INTERACTION_CREATE` to the bot
+    /// over the gateway WebSocket (`crate::gateway`), and replies go to the REST callback.
+    Gateway,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub mode: Mode,
+    /// Gateway mode: the bot token's file (`MINI_DISCORD_BOT_TOKEN_FILE`, systemd's
+    /// `LoadCredential=`), the gateway URL and the trust-anchor bundle.
+    pub bot_token_file: Option<PathBuf>,
+    pub gateway_url: String,
+    pub ca_file: PathBuf,
     pub listen: String,
     pub application_id: String,
     pub public_key_hex: String,
@@ -63,6 +79,11 @@ impl Config {
     /// Everything comes from the environment (the unit's 0600 `EnvironmentFile`); nothing is
     /// read from argv.
     pub fn from_env() -> Result<Self, String> {
+        let mode = match std::env::var("MINI_DISCORD_MODE").as_deref() {
+            Err(_) | Ok("") | Ok("http") => Mode::Http,
+            Ok("gateway") => Mode::Gateway,
+            Ok(other) => return Err(format!("MINI_DISCORD_MODE is http or gateway, not {other:?}")),
+        };
         let application_id = env_required("MINI_DISCORD_APPLICATION_ID")?;
         if !interaction::is_snowflake(&application_id) {
             return Err("MINI_DISCORD_APPLICATION_ID must be a Discord snowflake".into());
@@ -78,9 +99,20 @@ impl Config {
             }
         };
         Ok(Config {
+            mode,
+            bot_token_file: match mode {
+                Mode::Gateway => Some(crate::env_path("MINI_DISCORD_BOT_TOKEN_FILE")?),
+                Mode::Http => None,
+            },
+            gateway_url: std::env::var("MINI_DISCORD_GATEWAY_URL").ok().filter(|v| !v.is_empty())
+                .unwrap_or_else(|| crate::gateway::GATEWAY.to_string()),
+            ca_file: path_or("MINI_DISCORD_CA_FILE", "/etc/ssl/certs/ca-certificates.crt")?,
             listen: std::env::var("MINI_DISCORD_LISTEN").unwrap_or_else(|_| "127.0.0.1:8793".to_string()),
             application_id,
-            public_key_hex: env_required("MINI_DISCORD_PUBLIC_KEY")?,
+            public_key_hex: match mode {
+                Mode::Http => env_required("MINI_DISCORD_PUBLIC_KEY")?,
+                Mode::Gateway => std::env::var("MINI_DISCORD_PUBLIC_KEY").unwrap_or_default(),
+            },
             api_base: api_base.trim_end_matches('/').to_string(),
             roster: path_or("MINI_DISCORD_ROSTER", "/etc/mini/discord-roster.json")?,
             roster_owner_uid: env_u64("MINI_DISCORD_ROSTER_OWNER_UID", 0)? as u32,
@@ -162,7 +194,9 @@ impl Reply {
 
 pub struct App {
     cfg: Config,
-    verifier: Verifier,
+    /// The HTTP mode's signature check. None in gateway mode, where the TLS connection the
+    /// bot opened to Discord is the authentication of every event on it.
+    verifier: Option<Verifier>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     inflight: Arc<AtomicUsize>,
 }
@@ -177,7 +211,10 @@ impl Drop for Inflight {
 
 impl App {
     pub fn new(cfg: Config) -> Result<Arc<Self>, String> {
-        let verifier = Verifier::from_hex(&cfg.public_key_hex)?;
+        let verifier = match cfg.mode {
+            Mode::Http => Some(Verifier::from_hex(&cfg.public_key_hex)?),
+            Mode::Gateway => None,
+        };
         Ok(Arc::new(App {
             cfg,
             verifier,
@@ -196,7 +233,10 @@ impl App {
         if req.method != "POST" {
             return (Reply::text(405, "Method Not Allowed", "POST only\n"), None);
         }
-        if let Err(e) = self.verifier.verify(
+        let Some(verifier) = &self.verifier else {
+            return (Reply::text(404, "Not Found", "this entrance takes interactions over the gateway\n"), None);
+        };
+        if let Err(e) = verifier.verify(
             req.header("x-signature-ed25519"),
             req.header("x-signature-timestamp"),
             &req.body,
@@ -205,7 +245,13 @@ impl App {
             eprintln!("mini-discord: 401 {}", e.as_str());
             return (Reply::text(401, "Unauthorized", e.as_str()), None);
         }
-        let cmd = match interaction::parse(&req.body) {
+        self.handle_interaction(&req.body, now)
+    }
+
+    /// One interaction, however it arrived (a signed HTTP POST, or an `INTERACTION_CREATE`
+    /// event on the gateway): the reply to send back, and the line to run once it is sent.
+    pub fn handle_interaction(&self, body: &[u8], now: u64) -> (Reply, Option<(Job, Inflight)>) {
+        let cmd = match interaction::parse(body) {
             Ok(Interaction::Ping) => return (Reply::json(&interaction::pong()), None),
             Ok(Interaction::Unsupported(t)) => {
                 return (Reply::text(400, "Bad Request", &format!("unsupported interaction type {t}")), None)
@@ -428,22 +474,35 @@ impl App {
         let (reply, job) = self.handle(&req, now_s());
         let written = write_response(&mut stream, reply.status, reply.reason, reply.content_type, &reply.body);
         drop(stream);
-        if let Some((mut job, guard)) = job {
+        if let Some((job, guard)) = job {
             if let Err(e) = written {
                 // Discord never saw the deferral; running the line would act unseen.
                 eprintln!("mini-discord: deferral for {} not delivered ({e}); line not run", job.interaction);
                 return;
             }
-            // Custody before the run, after the deferral: a line whose acceptance could not be
-            // retained does not run.
-            if let Some(accept) = job.accept.take() {
-                if let Err(e) = job.record.save(accept) {
-                    eprintln!("mini-discord: custody save failed for {}: {e}; line not run", job.interaction);
-                    return;
-                }
-            }
-            self.run_job(job, guard);
+            self.accept_and_run(job, guard);
         }
+    }
+
+    /// After the reply reached Discord: retain the acceptance, then run. A line whose
+    /// acceptance could not be retained does not run.
+    pub fn accept_and_run(&self, mut job: Job, guard: Inflight) {
+        if let Some(accept) = job.accept.take() {
+            if let Err(e) = job.record.save(accept) {
+                eprintln!("mini-discord: custody save failed for {}: {e}; line not run", job.interaction);
+                return;
+            }
+        }
+        self.run_job(job, guard);
+    }
+
+    /// The interaction id and token a job answers (the gateway posts its callback with them).
+    pub fn api_base(&self) -> &str {
+        &self.cfg.api_base
+    }
+
+    pub fn poster(&self) -> &Poster {
+        &self.cfg.poster
     }
 
     pub fn serve(self: &Arc<Self>, listener: TcpListener) -> ! {

@@ -20,6 +20,8 @@
 //! * [`reply`]: the shell's ending line, and fitting output into Discord's 2000 characters.
 //! * [`curl`]: the interaction follow-up PATCH through `/usr/bin/curl`; the URL (which carries
 //!   the interaction token) reaches curl on stdin, never argv.
+//! * [`gateway`]: gateway mode: the same interactions over Discord's WebSocket, for an
+//!   application with no Interactions Endpoint URL; replies through the REST callback.
 //! * [`server`]: the endpoint itself: verify, answer PING, refuse early, defer, run, PATCH.
 //! * [`door`]: the self-serve door's queue schema, shared by the `/join` form (`mini-door`),
 //!   the entrance's `/mini line:link CODE`, and the root processor (`mini-door-process`).
@@ -29,6 +31,7 @@
 
 pub mod curl;
 pub mod door;
+pub mod gateway;
 pub mod navigation;
 pub mod http;
 pub mod interaction;

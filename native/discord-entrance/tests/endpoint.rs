@@ -95,6 +95,10 @@ fn world_with(tag: &str, split: bool) -> World {
     let key = SigningKey::from_bytes(&[9u8; 32]);
     let p = |x: &str| PathBuf::from(format!("/fixed/{x}"));
     let cfg = Config {
+        mode: minidregg_discord_entrance::server::Mode::Http,
+        bot_token_file: None,
+        gateway_url: String::new(),
+        ca_file: PathBuf::from("/nonexistent"),
         listen: String::new(),
         application_id: APP.into(),
         public_key_hex: hex_encode(key.verifying_key().as_bytes()),
