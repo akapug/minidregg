@@ -43,12 +43,15 @@ mkdir -p "$ev"; v=$ev/verdicts.txt
 { echo "candidate $(basename "$cand")  method ${method#$SRC/}  entry $entry  flags ${world_flags[*]:-none}"; } >"$v"
 step() { local name=$1; shift; local out rc
   out=$(python3 "$d" "$@" 2>&1); rc=$?
-  echo "$name rc=$rc: $(printf '%s' "$out" | grep -v "^$" | tail -1 | cut -c1-700)" | tee -a "$v"; return $rc; }
+  echo "$name rc=$rc: $(printf '%s' "$out" | grep -v "^$" | tail -1 | cut -c1-700)" | tee -a "$v"
+  # the driver reports a refused invocation as a result row, exit 0: a refusal is not an admission
+  if [ $rc = 0 ] && printf '%s' "$out" | grep -q '"refused": true'; then echo "$name REFUSED (row above)" | tee -a "$v"; return 1; fi
+  return $rc; }
 rc=0
 step world world --bin "$bin" --root "$run" "${world_flags[@]}" \
  && step publish publish --root "$run" --method "$method" --entry "$entry" \
  && step invoke invoke --root "$run" --label i1 \
  && step readback readback --root "$run" --label i1 || rc=$?
 python3 "$d" stop --root "$run" >/dev/null 2>&1
-cp -r "$run/transcript" "$run/results" "$ev/" 2>/dev/null
+cp -r "$run/results" "$ev/" 2>/dev/null; mkdir -p "$ev/transcript"; cp "$run"/transcript/{publication,publish-*,i1-invoke,i1-dry*}.{cmd,err,rc} "$ev/transcript/" 2>/dev/null
 echo "overall rc=$rc" | tee -a "$v"; exit $rc
