@@ -350,6 +350,8 @@ checkp hermes "key set names alice's owner public key" test -n "$ALICE_PUB"
 operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
   "$MINI" key --action grant --dir "$WS/alice" --provider friendkey --runner "${SUBJ[hprov]}" \
     --per-call 64 --per-day 200 --until 1000000000 --broker "$KEYS_CLIENT"
+# (The gateway pins a request without max_tokens to the task's maxOutputTokens,
+# 64 below; the broker refuses a call above the grant's per-call cap.)
 # The sandbox: the real launcher, its gate, the runtime root (controller edge,
 # stand-in worker, provider bridge) and the worker's only writable mount.
 mkdir -p -m 700 "$SD/launcher" "$SD/worker-work/.hermes" "$SD/runtime-root"
@@ -358,8 +360,16 @@ BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap")
 operator hermes "LAUNCHER: materialize bwrap for $BWRAP" python3 "$REPO/deploy/grain-host/materialize-bwrap.py" \
   --physical-bwrap "$BWRAP" --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$SD/launcher/bwrap"
 install -m 0700 "$LAUNCH_GATE" "$SD/launcher/launch-gate"; chmod 700 "$SD/launcher/bwrap"
+# J14_HERMES_ROOT: a runtime root staged by deploy/hermes/build-runtime-root
+# (upstream Hermes Agent + the Mini tool-catalogue patch). Unset: the ACP
+# stand-in journey.d/j14-hermes-acp.
+if [ -n "${J14_HERMES_ROOT:-}" ]; then
+  cp -a "$J14_HERMES_ROOT"/. "$SD/runtime-root/"
+  mkdir -p -m 700 "$SD/worker-work/.cache" "$SD/worker-work/.config" "$SD/worker-work/.local/share"
+else
+  install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
+fi
 install -m 0755 "$GRAIN_RUNTIME" "$SD/runtime-root/grain-runtime"
-install -m 0755 "$REPO/native/resource-client/journey.d/j14-hermes-acp" "$SD/runtime-root/hermes-acp"
 install -m 0755 "$BRIDGE" "$SD/runtime-root/grain-provider-bridge"
 # Hermes's grain and controller config, in one command.
 jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOCKET" --arg g "$W/genesis.json" \
@@ -382,7 +392,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
      budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
-       maxInputTokens:131072,maxOutputTokens:100,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
+       maxInputTokens:131072,maxOutputTokens:64,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
    room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
@@ -484,13 +494,20 @@ hermes attach1 "links both docs and digests three entries"
 checkp attach1 "the resident ran one prompt through the controller" test "$(resident_completed)" -ge 1
 ok attach1 alice "doc show lab-index"
 cp "$OUT" "$SD/index-1.txt"
-check attach1 "lab-index links paper once" 1 "$(grep -c "^link .*$PAPER_T" "$OUT")"
-check attach1 "lab-index links data once" 1 "$(grep -c "^link .*$DATA_T" "$OUT")"
-checkp attach1 "Hermes made both links (created-by $HS)" sh -c "[ \$(grep -E '^link .*($PAPER_T|$DATA_T).*created-by $HS' '$OUT' | wc -l) = 2 ]"
+# `doc links` lists the index's links (a target alice has no name for is shown
+# by its cell); `room ls` names each cell's writers from the signed history.
+ok attach1 alice "doc links lab-index"
+cp "$OUT" "$SD/links-1.txt"
+check attach1 "lab-index links paper once" 1 "$(grep -cE "^link [0-9]+ -> [a-z]+ $PAPER_T " "$OUT")"
+check attach1 "lab-index links data once" 1 "$(grep -cE "^link [0-9]+ -> [a-z]+ $DATA_T " "$OUT")"
+ok attach1 alice "room ls lab"
+cp "$OUT" "$SD/room-ls-1.txt"
+checkp attach1 "Hermes ($HS) is a writer of lab-index and lab-digest (signed history)" sh -c \
+  "grep -E ' by ([0-9]+,)*$HS(,[0-9]+)* .*lab-index' '$OUT' >/dev/null && grep -E ' by ([0-9]+,)*$HS(,[0-9]+)* .*lab-digest' '$OUT' >/dev/null"
 DIGEST_REF=lab-digest
 ok attach1 alice "doc show $DIGEST_REF"
 cp "$OUT" "$SD/digest-1.txt"
-checkp attach1 "lab-digest has a section by Hermes covering the three entries" sh -c "grep -E 'created-by $HS' '$OUT' | grep -q 'entries #'"
+checkp attach1 "lab-digest has a section covering the three entries" grep -qE '^ +[0-9]+  entries #1-#3: ' "$OUT"
 T1=$(paid_turns)
 check attach1 "three turns paid (two links, one digest)" 3 "$T1"
 check attach1 "Hermes's account = $BUDGET - 3*($PRICE + fee $FEE) (Hermes's signed read)" "$((BUDGET - 3 * TURN))" "$(credit_of hermes "$ACCT")"
@@ -517,7 +534,7 @@ checkp nogrant "the Host's operator log names it: capabilityRejected (no grant c
 tail_json >"$SD/tail-nogrant.jsonl"
 checkp nogrant "Hermes said why in its stream (the Host's refusal), replying to bob" \
   jq -s -e --arg h "$HS" --arg b "$B" 'any(.[]; .author == $h and .to == $b and (.text | test("refused")))' "$SD/tail-nogrant.jsonl"
-check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  created-by')"
+check nogrant "paper is unchanged: bob's one line" 1 "$(cd "$WS/bob" && "$SHELL_BIN" shell --socket "$SOCKET" --host "$HOST" --config "$CONFIG" --workspace "$WS/bob" --home "$H/bob" --line "doc show paper" 2>/dev/null | grep -cE '^ +[0-9]+  ')"
 
 # ------------------------------------------------ topup
 BAL=$(credit_of hermes "$ACCT")

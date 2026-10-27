@@ -1,0 +1,47 @@
+--- a/acp_adapter/server.py	2026-09-19 14:30:54
++++ b/acp_adapter/server.py	2026-10-27 08:18:15
+@@ -446,10 +446,15 @@
+             from agent.memory_manager import inject_memory_provider_tools
+ 
+             agent = state.agent
+-            agent.enabled_toolsets = _expand_acp_enabled_toolsets(
+-                getattr(agent, "enabled_toolsets", None) or ["hermes-acp"],
+-                mcp_server_names=[s.name for s in mcp_servers],
+-            )
++            if os.environ.get("HERMES_MINI_TOOL_CATALOGUE") == "1":
++                # A Mini room resident: the session's tools are exactly the
++                # MCP servers the client provided, no built-in toolset.
++                agent.enabled_toolsets = [f"mcp-{s.name}" for s in mcp_servers if s.name]
++            else:
++                agent.enabled_toolsets = _expand_acp_enabled_toolsets(
++                    getattr(agent, "enabled_toolsets", None) or ["hermes-acp"],
++                    mcp_server_names=[s.name for s in mcp_servers],
++                )
+             agent.tools = get_tool_definitions(
+                 enabled_toolsets=agent.enabled_toolsets,
+                 disabled_toolsets=getattr(agent, "disabled_toolsets", None), quiet_mode=True,
+@@ -595,10 +600,23 @@
+                 )
+         self._schedule_available_commands_update(state.session_id)
+         self._schedule_soon(lambda: self._send_usage_update(state))
++        field_meta = self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id))
++        if os.environ.get("HERMES_MINI_TOOL_CATALOGUE") == "1":
++            # Mini's restricted room resident admits a session only when the
++            # agent reports the exact tool surface it loaded; the controller
++            # compares the names with its own catalogue. `valid` is false if
++            # any non-Mini tool is on the surface.
++            names = sorted(getattr(state.agent, "valid_tool_names", None) or [])
++            field_meta = dict(field_meta or {})
++            field_meta["miniToolCatalogue"] = {
++                "type": "mini-hermes-tool-catalogue-v1",
++                "valid": bool(names) and all(n.startswith("mcp__mini_grain__") for n in names),
++                "names": names,
++            }
+         return {
+             "models": self._build_model_state(state),
+             "modes": self._session_modes(state),
+-            "field_meta": self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id)),
++            "field_meta": field_meta,
+         }
+ 
+     async def _attach_session_mcp(self, state: SessionState, mcp_servers: list | None, log: str, *log_args) -> None:

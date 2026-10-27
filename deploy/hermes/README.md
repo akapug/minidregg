@@ -274,50 +274,66 @@ one credit per purse micro-unit):
   different fees refuses the user-route reserve (its hold must equal the law's
   fee) and fails a metered settle closed; a fee change means a new purse.
 
-## The demo box: Hermes's grain and controller config
+## The demo box: Hermes as a room resident
 
-`controller.json` is not written by hand: two of its fields are capabilities
-allocated when the owner delegates the parent witness, so it comes out of
-`grain-runtime create deploy/hermes/grain-create.demo.json` (run as the Hermes
-grain account against the serving Store). `controller.demo.json` is the exact
-shape that command writes for this spec, kept for review; its
-`WITNESS-FROM-CREATE` values are the two fields create fills, and the
-controller refuses the file until they are real. Then
-`install-controller --system --service-user ACCOUNT --config /var/lib/mini/hermes/g/controller.json ...`
-renders `mini-grain-controller@9870001.service` (controller manager `system`,
-worker `user`, unit name) and writes `/etc/mini/controllers/9870001.json`.
+`demo/install-hermes STEP...` (run as root) is the sequence J14 runs on the
+ACP room resident, with the box's paths and dregg-infra's registration
+(`mini-controller-register`, `mini-grain-controller@TASK`,
+`mini-grain-resident@TASK`). Every Mini command runs as the service account
+(`SVC`, default `mini-core`). Steps, in order:
 
-Where each spec field comes from:
+    install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
 
-- `mini`, `host`: the shipped candidate (`/var/lib/mini/candidate/current/bin`).
-- `hostConfig`, `genesis`, `namespaceRoot`, `sponsor.key`: the Store's own
-  deployment files; `hostConfig` must carry the purse's `providerServices`
-  tariff (the profile's semantics do not change when it is added).
-- `hostSocket`, `room.socket`: the **private operator** socket (`mini
-  serve-operator`); the resident refuses anything that does not answer
-  `operator-status`.
-- `sponsor.subject`/`accountCapability`/`grants`, `template`: the Store's
-  genesis (sponsor enrollment, factory observation) and operator template.
-- `owner`, `workerKey`, `provider.key`: three subjects enrolled for Hermes's
-  grain, keys private to the grain account, never Hermes's room key.
-- `task`, `toolTask`, `provider.task`, `capabilities.*`: unused resource IDs
-  the operator picks (create refuses duplicates among them; the Host refuses
-  IDs in use).
-- `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices (Rust
-  policy today, gr R1).
-- `worker`: the shipped `bwrap` launcher (sibling `launch-gate`), a runtime
-  root holding `hermes-acp`, `grain-runtime` and `grain-provider-bridge`, and
-  `network: none` (the production topology: the worker reaches the model only
-  through the bridge and the controller's Unix gateway).
-- `provider.gateway`: `providers`/`credentialBroker` are the root-owned table
-  and broker client; `provider: "pool"` pins the pool row (set it, or the
-  first row listing the model is chosen); `model` is the infra lane's choice;
-  `reserve` must cover the pool fee plus the metered charge at
-  `maxInputTokens`/`maxOutputTokens` under the Host profile's pool tariff.
-- `room`: the room Hermes is summoned into, its room workspace and account;
-  `restrictTools: true` (also the default).
+Before it can run:
 
-Hermes cannot settle a provider call until the client consent accepts the
-height-pinned provider settle plan (main's `checkPlan` compares it with the
-unpinned local prepare and refuses; L1 owns the fix). The grain and unit can
-be installed now; turn the unit on with the candidate that carries that fix.
+- **The Store pins Hermes's purse tariff.** `demo/provider-services.json` is
+  the `providerServices` section of `operator.json`; it is pinned at genesis
+  (a serving Store refuses a changed config), so it ships with the next
+  re-genesis. Default prices: 1 credit is about 1 micro-dollar on the pool
+  route; `meta-llama/llama-3.1-8b-instruct` at 20000 / 50000 micro-credits per
+  million input / output tokens (OpenRouter's $0.02 / $0.05 per million) plus
+  100 per call; the user (BYOK) route pays 5 per call.
+- **The worker is upstream Hermes Agent.** `build-runtime-root SOURCE OUT
+  GRAIN_RUNTIME BRIDGE` stages it from a hermes-agent checkout at 6d8a8beb
+  with `hermes-agent/mini-tool-catalogue.patch` (the restricted resident
+  admits a session only when Hermes reports exactly the Mini room tools);
+  `HERMES_ROOT` names the result at the `runtime` step. It needs python3
+  (3.11–3.13) and uv on the build host, and network for the venv.
+- **dregg-infra's controller-entry.py** still calls `grain-runtime
+  controller-write-scopes`, which no longer exists (the source parses the
+  config at `controller-launch`); its registration must check the broker pin
+  directly instead (the patch the L4 lane handed the infra lane).
+
+What the steps write, and where each controller field comes from:
+
+- `subjects`: four enrolled subjects through the sponsor workspace
+  (`NODE/sponsor`): `hermes` (its room key, also the tool worker: room tools
+  act in the tool task's own workspace), `hhost` (parent owner), `hprov`
+  (provider worker), and `founder`, funded `FOUNDER_FUNDING` to own the room
+  and summon. Keys stay in `/var/lib/mini/hermes/homes`, private to `SVC`.
+- `create` writes the `mini-grain-create-v1` spec and runs `grain-runtime
+  create`, which births the parent (9870001), tool task (9870002) and provider
+  purse (9870003) and writes `/var/lib/mini/hermes/g/controller.json`:
+  - `mini`, `host`: the archived candidate by real path.
+  - `hostConfig`/`hostSocket`: `NODE/deployment/pinned-config.json` and the
+    private operator socket `NODE/operator/mini.sock` (the registration
+    requires exactly these).
+  - `sponsor`, `template`: `/etc/mini/genesis-params.json` (sponsor subject,
+    spend capability, factory observation) and `NODE/operator.json`.
+  - `budgets`, `worker.reserve`/`charge`, `toolCharges`: operator prices.
+  - `worker`: the materialized `bwrap` launcher (sibling `launch-gate`), the
+    runtime root, `network: none` (the worker reaches the model only through
+    `grain-provider-bridge` and the controller's Unix gateway).
+  - `provider.gateway`: `/etc/mini/providers.json` (root-owned) pinned to its
+    pool row for the model, `/etc/mini/keys-client.json`, the model, token
+    caps 16000 / 1024, and `reserve` = the pool fee plus the metered charge at
+    those caps under the pinned tariff (computed from the config).
+  - `room`: the room's workspace and home are direct children of `stateDir`
+    (the registration requires it); `restrictTools` is true by default.
+- `controller` writes the summoned budget account into `controller.json`
+  (it is known only after the summon) and registers it; `resident` writes
+  `resident.json` (`maxPrompts: null`, one pass a minute) with the inbox the
+  dispatch delivered, and re-registers with both units stopped.
+
+One registration serves one room: summoning Hermes into another room needs its
+own task and registration.

@@ -1,0 +1,5 @@
+[{"providerResourceId":9870003,
+  "tariff":{"version":"1","model":"meta-llama/llama-3.1-8b-instruct",
+    "routes":{"user":{"perOp":"5"},
+              "pool":{"perOp":"100","inputMicroPerMillion":"20000","outputMicroPerMillion":"50000"},
+              "homelab":{"perOp":"3","inputMicroPerMillion":"0","outputMicroPerMillion":"0"}}}}]

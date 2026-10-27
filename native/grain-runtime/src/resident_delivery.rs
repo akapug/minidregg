@@ -191,6 +191,14 @@ impl AcpCapture {
     }
 }
 
+/// The ACP-streamed final and the settled provider final are the same text
+/// up to surrounding whitespace: upstream Hermes streams a "\n\n" separator
+/// chunk before the final segment that follows its tool calls. The delivered
+/// text is always the provider's; any other difference refuses.
+fn acp_final_matches(captured: &str, provider: &str) -> bool {
+    captured.trim() == provider.trim()
+}
+
 fn assignment(request: &Value, origin: &Value) -> Result<Value> {
     let messages = request["messages"]
         .as_array()
@@ -531,7 +539,7 @@ impl Runtime {
             &replay.response_sha256,
             Some(replay.response_bytes),
         )?)?;
-        if acp.is_some_and(|captured| captured != text) {
+        if acp.is_some_and(|captured| !acp_final_matches(captured, &text)) {
             return Err("source ACP final differs from settled provider final".into());
         }
         let record = FinalRecord {
@@ -1084,6 +1092,15 @@ mod tests {
         request["messages"].as_array_mut().unwrap().push(duplicate);
         assert!(assignment(&request, &origin).is_err());
     }
+    #[test]
+    fn acp_final_matches_provider_final_up_to_surrounding_whitespace_only() {
+        assert!(acp_final_matches("\n\nAttach done: 2 writes.", "Attach done: 2 writes."));
+        assert!(acp_final_matches("the answer", "the answer\n"));
+        assert!(!acp_final_matches("the  answer", "the answer"));
+        assert!(!acp_final_matches("the answer, edited", "the answer"));
+        assert!(!acp_final_matches("", "the answer"));
+    }
+
     #[test]
     fn acp_capture_ignores_display_and_refuses_session_changes() {
         let mut c = AcpCapture::default();

@@ -267,6 +267,10 @@ fn closed_boundary(status: &Status) -> Result<()> {
                 "resident_completion"
                     | "resident_delivery"
                     | "resident_pending_prompt"
+                    // A maintenance prompt (the program revision changed) is
+                    // the pending prompt itself; it clears only when this
+                    // completion is received (resident_requests::reconcile).
+                    | "resident_maintenance_pending"
                     | "hermes_pending_prompt"
                     | "hermes_retention_issue"
             )
@@ -894,6 +898,15 @@ mod tests {
     }
 
     #[test]
+    fn a_maintenance_prompt_completion_is_received_at_its_closed_boundary() {
+        let (root, turn, _) = fixture("completion-maintenance");
+        let mut status = receiving_status(&turn, &root);
+        status.retained.push("resident_maintenance_pending");
+        closed_boundary(&status).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn completion_receipt_refuses_tampered_foreign_or_unclosed_evidence() {
         let (root, turn, resident) = fixture("completion-evidence-refusal");
         let bytes = serde_json::to_vec_pretty(&resident).unwrap();
@@ -910,6 +923,9 @@ mod tests {
         let mut unclosed = receiving_status(&turn, &root);
         unclosed.observations[0]["state"]["grain"]["reserved"] = json!("1");
         assert!(archive_quiescence(&root, &turn, &receiving, &bytes, &unclosed).is_err());
+        let mut other = receiving_status(&turn, &root);
+        other.retained.push("tool_hold");
+        assert!(closed_boundary(&other).is_err(), "a held allowance is never a closed boundary");
         let mut wrong_config = receiving_status(&turn, &root);
         wrong_config.config_sha256 = Some("f".repeat(64));
         assert!(archive_quiescence(&root, &turn, &receiving, &bytes, &wrong_config).is_err());
