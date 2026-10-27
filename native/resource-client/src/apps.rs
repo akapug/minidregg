@@ -776,6 +776,53 @@ pub(crate) fn app_birth_source(subject: &str, nonce: &str, context: &Value, ids:
         "grants":grants}))
 }
 
+/// The reservation one application birth consumes on the tool task: the tariff's base plus its
+/// per-birth unit for each of the three resources (app, package manifest, snapshot manifest).
+pub(crate) fn birth_reserve_amount(tariff: &Value) -> Result<String> {
+    let unit = |key: &str| -> Result<u64> {
+        tariff.get(key).and_then(Value::as_str).and_then(|v| v.parse::<u64>().ok()).ok_or_else(|| format!("tariff.{key} must be a decimal string"))
+    };
+    unit("perBirth")?.checked_mul(3).and_then(|v| v.checked_add(unit("base").ok()?)).map(|v| v.to_string()).ok_or_else(|| "tariff overflows".into())
+}
+
+/// The grain-intent that reserves AMOUNT on the tool task, as `grain-journey.sh`'s `grain_op`
+/// shapes it, from a signed read of the task.
+pub(crate) fn reserve_intent(subject: &str, nonce: &str, name: &str, tool_ref: &Value, view: &Value, amount: &str) -> Result<Value> {
+    let peer = birth_peer(tool_ref, view)?;
+    Ok(json!({"grain":{"task":peer["task"],"subject":subject,"capability":peer["capability"],"observeCapability":peer["observeCapability"],
+        "schemaVersion":"1","expectedTargetRoot":peer["targetRoot"],
+        "context":{"operationId":nonce,"payload":format!("mini apps install {name}")},
+        "before":peer["before"],"operation":{"type":"reserve","amount":amount},"publications":[]},
+        "grants":[{"kind":"object","target":peer["task"],"capability":peer["capability"]}],"intentNonce":nonce}))
+}
+
+/// Reserve on the tool task once per install name: a retained attempt, recovered exactly
+/// (accepted outcome, else lookup) and never submitted twice.
+fn reserve_tool(root: &Path, ws: &Value, name: &str, subject: &str, tool_ref: &Value, amount: &str) -> Result<()> {
+    use crate::workspace::{self as w, member_path};
+    let attempt = root.join("attempts").join(format!("apps-reserve-{}", w::ref_file(name)));
+    if attempt.exists() {
+        if w::accepted_outcome(&attempt)?.is_some() {
+            return Ok(());
+        }
+        if attempt.join("call.bin").is_file() {
+            crate::retry(&attempt, "lookup", false)?;
+            if w::accepted_outcome(&attempt)?.is_some() {
+                return Ok(());
+            }
+        }
+        return Err(format!("toolReservationUndecided: the tool reservation for {name} is neither confirmed nor refused; inspect {}", attempt.display()));
+    }
+    let (view, _, _) = w::signed_view(root, ws, tool_ref, "resource")?;
+    let intent = reserve_intent(subject, &w::random_nonce()?, name, tool_ref, &view, amount)?;
+    let intent_path = root.join("sources").join(format!("apps-reserve-{}.json", w::ref_file(name)));
+    let _ = fs::remove_file(&intent_path); // no attempt exists: an older unsubmitted intent is stale
+    crate::create_private(&intent_path, &serde_json::to_vec_pretty(&intent).map_err(|e| e.to_string())?)?;
+    eprintln!("apps tool reservation attempt: {}", attempt.display());
+    crate::submit(&w::workspace_host(ws)?, &member_path(ws, "config")?, &intent_path, std::ffi::OsStr::new("grain-intent"), &member_path(ws, "key")?, &attempt, false)?;
+    w::accepted_outcome(&attempt)?.map(|_| ()).ok_or_else(|| format!("toolReservationRefused: see {}", attempt.display()))
+}
+
 const APP_ROLES: [(&str, IdKind); 9] = [
     ("app", IdKind::Resource), ("packageManifest", IdKind::Resource), ("snapshotManifest", IdKind::Resource),
     ("appOwnerCapability", IdKind::Capability), ("appControlCapability", IdKind::Capability),
@@ -844,6 +891,12 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
     let stable = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
     let roles: Vec<Role> = APP_ROLES.iter().map(|(label, kind)| Role { label: (*label).into(), kind: *kind }).collect();
     let reservation = participant_namespace::reserve(&namespace_root, member(&context["genesis"], "domain")?, &subject, name, &stable, &roles)?;
+    let attempt = root.join("attempts").join(format!("apps-birth-{}", w::ref_file(name)));
+    // The metered composite consumes a reservation on the tool task; the member makes it first,
+    // under its delegated capability, unless the birth attempt already exists (it was made then).
+    if !attempt.exists() {
+        reserve_tool(root, ws, name, &subject, &tool_ref, &birth_reserve_amount(&config.tariff)?)?;
+    }
     // The peers' current state: signed reads under the member's own grants.
     let (tool_view, _, _) = w::signed_view(root, ws, &tool_ref, "resource")?;
     let (parent_view, _, _) = w::signed_view(root, ws, &parent_ref, "resource")?;
@@ -863,7 +916,6 @@ pub(crate) fn app_birth(root: &Path, ws: &Value, home: Option<&Path>, name: &str
     };
     let socket = crate::SOCKET.get().ok_or("apps install requires a pinned persistent Host socket")?;
     let authoring = root.join("sources").join(format!("apps-birth-{}.authoring", w::ref_file(name)));
-    let attempt = root.join("attempts").join(format!("apps-birth-{}", w::ref_file(name)));
     let host = w::workspace_host(ws)?;
     let host_config = member_path(ws, "config")?;
     if attempt.exists() && w::attempt_definitely_unadmitted(&attempt)? {
@@ -1395,6 +1447,14 @@ mod tests {
         let ids: std::collections::BTreeMap<String, String> = [("app","9001"),("packageManifest","9002"),("snapshotManifest","9003"),("appOwnerCapability","9101"),("appControlCapability","9102"),("packageOwnerCapability","9103"),("packageControlCapability","9104"),("snapshotOwnerCapability","9105"),("snapshotControlCapability","9106")].iter().map(|(k,v)| (k.to_string(), v.to_string())).collect();
         let tool_ref = json!({"target":"7902","observeCapability":"8101","operationCapability":"8102"});
         let view = json!({"cell":{"root":"abc","grain":{"generation":"1","status":"1","remaining":"50","reserved":"0"}}});
+        assert_eq!(birth_reserve_amount(&json!({"base":"2","perBirth":"1"})).unwrap(), "5");
+        assert!(birth_reserve_amount(&json!({"base":"2"})).is_err());
+        let reserve = reserve_intent("9", "77", "slides", &json!({"target":"7902","observeCapability":"8101","operationCapability":"8102"}), &view, "5").unwrap();
+        assert_eq!(reserve["grain"]["operation"], json!({"type":"reserve","amount":"5"}));
+        assert_eq!(reserve["grain"]["capability"], "8102");
+        assert_eq!(reserve["grain"]["expectedTargetRoot"], "abc");
+        assert_eq!(reserve["grain"]["before"]["reserved"], "0");
+        assert_eq!(reserve["grants"], json!([{"kind":"object","target":"7902","capability":"8102"}]));
         let tool = birth_peer(&tool_ref, &view).unwrap();
         let parent = birth_peer(&json!({"target":"7901","observeCapability":"8201"}), &view).unwrap();
         assert_eq!(tool["capability"], "8102");
