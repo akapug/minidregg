@@ -3,18 +3,16 @@
 //! This module does not fence or stop a unit. The physical path must join this
 //! sealed claim to the retained Running journal and volume witness, durably
 //! mark the attempt, and perform the checked manager action under that lock.
-#![allow(dead_code)] // The callable STOP supervisor is a later, separate cut.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex};
 use crate::lifecycle_v3_stop_native::{ReceiptFields, StopTarget};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, DirBuilder, File};
-use std::io::{self, Read};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::fs::DirBuilder;
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
 const MAX_FRAME: usize = 12_102_760;
@@ -99,60 +97,12 @@ impl ExactReceipt {
 /// the exact retained STOP plan, original BEGIN, both receipts and claim.
 pub(crate) struct FreshStopClaim {
     target: StopTarget,
-    stop_plan: Vec<u8>,
-    original_begin: Vec<u8>,
-    claim_ingress: Vec<u8>,
-    committed_frame: Vec<u8>,
-    inspection: Vec<u8>,
-    begin_receipt: ExactReceipt,
-    claim_receipt: ExactReceipt,
 }
 
 impl FreshStopClaim {
     pub(crate) fn target(&self) -> &StopTarget {
         &self.target
     }
-    pub(crate) fn stop_plan(&self) -> &[u8] {
-        &self.stop_plan
-    }
-    pub(crate) fn original_begin(&self) -> &[u8] {
-        &self.original_begin
-    }
-    pub(crate) fn claim_ingress(&self) -> &[u8] {
-        &self.claim_ingress
-    }
-    pub(crate) fn committed_frame(&self) -> &[u8] {
-        &self.committed_frame
-    }
-    pub(crate) fn inspection(&self) -> &[u8] {
-        &self.inspection
-    }
-    pub(crate) fn begin_receipt(&self) -> &ExactReceipt {
-        &self.begin_receipt
-    }
-    pub(crate) fn claim_receipt(&self) -> &ExactReceipt {
-        &self.claim_receipt
-    }
-}
-
-fn read_inspection(path: &Path) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.len() == 0
-        || metadata.len() > MAX_INSPECTION
-    {
-        return Err(invalid("STOP source inspection identity or size refused"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(path)?
-        .take(MAX_INSPECTION + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("STOP source inspection changed during read"));
-    }
-    Ok(bytes)
 }
 
 fn committed_source_receipt(
@@ -276,22 +226,9 @@ pub(crate) fn submit_once(
 
     // This Host CLI reopens the current verified image. Its output cannot be
     // substituted by a caller-supplied JSON file or a stale op27 lookup.
-    let _ = operator.pinned_config()?;
     let inspection_path = attempt_dir.join("stop-claim-current.json");
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&inspection_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned Mini Host STOP current inspection refused"));
-    }
-    let inspection = read_inspection(&inspection_path)?;
+    let inspection =
+        operator.inspect_stop_claim(&plan_path, &committed_path, &inspection_path, MAX_INSPECTION)?;
     let target = StopTarget::from_verified_inspection(
         retained_stop_plan,
         &committed,
@@ -300,16 +237,7 @@ pub(crate) fn submit_once(
         begin_receipt.borrowed(),
         claim_receipt.borrowed(),
     )?;
-    Ok(FreshStopClaim {
-        target,
-        stop_plan: retained_stop_plan.to_vec(),
-        original_begin: original_begin.to_vec(),
-        claim_ingress: claim_ingress.to_vec(),
-        committed_frame: committed,
-        inspection,
-        begin_receipt,
-        claim_receipt,
-    })
+    Ok(FreshStopClaim { target })
 }
 
 #[cfg(test)]

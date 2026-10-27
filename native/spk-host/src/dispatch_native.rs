@@ -1,7 +1,6 @@
 //! One private, no-retry Mini author/submit operation for the resident SPK
 //! supervisor. Op34's callback bytes are retained before source inspection;
 //! an uncertain write/read leaves a durable marker and cannot be repeated.
-#![allow(dead_code)] // Resident authorized supervisor is not enabled yet.
 
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::{
@@ -27,6 +26,8 @@ const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
 const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(600);
+const STOP_INSPECTION_DEADLINE: Duration = Duration::from_secs(300);
+const MAX_HELPER_STDERR: u64 = 64 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -462,35 +463,7 @@ impl PrivateOperator {
             }
             process.arg(input).arg(output).stdout(Stdio::null());
         }
-        process.stdin(Stdio::null()).stderr(Stdio::null());
-        if Instant::now() >= deadline {
-            return Err(invalid("Mini helper deadline"));
-        }
-        let mut child = process.spawn()?;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Mini helper deadline",
-                ));
-            }
-            // Bounded local child wait, never a Mini authority poll.
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        if !status.success() {
-            return Err(invalid("pinned Mini Host helper refused"));
-        }
+        run_pinned(process, output, deadline)?;
         read_bounded(
             output,
             if command == "inspect" {
@@ -499,6 +472,31 @@ impl PrivateOperator {
                 HOST_MAX_FRAME - 1
             },
         )
+    }
+
+    /// `inspect-stop-claim PLAN COMMITTED OUTPUT`: the current-image STOP
+    /// claim inspection, run from the verified descriptor (never the path)
+    /// under a deadline, its refusal reason retained beside `output`.
+    pub(crate) fn inspect_stop_claim(
+        &self,
+        plan: &Path,
+        committed: &Path,
+        output: &Path,
+        max: u64,
+    ) -> io::Result<Vec<u8>> {
+        let _ = self.pinned_config()?;
+        let executable = self.verified_host()?;
+        let mut process = Command::new(executable.path());
+        process
+            .arg(&self.config)
+            .arg("inspect-stop-claim")
+            .arg(plan)
+            .arg(committed)
+            .arg(output)
+            .stdout(Stdio::null());
+        run_pinned(process, output, Instant::now() + STOP_INSPECTION_DEADLINE)?;
+        let _ = self.pinned_config()?;
+        read_bounded(output, max as usize)
     }
 
     pub(crate) fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
@@ -577,6 +575,75 @@ impl PrivateOperator {
         }
         Ok(reply)
     }
+}
+
+/// Run one pinned Host helper to completion under `deadline`. Its stderr is
+/// retained as `<output>.stderr` (at most `MAX_HELPER_STDERR` bytes, removed
+/// when empty), and a refusal carries the first line of it: Lean's refusal
+/// reason is never dropped.
+fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Result<()> {
+    let mut stderr_name = output
+        .file_name()
+        .ok_or_else(|| invalid("helper output name absent"))?
+        .to_owned();
+    stderr_name.push(".stderr");
+    let stderr_path = output.with_file_name(stderr_name);
+    let stderr_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&stderr_path)?;
+    process
+        .stdin(Stdio::null())
+        .stderr(Stdio::from(stderr_file.try_clone()?));
+    if Instant::now() >= deadline {
+        return Err(invalid("Mini helper deadline"));
+    }
+    let mut child = process.spawn()?;
+    drop(process);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Mini helper deadline",
+            ));
+        }
+        // Bounded local child wait, never a Mini authority poll.
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if stderr_file.metadata()?.len() > MAX_HELPER_STDERR {
+        stderr_file.set_len(MAX_HELPER_STDERR)?;
+    }
+    stderr_file.sync_all()?;
+    let mut reason = String::new();
+    File::open(&stderr_path)?
+        .take(MAX_HELPER_STDERR)
+        .read_to_string(&mut reason)
+        .ok();
+    if reason.is_empty() {
+        let _ = fs::remove_file(&stderr_path);
+    }
+    if !status.success() {
+        let first = reason.lines().next().unwrap_or("").trim();
+        eprintln!("spk-host: pinned Mini Host helper refused: {first}");
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned Mini Host helper refused: {first}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Every directory is freshly created under the resident's private journal.
@@ -799,33 +866,35 @@ impl RecordedDispatch {
     }
 
     /// Only a definite RPC result while the same app generation is Running
-    /// releases the global native-submit marker. Timeout, EOF, or a concurrent
+    /// settles this call's submit marker. Timeout, EOF, or a concurrent
     /// fence leaves both physical and native attempt records for audit.
     pub(crate) fn finish(self, journal: &Journal, delivered: bool) -> io::Result<()> {
         journal.finish_dispatch(&self.identity, delivered)?;
-        retire_active_marker(&self.active_marker, &self.active_bytes)
+        let status = if delivered { "delivered" } else { "recorded-undelivered" };
+        settle_committed(&self.active_marker, &self.active_bytes, status)
     }
 
     /// The worker fence proves this exact command is no longer held (or was
     /// never enqueued). The journal keeps its operation terminally Uncertain
     /// and never dispatchable again; the native outcome itself was definite
     /// (committed and inspected) before DeliveryRequested, so once the journal
-    /// has taken that custody the generation-wide native marker is retired
-    /// with the shared slot. Without a matching fence nothing is released.
+    /// has taken that custody this call's submit marker is settled with the
+    /// shared slot. Without a matching fence nothing is released.
     pub(crate) fn release_uncertain(
         self,
         journal: &Journal,
         fence: crate::rpc_adapter::DispatchFence,
     ) -> io::Result<()> {
         journal.finish_dispatch_uncertain_released(&self.identity, fence)?;
-        retire_active_marker(&self.active_marker, &self.active_bytes)
+        settle_committed(&self.active_marker, &self.active_bytes, "delivery-uncertain-released")
     }
 }
 
 impl CommittedDispatch {
-    /// The native op34 marker is only cleared after hostd has fsynced its
+    /// The call's submit marker is only settled after hostd has fsynced its
     /// separate DeliveryRequested tombstone. A crash in either interval
-    /// blocks new native submissions until an operator audits exact records.
+    /// leaves this one call undecided (it counts toward the journal's bound
+    /// and is never looked up as absent: its permit was committed).
     pub(crate) fn record_delivery_requested(
         self,
         journal: &Journal,
@@ -890,7 +959,13 @@ fn author_signed_ingress(
     )?;
     let plan_reply = operator.invoke_until(36, &request_bytes, deadline)?;
     if plan_reply[4] != 36 {
-        return Err(invalid("Mini dispatch authoring refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            36,
+            &plan_reply,
+        ));
     }
     let plan_bytes = &plan_reply[5..];
     let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
@@ -922,7 +997,13 @@ fn author_signed_ingress(
     pair.extend_from_slice(&signatures_bin);
     let ingress_reply = operator.invoke_until(37, &pair, deadline)?;
     if ingress_reply[4] != 37 {
-        return Err(invalid("Mini dispatch assembly refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            37,
+            &ingress_reply,
+        ));
     }
     let ingress = &ingress_reply[5..];
     write_new(attempt_dir, "ingress.bin", ingress)?;
@@ -981,18 +1062,12 @@ fn route_bound_dispatch_json(binding: &ContinuityBinding, ingress: &[u8]) -> ser
         "ingressHex":hex(ingress)})
 }
 
-fn retire_active_marker(path: &Path, expected: &[u8]) -> io::Result<()> {
-    if fs::read(path)? != expected {
-        return Err(invalid(
-            "native submit marker drift after definite completion",
-        ));
-    }
-    fs::remove_file(path)?;
-    File::open(
-        path.parent()
-            .ok_or_else(|| invalid("marker parent absent"))?,
-    )?
-    .sync_all()
+fn settle_committed(active: &Path, expected: &[u8], status: &str) -> io::Result<()> {
+    crate::dispatch_fence::settle(
+        active,
+        expected,
+        &json!({"protocol":"mini-spk-dispatch-resolution-v1","status":status,"by":"committed-permit"}),
+    )
 }
 
 struct SubmittedDispatch {
@@ -1003,7 +1078,7 @@ struct SubmittedDispatch {
 
 impl SubmittedDispatch {
     /// A confirmed historical receipt is evidence of a Store record, never a
-    /// fresh physical-delivery permit. Keep the active marker on every outcome.
+    /// fresh physical-delivery permit.
     fn committed_payload(&self) -> io::Result<Vec<u8>> {
         match parse_op34_response(&self.frame)? {
             Op34Reply::CommittedBytes(payload) => Ok(payload.to_vec()),
@@ -1014,9 +1089,24 @@ impl SubmittedDispatch {
     }
 }
 
-/// Only the fresh private response from this call can certify no Store record.
-/// Keep per-attempt evidence and prohibit its replay even after releasing the
-/// generation-wide marker so an unrelated participant can make progress.
+/// What one submit produced.
+enum Submit {
+    /// A whole reply frame; the call's submit marker is still armed.
+    Frame(SubmittedDispatch),
+    /// Lean's positive no-record refusal; the call is settled.
+    NoRecord(crate::dispatch_fence::DispatchOutcome),
+    /// No reply frame; the call's submit marker is still armed.
+    Lost {
+        error: io::Error,
+        active_marker: PathBuf,
+        active_bytes: Vec<u8>,
+    },
+}
+
+/// Only the fresh private response from this call can certify no Store
+/// record. The per-call markers are durable before op34/164 and the same
+/// attempt can never be submitted twice; no journal-wide marker exists, so
+/// another member's call never waits on this one (`dispatch_fence`).
 fn submit_once(
     attempt_dir: &Path,
     operation_id: &str,
@@ -1024,29 +1114,25 @@ fn submit_once(
     opcode: u8,
     submission: &[u8],
     invoke: impl FnOnce(u8, &[u8]) -> io::Result<Vec<u8>>,
-) -> io::Result<SubmittedDispatch> {
+) -> io::Result<Submit> {
     if !matches!(opcode, 34 | ROUTE_BOUND_DISPATCH_OPCODE) {
         return Err(invalid("native dispatch submit opcode refused"));
     }
-    let parent = attempt_dir
-        .parent()
-        .ok_or_else(|| invalid("attempt parent missing"))?;
     let marker = json!({"protocol":"mini-spk-dispatch-submit-requested-v1",
         "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(ingress)),
         "submitOpcode":opcode,"submissionSha256":hex(&Sha256::digest(submission))});
     let active_bytes = serde_json::to_vec(&marker)?;
-    write_new(attempt_dir, "submit-requested.json", &active_bytes)?;
-    let active_marker = parent.join("native-dispatch-active.json");
-    let mut active_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&active_marker)?;
-    active_file.write_all(&active_bytes)?;
-    active_file.sync_all()?;
-    File::open(parent)?.sync_all()?;
-    let frame = invoke(opcode, submission)?;
+    let active_marker = crate::dispatch_fence::arm(attempt_dir, &active_bytes)?;
+    let frame = match invoke(opcode, submission) {
+        Ok(frame) => frame,
+        Err(error) => {
+            return Ok(Submit::Lost {
+                error,
+                active_marker,
+                active_bytes,
+            })
+        }
+    };
     write_new(attempt_dir, &format!("op{opcode}-frame.bin"), &frame)?;
     let mut refusal = Vec::with_capacity(NO_RECORD_REFUSAL.len() + 5);
     refusal.extend_from_slice(&((NO_RECORD_REFUSAL.len() + 1) as u32).to_le_bytes());
@@ -1055,14 +1141,17 @@ fn submit_once(
     if frame == refusal {
         // Source issues this unique frame only before entering durable submit.
         // Generic outcomes, EOF and malformed frames never reach this branch.
-        retire_active_marker(&active_marker, &active_bytes)?;
-        return Err(invalid("Mini dispatch refused before any Store record"));
+        return Ok(Submit::NoRecord(crate::dispatch_fence::no_record(
+            &active_marker,
+            &active_bytes,
+            operation_id,
+        )?));
     }
-    Ok(SubmittedDispatch {
+    Ok(Submit::Frame(SubmittedDispatch {
         frame,
         active_marker,
         active_bytes,
-    })
+    }))
 }
 
 pub(crate) fn dispatch_opcode(binding: Option<&ContinuityBinding>) -> u8 {
@@ -1129,25 +1218,84 @@ pub(crate) fn author_and_submit(
             operator.invoke_until(opcode, bytes, deadline)
         },
     )?;
-    let payload = submitted.committed_payload()?;
-    let payload_path = write_new(attempt_dir, "committed-payload.bin", &payload)?;
-    let inspection_path = attempt_dir.join("inspection.json");
-    let inspection = operator.tool(
-        "inspect",
-        "application-dispatch-committed",
-        &payload_path,
-        &inspection_path,
-    )?;
-    let fixed = FixedCustody {
-        app: &custody.app,
-        subject: &custody.subject,
-        session: &custody.session,
-        ticket: &custody.ticket_resource,
+    let submitted = match submitted {
+        Submit::Frame(submitted) => submitted,
+        Submit::NoRecord(outcome) => return Err(outcome.into_error()),
+        Submit::Lost {
+            error,
+            active_marker,
+            active_bytes,
+        } => {
+            eprintln!("spk-host: op{operation_id} submit reply lost: {error}");
+            return Err(crate::dispatch_fence::decide(
+                operator,
+                &active_marker,
+                &active_bytes,
+                operation_id,
+                &ingress,
+                crate::dispatch_fence::Reply::Lost,
+            )
+            .into_error());
+        }
     };
-    let matched = match_inspection(&payload, &inspection, http, &fixed)?;
-    if matched.operation_id != operation_id {
-        return Err(invalid("committed physical operation ID drift"));
-    }
+    let Ok(payload) = submitted.committed_payload() else {
+        return Err(crate::dispatch_fence::decide(
+            operator,
+            &submitted.active_marker,
+            &submitted.active_bytes,
+            operation_id,
+            &ingress,
+            crate::dispatch_fence::Reply::Frame(&submitted.frame),
+        )
+        .into_error());
+    };
+    // Lean committed a permit for this exact call. If it cannot be inspected
+    // and matched here, the permit is never used: the call is recorded and
+    // undelivered, and fd3 was never touched.
+    let inspected = (|| {
+        let payload_path = write_new(attempt_dir, "committed-payload.bin", &payload)?;
+        let inspection_path = attempt_dir.join("inspection.json");
+        let inspection = operator.tool(
+            "inspect",
+            "application-dispatch-committed",
+            &payload_path,
+            &inspection_path,
+        )?;
+        let fixed = FixedCustody {
+            app: &custody.app,
+            subject: &custody.subject,
+            session: &custody.session,
+            ticket: &custody.ticket_resource,
+        };
+        let matched = match_inspection(&payload, &inspection, http, &fixed)?;
+        if matched.operation_id != operation_id {
+            return Err(invalid("committed physical operation ID drift"));
+        }
+        Ok(matched)
+    })();
+    let matched = match inspected {
+        Ok(matched) => matched,
+        Err(error) => {
+            eprintln!("spk-host: op{operation_id} committed permit refused: {error}");
+            let settled = crate::dispatch_fence::settle(
+                &submitted.active_marker,
+                &submitted.active_bytes,
+                &json!({"protocol":"mini-spk-dispatch-resolution-v1",
+                    "status":"recorded-undelivered","by":"permit-inspection-refused",
+                    "permitSha256":hex(&Sha256::digest(&payload))}),
+            );
+            return Err(crate::dispatch_fence::DispatchOutcome {
+                operation: Some(operation_id.to_owned()),
+                status: if settled.is_ok() {
+                    crate::dispatch_fence::Status::RecordedUndelivered
+                } else {
+                    crate::dispatch_fence::Status::Uncertain
+                },
+                lean: None,
+            }
+            .into_error());
+        }
+    };
     Ok(CommittedDispatch {
         payload,
         matched,
@@ -1746,15 +1894,15 @@ pub(crate) mod qualification {
                     })?;
                     panic!("ambiguous race must never forward a permit")
                 });
-                assert!(result.is_err());
-                assert!(root.0.join("native-dispatch-active.json").exists());
+                assert!(matches!(result, Ok(Submit::Lost { .. })));
+                assert!(attempt.join("submit-active.json").exists());
                 assert!(attempt.join("submit-requested.json").exists());
                 assert!(!attempt.join("op34-frame.bin").exists());
-                let next = root.0.join("next");
-                DirBuilder::new().mode(0o700).create(&next).unwrap();
+                // The undecided attempt is never resent; another call is not
+                // fenced by it (dispatch_fence bounds the undecided count).
                 assert!(
-                    submit_once(&next, "2", b"ingress", 34, b"submission", |_, _| panic!(
-                        "uncertain race must block subsequent submission"
+                    submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| panic!(
+                        "uncertain race must never resubmit its own attempt"
                     ))
                     .is_err()
                 );
@@ -1775,8 +1923,9 @@ pub(crate) mod qualification {
                 )?;
                 panic!("missing go must never submit")
             });
-            assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
-            assert!(root.0.join("native-dispatch-active.json").exists());
+            assert!(matches!(result, Ok(Submit::Lost { ref error, .. })
+                if error.kind() == io::ErrorKind::TimedOut));
+            assert!(attempt.join("submit-active.json").exists());
             assert!(attempt.join("submit-requested.json").exists());
             write_new(&attempt,"race-go.json",br#"{"protocol":"mini-spk-dispatch-race-go-v1","nonceHex":"other","submissionSha256":"hash"}"#).unwrap();
             assert!(await_go(
@@ -2111,17 +2260,15 @@ mod tests {
                     assert_eq!(payload, b"a submission");
                     Ok(refusal.clone())
                 },
-            );
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "Mini dispatch refused before any Store record"
-            );
-            assert!(!root.0.join("native-dispatch-active.json").exists());
+            )
+            .unwrap();
+            let Submit::NoRecord(outcome) = result else {
+                panic!("the exact no-record frame settles the call");
+            };
+            assert_eq!(outcome.status, crate::dispatch_fence::Status::Refused);
+            assert!(!a.join("submit-active.json").exists());
             assert!(a.join("submit-requested.json").exists());
-            assert_eq!(
-                fs::read(a.join(format!("op{opcode}-frame.bin"))).unwrap(),
-                refusal
-            );
+            assert!(a.join("resolution.json").exists());
             assert!(submit_once(
                 &a,
                 "1",
@@ -2132,19 +2279,24 @@ mod tests {
             )
             .is_err());
             let b = root.attempt("b");
-            let submitted = submit_once(&b, "2", b"b ingress", 34, b"b submission", |op, bytes| {
-                assert_eq!(op, 34);
-                assert_eq!(bytes, b"b submission");
-                Ok(b"private committed response".to_vec())
-            })
-            .unwrap();
+            let Submit::Frame(submitted) =
+                submit_once(&b, "2", b"b ingress", 34, b"b submission", |op, bytes| {
+                    assert_eq!(op, 34);
+                    assert_eq!(bytes, b"b submission");
+                    Ok(b"private committed response".to_vec())
+                })
+                .unwrap()
+            else {
+                panic!("a reply frame is retained for decoding");
+            };
             assert_eq!(submitted.frame, b"private committed response");
-            assert!(submitted.active_marker.exists());
-            retire_active_marker(&submitted.active_marker, &submitted.active_bytes).unwrap();
+            assert_eq!(submitted.active_marker, b.join("submit-active.json"));
+            settle_committed(&submitted.active_marker, &submitted.active_bytes, "delivered").unwrap();
+            assert!(!submitted.active_marker.exists());
         }
     }
     #[test]
-    fn bound_dispatch_historical_confirmed_receipt_retains_marker_and_refuses_delivery() {
+    fn bound_dispatch_historical_confirmed_receipt_never_delivers_and_fences_only_its_call() {
         // NativeHostCodec.outcomeCodec: confirmed (.inl), replayed (.inr false),
         // then receipt(transactionId=11,eventId=12,acceptedCount=13,worldRoot=14).
         // Each positive Nat/Digest is one base-255 digit followed by 255.
@@ -2160,10 +2312,14 @@ mod tests {
         for opcode in [34, ROUTE_BOUND_DISPATCH_OPCODE] {
             let root = BoundFixture::new();
             let a = root.attempt("a");
-            let submitted = submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
-                Ok(historical.clone())
-            })
-            .unwrap();
+            let Submit::Frame(submitted) =
+                submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
+                    Ok(historical.clone())
+                })
+                .unwrap()
+            else {
+                panic!("an outcome frame is retained for decoding");
+            };
             // This is the production gate before writing/inspecting a permit
             // or constructing the opaque CommittedDispatch used for delivery.
             assert_eq!(
@@ -2187,13 +2343,16 @@ mod tests {
                 })
                 .is_err()
             );
+            // B is a different signed call: A's undecided marker is A's alone.
             let b = root.attempt("b");
-            assert!(
-                submit_once(&b, "2", b"b ingress", 34, b"b submission", |_, _| {
-                    panic!("historical receipt must not release the global marker")
-                })
-                .is_err()
-            );
+            assert!(matches!(
+                submit_once(&b, "2", b"b ingress", 34, b"b submission", |_, _| Ok(
+                    historical.clone()
+                ))
+                .unwrap(),
+                Submit::Frame(_)
+            ));
+            assert!(!root.0.join("native-dispatch-active.json").exists());
             assert_eq!(
                 fs::read(&submitted.active_marker).unwrap(),
                 submitted.active_bytes
@@ -2202,7 +2361,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_dispatch_uncertain_or_malformed_refusal_preserves_global_marker() {
+    fn bound_dispatch_uncertain_or_malformed_reply_keeps_its_call_undecided_only() {
         let valid = no_record_frame();
         let mut wrong_tag = valid.clone();
         wrong_tag[4] = 34;
@@ -2221,7 +2380,7 @@ mod tests {
         ] {
             let root = BoundFixture::new();
             let a = root.attempt("a");
-            let submitted = submit_once(
+            let Submit::Frame(submitted) = submit_once(
                 &a,
                 "1",
                 b"ingress",
@@ -2229,32 +2388,37 @@ mod tests {
                 b"request",
                 |_, _| Ok(response),
             )
-            .unwrap();
+            .unwrap() else {
+                panic!("a non-exact frame is never a settlement");
+            };
             assert!(submitted.active_marker.exists());
             assert!(submitted.committed_payload().is_err());
             let b = root.attempt("b");
-            assert!(
-                submit_once(&b, "2", b"ingress", 34, b"request", |_, _| panic!(
-                    "uncertain A must block B"
-                ))
-                .is_err()
-            );
+            assert!(matches!(
+                submit_once(&b, "2", b"ingress", 34, b"request", |_, _| Ok(valid.clone()))
+                    .unwrap(),
+                Submit::NoRecord(_)
+            ));
+            assert!(submitted.active_marker.exists());
         }
         let root = BoundFixture::new();
         let a = root.attempt("a");
-        assert!(submit_once(
-            &a,
-            "1",
-            b"ingress",
-            ROUTE_BOUND_DISPATCH_OPCODE,
-            b"request",
-            |_, _| Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "lost response"
-            ))
-        )
-        .is_err());
-        assert!(root.0.join("native-dispatch-active.json").exists());
+        assert!(matches!(
+            submit_once(
+                &a,
+                "1",
+                b"ingress",
+                ROUTE_BOUND_DISPATCH_OPCODE,
+                b"request",
+                |_, _| Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "lost response"
+                ))
+            )
+            .unwrap(),
+            Submit::Lost { .. }
+        ));
+        assert!(a.join("submit-active.json").exists());
         let root = BoundFixture::new();
         let a = root.attempt("a");
         assert!(submit_once(
@@ -2264,15 +2428,12 @@ mod tests {
             ROUTE_BOUND_DISPATCH_OPCODE,
             b"request",
             |_, _| {
-                fs::write(root.0.join("native-dispatch-active.json"), b"changed").unwrap();
+                fs::write(a.join("submit-active.json"), b"changed").unwrap();
                 Ok(valid)
             }
         )
         .is_err());
-        assert_eq!(
-            fs::read(root.0.join("native-dispatch-active.json")).unwrap(),
-            b"changed"
-        );
+        assert_eq!(fs::read(a.join("submit-active.json")).unwrap(), b"changed");
     }
 
     #[test]
@@ -2370,17 +2531,11 @@ mod tests {
 
     #[test]
     fn native_submit_marker_is_create_new_and_blocks_a_second_attempt() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("mini-spk-submit-{}-{nonce}", std::process::id()));
-        DirBuilder::new().mode(0o700).create(&root).unwrap();
-        let marker = root.join("native-dispatch-active.json");
-        write_new(&root, "native-dispatch-active.json", b"first").unwrap();
-        assert!(write_new(&root, "native-dispatch-active.json", b"second").is_err());
-        assert_eq!(fs::read(marker).unwrap(), b"first");
-        fs::remove_dir_all(root).unwrap();
+        let root = BoundFixture::new();
+        let attempt = root.attempt("a");
+        crate::dispatch_fence::arm(&attempt, b"first").unwrap();
+        assert!(crate::dispatch_fence::arm(&attempt, b"second").is_err());
+        assert_eq!(fs::read(attempt.join("submit-active.json")).unwrap(), b"first");
+        assert_eq!(fs::read(attempt.join("submit-requested.json")).unwrap(), b"first");
     }
 }

@@ -1,6 +1,5 @@
 //! Versioned controller transport for lifetime agent dispatch. These bytes are
 //! not a Mini permit; only a fresh installed op76 callback can open fd3.
-#![allow(dead_code)] // Shared resident v3 listener is wired in a later source cut.
 
 use crate::agent_api_lifetime_v3::LifetimeBinding;
 use crate::agent_api_lifetime_v3::ReceiptPin;

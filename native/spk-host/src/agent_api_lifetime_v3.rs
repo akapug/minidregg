@@ -1,7 +1,6 @@
 //! Versioned lifetime agent route comparisons. These are transport custody
 //! checks, not Mini admission or an fd3 send permit. In particular, an op77
 //! historical lookup can corroborate a receipt but cannot authorize delivery.
-#![allow(dead_code)] // No resident v3 caller until op76/80 native routes are qualified.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

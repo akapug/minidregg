@@ -74,7 +74,7 @@ that can find the versioned one) for the Store helper.
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
 | `OUT/bin/grain-runtime`, `OUT/bin/grain-provider-bridge` | Durable agent controller and sandbox provider bridge (`native/grain-runtime`) |
 | `OUT/bin/mini-inference-scheduler` | Shared inference admission, placement and fairness (`native/inference-scheduler`) |
-| `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy`, `OUT/bin/mini-spk-broker`, `OUT/bin/spk-hostd`, `OUT/bin/mini-spk-volume-helper` | Application custody, browser entrance, per-world broker, host daemon and volume helper (`native/spk-host`) |
+| `OUT/bin/spk-host`, `OUT/bin/spk-browser-proxy`, `OUT/bin/mini-spk-broker`, `OUT/bin/mini-spk-volume-helper` | Application custody, browser entrance, per-world broker and volume helper (`native/spk-host`) |
 | `OUT/bin/mini-keys` | Key broker: seal key, provider and Discord secrets (`native/mini-keys`); a required role |
 | `OUT/bin/launch-gate` | Grain worker launch gate beside the `bwrap` launcher (`native/launch-gate`, source `deploy/grain-host/launch-gate.rs`) |
 | `OUT/bin/pay-watcher` | Solana payment observer (`native/pay-watcher`) |

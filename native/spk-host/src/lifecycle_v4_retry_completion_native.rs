@@ -4,7 +4,6 @@
 //! committed claim in "committedClaim"); the completion half on
 //! `lifecycle_v3_completion_native` (op70 plan / op71 assemble / op38 submit /
 //! op39 receipt-only lookup). Uncertain op38 is never resubmitted.
-#![allow(dead_code)] // The op39 arm is reached only by operator recovery.
 
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -71,7 +70,6 @@ fn invalid(reason: &'static str) -> io::Error {
 
 pub(crate) struct SignedRetryPhysicalReport {
     pub signed_report: Vec<u8>,
-    pub attempt_dir: PathBuf,
 }
 
 pub(crate) struct RetryReportInput<'a> {
@@ -373,7 +371,6 @@ pub(crate) fn prepare_report_once(
     )?;
     Ok(SignedRetryPhysicalReport {
         signed_report: signed,
-        attempt_dir: attempt_dir.to_path_buf(),
     })
 }
 
@@ -770,13 +767,5 @@ mod tests {
         let signed = expected_signed(&report, &[7u8; 64]).unwrap();
         assert!(signed.starts_with(SIGNED_TAG));
         assert!(signed.ends_with(&encode_bytes(&[7u8; 64])));
-    }
-
-    #[test]
-    fn retry_v4_completion_ingress_tag_is_distinct_from_v2() {
-        assert_ne!(
-            INGRESS_TAG,
-            b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2".as_slice()
-        );
     }
 }

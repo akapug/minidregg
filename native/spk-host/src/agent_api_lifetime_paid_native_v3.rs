@@ -1,6 +1,5 @@
 //! Exact op78/79 lifetime paid assembly. This stage retains an ingress but
 //! cannot deliver it: only a later fresh op76 installed callback may do that.
-#![allow(dead_code)] // The versioned resident listener is wired separately.
 
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use crate::agent_api_lifetime_reverse_v3::{LifetimeReverseClient, RetainedReserveV3};
@@ -60,6 +59,7 @@ fn signatures(
 }
 
 pub(crate) struct AssembledLifetimePaidV3 {
+    #[allow(dead_code)] // Agent API v3 is parked (ruling R7); retained beside the ingress it produced.
     pub plan: Vec<u8>,
     pub ingress: Vec<u8>,
     pub inspection: Value,

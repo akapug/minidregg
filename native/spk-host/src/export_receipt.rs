@@ -144,6 +144,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         let id = "a".repeat(32);
         let capture = Some(id.as_str());
@@ -206,6 +207,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         let id = "b".repeat(32);
         let signed = vec![(CAPTURE_HEADER.to_owned(), id.clone())];

@@ -1,5 +1,4 @@
 //! Source-authored STOP Plan-v2, detached BEGIN, and one-shot event23 receipt.
-#![allow(dead_code)] // Awaiting the callable STOP supervisor cut.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -54,7 +53,6 @@ pub(crate) struct AcceptedStopBegin {
     receipt: ExactReceipt,
     client_operation_id: String,
     authorization_operation_id: String,
-    process_generation: String,
     volume_id_hex: String,
 }
 
@@ -74,11 +72,39 @@ impl AcceptedStopBegin {
     pub(crate) fn authorization_operation_id(&self) -> &str {
         &self.authorization_operation_id
     }
-    pub(crate) fn process_generation(&self) -> &str {
-        &self.process_generation
-    }
     pub(crate) fn volume_id_hex(&self) -> &str {
         &self.volume_id_hex
+    }
+}
+
+impl AcceptedStopBegin {
+    /// Rebuild an accepted BEGIN from its retained attempt after Lean's
+    /// op23 lookup returned the original receipt (`confirmed replayed`). The
+    /// plan, its inspection, the ingress and the client operation ID are the
+    /// exact retained bytes of the one submit; only the receipt is new, and it
+    /// is Lean's. The CLAIM that follows is still checked by Lean.
+    pub(crate) fn recovered(attempt_dir: &Path, receipt: ExactReceipt) -> io::Result<Self> {
+        use crate::lifecycle_receipt_lookup::retained;
+        let plan = retained(&attempt_dir.join("stop-plan-v2.bin"), MAX_FRAME as u64)?;
+        let view: Value =
+            serde_json::from_slice(&retained(&attempt_dir.join("stop-plan-v2.json"), 2 * 1024 * 1024)?)?;
+        let ingress = retained(&attempt_dir.join("begin-v3.bin"), MAX_FRAME as u64)?;
+        let requested: Value =
+            serde_json::from_slice(&retained(&attempt_dir.join("op66-requested.json"), 4096)?)?;
+        if text(&view, "canonicalPlanHex")? != hex(&plan) || !ingress.starts_with(BEGIN_TAG) {
+            return Err(invalid("STOP retained BEGIN artifacts disagree"));
+        }
+        let base = view
+            .get("basePlan")
+            .ok_or_else(|| invalid("STOP retained BEGIN base plan absent"))?;
+        Ok(Self {
+            stop_plan: plan,
+            ingress,
+            receipt,
+            client_operation_id: text(&requested, "clientOperationId")?.to_owned(),
+            authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
+            volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
+        })
     }
 }
 
@@ -241,7 +267,6 @@ pub(crate) fn submit_once(
         receipt,
         client_operation_id,
         authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
-        process_generation: text(base, "processGeneration")?.to_owned(),
         volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
     })
 }

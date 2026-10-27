@@ -1,7 +1,6 @@
 //! Source-authored launch-bound BEGIN request, signing and one-shot admission.
 //! The callable INSTALL/START routes remain gated until event23–25 Host
 //! authoring, fresh callbacks and physical claim inspection are qualified.
-#![allow(dead_code)] // The v3 lifecycle caller is still source-gated.
 
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
