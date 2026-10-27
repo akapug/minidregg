@@ -104,6 +104,17 @@ routes any reds here.
     an unresolved factory law.
   - It judges through `Pending.factoryRefusal`, so range, cast and unsupported refusals are
     disclosed like a law refusal (`publicRefusal`, as `invokeRefusal` does).
+- Audit pass 16 (lane/audit-platform 90ec46ab), two items owed:
+  - **Poles: owed as Lean witnesses.** A concrete `Pending` with an accepted factory branch
+    needs a signed, loaded image, and the `WindowExample` descriptor is template-level only.
+    For now `scripts/kn2/neutral-birth.lean` checks both poles on the deployed path: the
+    control and the `birth/<id> = root` law have a plan that passes and they commit; the
+    `root + 1` law has a plan that refuses and is refused `Reject.policyRejected`.
+  - **Disclosure: checked.** The `preparePending` refusals carry no payload. Of the
+    `PreparationReject` refusals, only `room` does: the requester's own room id and the
+    room gate's refusal, which is already grant-filtered (`birthRefusedOutsideGrant`,
+    FIX-DISCLOSE). `NativeHost.prepareLoaded` already printed `birth preparation: {repr
+    reason}` on the same authorized plan channel, so nothing new is disclosed.
 - Not touched: `GrainResourceBirthAdmission.Pending.admitBranch` has the same conflation
   (`law.admit = none` → `policyRejected`). It is outside audit (c) and is a follow-up.
 - Next: merge lane/lean-critical 147d3861 (genesis seed), then births priced from the cell
