@@ -637,7 +637,7 @@ def checked_units(base, r, partial=False):
 
 
 def consent_record(base, r, stage):
-    return {**stage['consent'], 'socket': str(Path(r['home']) / 'consent/peer.sock'),
+    return {**stage['consent'], 'transportSha256': stage['binaries']['mini'], 'socket': str(Path(r['home']) / 'consent/peer.sock'),
             'socketUnit': r['units'][3], 'serviceUnit': r['units'][4],
             'serviceUid': r['operatorUid'], 'controllerUid': r['uid'], 'activationPeerUid': 0,
             'provider': str(base / 'bin' / CONSENT_BIN), 'config': str(base / 'consent/config.json'),
@@ -667,6 +667,7 @@ def consent_readiness(base, r, stage):
     require(after.get('MainPID') == str(pid) and after.get('InvocationID') == observed.get('InvocationID')
             and after.get('ActiveState') == 'active', 'consent process changed during readiness')
     return {**record, 'mainPid': pid, 'processStartTicks': ticks, 'invocationId': observed.get('InvocationID'),
+            'processExecutableIdentity': [executable.st_dev, executable.st_ino],
             'socketUid': m.st_uid, 'socketMode': '0600', 'socketIdentity': [m.st_dev, m.st_ino],
             'readiness': 'process-and-socket-only', 'independentAdmissionObserved': False}
 
