@@ -375,8 +375,9 @@ existing machinery: a concierge room, a second house resident, a pool row.
 `openai-compatible` shape and needs no adapter. The pay-as-you-go
 `/api/paas/v4` is not funded (`1113`), and a 429 on the plan endpoints means a
 wrong endpoint. The Host quotes its stream (it omits `finish_reason` on delta
-chunks; `Host/ProviderUsageAudit.lean` holds the measured stream). Rows in
-`/etc/mini/providers.json`:
+chunks; `Host/ProviderUsageAudit.lean` holds the measured stream). The two
+rows, to append to `/etc/mini/providers.json`'s `providers` as they are
+(`demo/providers-zai-rows.json`):
 
 ```json
 {"name":"zai-glm","kind":"openai-compatible","credential":"pool",
@@ -428,10 +429,17 @@ tariffs):
 
 **Subscribe** (the web form's verbs): `tariff subscribers` (price and period),
 `credit` (balance), `pay subscribers week`, `room status subscribers` (the
-window and its end).
+window and its end), then once `chat join subscribers @subscribers-invite.json`.
 
-**Open:** a concierge window is kernel membership, but asking the room's
-Hermes is a chat line, which needs a roster stream only the founder's `chat
-invite` creates. Until that is closed, the founder invites each new member.
+**The roster.** A window is kernel membership; asking the room's Hermes is a
+chat line, which needs a stream on the room's roster. The concierge keeps the
+roster: for each subject it issues a window, it has the founder (the same
+operator account) run `chat invite subscribers SUBJECT --roster-only` (a
+stream and a roster row, no grant: the window is the grant, so its end ends the
+posting), and leaves the window's reference in
+`MEMBER_HOMES/SUBJECT/requests/subscribers-invite.json`. The subscriber joins
+once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
+`room status subscribers`.
+
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.

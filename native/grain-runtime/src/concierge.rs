@@ -67,6 +67,28 @@ pub(crate) struct Config {
     pub outbox: PathBuf,
     /// The journal: one JSON line per decision.
     pub journal: PathBuf,
+    /// The room's chat roster, kept by the founder (operator custody: the
+    /// founder's workspace on the same account). With it, each subject this
+    /// concierge issues a window gets a stream and a roster row (`chat invite
+    /// ROOM SUBJECT --roster-only`: no grant, the window is the grant), and the
+    /// window's reference is left in `memberHomes/SUBJECT/requests/ROOM-invite.json`
+    /// when that home exists; the member joins with `chat join ROOM @ROOM-invite.json`.
+    #[serde(default)]
+    pub roster: Option<RosterConfig>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RosterConfig {
+    /// The room's name in the founder's workspace.
+    pub room: String,
+    pub host: PathBuf,
+    pub config: PathBuf,
+    pub socket: PathBuf,
+    pub workspace: PathBuf,
+    pub home: PathBuf,
+    #[serde(default)]
+    pub member_homes: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -246,6 +268,8 @@ struct Journal {
     open: BTreeMap<String, u128>,
     /// The greatest ledger height decided.
     decided_height: u128,
+    /// Subjects given a stream and a roster row (`roster:SUBJECT`).
+    rostered: BTreeSet<String>,
 }
 
 impl Journal {
@@ -257,6 +281,7 @@ impl Journal {
             refunding: BTreeMap::new(),
             open: BTreeMap::new(),
             decided_height: 0,
+            rostered: BTreeSet::new(),
         };
         let Ok(text) = fs::read_to_string(path) else { return Ok(journal) };
         for (number_, line) in text.lines().enumerate() {
@@ -312,6 +337,9 @@ impl Journal {
                 if decision == "issued" {
                     let held = self.windows.entry(string(value, "subject")?).or_insert(0);
                     *held = (*held).max(number(value, "notAfter")?);
+                }
+                if decision == "rostered" {
+                    self.rostered.insert(string(value, "subject")?);
                 }
                 if key.starts_with("ledger-tx:") {
                     let height = height.ok_or("decided ledger line has no height")?;
@@ -591,7 +619,63 @@ pub(crate) fn step(config: &Config) -> Result<Vec<Value>> {
             decisions.push(line);
         }
     }
+    if let Some(roster) = &config.roster {
+        // After the decisions: a failed roster write never blocks a payment's
+        // decision; the next pass retries it (the write is idempotent).
+        let pending: Vec<String> = journal.windows.keys().filter(|s| !journal.rostered.contains(*s)).cloned().collect();
+        for subject in pending {
+            let line = format!("chat invite {} {subject} --roster-only", roster.room);
+            match run.mini(&[
+                "shell", "--socket", &roster.socket.display().to_string(), "--host", &roster.host.display().to_string(),
+                "--config", &roster.config.display().to_string(), "--workspace", &roster.workspace.display().to_string(),
+                "--home", &roster.home.display().to_string(), "--line", &line,
+            ]) {
+                Ok(_) => {
+                    let decided = json!({"key":format!("roster:{subject}"),"decision":"rostered","subject":subject});
+                    journal.append(decided.clone())?;
+                    decisions.push(decided);
+                }
+                Err(error) => decisions.push(json!({"key":format!("roster:{subject}"),"decision":"roster-pending","subject":subject,"error":error})),
+            }
+        }
+        if let Some(homes) = &roster.member_homes {
+            for subject in journal.windows.keys() {
+                deliver_window(&config.outbox, homes, &roster.room, subject)?;
+            }
+        }
+    }
     Ok(decisions)
+}
+
+/// The newest window reference this concierge left for `subject`, copied to
+/// `homes/SUBJECT/requests/ROOM-invite.json` when that home exists.
+fn deliver_window(outbox: &Path, homes: &Path, room: &str, subject: &str) -> Result<()> {
+    let home = homes.join(subject);
+    if !home.is_dir() {
+        return Ok(());
+    }
+    let Ok(entries) = fs::read_dir(outbox.join(subject)) else { return Ok(()) };
+    let newest = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_str().is_some_and(|n| n.starts_with("renew-t") && n.ends_with(".json")))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .max();
+    let Some((_, source)) = newest else { return Ok(()) };
+    let bytes = fs::read(&source).map_err(|e| format!("{}: {e}", source.display()))?;
+    let requests = home.join("requests");
+    fs::create_dir_all(&requests).map_err(|e| format!("{}: {e}", requests.display()))?;
+    let target = requests.join(format!("{room}-invite.json"));
+    if fs::read(&target).ok().as_deref() == Some(bytes.as_slice()) {
+        return Ok(());
+    }
+    let staged = requests.join(format!(".{room}-invite.json.tmp"));
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&staged)
+            .map_err(|e| format!("{}: {e}", staged.display()))?;
+        file.write_all(&bytes).and_then(|_| file.sync_all()).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&staged, &target).map_err(|e| format!("{}: {e}", target.display()))
 }
 
 /// The refund memo: names the room, the payment's ledger transaction and the
@@ -1023,7 +1107,7 @@ mod tests {
             log = log.display(), state = state.display())).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let config = Config { mini: fake, workspace: dir.join("ws"), program: dir.join("program.json"),
-            inbox: dir.join("inbox"), outbox: dir.join("outbox"), journal: dir.join("journal.jsonl") };
+            inbox: dir.join("inbox"), outbox: dir.join("outbox"), journal: dir.join("journal.jsonl"), roster: None };
         let program = Program { kind: "minidregg-concierge-program-v1".into(), room: "9".into(), concierge: "5".into(),
             till: "12".into(), topic: "renew".into(), member_verbs: vec![],
             refs: ProgramRefs { room: "lab".into(), till: "lab-till".into() } };
@@ -1047,5 +1131,26 @@ mod tests {
         assert_eq!(calls.lines().filter(|l| l.contains("lookup-operation")).count(), 2);
         assert!(!calls.contains("--action refund"), "a begun refund must never be sent again: {calls}");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_issued_window_is_rostered_once_and_its_newest_reference_reaches_the_members_home() {
+        let dir = std::env::temp_dir().join(format!("concierge-roster-{}-{}", std::process::id(), now()));
+        fs::create_dir_all(dir.join("outbox/77")).unwrap();
+        fs::create_dir_all(dir.join("homes/77")).unwrap();
+        let mut journal = Journal::open(&dir.join("journal.jsonl")).unwrap();
+        journal.append(json!({"key":"ledger-tx:401","decision":"issued","height":"40","subject":"77","notAfter":"52"})).unwrap();
+        assert!(!journal.rostered.contains("77"));
+        journal.append(json!({"key":"roster:77","decision":"rostered","subject":"77"})).unwrap();
+        let reopened = Journal::open(&dir.join("journal.jsonl")).unwrap();
+        assert!(reopened.rostered.contains("77") && reopened.windows["77"] == 52);
+        fs::write(dir.join("outbox/77/renew-t401.json"), b"{\"recipient\":\"77\",\"n\":1}").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(dir.join("outbox/77/renew-t402.json"), b"{\"recipient\":\"77\",\"n\":2}").unwrap();
+        deliver_window(&dir.join("outbox"), &dir.join("homes"), "subscribers", "77").unwrap();
+        assert_eq!(fs::read(dir.join("homes/77/requests/subscribers-invite.json")).unwrap(), b"{\"recipient\":\"77\",\"n\":2}");
+        // No home: nothing is delivered and nothing fails.
+        deliver_window(&dir.join("outbox"), &dir.join("homes"), "subscribers", "78").unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 }
