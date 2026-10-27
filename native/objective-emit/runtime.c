@@ -307,16 +307,10 @@ static void step_raw(void) {
     }
     case T_DONE: evaluate(ob_a[n], env); return;                              /* administrative */
     case T_PERFORM: {
-#ifndef OB_MUTATE_SHARED
-      /* OB_MUTATE_SHARED: deliberate mutation for the harness control (no sharedEffect refusal). */
       for (uint64_t k = 0; k < stack_len; k++)                               /* forcingShared */
         if (stk[k].tag == F_UPDATE) { refuse(R_SHAREDEFFECT); return; }
-#endif
       uint64_t a = heap_len;
-#ifndef OB_MUTATE_PERFORM
       heap_push(suspended_cell(ob_a[n], env));                               /* the plan, lazily */
-#endif
-      /* OB_MUTATE_PERFORM: deliberate mutation for the harness control (the plan is not allocated). */
       ctl.tag = K_YIELDED; ctl.addr = a; return;
     }
     }
@@ -331,10 +325,6 @@ static void step_raw(void) {
     case F_UPDATE:
       if (f.addr < heap_len && heap[f.addr].st == C_EVALUATING) {
         Cell c = heap[f.addr]; c.st = C_CACHED; c.value = v;
-#ifdef OB_MUTATE_UPDATE
-        /* Deliberate mutation for the harness control: forget the value (call-by-name). */
-        c.st = C_SUSPENDED;
-#endif
         heap_set(f.addr, c); POP();
       } else { refuse(R_INVALIDUPDATE); POP(); }
       return;
@@ -361,16 +351,11 @@ static void step_raw(void) {
     case F_EXTEND:
       if (v.tag == V_RECORD) {
         Fields *r = allocate_fields(f.pairs, f.npairs, f.env, v.rec->len);
-#ifdef OB_MUTATE_EXTEND
-        /* Deliberate mutation for the harness control: drop the shadowing filter. */
-        for (uint64_t k = 0; k < v.rec->len; k++) r->f[r->len++] = v.rec->f[k];
-#else
         for (uint64_t k = 0; k < v.rec->len; k++) {
           int shadowed = 0;
           for (uint64_t j = 0; j < f.npairs; j++) if (f.pairs[j].label == v.rec->f[k].label) { shadowed = 1; break; }
           if (!shadowed) r->f[r->len++] = v.rec->f[k];
         }
-#endif
         Value out = v_simple(V_RECORD); out.rec = r; returned(out); POP(); return;
       }
       refuse(R_WRONGVALUE); POP(); return;
