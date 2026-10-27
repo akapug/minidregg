@@ -49,11 +49,12 @@ pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
          <body data-path=\"{path}\">\n\
+         <a class=\"skip\" href=\"#stage\">Skip to content</a>\n\
          <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
          <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
          <div class=\"identity\">{identity}</div></header>\n\
          <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
-         <main class=\"stage\" id=\"stage\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <main class=\"stage\" id=\"stage\" tabindex=\"-1\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
          <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
         title = h(title),
         path = h(path),
@@ -92,7 +93,7 @@ pub fn outcome(class: &str, headline: &str, detail: &str, next: &[(&str, &str)])
         links.push_str(&format!("<a href=\"{}\" data-pane>{}</a> ", h(href), h(label)));
     }
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}</div>",
         h(headline),
         if detail.is_empty() { String::new() } else { format!("<pre>{}</pre>", h(detail)) },
         if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
@@ -139,7 +140,9 @@ pub fn term_index(terminals: &[(String, bool, bool)]) -> String {
 
 pub fn term_page(id: &str) -> String {
     format!(
-        "<div class=\"term\" data-ws=\"/ws/term/{}\" tabindex=\"0\"><noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
+        "<div class=\"term\" data-ws=\"/ws/term/{}\" role=\"region\" tabindex=\"0\" aria-label=\"Terminal: mini shell in the page (every verb is also a form under Commands)\">\
+         <p class=\"vh\">This pane is a terminal: the same shell <code>ssh -t</code> opens. Every verb it understands is also a keyboard-friendly form: <a href=\"/verb\">every shell verb as a form</a>. Recent terminal output is mirrored in text at the end of this region.</p>\
+         <noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
         h(id)
     )
 }

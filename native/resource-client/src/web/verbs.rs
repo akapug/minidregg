@@ -312,17 +312,22 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         "<section class=\"verb-form\"><h2><code>{}</code></h2><form method=\"post\" action=\"{action}\">{hidden}<input type=\"hidden\" name=\"alt\" value=\"{index}\"><div class=\"fields\">",
         escape(&alt.literals()),
     );
-    let _ = name;
+    // Each form's fields carry ids unique on the page (a verb renders one form per
+    // alternative, and the tour embeds several verbs' forms on one page), so a
+    // `label for` always resolves to its own field; the `name` stays positional
+    // (`a{i}`): the assembler reads it.
+    let prefix = format!("{name}-{index}");
     for (i, tok) in alt.tokens.iter().enumerate() {
         let field = format!("a{i}");
+        let id = format!("{prefix}-{i}");
         match tok {
             Tok::Lit(_) => {}
-            Tok::Arg { name, optional, kind } => out.push_str(&input(&field, name, *optional, kind)),
+            Tok::Arg { name, optional, kind } => out.push_str(&input(&id, &field, name, *optional, kind)),
             Tok::Flag { name, value: None, optional } => {
-                out.push_str(&format!("<label class=\"check\"><input type=\"checkbox\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
+                out.push_str(&format!("<label class=\"check\" for=\"flag-{id}\"><input type=\"checkbox\" id=\"flag-{id}\" name=\"{field}\" value=\"on\"{}> <code>{}</code>{}</label>", if *optional { "" } else { " required" }, escape(name), if *optional { "" } else { " (required)" }));
             }
             Tok::Flag { name, value: Some((placeholder, kind)), optional } => {
-                out.push_str(&input(&field, &format!("{name} {placeholder}"), *optional, kind));
+                out.push_str(&input(&id, &field, &format!("{name} {placeholder}"), *optional, kind));
             }
         }
     }
@@ -331,27 +336,29 @@ fn form(name: &str, index: usize, alt: &Alt, operation: &str, action: &str, hidd
         None => alt.proposes(operation),
     };
     if proposes {
-        out.push_str("<label class=\"check\"><input type=\"checkbox\" name=\"submit\" value=\"on\" checked> and <code>submit ID</code> at once</label>");
+        out.push_str(&format!("<label class=\"check\" for=\"{prefix}-submit\"><input type=\"checkbox\" id=\"{prefix}-submit\" name=\"submit\" value=\"on\" checked> and <code>submit ID</code> at once</label>"));
     }
     out.push_str("</div><p><button>Run</button></p></form></section>\n");
     out
 }
 
-fn input(field: &str, label: &str, optional: bool, kind: &Kind) -> String {
+/// One field of a derived form: labelled by the grammar leaf's argument name (and kind, as the
+/// placeholder shows), with a page-unique `id` so the label resolves to this field and no other.
+fn input(id: &str, field: &str, label: &str, optional: bool, kind: &Kind) -> String {
     let req = if optional { "" } else { " required" };
     let shown = format!("{}{}", escape(label), if optional { " <span class=note>(optional)</span>" } else { "" });
     match kind {
-        Kind::Text => format!("<label for=\"{field}\">{shown}</label><textarea id=\"{field}\" name=\"{field}\" maxlength=\"4096\"{req}></textarea>"),
+        Kind::Text => format!("<label for=\"{id}\">{shown}</label><textarea id=\"{id}\" name=\"{field}\" maxlength=\"4096\"{req}></textarea>"),
         Kind::Choice(options) => format!(
-            "<label for=\"{field}\">{shown}</label><select id=\"{field}\" name=\"{field}\">{}{}</select>",
+            "<label for=\"{id}\">{shown}</label><select id=\"{id}\" name=\"{field}\">{}{}</select>",
             if optional { "<option value=\"\">—</option>" } else { "" },
             options.iter().map(|o| format!("<option>{}</option>", escape(o))).collect::<String>()
         ),
-        Kind::Ref => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}>"),
-        Kind::Id => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
-        Kind::Number => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
-        Kind::Word => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\"{req}>"),
-        Kind::Rest => format!("<label for=\"{field}\">{shown}</label><input id=\"{field}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
+        Kind::Ref => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" list=\"refs\" autocomplete=\"off\"{req}>"),
+        Kind::Id => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" value=\"{}\" pattern=\"[A-Za-z0-9-]+\"{req}>", super::body::fresh_id()),
+        Kind::Number => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" inputmode=\"numeric\"{req}>"),
+        Kind::Word => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\"{req}>"),
+        Kind::Rest => format!("<label for=\"{id}\">{shown}</label><input id=\"{id}\" name=\"{field}\" type=\"text\" maxlength=\"2000\"{req}>"),
     }
 }
 

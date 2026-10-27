@@ -27,6 +27,13 @@
   --accent: #6fb1ff; --admitted: #63c27a; --refused: #ff7b72; --undecided: #e3b341; --term-bg: #0e0f12;
 }
 
+/* accessibility: the skip link (hidden until focused) and the visually-hidden class
+   (text alternatives that are there for assistive tech, not sight) */
+.skip { position: absolute; left: -10rem; top: .3rem; z-index: 20; background: var(--accent); color: var(--paper); padding: .4rem .8rem; border-radius: 4px; }
+.skip:focus { left: .8rem; }
+.vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.term-mirror { margin: 0; font: 12px var(--mono); }
+
 * { box-sizing: border-box; }
 html { height: 100%; }
 body {

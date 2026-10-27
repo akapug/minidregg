@@ -972,7 +972,7 @@ pub(super) fn outcome_of(ending: &Ending, next: &[(&str, &str)], transition: boo
         format!("<form method=\"post\" action=\"/paste\" class=\"inline paste\"><input type=\"hidden\" name=\"line\" value=\"{}\"><button>paste and submit <code>{}</code></button></form>", escape(line), escape(line))
     }).unwrap_or_default();
     format!(
-        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
+        "<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p>{}{}{}</div>\n",
         headline_html(&headline),
         if detail.trim().is_empty() { String::new() } else { format!("<pre>{}</pre>", escape(detail.trim())) },
         paste,
@@ -1026,7 +1026,7 @@ fn purse_meter(site: &Site) -> String {
             let scale = balance.max(1000);
             format!(
                 "<section class=\"purse\" data-live=\"15000\"><p class=\"big\"><span class=\"n\">{balance}</span> credits</p>\
-                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\">{balance}</meter>\
+                 <meter min=\"0\" max=\"{scale}\" low=\"{}\" value=\"{balance}\" aria-label=\"Purse balance: {balance} credits\">{balance}</meter>\
                  <p class=\"note\">{}</p></section>\n",
                 scale / 10,
                 escape(&line)
@@ -1055,7 +1055,7 @@ fn outcome_page(title: &str, class: &str, headline: &str, detail: &str, next: &[
         status: if class == "refused" { 403 } else { 200 },
         title: title.to_owned(),
         stamp: Stamp::None,
-        body: format!("<div class=\"outcome {class}\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
+        body: format!("<div class=\"outcome {class}\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><p class=\"headline\">{}</p><pre>{}</pre>{}</div>\n", escape(headline), escape(detail), if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }),
     }
 }
 
