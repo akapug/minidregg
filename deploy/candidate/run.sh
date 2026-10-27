@@ -84,6 +84,15 @@ init() {
   "$MINI" keygen --secret "$state/keys/clock.key" --public "$state/keys/clock.pub" \
     >"$state/keys/clock.pub.hex"
   clock_public=$(od -An -tx1 -v "$state/keys/clock.pub" | tr -d ' \n')
+  # The grain platform's completion custodian (deploy/market/INSTALL.md §0): a key pair the operator
+  # generates here, beside the sponsor's, with no copy anywhere else; its public key is pinned into
+  # the genesis config. An operator who made the pair beforehand sets the hex in the params instead.
+  if jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$p" >/dev/null; then
+    "$MINI" keygen --secret "$state/keys/completion.seed" --public "$state/keys/completion.pub" --no-prerotation \
+      >"$state/keys/completion.pub.hex"
+    completion_public=$(od -An -tx1 -v "$state/keys/completion.pub" | tr -d ' \n')
+    jq --arg k "$completion_public" '.grainPlatform.completionCustodianKey = $k' "$p" >"$p.filled" && mv "$p.filled" "$p"
+  fi
 
   sh "$GENESIS" "$p" "$sponsor_public" "$clock_public" "$HOST" "$STORE" "$VERIFIER" "$state" \
     || candidate_die "genesis template refused (see above)"
