@@ -313,7 +313,7 @@ impl StartLane {
         }
     }
 
-    fn admitted_protocol(self) -> &'static str {
+    pub(crate) fn admitted_protocol(self) -> &'static str {
         match self {
             Self::V3 => "mini-spk-resident-start-admitted-v3",
             Self::RetryV4 => "mini-spk-resident-start-admitted-retry-v4",
@@ -365,6 +365,32 @@ impl StartLane {
             Self::V3 => "claim-v3.bin",
             Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::CLAIM_INGRESS_FILE,
         }
+    }
+
+    /// The exact BEGIN ingress, CLAIM ingress and committed CLAIM of this
+    /// lane's retained START, for failed-START recovery. `v3_begin_dir` and
+    /// `v3_claim_dir` are the resident config's v3 attempt directories; the
+    /// v4 lane's live at fixed names under the journal.
+    pub(crate) fn recovery_artifacts(
+        self,
+        journal_dir: &Path,
+        v3_begin_dir: &Path,
+        v3_claim_dir: &Path,
+    ) -> [PathBuf; 3] {
+        let (begin, claim_dir) = match self {
+            Self::V3 => (v3_begin_dir.join("begin-v3.bin"), v3_claim_dir.to_path_buf()),
+            Self::RetryV4 => (
+                journal_dir
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_ATTEMPT_DIR)
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_INGRESS_FILE),
+                journal_dir.join(crate::lifecycle_v4_retry_claim_native::CLAIM_ATTEMPT_DIR),
+            ),
+        };
+        [
+            begin,
+            claim_dir.join(self.claim_ingress_file()),
+            claim_dir.join(self.committed_file()),
+        ]
     }
 
     fn committed_file(self) -> &'static str {
