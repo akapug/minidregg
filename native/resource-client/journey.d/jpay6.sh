@@ -171,6 +171,9 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 # The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# The birth intent embeds the FILLED genesis: the Host refuses a birth whose genesis lacks the clock
+# fields the helper wrote ("$.birth.genesis: missing field clockGenesisNow", the real JPAY6 red of a0db11f8).
+genesis = json.load(open(path("genesis.json")))
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
@@ -534,8 +537,12 @@ mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", sec
 # The friend's own provider key, in the friend's own namespace (their
 # workspace's subject and signing key), granted to the provider runner 9.
 FRIEND_WS = path("friend-workspace")
-ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
-                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS],
+# `workspace init` and the key grants reach the Host through --socket, so the Hermes half's Serve
+# starts here and lives until that half stops it.
+serve = Serve()
+ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG, "--socket", SOCKET,
+                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS,
+                     "--no-prerotation"],  # a fixture key with no next key (jpay-v2.sh idiom)
                     capture_output=True)
 if ws.returncode != 0:
     fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
@@ -628,7 +635,6 @@ if CONFIG_B != CONFIG:
 upstream = subprocess.Popen([TEST_PROVIDER, f"127.0.0.1:{UPORT}", path("upstream.log"), "--metered-usage"],
                             stdout=open(path("upstream.stdout"), "wb"), stderr=open(path("upstream.stderr"), "wb"))
 LIVE.append(upstream)
-serve = Serve()
 # grain-runtime's systemdScope requires the controller to be the active
 # MainPID of exactly mini-grain-controller@<task>.service.
 UNIT = f"mini-grain-controller@{PARENT}"
