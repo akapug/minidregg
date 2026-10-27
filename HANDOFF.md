@@ -1,6 +1,8 @@
 # Start here (2026-10-26)
 
-**The plan is [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md):** the finite
+**What the demo is: [`docs/DEMO-EXPERIENCE-2026-10-27.md`](docs/DEMO-EXPERIENCE-2026-10-27.md)**
+(the stranger's fifteen-minute tour, the web-parity law, the box as a member, the ranked ambitions).
+**How we get there is [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md):** the finite
 prefix from main to a public Mini on Hetzner with every surface on, then the coherence work that
 follows. It is a present-state document and is rewritten whole when the state changes.
 
@@ -15,10 +17,11 @@ follows. It is a present-state document and is rewritten whole when the state ch
 | `2026-10-26-native-crates/SYNTHESIS.md` | every Rust crate read whole: where Rust decides semantics, the triage, the literature, the Rust prefix |
 | `2026-10-26-triage/RUST-TRIAGE.md`, `LEAN-TRIAGE.md` | the unanchored second opinions: what to delete now, what to rescue, what to move to the research repos |
 
-**The live system:** one public node, `dregg-workhorse` (Hetzner cx33, fsn1), serving candidate
-`5688775a` of 2026-09-30 over ssh; roster = ember plus three test keys. Its replacement is the
-confined box described in `~/dev/dregg-infra` branch `demo-vm` (`edge/demo/CONFINEMENT.md`,
-`CHECKLIST.md`). The deploy frame, runbook and gate live in `~/dev/dregg-infra/edge/mini`.
+**The live system:** `dregg-demo` (Hetzner ccx23, fsn1, `demo.dregg.online`) serving rehearsal ship #1,
+closed to every login until the opening contract holds (plan §1, §2); `dregg-build` is the lanes'
+Linux box; both die 2026-11-11. Box truth is `~/dev/dregg-infra` branch `demo-vm`
+(`edge/demo/CONFINEMENT.md`, `CHECKLIST.md`). The old `dregg-workhorse` Mini slice goes at the opening.
+How the project is developed: `docs/COORDINATION-2026-10-27.md` (on `lane/coordination` until round 2 merges). The deploy frame, runbook and gate live in `~/dev/dregg-infra/edge/mini`.
 
 **The rules every lane obeys** are in the plan's §4 and in [`CLAUDE.md`](CLAUDE.md) /
 [`AGENTS.md`](AGENTS.md); the founding laws are in [`ATLAS.md`](ATLAS.md) §6.
