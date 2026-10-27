@@ -7946,6 +7946,11 @@ def run (arguments : List String) : IO UInt32 := do
             | some bytes => if bytes == cached then "stored checkpoint equal" else "stored checkpoint DIFFERS"
           IO.println s!"height {h}: cached seal {cached.length} bytes; full seal equal: {cached == full}; {storedVerdict}"
           pure (if cached == full && stored.all (· == cached) then 0 else 1)
+      | "link-index", [] =>
+          let (base, height, links) ← IO.ofExcept (← NativeHost.linkIndex config)
+          IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
+          IO.println s!"links {(linkIndexJson links).compress}"
+          pure 0
       | "presence-index", [] =>
           let (base, height, index) ← IO.ofExcept (← NativeHost.presenceIndex config)
           IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
@@ -8111,6 +8116,16 @@ def run (arguments : List String) : IO UInt32 := do
             | throw (RequestRefusal.malformed "noncanonical signing plan")
           let pinned ← IO.ofExcept (NativePlanHeight.pin plan)
           writeBytes output (signingPlanCodec.encode pinned)
+          pure 0
+      | "pin-enrollment-plan-height", [planPath, heightText, output] =>
+          -- An enrollment plan (op 86) carries no height of its own: the signer pins its
+          -- sponsor deadline to the height of the observation it was planned at, the same
+          -- height local consent re-derives the pinned plan from (`NativeSpecializedConsent`).
+          let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode (← readBytes planPath)
+            | throw (RequestRefusal.malformed "noncanonical enrollment signing plan")
+          let height ← IO.ofExcept (exactDecimal "pin height" heightText)
+          let pinned ← IO.ofExcept (NativePlanHeight.pinEnrollment height plan)
+          writeBytes output (ParticipantKeyEnrollment.signingPlanCodec.encode pinned)
           pure 0
       | "assemble", [planPath, signaturesPath, output] =>
           let some plan := signingPlanCodec.decode (← readBytes planPath)
