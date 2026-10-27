@@ -525,6 +525,16 @@ pub(crate) fn create(spec_path: &Path) -> Result<Value> {
         fs::DirBuilder::new().mode(0o700).create(&state).map_err(|e| format!("state: {e}"))?;
     }
     init_workspace(&spec, &spec.worker_key, &state.join("resource-workspace"))?;
+    // A room's tools keep their own home inside stateDir (the controller
+    // refuses one elsewhere); create makes it, private.
+    if let Some(home) = spec.room.as_ref().and_then(|r| r["home"].as_str()).map(PathBuf::from) {
+        if home.parent() != Some(state.as_path()) {
+            return Err("room.home must be a direct child of ROOT/state".into());
+        }
+        if !home.exists() {
+            fs::DirBuilder::new().mode(0o700).create(&home).map_err(|e| format!("room home: {e}"))?;
+        }
+    }
 
     // 4. The controller config, decoded through the controller's own type.
     let config = spec.controller(&witness, provider_witness.as_deref());
