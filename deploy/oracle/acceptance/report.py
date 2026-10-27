@@ -109,6 +109,45 @@ def consent_evidence(run, require):
                      'exercise independent consent. Memory observations cover this run, not arbitrary Store sizes.'}
 
 
+def controller_continuation(run, require):
+    directory = run / 'continuations/controller-create-1'
+    created = read(run / 'agent-lifetime/controller-create.json')
+    if not directory.exists():
+        require('controller_created_without_unrecorded_recovery', not created.get('resumedPendingCreation', False))
+        return None
+    value = read(directory / 'prepared.json')
+    world = read(run / 'world-identity.json')
+    require('controller_continuation_exact_boundary',
+            value.get('schema') == 'mini-oracle-controller-continuation-v1'
+            and value.get('boundary') == 'after-definite-share-before-any-START'
+            and value.get('run') == str(run) and value.get('store') == world['store']
+            and value.get('repeated_phases') == []
+            and value.get('controller_recovery_verb') == 'controller-resume-create'
+            and value.get('prior_exit') == {'execution_exit': 1, 'cleanup_exit': 0, 'namespace_preserved': True}
+            and created.get('resumedPendingCreation') is True
+            and created.get('controllerUid') == value.get('controller_uid'))
+    for name, digest in value['prior_files'].items():
+        relative = Path(name)
+        require('continuation_snapshot_' + name,
+                not relative.is_absolute() and '..' not in relative.parts
+                and sha(directory / 'prior' / relative) == digest)
+    for phase in ('store', 'birth-a', 'install-a', 'birth-b', 'install-b', 'share-a'):
+        for suffix in ('cmd', 'stdout', 'stderr', 'exit', 'seconds'):
+            name = f'world/evidence/{phase}.{suffix}'
+            require(f'continuation_preserves_{phase}_{suffix}', sha(run / name) == value['prior_files'][name])
+    for app in ('9101', '9201'):
+        status = read(directory / f'status-{app}.json')
+        require(f'continuation_{app}_installed_before_first_START',
+                status.get('app') == app and status.get('installCompleted') is True and status.get('runs') == [])
+    for line in (directory / 'recovery-input-sha256.txt').read_text().splitlines():
+        digest, path = line.split(None, 1)
+        require('continuation_source_' + path, Path(path).is_absolute() and sha(Path(path)) == digest)
+    return {'prepared': value, 'prepared_sha256': sha(directory / 'prepared.json'),
+            'recovery_input_manifest_sha256': sha(directory / 'recovery-input-sha256.txt'),
+            'scope': 'Preserved first failure; continued only the pending account creation and later phases. '
+                     'No repeated genesis, installation, publication or application share.'}
+
+
 def main():
     run, inventory_sha = Path(sys.argv[1]), sys.argv[2]
     ev = run / 'world/evidence'
@@ -343,6 +382,7 @@ def main():
     # cannot substitute for a controller's agent-origin lifetime grant, native
     # dispatch receipt and distinct-purse settlement.
     consent = consent_evidence(run, require)
+    continuation = controller_continuation(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
         agent_dir = run / 'agent-lifetime' / stage
@@ -433,6 +473,7 @@ def main():
                   'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
               'controller_consent': consent,
+              'controller_continuation': continuation,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}

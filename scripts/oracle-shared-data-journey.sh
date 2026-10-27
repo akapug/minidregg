@@ -7,7 +7,7 @@ set -euo pipefail
 umask 077
 usage() {
   cat <<'HELP'
-usage: scripts/oracle-shared-data-journey.sh [--resume] BASE_BIN OWN_BIN NEW_RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
+usage: scripts/oracle-shared-data-journey.sh [--resume|--continue-controller] BASE_BIN OWN_BIN RUN_ROOT SIGNED_RUNTIME_SPK DATA_SOURCE INVENTORY_JSON
 
 Linux operator account with user systemd/linger, subordinate UID/GID allocation,
 passwordless access to deploy/spk-host/install-user-world, bwrap, jq, curl, python3.
@@ -16,6 +16,8 @@ OWN_BIN: current spk-host, mini-spk-broker, mini-spk-volume-helper, spk-data-pub
 All paths absolute; NEW_RUN_ROOT must have protected ancestors. Without --resume
 it must not exist. --resume requires the exact U3 initial allocation/authoring
 selectors and a retained prepared INSTALL; older receiving-only worlds refuse.
+--continue-controller requires the exact preserved pre-START controller-create
+failure after both installs, publication and share. It never repeats those phases.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -28,6 +30,7 @@ HELP
 [[ ${1:-} != --help ]] || { usage; exit 0; }
 mode=new
 if [[ ${1:-} == --resume ]]; then mode=resume; shift; fi
+if [[ ${1:-} == --continue-controller ]]; then mode=continue-controller; shift; fi
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
 benchmark=${ORACLE_STOP_BENCHMARK_JSON:?qualified copied-Store STOP benchmark receipt required}
@@ -71,10 +74,12 @@ if config.get('agentLifetimeDispatchTargets') != expected:
 if not (run / 'bin/grain-runtime').is_file():
     raise SystemExit('resume refused: retained U3 controller runtime absent')
 PYRESUME
-  [[ -f $run/initial-attempt/input-sha256.txt ]] || fail 'preserve original attempt evidence before resume'
-  [[ $(sha256sum "$spk" | cut -d ' ' -f1) == $(awk 'NR==1{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume package differs'
-  [[ $(sha256sum "$inventory" | cut -d ' ' -f1) == $(awk 'NR==2{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume inventory differs'
-  sha256sum -c "$run/binary-sha256.txt" >"$run/resume-binary-check.txt"
+  if [[ $mode == resume ]]; then
+    [[ -f $run/initial-attempt/input-sha256.txt ]] || fail 'preserve original attempt evidence before resume'
+    [[ $(sha256sum "$spk" | cut -d ' ' -f1) == $(awk 'NR==1{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume package differs'
+    [[ $(sha256sum "$inventory" | cut -d ' ' -f1) == $(awk 'NR==2{print $1}' "$run/initial-attempt/input-sha256.txt") ]] || fail 'resume inventory differs'
+    sha256sum -c "$run/binary-sha256.txt" >"$run/resume-binary-check.txt"
+  fi
 fi
 ancestor=$(dirname "$run")
 while :; do
@@ -95,11 +100,17 @@ export KIND_A=api KIND_B=api ROLE_BASIS_A='{"type":"role","id":"0"}' ROLE_BASIS_
 export POST_PATH_A=/query POST_PATH_B=/query POST_TYPE_A=application/json POST_TYPE_B=application/json
 . "$repo/deploy/oracle/acceptance/world.sh"
 configured=0
+preserve_existing_exit=0
+[[ $mode != continue-controller ]] || preserve_existing_exit=1
 trap world_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export ORACLE_IMPORT_PROFILE=${ORACLE_IMPORT_PROFILE:-operator-appliance-v1}
 case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail 'unknown operator import profile';; esac
+controller_create_verb=controller-create
+if [[ $mode == continue-controller ]]; then
+  world_continue_controller "$run" "$repo"
+else
 disk_plan=$(world_disk_plan) || fail 'fresh journey does not fit unchanged import and later verification space guards'
 if [[ $mode == new ]]; then
   world_prepare "$base" "$own" "$run" "$repo"
@@ -116,7 +127,9 @@ sha256sum "$spk" "$inventory" "$benchmark" "$0" "$repo/deploy/oracle/acceptance/
   "$repo/deploy/oracle/acceptance/agent-cases.json" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
+fi
 phase() { timeout 1800 "$journey" phase "$run/world" "$@"; }
+if [[ $mode != continue-controller ]]; then
 # INSTALL does not launch the app or open its signed data attachment. Complete
 # both installations while the large-profile spool reserve is available, then
 # publish data before either START. The native guards remain unchanged.
@@ -130,6 +143,8 @@ publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
 [[ -d $publication && ! -L $publication ]] || fail 'publisher did not produce exact inventory slot'
 world_disk_snapshot after-publication
 phase share-a
+fi
+publication=$GRAINS_ROOT/spk/public-data/sha256-$inventory_sha
 world_controller_prepare
 phase start-a
 world_controller_activate "$run/world/evidence/start-a.stdout" initial
@@ -310,6 +325,9 @@ phase stop-a2 stop-b2 status-a status-b
 retain 9101; retain 9201
 world_disk_snapshot after-stops
 sha256sum -c "$run/input-sha256.txt" >"$run/input-recheck.txt"
+if [[ -n ${continuation:-} ]]; then
+  sha256sum -c "$continuation/recovery-input-sha256.txt" >"$continuation/recovery-input-recheck.txt"
+fi
 if [[ -f $run/resume-retained-install-sha256.txt ]]; then
   sha256sum -c "$run/resume-retained-install-sha256.txt" >"$run/resume-retained-install-recheck.txt"
 fi
