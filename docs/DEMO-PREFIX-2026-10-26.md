@@ -196,6 +196,11 @@ steps take ~15 min each; the nightly gets the full 10,800 s and measures rather 
 `m6grain` on Debian 13 rerunning after the test-SPK cache path was provided. None of these gates a
 rehearsal: the gate is the tour plus the composed scenario.
 
+**Consent mode, decided** (2026-10-27 afternoon): the box stays on full consent; with the O(1) recheck
+(`ConsentAnchor.recheckHeld`, in every candidate since round 2) the propose cost is flat, so thin consent buys
+nothing the demo needs and lacks a birth arm (JP2 refuses a thin birth by name until a thin-birth design
+exists: Phase 3). The soak's propose slope was the pre-recheck binaries.
+
 **The meter.** Found by L1 from the genesis review: `meterAllowance` is a lifetime lane never
 replenished; at ~1,000 turnBytes per record the demo's 10^7 lane holds ~10^4 records and the per-minute
 clock alone would have emptied it in about 7 days. Rehearsal #3's genesis raises it to 10^10 per lane;
