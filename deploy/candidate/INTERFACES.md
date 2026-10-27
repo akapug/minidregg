@@ -417,7 +417,8 @@ second and `maxStepSeconds` the most one clock tick may advance, both positive),
 storageBytes networkBytes sideEffectCount feeDebit leaseByteBlocks`, and, for a world that hosts SPK
 grains (deploy/market/INSTALL.md §0), `grainPlatform {lifecycleManagement {managementSubject
 managementKeyId} grainBirthTariff {base perBirth} completionCustodianKey}`: the management subject
-is a Host setting (`run.sh platform` changes it on a stopped Store; the sponsor, whose key pair
+is a Host setting (`run.sh platform` rewrites it and restarts a Store that `run.sh start` launched; a unit-managed
+Store is stopped by its unit first; the sponsor, whose key pair
 `run.sh init` generates, is the natural first value), the tariff the metered cost of a
 grain birth (base > 0), and `completionCustodianKey` the completion custodian's 32-byte public key as
 64 lowercase hex, `null` in the operator's file until `run.sh init` generates `keys/completion.seed`
