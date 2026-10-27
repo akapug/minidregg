@@ -38,9 +38,9 @@ Other libraries from the same graph (numbers only):
 
 ## What deployed assurance may claim
 
-Only the two modules the `Deployed.lean` umbrella imports from Assurance carry deployed assurance: `Assurance.EvaluatorAudit` (3 theorems) and `Assurance.StoryLaw` (43 theorems), 46 approximate theorems in 726 lines, neither with a satisfiable/teeth/inhabitation marker by this grep, and neither in the `Host.Main` closure (the Host binary does not import them; their subjects, `Compiler.Evaluator` and `Kernel.LawHistory`/`PolicyInstallController`, are). Claimable sentence:
+Only the two modules the `Deployed.lean` umbrella imports from Assurance carry deployed assurance: `Assurance.EvaluatorAudit` (3 theorems) and `Assurance.StoryLaw` (43 theorems), 46 approximate theorems in 726 lines, neither with a satisfiable/teeth/inhabitation marker by this grep, and neither in the `Host.Main` closure. Subject reach differs: `EvaluatorAudit` is about `Compiler.Evaluator`/`RefusalReason`, both Host-reached; `StoryLaw` is about `Kernel.LawView` and `Kernel.PolicyInstallController` (Host-reached) AND `Kernel.LawHistory` (its accepted-history contract, NOT Host-reached; see the next section), so the story-room theorem `sealed_story_scene_monotone` is partly about code the Host does not run. Claimable sentence:
 
-> Of 2,350 theorems (approximate, by line count) in 144 Assurance modules, 46 in 2 modules are carried by the deployed umbrella, which proves properties of Host-reached evaluator and story-law code; none of the 144 modules is imported by the Host binary, and the remaining 2,304 theorems are research-umbrella results not part of the deployed claim.
+> Of 2,350 theorems (approximate, by line count) in 144 Assurance modules, 46 in 2 modules are carried by the deployed umbrella, which proves properties of the Host-reached evaluator and of the story law over an accepted-history module (`Kernel.LawHistory`) the Host does not yet import; none of the 144 modules is imported by the Host binary, and the remaining 2,304 theorems are research-umbrella results not part of the deployed claim.
 
 Do not say "1,851" (the scout's older, column-0 figure) beside these numbers. `Deployed.lean`'s Residual comment still names `NockDoorAudit` among the kept audits; that module no longer exists (only two Assurance imports remain), a stale comment to fix when the file is next touched.
 
@@ -206,3 +206,34 @@ Do not say "1,851" (the scout's older, column-0 figure) beside these numbers. `D
 |---|---|---|---|---|---|
 | Assurance.EvaluatorAudit | 3 | 0 | 0 | 0 | Kernel/Compiler (Host-reached) |
 | Assurance.StoryLaw | 43 | 0 | 0 | 0 | Kernel/Compiler (Host-reached) |
+
+## Kernel-subject research modules
+
+The 20 RESEARCH modules whose Assurance subject is Host-unreached Kernel/Compiler code only (no direct Selvage or Theory-unreached subject). One row per SUBJECT module. "Importers" are non-Assurance modules importing it; `Kernel`/`Compiler` are the research umbrella roots; `ResearchWip` is the research scratch root. No plan names any of these (greps of `DEMO-PREFIX-2026-10-26.md`, `BACKLOG-2026-10-27.md`, `DEMO-EXPERIENCE-2026-10-27.md` over the module names find none; surfaces below are named by what they serve). Verdicts: RESCUE (one wiring step), TWIN (duplicates a live module), DEAD (no named surface, no live importer; delete is a decision for ember, not taken here), ZK-CARGO (a fourth class the evidence forced: the zkML/MPC/FRI tower C2 already moves; not dead, not a Host surface).
+
+| subject | Assurance files about it | importers outside Assurance | verdict |
+|---|---|---|---|
+| `Compiler.DeployedCellRegistry` | CredentialSignedEnvelopeEndpoint, DeployedCredentialLifecycle, CredentialTokenLocalEndpoint | `Compiler`, `Kernel.ConsentAnchor` | TWIN of `Compiler.CanonicalCellRegistry` (Host-reached): its own docstring says "The unified receiving path uses `Compiler.CanonicalCellRegistry`; it does not select this witness as a production registry configuration." The three credential-lifecycle Assurance files are about the exhibit, not the registry the Host runs. |
+| `Kernel.LawHistory` | ItemLaw, SheetLaw (and StoryLaw, in Deployed) | `Kernel` | RESCUE. Surface: the story room (DEMO-EXPERIENCE row 11, which cites `sealed_story_scene_monotone`); item and sheet laws share it ("Sheet, item and story laws use this one kernel-level contract"). Step: have the Host's story-room admission path import `Kernel.LawHistory` (it already imports its dependencies `LawView`, `MultiCellHyperedge`, `DeclaredResourceController`), so the demo's cited theorem is about run code. |
+| `Kernel.NativeHostBookInvariant` | CanonicalResourceBookInvariantAudit | `Kernel` | RESCUE. It extends `Kernel.NativeHostGenesis` (Host-reached) with "genesis and actual resource patches preserve account support". Step: import it from the Host genesis path (`Host/SourceAgreementBirth`, which imports NativeHostGenesis). |
+| `Kernel.ReplicatedSettlementFinality` | DreggNetProviderConsumer | `Kernel`, `Kernel.AuthenticatedSettlementFinality`, `Kernel.FinalityGate`, `Kernel.FinalityLiveness` (all Host-unreached) | RESCUE. Surface: the second node (DEMO-EXPERIENCE A9; `docs/DISTRIBUTED-DESIGN.md` consumes it: "consumed, not replaced"). Step: the second-node lane imports `Kernel.FinalityGate` (the `@[export]` fail-closed finality decider built on it) into the Host. |
+| `Kernel.CanonicalEscrowMarket` | DreggNetProviderConsumer | `Kernel`, `Kernel.PrivateEscrowSettlement` | DEAD (unplanned). Public order escrow over `Kernel.AuthorizedResourceCharge` (also Host-unreached). Overlaps conceptually with the live compute-market path (`Kernel.Job`, Pay*/purse) but declares itself a consumer of the canonical resource kernel, so TWIN is not established without a code read. |
+| `Kernel.ProviderExecutionLease` | DreggNetProviderConsumer | `Kernel` | DEAD (unplanned); same family and same TWIN-suspect note against `Kernel.Job`. |
+| `Kernel.PrivateEscrowSettlement` | ReleaseGateRouting | `Kernel` | DEAD (unplanned); private market order, parameterized by an Assurance-supplied proof `Source`; belongs with the `private-backend` move if kept. |
+| `Kernel.QuotaGcSettlement` | QuotaGcSettlementWitness | `Kernel` | DEAD (unplanned). Quota admission and reachability-safe reclamation; no live quota path imports it. |
+| `Compiler.BendCommittedUnroll` | ObjectiveZkStepTariff, BendArithmeticQualification, ObjectiveBendCommittedSource, ObjectiveZkLiteralArithmetic | `ResearchWip` | ZK-CARGO (`docs/ZK.md:169`, committed Bend run soundness) |
+| `Compiler.BendTraceSound` | BendArithmeticQualification | `BendCommittedNetwork`, `BendUnrolledDirect`, `BendUnrolledIR2`, `ResearchWip` | ZK-CARGO |
+| `Compiler.BendUnrolledIR2` | BendArithmeticQualification | `ResearchWip` | ZK-CARGO |
+| `Compiler.ObliviousUnrollSemantics` | BendArithmeticQualification, ObjectiveBendCommittedSource, ObjectiveZkStepTariff, ObjectiveZkLiteralInstance, ObjectiveZkLiteralArithmetic, ObjectiveZkRefinementAudit, ObjectiveBendProofSource | `BendCommittedRun`, `BendUnrolledDirect`, `BendUnrolledIR2`, `ObliviousUnrollChecks`, `ResearchWip` | ZK-CARGO |
+| `Compiler.ObliviousUnrollChecks` | BendArithmeticQualification | `ResearchWip` | ZK-CARGO |
+| `Compiler.ObjectiveDemandPhysical` | ObjectiveZkStepTariff, ObjectiveZkLiteralInstance, ObjectiveZkLiteralArithmetic, ObjectiveDemandPhysicalChecks | `ResearchWip` | ZK-CARGO (`docs/ZK.md:205`) |
+| `Compiler.ObjectiveDemandStateEquality` | ObjectiveZkStepTariff, ObjectiveZkLiteralInstance, ObjectiveZkLiteralArithmetic | `ObjectiveDemandPhysical`, `ResearchWip` | ZK-CARGO |
+| `Compiler.ObjectiveProofContext` | BendArithmeticQualification | `BendCommitmentFrame`, `ResearchWip` | ZK-CARGO |
+| `Compiler.BoundedNockNetwork` | BoundedNockRefinement | `ResearchWip` | ZK-CARGO (bounded Nock circuit for the MPC programme; "does not yet lower the full Nock controller") |
+| `Compiler.ObliviousEvaluator` | PrivateEvaluatorCustodyJoin | `Compiler`, `BoundedNockEntry`, `PrivateWorldIR` | ZK-CARGO (private-backend MPC programme, `docs/review/2026-10-26-native-crates/private-backend--B-mpc-protocols.md`) |
+| `Compiler.CommittedTerminalFiatShamir` | ReleaseGateRouting | `Compiler` | ZK-CARGO: its import closure contains 17 Selvage modules, so C2's "+ importers" rule moves it |
+| `Compiler.Tower256AdditiveFriController` | Tower256MerkleCardinalityCore | `Compiler`, `Tower256AdditiveFriRawController` | ZK-CARGO: closure contains 49 Selvage modules; `docs/SELVAGE-COMPLETE.md` places it in the proof system |
+
+Counts per verdict over the 20 subjects: RESCUE 3, TWIN 1, DEAD 4, ZK-CARGO 12. Two of the 20 DEAD-or-twin rows carry no certainty beyond docstrings and importers: the escrow/lease family should get a code read against `Kernel.Job` and the Pay* path before anything is deleted.
+
+Why the 12 ZK-CARGO rows are classed RESEARCH-by-Kernel/Compiler-subject and not Selvage-subject: the first census read Assurance-only imports; these subjects reach Selvage (or the Bend/MPC tower) only one hop below, through Compiler modules. A transitive reading would put them with the 100 Selvage-touching modules.
