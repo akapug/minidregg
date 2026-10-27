@@ -17,11 +17,14 @@ test("lost reply: exact lookup only, never a successor; recovered confirms", () 
   assert.throws(() => a.successor("11", "21"), /confirmed/);
 });
 
-test("refused permits a successor with fresh nonces only; unsent-after-uncertain stays uncertain", () => {
+test("refused is terminal (no successor); never-sent permits one with fresh nonces only; unsent-after-uncertain stays uncertain", () => {
   const a = sealed();
   a.record(enc("call"), { kind: "answered", outcome: { type: "refused" } });
-  assert.throws(() => a.successor("10", "21"));
-  const b = a.successor("11", "21");
+  assert.throws(() => a.successor("11", "21"), /no-effect/);
+  const n = sealed();
+  n.record(enc("call"), { kind: "unsent", detail: "connect" });
+  assert.throws(() => n.successor("10", "21"));
+  const b = n.successor("11", "21");
   assert.equal(b.number, 2);
   const c = sealed();
   c.record(enc("call"), { kind: "uncertain", detail: "write" });
