@@ -107,9 +107,9 @@ impl Session {
             .and_then(|_| self.input.write_all(&[operation]))
             .and_then(|_| self.input.write_all(payload))
             .and_then(|_| self.input.flush())
-            .map_err(|e| format!("local consent request failed: {e}"))?;
+            .map_err(|e| format!("local process request failed: {e}"))?;
         let mut width = [0u8; 4];
-        self.output.read_exact(&mut width).map_err(|e| format!("local consent provider ended before consent: {e}"))?;
+        self.output.read_exact(&mut width).map_err(|e| format!("local process {} ended before answering: {e}", self.executable.display()))?;
         let size = u32::from_le_bytes(width) as usize;
         if size == 0 || size > CAP {
             return Err("local consent response frame refused".into());
