@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use ed25519_dalek::{Signer, SigningKey};
 use minidregg_discord_entrance::curl::Poster;
-use minidregg_discord_entrance::http::{client_request, read_request, write_response};
+#[path = "support/client.rs"]
+mod client;
+use client::client_request;
+use minidregg_discord_entrance::http::{read_request, write_response};
 use minidregg_discord_entrance::now_s;
 use minidregg_discord_entrance::server::{App, Config};
 use minidregg_discord_entrance::session::{Deployment, Sessions};

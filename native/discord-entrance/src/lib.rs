@@ -12,14 +12,14 @@
 //! line means.
 //!
 //! * [`http`]: a bounded HTTP/1.1 request reader and response writer (plain HTTP; TLS is
-//!   Caddy's), plus a one-shot client used by the fake and the tests.
+//!   Caddy's). The tests' client is `tests/support/client.rs`, not part of this library.
 //! * [`signature`]: Discord's `X-Signature-Ed25519` over `X-Signature-Timestamp || body`.
 //! * [`interaction`]: the interaction JSON in, the response JSON out.
 //! * [`roster`]: `discord_user_id -> session NAME`, fail-closed on ownership and shape.
 //! * [`session`]: one line through the ssh entrance's forced command, and the `discord.log`.
 //! * [`reply`]: the shell's ending line, and fitting output into Discord's 2000 characters.
-//! * [`curl`]: outbound webhook calls through `/usr/bin/curl`; the URL (which carries the
-//!   interaction token or the channel webhook secret) reaches curl on stdin, never argv.
+//! * [`curl`]: the interaction follow-up PATCH through `/usr/bin/curl`; the URL (which carries
+//!   the interaction token) reaches curl on stdin, never argv.
 //! * [`server`]: the endpoint itself: verify, answer PING, refuse early, defer, run, PATCH.
 //! * [`door`]: the self-serve door's queue schema, shared by the `/join` form (`mini-door`),
 //!   the entrance's `/mini line:link CODE`, and the root processor (`mini-door-process`).
