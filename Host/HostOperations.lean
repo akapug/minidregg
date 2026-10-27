@@ -8,7 +8,7 @@ namespace Minidregg.Host.HostOperations
 /-- Private ordinary dispatch definitive no-record refusal; distinct from request164 -/
 def privateDispatchNoRecordMarker : UInt8 := 164
 
-/-- Host proven no-append refusal: the payload decodes to a refused outcome, the durable log is unchanged by the request and a fresh attempt is safe (Host/RequestRefusal.lean exceptionAnswer, returnedMarker) -/
+/-- Host proven no-append outcome: the payload decodes to a refused, contention or unavailable outcome a receiver decided before any append (never uncertain); the durable log is unchanged by the request and a fresh attempt is safe (Host/RequestRefusal.lean exceptionAnswer, returnedMarker; Host/Main.lean dispatchApplicationSubmitSession) -/
 def noRecordMarker : UInt8 := 253
 
 /-- Transport refusal: request never forwarded -/
