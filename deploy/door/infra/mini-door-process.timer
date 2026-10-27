@@ -1,0 +1,9 @@
+# /etc/systemd/system/mini-door-process.timer — the door's processor, a minute after the last pass.
+[Unit]
+Description=Mini door: run the root processor every minute
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

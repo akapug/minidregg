@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# /usr/local/lib/mini/mini-enrol-keygen — ON THE BOX, once per deployment, as root.
+#
+# Makes the FRESH enrollment receiving address (minidregg deploy/door/README.md, deploy/pay/README.md):
+# an Ed25519 key made by the candidate's own `mini keygen`, held by mini-core, never in git.
+#
+#   /var/lib/mini-core/secret/enrol.key            the 32-byte seed (mini-core 0600)
+#   /var/lib/mini-core/secret/enrol.pub            the 32-byte public key (the address)
+#   /var/lib/mini-core/secret/enrol-solana.json    the same key as a Solana CLI keypair
+#                                                  (seed || public, a JSON array; mini-core 0600),
+#                                                  for ember to import and move what it receives
+#
+# Prints the address (base58), which is what render-enrol --enrol-address-file reads and what
+# `mini pay book` then signs into the book. The address is a deployment parameter: it reaches
+# the join page from the signed pay view through the pin, never from a literal.
+# Refuses to replace an existing key (an address that has received funds must not vanish).
+set -euo pipefail
+. /usr/local/lib/mini/infra/lib.sh
+need_root mini-enrol-keygen
+dir=$R/var/lib/mini-core/secret
+key=$dir/enrol.key pub=$dir/enrol.pub sol=$dir/enrol-solana.json
+install -d -m 0700 "${OWN_MINI[@]}" "$R/var/lib/mini-core" "$dir"
+if [ ! -e "$key" ]; then
+  run_mini "$C/bin/mini" keygen --secret "$key" --public "$pub" --no-prerotation >/dev/null
+fi
+[ -s "$key" ] && [ -s "$pub" ] || { echo "mini-enrol-keygen: $key or $pub is missing or empty" >&2; exit 1; }
+if [ ! -e "$sol" ]; then
+  run_mini /usr/bin/python3 -I -c '
+import json, sys
+seed, pub = open(sys.argv[1], "rb").read(), open(sys.argv[2], "rb").read()
+assert len(seed) == 32 and len(pub) == 32, "a mini key is a 32-byte seed and a 32-byte public key"
+with open(sys.argv[3], "x") as f:
+    json.dump(list(seed + pub), f)
+' "$key" "$pub" "$sol"
+  chmod 0600 "$sol"
+fi
+/usr/bin/python3 -I -c '
+import sys
+A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+raw = open(sys.argv[1], "rb").read()
+n, out = int.from_bytes(raw, "big"), ""
+while n:
+    n, r = divmod(n, 58)
+    out = A[r] + out
+print("1" * (len(raw) - len(raw.lstrip(b"\0"))) + out)
+' "$pub"

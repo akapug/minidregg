@@ -69,6 +69,11 @@ ROLES = {
     "spkHostd": "spk-hostd",
     "spkVolumeHelper": "mini-spk-volume-helper",
     "discord": "mini-discord",
+    # The self-serve door (deploy/door/README.md): the /join form and its root processor.
+    "door": "mini-door",
+    "doorProcess": "mini-door-process",
+    # The room mirror ships so it can be enabled; it is off unless configured (deploy/discord/README.md).
+    "discordMirror": "mini-discord-mirror",
     "payWatcher": "pay-watcher",
     "keys": "mini-keys",
     # Test fixtures the standing journey runs against THIS set (journey-runner product_inputs defaults to
@@ -85,7 +90,8 @@ RUST_ROLES = (("mini", "resource-client"), ("store", "hyperdocument-link-sqlite-
               ("grainProviderBridge", "grain-runtime"), ("inferenceScheduler", "inference-scheduler"),
               ("spkHost", "spk-host"), ("spkBrowserProxy", "spk-host"), ("spkBroker", "spk-host"),
               ("spkHostd", "spk-host"), ("spkVolumeHelper", "spk-host"),
-              ("discord", "discord-entrance"), ("payWatcher", "pay-watcher"),
+              ("discord", "discord-entrance"), ("door", "discord-entrance"), ("doorProcess", "discord-entrance"), ("discordMirror", "discord-entrance"),
+              ("payWatcher", "pay-watcher"),
               ("keys", "mini-keys"),
               ("testProvider", "hermes-test-provider"), ("launchGate", "launch-gate"))
 # consent is required: a candidate whose friends cannot sign (the client refuses to sign without a

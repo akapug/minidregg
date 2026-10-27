@@ -35,6 +35,25 @@ those same steps, through the same scripts, on a timer. It requires split tenanc
   processor writes `status/ID.json` (root:mini-door 0640) and the form shows it. It carries the
   login line, the Discord link code, and for a paid join the signing statement and the memo.
 
+## Custody contract: who holds which key, for how long
+
+| key | holder | where | for how long |
+|---|---|---|---|
+| the member's Mini signing key and its NEXT key | the member's own account `mini-s-NAME` | `sessions/NAME/keys/` (0700 home, 0600 files), made by the session's own `keygen` | the account's life; the box holds it by design (hosted), and the page says so |
+| the member's ssh login key | the stranger | their machine; the box keeps only the public line | always |
+| the sponsor's key | `mini-core` | the Store (`store/node/sponsor`) | the deployment |
+| the enrollment receiving address | `mini-core` | `/var/lib/mini-core/secret/enrol.key` (0600), made fresh by `mini-enrol-keygen` at install | the deployment; ember imports `enrol-solana.json` to move what it receives |
+
+**No other file ever holds a member key.** The processor itself only tests that `keys/mini.key` and
+`keys/mini.key.pub` exist; it never opens either. Enrolment uses the possess flow: `mini-reenroll` (as patched in
+`infra/dregg-infra.patch`) plans from the member's public key, copies the four public plan files into the
+member's home, and the member's account signs the Host-chosen possession header there (`mini enroll
+--action possess` as `mini-s-NAME`); the sponsor seals with the detached signature. The earlier flow
+copied `keys/mini.key` into the sponsor's home (RUST-TRIAGE §4 row 1); that copy is gone. The paid route
+never involves the sponsor. The proof is `jdoor.sh --box`: after enrolment it searches every file under
+`/var/lib/mini`, `/etc/mini`, `/var/lib/mini-door*`, `/var/lib/mini-discord`, `/var/lib/mini-core` and
+`/tmp` for the member's 32 key bytes and fails if any file outside `sessions/NAME/` contains them.
+
 ## Two routes, one processor
 
 **Free** (`route=free`): the stranger gives a name and an ssh-ed25519 public key. The processor
@@ -51,7 +70,10 @@ exact statement and one `ssh-keygen -Y sign -n dregg-enrol@v2` command; the stra
 signature back; the processor finishes the memo (`--ssh-signature`) and the page shows recipient,
 amount, memo and the quote's expiry hour. After paying, the stranger pastes the transaction
 signature; the processor runs `join --wait --signature TX`, which creates `HOME/workspace` from the
-kernel's own enrolment (op 181). The payment lands on a **hosted** account that signs on the box.
+kernel's own enrolment (op 181). The receiving address is the deployment's fresh key (custody table
+above), signed into the book by `mini pay book` and shown from the rendered pin; mainnet or devnet is
+`pay.network` in `door.json`, and the RPC endpoints (Helius plus the public cluster endpoint, from the
+box's `rpc.env`) follow the same switch (`deploy/pay/README.md`). The payment lands on a **hosted** account that signs on the box.
 The enrollment view also lists the ssh key; `render-authorized-keys.sh` skips a view key equal to
 an operator key, so the login stays the hosted line, never a proxy line.
 
@@ -98,6 +120,9 @@ socket.
   tenant's lines as `mini-session-run` does (`setpriv --reuid=mini-s-NAME --regid=mini-sessions
   --init-groups --reset-env`, a fixed environment, a timeout) and the sponsor's `credit` read as
   `mini-core`, exactly as `mini-reenroll` does.
+- The Discord entrance runs a linked member's line through the root runner's socket
+  (`/run/mini-session-run.sock`), not sudo, so it keeps `NoNewPrivileges=yes`
+  (`deploy/discord/README.md`).
 - `ship.sh --regenesis` re-runs `mini-reenroll --all`; door accounts are in the roster, so they are
   re-enrolled with everyone else.
 - Removing a stranger: delete `$INFRA/friends/door/NAME.pub` and re-render; the account and home
@@ -105,12 +130,16 @@ socket.
 
 ## Phase 0 inputs this lane needs from ember
 
-- the Discord application (id, public key, the `commands.json` PUT); the **room mirror** is off:
+- the existing **Dragon's Egg** Discord application: its id and public key into the box's
+  `/etc/mini/discord.env`, its Interactions Endpoint URL set to `https://demo.dregg.online/interactions`,
+  and the `commands.json` PUT from ember's machine; the **room mirror** is off:
   it additionally needs a bot token with the Message Content intent, and `mini-discord-mirror`
   starts only with `MINI_MIRROR_PUBLISH_ROOM_TO_CHANNEL=yes`. The demo's Discord path is the
   entrance alone;
-- the signed tariff with `enrolIndex` and `journalFloor` installed (`mini pay book`), two Solana
-  RPC endpoints, and `enrol-v2.json` rendered from `deploy/pay/enrol-terms.json`;
+- mainnet or devnet for week 1 (`pay.network`; devnet also needs its mint); the Helius key
+  (`~/.helius-key`, installed as the box's `rpc.env`); then, on the box, `mini-enrol-keygen`, the signed
+  tariff with `enrolIndex` and `journalFloor` installed (`mini pay book`), and `enrol-v2.json` rendered
+  with the fresh address;
 - the door's numbers in `/etc/mini/door.json` if the defaults above are not right.
 
 Files: `infra/` holds the units, the config, and `INSTALL.md` for the infra lane;

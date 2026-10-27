@@ -1,0 +1,309 @@
+--- a/edge/mini/render-authorized-keys.sh	2026-10-26 23:19:49
++++ b/edge/mini/render-authorized-keys.sh	2026-10-26 23:20:43
+@@ -14,7 +14,11 @@
+ #
+ # Two sources, operator first:
+ #
+-#   1. friends/NAME.pub — the operator's roster (the --roster DIR). One Ed25519 key per
++#   1. friends/NAME.pub — the operator's roster (the --roster DIR), and friends/door/NAME.pub —
++#      the self-serve door's entries (minidregg deploy/door/README.md), written on the box by
++#      the door's root processor alone, always hosted, never colliding with an operator name.
++#      The Mac half's rsync leaves door/ alone (--exclude=/door/), so an operator render
++#      never deletes a stranger's login. One Ed25519 key per
+ #      file; NAME = ^[a-z][a-z0-9-]{0,31}$. A line `# mode=proxy` in the file makes
+ #      it a proxy key; without it the key is hosted (`mode=shell`, the default):
+ #        hosted  workspace /var/lib/mini/sessions/NAME/workspace (the sponsor's is
+@@ -74,7 +78,7 @@
+   . "$here/roster.sh"
+   roster=$(roster_for_box render) || exit 64
+   # Only the roster moves here; the scripts are install.sh's to sync.
+-  rsync -rlt --delete --chmod=D755,F644 "$roster/" "$BOX:$I/friends/"
++  rsync -rlt --delete --exclude=/door/ --chmod=D755,F644 "$roster/" "$BOX:$I/friends/"
+   exec ssh "$BOX" "chown -R root:root $I/friends && $I/render-authorized-keys.sh --on-box --roster $I/friends $*"
+ fi
+ shift
+@@ -101,6 +105,8 @@
+   [[ $R == /* ]] || { echo "render: MINI_ROOT must be absolute" >&2; exit 64; }
+ fi
+ SPONSOR=ember
++# lib.sh's names; this script does not source lib.sh, and creating a hosted account needs them.
++TENANT_GROUP=mini-sessions HOSTED_GROUP=mini-hosted
+ ETC=$R/etc/mini; LIB=$R/usr/local/lib/mini; INFRA=$LIB/infra
+ C=$R/var/lib/mini/candidate/current; NODE=$R/var/lib/mini/store/node; SESSIONS=$R/var/lib/mini/sessions
+ MINI="$C/bin/mini"; HOST="$C/bin/minidregg-host"
+@@ -133,6 +139,14 @@
+ roster+=("$ROSTER/$SPONSOR.pub")
+ for f in "$ROSTER"/*.pub; do
+   [ "$f" = "$ROSTER/$SPONSOR.pub" ] || roster+=("$f")
++done
++# The door's entries: hosted only, and an operator name always wins by refusal, not override.
++for f in "$ROSTER"/door/*.pub; do
++  [ -e "$f" ] || continue
++  n="$(basename "$f" .pub)"
++  [ ! -e "$ROSTER/$n.pub" ] || refuse "door entry door/$n.pub has the name of an operator entry"
++  ! grep -qE '^[[:space:]]*#[[:space:]]*mode=proxy' "$f" || refuse "door entry door/$n.pub asks for proxy mode; door accounts are hosted"
++  roster+=("$f")
+ done
+ names=() kmodes=() ktypes=() kdatas=()
+ declare -A operator_key=()
+--- a/edge/mini/mini-reenroll	2026-10-26 23:19:49
++++ b/edge/mini/mini-reenroll	2026-10-26 23:20:43
+@@ -8,8 +8,17 @@
+ # --all after the new genesis is serving; run it by hand for one friend who had not
+ # run `keygen` yet at that time.
+ #
+-#   --all    every HOSTED friend in /usr/local/lib/mini/infra/friends/ except the sponsor
++#   --all    every HOSTED friend in /usr/local/lib/mini/infra/friends/ (and friends/door/, the
++#            self-serve door's entries) except the sponsor
+ #
++# CUSTODY (minidregg deploy/door/README.md): the member's secret never leaves the member's own
++# 0700 home. The sponsor plans from the PUBLIC key (`enroll plan NAME PUBLIC-HEX ...`); the four
++# public plan files are handed to the member's account, which signs the Host-chosen possession
++# header there (`mini enroll --action possess`, as mini-s-NAME); the sponsor seals with that
++# detached signature. Nothing copies keys/mini.key anywhere.
++#
++# MINI_REENROLL_FUNDING (default 1000): the provisioning of each friend (the door's `funding`).
++#
+ # What it cannot do, and says so per name:
+ #   - a friend with no keys/mini.key (never ran `keygen mini.key`): skipped; they keygen,
+ #     then you run `mini-reenroll NAME`.
+@@ -25,10 +34,26 @@
+ CONFIG="$NODE/deployment/pinned-config.json"; SOCKET="$NODE/public/mini.sock"
+ [ -f "$NODE/state.json" ] && [ -S "$SOCKET" ] || { echo "mini-reenroll: no serving Store at $NODE" >&2; exit 1; }
+ 
++FUNDING=${MINI_REENROLL_FUNDING:-1000}
++[[ $FUNDING =~ ^[1-9][0-9]{0,30}$ ]] || { echo "mini-reenroll: MINI_REENROLL_FUNDING must be a positive decimal" >&2; exit 64; }
+ names=()
+ if [ "${1:-}" = --all ]; then
+-  for f in "$INFRA"/friends/*.pub; do n="$(basename "$f" .pub)"; [ "$n" = "$SPONSOR" ] || names+=("$n"); done
++  for f in "$INFRA"/friends/*.pub "$INFRA"/friends/door/*.pub; do
++    [ -e "$f" ] || continue
++    n="$(basename "$f" .pub)"; [ "$n" = "$SPONSOR" ] || names+=("$n")
++  done
+ else names=("$@"); fi
++hex() { od -An -tx1 -v "$1" | tr -d ' \n'; }
++# One mini command as the member's own account (its key is only readable there).
++as_member() {  # NAME CMD...
++  local n=$1; shift
++  local env=(env -i PATH=/usr/bin:/bin LANG=C.UTF-8 MINI_LOCAL_HOST="$C/bin/minidregg-host"
++    MINI_CONSENT_HOST="$C/bin/minidregg-client-consent" MINI_CONSENT_CONFIG="$CONFIG")
++  if [ -n "$R" ]; then "${env[@]}" "$@"
++  elif [ "$TENANCY" = split ]; then
++    timeout --kill-after=5 120 setpriv --reuid="$(hosted_account "$n")" --regid="$TENANT_GROUP" --init-groups --reset-env -- "${env[@]}" "$@"
++  else timeout --kill-after=5 120 runuser -u "$TENANT" -- "${env[@]}" "$@"; fi
++}
+ [ ${#names[@]} -gt 0 ] || { echo "mini-reenroll: no names (--all or NAME...)" >&2; exit 64; }
+ 
+ # The sponsor's OPERATOR session home: the operator account's. Under split
+@@ -50,31 +75,47 @@
+ for n in "${names[@]}"; do
+   [[ $n =~ ^[a-z][a-z0-9-]{0,31}$ ]] || { echo "mini-reenroll: $n: bad name" >&2; rc=1; continue; }
+   f="$INFRA/friends/$n.pub"
+-  [ -f "$f" ] || { echo "$n SKIPPED: not in friends/" >&2; rc=1; continue; }
++  [ -f "$f" ] || f="$INFRA/friends/door/$n.pub"
++  [ -f "$f" ] || { echo "$n SKIPPED: not in friends/ or friends/door/" >&2; rc=1; continue; }
+   if grep -qE '^[[:space:]]*#[[:space:]]*mode=proxy' "$f"; then echo "$n SKIPPED: proxy friend (tier B) — they re-run the offer flow with you" >&2; continue; fi
+   home="$S/$n"
+   [ -s "$home/keys/mini.key" ] || { echo "$n SKIPPED: no $home/keys/mini.key yet — they run \`keygen mini.key\`, then: mini-reenroll $n" >&2; continue; }
+-  custody="$SPONSOR_HOME/keys/$n.key"
+   out="$(mktemp)"; err="$(mktemp)"
+-  cleanup() { rm -f "$custody" "$out" "$err"; }
++  cleanup() { rm -f "$out" "$err"; }
+   if sponsor "enroll lookup $n" >"$out" 2>"$err" && jq -e .subject "$out" >/dev/null 2>&1; then
+     : # already enrolled in this genesis
+   else
+-    install -m 0600 "${OWN_MINI[@]}" "$home/keys/mini.key" "$custody"
++    [ -s "$home/keys/mini.key.pub" ] || { echo "$n FAILED: no keys/mini.key.pub beside the key" >&2; cleanup; rc=1; continue; }
+     # K-PREROTATE: the record commits to the friend's next key, which co-signs its
+     # succession; `keygen mini.key` wrote both beside the key. A key made with
+     # --no-prerotation has neither and is enrolled as one that can never rotate.
++    pub=$(hex "$home/keys/mini.key.pub")
+     if [ -s "$home/keys/mini.key.next.pub" ] && [ -s "$home/keys/mini.key.next.cosign" ]; then
+-      plan="enroll plan $n $n.key $(od -An -tx1 -v "$home/keys/mini.key.next.pub" | tr -d ' \n') $(od -An -tx1 -v "$home/keys/mini.key.next.cosign" | tr -d ' \n')"
++      plan="enroll plan $n $pub $(hex "$home/keys/mini.key.next.pub") $(hex "$home/keys/mini.key.next.cosign")"
+     elif [ ! -e "$home/keys/mini.key.next.pub" ] && [ ! -e "$home/keys/mini.key.next.cosign" ]; then
+-      plan="enroll plan $n $n.key --no-prerotation"
++      plan="enroll plan $n $pub --no-prerotation"
+     else
+       echo "$n FAILED: keys/mini.key.next.pub and keys/mini.key.next.cosign must both exist or both be absent" >&2; cleanup; rc=1; continue
+     fi
++    fail() { echo "$n FAILED at \`$1\`: $(grep -a -m1 -E '^(refused|error|undecided|usage):' "$err" || tail -n1 "$err")" >&2; }
+     ok=1
+-    for v in "$plan" "enroll seal $n" "enroll submit $n"; do
+-      sponsor "$v" >"$out" 2>"$err" || { echo "$n FAILED at \`$v\`: $(grep -a -m1 -E '^(refused|error|undecided|usage):' "$err" || tail -n1 "$err")" >&2; ok=0; break; }
+-    done
++    sponsor "$plan" >"$out" 2>"$err" || { fail "$plan"; ok=0; }
++    if [ $ok = 1 ]; then
++      # The member signs possession in its own account over the sponsor's PUBLIC plan files.
++      edir="$SPONSOR_HOME/enroll/$n" pdir="$home/possess"
++      if [ -n "$R" ]; then mown=(); elif [ "$TENANCY" = split ]; then mown=(-o "$(hosted_account "$n")" -g "$TENANT_GROUP"); else mown=("${OWN_TENANT[@]}"); fi
++      install -d -m 0700 "${mown[@]}" "$pdir"
++      for pf in plan.json command.json command.bin config.json; do install -m 0600 "${mown[@]}" "$edir/$pf" "$pdir/$pf"; done
++      rm -f "$pdir/possession.bin"
++      psubject=$(jq -r '.key.subject' "$edir/command.json")
++      as_member "$n" "$C/bin/mini" enroll --action possess --dir "$pdir" --key "$home/keys/mini.key" \
++        --subject "$psubject" --output "$pdir/possession.bin" >"$out" 2>"$err" || { fail "enroll --action possess (as the member)"; ok=0; }
++    fi
++    if [ $ok = 1 ]; then
++      for v in "enroll seal $n $(hex "$pdir/possession.bin")" "enroll submit $n"; do
++        sponsor "$v" >"$out" 2>"$err" || { fail "$v"; ok=0; break; }
++      done
++    fi
+     if [ $ok = 0 ]; then cleanup; rc=1; continue; fi
+     jq -e '.type == "minidregg-participant-enrollment-result-v1"' "$out" >/dev/null || { echo "$n FAILED: submit did not return an enrollment result" >&2; cleanup; rc=1; continue; }
+     sponsor "enroll lookup $n" >"$out" 2>"$err" || { echo "$n FAILED: lookup after submit: $(tail -n1 "$err")" >&2; cleanup; rc=1; continue; }
+@@ -86,7 +127,7 @@
+   prov="$NODE/sponsor/provisions/$n"
+   if [ ! -f "$prov/birth-context.json" ]; then
+     as_mini "$C/bin/mini" workspace --action provision --dir "$NODE/sponsor" --name "$n" --holder "$subject" \
+-      --funding 1000 --account-predicate "$permit" --factory-ref factory >"$out" 2>"$err" \
++      --funding "$FUNDING" --account-predicate "$permit" --factory-ref factory >"$out" 2>"$err" \
+       || { echo "$n FAILED at provision: $(tail -n1 "$err")" >&2; cleanup; rc=1; continue; }
+   fi
+   # The friend's home is the friend's own account's under split (lib.sh hosted_account).
+--- a/edge/mini/install.sh	2026-10-26 23:19:49
++++ b/edge/mini/install.sh	2026-10-26 23:21:30
+@@ -127,7 +127,7 @@
+     getent group "$g" >/dev/null || { groupadd --system "$g"; say "created group $g"; }
+   done
+   # Service accounts: no login shell, no home of their own, no password.
+-  for u in "$CORE" "$KEYS" "$DISCORD"; do
++  for u in "$CORE" "$KEYS" "$DISCORD" mini-door; do
+     if ! id "$u" >/dev/null 2>&1; then
+       useradd --system --user-group --home-dir /var/lib/mini --no-create-home --shell /usr/sbin/nologin "$u"
+       say "created user $u ($(id "$u"))"
+@@ -139,6 +139,14 @@
+   # entrance reaches neither: it runs lines only through mini-session-run.
+   for u in "$PROXY" "$CORE" "$KEYS"; do usermod -a -G "$TENANT_GROUP" "$u"; done
+   ! id -nG "$DISCORD" | tr ' ' '\n' | grep -qx "$TENANT_GROUP" || die "REFUSED — $DISCORD is in $TENANT_GROUP; the Discord entrance must reach no socket directly (gpasswd -d $DISCORD $TENANT_GROUP)"
++  # The door's form (minidregg deploy/door/README.md): no group, no socket, no sudo.
++  [ "$(id -nG mini-door)" = mini-door ] || die "REFUSED — mini-door has supplementary groups ($(id -nG mini-door)); the door's form holds none"
++  # The runner socket is root:$DISCORD 0660; the group must have no member but the entrance.
++  [ -z "$(getent group "$DISCORD" | cut -d: -f4)" ] || die "REFUSED — group $DISCORD has members; only the entrance may open the session runner socket"
++  # The door's spool, its status directory (root writes, the form reads), the processor's state.
++  install -d -m 0700 -o mini-door -g mini-door /var/lib/mini-door /var/lib/mini-door/queue
++  install -d -m 0750 -o root -g mini-door /var/lib/mini-door-status
++  install -d -m 0700 -o root -g root /var/lib/mini-door-process "$INFRA/friends/door"
+ fi
+ fi
+ 
+@@ -211,17 +219,9 @@
+   chmod 0440 "$credential_rule"
+   visudo -cf "$credential_rule"
+   mv -f "$credential_rule" /etc/sudoers.d/mini-credential-namespace
+-  # Split: the Discord entrance's one way to run a line as a friend (the runner
+-  # checks NAME against the Discord roster and the hosted group).
+-  if [ "$TENANCY" = split ]; then
+-    session_rule=$(mktemp /etc/sudoers.d/.mini-session-run.XXXXXX)
+-    printf '%s\n' "$DISCORD ALL=(root) NOPASSWD: /usr/local/lib/mini/mini-session-run *" >"$session_rule"
+-    chmod 0440 "$session_rule"
+-    visudo -cf "$session_rule"
+-    mv -f "$session_rule" /etc/sudoers.d/mini-session-run
+-  else
+-    rm -f /etc/sudoers.d/mini-session-run
+-  fi
++  # The Discord entrance reaches the session runner through its socket
++  # (mini-session-run.socket), never sudo: the old rule goes.
++  rm -f /etc/sudoers.d/mini-session-run
+ fi
+ install -m 0755 "${OWN_ROOT[@]}" "$INFRA/shell/mini-shell-ssh" "$LIB/mini-shell-ssh"
+ install -m 0755 "${OWN_ROOT[@]}" "$INFRA/shell/render-shell-key" "$LIB/render-shell-key"
+@@ -241,7 +241,8 @@
+ install -d -m 0755 "$UNITDIR"
+ for u in mini.slice mini-store.service mini-public-ingress.service mini-keys.service mini-backup.service mini-backup.timer \
+          mini-roster-sync.service mini-roster-sync.timer mini-inference.service mini-hermes.service mini-hermes-dispatch.service mini-discord.service \
+-         mini-clock-tick.service mini-clock-tick.timer mini-pay-watcher.service mini-pay-watcher.timer mini-enrollment-bootstrap.service; do
++         mini-clock-tick.service mini-clock-tick.timer mini-pay-watcher.service mini-pay-watcher.timer mini-enrollment-bootstrap.service \
++         mini-session-run.socket mini-session-run@.service mini-door.service mini-door-process.service mini-door-process.timer; do
+   put "$INFRA/$u" "$UNITDIR/$u"
+ done
+ # Split tenancy: every Mini unit runs as the operator account. A drop-in, not an
+@@ -280,21 +281,21 @@
+ }
+ keys_dropin
+ # The Discord entrance: its own account and state; each line through the root
+-# runner as the friend's account (minidregg discord-entrance MINI_SESSION_RUNNER).
+-# sudo needs setuid, so NoNewPrivileges is lifted for this unit alone; the friend's
+-# process inherits the unit's mounts, so the sessions tree and the public socket
+-# stay writable at the mount level (their modes decide who writes what).
++# runner's socket as the friend's account (minidregg discord-entrance
++# MINI_SESSION_RUNNER). No setuid program, so the unit's NoNewPrivileges=yes and
++# RestrictSUIDSGID=yes hold; the line runs in the runner's own unit, so the
++# entrance writes only its state (custody, logs, the door's link spool).
+ discord_dropin() {
+   local d="$UNITDIR/mini-discord.service.d" f
+   f="$d/40-tenancy.conf"
+   if [ "$TENANCY" = split ]; then
+     install -d -m 0755 "${OWN_ROOT[@]}" "$d"
+     {
+-      printf '[Service]\nUser=%s\nGroup=%s\nNoNewPrivileges=no\n' "$DISCORD" "$DISCORD"
++      printf '[Service]\nUser=%s\nGroup=%s\n' "$DISCORD" "$DISCORD"
+       printf 'StateDirectory=mini-discord\nStateDirectoryMode=0700\n'
+-      printf 'Environment=MINI_SESSION_RUNNER=/usr/local/lib/mini/mini-session-run MINI_DISCORD_STATE=/var/lib/mini-discord\n'
++      printf 'Environment=MINI_SESSION_RUNNER=/run/mini-session-run.sock MINI_DISCORD_STATE=/var/lib/mini-discord\n'
+       printf 'Environment=MINI_SPONSOR_WORKSPACE=/var/lib/mini/sessions/%s/workspace\n' "$SPONSOR"
+-      printf 'ReadWritePaths=\nReadWritePaths=/var/lib/mini/sessions /var/lib/mini/store/node/public /var/lib/mini-discord\n'
++      printf 'ReadWritePaths=\nReadWritePaths=/var/lib/mini-discord\n'
+     } >"$f.new"
+     if cmp -s "$f.new" "$f"; then rm -f "$f.new"; else mv -f "$f.new" "$f"; chmod 0644 "$f"; changed=1; say "wrote ${f#$R}"; fi
+   elif [ -e "$f" ]; then rm -f "$f"; changed=1; say "removed ${f#$R}"; fi
+--- a/edge/mini/mini-components	2026-10-26 23:21:30
++++ b/edge/mini/mini-components	2026-10-26 23:21:38
+@@ -181,7 +181,24 @@
+ if [ ${#why[@]} = 0 ]; then add discord on mini-discord.service "binary, env, roster"
+ else add discord off mini-discord.service "$(IFS=';'; echo "${why[*]}")"; fi
+ 
++# The self-serve door (minidregg deploy/door/README.md): split tenancy, both binaries, the
++# door's config. The runner socket follows the Discord entrance under split.
+ why=()
++[ "$TENANCY" = split ] || why+=("the door runs only under split tenancy")
++has_bin mini-door || why+=("candidate ships no bin/mini-door")
++has_bin mini-door-process || why+=("candidate ships no bin/mini-door-process")
++[ -f "$ETC/door.json" ] || why+=("no /etc/mini/door.json")
++if [ ${#why[@]} = 0 ]; then
++  add door on mini-door.service "the /join form"
++  add door-process on mini-door-process.timer "the door's root processor, every minute"
++else
++  add door off mini-door.service "$(IFS=';'; echo "${why[*]}")"
++  add door-process off mini-door-process.timer "$(IFS=';'; echo "${why[*]}")"
++fi
++if [ "$TENANCY" = split ] && has_bin mini-discord; then add session-run on mini-session-run.socket "the Discord entrance's runner socket"
++else add session-run off mini-session-run.socket "single tenancy or no Discord entrance"; fi
++
++why=()
+ client_has clock || why+=("client has no \`mini clock\` (K-CLOCK not in this candidate)")
+ [ -f "$NODE/sponsor/workspace.json" ] || why+=("no sponsor workspace")
+ if [ ${#why[@]} = 0 ]; then add clock on mini-clock-tick.timer "client has \`mini clock\`; the clock subject ticks each minute"
+--- a/edge/demo/host/caddy/Caddyfile	2026-10-26 23:19:49
++++ b/edge/demo/host/caddy/Caddyfile	2026-10-26 23:22:29
+@@ -35,6 +35,21 @@
+ 		}
+ 	}
+ 
++	# The self-serve door's form (minidregg deploy/door/README.md): uid mini-door on loopback.
++	# It reads X-Real-IP only from this proxy for its per-source limit.
++	handle /join* {
++		request_body {
++			max_size 4KB
++		}
++		reverse_proxy 127.0.0.1:8795 {
++			header_up X-Real-IP {remote_host}
++			transport http {
++				dial_timeout 2s
++				response_header_timeout 5s
++			}
++		}
++	}
++
+ 	# Paid-entry metadata, quote and exact enrollment status (edge/mini
+ 	# templates/enrollment-bootstrap.Caddyfile, retargeted to loopback). Only those routes.
+ 	handle /mini/v1/* {
+@@ -59,7 +74,7 @@
+ 	# own repository rather than Debian's older package.
+ 
+ 	handle {
+-		respond "Mini demo. Members: ssh -t mini-s-NAME@@DOMAIN@" 200
++		respond "Mini demo. Get an account: https://@DOMAIN@/join  Members: ssh -t mini-s-NAME@@DOMAIN@" 200
+ 	}
+ }
+ 

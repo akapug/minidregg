@@ -12,6 +12,8 @@
 #   bin/mini-spk-broker, bin/spk-hostd          SPK broker and grain host daemon (shipped, not installed by default)
 #   bin/mini-spk-volume-helper                  per-store root volume helper (deploy/spk-host/install-user-world installs it)
 #   bin/mini-discord                            Discord entrance
+#   bin/mini-discord-mirror                     Discord room mirror (off unless configured)
+#   bin/mini-door, bin/mini-door-process        the self-serve door's form and root processor
 #   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher
 # packaged by deploy/candidate/package.py into the one candidate format:
