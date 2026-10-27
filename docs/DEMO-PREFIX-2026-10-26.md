@@ -164,7 +164,7 @@ successor lane/fence (the Debian 13 floor audit PASS; now the SPK resident readi
 lane/hermes 0b8cc8bb (the real upstream Hermes agent through bwrap → bridge → gateway → broker → provider
 → v4 settle on the build box, 105 rows PASS; the v4 `leg` frame; reconcile after the record; the demo-box
 install sequence and worker root; the ask pass's completion boundary and the librarian fixture are its
-last reds). L12 web lane lane/web-frontend db61a971+ (parity 203/203 leaves with 0 refusals; JWF 35/35;
+last reds). L12 web lane lane/web-frontend 43533e6d (parity 203/203 leaves with 0 refusals; JWF 40/40 on the build box at 42e2db98; the grants page fills progressively and a bare `can` answers a named "N of M grants judged" notice instead of a 504; "Pay with your wallet" on the paid route with sol-misc's adapter and web3.js vendored and pinned; the join page publishes the door's funding figure from its config; the tour's Chromium drive fixed at its causes; an aged world under load showed `mini shell` taking 51 s to start and a one-reference `can` six minutes, now a hot-path item;
 the tour's doors 11 and 12; progressive `can`; "Pay with your wallet" on the paid route; the door's
 funding figure). L13 lane/app-market f68de59f+ (Hacker Slides and Simple Todos through create, install,
 share, start, enrol and page load on a live world; `HackSessionContext` served; the member's own install
