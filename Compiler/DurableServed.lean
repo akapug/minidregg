@@ -674,6 +674,10 @@ structure Opening (rootBytes : List UInt8 → Digest) where
     (Served.entriesOf served.roots served.cellIds served.height served.chain)
   /-- The height of the checkpoint the opening resumed from (the cadence). -/
   baseHeight : Nat
+  /-- The fold's World at the head, advanced per append as the full session's track is
+  (`DurableReceiverIO.foldRecords`), so a light seal is a v4 body byte-identical to
+  `storeCheckpoint`'s. `none` when the opening started without one. -/
+  world : Option HostRefinesWorld.DWorld
 
 /-- **An opening is never of a scratch Store** (`StoreIdentity.ofScratch`): the
 light write path commits only into the deployment's own Store. -/
@@ -737,6 +741,8 @@ structure Start (rootBytes : List UInt8 → Digest) where
   /-- A root tree already evaluated for this start: the predecessor's (a
   refresh) or the checkpoint's, evaluated by its open (`openSealedWith`). -/
   roots : Option (CachedRoots ids (Served.entriesOf before.model.roots ids height chain)) := none
+  /-- The fold's World at `height` (the checkpoint's, the seed's genesis World, or the head's). -/
+  world : Option HostRefinesWorld.DWorld := none
 
 /-- **The one verification of new entries**, used by the open (from its
 checkpoint) and by a session's refresh (from its head): every entry after
@@ -782,6 +788,8 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
   match replayed : replay rootBytes start.before records with
   | none => return .error "durable log suffix does not replay through the canonical executor"
   | some snapshot =>
+      let world := start.world.bind fun w =>
+        (DurableReceiverIO.foldRecords rootBytes w start.height records).toOption
       let cellIds := extendIds start.ids records
       let entries := Served.entriesOf snapshot.model.roots cellIds headHeight headChain
       let rooted : (cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache entries :=
@@ -804,7 +812,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
           let head := Head.genesis store worldRoot
           return .ok ⟨store, live, head, served, zero.trans (Head.genesis_fields store worldRoot).1.symm,
             genesisChain.trans (Head.genesis_fields store worldRoot).2.1.symm, roots, rootsExact,
-            start.checkpoint⟩
+            start.checkpoint, world⟩
         else return .error "an empty durable log's chain is not its genesis log start"
       else
         let some headTag := (suffix.getLast?.map (·.tag)).or start.tag
@@ -816,7 +824,7 @@ private def extendVerified (transport : DurableReceiverIO.Transport) (rootBytes 
               return .error "durable log head root differs from the replayed root"
             have fields := Head.verify_fields verified
             return .ok ⟨store, live, head, served, fields.1.symm, fields.2.1.symm, roots, rootsExact,
-              start.checkpoint⟩
+              start.checkpoint, world⟩
 
 /-- A checkpoint state's served entries are its world-root entries (`stateEntries`). -/
 theorem state_entries (base : State) (nodup : (base.cells.map Prod.fst).Nodup) (height : Nat)
@@ -837,10 +845,11 @@ private def startOf (seed : Seed) (base : State) (height : Nat) (chain : Digest)
     (frontier : List (Nat × Digest)) (indexRoot : Digest) (tag : Option (List UInt8))
     (nodup : (base.cells.map Prod.fst).Nodup)
     (roots : Option ((cache : WorldRootCache.RootCache) ×' WorldRootCache.RootsExact cache
-      (DurableCheckpointCodec.stateEntries rootBytes height chain base))) : Start rootBytes :=
+      (DurableCheckpointCodec.stateEntries rootBytes height chain base)))
+    (world : Option HostRefinesWorld.DWorld) : Start rootBytes :=
   ⟨seed, base.absentBytes, base.cells.map Prod.fst, base.snapshot rootBytes [], Served.state_snapshot_outside base,
     height, chain, frontier, indexRoot, tag, height,
-    roots.map fun built => ⟨nodup, built.1, (state_entries base nodup height chain).symm ▸ built.2⟩⟩
+    roots.map fun built => ⟨nodup, built.1, (state_entries base nodup height chain).symm ▸ built.2⟩, world⟩
 
 /-- The light opening of an opened Store's head: its checkpoint (or the seed),
 then `extendVerified` over the entries after it. -/
@@ -881,7 +890,8 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
       if admissible : SessionIndex.nodupFast (base.cells.map Prod.fst) = true ∧
             base.absentBytes = seed.absentBytes then
         extendVerified transport rootBytes store rfl
-          (startOf seed base 0 logStart [] DurableIndex.emptyDigest none ((SessionIndex.nodupFast_iff _).mp admissible.1) none) stored.entries lap
+          (startOf seed base 0 logStart [] DurableIndex.emptyDigest none ((SessionIndex.nodupFast_iff _).mp admissible.1) none
+            (TurnLog.genesisOfSeed seed).toOption) stored.entries lap
       else return .error "checkpoint state is not admissible for this Store's seed"
   | some checkpoint =>
       match DurableCheckpointCodec.openSealedWith (α := CheckpointRoots rootBytes) key rootBytes
@@ -904,7 +914,8 @@ def openHead (transport : DurableReceiverIO.Transport) (rootBytes : List UInt8 �
             base.absentBytes = seed.absentBytes then
                 extendVerified transport rootBytes store rfl
                   (startOf seed base body.height body.chain body.frontier body.indexRoot
-                    (some atCheckpoint.tag) ((SessionIndex.nodupFast_iff _).mp admissible.1) (some built)) (stored.entries.drop 1) lap
+                    (some atCheckpoint.tag) ((SessionIndex.nodupFast_iff _).mp admissible.1) (some built)
+                    (body.system.bind (DurableReceiverIO.worldOfCheckpoint body.state))) (stored.entries.drop 1) lap
               else return .error "checkpoint state is not admissible for this Store's seed"
 
 /-- **A session's refresh**: the entries another writer appended after this
@@ -928,7 +939,8 @@ def Opening.extend (transport : DurableReceiverIO.Transport) (rootBytes : List U
           fun cellId missing => served.outsideAbsent cellId missing, height, opening.head.chain,
           opening.head.frontier, opening.head.indexRoot, none, opening.baseHeight,
           some ⟨served.cellIds_nodup, opening.roots, by
-            simpa [served, Served.roots, opening.heightExact, opening.chainExact] using opening.rootsExact⟩⟩
+            simpa [served, Served.roots, opening.heightExact, opening.chainExact] using opening.rootsExact⟩,
+          opening.world⟩
         stored.entries (fun _ => pure ())
 
 /-! ## The light receive (KN2 2b-1, step 4)
@@ -1053,18 +1065,21 @@ def receiveServed (transport : DurableReceiverIO.Transport) (rootBytes : List UI
                 | .ok head' =>
                     have fields := Head.verify_fields verified
                     let served' := served.advance footprint intent next executed chain worldRoot
+                    let worldAfter := opening.world.bind fun w =>
+                      (DurableReceiverIO.foldRecords rootBytes w served.height [record]).toOption
                     -- A due checkpoint (a function of the height alone); a failed seal loses nothing.
                     let sealedAt ←
                       if transport.checkpointEvery > 0 && height % transport.checkpointEvery == 0 then do
                         let sealed := DurableCheckpointCodec.sealAt key height chain frontierAfter indexAfter
-                          served'.checkpointState worldRoot
+                          served'.checkpointState (worldAfter.map (·.system)) worldRoot
                         match ← transport.putCheckpoint height
                             (DurableCheckpointCodec.checkpointFrame.encode sealed) with
                         | .ok () => pure height
                         | .error _ => pure opening.baseHeight
                       else pure opening.baseHeight
                     return .appended kind
-                      ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt⟩
+                      ⟨opening.store, opening.live, head', served', fields.1.symm, fields.2.1.symm, roots.1, roots.2, sealedAt,
+                        worldAfter⟩
                       (by rw [fields.1, ← opening.heightExact]) entry rfl
       match ← transport.append height entry nodes with
       | .installed => confirm .installed

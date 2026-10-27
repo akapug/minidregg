@@ -131,6 +131,7 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .worldInstance => WorldKindCell.instanceWire
   | .objectiveActivity => objectiveActivityWire
   | .seat => seatWire
+  | .platform => Kernel.PlatformCellLayout.wire
 
 /-! ## The cell decoder -/
 

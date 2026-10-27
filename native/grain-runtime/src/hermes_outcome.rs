@@ -51,6 +51,41 @@ pub(crate) fn close_failure(state: &Path, journal: &Journal, prompt: u64) -> Res
         &serde_json::to_vec_pretty(&record).map_err(|e|e.to_string())?)
 }
 
+/// An end_turn after which no model call of this prompt reached the provider,
+/// because the gateway refused each one by name before any reserve (a cap,
+/// no credit, no route): nothing was sent and nothing is held, so the turn is
+/// decided, a typed failure naming the refusal, not an uncertain completion.
+/// Real Hermes reports such a turn as end_turn (it ends after its retries);
+/// any other end_turn is left for full validation.
+pub(crate) fn refused_model_turn(value: Value, journal: &Journal, prompt: u64, refusals: &[String]) -> Value {
+    if failure(&value).is_some() || value.get("stopReason").and_then(Value::as_str) != Some("end_turn")
+        || !all_model_calls_refused(journal, prompt, refusals) {
+        return value;
+    }
+    refusal_failure(refusals, None)
+}
+
+/// No model call of this prompt reached the provider and at least one was
+/// refused by name: nothing reserved, nothing held, nothing answered.
+pub(crate) fn all_model_calls_refused(journal: &Journal, prompt: u64, refusals: &[String]) -> bool {
+    !refusals.is_empty()
+        && !journal.provider_replays.iter().any(|r| r.prompt_operation_id == prompt)
+        && journal.provider_pending.is_none() && journal.provider_hold.is_none() && journal.provider_attempt.is_none()
+}
+
+/// The typed failure for such a turn, naming the first refusal; `ended` is
+/// the worker's own report when it ended with an error instead of end_turn.
+pub(crate) fn refusal_failure(refusals: &[String], ended: Option<&str>) -> Value {
+    let first = &refusals[0];
+    let code = first.strip_prefix(crate::credentials::REFUSED).unwrap_or(first);
+    let reason: String = format!("provider-refused:{code}").chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_:-".contains(*c)).take(96).collect();
+    let mut detail = refusals.join("; ");
+    if let Some(ended) = ended { detail = format!("{detail}; worker: {ended}"); }
+    json!({"miniTurnFailure":{"code":-32003,"data":{"type":"mini-hermes-turn-failure-v1","reason":reason,
+        "detail":detail.chars().take(4096).collect::<String>(),"retryable":false}}})
+}
+
 pub(crate) fn validate_completion(value: Value, journal: &Journal, prompt: u64,
     managed_provider: bool) -> Result<Value> {
     let blockers=terminal_blockers(journal);
@@ -82,6 +117,22 @@ pub(crate) fn validate_completion(value: Value, journal: &Journal, prompt: u64,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_end_turn_whose_every_model_call_was_refused_is_a_typed_failure() {
+        let (root,rt)=crate::tests::restart_resolution_fixture("hermes-refused-turn");
+        let mut j=rt.journal;j.connection=Connection::Soft;j.tool_hold=None;j.workspace_attempt=None;
+        j.provider_pending=None;j.provider_hold=None;j.provider_attempt=None;
+        j.prompt_witness=Some(json!({"before":{"generation":"7"}}));
+        let refusals=vec!["provider-refused:member-day-ceiling".to_owned()];
+        let turned=refused_model_turn(json!({"stopReason":"end_turn"}),&j,42,&refusals);
+        assert_eq!(turned["miniTurnFailure"]["data"]["reason"],"provider-refused:member-day-ceiling");
+        assert!(validate_completion(turned,&j,42,true).is_ok(), "a decided typed failure, not uncertain");
+        // No refusal recorded: the plain end_turn still needs its settled response.
+        let plain=refused_model_turn(json!({"stopReason":"end_turn"}),&j,42,&[]);
+        assert!(validate_completion(plain,&j,42,true).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn managed_completion_requires_this_prompt_settled_generation() {
         let (root,rt)=crate::tests::restart_resolution_fixture("hermes-completion");

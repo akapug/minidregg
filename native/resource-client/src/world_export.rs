@@ -22,6 +22,91 @@ use crate::{Args, Result};
 const MAX_TOTAL: u64 = 512 * 1024 * 1024;
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 
+/// One world export per member per this many seconds, whichever face asks: the shell's `export
+/// world` (this verb) and the web body's /export both claim through [`claim_export`], which reads
+/// and writes the one file HOME/exports/[`LAST_EXPORT`] (the unix second the last export began).
+pub(crate) const EXPORT_COOLDOWN_S: u64 = 600;
+pub(crate) const LAST_EXPORT: &str = ".last-export";
+
+/// A claimed export: the cooldown file, locked for the export's duration, already holding its
+/// start. [`ExportClaim::failed`] puts the previous start back (a failed export costs no cooldown).
+pub(crate) struct ExportClaim {
+    file: fs::File,
+    previous: Vec<u8>,
+}
+
+impl ExportClaim {
+    pub(crate) fn failed(mut self) {
+        use std::io::Seek;
+        let _ = self.file.set_len(0);
+        let _ = self.file.seek(std::io::SeekFrom::Start(0));
+        let _ = self.file.write_all(&self.previous);
+        let _ = self.file.sync_all();
+    }
+}
+
+/// Claim this member's export at `now`: refused by name while another export of the same member
+/// runs, and within [`EXPORT_COOLDOWN_S`] of the last one's start (both times named).
+pub(crate) fn claim_export(home: &Path, now: u64) -> Result<ExportClaim> {
+    use std::io::{Read, Seek};
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use std::os::unix::io::AsRawFd;
+    let dir = home.join("exports");
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(LAST_EXPORT);
+    let mut file = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    // SAFETY: flock on a descriptor this function owns.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err("export world: an export is already running for this member; wait for it to finish".into());
+    }
+    let mut previous = Vec::new();
+    file.read_to_end(&mut previous).map_err(|e| format!("{}: {e}", path.display()))?;
+    cooled(&path, &previous, now)?;
+    file.set_len(0).map_err(|e| e.to_string())?;
+    file.seek(std::io::SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    file.write_all(format!("{now}\n").as_bytes()).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    Ok(ExportClaim { file, previous })
+}
+
+/// The cooldown rule on the file's bytes: empty, or a unix second at least EXPORT_COOLDOWN_S ago.
+fn cooled(path: &Path, previous: &[u8], now: u64) -> Result<()> {
+    if previous.is_empty() {
+        return Ok(());
+    }
+    let text = std::str::from_utf8(previous).ok().map(str::trim_end);
+    let last: u64 = text.and_then(mini_sdk::decimal::parse).ok_or_else(|| format!(
+        "{}: not a unix second; the export cooldown cannot be read", path.display()))?;
+    let next = last.saturating_add(EXPORT_COOLDOWN_S);
+    if now < next {
+        return Err(format!("export world: one export per {} minutes; the last began {}, the next may begin from {}",
+            EXPORT_COOLDOWN_S / 60, crate::web::subscribe::utc(last), crate::web::subscribe::utc(next)));
+    }
+    Ok(())
+}
+
+/// Whether [`claim_export`] would succeed at `now`, without claiming: the web body asks before it
+/// starts `mini export-world` (which claims for itself), so a refusal is a page, not a log line.
+/// The same three refusals, by the same words.
+pub(crate) fn may_export(home: &Path, now: u64) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+    let path = home.join("exports").join(LAST_EXPORT);
+    let file = match fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    // SAFETY: flock on a descriptor this function owns; a shared probe released at once.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } != 0 {
+        return Err("export world: an export is already running for this member; wait for it to finish".into());
+    }
+    let previous = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    cooled(&path, &previous, now)
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let root = PathBuf::from(args.required("workspace")?);
     let home = PathBuf::from(args.required("home")?);
@@ -32,14 +117,28 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         fs::set_permissions(parent, std::os::unix::fs::PermissionsExt::from_mode(0o700)).map_err(|e| e.to_string())?;
     }
     let workspace = bounded_json(&root.join("workspace.json"))?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    let claim = claim_export(&home, now)?;
     // Written beside, then renamed: a reader of HOME/exports sees a whole archive or a `.part`.
     let mut part = out.clone().into_os_string();
     part.push(".part");
     let part = PathBuf::from(part);
-    let manifest = export(&root, &workspace, &home, &part).inspect_err(|_| {
-        let _ = fs::remove_file(&part);
-    })?;
+    let manifest = match export(&root, &workspace, &home, &part) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            let _ = fs::remove_file(&part);
+            claim.failed();
+            return Err(error);
+        }
+    };
     fs::rename(&part, &out).map_err(|e| e.to_string())?;
+    // The archive's digest, kept beside it after the archive is downloaded and deleted: the
+    // export page shows it while the next export waits out its cooldown.
+    let mut digest = Sha256::new();
+    std::io::copy(&mut fs::File::open(&out).map_err(|e| e.to_string())?, &mut digest).map_err(|e| e.to_string())?;
+    let mut sum = out.clone().into_os_string();
+    sum.push(".sha256");
+    fs::write(PathBuf::from(sum), format!("{}\n", hex(&digest.finalize()))).map_err(|e| e.to_string())?;
     println!("{}", serde_json::to_string_pretty(&json!({
         "type": "mini-world-export-result-v1", "out": out, "subject": manifest["subject"],
         "worldRoot": manifest["worldRoot"], "height": manifest["height"],
@@ -276,6 +375,29 @@ mod tests {
         let long = format!("mini-export/attempts/{}/{}", "x".repeat(90), "y".repeat(60));
         let h = super::ustar_header(&long, 0).unwrap();
         assert!(h[345..].starts_with(format!("mini-export/attempts/{}", "x".repeat(90)).as_bytes()));
+    }
+
+    #[test]
+    fn one_export_per_cooldown_named_by_time_and_a_failed_one_costs_nothing() {
+        let home = std::env::temp_dir().join(format!("we-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let t = 1_800_000_000;
+        let first = super::claim_export(&home, t).unwrap();
+        // while the first runs, a second is refused by name (the lock), not by time
+        let busy = super::claim_export(&home, t + 1).err().unwrap();
+        assert!(busy.contains("already running"), "{busy}");
+        drop(first);
+        let early = super::claim_export(&home, t + super::EXPORT_COOLDOWN_S - 1).err().unwrap();
+        assert!(early.contains("one export per 10 minutes") && early.contains(&crate::web::subscribe::utc(t))
+            && early.contains(&crate::web::subscribe::utc(t + super::EXPORT_COOLDOWN_S)), "{early}");
+        let second = super::claim_export(&home, t + super::EXPORT_COOLDOWN_S).unwrap();
+        second.failed();
+        // the failed export restored the first's start: the cooldown still runs from t
+        assert_eq!(std::fs::read_to_string(home.join("exports").join(super::LAST_EXPORT)).unwrap(), format!("{t}\n"));
+        drop(super::claim_export(&home, t + super::EXPORT_COOLDOWN_S).unwrap());
+        std::fs::write(home.join("exports").join(super::LAST_EXPORT), "soon").unwrap();
+        assert!(super::claim_export(&home, t * 2).err().unwrap().contains("not a unix second"));
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

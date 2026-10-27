@@ -96,13 +96,21 @@ before birth. The corrected runtime preserves all original root and balance
 checks. Its next attempt reached session creation, which the fixture's factory
 policy refused before submission. Tool cleanup completed, but the parent hold
 still needs definite-error settlement; no request was resent or acknowledged.
-The fresh world's policy now explicitly admits its allocated tool under the
-existing grain-backed birth restriction. The
-[recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
-the retained failure from the prepared v7 journey.
-Agent discovery/calls and the complete restart journey still need to pass.
-Do not resend that uncertain request as a new operation.
-The [v5 evidence](evidence/oracle-u3-acceptance-2026-10-27.json) holds exact state.
+The qualified native refusal-recovery repair is now integrated. Its one
+terminal-only attempt hit the Host frame-read deadline during historical ticket
+lookup. The original parent reservation remains held, with no result or ACK.
+All owned services are stopped and the namespace is preserved; another attempt
+must account for that failure rather than resend the original operation.
+
+The fresh v7 run installed both appliances and admitted a real agent session.
+Lifetime-grant planning then refused: its source creates three grants while the
+ordinary birth validator requires two. A dedicated lifetime-grant source and
+receiver repair is being checked. No grant was submitted, application started,
+or Oracle/browser call made in that run. Cleanup passed and the stopped Store
+is preserved. The next positive journey uses a fresh world on a coherent repaired
+Mini build. Agent discovery/calls and the complete restart journey remain open.
+The [recovery record](evidence/oracle-hosted-recovery-2026-10-27.json) distinguishes
+both stopped runs and their exact evidence.
 
 The veri7vn U5 v2 source composition has 351 direct operations. Its focused
 57-request Engine run observed 37 completed tasks, 13 appropriate refusals or

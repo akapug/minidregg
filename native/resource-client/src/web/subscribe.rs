@@ -46,7 +46,7 @@ pub(super) fn window(status: &str) -> (Option<u64>, Option<u64>) {
 }
 
 /// A UTC date for a unix time (days from the civil-from-days algorithm), to the minute.
-pub(super) fn utc(secs: u64) -> String {
+pub(crate) fn utc(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let (h, m) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
     let z = days + 719_468;

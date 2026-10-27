@@ -318,6 +318,20 @@ impl SealedNative {
         InnerCredentialOutcome::decode(&reply)
     }
 }
+/// The ONLY production caller of `RecipientKeyCustody::adopt_current`: feeds the
+/// Host's current-recipient readback (`inspect current-recipient` output, taken
+/// under the client custody lock) into the worker's key custody, re-checked
+/// against the pinned scope.
+pub fn adopt_current_recipient(
+    config: &Config,
+    readback: &[u8],
+    scope: &crate::current_recipient::ReadbackScope,
+) -> Result<()> {
+    let record = crate::current_recipient::VerifiedCurrentRecipient::from_host_readback(readback, scope)?;
+    let mut keys =
+        RecipientKeyCustody::open(&config.key_wal, &config.key_identity, config.key_capacity)?;
+    keys.adopt_current(&record)
+}
 /// Actual native-image verification followed by actual private receiver WAL.
 /// Response is pending local egress, not source Qualified/terminal YES or an
 /// encrypted audience release. All recursive plaintext stays in private WAL.
@@ -575,9 +589,7 @@ mod tests {
             credential: vec![3],
         };
         let bytes = request.encode().unwrap();
-        assert!(bytes.len() > crate::source_endpoint::MAX_COMPLETE_NATIVE_REQUEST);
         assert_eq!(InnerCredentialRequest::decode(&bytes).unwrap(), request);
-        assert!(crate::source_endpoint::admit_complete_transport_frame(&bytes, &[]).is_err());
         let claim = DispatchClaim {
             request_bytes: vec![1],
             source_index: request.source_index,

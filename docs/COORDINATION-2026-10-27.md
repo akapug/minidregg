@@ -145,16 +145,21 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
   (`docs/review/2026-10-26-council/`). Engineering decisions are the orchestrator's after that
   synthesis; **only money, dates and credentials go to ember**, stated in system terms with the
   default that applies while she is away.
-- **Integration is a fixed cut, every 60–90 minutes.** One integrator merges `lane/*` in dependency
-  order (Lean interfaces first, plan Phase 1) and reads the branches itself at the cut: lanes send
-  no tip messages and the root relays none. It builds the whole tree ONCE on `dregg-build` (per-file
-  green hides a red umbrella), merges to main after the cut with reds named, and sends ONE report
-  per cut. Work found in the shared worktree is committed as found; the next cut fixes forward.
-- **Rehearsal ships every few days with reds named** (`ship.sh --rehearsal`, re-genesis allowed);
+- **Integration is continuous; there is no cut cadence** (ember, 2026-10-27 night: "DELETE THAT RITUAL").
+  A lane's per-file-checked work lands on main the moment it is pushed: the lane merges origin/main into its
+  branch and the integrator merges the branch into main at once (fast-forward where possible), in
+  dependency order only when two land together. `dregg-build` builds main continuously and incrementally on
+  a warm tree (whatever is newest when the previous build finishes), and the gate runs on the newest built
+  main; reds are named within minutes with file:line and owning lane and fixed forward. A "candidate" is
+  simply the newest built main that passed the gate. Work found in the shared worktree is committed as found.
+- **Rehearsal ships when ember says**, from the newest gated main, with reds named (`ship.sh --rehearsal`; re-genesis is free);
   the opening waits for the §1 contract and nothing else (§6 states the gate).
 - No status censuses, no reviews of reviews, no ledgers unless they unblock the ship.
+- **Lanes do not build or validate; validation is centralized** (ember, 2026-10-27 night: "no more subagents running builds or validation commands at all. they run it in their heads or they run it in a side model until it's right. and then they propose the edit and we take it and fix any other issues forward. centralize that task."). A lane reasons its change through (in its head, or by asking a side model to check its reasoning), pushes it to its `lane/<name>` branch, and moves on. It runs no `lake`, no `lean`, no `cargo build/check/test`, no journey rows, no boxes. The integrator is the one validator: it merges each push into main, builds and gates main continuously across dregg-build, dregg-ref and hbox, and routes every red, with file:line and the error text, back to the owning lane within minutes; the lane proposes the fix the same way. Exceptions: the iteration-speed lane (its subject is the build itself) and infra's box operations.
+- **No Lean builds on the Mac** (2026-10-27 night: four concurrent lane builds put the Mac at 72 of 74 GB swap). The Mac edits, runs `cargo check` and filtered Rust tests; every `lake build` and every large elaboration runs on dregg-ref (lanes, through `closure-lock`) or is the continuous main build on dregg-build. Each lane and faerie works only in its own worktree.
+- **No lane waits on its own closure build** (ember, 2026-10-27 night: "we need to avoid having the dependence on these closure builds"). A lane per-file elaborates its changed files and their direct importers, pushes, and moves on; the continuous build of main is the closure, and its reds are named within minutes and fixed forward by the owning lane. A lane's own closure runs only in the background (dregg-ref, closure-lock) when a change touches importers it cannot check per file. The iteration-speed lane is replacing per-file batch checks with a live Lean server per lane and Lean 4.30's module system.
 - **One Lean closure per box at a time; the cut's is on `dregg-build`, the lanes' on `dregg-ref`.**
-  `dregg-build` builds the Host closure for the integrator's cut; a lane elaborates per file (`lean-ask`,
+  `dregg-build` builds main's Host closure continuously; a lane elaborates per file (`lean-ask`,
   `lake env lean`) and runs its closure on `dregg-ref` through `closure-lock swarm-build <cmd>` (one closure at a time on the box, `closure-lock --who` names the holder; the nightly at 00:03 UTC and M7's reference build hold the same lock; seed only `.lake/packages`, never a hard-linked `build/`) (the lanes' second Linux box, shared with
   nanodregg's announced measurement windows: ember, 2026-10-27 evening, "USE all these machines while we
   have them"), or on the Mac's warm `.lake`, or waits for the cut (2026-10-27
@@ -199,8 +204,7 @@ never a delete.
   standing rows are the nightly's: they name their reds in the morning report and never name a
   candidate's (plan §1; ember, 2026-10-27: no row burndown). When a brief says "fix the rows", ask
   what a stranger would touch.
-- **Integration cuts** every 60–90 minutes (§4); **rehearsal ships** every few days from the
-  integrated tip, reds named.
+- **Integration is continuous** (§4); **rehearsal ships** when ember says, from the newest gated main, reds named.
 - **The nightly** is the only scheduled run: the kernel journey (L9's split of the journey into a
   demo journey inside the gate and a nightly kernel journey), the timing rows (`growth` at 1000,
   `births` at 1000, the 10k soak when designed) on `dregg-build`'s SSD or the demo box, and the

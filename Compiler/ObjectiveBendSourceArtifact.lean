@@ -53,7 +53,7 @@ theorem decodeBytes_eq (bytes : ByteArray) : decodeBytes bytes = decode bytes.to
   (StreamCodec.framed frame stream).decodeBytes_eq bytes
 
 def identity (a : Artifact) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v3".toUTF8.toList (encode a)).digest
+  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v4".toUTF8.toList (encode a)).digest
 
 def schema : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT-SCHEMA/v2".toUTF8.toList frame).digest

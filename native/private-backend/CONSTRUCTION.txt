@@ -59,12 +59,18 @@ committed obligations; key rotation cannot reinterpret or erase old material.
 
 Recipient key custody (recipient_seal.rs): seeds are wrapped at rest under a custody
 wrap key kept beside the journal, and a capsule opens only under custody's CURRENT
-epoch (open_current; stale and future epochs refuse by name). OPEN channel: nothing
-yet calls adopt_current_epoch from the Host-verified CurrentRecipientRecord readback
-(Host/CurrentRecipientVerifier.lean, keyEpoch = Claim.epoch), so no worker run has a
-current epoch until that join exists. Only the epoch is bound to the Lean record, not
-the key bytes: Claim.encryptionKey is 32 bytes (Suite1 X25519) while a custody key is
-the 1216-byte hybrid public key.
+epoch (open_current: stale and future epochs refuse by name, and the capsule's key
+digest must equal the digest of custody's current public key bytes). The current epoch
+is set only by adopt_current, which takes a VerifiedCurrentRecipient: the Host's
+`inspect current-recipient` readback (Host/CurrentRecipientVerifier.lean) parsed by
+current_recipient.rs and re-checked against the operator-pinned domain, semantics,
+member, room and keys cell. Its one production caller is native_worker::
+adopt_current_recipient, reached by the CLI verb `adopt-current-recipient`. The readback
+is a claim: the caller must take it from the pinned local inspect operation under the
+client custody lock. The record binds the epoch and the 32-byte Suite1 X25519 key,
+which must equal the X25519 half of custody's 1216-byte hybrid key; the 1184-byte
+ML-KEM half is not in the Lean record and is bound only by the capsule's key digest.
+OPEN (Lean owner): a record that carries the hybrid key or its digest.
 
 Packet identity uses one canonical CommitteeParty/Generation/epoch/session/
 party/recipient/role/key-purpose record and sequence/body. A mix slot never

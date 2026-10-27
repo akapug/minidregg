@@ -39,6 +39,16 @@ pub(crate) enum Method {
     Put,
     Patch,
     Delete,
+    /// The WebDAV/CalDAV calls (Lean `davMethod`): ordinary exchanges with typed parameters.
+    Propfind,
+    Proppatch,
+    Mkcol,
+    Copy,
+    Move,
+    Lock,
+    Unlock,
+    Report,
+    Options,
     /// A `GET` carrying a valid RFC 6455 upgrade: a streamed dispatch whose
     /// one Mini write is the open (Sandstorm `openWebSocket`).
     WebSocket,
@@ -53,6 +63,15 @@ impl Method {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::Propfind => "PROPFIND",
+            Self::Proppatch => "PROPPATCH",
+            Self::Mkcol => "MKCOL",
+            Self::Copy => "COPY",
+            Self::Move => "MOVE",
+            Self::Lock => "LOCK",
+            Self::Unlock => "UNLOCK",
+            Self::Report => "REPORT",
+            Self::Options => "OPTIONS",
             Self::WebSocket => crate::dispatch_inspection::STREAMED_OPEN_METHOD,
         }
     }
@@ -64,12 +83,31 @@ impl Method {
             "PUT" => Ok(Self::Put),
             "PATCH" => Ok(Self::Patch),
             "DELETE" => Ok(Self::Delete),
+            "PROPFIND" => Ok(Self::Propfind),
+            "PROPPATCH" => Ok(Self::Proppatch),
+            "MKCOL" => Ok(Self::Mkcol),
+            "COPY" => Ok(Self::Copy),
+            "MOVE" => Ok(Self::Move),
+            "LOCK" => Ok(Self::Lock),
+            "UNLOCK" => Ok(Self::Unlock),
+            "REPORT" => Ok(Self::Report),
+            "OPTIONS" => Ok(Self::Options),
             _ => Err(refuse("HTTP method unavailable")),
         }
     }
 
     fn safe(self) -> bool {
         matches!(self, Self::Get | Self::Head)
+    }
+
+    fn dav(self) -> bool {
+        crate::host_operations::dav_method(self.as_str())
+    }
+
+    /// No body: Lean's `requestSafeFor` empty-body methods.
+    fn bodyless(self) -> bool {
+        matches!(self, Self::Get | Self::Head | Self::Delete | Self::Copy | Self::Move
+            | Self::Unlock | Self::Options | Self::WebSocket)
     }
 }
 
@@ -418,7 +456,16 @@ fn header_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
-fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
+/// How the request body follows the head: a `content-length`, or `transfer-encoding: chunked`
+/// (decoded into the same bounded body; git and WebDAV clients send larger bodies this way), and
+/// whether the client waits for `100 Continue` before sending it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Framing {
+    pub length: Option<usize>,
+    pub expect_continue: bool,
+}
+
+fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, Framing)> {
     let text = std::str::from_utf8(head).map_err(|_| refuse("HTTP headers are not UTF-8"))?;
     let mut lines = text.split("\r\n");
     let request_line = lines
@@ -452,7 +499,10 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     let mut websocket_version = None;
     let mut websocket_protocol = None;
     let mut body_len = None;
+    let mut chunked = false;
+    let mut expect_continue = false;
     let mut ordinary_headers = Vec::new();
+    let mut dav_headers = Vec::new();
     let mut export_capture = None;
     for line in lines {
         if line.is_empty() {
@@ -503,9 +553,19 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
                         .map_err(|_| refuse("HTTP body length overflow"))?,
                 );
             }
-            "transfer-encoding" | "expect" | "content-encoding" => {
-                return Err(refuse("unsupported HTTP transfer encoding"));
+            "transfer-encoding" => {
+                if !value.eq_ignore_ascii_case("chunked") {
+                    return Err(refuse("unsupported HTTP transfer encoding"));
+                }
+                chunked = true;
             }
+            "expect" => {
+                if !value.eq_ignore_ascii_case("100-continue") {
+                    return Err(refuse("unsupported HTTP expectation"));
+                }
+                expect_continue = true;
+            }
+            name if crate::host_operations::dav_header_name(name) => dav_headers.push((name.to_owned(), value)),
             name if name.starts_with("x-sandstorm-") => {
                 return Err(refuse("caller-supplied Sandstorm header"));
             }
@@ -515,6 +575,13 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
         }
     }
     let host = host.ok_or_else(|| refuse("missing HTTP Host"))?;
+    if chunked && body_len.is_some() {
+        return Err(refuse("HTTP content length with chunked transfer encoding"));
+    }
+    // DAV parameter headers are signed on a DAV call and nowhere else (Lean `davHeaderName`).
+    if method.dav() {
+        ordinary_headers.extend(dav_headers);
+    }
     let body_len = body_len.unwrap_or(0);
     // An upgrade is a WebSocket open or nothing. Its subprotocol list is an
     // app-visible input, so it is signed like an ordinary header; the
@@ -530,7 +597,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             (method, None)
         }
         Some(upgrade) => {
-            if method != Method::Get || body_len != 0 {
+            if method != Method::Get || body_len != 0 || chunked {
                 return Err(refuse("WebSocket upgrade is not a bodyless GET"));
             }
             let handshake = crate::web_socket::client_handshake(
@@ -552,8 +619,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     if target == "/__mini/bootstrap" && body_len > 128 {
         return Err(refuse("bootstrap form exceeds bound"));
     }
-    if matches!(method, Method::Get | Method::Head | Method::Delete) && body_len != 0 {
+    if method.bodyless() && (body_len != 0 || chunked) {
         return Err(refuse("method cannot carry HTTP body"));
+    }
+    if target == "/__mini/bootstrap" && chunked {
+        return Err(refuse("bootstrap form exceeds bound"));
     }
     Ok((
         ReceivedRequest {
@@ -573,8 +643,63 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             websocket,
             upgrade_stream: None,
         },
-        body_len,
+        Framing {
+            length: (!chunked).then_some(body_len),
+            expect_continue,
+        },
     ))
+}
+
+/// Decodes a complete chunked body from `bytes` (RFC 9112 section 7.1; extensions ignored,
+/// trailers refused). `Ok(None)` asks for more bytes; `Ok(Some((body, used)))` is the decoded
+/// body and the bytes it consumed. The decoded body is bounded by `MAX_BODY`.
+pub(crate) fn decode_chunked(bytes: &[u8]) -> io::Result<Option<(Vec<u8>, usize)>> {
+    // Chunks are located first and copied once the body is complete: an incomplete body is
+    // re-scanned per read, and the scan skips chunk data by its declared size.
+    let mut spans = Vec::new();
+    let mut total = 0_usize;
+    let mut at = 0;
+    loop {
+        let Some(line_end) = bytes[at..].windows(2).position(|w| w == b"\r\n") else {
+            if bytes.len() - at > 1024 {
+                return Err(refuse("HTTP chunk size line exceeds bound"));
+            }
+            return Ok(None);
+        };
+        let line = std::str::from_utf8(&bytes[at..at + line_end])
+            .map_err(|_| refuse("HTTP chunk size is not text"))?;
+        let size_text = line.split(';').next().unwrap_or("").trim();
+        if size_text.is_empty() || size_text.len() > 8 || !size_text.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(refuse("HTTP chunk size is not hexadecimal"));
+        }
+        let size = usize::from_str_radix(size_text, 16).map_err(|_| refuse("HTTP chunk size overflow"))?;
+        at += line_end + 2;
+        if size == 0 {
+            if bytes.len() < at + 2 {
+                return Ok(None);
+            }
+            if &bytes[at..at + 2] != b"\r\n" {
+                return Err(refuse("HTTP chunked trailers are unsupported"));
+            }
+            let mut body = Vec::with_capacity(total);
+            for (start, len) in spans {
+                body.extend_from_slice(&bytes[start..start + len]);
+            }
+            return Ok(Some((body, at + 2)));
+        }
+        if size > MAX_BODY - total {
+            return Err(refuse("HTTP body exceeds native bound"));
+        }
+        if bytes.len() < at + size + 2 {
+            return Ok(None);
+        }
+        if &bytes[at + size..at + size + 2] != b"\r\n" {
+            return Err(refuse("HTTP chunk is not terminated"));
+        }
+        spans.push((at, size));
+        total += size;
+        at += size + 2;
+    }
 }
 
 fn read_until(
@@ -623,15 +748,33 @@ fn read_request_until(stream: &mut UnixStream, deadline: Instant) -> io::Result<
     if head_end > MAX_HEAD {
         return Err(refuse("HTTP header exceeds bound"));
     }
-    let (mut request, body_len) = parse_head(&bytes[..head_end - 4])?;
-    let total = head_end
-        .checked_add(body_len)
-        .ok_or_else(|| refuse("HTTP frame length overflow"))?;
-    read_until(stream, &mut bytes, total, deadline)?;
-    if bytes.len() != total {
-        return Err(refuse("HTTP pipelining is unsupported"));
+    let (mut request, framing) = parse_head(&bytes[..head_end - 4])?;
+    if framing.expect_continue && bytes.len() == head_end && framing.length != Some(0) {
+        stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
     }
-    request.body.extend_from_slice(&bytes[head_end..]);
+    match framing.length {
+        Some(body_len) => {
+            let total = head_end
+                .checked_add(body_len)
+                .ok_or_else(|| refuse("HTTP frame length overflow"))?;
+            read_until(stream, &mut bytes, total, deadline)?;
+            if bytes.len() != total {
+                return Err(refuse("HTTP pipelining is unsupported"));
+            }
+            request.body.extend_from_slice(&bytes[head_end..]);
+        }
+        None => loop {
+            if let Some((body, used)) = decode_chunked(&bytes[head_end..])? {
+                if head_end + used != bytes.len() {
+                    return Err(refuse("HTTP pipelining is unsupported"));
+                }
+                request.body = body;
+                break;
+            }
+            let minimum = bytes.len() + 1;
+            read_until(stream, &mut bytes, minimum, deadline)?;
+        },
+    }
     Ok(request)
 }
 
@@ -1984,11 +2127,23 @@ mod tests {
             .windows(4)
             .position(|part| part == b"\r\n\r\n")
             .unwrap();
-        let (mut request, body_len) = parse_head(&bytes[..end])?;
-        if bytes.len() != end + 4 + body_len {
-            return Err(refuse("test frame body mismatch"));
+        let (mut request, framing) = parse_head(&bytes[..end])?;
+        match framing.length {
+            Some(body_len) => {
+                if bytes.len() != end + 4 + body_len {
+                    return Err(refuse("test frame body mismatch"));
+                }
+                request.body.extend_from_slice(&bytes[end + 4..]);
+            }
+            None => {
+                let (body, used) = decode_chunked(&bytes[end + 4..])?
+                    .ok_or_else(|| refuse("test frame chunked body incomplete"))?;
+                if end + 4 + used != bytes.len() {
+                    return Err(refuse("test frame body mismatch"));
+                }
+                request.body = body;
+            }
         }
-        request.body.extend_from_slice(&bytes[end + 4..]);
         Ok(request)
     }
 
@@ -2077,6 +2232,43 @@ mod tests {
                 .unwrap();
         assert_eq!(plain.method, Method::Get);
         assert!(plain.websocket.is_none());
+    }
+
+    #[test]
+    fn dav_calls_carry_their_parameter_headers_and_nothing_else_does() {
+        let propfind = parsed("PROPFIND /dav/notes HTTP/1.1\r\nHost: friend.example.test\r\nDepth: 1\r\nContent-Type: application/xml\r\nContent-Length: 11\r\n\r\n<propfind/>").unwrap();
+        assert_eq!(propfind.method, Method::Propfind);
+        assert_eq!(propfind.method.as_str(), "PROPFIND");
+        assert!(propfind.ordinary_headers.contains(&("depth".into(), "1".into())));
+        assert_eq!(propfind.body, b"<propfind/>");
+        let mv = parsed("MOVE /dav/a HTTP/1.1\r\nHost: friend.example.test\r\nDestination: https://friend.example.test/dav/b\r\nOverwrite: F\r\n\r\n").unwrap();
+        assert_eq!(mv.method, Method::Move);
+        assert!(mv.ordinary_headers.contains(&("destination".into(), "https://friend.example.test/dav/b".into())));
+        assert!(mv.ordinary_headers.contains(&("overwrite".into(), "F".into())));
+        // Off a DAV call the parameter headers are dropped like any browser metadata, never signed.
+        let get = parsed("GET /dav HTTP/1.1\r\nHost: friend.example.test\r\nDepth: 1\r\n\r\n").unwrap();
+        assert!(get.ordinary_headers.iter().all(|(name, _)| name != "depth"));
+        // Parameter-only calls carry no body; ACL is not served.
+        assert!(parsed("COPY /dav/a HTTP/1.1\r\nHost: friend.example.test\r\nContent-Length: 1\r\n\r\nx").is_err());
+        assert!(parsed("OPTIONS /dav HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
+        assert!(parsed("ACL /dav HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn chunked_bodies_decode_into_the_bounded_body() {
+        let push = parsed("POST /repo.git/git-receive-pack HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\nContent-Encoding: gzip\r\n\r\n4\r\nPACK\r\n6;ext=1\r\n-bytes\r\n0\r\n\r\n").unwrap();
+        assert_eq!(push.body, b"PACK-bytes");
+        assert!(push.ordinary_headers.contains(&("content-encoding".into(), "gzip".into())));
+        assert_eq!(decode_chunked(b"4\r\nPA").unwrap(), None);
+        assert_eq!(decode_chunked(b"4\r\nPACK\r\n0\r\n").unwrap(), None);
+        assert!(decode_chunked(b"4\r\nPACK\r\n0\r\nTrailer: x\r\n\r\n").is_err());
+        assert!(decode_chunked(b"zz\r\n").is_err());
+        assert!(decode_chunked(b"4\r\nPACKxx").is_err());
+        assert!(decode_chunked(format!("{:x}\r\n", MAX_BODY + 1).as_bytes()).is_err());
+        // A length and a chunked framing together is the smuggling shape: refused.
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: gzip\r\n\r\n").is_err());
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nExpect: something-else\r\n\r\n").is_err());
     }
 
     #[test]

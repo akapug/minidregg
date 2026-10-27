@@ -114,3 +114,30 @@ userspace by e2fsprogs as the app uid and never mounted from operator bytes.
 Size classes are `broker::CLASSES` (`broker.rs:59`) (S/M/L memory, CPU, tasks, IO weight,
 `/var` size, WebSocket caps); they are operator policy until a Lean
 declaration pins them.
+
+### Slice tree (the class is in the name)
+
+The broker renders, and only `broker::{grains_slice, class_slice, app_slice}` name:
+
+```text
+s{STORE}-{PREFIX}-grains.slice                      supervisors (no class)
+  s{STORE}-{PREFIX}-grains-{S|M|L}.slice            one size class (rendered at broker start)
+    s{STORE}-{PREFIX}-grains-{S|M|L}-a{APP}.slice   one app: its limits, its resident unit
+```
+
+The class is the one `set-cgroup` recorded (`grain.rs` `place`, from the app's declared
+size class); `install-unit` refuses an app with no class, so no grain lands outside a class
+slice, and a class change is refused once a unit is installed (the unit names its slice).
+Resident units are `mini-spk-s{STORE}-a{APP}-g{GEN}.service` (a pinned grammar; the class
+is in the slice, not the unit name). Per-grain CPU ceilings are drop-ins on the class
+prefix, one per class, bounding each app of that class and not the class together:
+
+```ini
+# ~/.config/systemd/user/s{STORE}-{PREFIX}-grains-S-.slice.d/60-cpu.conf   (M: 50%, L: 100%)
+[Slice]
+CPUQuota=25%
+```
+
+A drop-in on `s{STORE}-{PREFIX}-grains-S.slice.d/` instead would cap every S app together.
+The Hermes `mini-grain-controller@` / `mini-grain-resident@` units are not SPK grains and
+are not in this tree.

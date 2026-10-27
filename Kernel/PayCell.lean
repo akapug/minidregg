@@ -518,7 +518,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .computeUsage => computeUsageStream
   | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v7"
+def wireName : String := "DREGG/PAY/CELL/v8"
 
 def wire : Wire layout where
   name := wireName
@@ -544,19 +544,19 @@ def wire : Wire layout where
     | .computeUsage => "subject-id/nat"
     | .computeActivation => "unit"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v5"
+    | .tariff => "DREGG/PAY/TARIFF/v6"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
-    | .enrolment => "DREGG/PAY/ENROLMENT/v2"
+    | .enrolment => "DREGG/PAY/ENROLMENT/v3"
     | .sshIndex => "mini-key32/bytes"
-    | .journal => "DREGG/PAY/UNATTRIBUTED/v2"
-    | .claim => "DREGG/PAY/CLAIM/v3"
-    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v3"
-    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v2"
-    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v2"
-    | .chainTip => "DREGG/PAY/CHAIN-TIP/v2"
-    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v2"
-    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v2"
+    | .journal => "DREGG/PAY/UNATTRIBUTED/v3"
+    | .claim => "DREGG/PAY/CLAIM/v4"
+    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v4"
+    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v3"
+    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v3"
+    | .chainTip => "DREGG/PAY/CHAIN-TIP/v3"
+    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v3"
+    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v3"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

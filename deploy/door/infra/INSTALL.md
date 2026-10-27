@@ -33,6 +33,12 @@ It was made against `demo-vm` at `434aeb6` and checks clean there. What it chang
 
 ## 3. Secrets and parameters (never in git)
 
+- **Invite codes.** `door.json.example` carries `"inviteReserve": 20` (of `freeCap` 50) and
+  `"inviteCodes": "/etc/mini/invite-codes"`. Install the codes file `/etc/mini/invite-codes` as
+  `install -o root -g root -m 0600`, one `SERIAL CODE` line per code (serial a unique decimal of 1 or
+  more; code 8 to 64 of `A-Z a-z 0-9 -`, e.g. `openssl rand -hex 16`); see `deploy/door/README.md`.
+  The processor refuses to read it if it is not root-owned mode 0600, and a missing file stops coded
+  requests (named in their status) while uncoded ones go on. Never commit it.
 - **Solana RPC (Helius).** ember's key is `~/.helius-key` on the Mac. Install
   `/etc/mini/pay/rpc.env` (root 0600) on the box with
   `PAY_RPC_ENDPOINTS=https://mainnet.helius-rpc.com/?api-key=KEY https://api.mainnet-beta.solana.com`
