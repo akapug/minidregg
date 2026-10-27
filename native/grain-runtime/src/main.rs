@@ -3430,6 +3430,9 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     custody_gate: Arc<custody_gate::CustodyGate>,
+    /// Set when the last `command_output` child exited with a status and
+    /// every holder of its output pipes closed them: the sender is reaped.
+    custody_exit_reaped: AtomicBool,
     application_api_send_gate: Arc<application_api_tools::ForwardSendGate>,
     completion_phase: Arc<AtomicU8>,
     current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
@@ -6551,6 +6554,7 @@ impl Runtime {
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
             custody_gate: Arc::new(custody_gate::CustodyGate::new()),
+            custody_exit_reaped: AtomicBool::new(false),
             application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
@@ -7228,9 +7232,13 @@ impl Runtime {
         Ok(id)
     }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
+        self.custody_exit_reaped.store(false, Ordering::SeqCst);
         let output = deadline::output(Command::new(program).args(args), deadline::NATIVE_CALL)
             .map_err(|e| deadline::describe(&program.display().to_string(), e))?;
         if !output.status.success() {
+            // deadline::output returned a status and both pipes at EOF: the
+            // child is reaped and no descendant still holds its output.
+            self.custody_exit_reaped.store(true, Ordering::SeqCst);
             return Err(format!(
                 "{} exited {}: {}",
                 program.display(),
@@ -10253,6 +10261,7 @@ impl Runtime {
         Ok(Some(charge))
     }
     fn provider_settle(&mut self, charge: &str) -> Result<()> {
+        const PROVIDER_SETTLE_FRESH_PREPARES: u32 = 3;
         let authority = self.provider()?;
         let configured = self
             .config
@@ -10306,13 +10315,37 @@ impl Runtime {
         if self.journal.provider_pending.is_some() {
             return Err("provider transition needs exact retry".into());
         }
-        self.transition_as(
-            &authority,
-            json!({"type":"settle","charge":charge,"route":pin.route}),
-            "provider settle",
-            "gateway source-quoted provider settlement",
-            vec![],
-        )?;
+        // A continuity rejection before signing (the Store moved between
+        // the prepare and the Host's continuity check, e.g. another writer on
+        // a shared Store) sent nothing: retire that exact attempt on its
+        // verified marker and prepare afresh, at most PROVIDER_SETTLE_FRESH_PREPARES
+        // times. Anything else keeps its pending attempt for exact retry.
+        let mut fresh = 0;
+        loop {
+            match self.transition_as(
+                &authority,
+                json!({"type":"settle","charge":charge,"route":pin.route}),
+                "provider settle",
+                "gateway source-quoted provider settlement",
+                vec![],
+            ) {
+                Ok(()) => break,
+                Err(error)
+                    if fresh < PROVIDER_SETTLE_FRESH_PREPARES
+                        && self.retire_reaped_settle_rejection(&error)? =>
+                {
+                    fresh += 1;
+                    eprintln!("provider settle: continuity rejected before signing ({error}); fresh prepare {fresh}");
+                    thread::sleep(Duration::from_millis(250 << fresh));
+                    let signed = self.query_as(&authority)?;
+                    if !provider_reserve_coordinates(&signed, &hold) {
+                        return Err("metered provider signed hold changed before settlement".into());
+                    }
+                    provider_signed_route(&signed, &pin)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let after = self.query_as(&authority)?;
         match after.pointer("/grain/status").and_then(Value::as_str) {
             Some("1") => self.transition_as(
