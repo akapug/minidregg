@@ -159,6 +159,9 @@ case "$ORACLE_IMPORT_PROFILE" in standard-v1|operator-appliance-v1) ;; *) fail '
 controller_create_verb=controller-create
 if [[ $mode == recover-foreground ]]; then
   world_recover_foreground "$run" "$repo"
+  # A recovered definite refusal concludes this retained failed journey. It
+  # never creates a grant or starts an application; cleanup preserves the Store.
+  if [[ ${foreground_settlement_only:-0} == 1 ]]; then exit 0; fi
 elif [[ $mode == continue-checkpoint ]]; then
   world_continue_checkpoint "$run" "$repo"
 elif [[ $mode == continue-session ]]; then
