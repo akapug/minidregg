@@ -208,12 +208,14 @@ fi
 if install_app "Hacker Slides"; then
   if open_grain "$G"; then
     www=$(sed -E 's#^(https?://[^./]+)\.#\1-www.#' <<<"$ORIGIN")
-    # UNVERIFIED against the package (README, owed): the save and publish endpoints. Verified by GET on the -www origin.
-    web "$G" PUT /slides.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md" >/dev/null
-    web "$G" POST /publish -d '' >/dev/null
-    c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/")
-    if [ "$c" = 200 ] && grep -qi 'four slides\|Mini, in' "$T/deck"; then DECK_URL=$www; ok_ "Hacker Slides deck published at $www"
-    else skip_ "Hacker Slides installed as $G; the deck is not published (-www answered $c); the welcome page will not claim it"; fi
+    # The editor's PUT saves /var/slides.md and republishes it as /var/www/slides.md.
+    # There is no separate publish endpoint; the static deck loads this public markdown.
+    c=$(web "$G" PUT /slides.md -H 'Content-Type: text/markdown' --data-binary @"$D/apps/slides/slides.md")
+    if [ "$c" = 200 ]; then
+      c=$(curl -sS --max-time 120 -o "$T/deck" -w '%{http_code}' "$www/slides.md")
+      if [ "$c" = 200 ] && grep -Fq '# Mini, in four slides' "$T/deck"; then DECK_URL=$www; ok_ "Hacker Slides deck saved and published at $www"
+      else fail_ "Hacker Slides public slides.md: HTTP $c"; fi
+    else fail_ "Hacker Slides save: HTTP $c"; fi
   else fail_ "Hacker Slides: could not open $G"; fi
 fi
 # a deck already published by an earlier run

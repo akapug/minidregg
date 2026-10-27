@@ -225,8 +225,11 @@ if [ "$mode" = --box ]; then
         www=$(curl -sS --max-time 120 --unix-socket "$app_a_dir/www.sock" -H 'Host: grain.test' -o "$W/www-index.body" -D - http://grain.test/ 2>&1 | head -1 | tr -d '\r')
         post=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -X POST -o /dev/null -w '%{http_code}' http://grain.test/ 2>&1)
         esc=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -o /dev/null -w '%{http_code}' --path-as-is 'http://grain.test/../g2/resident.json' 2>&1)
-      else www="start-a: $(tail -1 "$W/www-world.err")"; fi
+        dir=$app_a_dir/routes/owner-web body=$W/slides-write.body out=$W
+        result=$(write_HackerSlides 2>&1 | tail -1)
+      else www="start-a: $(tail -1 "$W/www-world.err")"; result="0 $www"; fi
       row "the publishing socket serves Hacker Slides' /var/www (GET / 200, POST 405, an escape 404)" "$([ "${www:-}" = 'HTTP/1.1 200 OK' ] && [ "${post:-}" = 405 ] && [ "${esc:-}" = 404 ] && echo 1 || echo 0)" "${www:-none} post=${post:-} escape=${esc:-} $(head -c 60 "$W/www-index.body" 2>/dev/null | tr -d '\n')"
+      row "Hacker Slides: PUT saves and publishes slides.md, read back anonymously" "$([ "${result%% *}" = 1 ] && echo 1 || echo 0)" "${result#* }"
       # A third market app, Etherpad (saveIdentityCaps): create, install, share, start, enrol, GET.
       if jenv $J birth-c install-c share-c start-c enroll-c get-c >"$W/etherpad-world.out" 2>"$W/etherpad-world.err"; then ep=1; else ep=0; fi
       row "Etherpad on the same world: create, install, share, start, enrol, its pad /p/main 200" "$ep" "$(tail -1 "$W/etherpad-world.err" | cut -c1-160)"
