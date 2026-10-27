@@ -7,7 +7,10 @@ A cold open restores the newest checkpoint and fast-forwards the entries after i
 replay is `store audit`. These are the statements the v4 change proves, entered before any proof
 (the statements auditor's fifth pass folded in). The v4 pieces that do not exist yet are the
 parameters of each statement: `open4` (the v4 checkpoint open), `step` (one append on a session),
-`bodyOf` (the ONE body every sealer seals), `ff` (the fast-forward open) and `audit`.
+`bodyOf` (the ONE body every sealer seals), `ff` (the fast-forward open) and `audit`. They are the
+fields of ONE `Impl`, and every law is a field of ONE `Spec impl` over those shared fields: an
+instance that satisfies one law by a degenerate field (an `open4` that never decodes) fails
+`sealOpens` and `inhabited`.
 
 `Derived` is what the v3 open rebuilt from every entry below the checkpoint and the v4 body
 carries instead: the six indexes, the journal and history the snapshot's model reads, and the
@@ -120,85 +123,52 @@ structure View.Honest (image : Image) (view : View rootBytes) : Prop where
   snapshot : replaySnapshot rootBytes image = some view.snapshot
   derived : Derived.Honest rootBytes image view.derived
 
-/-! ## 1. The MAC gate -/
+/-! ## The implementation's v4 pieces, shared by every law -/
 
-/-- The v4 open accepts exactly a decoded frame under this key, this semantics, the recomputed
-world root and the MAC over an injective encoding of everything the body carries (no field
-outside the MAC). -/
-def MacGate (decode4 : List UInt8 → Option Sealed4)
-    (macInput : Body4 × Digest → List UInt8) (macInputDecode : List UInt8 → Option (Body4 × Digest))
-    (macDomain : List UInt8) (open4 : MacKey → List UInt8 → Except OpenRefusal Body4) : Prop :=
-  (∀ carried, macInputDecode (macInput carried) = some carried) ∧
-  ∀ key bytes body, open4 key bytes = .ok body ↔
-    ∃ sealed, decode4 bytes = some sealed ∧ sealed.body = body ∧ body.body.keyId = key.id ∧
-      body.semantics = semanticsId ∧ sealed.root = worldRoot rootBytes body.body ∧
-      sealed.mac = kmac256Bytes key.bytes macDomain (macInput (body, sealed.root))
+/-- A fast-forward open: from the checkpoint's bytes and the stored entry AT its height (the
+anchor; it binds the body when the suffix is empty), the stored entries after it and the Store's
+head height. It receives nothing below the anchor: that it reads no prefix is its type. -/
+abbrev FastForward (α : Type) := MacKey → Seed → Option (List UInt8 × Entry) → List Entry → Nat →
+  Except String α
 
-/-- Teeth, by name: another fold's body under this key is `foreignSemantics`; a wrong MAC over
-an otherwise acceptable frame is `badMac`. -/
-def MacGateRefusals (decode4 : List UInt8 → Option Sealed4)
-    (macInput : Body4 × Digest → List UInt8) (macDomain : List UInt8)
-    (open4 : MacKey → List UInt8 → Except OpenRefusal Body4) : Prop :=
-  ∀ key bytes sealed, decode4 bytes = some sealed → sealed.body.body.keyId = key.id →
-    (sealed.body.semantics ≠ semanticsId → open4 key bytes = .error .foreignSemantics) ∧
-    (sealed.body.semantics = semanticsId → sealed.root = worldRoot rootBytes sealed.body.body →
-      sealed.mac ≠ kmac256Bytes key.bytes macDomain (macInput (sealed.body, sealed.root)) →
-      open4 key bytes = .error .badMac)
+structure Impl where
+  /-- The checkpoint-relative `Loaded` (the reshape: seed, base height, base `Derived` and state,
+  the suffix, the head's `Derived` as base extended by the suffix, the engine over them). -/
+  Loaded4 : Type
+  /-- The light session's state. -/
+  Light : Type
+  /-- The `LoadedView` projection: what a session serves from. -/
+  view : Loaded4 → View rootBytes
+  lightView : Light → View rootBytes
+  /-- `representsCheck` on the reshaped `Loaded`: decided from `Derived` and the snapshot, no log. -/
+  representsCheck4 : Loaded4 → Bool
+  decode4 : List UInt8 → Option Sealed4
+  macInput : Body4 × Digest → List UInt8
+  macInputDecode : List UInt8 → Option (Body4 × Digest)
+  macDomain : List UInt8
+  open4 : MacKey → List UInt8 → Except OpenRefusal Body4
+  seal4 : MacKey → Body4 → List UInt8
+  /-- The ONE body every sealer seals (`storeCheckpoint`, the light session, `checkpointDifferential`,
+  the head seal, the clean-shutdown seal), from the session's view. -/
+  bodyOf : MacKey → View rootBytes → Body4
+  genesis : Seed → Loaded4
+  /-- One accepted append on a full session (chain, indexes, journal, World: `ofIntent_run`'s step). -/
+  step : Loaded4 → IntentRecord → Option Loaded4
+  /-- One accepted append on the light session (the same advance, its own representation). -/
+  lightStep : Light → IntentRecord → Option Light
+  /-- A full session handing over to the light one. -/
+  toLight : Loaded4 → Light
+  ff : FastForward Loaded4
+  audit : MacKey → Seed → List IntentRecord → List (Nat × List UInt8) → Except (Nat × String) Unit
 
-/-! ## 2. The suffix extends the snapshot
+variable {rootBytes} in
+/-- A session of either kind. -/
+abbrev Session (impl : Impl rootBytes) := impl.Loaded4 ⊕ impl.Light
 
-`ff key seed checkpoint suffix head`: `checkpoint` is the stored checkpoint's bytes and the
-stored entry AT its height (the anchor; it binds the body to the log when the suffix is empty);
-`suffix` the stored entries after it; `head` the Store's head height. The open receives nothing
-below the anchor: that it reads no prefix is its type. -/
-abbrev FastForward := MacKey → Seed → Option (List UInt8 × Entry) → List Entry → Nat →
-  Except String (View rootBytes)
-
-/-- Every acceptance is authenticated over exactly what it read: the checkpoint opens, the anchor's
-tag is this key's trailer at the body's height carrying its chain and world root, the suffix's
-tags verify chained from the body's chain, every suffix record decodes, and the suffix reaches the
-Store's head. -/
-def SuffixGate (open4 : MacKey → List UInt8 → Except OpenRefusal Body4) (ff : FastForward rootBytes) :
-    Prop :=
-  ∀ key seed bytes anchor suffix head view,
-    ff key seed (some (bytes, anchor)) suffix head = .ok view →
-    ∃ body carried, open4 key bytes = .ok body ∧
-      anchor.tag = DurableHistory.trailer key body.body.height carried ∧
-      carried.chain = body.body.chain ∧ carried.root = worldRoot rootBytes body.body ∧
-      verifyTags key body.body.height
-        (chainPrefixesStored body.body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
-      (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
-      body.body.height + suffix.length = head ∧ view.height = head
-
-/-- Disclosed, not a gap: a log cut short at its tail, with the head lowered to match, is opened as
-the genesis replay opens it (a rollback of the tail is outside what the MAC chain binds; neither
-open is worse than the other). -/
-def TailCutAsReplay (ff : FastForward rootBytes) : Prop :=
-  ∀ key seed checkpoint suffix head view k, k ≤ suffix.length →
-    ff key seed checkpoint suffix head = .ok view →
-    ∃ view', ff key seed checkpoint (suffix.take k) (head - (suffix.length - k)) = .ok view'
-
-/-! ## 3. Exactness over snapshot plus suffix, against a Store this Host wrote -/
-
-/-- On stored entries whose records decode to `pre ++ suf` and whose tags all verify from the
-seed's chain, a checkpoint honest for `pre` (or none, `pre = []`) fast-forwards to the replay's
-value at `pre ++ suf`. -/
-def Exact (open4 : MacKey → List UInt8 → Except OpenRefusal Body4) (ff : FastForward rootBytes) : Prop :=
-  ∀ key seed (entries : List Entry) (pre suf : List IntentRecord) checkpoint snapshot,
-    List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record)
-      entries (pre ++ suf) →
-    verifyTags key 0 (chainPrefixesStored (logStart seed) (entries.map (·.record)))
-      (entries.map (·.tag)) = .ok () →
-    replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
-    (match checkpoint with
-      | none => pre = []
-      | some (bytes, anchor) => ∃ body, open4 key bytes = .ok body ∧
-          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧
-          entries[pre.length - 1]? = some anchor ∧ pre ≠ []) →
-    ∃ view, ff key seed checkpoint (entries.drop pre.length) entries.length = .ok view ∧
-      View.Honest rootBytes logStart ⟨seed, pre ++ suf⟩ view ∧ view.snapshot = snapshot
-
-/-! ## 4. The keystone: every checkpoint of a Store this Host wrote is the replay's -/
+variable {rootBytes} in
+def Impl.sessionView (impl : Impl rootBytes) : Session impl → View rootBytes
+  | .inl loaded => impl.view loaded
+  | .inr light => impl.lightView light
 
 /-- A Store as the Host leaves it: the seed, the accepted records, the sealed checkpoints. -/
 structure Written where
@@ -208,91 +178,165 @@ structure Written where
 
 def Written.image (store : Written) : Image := ⟨store.seed, store.records⟩
 
-/-- The Stores this Host writes, with the session that wrote them: genesis; an append the Host
-accepted (`step`, the session's per-append advance of chain, indexes, journal and World:
-`ofIntent_run`'s step on the light session too); a seal at ANY height through the one `bodyOf`
-(the due cadence, the on-demand head seal, the clean-shutdown seal: item 6); a reopen through
-`ff` of THIS Store's own entries (records decoding to its records, tags verifying from the seed's
-chain) from genesis or from one of its own sealed checkpoints. Its inhabitant is every Store a
-Host run produced. -/
-inductive Wrote (key : MacKey) (genesisView : Seed → View rootBytes)
-    (step : View rootBytes → IntentRecord → Option (View rootBytes))
-    (bodyOf : MacKey → View rootBytes → Body4) (seal4 : MacKey → Body4 → List UInt8)
-    (ff : FastForward rootBytes) : Written → View rootBytes → Prop
-  | genesis (seed : Seed) : Wrote key genesisView step bodyOf seal4 ff ⟨seed, [], []⟩ (genesisView seed)
-  | append {store view view'} (record : IntentRecord) :
-      Wrote key genesisView step bodyOf seal4 ff store view → step view record = some view' →
-      Wrote key genesisView step bodyOf seal4 ff { store with records := store.records ++ [record] } view'
-  | seal {store view} :
-      Wrote key genesisView step bodyOf seal4 ff store view →
-      Wrote key genesisView step bodyOf seal4 ff
-        { store with checkpoints := (store.records.length, bodyOf key view) :: store.checkpoints } view
-  | reopenGenesis {store view view'} (entries : List Entry) :
-      Wrote key genesisView step bodyOf seal4 ff store view →
-      List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record)
-        entries store.records →
-      verifyTags key 0 (chainPrefixesStored (logStart store.seed) (entries.map (·.record)))
-        (entries.map (·.tag)) = .ok () →
-      ff key store.seed none entries entries.length = .ok view' →
-      Wrote key genesisView step bodyOf seal4 ff store view'
-  | reopenCheckpoint {store view view'} (entries : List Entry) (height : Nat) (body : Body4)
-      (anchor : Entry) :
-      Wrote key genesisView step bodyOf seal4 ff store view →
-      List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record)
-        entries store.records →
-      verifyTags key 0 (chainPrefixesStored (logStart store.seed) (entries.map (·.record)))
-        (entries.map (·.tag)) = .ok () →
-      (height, body) ∈ store.checkpoints → height ≠ 0 → entries[height - 1]? = some anchor →
-      ff key store.seed (some (seal4 key body, anchor)) (entries.drop height) entries.length = .ok view' →
-      Wrote key genesisView step bodyOf seal4 ff store view'
+/-- The stored entries of a Store's records, as an open reads them: each record decodes from its
+entry and every tag verifies chained from the seed's chain. -/
+def OwnEntries (key : MacKey) (seed : Seed) (entries : List Entry) (records : List IntentRecord) : Prop :=
+  List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record) entries records ∧
+  verifyTags key 0 (chainPrefixesStored (logStart seed) (entries.map (·.record)))
+    (entries.map (·.tag)) = .ok ()
 
-/-- The keystone: in every Store this Host wrote, the session is the replay's value at the head
-and every checkpoint is the replay's value at its height, World included (the v4 `world`, hence
-its system store, IS the fold's World: every row, not `representsCheck`'s membership checks). -/
-def Keystone (key : MacKey) (genesisView : Seed → View rootBytes)
-    (step : View rootBytes → IntentRecord → Option (View rootBytes))
-    (bodyOf : MacKey → View rootBytes → Body4) (seal4 : MacKey → Body4 → List UInt8)
-    (ff : FastForward rootBytes) : Prop :=
-  ∀ store view, Wrote rootBytes logStart key genesisView step bodyOf seal4 ff store view →
-    View.Honest rootBytes logStart store.image view ∧
+/-- The backup rule: open from the newest checkpoint at a positive height at or below the head,
+else from genesis. -/
+def newestAtOrBelow (checkpoints : List (Nat × Body4)) (head : Nat) : Option (Nat × Body4) :=
+  (checkpoints.filter fun checkpoint => 0 < checkpoint.1 ∧ checkpoint.1 ≤ head).foldl
+    (fun best checkpoint => match best with
+      | some held => if held.1 < checkpoint.1 then some checkpoint else some held
+      | none => some checkpoint) none
+
+variable {rootBytes} in
+/-- What `ff` is handed for a Store cut at `head` under the backup rule. -/
+def openInputs (impl : Impl rootBytes) (key : MacKey) (checkpoints : List (Nat × Body4))
+    (entries : List Entry) (head : Nat) : Option (List UInt8 × Entry) × List Entry :=
+  match newestAtOrBelow checkpoints head with
+  | none => (none, entries.take head)
+  | some (height, body) =>
+      match entries[height - 1]? with
+      | some anchor => (some (impl.seal4 key body, anchor), (entries.take head).drop height)
+      | none => (none, entries.take head)
+
+/-- The Stores this Host writes, with the session that wrote them: genesis; an append a full
+session accepted (`step`); an append the light session accepted (`lightStep`); a hand-over to the
+light session; a seal at ANY height through the one `bodyOf` of the session's view (the due
+cadence, the on-demand head seal, the clean-shutdown seal: item 6); a reopen through `ff` of THIS
+Store's own entries from genesis or from one of its own sealed checkpoints. Its inhabitant is
+every Store a Host run produced (`Spec.inhabited`). -/
+inductive Wrote (impl : Impl rootBytes) (key : MacKey) : Written → Session impl → Prop
+  | genesis (seed : Seed) : Wrote impl key ⟨seed, [], []⟩ (.inl (impl.genesis seed))
+  | append {store loaded loaded'} (record : IntentRecord) :
+      Wrote impl key store (.inl loaded) → impl.step loaded record = some loaded' →
+      Wrote impl key { store with records := store.records ++ [record] } (.inl loaded')
+  | lightAppend {store light light'} (record : IntentRecord) :
+      Wrote impl key store (.inr light) → impl.lightStep light record = some light' →
+      Wrote impl key { store with records := store.records ++ [record] } (.inr light')
+  | goLight {store loaded} :
+      Wrote impl key store (.inl loaded) → Wrote impl key store (.inr (impl.toLight loaded))
+  | seal {store session} :
+      Wrote impl key store session →
+      Wrote impl key
+        { store with checkpoints :=
+            (store.records.length, impl.bodyOf key (impl.sessionView session)) :: store.checkpoints }
+        session
+  | reopenGenesis {store session loaded'} (entries : List Entry) :
+      Wrote impl key store session → OwnEntries logStart key store.seed entries store.records →
+      impl.ff key store.seed none entries entries.length = .ok loaded' →
+      Wrote impl key store (.inl loaded')
+  | reopenCheckpoint {store session loaded'} (entries : List Entry) (height : Nat) (body : Body4)
+      (anchor : Entry) :
+      Wrote impl key store session → OwnEntries logStart key store.seed entries store.records →
+      (height, body) ∈ store.checkpoints → height ≠ 0 → entries[height - 1]? = some anchor →
+      impl.ff key store.seed (some (impl.seal4 key body, anchor)) (entries.drop height) entries.length
+        = .ok loaded' →
+      Wrote impl key store (.inl loaded')
+
+/-! ## The laws -/
+
+structure Spec (impl : Impl rootBytes) : Prop where
+  -- ### 1. The MAC gate
+  /-- The MAC input is an injective encoding of everything the body carries (no field outside it). -/
+  macInjective : ∀ carried, impl.macInputDecode (impl.macInput carried) = some carried
+  /-- Accept IFF decode, this key, this semantics, the recomputed root, the MAC. -/
+  macGate : ∀ key bytes body, impl.open4 key bytes = .ok body ↔
+    ∃ sealed, impl.decode4 bytes = some sealed ∧ sealed.body = body ∧ body.body.keyId = key.id ∧
+      body.semantics = semanticsId ∧ sealed.root = worldRoot rootBytes body.body ∧
+      sealed.mac = kmac256Bytes key.bytes impl.macDomain (impl.macInput (body, sealed.root))
+  /-- Teeth by name: another fold's body under this key; a wrong MAC. -/
+  macRefusals : ∀ key bytes sealed, impl.decode4 bytes = some sealed → sealed.body.body.keyId = key.id →
+    (sealed.body.semantics ≠ semanticsId → impl.open4 key bytes = .error .foreignSemantics) ∧
+    (sealed.body.semantics = semanticsId → sealed.root = worldRoot rootBytes sealed.body.body →
+      sealed.mac ≠ kmac256Bytes key.bytes impl.macDomain (impl.macInput (sealed.body, sealed.root)) →
+      impl.open4 key bytes = .error .badMac)
+  /-- What is sealed opens, as itself: the gate is not vacuous. -/
+  sealOpens : ∀ key view, impl.open4 key (impl.seal4 key (impl.bodyOf key view)) = .ok (impl.bodyOf key view)
+  -- ### 2. The suffix gate
+  /-- Every acceptance is authenticated over exactly what it read. -/
+  suffixGate : ∀ key seed bytes anchor suffix head loaded,
+    impl.ff key seed (some (bytes, anchor)) suffix head = .ok loaded →
+    ∃ body carried, impl.open4 key bytes = .ok body ∧
+      anchor.tag = DurableHistory.trailer key body.body.height carried ∧
+      carried.chain = body.body.chain ∧ carried.root = worldRoot rootBytes body.body ∧
+      verifyTags key body.body.height
+        (chainPrefixesStored body.body.chain (suffix.map (·.record))) (suffix.map (·.tag)) = .ok () ∧
+      (∀ entry ∈ suffix, (recordFrame.decode entry.record).isSome) ∧
+      body.body.height + suffix.length = head ∧ (impl.view loaded).height = head
+  -- ### 3. Exactness, and the reshaped `Loaded`
+  /-- On a Store's own entries, a checkpoint honest for `pre` (or none, `pre = []`) fast-forwards
+  to the replay's value at `pre ++ suf`. -/
+  exact : ∀ key seed (entries : List Entry) (pre suf : List IntentRecord) checkpoint snapshot,
+    OwnEntries logStart key seed entries (pre ++ suf) →
+    replaySnapshot rootBytes ⟨seed, pre ++ suf⟩ = some snapshot →
+    (match checkpoint with
+      | none => pre = []
+      | some (bytes, anchor) => ∃ body, impl.open4 key bytes = .ok body ∧
+          Body4.Honest rootBytes logStart semanticsId ⟨seed, pre⟩ body ∧
+          entries[pre.length - 1]? = some anchor ∧ pre ≠ []) →
+    ∃ loaded, impl.ff key seed checkpoint (entries.drop pre.length) entries.length = .ok loaded ∧
+      View.Honest rootBytes logStart ⟨seed, pre ++ suf⟩ (impl.view loaded) ∧
+      (impl.view loaded).snapshot = snapshot
+  /-- `representsCheck` from `Derived`: the reshaped check decides the snapshot's representation
+  by the carried World, with no log. -/
+  representsFromDerived : ∀ loaded, impl.representsCheck4 loaded = true ↔
+    ∃ world, (impl.view loaded).derived.world = some world ∧
+      HostRefinesWorld.SnapRepresents DeployedBridge.bridge (impl.view loaded).snapshot
+        (impl.view loaded).height world
+  -- ### 4. The keystone
+  /-- In every Store this Host wrote, the session (full or light) is the replay's value at the
+  head and every checkpoint is the replay's value at its height, World included (whole-World
+  equality: every system row). -/
+  keystone : ∀ key store session, Wrote rootBytes logStart impl key store session →
+    View.Honest rootBytes logStart store.image (impl.sessionView session) ∧
     ∀ height body, (height, body) ∈ store.checkpoints →
       Body4.Honest rootBytes logStart semanticsId ⟨store.seed, store.records.take height⟩ body
-
-/-! ## 5. `store audit` is the genesis replay, and refuses by height -/
-
-/-- `audit key seed entries checkpoints`: the genesis replay over every entry, compared with every
-stored checkpoint. Acceptance means every checkpoint is the replay's value at its height. -/
-def AuditSound (open4 : MacKey → List UInt8 → Except OpenRefusal Body4)
-    (audit : MacKey → Seed → List IntentRecord → List (Nat × List UInt8) → Except (Nat × String) Unit) :
-    Prop :=
-  ∀ key seed records checkpoints, audit key seed records checkpoints = .ok () →
+  /-- Inhabitation: a Store reached by an append, a seal at a positive height and a reopen from
+  that checkpoint. -/
+  inhabited : ∃ (key : MacKey) (seed : Seed) (record : IntentRecord) (loaded1 : impl.Loaded4)
+      (entries : List Entry) (anchor : Entry) (loaded2 : impl.Loaded4),
+    impl.step (impl.genesis seed) record = some loaded1 ∧
+    OwnEntries logStart key seed entries [record] ∧ entries[0]? = some anchor ∧
+    impl.ff key seed (some (impl.seal4 key (impl.bodyOf key (impl.view loaded1)), anchor)) [] 1
+      = .ok loaded2
+  -- ### 2'. Every cut height, under the backup rule
+  /-- A Store this Host wrote, cut at ANY height (below the newest checkpoint included), opens by
+  the backup rule to the replay's value at the cut: a tail rollback opens as the genesis replay
+  opens it; detecting one rests on the signer's `headTag`, not on this open. -/
+  cutHonest : ∀ key store session (entries : List Entry) head,
+    Wrote rootBytes logStart impl key store session →
+    OwnEntries logStart key store.seed entries store.records → head ≤ entries.length →
+    ∃ loaded,
+      impl.ff key store.seed (openInputs impl key store.checkpoints entries head).1
+        (openInputs impl key store.checkpoints entries head).2 head = .ok loaded ∧
+      View.Honest rootBytes logStart ⟨store.seed, store.records.take head⟩ (impl.view loaded)
+  -- ### 5. `store audit`
+  auditSound : ∀ key seed records checkpoints, impl.audit key seed records checkpoints = .ok () →
     ∀ height bytes, (height, bytes) ∈ checkpoints →
-      ∃ body, open4 key bytes = .ok body ∧
+      ∃ body, impl.open4 key bytes = .ok body ∧
         Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body
-
-/-- The refusal pole: a checkpoint that is not the replay's value at its height (a fold
-divergence included) makes the audit refuse, naming a height whose checkpoint is not. -/
-def AuditRefuses (open4 : MacKey → List UInt8 → Except OpenRefusal Body4)
-    (audit : MacKey → Seed → List IntentRecord → List (Nat × List UInt8) → Except (Nat × String) Unit) :
-    Prop :=
-  ∀ key seed records checkpoints,
-    (∃ height bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, open4 key bytes = .ok body →
+  /-- A dishonest checkpoint (a fold divergence included: caught here, never at open) makes the
+  audit refuse, naming a height whose checkpoint is dishonest. -/
+  auditRefuses : ∀ key seed records checkpoints,
+    (∃ height bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, impl.open4 key bytes = .ok body →
       ¬ Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body) →
-    ∃ height message, audit key seed records checkpoints = .error (height, message) ∧
-      ∃ bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, open4 key bytes = .ok body →
+    ∃ height message, impl.audit key seed records checkpoints = .error (height, message) ∧
+      ∃ bytes, (height, bytes) ∈ checkpoints ∧ ∀ body, impl.open4 key bytes = .ok body →
         ¬ Body4.Honest rootBytes logStart semanticsId ⟨seed, records.take height⟩ body
-
-/-! ## 6. A head seal makes a restored Store fast-forward zero records -/
-
-/-- After a seal at the head (the on-demand verb before a template is saved, or the clean
-shutdown), opening the Store reads an empty suffix and serves the session it sealed. -/
-def HeadSealZero (key : MacKey) (bodyOf : MacKey → View rootBytes → Body4)
-    (seal4 : MacKey → Body4 → List UInt8) (ff : FastForward rootBytes) : Prop :=
-  ∀ seed (entries : List Entry) (records : List IntentRecord) (view : View rootBytes) anchor,
+  -- ### 6. A head seal fast-forwards zero records
+  headSealZero : ∀ key seed (entries : List Entry) (records : List IntentRecord) (view : View rootBytes)
+      anchor,
     List.Forall₂ (fun entry record => recordFrame.decode entry.record = some record) entries records →
     View.Honest rootBytes logStart ⟨seed, records⟩ view → records ≠ [] →
     entries.getLast? = some anchor →
-    ∃ view', ff key seed (some (seal4 key (bodyOf key view), anchor)) [] entries.length = .ok view' ∧
-      view'.height = view.height ∧ view'.chain = view.chain ∧ view'.derived = view.derived
+    ∃ loaded, impl.ff key seed (some (impl.seal4 key (impl.bodyOf key view), anchor)) [] entries.length
+        = .ok loaded ∧
+      (impl.view loaded).height = view.height ∧ (impl.view loaded).chain = view.chain ∧
+      (impl.view loaded).derived = view.derived
 
 end Minidregg.Compiler.DurableFastForwardSpec
