@@ -64,6 +64,12 @@ impl Paths {
 struct DoorConfig {
     funding: u128,
     free_cap: usize,
+    /// Of `free_cap`, the seats only an invite code can take: an uncoded free enrolment is
+    /// admitted only while the free accounts made are fewer than `free_cap - invite_reserve`.
+    /// 0 (the default) is the door without invite codes.
+    invite_reserve: usize,
+    /// The root-owned codes file (under the processor's root prefix); required when `invite_reserve > 0`.
+    invite_codes: Option<PathBuf>,
     daily_cap: usize,
     per_run: usize,
     sponsor_floor: u128,
@@ -102,7 +108,7 @@ impl DoorConfig {
     fn load(path: &Path) -> Result<Self, String> {
         let v: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?)
             .map_err(|e| format!("door config: {e}"))?;
-        let known = ["version", "funding", "freeCap", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay"];
+        let known = ["version", "funding", "freeCap", "inviteReserve", "inviteCodes", "dailyCap", "perRun", "sponsorFloor", "linkTtlHours", "loginHost", "pay"];
         if let Some(k) = v.as_object().ok_or("door config is not an object")?.keys().find(|k| !known.contains(&k.as_str())) {
             return Err(format!("door config has an unknown key {k}"));
         }
@@ -137,9 +143,24 @@ impl DoorConfig {
         if login_host.is_empty() || !login_host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
             return Err("loginHost is a host name".into());
         }
+        let free_cap = nat("freeCap", 50)? as usize;
+        let invite_reserve = nat("inviteReserve", 0)? as usize;
+        if invite_reserve > free_cap {
+            return Err(format!("inviteReserve {invite_reserve} exceeds freeCap {free_cap}"));
+        }
+        let invite_codes = match &v["inviteCodes"] {
+            Value::Null => None,
+            Value::String(p) if p.starts_with('/') && !p.contains("..") => Some(PathBuf::from(p)),
+            _ => return Err("inviteCodes is an absolute path".into()),
+        };
+        if invite_reserve > 0 && invite_codes.is_none() {
+            return Err("inviteReserve above 0 needs inviteCodes (the codes file)".into());
+        }
         Ok(DoorConfig {
             funding: big("funding", 1000)?,
-            free_cap: nat("freeCap", 50)? as usize,
+            free_cap,
+            invite_reserve,
+            invite_codes,
             daily_cap: nat("dailyCap", 20)? as usize,
             per_run: nat("perRun", 4)?.max(1) as usize,
             sponsor_floor: big("sponsorFloor", 20_000)?,
@@ -148,6 +169,69 @@ impl DoorConfig {
             pay,
         })
     }
+}
+
+/// One line of the invite codes file (`inviteCodes`, root-owned, mode 0600). Comments (`#`) and
+/// blank lines are kept as they are. A code line is `SERIAL CODE` (unspent) or
+/// `SERIAL CODE used NAME REQUEST-ID AT` (struck): SERIAL is a decimal of 1 or more, unique; CODE
+/// is 8 to 64 of A-Z a-z 0-9 -, unique. The struck line names the request that holds the code, so
+/// a retry by the same request finds its own strike.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CodeLine {
+    Other(String),
+    Code { serial: u32, code: String, used: Option<String> },
+}
+
+fn parse_codes(text: &str) -> Result<Vec<CodeLine>, String> {
+    let mut out: Vec<CodeLine> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            out.push(CodeLine::Other(line.to_owned()));
+            continue;
+        }
+        let mut w = t.split_whitespace();
+        let (Some(serial), Some(code)) = (w.next(), w.next()) else { return Err(format!("line {}: want SERIAL CODE", n + 1)) };
+        let serial: u32 = serial.parse().ok().filter(|s| *s >= 1).ok_or(format!("line {}: the serial is a decimal of 1 or more", n + 1))?;
+        if !door::is_invite_code(code) {
+            return Err(format!("line {}: the code is 8 to 64 of A-Z a-z 0-9 -", n + 1));
+        }
+        let rest: Vec<&str> = w.collect();
+        let used = match rest.as_slice() {
+            [] => None,
+            ["used", name, request, at] if door::is_door_name(name) && door::is_request_id(request) && at.bytes().all(|b| b.is_ascii_digit()) => Some(format!("{name} {request} {at}")),
+            _ => return Err(format!("line {}: after the code, nothing or `used NAME REQUEST-ID AT`", n + 1)),
+        };
+        if out.iter().any(|l| matches!(l, CodeLine::Code { serial: s, code: c, .. } if *s == serial || c == code)) {
+            return Err(format!("line {}: a serial or code is repeated", n + 1));
+        }
+        out.push(CodeLine::Code { serial, code: code.to_owned(), used });
+    }
+    Ok(out)
+}
+
+fn render_codes(lines: &[CodeLine]) -> String {
+    let mut out = String::new();
+    for l in lines {
+        match l {
+            CodeLine::Other(t) => out.push_str(t),
+            CodeLine::Code { serial, code, used: None } => out.push_str(&format!("{serial} {code}")),
+            CodeLine::Code { serial, code, used: Some(u) } => out.push_str(&format!("{serial} {code} used {u}")),
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// What the codes file says of one code for one request.
+#[derive(Debug, PartialEq, Eq)]
+enum InviteState {
+    Unknown,
+    /// Struck by another request.
+    Spent,
+    /// Struck by this very request (a retry after a crash): its own reservation.
+    Mine(u32),
+    Unspent(u32),
 }
 
 /// One finished command.
@@ -453,6 +537,11 @@ impl<O: BoxOps> Processor<O> {
     }
 
     fn refuse(&mut self, r: &mut Value, why: &str) -> Result<(), String> {
+        if !r["inviteSerial"].is_null() && r["phase"] != "enrolled" {
+            // Refused after the code was struck, never enrolled: the code goes back to the operator's pool.
+            self.release_invite(r["id"].as_str().unwrap_or(""))?;
+            r["inviteSerial"] = Value::Null;
+        }
         r["phase"] = json!("refused");
         r["detail"] = json!(why);
         self.say(format!("request {} refused: {why}", r["id"].as_str().unwrap_or("")));
@@ -520,9 +609,14 @@ impl<O: BoxOps> Processor<O> {
     }
 
     /// Why the free route is closed, if it is.
-    fn free_closed(&mut self, except: Option<&str>) -> Option<String> {
-        if self.counted(Some("free"), false, except) >= self.cfg.free_cap {
+    /// `coded`: the request holds (or is claiming) an invite code, so the reserve is open to it.
+    fn free_closed(&mut self, except: Option<&str>, coded: bool) -> Option<String> {
+        let made = self.counted(Some("free"), false, except);
+        if made >= self.cfg.free_cap {
             return Some(format!("all {} free accounts are taken", self.cfg.free_cap));
+        }
+        if !coded && made >= self.cfg.free_cap - self.cfg.invite_reserve {
+            return Some(format!("open-seats-gone: the open free accounts are taken; {} remain for people with an invite code", self.cfg.free_cap - made));
         }
         if self.counted(None, true, except) >= self.cfg.daily_cap {
             return Some(format!("today's {} accounts are taken; try tomorrow", self.cfg.daily_cap));
@@ -532,6 +626,77 @@ impl<O: BoxOps> Processor<O> {
             Ok(b) => Some(format!("sponsorBelowFloor: the sponsor's balance {b} is below the floor {} plus one account's funding {}", self.cfg.sponsor_floor, self.cfg.funding)),
             Err(e) => Some(e),
         }
+    }
+
+    // ── invite codes ───────────────────────────────────────────────────────────────────────
+
+    fn codes_path(&self) -> Result<PathBuf, String> {
+        self.cfg.invite_codes.as_ref().map(|p| self.p.at(&p.to_string_lossy())).ok_or_else(|| "this door has no inviteCodes file".to_owned())
+    }
+
+    /// The codes file, after the checks a root secret needs: a regular file (not a link), no
+    /// group or other access, and (on the real root) owned by root.
+    fn load_codes(&self) -> Result<Vec<CodeLine>, String> {
+        use std::os::unix::fs::MetadataExt;
+        let path = self.codes_path()?;
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| format!("inviteCodes {}: {e}", path.display()))?;
+        if !meta.file_type().is_file() {
+            return Err(format!("inviteCodes {} is not a regular file", path.display()));
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(format!("inviteCodes {} must be mode 0600 (it is {:o})", path.display(), meta.mode() & 0o7777));
+        }
+        if self.p.root == Path::new("/") && meta.uid() != 0 {
+            return Err(format!("inviteCodes {} must be owned by root", path.display()));
+        }
+        parse_codes(&std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?).map_err(|e| format!("inviteCodes {}: {e}", path.display()))
+    }
+
+    fn save_codes(&self, lines: &[CodeLine]) -> Result<(), String> {
+        write_atomic(&self.codes_path()?, render_codes(lines).as_bytes(), 0o600)
+    }
+
+    fn invite_state(&self, code: &str, request: &str) -> Result<InviteState, String> {
+        Ok(match self.load_codes()?.iter().find_map(|l| match l { CodeLine::Code { serial, code: c, used } if c == code => Some((*serial, used.clone())), _ => None }) {
+            None => InviteState::Unknown,
+            Some((serial, None)) => InviteState::Unspent(serial),
+            Some((serial, Some(u))) if u.split(' ').nth(1) == Some(request) => InviteState::Mine(serial),
+            Some(_) => InviteState::Spent,
+        })
+    }
+
+    /// Strike the code for this request: the file is rewritten whole and atomically (temp, fsync,
+    /// rename), BEFORE the request's first world effect, so a code never admits two people. Striking
+    /// again for the same request is a no-op.
+    fn strike_invite(&self, serial: u32, name: &str, request: &str) -> Result<(), String> {
+        let mut lines = self.load_codes()?;
+        for l in lines.iter_mut() {
+            if let CodeLine::Code { serial: s, used, .. } = l {
+                if *s == serial {
+                    match used {
+                        None => *used = Some(format!("{name} {request} {}", self.now)),
+                        Some(u) if u.split(' ').nth(1) == Some(request) => return Ok(()),
+                        Some(_) => return Err(format!("invite serial {serial} was struck by another request")),
+                    }
+                }
+            }
+        }
+        self.save_codes(&lines)
+    }
+
+    /// A request refused after it struck a code never enrolled: the code goes back.
+    fn release_invite(&self, request: &str) -> Result<(), String> {
+        let mut lines = self.load_codes()?;
+        let mut changed = false;
+        for l in lines.iter_mut() {
+            if let CodeLine::Code { used, .. } = l {
+                if used.as_ref().is_some_and(|u| u.split(' ').nth(1) == Some(request)) {
+                    *used = None;
+                    changed = true;
+                }
+            }
+        }
+        if changed { self.save_codes(&lines) } else { Ok(()) }
     }
 
     // ── intake ─────────────────────────────────────────────────────────────────────────────
@@ -560,12 +725,12 @@ impl<O: BoxOps> Processor<O> {
     fn admit(&mut self, request: Request, file: &Path) -> Result<(), String> {
         let existing = read_json(&self.request_path(request.id()));
         match request {
-            Request::Join { id, at, name, ssh_key, discord, route, research } => {
+            Request::Join { id, at, name, ssh_key, discord, route, research, invite } => {
                 if existing.is_some() {
                     self.reject_file(file, "a request with this id exists");
                     return Ok(());
                 }
-                let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research,"phase":"queued"});
+                let mut r = json!({"id":id,"at":at,"day":self.day(),"name":name,"sshKey":ssh_key,"discord":discord,"route":route.word(),"research":research,"invite":invite,"phase":"queued"});
                 std::fs::remove_file(file).map_err(|e| e.to_string())?;
                 let keys = self.roster_keys();
                 let blob = ssh_key.split(' ').nth(1).unwrap_or("").to_owned();
@@ -655,8 +820,28 @@ impl<O: BoxOps> Processor<O> {
             "queued" => {
                 if r["route"] == "free" {
                     let id = r["id"].as_str().unwrap_or("").to_owned();
-                    if let Some(why) = self.free_closed(Some(&id)) {
+                    let invite = r["invite"].as_str().map(str::to_owned);
+                    let mut serial = None;
+                    if let Some(code) = &invite {
+                        if self.cfg.invite_reserve == 0 {
+                            return self.refuse(r, "invite-unknown: this door takes no invite codes");
+                        }
+                        match self.invite_state(code, &id)? {
+                            InviteState::Unknown => return self.refuse(r, "invite-unknown: that invite code is not one this door issued"),
+                            InviteState::Spent => return self.refuse(r, "invite-spent: that invite code has already been used"),
+                            InviteState::Mine(s) | InviteState::Unspent(s) => serial = Some(s),
+                        }
+                    }
+                    // The seat check comes before the strike: a refusal for seats burns no code.
+                    if let Some(why) = self.free_closed(Some(&id), serial.is_some()) {
                         return self.refuse(r, &why);
+                    }
+                    if let Some(s) = serial {
+                        // Struck before the first world effect (the roster entry below); a crash
+                        // after this line finds the request's own strike on the retry.
+                        self.strike_invite(s, &name, &id)?;
+                        r["inviteSerial"] = json!(s);
+                        r["invite"] = Value::Null;
                     }
                 }
                 if r["sshKey"].as_str().unwrap_or("").is_empty() {
@@ -694,7 +879,7 @@ impl<O: BoxOps> Processor<O> {
             "keyed" if r["route"] == "free" => {
                 // The caps are checked again at the one step that spends the sponsor's credit.
                 let id = r["id"].as_str().unwrap_or("").to_owned();
-                if let Some(why) = self.free_closed(Some(&id)) {
+                if let Some(why) = self.free_closed(Some(&id), !r["inviteSerial"].is_null()) {
                     return self.refuse(r, &why);
                 }
                 let ran = self.ops.reenroll(&name, self.cfg.funding);
@@ -809,34 +994,45 @@ impl<O: BoxOps> Processor<O> {
         args
     }
 
+    /// One declared-open cell with one scalar, as the member's own turns. A retried tick resumes:
+    /// the cell exists, or the attempt was sealed (then `retry` sends the exact call again and
+    /// reads its decided outcome, never a second write).
+    fn write_fact(&mut self, name: &str, reference: &str, attempt: &str, lines: [String; 3]) -> Result<(), String> {
+        let ws = self.p.home(name).join("workspace");
+        let [create, invoke, submit] = lines;
+        let mut steps: Vec<String> = Vec::new();
+        if ws.join("attempts").join(attempt).exists() {
+            steps.push(format!("retry {attempt}"));
+        } else {
+            if !ws.join("refs").join(format!("{reference}.json")).exists() {
+                steps.push(create);
+            }
+            steps.push(invoke);
+            steps.push(submit);
+        }
+        for line in &steps {
+            let ran = self.ops.tenant_line(name, line);
+            if !ran.ok {
+                return Err(format!("{reference} fact ({line}): {}", ran.why()));
+            }
+        }
+        Ok(())
+    }
+
     fn enrolled(&mut self, r: &mut Value) -> Result<(), String> {
+        let name = r["name"].as_str().unwrap_or("").to_owned();
         if r["researchConsent"].is_null() {
             // The member's research-consent fact, written as the member's own turns (the tenant
             // path every enrolment step uses): `research-consent` field 1 = 1 (CC0) or 0 (none).
-            // A retried tick resumes: the cell exists, or the attempt was sealed (then `retry` sends
-            // the exact call again and reads its decided outcome, never a second write).
-            let name = r["name"].as_str().unwrap_or("").to_owned();
             let cc0 = r["research"] == true;
-            let ws = self.p.home(&name).join("workspace");
-            let [create, invoke, submit] = door::research_consent_lines(cc0);
-            let attempted = ws.join("attempts").join(door::RESEARCH_CONSENT_ATTEMPT).exists();
-            let mut steps: Vec<String> = Vec::new();
-            if attempted {
-                steps.push(format!("retry {}", door::RESEARCH_CONSENT_ATTEMPT));
-            } else {
-                if !ws.join("refs").join(format!("{}.json", door::RESEARCH_CONSENT_REF)).exists() {
-                    steps.push(create);
-                }
-                steps.push(invoke);
-                steps.push(submit);
-            }
-            for line in &steps {
-                let ran = self.ops.tenant_line(&name, line);
-                if !ran.ok {
-                    return Err(format!("research consent ({line}): {}", ran.why()));
-                }
-            }
+            self.write_fact(&name, door::RESEARCH_CONSENT_REF, door::RESEARCH_CONSENT_ATTEMPT, door::research_consent_lines(cc0))?;
             r["researchConsent"] = json!(if cc0 { "cc0" } else { "none" });
+        }
+        if let (Some(serial), true) = (r["inviteSerial"].as_u64(), r["inviteFact"].is_null()) {
+            // A member admitted with an invite code carries `invite` field 1 = the code's serial
+            // (never the code). An uncoded member has no `invite` reference.
+            self.write_fact(&name, door::INVITE_REF, door::INVITE_ATTEMPT, door::invite_lines(serial as u32))?;
+            r["inviteFact"] = json!(serial);
         }
         if r["discord"] == true && r["linkCode"].is_null() {
             let code = door::new_link_code()?;
@@ -933,12 +1129,16 @@ impl<O: BoxOps> Processor<O> {
     // ── the form's view of the door ────────────────────────────────────────────────────────
 
     fn door_state(&mut self) -> Result<(), String> {
-        let free_reason = self.free_closed(None);
+        let free_reason = self.free_closed(None, true);
+        let made = self.counted(Some("free"), false, None);
+        let open_seats = (self.cfg.free_cap - self.cfg.invite_reserve).saturating_sub(made);
+        let reserved_seats = self.cfg.free_cap.saturating_sub(made).saturating_sub(open_seats);
         let address = self.cfg.pay.as_ref().and_then(|p| read_json(&p.enrol_pin)).and_then(|v| v["enrolAddress"].as_str().map(str::to_owned));
         let paid = self.cfg.pay.is_some() && address.is_some() && self.counted(None, true, None) < self.cfg.daily_cap;
         let v = json!({"type":door::STATE_TYPE,"free":free_reason.is_none(),"freeReason":free_reason,"paid":paid,
             "enrolAddress":address,"network":self.cfg.pay.as_ref().map(|p| p.network.clone()),"at":self.now,
-            "funding":self.cfg.funding.to_string()});
+            "funding":self.cfg.funding.to_string(),
+            "inviteReserve":self.cfg.invite_reserve,"openSeats":open_seats,"reservedSeats":reserved_seats});
         self.publish("door-state.json", &v)
     }
 
@@ -1093,7 +1293,7 @@ mod tests {
         let pin = root.join("enrol-v2.json");
         std::fs::write(&pin, r#"{"enrolAddress":"Fresh1111111111111111111111111111111111111"}"#).unwrap();
         let me = std::fs::metadata(&root).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap();
-        let cfg = DoorConfig { funding: 1000, free_cap: 2, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
+        let cfg = DoorConfig { funding: 1000, free_cap: 2, invite_reserve: 0, invite_codes: None, daily_cap: 10, per_run: 4, sponsor_floor: 500, link_ttl_s: 3600,
             login_host: "demo.example".into(), pay: pay.then(|| PayConfig { enrol_pin: pin, birth_context: None, network: "devnet".into(), symbol: "DREGG".into(), rpc: "https://api.devnet.solana.com".into() }) };
         Processor { ops: Fake { p: p.clone(), me, balance: RefCell::new(3000), calls: RefCell::new(Vec::new()), fail_reenroll: RefCell::new(false) },
             p, cfg, now: 1_000_000, sponsor: None, log: Vec::new() }
@@ -1104,7 +1304,7 @@ mod tests {
     }
 
     fn join(name: &str, key: &str, route: Route, discord: bool) -> Request {
-        Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: key.into(), discord, route, research: name == "bea" }
+        Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: key.into(), discord, route, research: name == "bea", invite: None }
     }
 
     fn status(w: &Processor<Fake>, id: &str) -> Value {
@@ -1139,7 +1339,7 @@ mod tests {
         // The schema: an empty sshKey round-trips as a free join, never as a paid one.
         let bytes = r.to_json().to_string();
         assert!(matches!(Request::parse(bytes.as_bytes()).unwrap(), Request::Join { ssh_key, .. } if ssh_key.is_empty()));
-        let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid, research: false };
+        let paid = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "cy".into(), ssh_key: String::new(), discord: false, route: Route::Paid, research: false, invite: None };
         assert!(Request::parse(paid.to_json().to_string().as_bytes()).is_err());
     }
 
@@ -1310,5 +1510,141 @@ mod tests {
         std::fs::write(&p, r#"{"version":1,"pay":{"enrolPin":"/x","network":"testnet"}}"#).unwrap();
         assert!(DoorConfig::load(&p).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ── invite reserve ─────────────────────────────────────────────────────────────────────
+
+    fn invite_world(tag: &str) -> Processor<Fake> {
+        let mut w = world(tag, false);
+        w.cfg.free_cap = 50;
+        w.cfg.invite_reserve = 20;
+        w.cfg.invite_codes = Some(PathBuf::from("/etc/mini/invite-codes"));
+        w.cfg.daily_cap = 1000;
+        w.cfg.per_run = 100;
+        *w.ops.balance.borrow_mut() = 1_000_000_000;
+        let text: String = std::iter::once("# operator-issued, one use each\n".to_owned()).chain((1..=21).map(|n| format!("{n} INVITE{n:03}-abcdef\n"))).collect();
+        write_atomic(&w.codes_path().unwrap(), text.as_bytes(), 0o600).unwrap();
+        w
+    }
+
+    fn code(n: u32) -> String { format!("INVITE{n:03}-abcdef") }
+
+    /// One stranger (browser-only, free route), one tick; the request's status.
+    fn stranger(w: &mut Processor<Fake>, name: &str, invite: Option<String>) -> Value {
+        let r = Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: name.into(), ssh_key: String::new(), discord: false, route: Route::Free, research: false, invite };
+        submit(w, &r);
+        run(w);
+        status(w, r.id())
+    }
+
+    fn invite_calls(w: &Processor<Fake>) -> Vec<String> {
+        w.ops.calls.borrow().iter().filter(|c| c.contains("invite")).cloned().collect()
+    }
+
+    #[test]
+    fn invite_reserve_holds_twenty_of_fifty_seats_for_codes() {
+        let mut w = invite_world("invite-seats");
+        for i in 1..=30 {
+            let s = stranger(&mut w, &format!("m{i}"), None);
+            assert_eq!(s["phase"], "enrolled", "uncoded stranger {i} takes an open seat: {s}");
+        }
+        assert!(invite_calls(&w).is_empty(), "an uncoded member has no invite fact");
+        let state = read_json(&w.p.status().join("door-state.json")).unwrap();
+        assert_eq!((state["openSeats"].as_u64(), state["reservedSeats"].as_u64(), state["free"].as_bool()), (Some(0), Some(20), Some(true)), "{state}");
+        // The 31st uncoded stranger is refused by name, and told what remains.
+        let s = stranger(&mut w, "m31", None);
+        assert_eq!(s["phase"], "refused", "{s}");
+        let detail = s["detail"].as_str().unwrap();
+        assert!(detail.starts_with("open-seats-gone:") && detail.contains("20 remain for people with an invite code"), "{detail}");
+        // An unknown code, by name; nothing is struck.
+        let s = stranger(&mut w, "m32", Some("NOSUCHCODE-1234".into()));
+        assert!(s["detail"].as_str().unwrap().starts_with("invite-unknown:"), "{s}");
+        // A coded stranger is admitted on a reserved seat; the code is struck with the request, and
+        // the member's own turns write `invite` field 1 = the serial (never the code).
+        let s = stranger(&mut w, "m33", Some(code(7)));
+        assert_eq!(s["phase"], "enrolled", "{s}");
+        assert!(!s.to_string().contains(&code(7)), "the status never carries the code");
+        assert_eq!(invite_calls(&w), ["m33: create invite declared open", "m33: invoke invite-0 invite create 1 7", "m33: submit invite-0"]);
+        assert!(!w.ops.calls.borrow().iter().any(|c| c.contains(&code(7))), "no world line carries the code");
+        let file = std::fs::read_to_string(w.codes_path().unwrap()).unwrap();
+        let line = file.lines().find(|l| l.starts_with("7 ")).unwrap();
+        assert!(line.starts_with(&format!("7 {} used m33 {} ", code(7), s["id"].as_str().unwrap())), "{line}");
+        assert!(file.starts_with("# operator-issued"), "comments survive the rewrite");
+        // The same code again: spent.
+        let s = stranger(&mut w, "m34", Some(code(7)));
+        assert!(s["detail"].as_str().unwrap().starts_with("invite-spent:"), "{s}");
+        // Coded strangers fill the reserve (m33 is the first of 20) ...
+        for (k, n) in (1..=21u32).filter(|n| *n != 7).take(19).enumerate() {
+            let s = stranger(&mut w, &format!("c{k}"), Some(code(n)));
+            assert_eq!(s["phase"], "enrolled", "coded stranger {k}: {s}");
+        }
+        // ... and the 51st, even with a valid unspent code, is refused at freeCap and keeps the code.
+        let s = stranger(&mut w, "late", Some(code(21)));
+        assert_eq!(s["phase"], "refused", "{s}");
+        assert_eq!(s["detail"], "all 50 free accounts are taken");
+        assert!(std::fs::read_to_string(w.codes_path().unwrap()).unwrap().lines().any(|l| l == format!("21 {}", code(21))), "a seat refusal burns no code");
+    }
+
+    #[test]
+    fn a_retry_by_the_same_request_reuses_its_own_strike_and_a_refusal_after_it_returns_the_code() {
+        let mut w = invite_world("invite-crash");
+        let r = Request::Join { id: door::new_request_id().unwrap(), at: 999_000, name: "zed".into(), ssh_key: String::new(), discord: false, route: Route::Free, research: false, invite: Some(code(3)) };
+        // The crash: the strike landed, the request's own record did not.
+        w.strike_invite(3, "zed", r.id()).unwrap();
+        submit(&w, &r);
+        run(&mut w);
+        assert_eq!(status(&w, r.id())["phase"], "enrolled", "the request finds its own strike, not 'spent'");
+        assert!(invite_calls(&w).contains(&"zed: invoke invite-0 invite create 1 3".to_owned()));
+        // Another request cannot take it.
+        assert_eq!(w.invite_state(&code(3), "someone-else").unwrap(), InviteState::Spent);
+        // A request refused after its strike hands the code back.
+        let r2 = door::new_request_id().unwrap();
+        w.strike_invite(4, "yan", &r2).unwrap();
+        assert_eq!(w.invite_state(&code(4), "x").unwrap(), InviteState::Spent);
+        w.release_invite(&r2).unwrap();
+        assert_eq!(w.invite_state(&code(4), "x").unwrap(), InviteState::Unspent(4));
+    }
+
+    #[test]
+    fn the_codes_file_must_be_private_and_well_formed() {
+        let mut w = invite_world("invite-file");
+        std::fs::set_permissions(w.codes_path().unwrap(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        let s = stranger(&mut w, "kay", Some(code(1)));
+        assert_ne!(s["phase"], "enrolled", "{s}");
+        assert!(s["detail"].as_str().unwrap().contains("0600"), "{s}");
+        std::fs::set_permissions(w.codes_path().unwrap(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        for bad in ["1 SHORT\n", "0 INVITE001-abcdef\n", "1 INVITE001-abcdef\n2 INVITE001-abcdef\n", "1 INVITE001-abcdef used\n"] {
+            assert!(parse_codes(bad).is_err(), "{bad:?}");
+        }
+        let text = "# c\n1 INVITE001-abcdef used kay 0123456789abcdef0123456789abcdef 5\n\n2 INVITE002-abcdef\n";
+        assert_eq!(render_codes(&parse_codes(text).unwrap()), text);
+    }
+
+    #[test]
+    fn door_json_reads_the_invite_fields_and_refuses_a_reserve_beyond_the_cap() {
+        let dir = std::env::temp_dir().join(format!("door-json-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let load = |body: &str| { let f = dir.join("door.json"); std::fs::write(&f, body).unwrap(); DoorConfig::load(&f) };
+        let ok = load(r#"{"version":1,"freeCap":50,"inviteReserve":20,"inviteCodes":"/etc/mini/invite-codes","dailyCap":20}"#).unwrap();
+        assert_eq!((ok.free_cap, ok.invite_reserve, ok.daily_cap), (50, 20, 20));
+        assert_eq!(ok.invite_codes, Some(PathBuf::from("/etc/mini/invite-codes")));
+        let plain = load(r#"{"version":1}"#).unwrap();
+        assert_eq!((plain.invite_reserve, plain.invite_codes), (0, None), "today's door");
+        assert!(load(r#"{"version":1,"freeCap":50,"inviteReserve":51,"inviteCodes":"/x"}"#).unwrap_err().contains("exceeds freeCap"));
+        assert!(load(r#"{"version":1,"freeCap":50,"inviteReserve":20}"#).unwrap_err().contains("inviteCodes"));
+        assert!(load(r#"{"version":1,"inviteCodes":"relative"}"#).is_err());
+        assert!(load(r#"{"version":1,"inviteReserv":20}"#).unwrap_err().contains("unknown key"));
+    }
+
+    #[test]
+    fn a_request_with_an_invite_round_trips_and_is_free_route_only() {
+        let r = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "ab".into(), ssh_key: String::new(), discord: false, route: Route::Free, research: false, invite: Some(code(1)) };
+        assert_eq!(Request::parse(r.to_json().to_string().as_bytes()).unwrap(), r);
+        let mut v = r.to_json();
+        v["invite"] = json!("short");
+        assert!(Request::parse(v.to_string().as_bytes()).is_err());
+        let mut v = Request::Join { id: door::new_request_id().unwrap(), at: 1, name: "ab".into(), ssh_key: KEY.into(), discord: false, route: Route::Paid, research: false, invite: None }.to_json();
+        v["invite"] = json!(code(1));
+        assert!(Request::parse(v.to_string().as_bytes()).is_err(), "a paid request carries no code");
     }
 }
