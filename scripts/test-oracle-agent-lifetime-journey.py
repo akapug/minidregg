@@ -17,6 +17,70 @@ OVERLAY = ROOT / "scripts/spk-platform/agent-genesis-overlay.sh"
 
 
 class HarnessTests(unittest.TestCase):
+    def test_owner_worker_policy_uses_exact_native_source_and_readback(self):
+        spec = importlib.util.spec_from_file_location("oracle_agent_policy", ROOT / "deploy/oracle/acceptance/agent.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        allocation = json.loads((ROOT / "deploy/oracle/acceptance/agent-allocation.json").read_text())["agents"][0]
+        for fault in (None, "active", "changed-policy", "wrong-readback", "unknown-worker"):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                op = object.__new__(module.Operator)
+                op.agent, op.calls, op.workroom = allocation, root, root
+                op.mini, op.host, op.config, op.public = map(Path, ("/mini", "/host", "/config", "/socket"))
+                a, caps = allocation, allocation["plannedCaps"]
+                config = {"task": a["controller"]["task"], "subject": a["controller"]["subject"],
+                    "capability": caps["parentOwner"], "queryCapability": caps["parentOwner"],
+                    "policyControlCapability": caps["parentControl"],
+                    "toolTask": {key:a["tool"][key] for key in ("task", "subject")},
+                    "dispatchTask": {key:a["dispatch"][key] for key in ("task", "subject")}}
+                if fault == "unknown-worker": config["dispatchTask"]["subject"] = "777"
+                config_path = root / "controller.json"
+                module.write(config_path, config)
+                original = {"owner":a["controller"]["subject"], "workerSubjects":[a[role]["subject"] for role in ("tool", "dispatch", "provider")], "workerGeneration":"1"}
+                desired = dict(original, workerSubjects=[a[role]["subject"] for role in ("tool", "dispatch")])
+                calls = []
+                def query(label, subject, task, capability, key, view="resource"):
+                    path = root / label
+                    path.mkdir()
+                    if view == "resource":
+                        value = {"cell":{"grain":{"task":task,"generation":"0","status":"2" if fault == "active" else "0","reserved":"0"}}}
+                    else:
+                        after = label == "policy-after"
+                        value = {"policyId":task,"version":"1" if after else "0", "previous":"old-address" if after else None,
+                            "domain":"10","semantics":"20","address":"old-address","canonical":"aa",
+                            "predicate":desired if after else original}
+                        if fault == "changed-policy" and not after: value["predicate"] = {"changed":True}
+                        if fault == "wrong-readback" and after: value["previous"] = "wrong"
+                    module.write(path / "view.json", value)
+                    module.write(path / "challenge.json", {"authorityRoot":"source-root"})
+                    return path
+                def call(label, args):
+                    calls.append((label,args))
+                    if args[1] == "author":
+                        source = Path(args[args.index("--input")+1])
+                        output = Path(args[args.index("--output")+1])
+                        module.write(output, json.dumps(module.read(source),sort_keys=True).encode())
+                    elif args[1] == "submit":
+                        self.assertEqual(args[args.index("--intent-kind")+1], "grain-policy-install-intent")
+                        source = module.read(args[args.index("--intent")+1])
+                        self.assertEqual(source["currentSourceHex"],"aa")
+                        self.assertEqual(source["expectedPreRoot"],"source-root")
+                        self.assertEqual(source["expectedVersion"],"0")
+                        self.assertEqual(source["control"],caps["parentControl"])
+                        self.assertEqual(source["workerSubjects"],desired["workerSubjects"])
+                        path = Path(args[args.index("--dir")+1]); path.mkdir()
+                        module.write(path / "outcome.json", {"type":"confirmed","confirmation":"installed", "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})
+                    else: self.fail("unexpected native operation")
+                op.query, op.call = query, call
+                if fault is None:
+                    report = module.read(op.prepare_worker_policy(config_path))
+                    self.assertEqual(report["workers"],desired["workerSubjects"])
+                    self.assertEqual(report["receipt"]["acceptedCount"],"3")
+                else:
+                    with self.assertRaises(ValueError): op.prepare_worker_policy(config_path)
+                    self.assertEqual(sum(args[1] == "submit" for _,args in calls), 1 if fault == "wrong-readback" else 0)
+
     def test_complete_grain_store_overlay_on_frozen_339_source(self):
         # Run the real grain-store -> positive-base -> native-share-member
         # transformations. Stub only native executables, stopping exactly at
