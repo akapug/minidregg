@@ -24,6 +24,7 @@ then the call's semantic projection (`PROJECTION key = value` lines,
 against the hand-written authority), exit 0; any other outcome exits non-zero. The interpreter recurses deeply: run it
 under `ulimit -s unlimited`.
 -/
+import Theory.Sp800185Cshake256Native
 import Host.ClientConsentCore
 import Kernel.ObjectiveBendAuthenticatedInputs
 import Fixtures.NativeAcceptedFixtureProjection

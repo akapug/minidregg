@@ -186,9 +186,12 @@ impl Gateway {
     /// with inline styles (`mini web`'s own CSP made the same allowance).
     fn finish(&self, response: Response) -> Response {
         let frame = if self.frame_src.is_empty() { "'none'".to_owned() } else { self.frame_src.clone() };
+        // A grain's one-time bootstrap is a form posted to the grain's own origin: the origins the
+        // pane may frame are the only other targets a form may name.
+        let forms = if self.frame_src.is_empty() { "'self'".to_owned() } else { format!("'self' {}", self.frame_src) };
         let cache = response.header("Cache-Control").is_some();
         let response = response
-            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"))
+            .with("Content-Security-Policy", &format!("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src {frame}; form-action {forms}; frame-ancestors 'none'; base-uri 'none'"))
             .with("X-Content-Type-Options", "nosniff")
             .with("X-Frame-Options", "DENY")
             .with("Referrer-Policy", "same-origin");
@@ -398,6 +401,9 @@ impl Gateway {
             Ok(proxy::Answer::Download(download)) => Reply::Download(download),
             Ok(proxy::Answer::Page(fragment)) => {
                 if let Some(location) = fragment.location.filter(|_| (300..400).contains(&fragment.status)) {
+                    if !http::same_origin_path(&location) {
+                        return self.stage(502, "Unavailable", refusal("The body asked for a redirect elsewhere", "a body redirects only within this origin"), who, request);
+                    }
                     return Reply::Raw(Response::redirect(&location));
                 }
                 self.stage(fragment.status, &fragment.title, fragment.html, who, request)

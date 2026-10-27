@@ -106,6 +106,41 @@ def session_refusal(request_id, result, final_journal, exported, store):
                          'new tool-id only after supported attach/reconciliation']}
 
 
+def validate_run_acl(owner, mode, operator, controller, acl):
+    require(type(controller) is int and controller > 0 and controller != operator,
+            'installed controller identity malformed')
+    expected = ['user::rwx', f'user:{controller}:--x', 'group::---', 'mask::--x', 'other::---']
+    require(owner == operator and mode == 0o710 and acl.splitlines() == expected,
+            'retained run ACL differs from exact installed-controller traversal')
+
+
+def retained_run_custody(run):
+    meta = run.lstat()
+    require(stat.S_ISDIR(meta.st_mode), 'retained run is not a directory')
+    world = read(run / 'world-identity.json')
+    require(re.fullmatch('[0-9a-f]{16}', world['store']), 'retained Store identity malformed')
+    created = read(run / 'agent-lifetime/controller-create.json')
+    reservation = Path('/etc/mini-spk-controller-reservations') / (world['store'] + '.json')
+    reserved_meta = reservation.lstat()
+    require(stat.S_ISREG(reserved_meta.st_mode) and reserved_meta.st_uid == 0
+            and stat.S_IMODE(reserved_meta.st_mode) == 0o644 and reserved_meta.st_nlink == 1,
+            'controller reservation custody differs')
+    reserved = read(reservation)
+    require(reserved.get('protocol') == 'mini-spk-controller-namespace-v1'
+            and reserved.get('store') == created.get('store') == world['store']
+            and reserved.get('operatorUid') == created.get('operatorUid') == os.getuid()
+            and reserved.get('controllerUid') == created.get('controllerUid'),
+            'installed controller reservation differs')
+    result = subprocess.run(['/usr/bin/getfacl', '-cpn', '--', str(run)], capture_output=True,
+                            text=True, check=True, timeout=5)
+    require(len(result.stdout) <= 4096 and result.stderr == '', 'run ACL observation differs')
+    acl = result.stdout.rstrip('\n')
+    validate_run_acl(meta.st_uid, stat.S_IMODE(meta.st_mode), os.getuid(), created['controllerUid'], acl)
+    return {'path': str(run), 'owner': meta.st_uid, 'mode': stat.S_IMODE(meta.st_mode),
+            'controller_uid': created['controllerUid'], 'acl': acl,
+            'reservation_sha256': sha(reservation)}
+
+
 def stopped_services(run, store):
     for name in ('operator.pid', 'participant.pid'):
         require(not (run / 'world/sock' / name).exists(), 'Store service remains present')
@@ -141,7 +176,61 @@ def stopped_services(run, store):
     return observed
 
 
-def prepare_session(run, spk, inventory, benchmark, repo, exported_path, check_only=False):
+def resume_prepared_archive(output, current, source_manifest, check_only):
+    """Resume only a durable backup stopped at the source-manifest check."""
+    require({p.name for p in output.iterdir()} == {'prepared.json', 'prior', 'bin', 'recovery-input-sha256.txt'},
+            'prepared continuation has a newer repair or attempt')
+    old = read(output / 'prepared.json')
+    for key in ('run', 'store', 'boundary', 'original_inputs', 'original_binaries', 'native_files_before',
+                'run_custody', 'stopped_services', 'store_before', 'native_profile_sha256', 'host_config_sha256'):
+        require(old.get(key) == current.get(key), 'prepared boundary changed: ' + key)
+    for name, digest in old['prior_files'].items():
+        relative = Path(name)
+        require(not relative.is_absolute() and '..' not in relative.parts
+                and not (output / 'prior' / relative).is_symlink()
+                and sha(output / 'prior' / relative) == digest, 'durable prepared archive differs')
+    actual = {str(p.relative_to(output / 'prior')) for p in (output / 'prior').rglob('*') if p.is_file()}
+    require(actual == set(old['prior_files']), 'prepared archive file set differs')
+    for original, copy in old['store_snapshot'].items():
+        require(Path(copy).is_relative_to(output / 'prior') and sha(Path(copy)) == current['store_before'][original],
+                'prepared Store snapshot differs')
+    require({p.name for p in (output / 'bin').iterdir()} == {'grain-runtime'}, 'prepared binary set differs')
+    runtime = output / 'bin/grain-runtime'
+    meta = runtime.lstat()
+    require(stat.S_ISREG(meta.st_mode) and meta.st_uid == os.getuid() and meta.st_nlink == 1
+            and stat.S_IMODE(meta.st_mode) == 0o500, 'prepared runtime custody differs')
+    sources = manifest(source_manifest)
+    runtimes = [digest for name, digest in sources.items() if Path(name).name == 'grain-runtime']
+    require(runtimes == [sha(runtime)], 'prepared runtime is not the new qualified input')
+    partial = output / 'recovery-input-sha256.txt'
+    manifest(partial)
+    failed_path = Path(old['recovery_source']).parent / 'failed-launch.json'
+    failed = read(failed_path)
+    require(failed.get('schema') == 'mini-oracle-session-manifest-refusal-v1'
+            and failed.get('repairs_begun') is False and failed.get('request_begun') is False
+            and failed.get('prepared_sha256') == sha(output / 'prepared.json')
+            and failed.get('partial_manifest_sha256') == sha(partial), 'manifest-refusal evidence differs')
+    receipt = {'schema': 'mini-oracle-prepared-session-resume-v1', 'run': current['run'], 'store': current['store'],
+               'prepared_sha256': sha(output / 'prepared.json'), 'partial_manifest_sha256': sha(partial),
+               'failed_launch_receipt': str(failed_path), 'failed_launch_sha256': sha(failed_path),
+               'source': current['recovery_source'], 'source_files': sources,
+               'source_manifest_sha256': sha(source_manifest), 'runtime_sha256': sha(runtime),
+               'existing_backup_reused': True, 'repeated_phases': [],
+               'execution_manifest': str(output / 'source-resume-1-input-sha256.txt')}
+    if check_only:
+        return {**receipt, 'checked': True}
+    fd = os.open(output / 'source-resume-1.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'wb') as sink:
+        sink.write((json.dumps(receipt, indent=2) + '\n').encode()); sink.flush(); os.fsync(sink.fileno())
+    fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return output
+
+
+def prepare_session(run, spk, inventory, benchmark, repo, exported_path, resume_manifest=None, check_only=False):
     """Snapshot the exact failed attach before separately admitted repairs.
 
     Call only with a fresh fixed-installer export. No native operation, config
@@ -204,9 +293,11 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, check_o
     revision = root / 'spk/public-data' / ('sha256-' + sha(inventory))
     require(not revision.is_symlink() and sha(revision / 'inventory.json') == sha(inventory),
             'published inventory differs')
+    custody = retained_run_custody(run)
     services = stopped_services(run, world['store'])
     output = run / 'continuations/session-refusal-1'
-    require(not output.exists(), 'session-refusal continuation already attempted')
+    require(output.is_dir() if resume_manifest is not None else not output.exists(),
+            'session continuation directory does not match selected boundary')
     workroom = run / 'world/store/base/workroom'
     store_files = list((workroom / 'store').rglob('*'))
     require(all(not p.is_symlink() and p.is_file() for p in store_files)
@@ -218,13 +309,15 @@ def prepare_session(run, spk, inventory, benchmark, repo, exported_path, check_o
     value = {'schema': 'mini-oracle-session-continuation-v1', 'run': str(run), 'store': world['store'],
              'boundary': refusal, 'prior_continuation': str(first), 'recovery_source': str(repo),
              'original_inputs': inputs, 'original_binaries': binaries, 'native_files_before': actual,
-             'stopped_services': services, 'store_before': before, 'repeated_phases': [],
+             'run_custody': custody, 'stopped_services': services, 'store_before': before, 'repeated_phases': [],
              'failed_request_acknowledged': False,
              'ack_scope': 'null operation has no retained native foreground record; preserve client receipt only',
              'source_repair_phases': ['worker-policy', 'bootstrap-dispatch-enrollment'],
              'physical_repair_phases': ['consent-storage', 'controller-runtime-upgrade'],
              'fresh_export_sha256': sha(exported_path), 'native_profile_sha256': sha(profile_path),
              'host_config_sha256': config_sha}
+    if resume_manifest is not None:
+        return resume_prepared_archive(output, value, resume_manifest, check_only)
     if check_only:
         return {**value, 'checked': True}
     output.mkdir(mode=0o700)
@@ -423,6 +516,10 @@ def prepare(run, spk, inventory, benchmark, repo, check_only=False):
 if __name__ == '__main__':
     os.umask(0o077)
     args = sys.argv[1:]
+    if args[:1] == ['--check-session-custody']:
+        require(len(args) == 2, 'session custody requires exactly one run path')
+        print(json.dumps(retained_run_custody(Path(args[1]))))
+        sys.exit(0)
     session = args[:1] == ['--session-refusal']
     if session:
         args = args[1:]

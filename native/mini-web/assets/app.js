@@ -92,6 +92,7 @@
     for (const el of root.querySelectorAll("[data-load]:not([data-loaded])")) {
       el.dataset.loaded = "1";
       const slot = el.querySelector(".fill") || el;
+      if (!sameOrigin(el.dataset.load)) continue;
       try {
         const response = await fetch(el.dataset.load, { headers: { "X-Mini-Fragment": "1" }, credentials: "same-origin" });
         slot.innerHTML = await response.text();
@@ -154,7 +155,9 @@
   function restore() {
     if (!location.hash || location.hash.length < 2) return;
     for (const raw of location.hash.slice(1).split("|")) {
-      const path = decodeURIComponent(raw);
+      // The hash is anyone's link: only a same-origin path opens a pane.
+      let path = "";
+      try { const u = sameOrigin(decodeURIComponent(raw)); path = u ? u.pathname + u.search : ""; } catch (e) {}
       if (path && !paneFor(path)) { const pane = newPane(path); load(pane, path); }
     }
   }

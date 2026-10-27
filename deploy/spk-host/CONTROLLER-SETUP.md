@@ -21,6 +21,8 @@ controller-tool-ack STORE HELPER REQUEST_ID
 controller-journal STORE HELPER
 controller-service-logs STORE HELPER
 controller-consent-storage STORE HELPER
+controller-runtime-upgrade STORE HELPER OPERATOR_BINARY
+controller-enroll STORE HELPER REQUEST_FILE
 controller-export STORE HELPER
 controller-reserve-export STORE HELPER DISPATCH_ATTEMPT_ID
 controller-remove STORE HELPER
@@ -185,6 +187,46 @@ intent, unit, stage or manager-reload step can resume only those same byte
 states; unrelated edits or changed Store identities refuse. No restart, source
 request or config rewrite occurs. New stages include these checks directly.
 
+`controller-runtime-upgrade` changes only the stopped controller's root-pinned
+`grain-runtime`, its matching private home copy, and the stage's runtime hash.
+The source is an operator-owned bounded regular executable with the same custody
+checks as initial staging. All five units must be inactive, with no manager or
+controller process. Exact prior/new binary and stage bytes remain in root-private
+hash archives. An immutable intent permits interrupted root-copy, home-copy and
+stage publication to finish only from those exact old/new states. Recoverable
+archives and intents are first written to private staging files; a short write
+can resume only from the exact prefix of the already-bound expected bytes.
+File and directory sync precede publication. Conflicting final/staged bytes
+remain preserved and refuse. It preserves
+identity, configuration, journal, keys, other binaries and unit definitions.
+This installs explicitly selected operator code; a matching source/qualified
+native build remains a separate deployment obligation.
+
+After `controller-config` installs and retains a target configuration,
+`controller-enroll` runs only the native
+`grain-runtime application-enroll stopped HOME/controller.json REQUEST` as the
+controller. Its operator-owned 0600 request is at most 8192 bytes, with the
+native protocol, `bootstrap-dispatch` or `application` mode, expected current
+binding hash and target raw configuration hash. The installer checks the target
+against the exact installed config and root-retained revision, then copies the
+request to an immutable SHA-named private `HOME/enroll-requests` file. Native
+code checks source authority and publication; the installer does not edit the
+journal or synthesize enrollment.
+
+The runtime stays stopped. The wrapper checks and starts only the exact consent
+socket/service and operator proxy socket needed for source reads and restores
+helpers previously inactive afterward, including after refusal. Previously
+active helpers remain active. It holds the exclusive per-controller lifecycle
+lock across the child, while releasing the global allocator lock. There is one
+1800-second child execution with bounded output and owned-process cleanup; no
+automatic retry. Native output and exit status pass through. A helper cleanup
+failure is an additional transport failure, not evidence that native enrollment
+was undone. The retained request/native record supports an explicit identical
+request recovery when the native command permits it. A nonzero native exit can
+occur after a journal rename/fsync failure and therefore does not prove the
+binding stayed unchanged. Failed or successful binding transitions are never
+rolled back by the installer.
+
 Stage returns the consent service/socket/provider/config/identity and storage pins. Start
 adds its observed systemd invocation, MainPID, process start ticks, exact
 executable inode and socket owner/mode. This is labeled **process and socket
@@ -200,8 +242,14 @@ actual host unit from `grain start`. Stop the controller before installing its
 final configuration with that unit. `controller-config` accepts either one
 configuration file or a bundle containing `controller.json` and the optional
 final grant files above. Existing grant bytes are immutable; only byte-equal
-copies are accepted. Every configuration revision is retained by hash. Restart
-uses the existing native journal, not a fabricated birth record.
+copies are accepted. Every configuration revision is retained by hash. Configuration publication
+also retains the exact previous/target hashes and grant-file hashes in an
+immutable intent. It accepts only that old or new current config on recovery;
+an already-current target is idempotent, while a historical noncurrent revision
+without a matching publication intent refuses. The renamed config's home
+directory is synced before success, so subsequent native journal enrollment
+cannot rely on an acknowledged but unsynced config rename. Restart uses the
+existing native journal, not a fabricated birth record.
 
 Tool IDs are exactly 32 lowercase hexadecimal characters. The four supported
 tools are `mini_create_application_session`, `mini_oracle_discover`,

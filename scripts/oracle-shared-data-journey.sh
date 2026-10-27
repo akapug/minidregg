@@ -20,6 +20,8 @@ selectors and a retained prepared INSTALL; older receiving-only worlds refuse.
 failure after both installs, publication and share. It never repeats those phases.
 --continue-session preserves the definite null-operation session refusal, applies
 qualified stopped-controller repairs, and uses a new tool ID after native enrollment.
+Its --resume-prepared suffix is limited to the recorded source-manifest refusal
+with a durable backup, identical stopped state, and no repair or tool attempt.
 Creates and removes only a fresh scratch Store namespace. Keeps evidence in RUN.
 The input data is read only; publication copies it once into this Store's custody.
 No public deployment and no direct fd3 calls. Uses the same current receiving
@@ -31,11 +33,16 @@ HELP
 }
 [[ ${1:-} != --help ]] || { usage; exit 0; }
 mode=new
+session_resume_prepared=0
 case ${1:-} in
   --resume) mode=resume; shift ;;
   --continue-controller) mode=continue-controller; shift ;;
   --continue-session) mode=continue-session; shift ;;
 esac
+if [[ ${1:-} == --resume-prepared ]]; then
+  [[ $mode == continue-session ]] || { usage >&2; exit 2; }
+  session_resume_prepared=1; shift
+fi
 [[ $# == 6 ]] || { usage >&2; exit 2; }
 base=$1 own=$2 run=$3 spk=$4 source=$5 inventory=$6
 benchmark=${ORACLE_STOP_BENCHMARK_JSON:?qualified copied-Store STOP benchmark receipt required}
@@ -49,7 +56,11 @@ done
 if [[ $mode == new ]]; then
   [[ ! -e $run && ! -L $run ]] || fail 'run directory already exists'
 else
-  [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
+  if [[ $mode == continue-session ]]; then
+    python3 -B "$repo/deploy/oracle/acceptance/continue_controller.py" --check-session-custody "$run" >/dev/null
+  else
+    [[ -d $run && ! -L $run && $(stat -c '%u:%a' "$run") == "$(id -u):700" ]] || fail 'retained run custody differs'
+  fi
   # This recipe cannot extend historical receiving-only worlds. Check the
   # exact fresh U3 allocation and initial authoring selectors before any phase.
   python3 - "$run" "$repo/deploy/oracle/acceptance/agent-allocation.json" <<'PYRESUME'
@@ -129,9 +140,10 @@ jq --argjson bytes "$(stat -c '%s' "$spk")" '
   {selected_profile:(.importProfile // "standard-v1"),
    deadline_seconds:(if .importProfile=="operator-appliance-v1" then 1800 else 120 end),
    signed_spk_bytes:$bytes,mini_raw_admission_cap_bytes:268435456}'   "$GRAINS_ROOT/broker/config.json" >"$run/import-profile.json"
-sha256sum "$spk" "$inventory" "$benchmark" "$0" "$repo/deploy/oracle/acceptance/world.sh" "$repo/deploy/oracle/acceptance/report.py" "$repo/scripts/oracle-stop-inspection-probe.py" "$repo/scripts/oracle-agent-authority-probe.py" \
-  "$repo/scripts/oracle-agent-lifetime-journey.sh" "$repo/deploy/oracle/acceptance/agent-allocation.json" "$repo/deploy/oracle/acceptance/agent.py" \
-  "$repo/deploy/oracle/acceptance/agent-cases.json" "$repo/deploy/oracle/acceptance/volume_cleanup.py" "$installer" "$repo/deploy/spk-host/controller-world.py" >"$run/input-sha256.txt"
+{
+  sha256sum "$spk" "$inventory" "$benchmark"
+  world_source_manifest
+} >"$run/input-sha256.txt"
 cp "$inventory" "$run/inventory.json"
 cp "$benchmark" "$run/copied-store-stop-benchmark.json"
 fi
@@ -333,7 +345,7 @@ retain 9101; retain 9201
 world_disk_snapshot after-stops
 sha256sum -c "$run/input-sha256.txt" >"$run/input-recheck.txt"
 if [[ -n ${continuation:-} ]]; then
-  sha256sum -c "$continuation/recovery-input-sha256.txt" >"$continuation/recovery-input-recheck.txt"
+  sha256sum -c "${recovery_manifest:-$continuation/recovery-input-sha256.txt}" >"$continuation/recovery-input-recheck.txt"
 fi
 if [[ -f $run/resume-retained-install-sha256.txt ]]; then
   sha256sum -c "$run/resume-retained-install-sha256.txt" >"$run/resume-retained-install-recheck.txt"
