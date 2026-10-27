@@ -172,5 +172,22 @@
       "path": "/build/lanes/oracle-u3/controller-smokes/result.txt",
       "sha256": "44e9c7486089ce90a5bc7a6956b104723b6f544a91d1959e49788696e3d877ca"
     }
+  },
+  "consent_repair": {
+    "status": "companion build and scenario passed; real retained config qualification pending",
+    "baseline_consent_sha256": "1ce338424630443cfcac69e47ff0e001c1a0d42465749e07837ce8b7aedd7912",
+    "baseline_core_sha256": "8fe7d8ed2b04ed8b796baf474c3373e78f047aad6f1cf5e0e0ee4b4e8a149ed6",
+    "narrow_patch_sha256": "1debac2ae81ee77689149e7138baad7dbbc102773258e81e968bfa2f96c6b4f7",
+    "composed_core_sha256": "42aca4d3cfbf4d3d4d9e51caebac65a104be89c5d545d18b28ed8480f7a8032d",
+    "scenario_sha256": "2b75d186497b133113479a71efdd9e551e8927c265b733623e646e10ea5939db",
+    "scenario_wrapper_sha256": "5c7692d064d82a5fa2e59e53ba87a13d7045d2b6d8103e1ec3c2ddcfabc972d5",
+    "scenario": "compiled with guards, theorem and actual settings loader checks",
+    "build_evidence": "/othersys/lanes/oracle-u3-consent-evidence",
+    "aborted_attempt": "whole current-main Core stopped before compilation; baseline restored before narrow patch",
+    "binary": "/othersys/lanes/oracle-u3-consent-evidence/minidregg-client-consent",
+    "binary_sha256": "1fca63aa1c82aefc2d9ea4f5161af951b505bb6a72edb6b34d8bac3d3ebe2717",
+    "build_log_sha256": "0c5c36953bb75fd9de4b5c4cef7466fc2870b290306715cfde85bf393b81fa69",
+    "companion": "679 Host modules verified unchanged; 13-module closure passed, 3 compiled; max Lean RSS 2960156 KiB",
+    "host_main_and_binary_recheck": "unchanged"
   }
 }

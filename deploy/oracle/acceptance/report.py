@@ -33,6 +33,82 @@ def mount_rows(directory):
     return result
 
 
+def consent_evidence(run, require):
+    directory = run / 'agent-lifetime'
+    world = read(run / 'world-identity.json')
+    created = read(directory / 'controller-create.json')
+    staged = read(directory / 'controller-stage-receipt.json')
+    base = world['root'] + '/controller'
+    expected = {
+        'providerSha256': sha(run / 'bin/minidregg-client-consent'),
+        'transportSha256': sha(run / 'bin/mini'),
+        'configSha256': sha(run / 'world/store/base/workroom/deployment/pinned-config.json'),
+        'socket': base + '/home/consent/peer.sock',
+        'socketUnit': f"mini-spk-controller-consent-{world['store']}.socket",
+        'serviceUnit': f"mini-spk-controller-consent-{world['store']}.service",
+        'serviceUid': created['operatorUid'], 'controllerUid': created['controllerUid'],
+        'activationPeerUid': 0, 'provider': base + '/bin/minidregg-client-consent',
+        'config': base + '/consent/config.json', 'anchors': base + '/consent/anchors',
+    }
+    require('controller_consent_v2_distinct_identity',
+            created.get('protocol') == staged.get('protocol') == 'mini-spk-controller-v2'
+            and created.get('store') == staged.get('store') == world['store']
+            and type(created['operatorUid']) is int and created['operatorUid'] > 0
+            and type(created['controllerUid']) is int and created['controllerUid'] > 0
+            and created['operatorUid'] != created['controllerUid']
+            and created.get('consentSocket') == expected['socket']
+            and created.get('consentPeerUid') == 0)
+    require('controller_consent_exact_stage_pins', staged.get('consent') == expected)
+    require('controller_consent_exact_config_bytes',
+            sha(directory / 'controller-stage/host-config.json') == expected['configSha256'])
+    starts = {}
+    for label, filename in (('bootstrap', 'controller-bootstrap-start.json'),
+                            ('initial', 'controller-start-initial.json'),
+                            ('restart', 'controller-start-restart.json')):
+        receipt = read(directory / filename)
+        value = receipt.get('consent', {})
+        require(f'consent_{label}_exact_pins',
+                receipt.get('action') == 'start' and receipt.get('store') == world['store']
+                and all(value.get(key) == item for key, item in expected.items())
+                and expected['serviceUnit'] in receipt.get('units', [])
+                and expected['socketUnit'] in receipt.get('units', []))
+        require(f'consent_{label}_observed_readiness_only',
+                value.get('readiness') == 'process-and-socket-only'
+                and value.get('independentAdmissionObserved') is False
+                and type(value.get('mainPid')) is int and value['mainPid'] > 0
+                and type(value.get('processStartTicks')) is int and value['processStartTicks'] > 0
+                and re.fullmatch('[0-9a-f]{32}', value.get('invocationId', '')) is not None
+                and value.get('socketUid') == created['controllerUid'] and value.get('socketMode') == '0600'
+                and all(isinstance(value.get(key), list) and len(value[key]) == 2
+                        and all(type(n) is int and n >= 0 for n in value[key]) and value[key][1] > 0
+                        for key in ('socketIdentity', 'processExecutableIdentity')))
+        starts[label] = value
+    require('consent_restarts_have_distinct_invocations',
+            len({value['invocationId'] for value in starts.values()}) == 3)
+    require('consent_restarts_keep_transport_inode',
+            all(value['processExecutableIdentity'] == starts['bootstrap']['processExecutableIdentity']
+                for value in starts.values()))
+    observations = {}
+    for stage, start in (('probe', 'initial'), ('probe-after-restart', 'restart')):
+        value = read(directory / f'consent-memory-after-{stage}.json')
+        properties = value.get('properties', {})
+        require(f'consent_{stage}_resources_match_active_invocation',
+                value.get('schema') == 'mini-oracle-consent-resources-v1'
+                and value.get('unit') == expected['serviceUnit'] and value.get('observation_exit') == 0
+                and properties.get('ActiveState') == 'active'
+                and properties.get('MainPID') == str(starts[start]['mainPid'])
+                and properties.get('InvocationID') == starts[start]['invocationId'])
+        def bytes_or_unavailable(key):
+            raw = properties.get(key, '')
+            return int(raw) if raw.isascii() and raw.isdecimal() and int(raw) < 2**64 - 1 else None
+        observations[stage] = {'observation': value,
+                               'memory_peak_bytes': bytes_or_unavailable('MemoryPeak'),
+                               'memory_limit_bytes': bytes_or_unavailable('MemoryMax')}
+    return {'stage': expected, 'starts': starts, 'resources': observations,
+            'scope': 'Startup receipts show process/socket readiness only. Actual agent operations below '
+                     'exercise independent consent. Memory observations cover this run, not arbitrary Store sizes.'}
+
+
 def main():
     run, inventory_sha = Path(sys.argv[1]), sys.argv[2]
     ev = run / 'world/evidence'
@@ -266,6 +342,7 @@ def main():
     # This stage is mandatory for the U3 claim. Receiving HTTP responses above
     # cannot substitute for a controller's agent-origin lifetime grant, native
     # dispatch receipt and distinct-purse settlement.
+    consent = consent_evidence(run, require)
     agent_stages = {}
     for stage in ('probe', 'probe-after-restart'):
         agent_dir = run / 'agent-lifetime' / stage
@@ -355,6 +432,7 @@ def main():
                   'sha256': sha(run / 'copied-store-stop-benchmark.json'),
                   'scope': 'Different copied Store/config; same Host. Fresh probes are resident-only.'},
               'agent_lifetime': agent_stages, 'agent_authority_controls': authority,
+              'controller_consent': consent,
               'stopped_running_reconciliation': {'before': prior, 'inactive_manager': manager,
                                                  'source_stopped': stopped},
               'refusals': refusals}
