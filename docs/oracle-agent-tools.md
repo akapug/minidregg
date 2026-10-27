@@ -193,6 +193,9 @@ the changed configuration until enrollment succeeds; it never silently rewrites
 the journal. The command retains its request and exact before/after journal
 bytes, then atomically changes only the binding. Repeating the same request
 recovers that exact completed change; it does not repeat an application call.
+A nonzero exit can follow publication, for example if the final filesystem
+sync fails. Preserve the request and inspect the retained states before an
+explicit retry; do not restore the old configuration or erase the journal.
 
 The separate `bootstrap-dispatch` mode can add the real dispatch task before
 the controller's first admitted operation. It requires fresh signed reads of
