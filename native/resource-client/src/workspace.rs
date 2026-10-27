@@ -823,7 +823,7 @@ fn import_complete(root: &Path, input: ImportInput<'_>, sealed: Option<(&str, &s
     Ok(())
 }
 
-fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
+pub(crate) fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
     let value = bounded_json(source)?;
     if member(&value, "type")? != "minidregg-delegated-reference-v1"
         || member(&value, "recipient")? != member(workspace, "subject")?
@@ -4337,7 +4337,7 @@ fn put_fields(target: &mut Value, fields: &Value) {
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
-fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
     let mut numbers = Vec::new();
     for entry in fs::read_dir(base).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -4384,7 +4384,7 @@ fn authoring_released(generation: &Path) -> bool {
 /// assembled an exact call (so nothing was ever submitted), or the newest Host
 /// outcome for its exact call is a final `refused`. A confirmed, uncertain,
 /// unavailable, contended or absent outcome is not definite and keeps custody.
-fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
+pub(crate) fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
     if !attempt.join("call.bin").is_file() {
         return Ok(true);
     }
@@ -4399,7 +4399,7 @@ fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
 /// release the namespace binding, and retire the attempt directory (kept as
 /// `NAME.released-N` with all its evidence). Each step is idempotent and the
 /// retirement, which removes the trigger, is last.
-fn release_unadmitted_attempt(
+pub(crate) fn release_unadmitted_attempt(
     authoring: &Path,
     attempt: &Path,
     reservation: &participant_namespace::Reservation,
@@ -4457,7 +4457,7 @@ fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
 /// a generation observed in this call is superseded only when `stale` finds
 /// the Host answering its own `stale-root` to that observation (the timer race
 /// at birth), at most `replan::max()` times (the shared `replan` loop).
-fn author_generations(
+pub(crate) fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
     mut observe: impl FnMut() -> Result<PathBuf>,
