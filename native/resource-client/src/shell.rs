@@ -1852,7 +1852,10 @@ fn prune_refusals(dir: &Path, keep: usize) {
 /// first component of every request the line writes.
 fn admit_session_paths(session: &Session, flags: &[(String, OsString)], writes: &[(PathBuf, Vec<u8>)]) -> Result<()> {
     let mut folders = vec!["keys".to_owned(), "enroll".to_owned()];
-    for (path, _) in writes {
+    // A flag naming a file under the home (`room concierge`'s program in
+    // HOME/concierge/, an outbox) gets its first folder as a request does.
+    let flagged = flags.iter().map(|(_, value)| PathBuf::from(value));
+    for path in writes.iter().map(|(path, _)| path.clone()).chain(flagged) {
         if let Ok(relative) = path.strip_prefix(&session.home) {
             let mut parts = relative.components();
             if let (Some(std::path::Component::Normal(first)), Some(_)) = (parts.next(), parts.next()) {
