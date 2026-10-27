@@ -1,0 +1,43 @@
+# The docuverse route for the one edge (Caddy; WEB-SPK-PUBLIC.md §3.1, D2, D3).
+# The infra lane owns the Caddyfile; import this snippet into the
+# demo.dregg.online site block. It serves the static snapshot the public reader
+# renders (deploy/web/mini-pubread.service) and nothing else: no reverse proxy,
+# no socket, no key behind this route.
+#
+# TLS: Caddy >= 2.10 offers X25519MLKEM768 first with X25519 fallback by
+# default (ruling D3). Verify on the deployed binary:
+#   openssl s_client -connect demo.dregg.online:443 -groups X25519MLKEM768   (OpenSSL >= 3.5)
+#   openssl s_client -connect demo.dregg.online:443 -groups X25519
+#
+# /join is the self-serve door (lane L5) and must say "everything on this box
+# is world-readable" (D8); /interactions (Discord) and /mini/v1/* (PAY) are
+# their lanes' routes. Order: those handles first, this one last.
+
+(mini_docuverse) {
+	header {
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy same-origin
+		Strict-Transport-Security "max-age=31536000"
+		Cache-Control "public, max-age=60"
+		-Server
+	}
+	handle {
+		@unsafe not method GET HEAD
+		respond @unsafe "the docuverse is read-only; writing happens in the ssh shell" 405
+		# `current` is a symlink the renderer flips by rename: each request
+		# resolves it once, so a visitor never sees half a snapshot. Pages are
+		# DIR/index.html; file_server redirects /doc/N to /doc/N/.
+		root * /srv/mini-public/current
+		file_server
+	}
+}
+
+# demo.dregg.online {
+#	encode zstd gzip
+#	handle /join* { ... lane L5 ... }
+#	handle /interactions { ... }
+#	handle /mini/v1/* { ... }
+#	import mini_docuverse
+# }

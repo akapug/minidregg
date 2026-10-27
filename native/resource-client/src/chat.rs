@@ -132,9 +132,9 @@ pub(crate) const LS_USAGE: &str = "room ls [ROOM] [--since HEIGHT] [--import] [-
 const MAX_TOPIC: usize = 64;
 const MAX_PAYLOAD: usize = 4096;
 
-/// The room template's per-author law (`deploy/shell/templates/room/chat/law.author.json`):
+/// The room template's per-author law (`native/resource-client/templates/room/chat/law.author.json`):
 /// every write (mutate 2, append 7) is signed by `@SUBJECT`; reads and grants pass.
-const AUTHOR_LAW: &str = include_str!("../../../deploy/shell/templates/room/chat/law.author.json");
+const AUTHOR_LAW: &str = include_str!("../templates/room/chat/law.author.json");
 
 pub(crate) fn author_law(subject: &str) -> Value {
     let text = AUTHOR_LAW.replace("@SUBJECT", subject);

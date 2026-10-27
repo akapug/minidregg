@@ -36,7 +36,7 @@ umask 077
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
-TALE=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/story/tale" && pwd)
+TALE=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/story/tale" && pwd)
 mkdir -p -m 700 "$H" "$WS" "$L"
 TABLE=$SD/j15.tsv
 printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"

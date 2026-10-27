@@ -41,11 +41,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The role templates, compiled in (the files are the roles).
-const LIBRARIAN_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/grants.json");
-const LIBRARIAN_PROGRAM: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/program.md");
-const LIBRARIAN_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/budget.json");
-const RUNNER_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/runner/grants.json");
-const RUNNER_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/runner/budget.json");
+const LIBRARIAN_GRANTS: &str = include_str!("../templates/hermes/librarian/grants.json");
+const LIBRARIAN_PROGRAM: &str = include_str!("../templates/hermes/librarian/program.md");
+const LIBRARIAN_BUDGET: &str = include_str!("../templates/hermes/librarian/budget.json");
+const RUNNER_GRANTS: &str = include_str!("../templates/hermes/runner/grants.json");
+const RUNNER_BUDGET: &str = include_str!("../templates/hermes/runner/budget.json");
 
 /// Legacy operator record, used only when no resident registry is advertised.
 /// Current selection is scoped to the actual source room cell.

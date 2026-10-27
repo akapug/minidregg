@@ -7,8 +7,8 @@ usage (from the repository root):
   scripts/gen-joblaw.py --check   exit 1 if law.job.json or law.job.shell is not law.job's
                                   rendering, or §2 differs from what the JSON generates
 
-Source: deploy/shell/templates/job/law.job (the grammar; clause numbers in its `-- N` comments),
-rendered by deploy/shell/templates/mud/render.py to law.job.json (an `all` of clauses 0..N).
+Source: native/resource-client/templates/job/law.job (the grammar; clause numbers in its `-- N` comments),
+rendered by native/resource-client/templates/mud/render.py to law.job.json (an `all` of clauses 0..N).
 A value placeholder `{X}` becomes `p.X` (`{PROGRAM}`, a Nat, becomes `(p.PROGRAM : Int)` in a value
 position and `.ran p.PROGRAM` in K-RAN's atom); negative literals are parenthesised; nothing is
 re-sorted, dropped or simplified.
@@ -19,7 +19,7 @@ to law.job.json.
 Changing the law without re-running this script leaves the theorems about a different law."""
 import json, os, re, subprocess, sys, tempfile
 
-T = "deploy/shell/templates/job"
+T = "native/resource-client/templates/job"
 F = "Kernel/Job.lean"
 PH = re.compile(r"\{([A-Z_0-9]+)\}")
 
@@ -115,7 +115,7 @@ def rendered_json():
     with tempfile.TemporaryDirectory() as d:
         for f in ("fields.json", "law.job"):
             open(os.path.join(d, f), "w").write(open(os.path.join(T, f)).read())
-        subprocess.run([sys.executable, "deploy/shell/templates/mud/render.py", d, "law.job"],
+        subprocess.run([sys.executable, "native/resource-client/templates/mud/render.py", d, "law.job"],
                        check=True, stdout=subprocess.DEVNULL)
         return open(os.path.join(d, "law.job.json")).read()
 

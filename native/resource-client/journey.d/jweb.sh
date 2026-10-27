@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# journey.d/jweb.sh — WEB-ENTRANCE + WEB-2: `mini web`, the read-only loopback
-# hypertext face, on the docuverse braid. Runs after K12C (paper, notes, an
+# journey.d/jweb.sh — WEB-ENTRANCE + WEB-2: `mini web`, the loopback hypertext
+# face (reads, plus the document editor and creation POST forms the member
+# server serves; this journey drives the reads), its `--read-only` face and its
+# `--render-static` snapshot (WEB-SPK-PUBLIC §7 W1, W2), on the docuverse braid. Runs after K12C (paper, notes, an
 # annotation; carol and dave), K12M (mpaper, marked), K12T (wall, page with
 # three transclusions; the readers tdave and the late joiner tlate) and K12H
 # (hist, six edits, the third key granted after h2).
@@ -49,6 +51,13 @@
 #   board-fields             A's /board/wide (K4's) or /board/shared         -> fields >= 1
 #   room-children            A's /room/wlab lists wnote                      -> wnote
 #   room-members             A's /room/wlab members (the `who` view)         -> A present
+#   ro-post-refused          --read-only: POST /TOKEN/doc/paper/edit/ID (a valid form) -> 405 read-only refusal
+#   ro-draft-refused         --read-only: GET /TOKEN/doc/paper/edit           -> 403 read-only refusal
+#   ro-no-custody            reads and web-edits sessions the two refusals made -> 0:0
+#   ro-doc-no-edit-link      --read-only: /doc/paper renders, no edit link     -> 200:0
+#   static-equals-live       --render-static: current/doc/paper's <article> = C's live page's -> equal
+#   static-deterministic     a second render over the same Store              -> same snapshot name
+#   static-links-under-origin every href on the static paper page under --public-origin; no path secret -> 0:0
 #   lynx-dump                lynx -dump of C's /doc/paper (if lynx exists)   -> text
 # Exit 0 = every row as expected. Last stdout line = the rows file.
 set -uo pipefail
@@ -92,8 +101,8 @@ same_html() { # PAGE SHOW-RUN -> equal | differs (the page's document vs `doc sh
 }
 show_elements() { jq -r '[.lines[].element] | join(" ")' "$D/$1.out"; }
 
-start() { # NAME WS -> sets URL_<NAME> and PORT_<NAME>
-  "$MINI" web --dir "$2" --listen 127.0.0.1:0 >"$D/web-$1.out" 2>"$D/web-$1.err" &
+start() { # NAME WS [FLAGS...] -> sets URL_<NAME> and PORT_<NAME>
+  "$MINI" web --dir "$2" --listen 127.0.0.1:0 "${@:3}" >"$D/web-$1.out" 2>"$D/web-$1.err" &
   PIDS+=($!)
   local i url
   for i in $(seq 1 100); do
@@ -236,6 +245,29 @@ code=$(get a-room.html "${URL_A}room/wlab")
 row room-children "200:wnote" "$code:$(grep -o 'data-child="[a-z0-9-]*"' "$D/pages/a-room.html" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//')" "born --in wlab"
 row room-members present "$(grep -q "data-member=\"$A_SUBJECT\"" "$D/pages/a-room.html" && echo present || echo absent)" "$(grep -o 'data-members="[0-9]*"' "$D/pages/a-room.html") $(grep -o 'data-members-refused>[^<]*' "$D/pages/a-room.html")"
 
+# --read-only (W1): every POST and every custody-opening route refuses before
+# any read or custody write; reads still render, without the edit link.
+start CRO "$CW" --read-only
+before=$(signed_reads "$CW"); edits=$(find "$CW/web-edits" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
+code=$(get ro-post.html "${URL_CRO}doc/paper/edit/0123456789abcdef0123456789abcdef" -X POST \
+  -H "Origin: http://127.0.0.1:$PORT_CRO" -H 'Content-Type: application/x-www-form-urlencoded' --data text=x)
+row ro-post-refused "405:read-only" "$code:$(grep -q -- '--read-only' "$D/pages/ro-post.html" && echo read-only || echo other)" "$(grep -o 'this mini web runs[^<]*' "$D/pages/ro-post.html" | head -1 | cut -c1-80)"
+code=$(get ro-edit.html "${URL_CRO}doc/paper/edit")
+row ro-draft-refused "403:read-only" "$code:$(grep -q -- '--read-only' "$D/pages/ro-edit.html" && echo read-only || echo other)" "a draft-opening GET"
+row ro-no-custody "0:0" "$(( $(signed_reads "$CW") - before )):$(( $(find "$CW/web-edits" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l) - edits ))" "signed reads : web-edits sessions"
+code=$(get ro-paper.html "${URL_CRO}doc/paper")
+row ro-doc-no-edit-link "200:0" "$code:$(grep -c '/edit"' "$D/pages/ro-paper.html")" "read-only document page"
+
+# --render-static (W2): the same pages as files, under the public origin.
+run static "$MINI" web --dir "$CW" --read-only --render-static "$D/static" --public-origin https://demo.dregg.online
+cp "$D/static/current/doc/paper/index.html" "$D/pages/static-paper.html" 2>/dev/null || : >"$D/pages/static-paper.html"
+article c-paper.html >"$D/c-paper.article"
+row static-equals-live "equal" "$(article static-paper.html | cmp -s - "$D/c-paper.article" && [ -s "$D/c-paper.article" ] && echo equal || echo differs)" "$(tail -1 "$D/static.err" | cut -c1-140)"
+run static-again "$MINI" web --dir "$CW" --read-only --render-static "$D/static" --public-origin https://demo.dregg.online
+row static-deterministic same "$( [ "$(tail -1 "$D/static.out")" = "$(tail -1 "$D/static-again.out")" ] && [ -n "$(tail -1 "$D/static.out")" ] && echo same || echo different)" "$(tail -1 "$D/static.out")"
+token=${URL_C#http://127.0.0.1:*/}; token=${token%/}
+row static-links-under-origin "0:0" "$(grep -o 'href="[^"]*"' "$D/pages/static-paper.html" | grep -vc '^href="https://demo\.dregg\.online/'):$(grep -c "$token" "$D/pages/static-paper.html")" "hrefs outside the origin : path secrets"
+
 if command -v lynx >/dev/null; then
   lynx -dump "${URL_C}doc/paper" >"$D/pages/c-paper.lynx.txt" 2>&1
   row lynx-dump text "$(grep -q 'the first line' "$D/pages/c-paper.lynx.txt" && echo text || echo none)" "lynx -dump"
@@ -247,5 +279,5 @@ cleanup; PIDS=()
 cat "$rows" >&2
 total=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad of $total web rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$total/$total web rows as expected: loopback-only, no write route, foreign Host/Origin refused before any read; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
+echo "$total/$total web rows as expected: loopback-only, foreign Host/Origin refused before any read; --read-only refuses every write and custody route; the static snapshot equals the live page; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
 echo "$rows"

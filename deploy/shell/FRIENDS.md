@@ -422,7 +422,7 @@ room key is wrapped to an X25519 + ML-KEM-768 pair; the signatures that vouch fo
 not). if you are the founder and rotate your signing key, run `room transition` first (it hands the
 room to your next key; members need no re-pin) -- `rotate-key` refuses until you do. a private room is
 never mirrored to Discord. again: devnet quality; privacy not audited. details:
-`deploy/shell/templates/room/private/README.md` and `docs/PRIVATE-ROOMS-DESIGN.txt`.
+`native/resource-client/templates/room/private/README.md` and `docs/PRIVATE-ROOMS-DESIGN.txt`.
 
 what can you do here? ask before you try (main only):
 ```

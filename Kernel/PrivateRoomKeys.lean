@@ -68,7 +68,7 @@ client invariant; `future_unreadable` is IND-CPA of the primitives. Both are
 said in PRIVACY §3.1; neither is dressed as a theorem.
 
 The deployed law is the JSON template
-`deploy/shell/templates/room/private/law.keys.json` (the client installs that
+`native/resource-client/templates/room/private/law.keys.json` (the client installs that
 file, with `@FOUNDER` replaced, through `include_str!`). The Host parses it to
 the `Pred` below; this file states what that `Pred` decides.
 -/

@@ -32,7 +32,7 @@ and the well; they sum to zero (`escrow_conserved`), so
 retired credit having gone into the well.
 
 The job cell's FIELDS and its law are C1 JOB-LAW's (`Kernel/Job.lean`,
-`deploy/shell/templates/job/fields.json`: escrow 8, provider 9, providerAcct
+`native/resource-client/templates/job/fields.json`: escrow 8, provider 9, providerAcct
 10, bond 11).  That law gates every money move on `Job.moneySlot`, which only
 this receiver projects (clause 44, `Job.money_frozen_without_slot`); the
 receiver accepts a job only when its installed law IS the job law at some
@@ -59,7 +59,7 @@ open Minidregg.Pred
 
 set_option autoImplicit false
 
-/-! ## The job cell's money fields (C1 JOB-LAW's `deploy/shell/templates/job/fields.json`) -/
+/-! ## The job cell's money fields (C1 JOB-LAW's `native/resource-client/templates/job/fields.json`) -/
 
 /-- `state`: 0 open · 1 claimed · 2 answered · 3 upheld · 4 slashed · 5 void · 6 closed. -/
 def stateField : Nat := 0

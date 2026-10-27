@@ -1,0 +1,15 @@
+# Re-render the public docuverse snapshot. OnUnitInactiveSec counts from the end
+# of the previous render, so renders never overlap and a slow render stretches
+# the period instead of queueing. Set the period to at least twice the measured
+# render time (deploy/web/README.md); a revoke leaves the snapshot within one
+# period plus one render, which the static pages say.
+[Unit]
+Description=Mini public docuverse: periodic snapshot
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

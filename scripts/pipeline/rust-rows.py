@@ -35,8 +35,8 @@ def balanced(text, i):
     return len(text)
 def embedded(crate):
     """Repo-relative files (a trailing / names a directory) a crate's sources include_str!/include_bytes!,
-    including files outside native/ (deploy/shell/templates/..., Kernel/*.lean) and in-crate files outside
-    src/ (journey.d/*.golden.txt). A change to one is a change to the crate's tests; a selector that looks
+    including files outside native/ (Kernel/*.lean) and in-crate files outside src/ (journey.d/*.golden.txt,
+    templates/...). A change to one is a change to the crate's tests; a selector that looks
     only under native/<crate>/src would never run the rows that read it."""
     out, cdir = set(), os.path.join(native, crate)
     for dirpath, dirnames, filenames in os.walk(cdir):
