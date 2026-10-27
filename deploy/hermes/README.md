@@ -382,9 +382,9 @@ rows, to append to `/etc/mini/providers.json`'s `providers` as they are
 ```json
 {"name":"zai-glm","kind":"openai-compatible","credential":"pool",
  "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
- "models":["glm-5.3","glm-5.3-flash"],
- "caps":{"perCall":"4096","perDay":"140","ceilingMicroUsd":"70000","callMicroUsd":"500",
-         "memberDayMicroUsd":"10000","memberTotalMicroUsd":"35000"}},
+ "models":["glm-5.3-flash"],
+ "caps":{"perCall":"4096","perDay":"160","ceilingMicroUsd":"70000","callMicroUsd":"150",
+         "memberDayMicroUsd":"3000","memberTotalMicroUsd":"35000"}},
 {"name":"zai-byok","kind":"openai-compatible","credential":"user",
  "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
  "models":["glm-5.3","glm-5.3-flash"]}
@@ -396,14 +396,19 @@ sees). Egress: the broker account to `api.z.ai:443` only.
 
 **Caps, from the plan's quota.** The plan reports (`GET
 /api/monitor/usage/quota/limit`) 28000 credits per 5 hours and 140000 per week
-(level max). Measured: ~50 credits for a 75-token call, ~128 for a 4.4K-token
-call, so a Hermes model call (≤16000 in, ≤4096 out) is at most ~500. On this
-row the broker's spend units are those credits: `callMicroUsd` 500 (worst
-case), `ceilingMicroUsd` 70000 (half the week, the other half stays ember's;
-`mini-keys pool --action spend-reset --provider zai-glm` at each weekly
-reset), `perDay` 140 calls (70000 / 500, per runner: the GLM resident), and
-per subscriber 10000 a day (20 calls, about five asks) and 35000 in all (half
-the ceiling) until the weekly reset. A subscriber past either gets
+(level max). The house resident runs `glm-5.3-flash` (ember's ruling: the
+flash tier spends the plan more slowly). Measured on flash, 2026-10-27, five
+uncached Hermes-sized calls (8823 prompt tokens, 400 output) per batch: 24 and
+51 credits a call in two batches (the quota counter lags and the account is
+shared, so the higher figure is kept as typical); a call at the row's bounds
+(16000 in, 4096 out) is taken as at most 150. On this row the broker's spend
+units are those credits: `callMicroUsd` 150 (worst case), `ceilingMicroUsd`
+70000 (half the week, the other half stays ember's; `mini-keys pool --action
+spend-reset --provider zai-glm` at each weekly reset), `perDay` 160 calls
+(about a third of 70000 / 150, per runner: the GLM resident, so the week's
+share lasts at least three days), and per subscriber 3000 a day (20
+worst-case calls, about five asks) and 35000 in all (half the ceiling) until
+the weekly reset. A subscriber past either gets
 `member-day-ceiling` / `member-total-ceiling` by name. The plan's three
 one-time resets (valid to 2026-12-22) raise the week when used; they change
 the ceiling, not the code.
@@ -413,7 +418,7 @@ subscribers week`); the concierge delegates `member` under the room with
 `notAfter = height + 43200` (30 days at one tick a minute; renewing extends),
 refunds anything it does not honour, and the kernel ends the window. The GLM
 resident's purse pays 1 credit a call on either route (the tariff in
-`demo/provider-services.json`, purse 9871003: no token metering, because the
+`demo/provider-services.json`, purse 9871003, glm-5.3-flash: no token metering, because the
 plan is flat); the room's `hermes/turn` and the summon budget are the
 founder's, funded from the till. ember's plan pays Z.AI. A member's own Z.AI
 plan key goes on `zai-byok` exactly as any friend key (`mini key --action
@@ -422,7 +427,7 @@ set`, `--action grant` to their own grain's runner).
 **Install** (after the `hermes` resident; Store genesis carries both purse
 tariffs):
 
-    INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+    INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
       HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
 
 `concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).

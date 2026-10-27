@@ -43,7 +43,7 @@
 #                    directory (DIR/SUBJECT) that receives each window's join reference
 #
 #   The subscriber tier (deploy/hermes/README.md "The subscriber tier"):
-#     INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+#     INSTANCE=glm BASE=9871000 MODEL=glm-5.3-flash ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
 #       HERMES_ROOT=OUT install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
 set -euo pipefail
 SVC=${SVC:-mini-core}
@@ -52,7 +52,10 @@ SVC=${SVC:-mini-core}
 CAND=${CAND:-$(readlink -f /var/lib/mini/candidate/current)}
 NODE=${NODE:-/var/lib/mini/store/node}
 ROOM=${ROOM:-hermes-lab} BUDGET=${BUDGET:-1000} PRICE=${PRICE:-10} FOUNDER_FUNDING=${FOUNDER_FUNDING:-5000}
-INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000} MODEL=${MODEL:-meta-llama/llama-3.1-8b-instruct}
+INSTANCE=${INSTANCE:-hermes} BASE=${BASE:-9870000}
+# The house resident on the OpenRouter pool runs llama-3.1-8b; the subscriber
+# tier's (INSTANCE=glm) runs glm-5.3-flash on the coding plan.
+case $INSTANCE in glm) MODEL=${MODEL:-glm-5.3-flash} ;; *) MODEL=${MODEL:-meta-llama/llama-3.1-8b-instruct} ;; esac
 case $INSTANCE in *[!a-z0-9]*|'') echo "install-hermes: INSTANCE must be lowercase letters and digits" >&2; exit 64 ;; esac
 case $BASE in *[!0-9]*|'') echo "install-hermes: BASE must be a decimal" >&2; exit 64 ;; esac
 TIER=${TIER:-} WEEK=${WEEK:-4000} PERIOD=${PERIOD:-43200}
@@ -282,7 +285,7 @@ step_summon() {
   sed -n 's/.*hand-off in //p' "$RECORD/summon.out" | tail -1 | as_svc tee "$RECORD/outbox" >/dev/null
   [ -s "$(cat "$RECORD/outbox")/handoff.json" ] || die "summon left no sealed hand-off"
   # The room names Hermes's provider purse (the page shows its route by that
-  # purse's tariff model: meta-llama/... for hermes-lab, glm-5.3 for subscribers).
+  # purse's tariff model: meta-llama/... for hermes-lab, glm-5.3-flash for subscribers).
   sh_line founder "tariff $ROOM set hermes/provider $PURSE_T" >/dev/null
   mark summon
 }
