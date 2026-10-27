@@ -33,7 +33,8 @@ MINI=$BIN/mini
 WR=$RUN/store/base/workroom
 GENESIS=$WR/genesis.json
 [[ -f $GENESIS && -f $WR/tool.key && -f $WR/member.key ]] || { echo "the world's workroom lacks genesis.json, tool.key or member.key" >&2; exit 1; }
-mini() { "$MINI" --socket "$PSOCK" "$@"; }
+# `--socket` is a client option after the command (never before it).
+mini() { local command=$1; shift; "$MINI" "$command" --socket "$PSOCK" "$@"; }
 
 # ---- two workspaces over the workroom's own keys ----------------------------------------------
 context() { # SUBJECT FACTORY-CAP ACCOUNT-CAP -> file
