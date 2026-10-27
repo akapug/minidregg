@@ -85,6 +85,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "submit", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "lookup", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "retry", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "attempt", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "publish", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "revoke", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
     Verb { name: "renounce", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
@@ -1612,6 +1613,10 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let p = crate::shell_grammar::parse(&crate::shell_grammar::LOOKUP, &w)?;
             client("workspace", vec![flag("action", "recover"), flag("dir", ws()), flag("attempt", ws().join("attempts").join(p.arg(0)))])
         }
+        "attempt" => {
+            let p = crate::shell_grammar::parse(&crate::shell_grammar::ATTEMPT, &w)?;
+            client("attempt-state", vec![flag("attempt", ws().join("attempts").join(p.arg(0)))])
+        }
         "retry" => {
             let p = crate::shell_grammar::parse(&crate::shell_grammar::RETRY, &w)?;
             client("retry", vec![flag("attempt", ws().join("attempts").join(p.arg(0))), flag("mode", "submit")])
@@ -2267,7 +2272,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("ask" | "dismiss" | "summon", 1) => refs(),
         ("home" | "read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
-        ("lookup" | "retry", 1) => attempts(),
+        ("lookup" | "retry" | "attempt", 1) => attempts(),
         ("history", 1) => vec!["all".into()],
         ("pay", 1) => ["address", "status", "audit"].map(String::from).to_vec(),
         ("pay", 2) if w[1] != "audit" => refs(),

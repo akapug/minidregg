@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod attempt_state;
 mod bounds;
 mod fsio;
 pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
@@ -826,6 +827,7 @@ usage:
     --workspace takes the Host, config, key and socket from the workspace: the challenge and the query
     are answered by its serving session (ops 4/5), not by two cold Host opens of the Store.
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
+  mini attempt-state --attempt ATTEMPT [--file outcome.json|retry-NNNN.json] [--json]   (local: the retained state, repaired from seal.record)
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
   mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
@@ -927,7 +929,7 @@ impl Args {
             // The valueless switches: opting out of pre-rotation is a
             // deliberate act and reads as one; `web --body` / `--anonymous` name a face; `apps --json` a shape.
             if rendered == "--no-prerotation" || command == OsStr::new("web") && matches!(rendered.as_ref(), "--body" | "--anonymous")
-                || command == OsStr::new("apps") && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
+                || matches!(command.to_str(), Some("apps" | "attempt-state")) && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }
@@ -3528,6 +3530,14 @@ fn run(mut args: Args) -> Result<()> {
             };
             args.finish()?;
             objective_invoke::submit(&host, &config, &request, &intent_nonce, &key, &directory, prepare_only)
+        }
+        "attempt-state" => {
+            let directory = path(args.required("attempt")?);
+            let file = args.optional("file").map(|f| f.into_string().map_err(|_| "--file must be UTF-8".to_owned())).transpose()?;
+            // `--json` (valueless) is the only rendering; accepted so callers can say what they read.
+            let _ = args.optional("json");
+            args.finish()?;
+            attempt_state::run(&directory, file.as_deref())
         }
         "retry" => {
             let directory = path(args.required("attempt")?);
