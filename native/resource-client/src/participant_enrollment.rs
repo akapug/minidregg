@@ -523,7 +523,7 @@ pub(crate) fn signed_factory_observation(
         &input.directory.join("query.bin"),
     )?;
     let query_bytes = crate::client_consent::intent(input.host, input.config,
-        &input.directory.join("query.bin"), signing)?;
+        &input.directory.join("query.bin"), signing.verifying_key().as_bytes())?;
     let observation = input.directory.join("observation");
     match fs::DirBuilder::new().mode(0o700).create(&observation) {
         Ok(()) => (),
@@ -560,7 +560,7 @@ pub(crate) fn signed_factory_observation(
     )?;
     let headers = crate::client_consent::observation(input.host, input.config,
         &input.directory.join("query.bin"), &intent_signature_path,
-        &observation.join("challenge.bin"), signing)?;
+        &observation.join("challenge.bin"), signing.verifying_key().as_bytes())?;
     if headers.is_empty() {
         return Err("factory observation has no signing header".into());
     }

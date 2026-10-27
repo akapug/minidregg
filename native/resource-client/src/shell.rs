@@ -95,11 +95,10 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
-    Verb { name: "channel", usage: "channel say ROOM @NAME TEXT... | channel tail ROOM | channel status ROOM", operation: "mini channel say|tail|status ROOM [@NAME TEXT] --home HOME/channels (the member loop, `mini channel join`, is its own long-running process)" },
-    Verb { name: "pay", usage: "pay ROOM week|N [--account REF] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
+    Verb { name: "pay", usage: "pay ROOM week|N [--account REF] [again] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
     Verb { name: "credit", usage: "credit [ACCOUNT-REF]", operation: "mini credit --action balance (a signed read of my account)" },
     Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period|open N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
-    Verb { name: "topup", usage: "topup ROOM N [hermes|concierge] [--account REF]", operation: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
+    Verb { name: "topup", usage: "topup ROOM N [hermes|concierge] [--account REF] [again]", operation: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
@@ -1742,24 +1741,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 _ => return Err(u.to_owned()),
             }
         }
-        "channel" => {
-            if w.len() < 3 {
-                return Err(u.to_owned());
-            }
-            workspace_name(&w[2], "room name")?;
-            let mut flags = vec![flag("action", w[1].clone()), flag("room", w[2].clone()), flag("home", session.home.join("channels"))];
-            match w[1].as_str() {
-                "say" if w.len() >= 5 && w[3].starts_with('@') => {
-                    flags.push(flag("to", w[3].clone()));
-                    flags.push(flag("text", w[4..].join(" ")));
-                }
-                "tail" | "status" if w.len() == 3 => {}
-                _ => return Err(u.to_owned()),
-            }
-            client("channel", flags)
-        }
         "pay" if w.get(1).is_some_and(|word| !matches!(word.as_str(), "address" | "status" | "audit")) => {
-            // `pay ROOM week|N [--account REF]` (P-CREDIT).
+            // `pay ROOM week|N [--account REF] [again]` (P-CREDIT). A rerun of the same payment
+            // recovers its record; `again` is the member's decision to pay once more.
+            let again = w.last().is_some_and(|word| word == "again") && w.len() > 3;
+            let w: Vec<String> = if again { w[..w.len() - 1].to_vec() } else { w.to_vec() };
             if !(w.len() == 3 || w.len() == 5) {
                 return Err(u.to_owned());
             }
@@ -1783,6 +1769,9 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 workspace_name(&w[4], "account reference")?;
                 flags.push(flag("account", w[4].clone()));
+            }
+            if again {
+                flags.push(flag("again", "true"));
             }
             client("credit", flags)
         }
@@ -1831,6 +1820,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         i += 1;
                     }
                     whose @ ("hermes" | "concierge") => flags.push(flag("to", whose)),
+                    "again" => flags.push(flag("again", "true")),
                     _ => return Err(u.to_owned()),
                 }
                 i += 1;
@@ -2405,6 +2395,9 @@ fn hex_text(value: Option<&Value>) -> String {
 }
 
 fn outcome_line(outcome: &Value) -> (i32, String) {
+    if let Some(line) = super::charged_line(outcome) {
+        return (EXIT_REFUSED, line);
+    }
     match outcome.get("type").and_then(Value::as_str) {
         Some("refused") => (
             EXIT_REFUSED,
@@ -2449,22 +2442,45 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
                     text.push_str(&format!("  outcome: {outcome}\n"));
                     code
                 }
+                // The class is the DECODED outcome's, never the reply byte's: Lean answers 255
+                // for `unavailable` and thrown handlers too (`HostDecision::is_refusal`), and an
+                // undecoded frame decides nothing. Only a decoded `refused` exits 3.
                 HostDecision::RefusedFrame { command, byte, encoded, .. } => {
-                    match decoded {
-                        Some(Ok(outcome)) => {
-                            let (_, line) = outcome_line(outcome);
-                            text.push_str(&format!("{line} (Host refused {command}, reply byte {byte})\n"));
-                            text.push_str(&format!("  outcome (decoded by the Host): {outcome}\n"));
+                    let code = match decoded {
+                        // 254 is the socket's, judged before the Host write: certainly never sent.
+                        _ if *byte == super::host_operations_never_forwarded() => {
+                            text.push_str(&format!(
+                                "refused: not sent: {command} was never forwarded to the Host (reply byte {byte}); nothing happened\n"
+                            ));
+                            EXIT_REFUSED
                         }
-                        Some(Err(why)) => text.push_str(&format!(
-                            "refused: Host refused {command}, reply byte {byte}; the Host could not decode the frame: {why}\n"
-                        )),
-                        None => text.push_str(&format!(
-                            "refused: Host refused {command}, reply byte {byte}\n"
-                        )),
-                    }
+                        Some(Ok(outcome)) => {
+                            let (code, line) = outcome_line(outcome);
+                            if code == EXIT_REFUSED {
+                                text.push_str(&format!("{line} (Host refused {command}, reply byte {byte})\n"));
+                            } else {
+                                text.push_str(&format!("{line} (Host answered {command} with reply byte {byte})\n"));
+                            }
+                            text.push_str(&format!("  outcome (decoded by the Host): {outcome}\n"));
+                            code
+                        }
+                        Some(Err(why)) => {
+                            text.push_str(&format!(
+                                "undecided: Host answered {command} with reply byte {byte} and could not decode the frame: {why}; \
+                                 the attempt is retained, `lookup ID` asks again\n"
+                            ));
+                            EXIT_UNDECIDED
+                        }
+                        None => {
+                            text.push_str(&format!(
+                                "undecided: Host answered {command} with reply byte {byte}, undecoded; \
+                                 the attempt is retained, `lookup ID` asks again\n"
+                            ));
+                            EXIT_UNDECIDED
+                        }
+                    };
                     text.push_str(&format!("  encoded: {}\n", super::hex(encoded)));
-                    EXIT_REFUSED
+                    code
                 }
             };
             if let Some(path) = evidence {
@@ -3719,7 +3735,8 @@ mod tests {
     }
 
     #[test]
-    fn undecodable_refusal_is_still_a_refusal_with_its_bytes() {
+    fn a_frame_is_classified_by_its_decoding_never_by_its_byte() {
+        // 254: the socket refused before forwarding; certainly nothing happened.
         let ending = Ending::Host {
             client: "enrollment Host refused op87; exact frame retained".into(),
             decision: HostDecision::RefusedFrame { command: "enrollment op87".into(), byte: 254, encoded: vec![1], decoded: None },
@@ -3728,8 +3745,22 @@ mod tests {
         };
         let (code, text) = render(&ending);
         assert_eq!(code, EXIT_REFUSED);
-        assert!(text.starts_with("refused: Host refused enrollment op87, reply byte 254; the Host could not decode the frame: bad frame\n"));
+        assert!(text.starts_with("refused: not sent: enrollment op87 was never forwarded to the Host (reply byte 254)"), "{text}");
         assert!(text.contains("  encoded: 01\n"));
+        // 255 the Host could not decode, or decoded as unavailable/uncertain: undecided, never "refused".
+        for decoded in [Some(Err("bad frame".to_owned())), None,
+            Some(Ok(json!({"type":"unavailable","detail":super::super::hex(b"host session reopening")}))),
+            Some(Ok(json!({"type":"uncertain"})))] {
+            let ending = Ending::Host {
+                client: "c".into(),
+                decision: HostDecision::RefusedFrame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None },
+                decoded,
+                evidence: None,
+            };
+            let (code, text) = render(&ending);
+            assert_eq!(code, EXIT_UNDECIDED, "{text}");
+            assert!(text.starts_with("undecided: "), "{text}");
+        }
     }
 
     #[test]

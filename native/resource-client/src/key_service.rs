@@ -294,7 +294,7 @@ mod tests {
         assert!(refusal_of(&json!({"type":"mini-member-provider-challenge-v1"})).is_none());
     }
 
-    // F_SETPIPE_SZ is Linux-only; without it the test cannot build elsewhere.
+    /// `F_SETPIPE_SZ` is Linux's; the deadline it measures is the Linux pipe buffer's.
     #[cfg(target_os = "linux")]
     #[test]
     fn partially_saturated_pipe_stalled_reader_obeys_deadline() {

@@ -68,8 +68,6 @@ mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
-#[path = "world_surface.rs"]
-pub(crate) mod world_surface;
 #[path = "world_prototype.rs"]
 mod world_prototype;
 
@@ -3655,6 +3653,7 @@ pub(crate) fn submit_intent(
         }
         return result;
     }
+    refuse_rerun(root, &source, kind)?;
     if crate::client_consent::thin_mode() {
         if kind != "intent" {
             return Err("thin consent signs retained invocation intents only; nothing signed".into());
@@ -3672,6 +3671,40 @@ pub(crate) fn submit_intent(
     )?;
     if !prepare_only {
         renounce_note(&source);
+    }
+    Ok(())
+}
+
+/// A second submission of an intent that an earlier attempt of this workspace already holds is
+/// refused unless that attempt is decided as refused or never sealed a call: the attempt is the
+/// intent's record, and a rerun after a lost reply must look up its exact call, not author a second
+/// one (review §5.2 P4). The retained copy (`intent.json`, or `intent-source.bin` for binary
+/// intents) identifies it, byte for byte.
+fn refuse_rerun(root: &Path, source: &Path, kind: &str) -> Result<()> {
+    let retained = if kind == "binary" { "intent-source.bin" } else { "intent.json" };
+    let bytes = fs::read(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?;
+    let Ok(entries) = fs::read_dir(root.join("attempts")) else { return Ok(()) };
+    for entry in entries.flatten() {
+        let attempt = entry.path();
+        let copy = attempt.join(retained);
+        if !fs::metadata(&copy).is_ok_and(|m| m.len() == bytes.len() as u64) || fs::read(&copy).ok().as_deref() != Some(bytes.as_slice()) {
+            continue;
+        }
+        if !attempt.join("call.bin").is_file() {
+            continue; // never sealed: nothing can have been submitted
+        }
+        let retry = format!("`mini retry --dir {} --mode lookup`", attempt.display());
+        match retained_attempt_outcome(&attempt)? {
+            AttemptOutcome::Refused => continue,
+            AttemptOutcome::Confirmed(_) => return Err(format!(
+                "this intent is already confirmed by attempt {}; it is not submitted again (its receipt: {retry})",
+                attempt.display())),
+            AttemptOutcome::Charged(_) => return Err(format!(
+                "this intent was admitted as a charged failure by attempt {}; it is not submitted again", attempt.display())),
+            AttemptOutcome::Pending => return Err(format!(
+                "undecided: attempt {} holds this intent's exact call and may have been admitted; nothing new is submitted: {retry}",
+                attempt.display())),
+        }
     }
     Ok(())
 }
@@ -4018,6 +4051,8 @@ pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
 /// Reading this status does not advance receipt-continuity custody.
 pub(crate) enum AttemptOutcome {
     Confirmed(Value),
+    /// Admitted with only its price posted (`disposition: charged`): terminal, not accepted.
+    Charged(Value),
     Refused,
     Pending,
 }
@@ -4026,6 +4061,7 @@ pub(crate) fn retained_attempt_outcome(attempt: &Path) -> Result<AttemptOutcome>
     // The rule and the reading of the retained files are the SDK's (`AttemptDir::standing`).
     Ok(match mini_sdk::store::AttemptDir(attempt.to_path_buf()).standing()? {
         mini_sdk::custody::Standing::Confirmed(value) => AttemptOutcome::Confirmed(value),
+        mini_sdk::custody::Standing::Charged(value) => AttemptOutcome::Charged(value),
         mini_sdk::custody::Standing::Refused => AttemptOutcome::Refused,
         mini_sdk::custody::Standing::Pending => AttemptOutcome::Pending,
     })
@@ -4045,6 +4081,10 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
             receipt_continuity::finish_attempt(continuity, &value, true)?;
             Ok(Some(value))
         }
+        // Not accepted, and never pending either: the call is decided and must not be resent.
+        AttemptOutcome::Charged(value) => Err(format!(
+            "the Host admitted this call as a charged failure: only its price was posted, nothing else was written (cause {})",
+            value.get("cause").unwrap_or(&Value::Null))),
         AttemptOutcome::Refused | AttemptOutcome::Pending => Ok(None),
     }
 }
