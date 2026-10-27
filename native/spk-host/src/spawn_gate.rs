@@ -419,6 +419,14 @@ impl BoundedChild {
     pub fn pid(&self) -> u32 {
         self.pid as u32
     }
+    /// The app's published tree, through the remote launch worker (the only
+    /// process with the app's identity outside the sandbox).
+    pub(crate) fn open_www(&mut self) -> io::Result<Option<std::os::fd::OwnedFd>> {
+        match &mut self.remote {
+            Some(client) if !self.reaped => client.open_www(self.pid as u32),
+            _ => Err(invalid("published tree needs the live remote launch worker")),
+        }
+    }
     pub fn kill_and_reap(&mut self) -> bool {
         if !self.reaped {
             self.reaped = if let Some(client)=&mut self.remote {client.kill_and_reap(self.pid as u32).unwrap_or(false)} else {kill_reap(self.pid)};

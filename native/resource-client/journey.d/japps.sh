@@ -182,7 +182,9 @@ if [ "$mode" = --box ]; then
     basis() { if "$BIN/spk-host" qualify --import-profile standard-v1 "$1" 2>/dev/null | jq -e '.signedSchema.roles | length > 0' >/dev/null; then echo '{"type":"role","id":"0"}'; else echo '{"type":"allAccess"}'; fi; }
     Q2=${JAPPS_QUALIFY_ROOT:-$HOME}/.mini-japps-basis.$$; mkdir -m 0700 "$Q2"
     cp "$W/state/quarantine/$SLIDES_PKG.spk" "$Q2/a.spk"; cp "$W/state/quarantine/$TODOS_PKG.spk" "$Q2/b.spk"
-    BASIS_A=$(basis "$Q2/a.spk"); BASIS_B=$(basis "$Q2/b.spk"); rm -rf "$Q2"
+    seed "$ETHERPAD_PKG"; bash "$FETCH" --state "$W/state" --mini "$MINI" fetch "$ETHERPAD_PKG" >/dev/null 2>&1
+    cp "$W/state/quarantine/$ETHERPAD_PKG.spk" "$Q2/c.spk"
+    BASIS_A=$(basis "$Q2/a.spk"); BASIS_B=$(basis "$Q2/b.spk"); BASIS_C=$(basis "$Q2/c.spk"); rm -rf "$Q2"
     phases="birth-a install-a share-a start-a enroll-a get-a birth-b install-b share-b start-b enroll-b get-b stop-a"
     [ -n "${WORLD_RUN:-}" ] || phases="store services workroom profile $phases"
     # shellcheck disable=SC2086
@@ -193,9 +195,34 @@ if [ "$mode" = --box ]; then
           >"$W/world.out" 2>"$W/world.err"; then ok=1; fi
     row "two market apps on a scratch world: install, share, start, enroll, GET, stop one (grain-journey.sh)" "$ok" "$(tail -1 "$W/world.err" | cut -c1-160)"
     if [ "$ok" = 1 ]; then
-      app_a=$(ls "$run"/evidence/a-app-author/source.json >/dev/null 2>&1 && echo 7101 || echo "")
-      exp=$("$BIN/spk-host" grain export "$(jq -er .profilePath "$run/evidence/profile-result.json")" "${app_a:-7101}" "$W/export-a" 2>&1); rc=$?
+      # The stopped app's id is the one grain-journey.sh's birth of app a bound (its retained source).
+      app_a=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/a-app-source.json" 2>/dev/null)
+      exp=$("$BIN/spk-host" grain export "$(jq -er .profilePath "$run/evidence/profile-result.json")" "${app_a:?no app a birth source in $run/evidence}" "$W/export-a" 2>&1); rc=$?
       row "export of the stopped app writes var.ext4, manifest.json and manifest.sig" "$([ "$rc" = 0 ] && [ -f "$W/export-a/manifest.sig" ] && echo 1 || echo 0)" "$(tail -1 <<<"$exp" | cut -c1-120)"
+      J="sh $REPO/scripts/spk-platform/grain-journey.sh phase $run"
+      jenv() { env BIN="$BIN" GRAINS_ROOT="$GRAINS_ROOT" BROKER_SOCKET="$BROKER_SOCKET" KIND_A=web KIND_B=web KIND_C=web \
+        GET_PATH_A=/ GET_PATH_B=/ GET_PATH_C=/p/main CLASS_A=S CLASS_B=S CLASS_C=M ROLE_BASIS_A="$BASIS_A" ROLE_BASIS_B="$BASIS_B" \
+        ROLE_BASIS_C="$BASIS_C" SPK_A="$W/state/quarantine/$SLIDES_PKG.spk" SPK_B="$W/state/quarantine/$TODOS_PKG.spk" \
+        SPK_C="$W/state/quarantine/$ETHERPAD_PKG.spk" "$@"; }
+      state=$(jq -er .stateRoot "$(jq -er .profilePath "$run/evidence/profile-result.json")")
+      # The tour's step 7: a second browser session on the running Simple Todos grain co-edits.
+      app_b=$(jq -er '.applicationGrainBirth.applicationBirth.application.app' "$run/evidence/b-app-source.json")
+      if jenv $J share-b2 enroll-b2 get-b2 >"$W/coedit-world.out" 2>"$W/coedit-world.err"; then
+        co=$(python3 "$REPO/scripts/spk-platform/ddp-coedit.py" "$state/apps/$app_b/routes/owner-web" "$state/apps/$app_b/routes/guest2-web" 2>&1 | tail -1)
+      else co="second session: $(tail -1 "$W/coedit-world.err")"; fi
+      row "a second browser session co-edits Simple Todos (B sees A's todo over DDP)" "$(jq -e .ok <<<"$co" >/dev/null 2>&1 && echo 1 || echo 0)" "$(cut -c1-160 <<<"$co")"
+      # The publishing origin: restart the stopped Hacker Slides grain and read its /var/www
+      # through the resident's www.sock (the socket the front reaches through the connector).
+      app_a_dir=$state/apps/$app_a
+      if jenv $J start-a >"$W/www-world.out" 2>"$W/www-world.err"; then
+        www=$(curl -sS --max-time 120 --unix-socket "$app_a_dir/www.sock" -H 'Host: grain.test' -o "$W/www-index.body" -D - http://grain.test/ 2>&1 | head -1 | tr -d '\r')
+        post=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -X POST -o /dev/null -w '%{http_code}' http://grain.test/ 2>&1)
+        esc=$(curl -sS --max-time 30 --unix-socket "$app_a_dir/www.sock" -o /dev/null -w '%{http_code}' --path-as-is 'http://grain.test/../g2/resident.json' 2>&1)
+      else www="start-a: $(tail -1 "$W/www-world.err")"; fi
+      row "the publishing socket serves Hacker Slides' /var/www (GET / 200, POST 405, an escape 404)" "$([ "${www:-}" = 'HTTP/1.1 200 OK' ] && [ "${post:-}" = 405 ] && [ "${esc:-}" = 404 ] && echo 1 || echo 0)" "${www:-none} post=${post:-} escape=${esc:-} $(head -c 60 "$W/www-index.body" 2>/dev/null | tr -d '\n')"
+      # A third market app, Etherpad (saveIdentityCaps): create, install, share, start, enrol, GET.
+      if jenv $J birth-c install-c share-c start-c enroll-c get-c >"$W/etherpad-world.out" 2>"$W/etherpad-world.err"; then ep=1; else ep=0; fi
+      row "Etherpad on the same world: create, install, share, start, enrol, its pad /p/main 200" "$ep" "$(tail -1 "$W/etherpad-world.err" | cut -c1-160)"
     fi
     [ -n "${WORLD_RUN:-}" ] || sh "$REPO/scripts/spk-platform/grain-journey.sh" stop-services "$run" >/dev/null 2>&1 || true
   else

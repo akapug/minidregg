@@ -76,7 +76,8 @@ joins afterwards, so the credential floor stays in the bootstrap's code.
 | Bounding, ambient and all five capability sets empty; real/effective/saved UID/GID exact; no_new_privs | `os::drop_to_identity` and `os::holds_exactly_identity` in both parent and worker. This is bootstrap code, because no bwrap flag reaches a joining process |
 | No unit-level ambient capabilities | `AmbientCapabilities=` in the rendered unit |
 | The operator parser cannot create or enter namespaces | the parser seccomp filter (unshare, setns, namespace clone flags, clone3) |
-| One launch over the private channel; no identity selector in packets | the bootstrap channel wire (`deny_unknown_fields`, bounded frames, tags 1/2/3) |
+| One launch over the private channel; no identity selector in packets | the bootstrap channel wire (`deny_unknown_fields`, bounded frames, tags 1/2/3/4, and 6 after the launch) |
+| The operator reads only what the app published | tag 6 carries no descriptor and no path: the worker opens `www` under the grain's own `/var` as the app (`O_DIRECTORY | O_NOFOLLOW`) and returns that one descriptor; the resident opens every file beneath it as the operator (`www_publish.rs`, `O_NOFOLLOW` per component), so the kernel admits only world-readable files and directories; nothing is written |
 | The app sandbox runs the same bwrap build | `ResidentBound::validate` (resident config `bwrapSha256` must equal the broker-rendered one) and the spawn gate's name/inode/SHA pin and its mode/ACL execute decision for the app identity |
 
 ## Source admission still selects the work

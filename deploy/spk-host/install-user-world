@@ -21,7 +21,7 @@ try:
                 m.st_mode & 0o7022 == 0 and 0 < m.st_size <= 98304):
             raise ValueError('controller setup companion custody refused')
         code = source.read(98305)
-    if hashlib.sha256(code).hexdigest() != '75484308600779c96b8f638896b49892e2824da8da9bfd99c42c9a0720425bab':
+    if hashlib.sha256(code).hexdigest() != '7b204ff91dfc65e8733e971934c0d0a29cbf0c9ac5d4fe0cd729c8b350492a1d':
         raise ValueError('controller setup companion code pin differs')
 except (OSError, ValueError) as error:
     sys.exit(str(error))
@@ -120,7 +120,13 @@ op_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
 
 # One fail-closed allocator checks every root registry and permanent controller
 # reservation while inheriting this exact held global lock (fd8).
-"$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count"
+# A START already taken by another world or a controller account moves to the next free
+# range of the delegation; the registry and the ROOT SETUP line carry the allocated one.
+allocation=$("$0" controller-check-app-allocation "$store" "$helper" "$op_uid" "$start" "$count")
+printf '%s\n' "$allocation"
+[[ $allocation =~ \"appRangeChecked\":\ \[([0-9]+),\ ([0-9]+)\] ]] || { echo 'app allocation reply malformed' >&2; exit 1; }
+(( BASH_REMATCH[2] - BASH_REMATCH[1] == count )) || { echo 'app allocation count differs' >&2; exit 1; }
+start=${BASH_REMATCH[1]}
 
 [[ -f $source_helper && ! -L $source_helper && -x $source_helper ]] || usage
 created_helper=0
