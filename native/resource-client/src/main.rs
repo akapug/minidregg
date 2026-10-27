@@ -744,6 +744,7 @@ usage:
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini web --dir WORKSPACE --listen 127.0.0.1:PORT [--read-only [--public-origin https://HOST]] [--home H]   (loopback hypertext over this workspace's signed reads; document edit/create POST forms unless --read-only)
   mini web --dir WORKSPACE --read-only --render-static OUT-DIR [--public-origin https://HOST] [--history-pages N]   (static snapshot of the pages this subject may observe; OUT-DIR/current)
+  mini --socket SOCKET web --body --listen-fd 3 --dir WORKSPACE --home HOME --host HOST --config CONFIG [--anonymous]   (the web front end's body: stage fragments and verb actions for the gateway, over the inherited listener; mini-web-spawn starts it as the member)
   mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
   mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
@@ -909,7 +910,7 @@ impl Args {
             }
             // The valueless switches: opting out of pre-rotation is a
             // deliberate act and reads as one; `web --read-only` names a face.
-            if rendered == "--no-prerotation" || command == OsStr::new("web") && rendered == "--read-only" {
+            if rendered == "--no-prerotation" || command == OsStr::new("web") && matches!(rendered.as_ref(), "--read-only" | "--body" | "--anonymous") {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }

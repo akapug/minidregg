@@ -34,6 +34,8 @@ mod world;
 mod studio;
 #[path = "web/search.rs"]
 mod search;
+#[path = "web/body.rs"]
+mod body;
 
 use crate::workspace;
 use crate::{absolute, hex, path, Args, Result};
@@ -87,8 +89,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             front: Front { origins: origin.iter().cloned().collect(), read_only: true },
             base: origin.unwrap_or_default(),
             face: Face::Static,
+            shell: None,
         };
         return render_static(&site, &absolute(&path(out))?, depth);
+    }
+    if args.optional("body").is_some() {
+        if read_only || origin.is_some() {
+            return Err("--body takes neither --read-only nor --public-origin: the gateway owns the origin; --anonymous is the public reader".into());
+        }
+        return body::run(args, root);
     }
     let listen = args
         .required("listen")?
@@ -126,6 +135,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         token,
         front,
         face: Face::Server,
+        shell: None,
     };
     println!(
         "mini web: workspace for subject {} at http://127.0.0.1:{}/{}/{}",
@@ -240,6 +250,8 @@ fn custody_route(parts: &[&str]) -> bool {
 enum Face {
     Server,
     Static,
+    /// `--body`: fragments for the web gateway (`web/body.rs`); links under `/`.
+    Body,
 }
 
 /// How many of a document's most recent history rows get their own `at` and
@@ -261,6 +273,8 @@ struct Site {
     /// public origin (or empty) for a static snapshot.
     base: String,
     face: Face,
+    /// The shell's paths, when this site runs verbs as the member (`--body`).
+    shell: Option<body::Shell>,
 }
 
 #[derive(Debug)]
@@ -714,6 +728,7 @@ impl Site {
         let links = nav(&self.base, self.face == Face::Server);
         match self.face {
             Face::Server => links,
+            Face::Body => String::new(),
             Face::Static => format!("{links}<p class=note data-snapshot>{SNAPSHOT_NOTE}</p>"),
         }
     }
@@ -951,7 +966,7 @@ impl Site {
                     escape(name),
                     render_fields(&entries, false),
                     match self.face {
-                        Face::Server => format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name)),
+                        Face::Server | Face::Body => format!(" (<a href=\"{base}/board/{}\">as a board</a>)", escape(name)),
                         Face::Static => String::new(),
                     }
                 ),
@@ -999,7 +1014,7 @@ impl Site {
             let n = escape(name);
             let edit = if self.front.read_only { String::new() } else { format!("<a href=\"{base}/doc/{n}/edit\">Edit and inspect</a> | ") };
             let inspect = match self.face {
-                Face::Server => format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>"),
+                Face::Server | Face::Body => format!(" | <a href=\"{base}/doc/{n}/inspect\">source and comments</a>"),
                 Face::Static => String::new(),
             };
             body.push_str(&format!("<p class=note>{edit}<a href=\"{base}/doc/{n}/history\">history</a>{inspect}</p>\n"));

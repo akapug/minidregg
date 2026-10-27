@@ -1,0 +1,182 @@
+//! The one page shell and the gateway's own partials. Everything about kernel state is rendered
+//! by the body and arrives as a stage fragment; this file is the chrome around it: the top bar,
+//! the rail of places, the footer with the world-readable sentence, and the few pages that are the
+//! gateway's own (login, terminals, sessions, refusals).
+
+use crate::http::html_escape as h;
+use crate::session::Who;
+
+pub const PLACES: &[(&str, &str, &str)] = &[
+    ("Documents", "/doc", "The documents you hold: pages, history, diffs, append and edit."),
+    ("Boards", "/board", "Tasks on columns: add, move, take."),
+    ("Rooms", "/room", "Members, streams as chat, residents."),
+    ("Apps", "/apps", "The app market: install, open a grain."),
+    ("Receipts", "/receipts", "Every attempt and its decoded outcome."),
+    ("Grants & laws", "/grants", "What your grants cover; delegate, revoke, install a law."),
+    ("Keys & sessions", "/keys", "Your hosted key, its status; your browser sessions."),
+    ("Terminal", "/term", "mini shell, in the page."),
+];
+
+pub const WORLD_READABLE: &str = "Everything on this box is world-readable: every member can read the whole demo Store, and a hosted account's signing key lives on the box. Keep nothing private or precious here.";
+
+/// The whole document around a stage fragment.
+pub fn page(title: &str, who: Option<&Who>, path: &str, stage: &str, shutdown: &str) -> String {
+    let xterm = if stage.contains("data-ws=") {
+        "<link rel=\"stylesheet\" href=\"/assets/vendor/xterm.css\">\n<script defer src=\"/assets/vendor/xterm.js\"></script>\n<script defer src=\"/assets/vendor/addon-fit.js\"></script>\n"
+    } else {
+        ""
+    };
+    let mut rail = String::new();
+    for (label, href, hint) in PLACES {
+        let current = if path == *href || path.starts_with(&format!("{href}/")) { " aria-current=\"page\"" } else { "" };
+        rail.push_str(&format!("<li><a href=\"{href}\" title=\"{}\" data-pane{current}>{label}</a></li>", h(hint)));
+    }
+    let identity = match who {
+        Some(who) => format!(
+            "<span class=\"me\" title=\"session {}\">{}</span>\
+             <form method=\"post\" action=\"/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{}\"><button class=\"quiet\">Log out</button></form>",
+            h(&who.prefix()),
+            h(&who.name),
+            h(&who.csrf)
+        ),
+        None => "<span class=\"me public\">public reader</span><a class=\"button\" href=\"/join\" data-full>Join</a>".to_owned(),
+    };
+    let shutdown_line = if shutdown.is_empty() { String::new() } else { format!(" This demo is torn down on {}; nothing you make here persists beyond it.", h(shutdown)) };
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title} · Mini</title>\n<link rel=\"stylesheet\" href=\"/assets/app.css\">\n{xterm}<script defer src=\"/assets/app.js\"></script>\n</head>\n\
+         <body data-path=\"{path}\">\n\
+         <header class=\"top\"><a class=\"brand\" href=\"/\" data-full>Mini</a>\
+         <form method=\"get\" action=\"/search\" class=\"search\" role=\"search\"><input type=\"search\" name=\"q\" placeholder=\"Search documents\" aria-label=\"Search documents\"></form>\
+         <div class=\"identity\">{identity}</div></header>\n\
+         <nav class=\"rail\" aria-label=\"Places\"><ul>{rail}</ul></nav>\n\
+         <main class=\"stage\" id=\"stage\"><section class=\"pane\" data-path=\"{path}\" data-title=\"{title}\"><h1 class=\"pane-title\">{title}</h1><div class=\"pane-body\">\n{stage}\n</div></section></main>\n\
+         <footer class=\"foot\"><p>{world}{shutdown_line}</p></footer>\n</body>\n</html>\n",
+        title = h(title),
+        path = h(path),
+        world = h(WORLD_READABLE),
+    )
+}
+
+/// The outcome partial the gateway uses for its own actions; the body renders the same shape for
+/// verbs (`admitted`, `refused`, `undecided`).
+pub fn outcome(class: &str, headline: &str, detail: &str, next: &[(&str, &str)]) -> String {
+    let mut links = String::new();
+    for (label, href) in next {
+        links.push_str(&format!("<a href=\"{}\" data-pane>{}</a> ", h(href), h(label)));
+    }
+    format!(
+        "<div class=\"outcome {class}\"><p class=\"headline\">{}</p>{}{}</div>",
+        h(headline),
+        if detail.is_empty() { String::new() } else { format!("<pre>{}</pre>", h(detail)) },
+        if links.is_empty() { String::new() } else { format!("<p class=\"next\">{links}</p>") }
+    )
+}
+
+pub fn refusal(headline: &str, detail: &str) -> String {
+    outcome("refused", headline, detail, &[])
+}
+
+pub fn login_confirm(code: &str) -> String {
+    format!(
+        "<p>This link opens a browser session for the account the door made for you. It works once.</p>\
+         <form method=\"post\" action=\"/login\"><input type=\"hidden\" name=\"code\" value=\"{}\"><button>Open my session</button></form>\
+         <p class=\"note\">Your session is a cookie that names your hosted account; it is never a key. Your signing key stays on the box, in your account's home. Log out from any page; see every session under Keys &amp; sessions.</p>",
+        h(code)
+    )
+}
+
+pub fn public_only(what: &str) -> String {
+    format!(
+        "<p>{} needs a session. The door at <a href=\"/join\" data-full>/join</a> makes you an account and gives you a one-time link that opens one here.</p>",
+        h(what)
+    )
+}
+
+pub fn term_index(terminals: &[(String, bool, bool)], csrf: &str) -> String {
+    let mut rows = String::new();
+    for (id, attached, exited) in terminals {
+        let state = match (attached, exited) { (_, true) => "ended", (true, _) => "attached", (false, _) => "waiting" };
+        rows.push_str(&format!(
+            "<tr><td><a href=\"/term/{id}\" data-pane>shell {}</a></td><td>{state}</td>\
+             <td><form method=\"post\" action=\"/term/{id}/close\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button class=\"quiet\">Close</button></form></td></tr>",
+            h(&id[..6])
+        ));
+    }
+    format!(
+        "<p><code>mini shell</code> as your account, in the page: the same shell <code>ssh -t</code> opens, with the same verbs, Tab completion and history.</p>\
+         <form method=\"post\" action=\"/term\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button>Open a terminal</button></form>\
+         {}",
+        if rows.is_empty() { String::new() } else { format!("<table><thead><tr><th>terminal</th><th>state</th><th></th></tr></thead><tbody>{rows}</tbody></table>") }
+    )
+}
+
+pub fn term_page(id: &str) -> String {
+    format!(
+        "<div class=\"term\" data-ws=\"/ws/term/{}\" tabindex=\"0\"><noscript><p>The terminal needs JavaScript. Without it, the same shell is <code>ssh -t</code> to your account.</p></noscript></div>",
+        h(id)
+    )
+}
+
+pub fn sessions_page(sessions: &[(String, u64, u64, bool)], csrf: &str) -> String {
+    let mut rows = String::new();
+    for (prefix, created, last, current) in sessions {
+        rows.push_str(&format!(
+            "<tr><td><code>{prefix}</code>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            if *current { " <em>this one</em>" } else { "" },
+            when(*created),
+            when(*last),
+            if *current {
+                format!("<form method=\"post\" action=\"/logout\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><button class=\"quiet\">Log out</button></form>")
+            } else {
+                format!("<form method=\"post\" action=\"/sessions/revoke\" class=\"inline\"><input type=\"hidden\" name=\"csrf\" value=\"{csrf}\"><input type=\"hidden\" name=\"prefix\" value=\"{prefix}\"><button class=\"quiet\">Revoke</button></form>")
+            }
+        ));
+    }
+    format!(
+        "<p>Every browser session of this account. A session ends after a day idle, a week at most, or when you revoke it; revoking ends its terminals and its rendering process.</p>\
+         <table><thead><tr><th>session</th><th>opened</th><th>last seen</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+}
+
+pub fn when(t: u64) -> String {
+    // Unix seconds as an ISO-like UTC stamp, without a clock library.
+    let days = t / 86400;
+    let secs = t % 86400;
+    let (y, m, d) = civil(days as i64);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}Z", secs / 3600, (secs % 3600) / 60)
+}
+
+fn civil(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_shell_carries_the_rail_identity_and_the_sentence() {
+        let who = Who { sid: "s".into(), name: "alice".into(), csrf: "c".into() };
+        let html = page("Documents", Some(&who), "/doc", "<p>x</p>", "11 November 2026");
+        assert!(html.contains("aria-current=\"page\">Documents"));
+        assert!(html.contains("alice"));
+        assert!(html.contains("name=\"csrf\" value=\"c\""));
+        assert!(html.contains(WORLD_READABLE.split(':').next().unwrap()));
+        assert!(html.contains("11 November 2026"));
+        assert!(!html.contains("xterm.js"), "xterm loads only with a terminal on the stage");
+        let anon = page("Mini", None, "/", &term_page("abc"), "");
+        assert!(anon.contains("public reader") && anon.contains("/join") && anon.contains("xterm.js"));
+        assert_eq!(when(0), "1970-01-01 00:00Z");
+        assert_eq!(when(1_761_600_000), "2025-10-27 21:20Z");
+    }
+}
