@@ -1745,30 +1745,6 @@ impl Journal {
         })
     }
 
-    /// Production stop path. The durable tombstone precedes the systemd stop;
-    /// a missing/mismatched unit or manager failure retains Fenced.
-    pub(crate) fn fence_and_stop_manager(&self) -> io::Result<()> {
-        self.fence_and_stop(
-            |unit| {
-                let record = self
-                    .read()?
-                    .ok_or_else(|| invalid("missing fenced record"))?;
-                // A prior stop may have succeeded just before the Stopped
-                // record fsync failed. Systemd then clears InvocationID. A
-                // complete exact post-stop audit permits this idempotent retry.
-                if UnitStopAudit::inspect(&record)
-                    .and_then(|audit| audit.prove(&record))
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-                UnitStopAudit::before_stop(&record)?;
-                self.stop_unit(unit)
-            },
-            UnitStopAudit::inspect,
-        )
-    }
-
     /// Source-bound STOP uses the exact retained running incarnation and a
     /// root volume recheck while holding the journal lock. Fenced is durable
     /// before systemd stop; a crash after the manager acts can only resume by
@@ -3243,18 +3219,6 @@ mod tests {
             .unwrap()
             .prove(&record)
             .unwrap();
-        // Simulate a crash after systemd stop but before Stopped fsync. The
-        // production retry must recognize the exact cleared manager/cgroup
-        // state and finish the durable tombstone without a second stop.
-        let path = Path::new("/run/user").join(unsafe { libc::geteuid() }.to_string()).join(format!("mini-spk-stop-audit-{}", std::process::id()));
-        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-        let journal = Journal::open(&path).unwrap();
-        journal
-            .with_lock(|this| this.write_unlocked(&record))
-            .unwrap();
-        journal.fence_and_stop_manager().unwrap();
-        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
-        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
