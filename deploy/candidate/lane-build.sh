@@ -74,10 +74,10 @@ case $step in
     printf '%s\n' "$src" >"$LANE_DIR/logs/rust-build.root"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
     python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
-    while read -r _ crate bin; do
+    while read -r _ crate bin features; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
       (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
-        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin" ${features:+--features "$features"}) </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
     done <"$LANE_DIR/logs/rust-roles.txt"
