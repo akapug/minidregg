@@ -68,8 +68,6 @@ mod lawsat;
 
 #[path = "world_kind.rs"]
 mod world_kind;
-#[path = "world_surface.rs"]
-pub(crate) mod world_surface;
 #[path = "world_prototype.rs"]
 mod world_prototype;
 

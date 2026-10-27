@@ -10,11 +10,11 @@ Objective Bend source language itself see
 
 - `Compiler/BendWorldSurface.lean` owns the canonical framed encoding of
   `Surface`, `Node` and `Intent`.
-- `native/resource-client/src/world_surface.rs` consumes that decoder's JSON
-  projection (its Lean producer was upstream-Bend only and was deleted on
-  2026-10-04; an Objective producer must supply it) and checks structure, origin equality, admitted observation
-  indices and every intent field; `native/resource-client/src/web/surface.rs`
-  renders it with escaped prose and bounded traversal.
+- No client consumes it. `world_surface.rs` (the JSON projection's checker) and
+  `web/surface.rs` (its renderer) had no caller outside their own tests, because
+  the Lean producer was upstream-Bend only (deleted 2026-10-04); both were deleted
+  on 2026-10-26 (RUST-TRIAGE row 13). An Objective producer arrives with its own
+  consumer; Git history keeps the old pair.
 - The shared source declarations were `world/Workshop/WorldSurface.bend`, an
   upstream-Bend file deleted on 2026-10-04 (Git history keeps it). No Objective Bend (`.obend`) program declares or returns a
   Surface, and the Objective elaborator has no Surface output lowering. An
