@@ -455,7 +455,7 @@ once: `chat join subscribers @subscribers-invite.json`; a renewal is adopted by
 Whether the coding plan's terms permit serving others' agents is for the join
 page to state.
 
-## State (lane L4, 2026-10-27)
+## State (lane L4b, 2026-10-27)
 
 **The room resident (J14)** passes whole on the lane (run 24, 153/153 rows; upstream Hermes
 Agent 6d8a8beb in the gated worker, pool route, `--network none` plus the bridge). The subscriber
@@ -510,28 +510,42 @@ to a candidate whose host carries bc88a5ab, and add `J14_AWAIT=1` for the bridge
 - each write is paid (one `hermes/turn`) and journaled as a `room_attempt` before it runs, and its
   exact lookup is `RoomTools::lookup`.
 
-**Owed (first):**
-- **A system uid for each resident.** Today install-hermes defaults to SVC=mini-core, so both
-  residents run as the operator uid that owns the Store, and their files belong to the operator
-  (demo-vm 602b8fa, ABUSE-LIMITS gap 9). install-hermes must:
-  - create `mini-h-INSTANCE` (`mini-h-hermes`, `mini-h-glm`) and run the resident, its controller
-    and its workers as that user;
-  - give the user linger (its own systemd user manager) and the demo's user@ drop-in for bwrap user
-    namespaces;
-  - add only the groups that open the operator socket and the key broker's client socket.
-
-  The run sheet passes SVC=mini-h-INSTANCE. Infra's per-uid ext4 quota (about 32 MiB) then covers
-  everything that uid owns under the instance directory: homes, keys, journals, `/workspace`.
-  Measure what a resident actually uses (Hermes's `.hermes` with `state.db`, the room workspace and
-  journals after a J14 run) before raising 32 MiB. Send infra (aed5ecf506cf840af) the final user and
-  group names.
-- **Sandbox sizes are now small**: scratch S 16, M 64, L 128 MiB, `/tmp` 16 MiB,
-  `LimitFSIZE` = scratch. The controller refuses a prompt while `/workspace` exceeds the scratch
-  size. Check against the measurement above that Hermes's own state fits that threshold on S; if it
-  does not, the threshold needs its own figure.
+**One uid per resident (owner: yes; blocked on one route decision).** The names are
+`mini-h-hermes` and `mini-h-glm`, each a system user with a same-named group, sent to infra.
+- **Measured** (J14 run 24: 3 resident prompts, 11 paid model calls, 85 signed attempts, 240
+  queries; `footprint.tsv` and `host-ops.txt` in every J14 step dir from 0a8527b8 on):
+  - the uid would own about 43 MiB and 8,700 inodes: controller root 41.4 MiB / 8,574 inodes,
+    Hermes's `/workspace` 0.9 MiB / 37 inodes (`state.db` 712 KiB), homes 0.2 MiB, launcher 0.6 MiB;
+  - growth is about 3.8 MiB and 780 inodes per paid model call, nearly all of it the controller's
+    journal (`attempt-*`, `query-*`, `provider-meter-*`), and about 80 KiB per prompt in `state.db`.
+- **Infra's planned 32 MiB / 2,500-inode quota** would stop a resident inside its first session.
+  Proposed instead: 512/640 MiB and 100K/125K inodes, which covers one summon budget (1000 at
+  hermes/turn 10, so at most 100 model calls, about 380 MiB and 78K inodes).
+- **The journal needs a retention policy (owed).** At the pool row's 200 calls a day, one resident's
+  journal grows about 760 MiB and 156K inodes a day, against a 20 GB Mini volume.
+- **The route decision.** The groups in the brief do not exist for the operator socket:
+  - it is owner-private by law (the client refuses a socket or directory that its own euid does not
+    own), and the resident's preflight requires the private operator and its `mini.control`;
+  - only the key broker is group-reachable (`mini-sessions`; a member is matched by primary gid,
+    so a resident in it is not a member);
+  - a resident under its own uid therefore needs a controller-private operator route: a
+    systemd-activated socket owned by the resident, served by a `mini-core` proxy forwarding the
+    controller's operation surface (the set measured in `host-ops.txt`), plus a status-only control
+    socket, plus `--operator-peer-uid` on every operator command rather than only reserve commands.
+  - `grain-runtime create` also signs the birth with the operator's sponsor key, so create must split
+    into an operator birth and a resident remainder.
+  - Infra side: `controller-entry.py` needs a per-registration `serviceUid`, per-task `User=` and
+    `Requires=user@UID`, the resident uids as broker provider peers, the user@ drop-in
+    (`RestrictNamespaces=`, `Delegate=`) and a slice per uid, linger, and `/var/lib/mini/glm` among
+    the allowed write roots.
+  - install-hermes changes once the route is decided.
+- **The sandbox threshold** is now its own figure (0a8527b8): `sandbox.workspaceMib`, S 64, M 128,
+  L 256 MiB, beside `scratchMib` (S 16, M 64, L 128, `/tmp` 16, `LimitFSIZE` = scratch). The demo's
+  install-hermes grants no sandbox today, so neither figure applies there yet.
 
 **Owed:**
-- Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane.
+- Run J14_TOOLS and J14_AWAIT on a candidate carrying bc88a5ab and this lane (L4b quest 2:
+  `/build/lanes/hermes-tier-run/tools-run.sh`, `C=` the candidate). The same run yields `host-ops.txt`.
 - The redteam row's 7 reds (lane/redteam-q2 REDTEAM.md):
   - planted calls 0-3 never reach the controller, because Hermes drops the names first;
   - planted call 7 was not performed;
