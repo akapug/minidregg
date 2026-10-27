@@ -121,6 +121,18 @@ Example table (`type` and every field are required; `caps` exactly on a
   ceiling of at most `40000000`), so that cap is never the first line.
   `mini-keys pool --action ls` shows the charged total; `--action spend-reset
   --provider pool` resets it after the operator re-checks the provider side.
+- **Each member's share** of that ceiling: `memberDayMicroUsd` and
+  `memberTotalMicroUsd`, charged at the same `callMicroUsd` against the member
+  a call serves. For a room resident that is the author of the request the
+  prompt answers (the controller reads it from the assignment and names it to
+  the broker); for anything else, the runner. A call past either refuses
+  `member-day-ceiling` or `member-total-ceiling`. A row with a ceiling and no
+  member caps gets **1/40 of the ceiling a day and 1/10 in all**: on the demo's
+  `40000000` / `100000`, $1 a day (10 worst-case calls) and $4 in all (40
+  calls) per member, so no ten members can drain the key and no one can drain
+  it in a day. The numbers are the row's, so they are published with the
+  table (`/etc/mini/providers.json`, world-readable). Both caps need
+  `callMicroUsd <= day <= total <= ceiling`.
 
 **The pool is optional.** Set it only if you want to fund Hermes for friends
 who bring no key:
@@ -242,7 +254,9 @@ ssh mini@BOX key revoke openrouter        # delete the key and every grant
 | `no-credential` | your row needs your key, and there is no key or no grant for this runner |
 | `grant-expired` | the signed height is past your `--until` |
 | `per-call-cap` | the request's `max_tokens` is absent or above your `--per-call` |
-| `per-day-cap` | today's calls reached your `--per-day` |
+| `per-day-cap` | today's calls reached your `--per-day` (or the pool row's `perDay`) |
+| `member-day-ceiling` | the member this call serves spent its share of the pool row for this UTC day |
+| `member-total-ceiling` | the member this call serves spent its whole share of the pool row |
 | `no-credit` | the purse refused the reserve (402) |
 
 ## Charges: the Host's per-route tariff
@@ -283,6 +297,11 @@ ACP room resident, with the box's paths and dregg-infra's registration
 (`SVC`, default `mini-core`). Steps, in order:
 
     install-hermes preflight subjects room runtime create handoff summon controller dispatch resident
+
+Its rehearsal is J14 on the same candidate with `J14_ROUTE=pool` (the
+operator's sealed pool key, the metered tariff quoted from the upstream's
+usage record) and `J14_HERMES_ROOT` set to the runtime root below; the default
+`J14_ROUTE=user` runs a friend's own key instead.
 
 Before it can run:
 
@@ -343,3 +362,76 @@ What the steps write, and where each controller field comes from:
 
 One registration serves one room: summoning Hermes into another room needs its
 own task and registration.
+
+## The subscriber tier: Hermes on GLM through the Z.AI coding plan
+
+A flat 4000 DREGG a month buys membership of the `subscribers` room, whose
+resident Hermes answers on GLM through ember's Z.AI coding-plan key. It is
+existing machinery: a concierge room, a second house resident, a pool row.
+
+**The route.** The coding plan serves OpenAI Chat Completions at
+`https://api.z.ai/api/coding/paas/v4/chat/completions` (measured 2026-10-27:
+200, streaming, usage on the finishing chunk), so the row is the ordinary
+`openai-compatible` shape and needs no adapter. The pay-as-you-go
+`/api/paas/v4` is not funded (`1113`), and a 429 on the plan endpoints means a
+wrong endpoint. The Host quotes its stream (it omits `finish_reason` on delta
+chunks; `Host/ProviderUsageAudit.lean` holds the measured stream). Rows in
+`/etc/mini/providers.json`:
+
+```json
+{"name":"zai-glm","kind":"openai-compatible","credential":"pool",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"],
+ "caps":{"perCall":"4096","perDay":"140","ceilingMicroUsd":"70000","callMicroUsd":"500",
+         "memberDayMicroUsd":"10000","memberTotalMicroUsd":"35000"}},
+{"name":"zai-byok","kind":"openai-compatible","credential":"user",
+ "endpoint":"https://api.z.ai/api/coding/paas/v4/chat/completions",
+ "models":["glm-5.3","glm-5.3-flash"]}
+```
+
+The key is sealed like the OpenRouter pool key (`mini-keys pool --action set
+--provider zai-glm --secret - < zai-key`, as root, never in a file the repo
+sees). Egress: the broker account to `api.z.ai:443` only.
+
+**Caps, from the plan's quota.** The plan reports (`GET
+/api/monitor/usage/quota/limit`) 28000 credits per 5 hours and 140000 per week
+(level max). Measured: ~50 credits for a 75-token call, ~128 for a 4.4K-token
+call, so a Hermes model call (≤16000 in, ≤4096 out) is at most ~500. On this
+row the broker's spend units are those credits: `callMicroUsd` 500 (worst
+case), `ceilingMicroUsd` 70000 (half the week, the other half stays ember's;
+`mini-keys pool --action spend-reset --provider zai-glm` at each weekly
+reset), `perDay` 140 calls (70000 / 500, per runner: the GLM resident), and
+per subscriber 10000 a day (20 calls, about five asks) and 35000 in all (half
+the ceiling) until the weekly reset. A subscriber past either gets
+`member-day-ceiling` / `member-total-ceiling` by name. The plan's three
+one-time resets (valid to 2026-12-22) raise the week when used; they change
+the ceiling, not the code.
+
+**Who pays what.** The subscriber pays 4000 DREGG to the room's till (`pay
+subscribers week`); the concierge delegates `member` under the room with
+`notAfter = height + 43200` (30 days at one tick a minute; renewing extends),
+refunds anything it does not honour, and the kernel ends the window. The GLM
+resident's purse pays 1 credit a call on either route (the tariff in
+`demo/provider-services.json`, purse 9871003: no token metering, because the
+plan is flat); the room's `hermes/turn` and the summon budget are the
+founder's, funded from the till. ember's plan pays Z.AI. A member's own Z.AI
+plan key goes on `zai-byok` exactly as any friend key (`mini key --action
+set`, `--action grant` to their own grain's runner).
+
+**Install** (after the `hermes` resident; Store genesis carries both purse
+tariffs):
+
+    INSTANCE=glm BASE=9871000 MODEL=glm-5.3 ROOM=subscribers TIER=1 POOL_ROW=zai-glm \
+      HERMES_ROOT=OUT demo/install-hermes preflight subjects room concierge runtime create handoff summon controller dispatch resident
+
+`concierge` installs `mini-concierge-subscribers.timer` (one pass a minute).
+
+**Subscribe** (the web form's verbs): `tariff subscribers` (price and period),
+`credit` (balance), `pay subscribers week`, `room status subscribers` (the
+window and its end).
+
+**Open:** a concierge window is kernel membership, but asking the room's
+Hermes is a chat line, which needs a roster stream only the founder's `chat
+invite` creates. Until that is closed, the founder invites each new member.
+Whether the coding plan's terms permit serving others' agents is for the join
+page to state.

@@ -410,7 +410,10 @@ pub(crate) fn dismiss(state:&Path)->Result<()> {
 }
 /// Recovery follows the native receipt, so a lost driver completion frame does
 /// not run a second model or silently classify an uncertain write as done.
-pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)->Result<()> {
+/// A maintenance prompt closes when its completion is received, before the
+/// reply it may carry is delivered: the delivery boundary admits nothing
+/// retained but the delivery and the request it answers.
+pub(crate) fn receive_maintenance(state:&Path,completion:Option<&Value>)->Result<()> {
     let mut q=open(state)?;
     if let (Some(pending),Some(frame))=(&q.maintenance_pending,completion) {
         if frame["outcome"]=="completed" && frame["residentOrigin"]["residentPromptId"]==pending["residentPromptId"] {
@@ -430,6 +433,11 @@ pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)-
             }
         }
     }
+    Ok(())
+}
+pub(crate) fn reconcile(state:&Path,controller:&Path,completion:Option<&Value>)->Result<()> {
+    receive_maintenance(state,completion)?;
+    let mut q=open(state)?;
     let Some(r)=q.selected.as_ref() else{return Ok(())};
     if terminal(state,r)? {q.last_author=r.entry["author"].as_str().map(str::to_owned);q.selected=None;return atomic_json(&path(state),&q);}
     let Some(start)=&r.started else{return Ok(())};

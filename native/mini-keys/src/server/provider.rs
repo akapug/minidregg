@@ -117,6 +117,11 @@ fn ticket_id() -> Result<String, Refusal> {
 pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note) -> Result<Value, Refusal> {
     let kind = text(request, "kind")?;
     match kind {
+        // `member`: the subject this call serves (a resident's requester);
+        // its share of the row's spend ceiling is charged. Absent: the runner.
+        "pool" if request.get("member").is_some() => {
+            exact(request, &["op", "provider", "runner", "kind", "maxTokens", "bodySha256", "member"])?
+        }
         "pool" => exact(request, &["op", "provider", "runner", "kind", "maxTokens", "bodySha256"])?,
         "user" => exact(request, &["op", "provider", "runner", "kind", "maxTokens", "bodySha256", "owner", "model", "height"])?,
         _ => return Err(refuse("bad-request", "kind must be pool or user (a homelab row needs no ticket)")),
@@ -126,6 +131,10 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
     let max_tokens = optional_number(request, "maxTokens")?;
     let body_sha256 = sha_field(request, "bodySha256")?;
     let owner = if kind == "user" { Some(owner_of(request)?) } else { None };
+    let member = match request.get("member") {
+        Some(_) => text(request, "member")?.to_owned(),
+        None => runner.clone(),
+    };
     note.set("provider", provider.clone());
     note.set("runner", runner.clone());
     note.set("kind", kind);
@@ -179,8 +188,9 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
         CredentialSource::Pool => {
             let caps: Caps = row.caps.ok_or_else(|| refuse("provider-table", "pool row has no caps"))?;
             minted.per_call = caps.per_call;
+            note.set("member", member.clone());
             let t = &minted;
-            store.pool_grant(&provider, &runner, max_tokens, caps, credentials::utc_day(), &mut || broker.tickets.put(t))
+            store.pool_grant(&provider, &runner, &member, max_tokens, caps, credentials::utc_day(), &mut || broker.tickets.put(t))
         }
         CredentialSource::User => {
             let owner = owner.as_ref().ok_or_else(|| refuse("bad-request", "owner absent"))?;

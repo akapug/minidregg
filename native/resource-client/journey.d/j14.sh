@@ -75,9 +75,15 @@ G=$JOURNEY_D/g
 # J14 runs on its OWN Store, served through the private operator socket (the
 # resident's preflight requires it, and a public socket cannot be upgraded to
 # operator mode) with Hermes's purse tariff pinned from the first event.
-PURSE_T=9870003 USER_FEE=5 MODEL=mini-hermes-protocol-fixture
-jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" '[{providerResourceId:($p|tonumber),
-  tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:"7",inputMicroPerMillion:"20000000",outputMicroPerMillion:"40000000"},
+# J14_ROUTE: `user` (alice's own key, granted to the provider runner; the
+# purse pays the per-op fee) or `pool` (the operator's sealed pool key; the
+# purse pays the metered tariff from the upstream's usage record), the demo
+# box's route.
+J14_ROUTE=${J14_ROUTE:-user}
+case $J14_ROUTE in user|pool) ;; *) echo "J14_ROUTE must be user or pool" >&2; exit 2 ;; esac
+PURSE_T=9870003 USER_FEE=5 POOL_FEE=7 POOL_IN=100000 POOL_OUT=200000 MODEL=mini-hermes-protocol-fixture
+jq -n --arg p "$PURSE_T" --arg m "$MODEL" --arg f "$USER_FEE" --arg pf "$POOL_FEE" --arg pi "$POOL_IN" --arg po "$POOL_OUT" '[{providerResourceId:($p|tonumber),
+  tariff:{version:"1",model:$m,routes:{user:{perOp:$f},pool:{perOp:$pf,inputMicroPerMillion:$pi,outputMicroPerMillion:$po},
   homelab:{perOp:"3",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}]' >"$JOURNEY_STEP_DIR/provider-services.json"
 NEWPARTICIPANT_SERVE=serve-operator NEWPARTICIPANT_PROVIDER_SERVICES=$JOURNEY_STEP_DIR/provider-services.json \
   sh "$REPO/native/resource-client/newparticipant-acceptance.sh" "$HOST" "$MINI" "${STORE:?}" "${VERIFIER:?}" \
@@ -99,6 +105,10 @@ PRICE=10
 BUDGET=1000
 TOPUP=100
 PORT=${J14_PROVIDER_PORT:-7743}
+# One resident pass (a prompt: provider reserve/settle per model call plus the
+# tool writes, each a Host transaction) and the worker unit's wall time. A
+# shared build box at load 2x its cores spends ~30 s per transaction.
+J14_PASS_SECONDS=${J14_PASS_SECONDS:-1800}  # the launcher caps a worker at 1800 s
 PROVIDER_PID=""
 KEYS_PID=""
 UNIT=""
@@ -243,7 +253,7 @@ hermes() { # STEP WHAT: one resident pass that runs exactly one more prompt (or 
   local next=$(( $(resident_completed) + 1 ))
   jq -n --arg c "$G/controller.json" --arg i "$RINBOX" --arg s "$RSTATE" --argjson m "$next" \
     '{type:"mini-hermes-room-resident-v1",controller:$c,inbox:$i,state:$s,maxPrompts:$m,intervalSeconds:5}' >"$RCFG"
-  operator "$1" "hermes resident pass: $2" timeout 900 "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
+  operator "$1" "hermes resident pass: $2" timeout "$J14_PASS_SECONDS" "$GRAIN_RUNTIME" hermes-room resident "$RCFG"
   cp "$OUT" "$SD/resident-$1.jsonl"; cp "$ERR" "$SD/resident-$1.err"
   { echo "# hermes resident ($1): $2"; cut -c1-400 "$OUT"; tail -3 "$ERR"; } >>"$SD/transcript.txt"
 }
@@ -315,7 +325,7 @@ pidfile=$W/public/server.pid
 operator hermes "the private operator socket answers operator-status" \
   "$MINI" operator-status --socket "$SOCKET" --host "$HOST" --config "$CONFIG"
 # The deterministic librarian upstream.
-"$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" --room-librarian >"$SD/provider.out" 2>"$SD/provider.err" &
+"$TEST_PROVIDER" "127.0.0.1:$PORT" "$PLOG" "--room-librarian$([ "$J14_ROUTE" = pool ] && echo -metered)" >"$SD/provider.out" 2>"$SD/provider.err" &
 PROVIDER_PID=$!
 for i in $(seq 1 100); do grep -q "^http://" "$SD/provider.out" 2>/dev/null && break; sleep 0.1; done
 checkp hermes "the deterministic provider listens on loopback $PORT (pid $PROVIDER_PID)" grep -q "^http://127.0.0.1:$PORT/v1" "$SD/provider.out"
@@ -323,7 +333,9 @@ checkp hermes "the deterministic provider listens on loopback $PORT (pid $PROVID
 mkdir -p -m 700 "$SD/etc" "$JOURNEY_D/keys/run" "$JOURNEY_D/keys/state" "$SD/credentials"
 PTABLE=$SD/etc/providers.json
 jq -n --arg e "http://127.0.0.1:$PORT/v1/chat/completions" --arg m "$MODEL" \
-  '{type:"mini-provider-table-v2",providers:[{name:"friendkey",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"user"}]}' >"$SD/providers-source.json"
+  '{type:"mini-provider-table-v2",providers:[{name:"friendkey",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"user"},
+    {name:"pool",kind:"openai-compatible",endpoint:$e,models:[$m],credential:"pool",
+     caps:{perCall:"64",perDay:"200",ceilingMicroUsd:"40000000",callMicroUsd:"100000"}}]}' >"$SD/providers-source.json"
 operator hermes "TABLE: the provider table is root-owned" sudo -n install -o root -g root -m 0644 "$SD/providers-source.json" "$PTABLE"
 head -c 32 /dev/urandom >"$SD/credentials.key"; chmod 600 "$SD/credentials.key"
 jq -n --arg s "$JOURNEY_D/keys/run/broker.sock" --arg a "$JOURNEY_D/keys/state/audit.jsonl" --arg sp "$JOURNEY_D/keys/state/spool" \
@@ -352,6 +364,19 @@ operator hermes "KEY: alice grants the provider runner ${SUBJ[hprov]}" \
     --per-call 64 --per-day 200 --until 1000000000 --broker "$KEYS_CLIENT"
 # (The gateway pins a request without max_tokens to the task's maxOutputTokens,
 # 64 below; the broker refuses a call above the grant's per-call cap.)
+# The operator's pool key, sealed by the broker (the demo box's OpenRouter row).
+POOL_KEY=j14-pool-fixture-key
+printf '%s\n' "$POOL_KEY" >"$SD/pool-key.secret"; chmod 600 "$SD/pool-key.secret"
+operator hermes "KEY: the operator seals the pool key (row pool, caps perCall 64, ceiling 40000000 micro-USD)" \
+  "$MINI" key --action set --pool true --provider pool --secret "$SD/pool-key.secret" --broker "$KEYS_CLIENT"
+rm -f "$SD/pool-key.secret"
+# The pool hold covers the fee and the metered charge at the token caps
+# (deploy/hermes/demo/install-hermes sizes the box's the same way).
+if [ "$J14_ROUTE" = pool ]; then
+  GW_RESERVE=$((POOL_FEE + (131072 * POOL_IN + 64 * POOL_OUT + 999999) / 1000000))
+else
+  GW_RESERVE=30000
+fi
 # The sandbox: the real launcher, its gate, the runtime root (controller edge,
 # stand-in worker, provider bridge) and the worker's only writable mount.
 mkdir -p -m 700 "$SD/launcher" "$SD/worker-work/.hermes" "$SD/runtime-root"
@@ -378,6 +403,7 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
   --arg pk "$H/hprov/keys/mini.key" --arg ps "${SUBJ[hprov]}" --arg pt "$PARENT_T" --arg tt "$TOOL_T" --arg ut "$PURSE_T" \
   --arg l "$SD/launcher/bwrap" --arg rt "$SD/runtime-root" --arg ww "$SD/worker-work" --arg table "$PTABLE" \
   --arg kc "$KEYS_CLIENT" --arg gb "127.0.0.1:$GPORT" --arg m "$MODEL" --arg a "$A" --arg apub "$ALICE_PUB" \
+  --arg route "$J14_ROUTE" --arg reserve "$GW_RESERVE" --arg pass "$J14_PASS_SECONDS" \
   --arg ws "$G/state/resource-workspace" --arg home "$G/state/room-home" \
   --argjson op "$(jq -c '{issuer:(.issuer|tostring),ownerBudget:(.ownerBudget|tostring),lifetime:(.lifetime|tostring)}' "$W/operator.json")" '
   {type:"mini-grain-create-v1",mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,genesis:$g,namespaceRoot:$ns,
@@ -388,12 +414,14 @@ jq -n --arg mini "$MINI" --arg host "$HOST" --arg cfg "$CONFIG" --arg sock "$SOC
    task:$pt,toolTask:$tt,
    capabilities:{parentObserve:"9870011",parentControl:"9870012",toolObserve:"9870013",toolControl:"9870014"},
    budgets:{parent:"20000",tool:"20000",witnessMaxCost:"50000"},
-   worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:900,reserve:"3",charge:"1"},
+   worker:{launcher:$l,runtimeRoot:$rt,workspace:$ww,network:"none",wallTimeSeconds:($pass|tonumber),reserve:"3",charge:"1"},
    toolCharges:{reserve:"2",charge:"1"},
    provider:{key:{key:$pk,subject:$ps,noPrerotation:false},task:$ut,observeCapability:"9870015",controlCapability:"9870016",
-     budget:"20000",gateway:{providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:"30000",
-       maxInputTokens:131072,maxOutputTokens:64,onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey",
-       maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}},
+     budget:"20000",gateway:({providers:$table,credentialBroker:$kc,gatewayBind:$gb,model:$m,reserve:$reserve,
+       maxInputTokens:131072,maxOutputTokens:64,
+       maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:600,localFixtureHostNetwork:false}
+       + (if $route == "pool" then {provider:"pool"}
+          else {onBehalfOf:{subject:$a,publicKey:$apub},provider:"friendkey"} end))},
    room:{mini:$mini,host:$host,hostConfig:$cfg,socket:$sock,workspace:$ws,home:$home,room:"lab",account:"unsummoned"}}' >"$SD/grain-spec.json"
 operator hermes "CREATE: grain-runtime create births Hermes's grain and writes its controller config" \
   "$GRAIN_RUNTIME" create "$SD/grain-spec.json"
@@ -610,11 +638,18 @@ restart() {
 }
 operator audit "stop the Host, cold audit re-admits every record, serve again" restart r1
 check audit "cold audit exit 0" 0 "$(cat "$SD/audit-r1.rc")"
+if [ "$J14_ROUTE" = pool ]; then
+  POOL_AUTH="auth=sha256:$(printf 'Bearer %s' "$POOL_KEY" | sha256sum | cut -d' ' -f1)"
+  check audit "every upstream completion was paid with the operator's pool bearer" \
+    "$(grep -c '^completion ' "$PLOG")" "$(grep '^completion ' "$PLOG" | grep -c -- "$POOL_AUTH")"
+fi
 PLINES=$(wc -l <"$PLOG")
 hermes audit "after the cold audit: dismissed, nothing to do"
 check audit "Hermes sent the provider nothing more" "$PLINES" "$(wc -l <"$PLOG")"
 ok audit bob "tail --in lab -n 100"
 cp "$OUT" "$SD/tail-final.txt"
-checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes" "$OUT"
+# Hermes is dismissed by now, so the tail names it by its subject's short
+# form (s…LAST6), not by its member name.
+checkp audit "bob's tail after the audit shows Hermes's entries" grep -q "$HS\|hermes\|s…${HS: -6}" "$OUT"
 
 finish
