@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# scripts/pipeline/box-wait -- wait for one job on a box, then print its verdict, in ONE background call.
+#
+#   box-wait [--host USER@HOST] [--key FILE] (--pid PIDFILE | --marker FILE) [--show FILE]... [--cmd REMOTE-SH]
+#            [--every S] [--timeout S]
+#
+# The lane starts its job detached on the box with a PID file (`nohup JOB & echo $! > job.pid`), or has
+# the job write a marker file when it is done, and then runs box-wait as one `run_in_background` call
+# (Claude Code: Bash run_in_background) and does other batch work; the call's completion is the wake-up.
+# No foreground waits, no polling loops in the lane (COORDINATION §3; review ITERATION-LOOPS E3).
+#
+# Done means: the PID named in PIDFILE is no longer alive (--pid), or FILE exists (--marker). Then, on
+# the box: each --show FILE's last 40 lines (labelled), then --cmd's output. Paths are the box's.
+# The wait itself runs ON the box inside one ssh session (a `sleep` loop, no per-poll ssh); a dropped
+# connection reconnects after --every seconds and carries on. box-wait never signals anything: it
+# reads a PID, it never kills one.
+#
+# Exit: 0 done (the verdict printed); 1 --timeout elapsed first (default 14400 s: four hours); 2 usage,
+# or the PID file is absent or empty when the wait starts (no PID file, no wait: say so to the parent).
+# Defaults: --host lanes@178.105.4.114 (dregg-build), --key ~/.ssh/id_portable, --every 15.
+set -u
+host=lanes@178.105.4.114 key=$HOME/.ssh/id_portable pidfile="" marker="" cmd="" every=15 timeout=14400
+show=()
+usage() { sed -n '4,6p' "$0" >&2; exit 2; }
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --host) host=$2; shift 2 ;; --key) key=$2; shift 2 ;;
+    --pid) pidfile=$2; shift 2 ;; --marker) marker=$2; shift 2 ;;
+    --show) show+=("$2"); shift 2 ;; --cmd) cmd=$2; shift 2 ;;
+    --every) every=$2; shift 2 ;; --timeout) timeout=$2; shift 2 ;;
+    -h|--help) usage ;; *) echo "box-wait: unknown $1" >&2; usage ;;
+  esac
+done
+[ -n "$pidfile$marker" ] && [ -z "$pidfile" -o -z "$marker" ] || { echo "box-wait: give exactly one of --pid or --marker" >&2; exit 2; }
+for n in "$every" "$timeout"; do case $n in ''|*[!0-9]*|0) echo "box-wait: --every/--timeout take positive seconds" >&2; exit 2 ;; esac; done
+q() { printf '%q' "$1"; }
+ssh_box() { ssh -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o IdentitiesOnly=yes -i "$key" "$host" "$@"; }
+if [ -n "$pidfile" ]; then
+  ssh_box "test -s $(q "$pidfile")" || { echo "box-wait: no PID file at $host:$pidfile (no PID file, no wait)" >&2; exit 2; }
+  done_test="! kill -0 \"\$(cat $(q "$pidfile"))\" 2>/dev/null"
+  what="pid $(ssh_box "cat $(q "$pidfile")" 2>/dev/null) ($pidfile)"
+else
+  done_test="test -e $(q "$marker")"
+  what="marker $marker"
+fi
+start=$(date +%s)
+echo "box-wait: $host: waiting for $what (every ${every}s, timeout ${timeout}s)" >&2
+while :; do
+  left=$((timeout - ($(date +%s) - start)))
+  [ "$left" -gt 0 ] || { echo "box-wait: timeout after ${timeout}s; $what still running" >&2; exit 1; }
+  # One ssh session per connection: the loop runs on the box; exit 0 = done, 1 = its share of the timeout ran out.
+  ssh_box "end=\$((\$(date +%s) + $left)); until $done_test; do [ \$(date +%s) -lt \$end ] || exit 1; sleep $every; done; exit 0"
+  rc=$?
+  [ "$rc" = 0 ] && break
+  [ "$rc" = 1 ] && { echo "box-wait: timeout after ${timeout}s; $what still running" >&2; exit 1; }
+  echo "box-wait: ssh dropped (rc $rc); reconnecting in ${every}s" >&2; sleep "$every"
+done
+echo "box-wait: done after $(( $(date +%s) - start ))s: $what"
+report=""
+for f in "${show[@]}"; do report="$report echo \"== $(q "$f")\"; tail -n 40 $(q "$f") 2>&1;"; done
+[ -z "$cmd" ] || report="$report echo '== --cmd'; $cmd"
+[ -z "$report" ] || ssh_box "$report"
+exit 0

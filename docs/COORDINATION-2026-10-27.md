@@ -84,6 +84,17 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
   There is no more "owed to hbox": a lane that cannot run something on the Mac runs it there
   itself. What truly cannot run anywhere the lane reaches (a demo-box drill, a mainnet pay) goes in
   the lane's **BATCH FOR THE PARENT**, one list at the end of the report, not a message per item.
+- **Box runs never hold a turn.** Start the job detached on the box with a PID file
+  (`nohup JOB > job.log 2>&1 < /dev/null & echo $! > job.pid`), then make ONE background call,
+  `scripts/pipeline/box-wait --pid /build/lanes/<lane>/job.pid --show <log> --cmd '<verdict lines>'`
+  (Claude Code: `run_in_background`), and do the next batch meanwhile; its completion is the wake-up.
+  The wait runs on the box inside one ssh session, reconnects if the session drops, and reads the PID
+  without ever signalling it. No PID file, no wait (it exits 2 and says so).
+- **One journey run reports every red, and one red step reruns alone.** The standing rows run
+  `journey.sh` with `JOURNEY_KEEP_GOING=1`: a step whose dependency failed still runs and its detail
+  names the failed dependency (a failed J0 still blocks: no world, nothing to run). To rerun one step,
+  `journey.sh --only STEP [--only STEP2] MANIFEST NEW_ROOT` runs it and exactly its dependency closure
+  (read from the script's own `run_step` lines), in minutes rather than the whole journey's hours.
 - **Decisions are taken by default and recorded**, in the report, in system terms; questions are
   batched into the same list. Only money, dates and credentials go to ember (§4).
 - **Finish fast, push, report in ≤ 20 lines**: what landed (branch tip), what was verified and
